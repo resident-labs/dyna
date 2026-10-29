@@ -98,12 +98,14 @@ strings such as `"20m"`. The function waits for the engine's finished event
 and returns `{ id, node, state, exitCode, log }`, where `log` is the
 `dyna job logs ID` command. Other final states resolve normally; API failures
 reject. It does not poll. Each invocation has a durable idempotency key based
-on its run, normalized spec hash, and zero-based occurrence of that hash.
-Different requests cannot exchange jobs when parallel completion order changes.
-Identical calls receive distinct occurrence numbers. A resumed workflow
-recovers the original job even if the submission response or journal write was
-lost. The engine verifies the request hash when recovering a key. Stopping the
-run cancels an unfinished job.
+on its run, normalized spec hash, source call and async branch path, and an
+occurrence number for that combined identity. Different requests and identical
+parallel branches cannot exchange jobs when completion order changes. A
+resumed workflow recovers the original job even if the submission response or
+journal write was lost. The engine verifies the request hash when recovering a
+key. Replay rejects identical invocations it cannot distinguish instead of
+submitting or returning the wrong job. Stopping the run cancels an unfinished
+job.
 
 ```js
 const check = await job({

@@ -201,6 +201,7 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 
 	loop.RunOnLoop(func(vm *goja.Runtime) {
 		console.Enable(vm)
+		vm.SetAsyncContextTracker(planAsyncContextTracker{vm: vm})
 		// goja cannot see the context. A script that never yields, such as
 		// while (true) {}, would hold the loop forever; a cancel or deadline
 		// interrupts it. loop.Stop runs before cancel, so a finished run is never interrupted.
