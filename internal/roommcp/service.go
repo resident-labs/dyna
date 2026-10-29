@@ -28,6 +28,9 @@ const (
 	argumentsLimit = 2 << 10
 )
 
+// errChanged answers a call or attach that raced with a change to the server.
+var errChanged = errors.New("the MCP server changed while connecting; try again")
+
 var serverName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // Sessions finds the sessions a grant names. *subagent.Store satisfies it.
@@ -43,6 +46,9 @@ type serverRuntime struct {
 	client   *Client
 	lifetime context.Context
 	cancel   context.CancelFunc
+	// gen is the server's generation when this connection was dialed. Every
+	// change to a server's stored state ends the old generation (see drop).
+	gen uint64
 	// initialize runs the MCP handshake once, for every caller of this runtime.
 	initialize func() error
 }
@@ -56,8 +62,11 @@ type Service struct {
 	now      func() time.Time
 	// beforeDrop lets a test see the stored state at the moment a connection ends.
 	beforeDrop func(key serverKey)
-	mu         sync.Mutex
-	active     map[serverKey]serverRuntime
+	// afterDial lets a test pause a connection between dialing and registering.
+	afterDial func()
+	mu        sync.Mutex
+	active    map[serverKey]serverRuntime
+	gen       map[serverKey]uint64
 }
 
 // NewService opens the server registry. The engine migrates its tables first (Migrate). Tokens stay in the accounts store.
@@ -66,7 +75,7 @@ func NewService(dataDir string, accounts *accountstore.Store, rooms *room.Store,
 	if err != nil {
 		return nil, err
 	}
-	return &Service{db: db, accounts: accounts, rooms: rooms, sessions: sessions, now: time.Now, active: make(map[serverKey]serverRuntime)}, nil
+	return &Service{db: db, accounts: accounts, rooms: rooms, sessions: sessions, now: time.Now, active: make(map[serverKey]serverRuntime), gen: make(map[serverKey]uint64)}, nil
 }
 
 // manage resolves the room and checks the caller. The owner may do anything;
@@ -102,6 +111,7 @@ func (s *Service) SetToken(ctx context.Context, roomRef, name, serverURL, token 
 		return err
 	}
 	var credential accountstore.Metadata
+	s.drop(serverKey{rec.ID, name})
 	err = s.accounts.Update(func(st *accountstore.State) error {
 		var saveErr error
 		credential, saveErr = st.SaveMCPBearer(rec.ID, name, token)
@@ -110,8 +120,6 @@ func (s *Service) SetToken(ctx context.Context, roomRef, name, serverURL, token 
 	if err != nil {
 		return err
 	}
-	// Change the stored state first, then end the live connection: a stale call
-	// that registers a connection in between is ended by the drop.
 	if err := state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		// A new URL is a new server: its tools start off and nobody holds a grant.
 		for _, table := range []string{"room_mcp_tools", "room_mcp_grants"} {
@@ -139,7 +147,9 @@ func (s *Service) RemoveToken(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
-	// Clear the flag, then end the live connection, then delete the token.
+	// End the connection, clear the flag, end whatever dialed meanwhile, then
+	// delete the token.
+	s.drop(serverKey{rec.ID, name})
 	if err := s.setAttached(ctx, rec.ID, name, false); err != nil {
 		return err
 	}
@@ -160,7 +170,7 @@ func (s *Service) Remove(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
-	// Delete the server first, so a stale call cannot register a connection for it.
+	s.drop(serverKey{rec.ID, name})
 	if err := state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_servers WHERE room=? AND name=?", rec.ID, name)
 		return err
@@ -183,13 +193,18 @@ func (s *Service) credentialID(ctx context.Context, roomID, name string) (string
 	return id, err
 }
 
-// drop ends the live connection and every call in flight on it.
+// drop ends the live connection and every call in flight on it, and starts a
+// new generation: a connection dialed earlier can no longer register, and an
+// attach that started earlier can no longer mark the server attached. A change
+// to a server's state drops before it writes and again after, so nothing
+// dialed during the write survives it.
 func (s *Service) drop(key serverKey) {
 	if s.beforeDrop != nil {
 		s.beforeDrop(key)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.gen[key]++
 	if active, ok := s.active[key]; ok {
 		active.cancel()
 		delete(s.active, key)
@@ -216,6 +231,11 @@ func (s *Service) setAttached(ctx context.Context, roomID, name string, attached
 // dial builds a connection from the saved token. Nothing can use it until the
 // caller registers it.
 func (s *Service) dial(ctx context.Context, roomID, name string) (serverRuntime, error) {
+	// Read the generation before any stored state, so a change after this point
+	// is a later generation and the registration check rejects this connection.
+	s.mu.Lock()
+	gen := s.gen[serverKey{roomID, name}]
+	s.mu.Unlock()
 	var rawURL, id string
 	err := s.db.QueryRowContext(ctx, "SELECT url,credential_id FROM room_mcp_servers WHERE room=? AND name=?", roomID, name).Scan(&rawURL, &id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -243,7 +263,7 @@ func (s *Service) dial(ctx context.Context, roomID, name string) (serverRuntime,
 		return serverRuntime{}, err
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
-	rt := serverRuntime{client: client, lifetime: lifetime, cancel: cancel}
+	rt := serverRuntime{client: client, lifetime: lifetime, cancel: cancel, gen: gen}
 	rt.initialize = sync.OnceValue(func() error { return client.Initialize(lifetime) })
 	return rt, nil
 }
@@ -255,8 +275,15 @@ func (s *Service) open(ctx context.Context, roomID, name string) (serverRuntime,
 		return serverRuntime{}, err
 	}
 	key := serverKey{roomID, name}
+	if s.afterDial != nil {
+		s.afterDial()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.gen[key] != rt.gen {
+		rt.cancel()
+		return serverRuntime{}, errChanged
+	}
 	if previous, ok := s.active[key]; ok {
 		previous.cancel()
 	}
@@ -292,11 +319,18 @@ func (s *Service) connection(ctx context.Context, roomID, name string) (serverRu
 	if err != nil {
 		return serverRuntime{}, err
 	}
+	if s.afterDial != nil {
+		s.afterDial()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if rt, ok := s.active[key]; ok {
 		fresh.cancel()
 		return rt, nil
+	}
+	if s.gen[key] != fresh.gen {
+		fresh.cancel()
+		return serverRuntime{}, errChanged
 	}
 	var attached bool
 	if err := s.db.QueryRowContext(ctx, "SELECT attached FROM room_mcp_servers WHERE room=? AND name=?", roomID, name).Scan(&attached); err != nil || !attached {
@@ -327,6 +361,9 @@ func (s *Service) pin(ctx context.Context, rec room.Record, name string, rt serv
 	defer s.mu.Unlock()
 	if rt.lifetime.Err() != nil {
 		return errors.New("MCP server is detached")
+	}
+	if s.gen[serverKey{rec.ID, name}] != rt.gen {
+		return errChanged
 	}
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		if attach {
@@ -390,7 +427,7 @@ func (s *Service) Detach(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
-	// Clear the flag first: connection reads it after it registers a connection.
+	s.drop(serverKey{rec.ID, name})
 	if err := s.setAttached(ctx, rec.ID, name, false); err != nil {
 		return err
 	}
