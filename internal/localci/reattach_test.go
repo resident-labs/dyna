@@ -348,6 +348,30 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	if rows, _ := store.attachmentRows(t.Context(), repo, sha); len(rows) != 0 {
 		t.Fatalf("the unusable record was kept: %+v", rows)
 	}
+
+	// A host-only attachment keeps its check kind in the JSON payload. Its
+	// teardown stops the scope without asking a Docker daemon for containers.
+	hostOnly := attachment{RunID: "r2", Checks: []Suite{"host"}, Source: jobs.CheckSource{Kind: jobs.CheckKindPullRequest}, CheckKinds: map[Suite]attachmentCheckKind{"host": {Host: true}}}
+	if err := store.saveAttachment(t.Context(), repo, sha, "pve", hostOnly); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r2"); err != nil {
+		t.Fatal(err)
+	}
+	orphans, err := store.OrphanedAttachments(t.Context())
+	if err != nil || len(orphans) != 1 || orphans[0].Source.Kind != jobs.CheckKindPullRequest {
+		t.Fatalf("orphans = %+v, %v, want the host run and its source", orphans, err)
+	}
+	if err := runner.AbandonOrphanedRun(t.Context(), store, orphans[0]); err != nil {
+		t.Fatal(err)
+	}
+	if len(scripts) != 4 {
+		t.Fatalf("host cleanup = %q, want teardown then folder removal", scripts)
+	}
+	cleanup := scripts[2]
+	if strings.Contains(cleanup, "; no_container ") || strings.Contains(cleanup, "; no_labelled ") || !strings.Contains(cleanup, "dyna-ci-r2-host.scope") {
+		t.Fatalf("host cleanup invokes containers or misses the scope: %q", cleanup)
+	}
 }
 
 // The scheduler asks which machine holds a commit's checks.
