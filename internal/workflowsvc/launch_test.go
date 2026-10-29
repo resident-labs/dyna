@@ -32,18 +32,19 @@ const launchTestControl = "DYNA_LAUNCH_TEST_CONTROL"
 const launchTestMode = "DYNA_LAUNCH_TEST_MODE"
 
 type launchEvent struct {
-	Kind       string
-	PID        int
-	Process    callerid.Process
-	Actor      callerid.Identity
-	Options    Options
-	Cwd        string
-	Argv       []string
-	Detached   string
-	Room       string
-	Session    string
-	LockMarker string
-	LockTarget string
+	Kind        string
+	PID         int
+	Process     callerid.Process
+	Actor       callerid.Identity
+	Options     Options
+	Cwd         string
+	Argv        []string
+	Detached    string
+	Room        string
+	Session     string
+	GitHubToken string
+	LockMarker  string
+	LockTarget  string
 }
 
 // TestMain makes this test executable a real gated worker or its real parent.
@@ -119,7 +120,7 @@ func launchWorkerFixture() error {
 		return err
 	}
 	event := launchEvent{Kind: "ready", PID: os.Getpid(), Process: self, Actor: resolver.Resolve(os.Getpid()), Options: opts, Cwd: cwd,
-		Argv: os.Args[3:], Detached: env["DYNA_RUN_DETACHED"], Room: env[mode.EnvRoomID], Session: env[mode.EnvSession],
+		Argv: os.Args[3:], Detached: env["DYNA_RUN_DETACHED"], Room: env[mode.EnvRoomID], Session: env[mode.EnvSession], GitHubToken: env["GH_TOKEN"],
 		LockMarker: os.Getenv("DYNA_SUBAGENT_LOCK_FD"), LockTarget: lockTarget}
 	out := json.NewEncoder(conn)
 	if err := out.Encode(event); err != nil {
@@ -229,6 +230,7 @@ func TestForegroundLaunchRegistersAndPreservesInputsAndStreams(t *testing.T) {
 	t.Setenv("DYNA_RUN_ID", "wf_parent")
 	t.Setenv(mode.EnvRoomID, "room_test")
 	t.Setenv(mode.EnvSession, "ses_parent")
+	t.Setenv("GH_TOKEN", "must-not-reach-workflows")
 	lock, err := os.CreateTemp(t.TempDir(), "lock")
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +255,7 @@ func TestForegroundLaunchRegistersAndPreservesInputsAndStreams(t *testing.T) {
 		t.Fatalf("child identity = %+v", event.Actor)
 	}
 	cwd, _ := os.Getwd()
-	if !reflect.DeepEqual(event.Options, opts) || event.Cwd != cwd || event.Detached != "0" || event.Room != "room_test" || event.Session != "ses_parent" {
+	if !reflect.DeepEqual(event.Options, opts) || event.Cwd != cwd || event.Detached != "0" || event.Room != "room_test" || event.Session != "ses_parent" || event.GitHubToken != "" {
 		t.Fatalf("child inputs = %+v; want %+v, cwd %s", event, opts, cwd)
 	}
 	if !slices.Equal(event.Argv, []string{"--output", "json", "--quiet"}) || event.LockMarker != "" || event.LockTarget == lock.Name() {
