@@ -272,16 +272,28 @@ func (a *Accounts) ClearLimit(id string) error {
 	return scopes.ClearLimit(id)
 }
 
-// clearOpenEndedHold removes a no-timer hold after a successful probe or
-// refresh. A timed or stated hold stays. A failed clear only logs, because the
-// probe or refresh itself succeeded.
-func (a *Accounts) clearOpenEndedHold(id string) {
+// clearProbedHold clears an account's unstated hold after a successful usage
+// probe that began at since. A failed clear only logs, because the probe itself
+// succeeded.
+func (a *Accounts) clearProbedHold(id string, since time.Time) {
 	scopes, err := a.scopes()
 	if err == nil {
-		err = scopes.ClearOpenEnded(id)
+		err = scopes.ClearUnstated(id, since)
 	}
 	if err != nil {
-		log.Printf("clear no-timer hold for account %s: %v", id, err)
+		log.Printf("clear quota hold for account %s: %v", id, err)
+	}
+}
+
+// clearRefreshedHold clears an account's no-timer hold after a successful
+// credential refresh that began at since. A failed clear only logs.
+func (a *Accounts) clearRefreshedHold(id string, since time.Time) {
+	scopes, err := a.scopes()
+	if err == nil {
+		err = scopes.ClearOpenEnded(id, since)
+	}
+	if err != nil {
+		log.Printf("clear quota hold for account %s: %v", id, err)
 	}
 }
 
@@ -429,6 +441,7 @@ func (a *Accounts) readObservations(ids []string) (map[string]*store.Observation
 // observation. It returns nil when the account's harness has no usage probe
 // or the probe failed; the saved reading then stands.
 func (a *Accounts) refreshReading(ctx context.Context, n NativeAccount) *store.Observation {
+	probeStart := time.Now()
 	m, err := a.SavedManager(n.ID, "")
 	if err != nil {
 		return nil
@@ -456,6 +469,6 @@ func (a *Accounts) refreshReading(ctx context.Context, n NativeAccount) *store.O
 	}, true); err != nil {
 		return nil
 	}
-	a.clearOpenEndedHold(n.ID)
+	a.clearProbedHold(n.ID, probeStart)
 	return &observation
 }
