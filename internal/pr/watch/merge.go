@@ -186,11 +186,14 @@ func (s *Service) readOnlyUpstreamPR(r Record) bool {
 	if err != nil {
 		return false
 	}
+	// An unresolved checkout could be the head's repo, so keep its notices.
 	var owned []string
 	for _, entry := range rec.Repos() {
-		if own, err := resolveCheckoutRepo(context.Background(), entry.Path); err == nil {
-			owned = append(owned, own.ID)
+		own, err := resolveCheckoutRepo(context.Background(), entry.Path)
+		if err != nil {
+			return false
 		}
+		owned = append(owned, own.ID)
 	}
 	if len(owned) == 0 {
 		return false
