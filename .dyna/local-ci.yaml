@@ -23,11 +23,63 @@ checks:
     caches: [npm]
     reports: junit
 
-  - id: pi
+  - id: pi-pack
+    name: pi
     image: node:22
-    command: bash scripts/ci.sh pi
+    command: bash scripts/ci.sh pi pack
+    caches: [npm]
+    reports: none
+
+  - id: pi-test-0
+    name: pi test (0)
+    providerGroup: pi-test
+    image: node:22
+    hostUser: true
+    setup: &pi-test-setup timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq ripgrep fd-find >/dev/null || exit 69
+    command: bash scripts/ci.sh pi test-shard
     caches: [npm]
     reports: junit
+    env: &pi-test-shard-env
+      PI_SHARD: 1/4
+
+  - id: pi-test-1
+    name: pi test (1)
+    providerGroup: pi-test
+    image: node:22
+    hostUser: true
+    setup: *pi-test-setup
+    command: bash scripts/ci.sh pi test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *pi-test-shard-env
+      PI_SHARD: 2/4
+
+  - id: pi-test-2
+    name: pi test (2)
+    providerGroup: pi-test
+    image: node:22
+    hostUser: true
+    setup: *pi-test-setup
+    command: bash scripts/ci.sh pi test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *pi-test-shard-env
+      PI_SHARD: 3/4
+
+  - id: pi-test-3
+    name: pi test (3)
+    providerGroup: pi-test
+    image: node:22
+    hostUser: true
+    setup: *pi-test-setup
+    command: bash scripts/ci.sh pi test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *pi-test-shard-env
+      PI_SHARD: 4/4
 
   - id: frontend-0
     name: frontend test (0)
@@ -338,7 +390,7 @@ suites:
 
   - id: pi
     files: ['^third_party/pi/', '^scripts/pi-(hydrate|pack)\.sh$', '^scripts/ci\.sh$', '^\.github/']
-    checks: [pi]
+    checks: [pi-pack, pi-test-0, pi-test-1, pi-test-2, pi-test-3]
 
   - id: frontend
     checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build]

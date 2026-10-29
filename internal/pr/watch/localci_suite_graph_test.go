@@ -39,6 +39,7 @@ func watchDynaRequiredChecks(t *testing.T) []localci.CheckName {
 // description loses fails here instead of agreeing with itself.
 var expectedChecks = map[localci.Suite][]localci.CheckName{
 	localci.SuiteRelay:         {"relay"},
+	localci.Suite("pi"):        {"pi", "pi test (0)", "pi test (1)", "pi test (2)", "pi test (3)"},
 	localci.SuiteFrontend:      {"frontend test (0)", "frontend test (1)", "frontend test (2)", "frontend test (3)", "frontend test (4)", "frontend test (5)", "frontend"},
 	localci.SuiteFrontendCheck: {"frontend-check"},
 	localci.SuiteGoStatic:      {"go-static"},
@@ -58,7 +59,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 
 // expectedTrials is the suite set a merge trial must run.
 var expectedTrials = []localci.Suite{
-	localci.SuiteRelay, localci.SuiteGo, localci.SuiteCross, localci.SuiteComputerSmoke,
+	localci.SuiteRelay, localci.Suite("pi"), localci.SuiteGo, localci.SuiteCross, localci.SuiteComputerSmoke,
 }
 
 // reportedChecks is what a run of one suite leaves in a saved result: the name of

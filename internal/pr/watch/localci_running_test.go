@@ -140,7 +140,7 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 		t.Fatalf("running CI names %q at %q, want the PR", got.Title, got.URL)
 	}
 	// A merge trial runs every workflow suite, not only the ones its files select.
-	if suites := strings.Join(got.Suites, ","); suites != "relay,go,cross,computer-smoke" {
+	if suites := strings.Join(got.Suites, ","); suites != "relay,pi,go,cross,computer-smoke" {
 		t.Fatalf("running CI suites = %q", suites)
 	}
 
