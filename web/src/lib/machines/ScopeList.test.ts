@@ -38,15 +38,15 @@ test('the room picker offers only rooms not chosen, and picking one adds it', as
   ui.unmount(component)
 })
 
-test('typing a suite and pressing Enter adds it once, trimmed', async () => {
+test('typing a room and pressing Enter adds it once, trimmed', async () => {
   const changes: string[][] = []
-  const { ui, component } = await mountList({ label: 'Suites', values: ['web'], everyText: 'Every suite', onchange: (v: string[]) => changes.push(v) })
-  const input = document.querySelector<HTMLInputElement>('input[aria-label="Add to Suites"]')
+  const { ui, component } = await mountList({ label: 'Rooms', values: ['dyna'], everyText: 'Every room', onchange: (v: string[]) => changes.push(v) })
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="Add to Rooms"]')
   assert.ok(input)
-  input.value = ' unit '
+  input.value = ' jobs '
   input.dispatchEvent(new Event('input', { bubbles: true }))
   input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-  assert.deepEqual(changes, [['unit', 'web']])
+  assert.deepEqual(changes, [['dyna', 'jobs']])
   ui.unmount(component)
 })
 

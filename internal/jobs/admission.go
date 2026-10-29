@@ -994,5 +994,8 @@ func (a Admission) FreeCPUs(ctx context.Context, node string, capacity int) int 
 	for _, row := range q.waitingRows {
 		used += row.CPUs
 	}
+	for _, job := range q.queued {
+		used += jobDemand(job, limits).CPUs
+	}
 	return max(capacity-used, 0)
 }

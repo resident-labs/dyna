@@ -34,6 +34,7 @@ const Topic = "machines"
 type ResourceName string
 
 var resourceNamePattern = regexp.MustCompile(`^[a-z0-9._-]{1,64}$`)
+var labelPattern = regexp.MustCompile(`^[a-z0-9._-]{1,64}(?:=[a-z0-9._-]{1,64})?$`)
 
 // ParseResourceName validates a resource name at an external boundary.
 func ParseResourceName(name string) (ResourceName, error) {
@@ -54,6 +55,31 @@ func ParseResourceNames(names []string) ([]ResourceName, error) {
 		}
 		if !seen[parsed] {
 			seen[parsed] = true
+			out = append(out, parsed)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// ParseLabel validates one owner or placement label. A label is a name such as
+// gpu, or a key-value pair such as arch=x86_64.
+func ParseLabel(label string) (string, error) {
+	if !labelPattern.MatchString(label) {
+		return "", fmt.Errorf("label %q must use lowercase letters, digits, '-', '_' or '.', with an optional '=value'", label)
+	}
+	return label, nil
+}
+
+// ParseLabels validates, deduplicates and sorts labels from an external boundary.
+func ParseLabels(labels []string) ([]string, error) {
+	out := make([]string, 0, len(labels))
+	for _, label := range labels {
+		parsed, err := ParseLabel(label)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(out, parsed) {
 			out = append(out, parsed)
 		}
 	}
@@ -84,13 +110,9 @@ type Machine struct {
 	// list allows every room, which is what every machine allowed before it
 	// could name rooms.
 	Rooms []string `json:"rooms,omitempty"`
-	// Suites limits the local CI work this machine takes to those suites. An
-	// empty list allows every suite, which is what every machine allowed before
-	// it could name suites.
-	Suites []string `json:"suites,omitempty"`
-	// Labels mark what this machine takes. The ci label says it runs local CI
-	// checks; an unlabeled machine still takes jobs when enabled. Label names
-	// follow the resource name rule.
+	// Labels are the owner's stored placement labels. The ci label says the
+	// machine runs local CI checks; an unlabeled machine still takes jobs when
+	// enabled. Probed labels come from Capabilities instead of this list.
 	Labels []string `json:"labels,omitempty"`
 	// ContainerSocket is the container runtime socket a workflow job uses on
 	// this machine, as a DOCKER_HOST value. It is empty for Docker's socket, so
@@ -325,15 +347,32 @@ func (m Machine) AllowsRoom(roomID string) bool {
 // machine, so only local CI checks read this label.
 const LabelCI = "ci"
 
-// HasLabel reports whether the machine carries a label.
-func (m Machine) HasLabel(label string) bool {
-	return slices.Contains(m.Labels, label)
+// ProbedLabels derives labels from the last good probe. They stay separate
+// from owner labels and change only when a probe stores new capabilities.
+func (m Machine) ProbedLabels() []string {
+	caps := m.Capabilities
+	labels := make([]string, 0, 5)
+	if caps.OS != "" {
+		labels = append(labels, "os="+strings.ToLower(caps.OS))
+	}
+	if caps.Arch != "" {
+		labels = append(labels, "arch="+strings.ToLower(caps.Arch))
+	}
+	if caps.GPU {
+		labels = append(labels, "gpu")
+	}
+	for _, runtime := range caps.Containers.Names() {
+		labels = append(labels, runtime)
+	}
+	if len(labels) == 0 {
+		return nil
+	}
+	return labels
 }
 
-// AllowsSuite reports whether the machine takes CI work for the suite. A
-// machine that names no suite takes every suite.
-func (m Machine) AllowsSuite(suite string) bool {
-	return len(m.Suites) == 0 || slices.Contains(m.Suites, suite)
+// HasLabel reports whether the owner or the last probe gave the machine a label.
+func (m Machine) HasLabel(label string) bool {
+	return slices.Contains(m.Labels, label) || slices.Contains(m.ProbedLabels(), label)
 }
 
 // ErrLocal marks a change that would remove or unmake the engine host.
@@ -399,9 +438,6 @@ func (m Machine) Validate() error {
 	if err := validateRoomList(m.Rooms); err != nil {
 		return err
 	}
-	if err := validateSuiteList(m.Suites); err != nil {
-		return err
-	}
 	if err := validateLabelList(m.Labels); err != nil {
 		return err
 	}
@@ -413,8 +449,8 @@ func (m Machine) Validate() error {
 func validateLabelList(labels []string) error {
 	seen := make(map[string]bool, len(labels))
 	for _, label := range labels {
-		if _, err := ParseResourceName(label); err != nil {
-			return fmt.Errorf("label %s: %w", label, err)
+		if _, err := ParseLabel(label); err != nil {
+			return err
 		}
 		if seen[label] {
 			return fmt.Errorf("label %s appears twice", label)
@@ -453,23 +489,7 @@ func validateGrants(grants []HostChecksGrant) error {
 	return nil
 }
 
-// validateSuiteList reports whether a suite limit is storable. A suite ID comes
-// from a repository definition, so only its shape is checked here.
-func validateSuiteList(suites []string) error {
-	seen := make(map[string]bool, len(suites))
-	for _, suite := range suites {
-		if strings.TrimSpace(suite) != suite || suite == "" || len(suite) > 64 || strings.ContainsAny(suite, " ,\t\r\n") {
-			return fmt.Errorf("suite %q must be a suite ID of at most 64 bytes", suite)
-		}
-		if seen[suite] {
-			return fmt.Errorf("suite %q is named twice", suite)
-		}
-		seen[suite] = true
-	}
-	return nil
-}
-
-const schemaVersion = 14
+const schemaVersion = 15
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -487,7 +507,6 @@ const schema = `CREATE TABLE machines (
 	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
 	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
 	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
-	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
 	labels         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(labels)),
 	container_socket TEXT  NOT NULL DEFAULT '',
 	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
@@ -531,7 +550,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,ssh,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -683,6 +702,68 @@ func prepare(conn *sql.Conn, old int) error {
 			if _, err := conn.ExecContext(ctx, "ALTER TABLE machines DROP COLUMN "+column); err != nil {
 				return fmt.Errorf("drop machines.%s: %w", column, err)
 			}
+		}
+	}
+	if old < 15 {
+		// A suite list becomes owner labels before its column goes. A machine
+		// with no suite= labels remains unrestricted, exactly as an empty suite
+		// list was; a machine with them takes only the suites they name.
+		if err := importSuiteLabels(ctx, conn); err != nil {
+			return fmt.Errorf("import machine suite labels: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, "ALTER TABLE machines DROP COLUMN suites"); err != nil {
+			return fmt.Errorf("drop machines.suites: %w", err)
+		}
+	}
+	return nil
+}
+
+// importSuiteLabels carries each old suite filter into owner labels once.
+func importSuiteLabels(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "SELECT id, labels, suites FROM machines WHERE json_array_length(suites) > 0")
+	if err != nil {
+		return err
+	}
+	type update struct{ id, labels string }
+	var updates []update
+	for rows.Next() {
+		var id, rawLabels, rawSuites string
+		if err := rows.Scan(&id, &rawLabels, &rawSuites); err != nil {
+			rows.Close()
+			return err
+		}
+		var labels, suites []string
+		if err := json.Unmarshal([]byte(rawLabels), &labels); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := json.Unmarshal([]byte(rawSuites), &suites); err != nil {
+			rows.Close()
+			return err
+		}
+		for _, suite := range suites {
+			label := "suite=" + suite
+			if !slices.Contains(labels, label) {
+				labels = append(labels, label)
+			}
+		}
+		raw, err := json.Marshal(labels)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		updates = append(updates, update{id: id, labels: string(raw)})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if _, err := conn.ExecContext(ctx, "UPDATE machines SET labels=? WHERE id=?", update.labels, update.id); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -941,10 +1022,10 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var capabilities, health, load, probeError, grants, rooms, suites, labels, resources string
+	var capabilities, health, load, probeError, grants, rooms, labels, resources string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &m.SSH, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
+		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -968,19 +1049,10 @@ func scan(row scanner) (Machine, error) {
 	if len(m.Rooms) == 0 {
 		m.Rooms = nil
 	}
-	if err := json.Unmarshal([]byte(suites), &m.Suites); err != nil {
-		return Machine{}, fmt.Errorf("machine %s suites: %w", m.Name, err)
-	}
-	// A machine that names no suite reads back with no list, as it does for
-	// rooms, so every stored row has one meaning of "every suite".
-	if len(m.Suites) == 0 {
-		m.Suites = nil
-	}
 	if err := json.Unmarshal([]byte(labels), &m.Labels); err != nil {
 		return Machine{}, fmt.Errorf("machine %s labels: %w", m.Name, err)
 	}
-	// A machine that names no label reads back with no list, as it does for
-	// rooms and suites.
+	// A machine that names no label reads back with no list, as rooms do.
 	if len(m.Labels) == 0 {
 		m.Labels = nil
 	}
@@ -1119,15 +1191,15 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	if err := m.Validate(); err != nil {
 		return Machine{}, err
 	}
-	rooms, suites, labels := marshalNames(m.Rooms), marshalNames(m.Suites), marshalNames(m.Labels)
+	rooms, labels := marshalNames(m.Rooms), marshalNames(m.Labels)
 	resources := marshalResources(m.Resources)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
 			// An edit keeps who allows host checks: the engine changes grants
 			// through UpdateHostChecksGrants inside its own transaction, so a
 			// list read before that change cannot restore it.
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, suites=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
-				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, suites, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
+				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1137,9 +1209,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
 		return err
 	})
 	if err != nil {

@@ -76,12 +76,12 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 // the check temporary folder, a local container runtime socket, the node
 // queue's limits (IO-heavy work and disk) and named resources. Those set
 // capacity and route no work. The creation, name, switch, route, host, room
-// list, suite list and labels stay the owner's: they decide which machine the
+// list, labels stay the owner's: they decide which machine the
 // engine reaches and which rooms' code runs on it, and the ci label routes
 // local CI, so a root could send another room's work, or its own SSH
 // credentials, to a host the owner never chose.
 func rootMayPatch(patch websvc.MachinePatch) bool {
-	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.Labels == nil && patch.Enabled == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
+	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Labels == nil && patch.Enabled == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
 }
 
 // localSocket reports whether a patch leaves the container socket alone, restores

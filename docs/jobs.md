@@ -7,10 +7,21 @@ machine's node queue, and store their log and exit code.
 
 ## Run a job
 
-`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG | --host] [--artifact PATH]... -- CMD`
+`dyna job run [--node N | --label L]... [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG | --host] [--artifact PATH]... -- CMD`
 
-- With no `--node`, the job runs on the local node (the engine host), so a
-  one-machine owner needs no setup.
+- With no `--node` or `--label`, the job runs on the local node (the engine
+  host), so a one-machine owner needs no setup.
+- Repeat `--label L` to place the job without naming a node. Dyna chooses an
+  enabled machine that the job's room may use, has every requested label, and
+  has the most free CPU capacity in the node queue. The choice accounts for
+  running and queued jobs and CI checks. `--node` and `--label` are mutually
+  exclusive. If no machine has every label, submission fails with the missing
+  label instead of creating a job that can never start.
+- Owner labels come from `dyna machine edit N --label L`. Probed labels come
+  from the last successful machine probe: `os=linux` or `os=darwin`,
+  `arch=<machine architecture>`, `gpu` when a GPU is visible, and `docker`
+  or `containerd` for a container runtime. Both kinds place jobs. For example:
+  `dyna job run --label os=linux --label gpu -- nvidia-smi`.
 - `--commit REF` pushes that exact commit of the current repository to the
   node the way local CI does, checks it out in a fresh per-job directory, and
   removes the directory at the end. Without it the command runs with no source,

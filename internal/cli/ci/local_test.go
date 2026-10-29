@@ -13,8 +13,8 @@ import (
 
 func TestFindNodeSelectsMachines(t *testing.T) {
 	nodes := []localci.Node{
-		{Name: "this-box", Enabled: true},
-		{Name: "hermes", SSH: "pip@hermeslab", Enabled: true},
+		{Name: "this-box", Enabled: true, Labels: []string{machines.LabelCI}},
+		{Name: "hermes", SSH: "pip@hermeslab", Enabled: true, Labels: []string{machines.LabelCI}},
 		{Name: "paused", SSH: "ari@paused", Enabled: false},
 	}
 	for _, tc := range []struct {
@@ -32,7 +32,7 @@ func TestFindNodeSelectsMachines(t *testing.T) {
 			t.Errorf("findNode(%q) = %q, %t", tc.name, node.Name, ok)
 		}
 	}
-	if _, ok := findNode([]localci.Node{{Name: "this-box", Enabled: false}}, "local"); ok {
+	if _, ok := findNode([]localci.Node{{Name: "this-box", Enabled: false, Labels: []string{machines.LabelCI}}}, "local"); ok {
 		t.Fatal("findNode used a disabled local machine")
 	}
 }

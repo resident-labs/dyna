@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -382,9 +383,8 @@ INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated
  ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,1,'["room_dyna"]');
 INSERT INTO meta(key,value) VALUES('machines.version','5');`
 
-// A version 5 registry reaches the version 6 step, which adds only the suite
-// list. A machine that named no suite before it could allows every suite.
-func TestMigrateAddsSuiteListToVersionFive(t *testing.T) {
+// A version 5 registry had no suite filter, so migration leaves it unrestricted.
+func TestMigrateKeepsVersionFiveMachineUnrestricted(t *testing.T) {
 	ctx := context.Background()
 	dir := storetest.DataDir(t)
 	db, err := database.Open(dir)
@@ -403,8 +403,10 @@ func TestMigrateAddsSuiteListToVersionFive(t *testing.T) {
 	if !m.AllowsRoom("room_dyna") || m.AllowsRoom("room_other") {
 		t.Fatalf("migrated machine rooms = %v", m.Rooms)
 	}
-	if len(m.Suites) != 0 || !m.AllowsSuite("go") {
-		t.Fatalf("migrated machine suites = %v", m.Suites)
+	for _, label := range m.Labels {
+		if strings.HasPrefix(label, "suite=") {
+			t.Fatalf("an unrestricted machine gained a suite filter: %v", m.Labels)
+		}
 	}
 }
 
@@ -515,6 +517,46 @@ func TestMigrateDropsRolesAndSlots(t *testing.T) {
 	}
 	if desktop.HasLabel(LabelCI) {
 		t.Fatalf("engine host without the old ci role carries the ci label: %#v", desktop)
+	}
+}
+
+func TestMigrateImportsSuiteFiltersAsOwnerLabels(t *testing.T) {
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	version14 := strings.Replace(schema, "	labels         TEXT", `	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
+	labels         TEXT`, 1)
+	if version14 == schema {
+		t.Fatal("the version 14 fixture could not add its suites column")
+	}
+	_, err = db.Exec(version14 + `
+INSERT INTO machines(id,name,ssh,enabled,local,created_ms,updated_ms,labels,suites) VALUES
+ ('m_limited','limited','pip@limited',1,0,1000,1000,'["ci","suite=go"]','["go","frontend"]'),
+ ('m_every','every','pip@every',1,0,1000,1000,'[]','[]');
+INSERT INTO meta(key,value) VALUES('machines.version','14');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := Store{DataDir: dir}
+	limited, err := store.Get(context.Background(), "limited")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ci", "suite=go", "suite=frontend"}
+	if !reflect.DeepEqual(limited.Labels, want) {
+		t.Fatalf("imported labels = %v, want %v", limited.Labels, want)
+	}
+	every, err := store.Get(context.Background(), "every")
+	if err != nil || len(every.Labels) != 0 {
+		t.Fatalf("an unrestricted machine gained labels: %#v, %v", every, err)
+	}
+	var column string
+	if err := db.QueryRow("SELECT name FROM pragma_table_info('machines') WHERE name='suites'").Scan(&column); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("machines.suites remains: %v", err)
 	}
 }
 

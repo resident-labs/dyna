@@ -282,12 +282,11 @@ func TestStoreHostedAttemptsPersist(t *testing.T) {
 	}
 }
 
-// A machine that names no suite takes every suite, and a run whose suites no
-// one machine allows reports the suite that stops it, so a trial never waits
-// for a machine that cannot take it.
+// A machine without suite labels takes every suite. Imported suite labels keep
+// an old machine's filter, and a blocked run still names the suite it cannot take.
 func TestBlockedSuiteNamesTheSuiteNoMachineAllows(t *testing.T) {
 	everySuite := []Node{{Name: "all", Enabled: true}}
-	split := []Node{{Name: "go-only", Enabled: true, Suites: []string{"go"}}, {Name: "web-only", Enabled: true, Suites: []string{"frontend"}}}
+	split := []Node{{Name: "go-only", Enabled: true, Labels: []string{"suite=go"}}, {Name: "web-only", Enabled: true, Labels: []string{"suite=frontend"}}}
 	for _, tc := range []struct {
 		name   string
 		nodes  []Node

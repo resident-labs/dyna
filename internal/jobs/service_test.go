@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -34,6 +35,46 @@ func (f fakeMachines) Get(_ context.Context, name string) (machines.Machine, err
 }
 
 func (f fakeMachines) GetLocal(context.Context) (machines.Machine, error) { return f.local, nil }
+
+func (f fakeMachines) List(context.Context) ([]machines.Machine, error) {
+	list := make([]machines.Machine, 0, len(f.byName)+1)
+	seen := map[string]bool{}
+	if f.local.Name != "" {
+		list = append(list, f.local)
+		seen[f.local.Name] = true
+	}
+	for name, machine := range f.byName {
+		if !seen[name] {
+			list = append(list, machine)
+		}
+	}
+	slices.SortFunc(list, func(a, b machines.Machine) int { return strings.Compare(a.Name, b.Name) })
+	return list, nil
+}
+
+func TestSubmitPlacesLabelsOnTheRoomiestEligibleMachine(t *testing.T) {
+	dir := t.TempDir()
+	source := fakeMachines{byName: map[string]machines.Machine{
+		"busy":       {Name: "busy", SSH: "build@busy", Enabled: true, Rooms: []string{"room_a"}, Labels: []string{"gpu"}, Capabilities: machines.Capabilities{Arch: "x86_64", CPUs: 8}},
+		"idle":       {Name: "idle", SSH: "build@idle", Enabled: true, Rooms: []string{"room_a"}, Labels: []string{"gpu"}, Capabilities: machines.Capabilities{Arch: "x86_64", CPUs: 4}},
+		"other-room": {Name: "other-room", SSH: "build@other", Enabled: true, Rooms: []string{"room_b"}, Labels: []string{"gpu"}, Capabilities: machines.Capabilities{Arch: "x86_64", CPUs: 64}},
+		"disabled":   {Name: "disabled", SSH: "build@disabled", Enabled: false, Labels: []string{"gpu"}, Capabilities: machines.Capabilities{Arch: "x86_64", CPUs: 64}},
+	}}
+	service := &Service{Store: Store{DataDir: dir}, Machines: source, DataDir: dir}
+	if _, err := service.Submit(t.Context(), Input{Node: "busy", RoomID: "room_a", Command: []string{"true"}, Image: "alpine", CPUs: 6}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := service.Submit(t.Context(), Input{RoomID: "room_a", Command: []string{"true"}, Image: "alpine", Labels: []string{"gpu", "arch=x86_64"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Node != "idle" {
+		t.Fatalf("label placement chose %q, want the eligible node with the most free CPUs", job.Node)
+	}
+	if _, err := service.Submit(t.Context(), Input{Command: []string{"true"}, Image: "alpine", Labels: []string{"missing"}}); err == nil || !strings.Contains(err.Error(), "no machine has label \"missing\"") {
+		t.Fatalf("unknown label error = %v", err)
+	}
+}
 
 // chanReporter hands each event to a test through a channel, so a test waits
 // for the service by receiving, with no clock of its own.

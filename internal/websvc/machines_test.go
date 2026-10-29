@@ -294,11 +294,17 @@ func probeCallLeft(t *testing.T, connect, min time.Duration) {
 	}
 }
 
-// A machine's summary carries its room and suite limits, so the Machine page
-// can show them.
-func TestMachineSummaryCarriesRoomsAndSuites(t *testing.T) {
-	got := machineSummary(machines.Machine{ID: "m_1", Name: "ci-box", Rooms: []string{"room_a"}, Suites: []string{"unit", "web"}})
-	if len(got.Rooms) != 1 || got.Rooms[0] != "room_a" || len(got.Suites) != 2 || got.Suites[1] != "web" {
-		t.Fatalf("summary = %+v, want the rooms and suites", got)
+// A machine's summary separates owner labels from labels of its last probe.
+func TestMachineSummaryCarriesRoomsAndLabels(t *testing.T) {
+	got := machineSummary(machines.Machine{
+		ID: "m_1", Name: "ci-box", Rooms: []string{"room_a"}, Labels: []string{"ci"},
+		Capabilities: machines.Capabilities{OS: "Linux", Arch: "x86_64"},
+	})
+	if len(got.Rooms) != 1 || got.Rooms[0] != "room_a" || len(got.Labels) != 1 || got.Labels[0] != "ci" {
+		t.Fatalf("summary = %+v, want the room and owner label", got)
+	}
+	wantProbed := []string{"os=linux", "arch=x86_64"}
+	if !slices.Equal(got.ProbedLabels, wantProbed) {
+		t.Fatalf("probed labels = %v, want %v", got.ProbedLabels, wantProbed)
 	}
 }
