@@ -411,8 +411,10 @@ func MarkRemoved(path string) error {
 	}
 	// Worktree records have no change-bus consumer.
 	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(context.Background(), `DELETE FROM worktree_records WHERE path=?`, key)
-		return err
+		if _, err := conn.ExecContext(context.Background(), `DELETE FROM worktree_records WHERE path=?`, key); err != nil {
+			return err
+		}
+		return rearmPortCapacity(context.Background(), conn)
 	})
 	if err != nil {
 		return fmt.Errorf("remove worktree registry record: %w", err)
