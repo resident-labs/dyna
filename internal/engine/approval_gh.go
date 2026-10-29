@@ -42,6 +42,19 @@ func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
 		default:
 			code = 1
 		}
+		var outputErr error
+		if stdout.Truncated() {
+			outputErr = errors.New("gh stdout exceeded 1 MiB; output is incomplete")
+		}
+		if stderr.Truncated() {
+			outputErr = errors.Join(outputErr, errors.New("gh stderr exceeded 64 KiB; output is incomplete"))
+		}
+		if outputErr != nil {
+			if code == 0 {
+				code = 1
+			}
+			runErr = errors.Join(runErr, outputErr)
+		}
 		stdoutText, stderrText := string(stdout.Bytes()), string(stderr.Bytes())
 		result := approvals.Result{
 			ExitCode: &code,
