@@ -414,8 +414,9 @@ func claimEngineListeners(socketPath, dataDir string, f Options, refresh bool) (
 
 // run owns one complete engine lifetime. Recovery drains its read-only server
 // before Run starts the writable handlers and workers with current stores.
-func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
-	ctx, cancelRun := context.WithCancel(ctx)
+func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
+	ctx, cancelRun, stopSignal := runContext(signalCtx)
+	defer stopSignal()
 	defer cancelRun()
 	// The engine's environment is the owner's, never a caller's, so a check
 	// without an actor refuses (requirements item 3). A request acts for its

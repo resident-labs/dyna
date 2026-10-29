@@ -37,6 +37,23 @@ var stopSlowAfter = func() time.Duration { return 10 * time.Second }
 // stopLogf writes the slow-stop line; a test replaces it.
 var stopLogf = log.Printf
 
+// runContext decouples the engine's run context from the caller's signal
+// context. A stop signal cancels the signal context at once, before any
+// deferred shutdown runs, so a run context derived from it directly told
+// every job and local CI check it was cancelled while the engine stop mark
+// was still unset, and each tore down its unit on the node as a user cancel.
+// The mark is set first, and only then the run context is cancelled: work
+// that sees the cancel also sees the mark, and leaves its node work running
+// for the restarted engine (D-433).
+func runContext(signalCtx context.Context) (ctx context.Context, cancelRun context.CancelFunc, stopSignal func() bool) {
+	ctx, cancelRun = context.WithCancel(context.WithoutCancel(signalCtx))
+	stopSignal = context.AfterFunc(signalCtx, func() {
+		localci.MarkEngineStopping()
+		cancelRun()
+	})
+	return ctx, cancelRun, stopSignal
+}
+
 // stopEngine cancels every engine service before joining cleanup. HTTP, workers
 // and foreground process cleanup share one deadline, including error exits.
 func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*http.Server, cleanup ...func()) error {
