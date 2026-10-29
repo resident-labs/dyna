@@ -60,6 +60,7 @@ func (e *engine) bind(vm *goja.Runtime) error {
 	})
 	vm.Set("__spawn", e.spawn)
 	vm.Set("__exec", e.exec)
+	vm.Set("__job", e.job)
 	vm.Set("__workflow", e.workflow)
 	vm.Set("__post", e.post)
 	vm.Set("__worktrees", e.scriptWorktrees)

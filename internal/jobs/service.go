@@ -175,6 +175,8 @@ func scratchPathDelimiter(b byte) bool {
 type Input struct {
 	RoomID  string
 	Session string
+	// Run is the workflow run that submitted the job, when one did.
+	Run string
 	// Node names the registered machine. Empty means the local node, unless
 	// Labels selects an eligible machine.
 	Node    string
@@ -250,7 +252,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 		return Job{}, err
 	}
 	job := Job{
-		ID: id, RoomID: in.RoomID, Session: in.Session, Node: machine.Name,
+		ID: id, RoomID: in.RoomID, Session: in.Session, Run: in.Run, Node: machine.Name,
 		Command: in.Command, Host: host, Image: in.Image,
 		CPUs: in.CPUs, Timeout: in.Timeout, Heavy: in.Heavy, Artifacts: in.Artifacts,
 		Resources: in.Resources, State: StateQueued, Created: s.Store.now(),

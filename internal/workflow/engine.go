@@ -72,8 +72,8 @@ type Options struct {
 	// routing. A non-nil error with a non-empty result ID means the post was
 	// stored but at least one delivery failed.
 	Poster func(ctx context.Context, runID string, mentions []string, text string) (PostResult, error)
-	// Engine starts the leaf session that serves each agent() call. A run
-	// coordinator passes its engine connection; tests pass a fake.
+	// Engine starts agent() sessions and submits and waits for job() calls. A
+	// run coordinator passes its engine connection; tests pass a fake.
 	Engine EngineCaller
 	// Commands runs the commands of run() calls as managed shells. Nil makes
 	// run() fail; the run coordinator passes the shells-backed runner.
@@ -111,7 +111,7 @@ type sharedState struct {
 	scratchID         string
 	scratchWarning    sync.Once
 	agentSeq          int
-	execSeq           int // run() calls; counted apart from agents and their cap
+	execSeq           int // run() and job() steps; counted apart from agents and their cap
 	workflowSeq       int
 	profSems          map[string]chan struct{}
 	profCalls         map[string]int

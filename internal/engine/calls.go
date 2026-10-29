@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/gitsvc"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/room"
@@ -35,6 +36,7 @@ type services struct {
 	devices   *devicesvc.Service
 	files     *filesvc.Service
 	jobs      *jobs.Service
+	events    *hub.Hub
 	git       *gitsvc.Service
 	rooms     *roomsvc.Service
 	terminals *terminalsvc.Service
@@ -141,6 +143,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "RunJob", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.runJob},
 		{Name: "CancelJob", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.cancelJob},
 		{Name: "JobShow", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.jobShow},
+		{Name: "WaitJob", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.waitJob},
 		{Name: "JobList", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.jobList},
 		{Name: "JobLogs", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.jobLogs},
 		// A probe reads the machine now and stores what it found. It writes
