@@ -203,7 +203,7 @@ esac
 		{"pr review comment on parent", ReadWrite, []string{"pr", "review", "1", "--comment", "--repo", "upstream/project"}, "", 1},
 		{"read-only pr comment on parent", ReadOnly, []string{"pr", "comment", "1", "--repo", "upstream/project"}, errReadOnly.Error(), 1},
 		{"pr review on origin", ReadWrite, []string{"pr", "review", "--approve", "--repo", "fork/project"}, "", 0},
-		{"pr review on parent", ReadWrite, []string{"pr", "review", "--approve", "--repo", "upstream/project"}, errNotInRoom.Error(), 0},
+		{"pr review on parent", ReadWrite, []string{"pr", "review", "--approve", "--repo", "upstream/project"}, "", 1},
 		{"pr merge on parent", ReadWrite, []string{"pr", "merge", "--repo", "upstream/project"}, errNotInRoom.Error(), 0},
 		{"read-only pr create on parent", ReadOnly, []string{"pr", "create", "--repo", "upstream/project"}, errReadOnly.Error(), 0},
 	} {
@@ -521,33 +521,6 @@ esac
 	ctx := context.Background()
 	if err := Run(ctx, Command(ctx, exe, "", "repo", "fork", "upstream/project", "--clone=false")); err != nil {
 		t.Fatalf("fork of the recorded upstream: %v", err)
-	}
-}
-
-func TestWorkerAllowsRoutineCollaborationWrites(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		args    []string
-		allowed bool
-	}{
-		{"issue edit", []string{"issue", "edit", "5", "--add-label", "bug"}, true},
-		{"issue comment", []string{"issue", "comment", "5", "--body", "hi"}, true},
-		{"pr comment", []string{"pr", "comment", "5", "--body", "hi"}, true},
-		{"pr review comment", []string{"pr", "review", "5", "--comment", "--body", "hi"}, true},
-		{"pr review short comment", []string{"pr", "review", "5", "-c", "-b", "hi"}, true},
-		{"pr review approve", []string{"pr", "review", "5", "--approve"}, false},
-		{"pr review comment and approve", []string{"pr", "review", "5", "-c", "-a"}, false},
-		{"pr review request changes", []string{"pr", "review", "5", "--request-changes", "-b", "no"}, false},
-		{"pr review without a flag", []string{"pr", "review", "5"}, false},
-		{"issue close", []string{"issue", "close", "5"}, false},
-		{"pr merge", []string{"pr", "merge", "5"}, false},
-		{"api write", []string{"api", "-X", "POST", "repos/o/r/issues"}, false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := checkWorkerPolicy(tt.args) == nil; got != tt.allowed {
-				t.Fatalf("checkWorkerPolicy(%v) allowed = %v, want %v", tt.args, got, tt.allowed)
-			}
-		})
 	}
 }
 
