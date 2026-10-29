@@ -134,6 +134,12 @@ globalThis.run = function (command, opts) {
   return __exec(command, applyPlanCtx(opts));
 };
 
+// job(spec) -> Promise<{ id, node, state, exitCode, log }>
+// Runs one command through the engine job queue. Durations use Go syntax.
+globalThis.job = function (spec) {
+  return __job(spec);
+};
+
 // post(to, text, data?) or post(to, { text, data }) -> { id, deliveries, skipped?, error? }
 // to is one @mention string or an array of them; the script posts as the run.
 // data is an object or array that the feed shows as a key and value view.

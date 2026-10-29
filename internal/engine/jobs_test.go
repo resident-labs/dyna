@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/room"
@@ -45,6 +47,58 @@ func TestJobEventDescribesResults(t *testing.T) {
 				t.Fatalf("payload exit code presence = %v, want %v: %s", got, want, payload)
 			}
 		})
+	}
+}
+
+func TestWaitJobReturnsAfterJobsEvent(t *testing.T) {
+	store := jobs.Store{DataDir: t.TempDir()}
+	queued := jobs.Job{ID: "job_wait", Command: []string{"true"}, State: jobs.StateQueued}
+	if err := store.Save(t.Context(), queued); err != nil {
+		t.Fatal(err)
+	}
+	events := hub.New(1)
+	s := services{jobs: &jobs.Service{Store: store}, events: events}
+	type answer struct {
+		result jobs.WaitResult
+		err    error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		result, err := s.waitJob(t.Context(), queued.ID)
+		done <- answer{result: result, err: err}
+	}()
+	code := 0
+	finished := queued
+	finished.State, finished.ExitCode = jobs.StatePassed, &code
+	if err := store.Save(t.Context(), finished); err != nil {
+		t.Fatal(err)
+	}
+	events.Publish(hub.Event{Topic: jobs.Topic})
+	got := <-done
+	if got.err != nil || !got.result.Done || got.result.Job.State != jobs.StatePassed || got.result.Job.ExitCode == nil || *got.result.Job.ExitCode != 0 {
+		t.Fatalf("WaitJob = %+v, %v", got.result, got.err)
+	}
+}
+
+func TestCancelJobAllowsOnlyOwningWorkflowRun(t *testing.T) {
+	store := jobs.Store{DataDir: t.TempDir()}
+	s := services{jobs: &jobs.Service{Store: store}}
+	job := jobs.Job{ID: "job_owned", Run: "wf_one", Session: "ses_one", Command: []string{"true"}, State: jobs.StateQueued}
+	if err := store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Worker, Run: "wf_one"})
+	got, err := s.cancelJob(owner, job.ID)
+	if err != nil || !got.CancelRequested {
+		t.Fatalf("owning run cancel = %+v, %v", got, err)
+	}
+	other := authority.WithActor(t.Context(), authority.Actor{Role: authority.Worker, Run: "wf_two"})
+	if _, err := s.cancelJob(other, job.ID); err == nil {
+		t.Fatal("another workflow run cancelled the job")
+	}
+	leaf := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: "ses_two", Run: "wf_one"})
+	if _, err := s.cancelJob(leaf, job.ID); err == nil {
+		t.Fatal("another session in the workflow run cancelled the job")
 	}
 }
 
