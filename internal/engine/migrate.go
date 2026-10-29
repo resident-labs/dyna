@@ -18,10 +18,7 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-const (
-	installMarker        = ".dyna-installed"
-	installMarkerContent = "installed by install.sh\n"
-)
+const installMarker = ".dyna-installed"
 
 // migrateStores lets startup tests inject a failing migration. Production and
 // the fake engine both run the shared ordered registry.
@@ -73,13 +70,13 @@ func checkLiveMigration(dataDir, ownerDataDir string) error {
 			return nil
 		}
 	}
-	// install.sh leaves a marker beside custom installations, so a direct
-	// launch does not depend on the installer's temporary environment.
+	// install.sh binds a custom installation to its executable in this marker,
+	// so a direct launch needs none of the installer's temporary environment.
 	marker, err := os.ReadFile(filepath.Join(filepath.Dir(exe), installMarker))
-	if err == nil && string(marker) == installMarkerContent {
+	if err == nil && string(marker) == exe+"\n" {
 		return nil
 	}
-	return fmt.Errorf("migrate dyna.db: only the installed engine may migrate the default data directory %s; running executable is %s, not %s or %s, and has no install.sh marker; for owner-directed hand recovery set DYNA_ALLOW_DEV_MIGRATION=1", ownerDataDir, exe, installed[0], installed[1])
+	return fmt.Errorf("migrate dyna.db: only the installed engine may migrate the default data directory %s; running executable is %s, not %s or %s, and has no matching install.sh marker; for owner-directed hand recovery set DYNA_ALLOW_DEV_MIGRATION=1", ownerDataDir, exe, installed[0], installed[1])
 }
 
 func sameFolder(a, b string) bool {
