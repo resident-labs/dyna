@@ -88,6 +88,10 @@ type Machine struct {
 	// empty list allows every suite, which is what every machine allowed before
 	// it could name suites.
 	Suites []string `json:"suites,omitempty"`
+	// Labels mark what this machine takes. The ci label says it runs local CI
+	// checks; an unlabeled machine still takes jobs when enabled. Label names
+	// follow the resource name rule.
+	Labels []string `json:"labels,omitempty"`
 	// ContainerSocket is the container runtime socket a workflow job uses on
 	// this machine, as a DOCKER_HOST value. It is empty for Docker's socket, so
 	// a rootless Podman machine can name its own without changing anything else.
@@ -317,6 +321,15 @@ func (m Machine) AllowsRoom(roomID string) bool {
 	return len(m.Rooms) == 0 || slices.Contains(m.Rooms, roomID)
 }
 
+// LabelCI marks a machine that takes local CI work. Jobs use any enabled
+// machine, so only local CI checks read this label.
+const LabelCI = "ci"
+
+// HasLabel reports whether the machine carries a label.
+func (m Machine) HasLabel(label string) bool {
+	return slices.Contains(m.Labels, label)
+}
+
 // AllowsSuite reports whether the machine takes CI work for the suite. A
 // machine that names no suite takes every suite.
 func (m Machine) AllowsSuite(suite string) bool {
@@ -389,7 +402,26 @@ func (m Machine) Validate() error {
 	if err := validateSuiteList(m.Suites); err != nil {
 		return err
 	}
+	if err := validateLabelList(m.Labels); err != nil {
+		return err
+	}
 	return validateGrants(m.HostChecksGrants)
+}
+
+// validateLabelList reports whether a label list is storable. Label names
+// follow the resource name rule, and each label appears once.
+func validateLabelList(labels []string) error {
+	seen := make(map[string]bool, len(labels))
+	for _, label := range labels {
+		if _, err := ParseResourceName(label); err != nil {
+			return fmt.Errorf("label %s: %w", label, err)
+		}
+		if seen[label] {
+			return fmt.Errorf("label %s appears twice", label)
+		}
+		seen[label] = true
+	}
+	return nil
 }
 
 // validateRoomList reports whether a room limit is storable.
@@ -456,6 +488,7 @@ const schema = `CREATE TABLE machines (
 	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
 	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
 	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
+	labels         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(labels)),
 	container_socket TEXT  NOT NULL DEFAULT '',
 	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
 	check_tmp TEXT NOT NULL DEFAULT '',
@@ -498,7 +531,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,ssh,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -636,9 +669,16 @@ func prepare(conn *sql.Conn, old int) error {
 		}
 	}
 	if old < 14 {
-		// A node no longer has roles or CI slots: every enabled machine whose
-		// room list allows a room takes that room's work, and the admission
-		// queue alone bounds how much runs.
+		// A node no longer has roles or CI slots. The one choice a role made
+		// survives as a label: a machine the owner gave the ci role keeps
+		// taking local CI, and every other machine stays out of it. The
+		// admission queue alone bounds how much runs.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN labels TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(labels))`); err != nil {
+			return fmt.Errorf("add machines.labels: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE machines SET labels='["ci"]' WHERE roles LIKE ?`, `%"ci"%`); err != nil {
+			return fmt.Errorf("carry the ci role into labels: %w", err)
+		}
 		for _, column := range []string{"roles", "ci_slots"} {
 			if _, err := conn.ExecContext(ctx, "ALTER TABLE machines DROP COLUMN "+column); err != nil {
 				return fmt.Errorf("drop machines.%s: %w", column, err)
@@ -710,7 +750,7 @@ func addLocal(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	now := time.Now().UnixMilli()
-	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`) VALUES(?,?,'',1,1,?,?)`,
+	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,labels) VALUES(?,?,'',1,1,?,?,'[]')`,
 		newID(), name, now, now)
 	return err
 }
@@ -804,7 +844,8 @@ func importNode(ctx context.Context, conn *sql.Conn, name, ssh string, enabled b
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`) VALUES(?,?,?,?,0,?,?)`,
+	// An old CI node keeps taking local CI, so its label says so.
+	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,labels) VALUES(?,?,?,?,0,?,?,'["ci"]')`,
 		newID(), name, ssh, enabled, now, now)
 	return err
 }
@@ -894,10 +935,10 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var capabilities, health, load, probeError, grants, rooms, suites, resources string
+	var capabilities, health, load, probeError, grants, rooms, suites, labels, resources string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &m.SSH, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
+		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -928,6 +969,14 @@ func scan(row scanner) (Machine, error) {
 	// rooms, so every stored row has one meaning of "every suite".
 	if len(m.Suites) == 0 {
 		m.Suites = nil
+	}
+	if err := json.Unmarshal([]byte(labels), &m.Labels); err != nil {
+		return Machine{}, fmt.Errorf("machine %s labels: %w", m.Name, err)
+	}
+	// A machine that names no label reads back with no list, as it does for
+	// rooms and suites.
+	if len(m.Labels) == 0 {
+		m.Labels = nil
 	}
 	if err := json.Unmarshal([]byte(capabilities), &m.Capabilities); err != nil {
 		return Machine{}, fmt.Errorf("machine %s capabilities: %w", m.Name, err)
@@ -1064,15 +1113,15 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	if err := m.Validate(); err != nil {
 		return Machine{}, err
 	}
-	rooms, suites := marshalNames(m.Rooms), marshalNames(m.Suites)
+	rooms, suites, labels := marshalNames(m.Rooms), marshalNames(m.Suites), marshalNames(m.Labels)
 	resources := marshalResources(m.Resources)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
 			// An edit keeps who allows host checks: the engine changes grants
 			// through UpdateHostChecksGrants inside its own transaction, so a
 			// list read before that change cannot restore it.
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
-				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, suites=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
+				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, suites, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1082,9 +1131,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
 		return err
 	})
 	if err != nil {

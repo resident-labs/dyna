@@ -185,7 +185,9 @@ machine is the local row that runs the engine:
 ```sh
 dyna machine list
 dyna machine add omarchy --ssh ari@omarchy
+dyna machine edit omarchy --label ci
 dyna machine add hermeslab --ssh pip@hermeslab
+dyna machine edit hermeslab --label ci
 dyna git ci mode local
 ```
 
@@ -200,8 +202,8 @@ trial releases the merge, and any failure from either vetoes it. With no enabled
 machine, the hosted trial CI decides. So `dyna git ci show <head>` can report no
 result while the trial decides; check a landed change with
 `dyna git ci show <merge commit>`.
-Use `dyna machine edit <name> --disable` or `dyna machine rm <name>` to stop
-assigning a machine CI work.
+Use `dyna machine edit <name> --unlabel ci`, `dyna machine edit <name>
+--disable` or `dyna machine rm <name>` to stop assigning a machine CI work.
 
 A machine can take work from chosen rooms only, so each room's CI uses the
 machines it owns:

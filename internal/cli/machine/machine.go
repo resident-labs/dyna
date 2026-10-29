@@ -157,6 +157,7 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
 			fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
 			fmt.Fprintf(out, "Suites:   %s\n", suiteList(m.Suites))
+			fmt.Fprintf(out, "Labels:   %s\n", labelList(m.Labels))
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
 			fmt.Fprintf(out, "Status:   %s\n", m.Status())
@@ -313,7 +314,7 @@ func addCommand() *cobra.Command {
 func editCommand() *cobra.Command {
 	var rename, ssh string
 	var maxIOHeavy, maxDiskPercent int
-	var resourceEdits []string
+	var resourceEdits, labels, unlabels []string
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
 	var rooms []string
@@ -350,6 +351,13 @@ func editCommand() *cobra.Command {
 					return err
 				}
 				patch.Rooms, changed = &list, true
+			}
+			if c.Flags().Changed("label") || c.Flags().Changed("unlabel") {
+				list, err := editLabels(current.Labels, labels, unlabels)
+				if err != nil {
+					return err
+				}
+				patch.Labels, changed = &list, true
 			}
 			if c.Flags().Changed("suites") {
 				list := parseSuites(suites)
@@ -425,6 +433,8 @@ func editCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
 	cmd.Flags().StringSliceVar(&suites, "suites", nil, "limit local CI to these suites (comma separated; empty allows every suite)")
+	cmd.Flags().StringArrayVar(&labels, "label", nil, "add a label, such as ci to run local CI checks (repeatable)")
+	cmd.Flags().StringArrayVar(&unlabels, "unlabel", nil, "remove a label (repeatable)")
 	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
 	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the machine, such as 60s (0 restores the default of 10s)")
 	cmd.Flags().StringVar(&checkTmp, "check-tmp", "", "folder that holds each host check's temporary folder, such as /dev/shm (empty uses the machine's TMPDIR, else /tmp)")
@@ -537,6 +547,33 @@ func roomList(ids []string) string {
 	}
 	slices.Sort(names)
 	return strings.Join(names, ", ")
+}
+
+// labelList words a label list for show: labels a machine carries, or none.
+func labelList(labels []string) string {
+	if len(labels) == 0 {
+		return "none (local CI needs the ci label)"
+	}
+	return strings.Join(labels, ", ")
+}
+
+// editLabels adds and removes labels on a machine's list. Label names follow
+// the resource name rule, and the result is sorted and free of repeats.
+func editLabels(current, add, remove []string) ([]string, error) {
+	for _, name := range add {
+		if _, err := machines.ParseResourceName(strings.TrimSpace(name)); err != nil {
+			return nil, fmt.Errorf("label %s: %w", name, err)
+		}
+	}
+	out := make([]string, 0, len(current)+len(add))
+	for _, label := range slices.Concat(current, add) {
+		label = strings.TrimSpace(label)
+		if !slices.Contains(remove, label) && label != "" && !slices.Contains(out, label) {
+			out = append(out, label)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // parseSuites reads the suite names a command line names. A suite ID comes from

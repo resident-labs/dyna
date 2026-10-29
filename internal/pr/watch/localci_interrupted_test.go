@@ -7,6 +7,7 @@ import (
 
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 )
 
 // stoppedRun is the result shape D-146 reported: every check of a trial on one
@@ -120,7 +121,7 @@ func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
 	stopped := stoppedRun()
 	stopped.Repo, stopped.SHA = repo, head
 	ci.results[head] = stopped
-	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, CPUs: 2}}
+	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, CPUs: 2, Labels: []string{machines.LabelCI}}}
 	job := registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true}
 
 	// The only machine's node queue is full, so the retry cannot start and must
@@ -262,7 +263,7 @@ func TestMachineFailureRerunsOnTheSameMachineWhenNoOtherCanTakeIt(t *testing.T) 
 	}
 	ci.results[head] = dropped
 	// One machine only, and it is the one that failed.
-	ci.nodes = []localci.Node{{Name: "hermeslab", Enabled: true}}
+	ci.nodes = []localci.Node{{Name: "hermeslab", Enabled: true, Labels: []string{machines.LabelCI}}}
 	job := registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true}
 
 	ci.started = make(chan struct{}, 1)
@@ -330,7 +331,7 @@ func TestResumedReplacementThatLosesSSHFailsTheTrial(t *testing.T) {
 		saved.Checks[i].Cause = localci.CauseSSHDrop
 	}
 	ci.results[head] = saved
-	ci.nodes = []localci.Node{{Name: "hermeslab", Enabled: true}}
+	ci.nodes = []localci.Node{{Name: "hermeslab", Enabled: true, Labels: []string{machines.LabelCI}}}
 	ci.started = make(chan struct{}, 1)
 	started, err := e.s.startRegisteredCI(t.Context(), registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true})
 	if err != nil {
