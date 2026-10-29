@@ -120,9 +120,11 @@ fi
 // PollScript runs on the node. Its arguments are groups of three: a
 // check's folder, its unit name and the offset of the log bytes the engine has.
 // For each group it prints one header line, the new log bytes, and a newline.
-// The state is read before the size, so a check that exited is reported with
-// its whole log. One poll returns at most 256 KiB of log per check, so a check
-// that prints a lot cannot make a poll on a slow route run for minutes.
+// The header includes the log modification time, so an idle deadline survives
+// an engine restart. The state is read before the size, so a check that exited
+// is reported with its whole log. One poll returns at most 256 KiB of log
+// per check, so a check that prints a lot cannot make a poll on a slow route
+// run for minutes.
 const PollScript = `chunk=262144
 while [ "$#" -ge 3 ]; do
   d=$1; unit=$2; off=$3; shift 3
@@ -135,8 +137,9 @@ while [ "$#" -ge 3 ]; do
   code=
   if [ "$state" = exited ]; then code=$(sed -n 's/.*"exitCode":\(-\{0,1\}[0-9]\{1,\}\).*/\1/p' "$d/exit.json" | head -n 1); fi
   size=$(wc -c < "$d/log" 2>/dev/null || echo 0); size=$((size + 0))
+  mtime=$(stat -c %Y "$d/log" 2>/dev/null || echo 0); mtime=$((mtime + 0))
   n=$((size - off)); [ "$n" -gt 0 ] || n=0; [ "$n" -le "$chunk" ] || n=$chunk
-  printf 'DYNA_DETACH dir=%s state=%s code=%s size=%s bytes=%s\n' "$d" "$state" "$code" "$size" "$n"
+  printf 'DYNA_DETACH dir=%s state=%s code=%s size=%s mtime=%s bytes=%s\n' "$d" "$state" "$code" "$size" "$mtime" "$n"
   if [ "$n" -gt 0 ]; then tail -c +"$((off + 1))" "$d/log" | head -c "$n"; fi
   printf '\n'
 done
@@ -187,6 +190,8 @@ type RunSpec struct {
 	// Offset is where an attached job's log continues; a launched job starts
 	// at 0.
 	Offset int64
+	// Idle stops a running job after its node log stays unchanged this long.
+	Idle time.Duration
 	// Dir is the check's folder on the node.
 	Dir string
 	// Unit is the name of the job's systemd unit.
@@ -196,6 +201,11 @@ type RunSpec struct {
 	// Limits bound the unit. A job that bounds its own command passes nil.
 	Limits *Limits
 }
+
+// idleTimeoutError reports that a running job's node log had no new output.
+type idleTimeoutError struct{ idle time.Duration }
+
+func (e *idleTimeoutError) Error() string { return fmt.Sprintf("no output for %s", e.idle) }
 
 // DetachedExit is a job that exited with a status on the node.
 type DetachedExit struct{ Code int }
@@ -529,6 +539,10 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 				p.applied(w.spec.Dir)
 			}
 		}
+		if frame.Unit == UnitRunning && w.spec.Idle > 0 && !frame.ModTime.IsZero() && !p.x.now().Before(frame.ModTime.Add(w.spec.Idle)) {
+			p.finish(w, &idleTimeoutError{idle: w.spec.Idle})
+			continue
+		}
 		if w.offset < frame.Size {
 			continue
 		}
@@ -562,10 +576,11 @@ type Frame struct {
 	Unit    UnitState
 	Code    int
 	Size    int64
+	ModTime time.Time
 	Payload []byte
 }
 
-var pollHeader = regexp.MustCompile(`^DYNA_DETACH dir=(\S+) state=(running|exited|gone|missing) code=(-?[0-9]*) size=([0-9]+) bytes=([0-9]+)$`)
+var pollHeader = regexp.MustCompile(`^DYNA_DETACH dir=(\S+) state=(running|exited|gone|missing) code=(-?[0-9]*) size=([0-9]+) mtime=([0-9]+) bytes=([0-9]+)$`)
 
 // Poll asks the node about every job in specs with one call, and retries the
 // call when the connection fails. The offset of each job's log bytes comes
@@ -622,8 +637,12 @@ func ParsePoll(reply io.Reader) (map[string]Frame, error) {
 			return nil, fmt.Errorf("unexpected poll header %q", line)
 		}
 		size, _ := strconv.ParseInt(match[4], 10, 64)
-		n, _ := strconv.Atoi(match[5])
+		modified, _ := strconv.ParseInt(match[5], 10, 64)
+		n, _ := strconv.Atoi(match[6])
 		frame := Frame{Unit: UnitState(match[2]), Size: size, Payload: make([]byte, n)}
+		if modified > 0 {
+			frame.ModTime = time.Unix(modified, 0)
+		}
 		if match[3] != "" {
 			frame.Code, _ = strconv.Atoi(match[3])
 		}
