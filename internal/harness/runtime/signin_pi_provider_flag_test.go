@@ -10,13 +10,13 @@ import (
 )
 
 // The Accounts page picks the provider once. The helper must carry that choice
-// to the Pi process, so the extension does not ask for it again.
+// to the Pi process, so the native command does not ask for it again.
 func TestPiSignInHelperCarriesTheChosenProvider(t *testing.T) {
 	scope := t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", scope)
 	t.Setenv("HOME", harnesshome.Home(scope))
 	fake := filepath.Join(scope, "fake-pi")
-	script := "#!/bin/sh\nprintf '%s' \"$PI_DYNA_PROVIDER\" > \"$PI_CODING_AGENT_DIR/provider.txt\"\n"
+	script := "#!/bin/sh\nprintf '%s' \"$*\" > \"$PI_CODING_AGENT_DIR/provider.txt\"\n"
 	if err := os.WriteFile(fake, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +24,8 @@ func TestPiSignInHelperCarriesTheChosenProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(scope, "provider.txt"))
-	if err != nil || string(got) != "openai-codex" {
-		t.Fatalf("Pi received provider %q, %v", got, err)
+	if err != nil || string(got) != "auth login --provider openai-codex --json" {
+		t.Fatalf("Pi received arguments %q, %v", got, err)
 	}
 }
 

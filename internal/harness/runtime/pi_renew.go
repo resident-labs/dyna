@@ -3,32 +3,21 @@ package runtime
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/mode"
 )
 
-// piRenewScript asks Pi to renew one saved OAuth grant. Pi resolves the
-// provider's own refresh hook and takes its auth.json lock while it renews, so
-// Dyna keeps no provider refresh protocol of its own and never races Pi's
-// writer.
-//
-//go:embed pi_renew.mjs
-var piRenewScript string
-
-// piRenewRunner runs the renewal script for one account home and provider. It
-// returns nil when the grant is usable, native.ErrInvalidGrant when the provider
-// rejected it, and another error when the run itself failed. Tests replace it.
-var piRenewRunner = runPiRenewScript
+// piRenewRunner asks Pi to renew one account home's provider grant. It returns
+// nil when the grant is usable, native.ErrInvalidGrant when the provider
+// rejected it, and another error when the renewal is unavailable or transient.
+var piRenewRunner = runPiRenew
 
 // renewPi asks Pi to renew the account's grant and returns the renewed login.
 func (m *nativeFilesManager) renewPi(ctx context.Context, c native.Captured) (native.Captured, error) {
@@ -57,63 +46,49 @@ func (m *nativeFilesManager) renewPi(ctx context.Context, c native.Captured) (na
 	return renewed, nil
 }
 
-// runPiRenewScript runs the embedded script with the Pi bundle's own package and
-// node.
-func runPiRenewScript(ctx context.Context, home, provider, executable string) error {
-	pkg, err := piPackageDir(executable)
-	if err != nil {
-		return err
-	}
-	dir, err := os.MkdirTemp("", "dyna-pi-renew-*")
-	if err != nil {
-		return errors.New("the Pi renewal script could not be prepared")
-	}
-	defer os.RemoveAll(dir)
-	script := filepath.Join(dir, "pi_renew.mjs")
-	if err = os.WriteFile(script, []byte(piRenewScript), 0600); err != nil {
-		return errors.New("the Pi renewal script could not be prepared")
-	}
-	cmd := exec.CommandContext(ctx, "node", script, filepath.Join(home, "auth.json"), provider)
-	cmd.Dir = dir
-	cmd.Env = append(envWithout(os.Environ(), mode.EnvSession, mode.EnvMode, mode.EnvRoom, mode.EnvDepth),
-		"PI_CODING_AGENT_DIR="+home,
-		"DYNA_PI_PACKAGE="+pkg,
-	)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	runErr := cmd.Run()
-	out := strings.TrimSpace(stderr.String())
-	if line, _, _ := strings.Cut(out, "\n"); strings.HasPrefix(line, "error ") {
-		return classifyPiRenewFailure(line)
-	}
-	if runErr != nil {
-		var exit *exec.ExitError
-		if errors.As(runErr, &exit) && exit.ExitCode() == 3 {
-			return native.ErrNotSignedIn
-		}
-		return errors.New("Pi could not renew this sign-in")
-	}
-	return nil
+type piRenewResult struct {
+	Status     string `json:"status"`
+	Kind       string `json:"kind"`
+	HTTPStatus int    `json:"httpStatus"`
 }
 
-// classifyPiRenewFailure decides whether a renewal failure is a rejected grant
-// or a transient one. Only the provider's own signal counts: an authentication
-// status or the invalid_grant code. Pi wraps every refresh failure in the same
-// message, so its wording is never used, and a network error, a timeout, a 429
-// or a 5xx stays transient and never asks the owner to sign in again.
-func classifyPiRenewFailure(line string) error {
-	fields := strings.Fields(line)
-	if len(fields) < 3 || !strings.HasPrefix(fields[0], "error") {
+// runPiRenew uses the selected Pi fork's native refresh command. Pi resolves
+// the provider and renews under its own auth.json lock.
+func runPiRenew(ctx context.Context, home, provider, executable string) error {
+	if executable == "" {
+		return errors.New("Dyna's Pi copy is not installed")
+	}
+	cmd := exec.CommandContext(ctx, executable, "auth", "refresh", "--provider", provider, "--json")
+	cmd.Dir = home
+	cmd.Env = append(envWithout(os.Environ(), mode.EnvSession, mode.EnvMode, mode.EnvRoom, mode.EnvDepth),
+		"PI_CODING_AGENT_DIR="+home,
+	)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	runErr := cmd.Run()
+	err := classifyPiRenewResult(stdout.Bytes())
+	if err == nil && runErr != nil {
 		return errors.New("Pi could not renew this sign-in")
 	}
-	status, _ := strconv.Atoi(fields[1])
-	switch fields[2] {
-	case "invalid_grant":
-		return native.ErrInvalidGrant
+	return err
+}
+
+// classifyPiRenewResult maps Pi's typed status onto the existing account
+// errors. Every failure except an explicitly rejected grant stays transient.
+func classifyPiRenewResult(output []byte) error {
+	var result piRenewResult
+	if len(output) > 64<<10 || json.Unmarshal(output, &result) != nil {
+		return errors.New("Pi could not renew this sign-in")
 	}
-	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusBadRequest:
-		return native.ErrInvalidGrant
+	switch result.Status {
+	case "renewed":
+		return nil
+	case "no_credential":
+		return native.ErrNotSignedIn
+	case "failed":
+		if result.Kind == "invalid_grant" {
+			return native.ErrInvalidGrant
+		}
 	}
 	return errors.New("Pi could not renew this sign-in")
 }
@@ -129,19 +104,6 @@ func readPiAuthEntries(path string) (map[string]json.RawMessage, error) {
 		return nil, errors.New("Pi's login file is not valid JSON.")
 	}
 	return entries, nil
-}
-
-// piPackageDir resolves the Pi package a bundle executable belongs to.
-func piPackageDir(executable string) (string, error) {
-	if executable == "" {
-		return "", errors.New("Dyna's Pi copy is not installed")
-	}
-	prefix := filepath.Dir(filepath.Dir(executable))
-	dir := filepath.Join(prefix, "lib", "node_modules", "@earendil-works", "pi-coding-agent")
-	if info, err := os.Stat(filepath.Join(dir, "dist", "index.js")); err != nil || !info.Mode().IsRegular() {
-		return "", errors.New("Dyna's Pi copy has no provider runtime")
-	}
-	return dir, nil
 }
 
 // envWithout drops the named variables from a copy of env.

@@ -4,7 +4,16 @@ import { FileAuthStorageBackend } from "../core/auth-storage.ts";
 import { stripBom } from "../utils/text.ts";
 import type { Args } from "./args.ts";
 
-export type AuthCommandKind = "check" | "api_key" | "bearer_token" | "list" | "set" | "remove" | "apply";
+export type AuthCommandKind =
+	| "check"
+	| "api_key"
+	| "bearer_token"
+	| "list"
+	| "set"
+	| "remove"
+	| "apply"
+	| "login"
+	| "refresh";
 
 export interface AuthCommand {
 	kind: AuthCommandKind;
@@ -26,6 +35,8 @@ const AUTH_COMMAND_USAGE: Record<AuthCommandKind, string> = {
 	set: `${APP_NAME} auth set --provider <provider>`,
 	remove: `${APP_NAME} auth remove --provider <provider>`,
 	apply: `${APP_NAME} auth apply`,
+	login: `${APP_NAME} auth login [--provider <provider>] --json`,
+	refresh: `${APP_NAME} auth refresh --provider <provider> --json`,
 };
 
 export function getAuthCommandName(kind: AuthCommandKind): string {
@@ -35,7 +46,9 @@ export function getAuthCommandName(kind: AuthCommandKind): string {
 	if (kind === "list") return "auth list";
 	if (kind === "set") return "auth set";
 	if (kind === "remove") return "auth remove";
-	return "auth apply";
+	if (kind === "apply") return "auth apply";
+	if (kind === "login") return "auth login";
+	return "auth refresh";
 }
 
 export function getAuthCommandUsage(kind: AuthCommandKind): string {
@@ -58,6 +71,8 @@ export function printAuthCommandHelp(): void {
   pi auth set --provider <provider>
   pi auth remove --provider <provider>
   pi auth apply
+  pi auth login [--provider <provider>] --json
+  pi auth refresh --provider <provider> --json
 
 Auth commands require at least one of --provider or --model. Checks refresh expired OAuth credentials by default; --no-refresh prevents this. --credentials emits the credential, or includes it in JSON output.
 
@@ -67,26 +82,39 @@ Auth storage commands read and write the login file under its own lock: list pri
 export function parseAuthCommand(args: string[]): AuthCommand | undefined {
 	if (args[0] !== "auth") return undefined;
 
-	const kind =
-		args[1] === "check"
-			? "check"
-			: args[1] === "print-api-key"
-				? "api_key"
-				: args[1] === "print-bearer-token"
-					? "bearer_token"
-					: args[1] === "list"
-						? "list"
-						: args[1] === "set"
-							? "set"
-							: args[1] === "remove"
-								? "remove"
-								: args[1] === "apply"
-									? "apply"
-									: undefined;
-	if (!kind) {
-		throw new AuthCommandError(
-			`Unknown auth command "${args[1] ?? ""}". Use "${APP_NAME} auth help" for the supported commands.`,
-		);
+	let kind: AuthCommandKind;
+	switch (args[1]) {
+		case "check":
+			kind = "check";
+			break;
+		case "print-api-key":
+			kind = "api_key";
+			break;
+		case "print-bearer-token":
+			kind = "bearer_token";
+			break;
+		case "list":
+			kind = "list";
+			break;
+		case "set":
+			kind = "set";
+			break;
+		case "remove":
+			kind = "remove";
+			break;
+		case "apply":
+			kind = "apply";
+			break;
+		case "login":
+			kind = "login";
+			break;
+		case "refresh":
+			kind = "refresh";
+			break;
+		default:
+			throw new AuthCommandError(
+				`Unknown auth command "${args[1] ?? ""}". Use "${APP_NAME} auth help" for the supported commands.`,
+			);
 	}
 
 	const commandArgs: string[] = [];
@@ -108,14 +136,16 @@ export function parseAuthCommand(args: string[]): AuthCommand | undefined {
 			minExpiryMs = amount * (unit === "ms" ? 1 : unit === "s" ? 1_000 : unit === "m" ? 60_000 : 3_600_000);
 			continue;
 		}
-		if (arg === "--provider" && (kind === "set" || kind === "remove")) {
+		if (arg === "--provider" && (kind === "set" || kind === "remove" || kind === "login" || kind === "refresh")) {
 			provider = args[++index];
 			if (!provider) throw new AuthCommandError(`--provider requires a value for "${getAuthCommandName(kind)}"`);
 			continue;
 		}
 		if (arg === "--json") {
-			if (kind !== "check" && kind !== "list")
-				throw new AuthCommandError("--json is only supported by auth check and auth list");
+			if (kind !== "check" && kind !== "list" && kind !== "login" && kind !== "refresh")
+				throw new AuthCommandError(
+					"--json is only supported by auth check, auth list, auth login and auth refresh",
+				);
 			json = true;
 			continue;
 		}
@@ -128,8 +158,11 @@ export function parseAuthCommand(args: string[]): AuthCommand | undefined {
 		commandArgs.push(arg);
 	}
 
-	if ((kind === "set" || kind === "remove") && !provider) {
+	if ((kind === "set" || kind === "remove" || kind === "refresh") && !provider) {
 		throw new AuthCommandError(`"${getAuthCommandName(kind)}" requires --provider <provider>`);
+	}
+	if ((kind === "login" || kind === "refresh") && !json) {
+		throw new AuthCommandError(`"${getAuthCommandName(kind)}" requires --json`);
 	}
 
 	const command: AuthCommand =
@@ -176,15 +209,18 @@ function parseAuthApplyEdit(stdin: string | undefined): AuthApplyEdit {
 	}
 	const edit = parsed as AuthApplyEdit;
 	if (edit.set !== undefined && (typeof edit.set !== "object" || edit.set === null || Array.isArray(edit.set))) {
-		throw new AuthCommandError("auth apply \"set\" must be one object of entries.");
+		throw new AuthCommandError('auth apply "set" must be one object of entries.');
 	}
 	if (edit.remove !== undefined) {
 		if (!Array.isArray(edit.remove) || edit.remove.some((id) => typeof id !== "string")) {
-			throw new AuthCommandError("auth apply \"remove\" must be one array of provider ids.");
+			throw new AuthCommandError('auth apply "remove" must be one array of provider ids.');
 		}
 	}
-	if (edit.expect !== undefined && (typeof edit.expect !== "object" || edit.expect === null || Array.isArray(edit.expect))) {
-		throw new AuthCommandError("auth apply \"expect\" must be one object of entries.");
+	if (
+		edit.expect !== undefined &&
+		(typeof edit.expect !== "object" || edit.expect === null || Array.isArray(edit.expect))
+	) {
+		throw new AuthCommandError('auth apply "expect" must be one object of entries.');
 	}
 	return edit;
 }
@@ -202,7 +238,11 @@ function sameJsonValues(a: unknown, b: unknown): boolean {
 	if (Array.isArray(a) !== Array.isArray(b)) return false;
 	const keys = Object.keys(a as object);
 	if (keys.length !== Object.keys(b as object).length) return false;
-	return keys.every((key) => key in (b as object) && sameJsonValues((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+	return keys.every(
+		(key) =>
+			key in (b as object) &&
+			sameJsonValues((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+	);
 }
 
 /**
