@@ -208,6 +208,7 @@ func repoCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
+	var upstream string
 	add := &cobra.Command{
 		Use:   "add <room> <path>",
 		Short: "Accept checkouts of another repository",
@@ -217,12 +218,13 @@ func repoCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := engineClient().Call(cmd.Context(), "AddRoomRepo", []any{args[0], path}, nil); err != nil {
+			if err := engineClient().Call(cmd.Context(), "AddRoomRepo", []any{args[0], path, upstream}, nil); err != nil {
 				return fmt.Errorf("the room was not updated: %w", err)
 			}
 			return nil
 		},
 	}
+	add.Flags().StringVar(&upstream, "upstream", "", "parent repository of this checkout's fork, as host/owner/repo; empty keeps none")
 	remove := &cobra.Command{
 		Use:   "remove <room> <path>",
 		Short: "Stop accepting a registered repository",

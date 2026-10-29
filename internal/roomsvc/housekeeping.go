@@ -97,12 +97,17 @@ func (s *Service) SetRoomLimit(ctx context.Context, ref, field, value string) (S
 }
 
 // AddRoomRepo registers another repository whose checkouts the room accepts
-// for local changes. Only the owner or the room's root may.
-func (s *Service) AddRoomRepo(ctx context.Context, ref, path string) error {
+// for local changes. A non-empty upstream names that repository's parent, so
+// `pr track` accepts PRs opened on it. Only the owner or the room's root may.
+func (s *Service) AddRoomRepo(ctx context.Context, ref, path, upstream string) error {
 	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
 		return err
 	}
-	return s.rooms().AddRepo(ref, path)
+	parent, err := room.ParseUpstream(upstream)
+	if err != nil {
+		return err
+	}
+	return s.rooms().AddRepo(ref, path, parent)
 }
 
 // RemoveRoomRepo unregisters a repository added with AddRoomRepo.

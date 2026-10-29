@@ -279,19 +279,31 @@ func matchesRepository(ctx context.Context, rec room.Record, r repository) bool 
 // that the room's fork checkout belongs to. Reads of it are allowed; writes stay
 // on the room's own repository.
 func matchesUpstream(rec room.Record, r repository) bool {
-	return rec.Upstream != "" && r.name != "" && strings.EqualFold(rec.Upstream, r.host+"/"+r.name)
+	if r.name == "" {
+		return false
+	}
+	return slices.ContainsFunc(rec.Upstreams(), func(up string) bool {
+		return strings.EqualFold(up, r.host+"/"+r.name)
+	})
 }
 
-// matchesForkParent asks GitHub for the parent of the room's origin repository.
-func matchesForkParent(ctx context.Context, rec room.Record, r repository) bool {
+// matchesForkParent asks GitHub for the parent of the origin of the room's
+// checkout that cmdDir uses: the room's repository, or a registered extra one.
+func matchesForkParent(ctx context.Context, rec room.Record, cmdDir string, r repository) bool {
 	if rec.Repo == "" || r.name == "" {
 		return false
 	}
-	remote, err := repoid.Git(ctx, rec.Repo, "remote", "get-url", "origin")
+	checkout := rec.Repo
+	for _, path := range rec.ExtraRepos {
+		if sameCheckout(cmdDir, path) {
+			checkout = path
+		}
+	}
+	remote, err := repoid.Git(ctx, checkout, "remote", "get-url", "origin")
 	if err != nil {
 		return false
 	}
-	identity, err := repoid.RemoteIdentity(rec.Repo, remote)
+	identity, err := repoid.RemoteIdentity(checkout, remote)
 	if err != nil {
 		return false
 	}
@@ -300,7 +312,7 @@ func matchesForkParent(ctx context.Context, rec room.Record, r repository) bool 
 		return false
 	}
 	origin := repository{parts[0], parts[1] + "/" + parts[2]}
-	parent, ok := parentRepo(ctx, Command(ctx, "", rec.Repo), origin)
+	parent, ok := parentRepo(ctx, Command(ctx, "", checkout), origin)
 	return ok && strings.EqualFold(r.name, parent)
 }
 
@@ -642,7 +654,7 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 		if Access(ctx, rec) != ReadWrite {
 			return errReadOnly
 		}
-		if !matchesForkParent(ctx, rec, r) {
+		if !matchesForkParent(ctx, rec, cmdDir, r) {
 			return err
 		}
 	}

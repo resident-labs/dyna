@@ -34,9 +34,31 @@ func pathMissing(path string) bool {
 	return err != nil
 }
 
+// UpstreamOf returns the parent repository of the registered repository at
+// root, or empty when it has none. The room's own repository uses Upstream.
+func (r Record) UpstreamOf(root string) string {
+	if root == r.Repo {
+		return r.Upstream
+	}
+	return r.RepoUpstreams[root]
+}
+
+// Upstreams lists every parent repository the room records, in no set order.
+func (r Record) Upstreams() []string {
+	var out []string
+	if r.Upstream != "" {
+		out = append(out, r.Upstream)
+	}
+	for _, up := range r.RepoUpstreams {
+		out = append(out, up)
+	}
+	return out
+}
+
 // AddRepo registers the git repository that holds path, so the room accepts
 // its checkouts for local changes. It stores the repository's main worktree.
-func (s *Store) AddRepo(ref, path string) error {
+// A non-empty upstream, as host/owner/repo, names that repository's parent.
+func (s *Store) AddRepo(ref, path, upstream string) error {
 	root, err := RepoRoot(path)
 	if err != nil {
 		return err
@@ -46,6 +68,12 @@ func (s *Store) AddRepo(ref, path string) error {
 			return fmt.Errorf("room %s already accepts %s", r.Name, root)
 		}
 		r.ExtraRepos = append(r.ExtraRepos, root)
+		if upstream != "" {
+			if r.RepoUpstreams == nil {
+				r.RepoUpstreams = map[string]string{}
+			}
+			r.RepoUpstreams[root] = upstream
+		}
 		return nil
 	})
 }
@@ -66,6 +94,7 @@ func (s *Store) RemoveRepo(ref, path string) error {
 			return fmt.Errorf("room %s has no registered repository %s", r.Name, abs)
 		}
 		r.ExtraRepos = slices.Delete(slices.Clone(r.ExtraRepos), i, i+1)
+		delete(r.RepoUpstreams, abs)
 		return nil
 	})
 }
