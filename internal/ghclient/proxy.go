@@ -29,6 +29,7 @@ func SessionCommand(ctx context.Context, args []string) error {
 	if ref := os.Getenv("DYNA_ROOM_ID"); ref != "" {
 		ctx = WithRoom(ctx, ref)
 	}
+	ctx = WithAgentText(ctx)
 	cmd := Command(ctx, binary, dir, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return Run(ctx, cmd)
