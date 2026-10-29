@@ -263,6 +263,51 @@ func TestIdleStopDrainsOutputWrittenAfterTheStop(t *testing.T) {
 	}
 }
 
+// The stop call answers only after the node's log writer has finished, so
+// output the unit buffered past its end still reaches the stored log: the
+// forced stop kills the wrapper, but the writer drains on in its own session
+// while the unit is already gone.
+func TestStopWaitsForTheLogWriter(t *testing.T) {
+	tail := bytes.Repeat([]byte("y"), 300<<10)
+	var fake *jobstest.Fake
+	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			return nil
+		}
+		fmt.Fprintln(out, "before the stop")
+		<-ctx.Done()
+		if _, err := out.Write(tail); err != nil {
+			return err
+		}
+		return ctx.Err()
+	})
+	defer svc.Stop()
+	fake.StopHook = func(call int, failed bool) {
+		if call == 1 && !failed {
+			fake.VanishAll()
+		}
+	}
+	idle := 5 * time.Second
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished := <-reporter.finished; finished.State != StateTimedOut {
+		t.Fatalf("finished = %+v, want timed_out", finished)
+	}
+	stored, err := svc.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := os.ReadFile(stored.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := len("before the stop\n") + len(tail); len(log) != want {
+		t.Fatalf("log has %d bytes, want all %d the writer held past the unit", len(log), want)
+	}
+}
+
 // A job that never writes output still reaches its idle deadline: the node
 // creates the log at launch, so quiet time counts from launch, not from a
 // first write that may never come.

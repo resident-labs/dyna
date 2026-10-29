@@ -97,6 +97,7 @@ if IFS= read -r -n 1 _; then
 fi
 ' dyna-cap "$1" < "$1/out" &
 writer=$!
+echo "$writer" > "$1/writer.pid"
 exec 4> "$1/out"
 bash -o pipefail "$1/run.sh" >&4 2>&1 </dev/null
 code=$?
@@ -104,6 +105,7 @@ exec 4>&-
 for i in $(seq 1 "${DYNA_CI_DRAIN_TENTHS:-50}"); do kill -0 "$writer" 2>/dev/null || break; sleep 0.1; done
 kill -KILL -- "-$writer" 2>/dev/null || true
 wait "$writer" 2>/dev/null || true
+rm -f "$1/writer.pid"
 for i in $(seq 1 40); do kill -0 -- "-$writer" 2>/dev/null || break; sleep 0.05; done
 if [ -f "$1/trailer" ]; then cat "$1/trailer" >> "$1/log"; fi
 printf '{"exitCode":%s}\n' "$code" > "$1/exit.tmp" && mv "$1/exit.tmp" "$1/exit.json"
@@ -162,10 +164,13 @@ done
 `
 
 // StopScript runs on the node. It takes the check's folder and its unit
-// name, asks the check to stop, and kills what is left. A check that recorded
-// its own exit, with the user manager confirming its unit down, is left
-// alone: the forced calls would only restate what the manager already
-// answered, and each is a round trip the run's tail pays per check.
+// name, asks the check to stop, and kills what is left. Its answer comes only
+// after the log writer's session has ended: the writer runs outside the
+// unit's reach and can still be draining the output the unit buffered, so a
+// stop that skipped it would let the next poll see a final log that is not.
+// A check that recorded its own exit, with the user manager confirming its
+// unit down, is left alone: the wrapper already waited for the writer, and
+// the forced calls would only restate what the manager already answered.
 const StopScript = UnitStoppedFunction + `d=$1; unit=$2
 if [ -s "$d/pid" ]; then
   pid=$(cat "$d/pid")
@@ -187,6 +192,14 @@ elif command -v systemctl >/dev/null 2>&1; then
   # The stop counts only when the user manager says the unit is down. A manager
   # that does not answer proves nothing, so that fails the call too.
   unit_stopped "$unit" || { echo "unit $unit is not confirmed stopped" >&2; exit 1; }
+fi
+# The writer of the log outlives the wrapper the stop just killed, because it
+# runs in a session of its own: its last drain is the tail the run must keep.
+# A killed wrapper leaves the pid file behind, and a dead writer's pid answers
+# no probe, so the wait ends at once on the paths that killed it.
+if [ -s "$d/writer.pid" ]; then
+  w=$(cat "$d/writer.pid")
+  for i in $(seq 1 50); do kill -0 "$w" 2>/dev/null || break; sleep 0.1; done
 fi
 `
 
