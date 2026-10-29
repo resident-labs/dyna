@@ -199,20 +199,24 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	}
 	// Each pass starts the worktree cleanup at the next repository, so a slow
 	// repository cannot hold back the others on every pass. The turn is stored,
-	// because each hook run is a new process. The cleanup runs
-	// within the pass time left after stepShare, so the later steps keep their
-	// share. A removal
-	// needs its repository fetched and scanned first, so a shorter cap would stop
-	// every removal. Trees left unfinished at that point are kept and marked
-	// deferred, so the next pass retries them.
-	passEnd, _ := ctx.Deadline()
-	errs = append(errs, runStep(ctx, &result, "worktrees", worktreeShare(passEnd), func(ctx context.Context) error {
-		turn, err := nextWorktreeTurn(ctx, store.DataDir())
-		if err != nil {
-			return err
-		}
-		return cleanWorktrees(ctx, &result, fromTurn(repos, turn), worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})
-	}))
+	// because each hook run is a new process. Even turns run the cleanup before the
+	// sweeps and odd turns after them, so a slow cleanup cannot starve the sweeps on
+	// every pass. A removal needs its repository fetched and scanned first, so a
+	// shorter cap would stop every removal. Trees left unfinished at the deadline are
+	// kept and marked deferred, so the next pass retries them.
+	turn, turnErr := nextWorktreeTurn(ctx, store.DataDir())
+	cleanup := func() {
+		passEnd, _ := ctx.Deadline()
+		errs = append(errs, runStep(ctx, &result, "worktrees", worktreeShare(passEnd), func(ctx context.Context) error {
+			if turnErr != nil {
+				return turnErr
+			}
+			return cleanWorktrees(ctx, &result, fromTurn(repos, turn), worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})
+		}))
+	}
+	if turn%2 == 0 {
+		cleanup()
+	}
 	step("scratch", func(ctx context.Context) error {
 		cleaned, err := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
 		result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
@@ -257,6 +261,9 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 				return sweepDiskTemp(now, root, processAlive, dry)
 			})
 		}
+	}
+	if turn%2 == 1 {
+		cleanup()
 	}
 	return result, errors.Join(errs...)
 }
