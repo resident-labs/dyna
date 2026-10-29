@@ -41,7 +41,7 @@ func DisplayApprovalBody(payload approvals.GHPayload) string {
 		if ref.file {
 			content = snapshots[ref.path]
 		}
-		if !api && ref.name == "body" {
+		if !api && (ref.name == "body" || ref.name == "comment") {
 			body = content
 			continue
 		}
@@ -161,7 +161,11 @@ func approvalFileArguments(args []string) ([]fileArgument, error) {
 			}
 			switch flag {
 			case "--body":
-				refs = append(refs, fileArgument{index: i, name: "body", value: value})
+				refs = append(refs, fileArgument{index: i, name: "body", value: value, prefix: prefix})
+			case "--comment":
+				if takes {
+					refs = append(refs, fileArgument{index: i, name: "comment", value: value, prefix: prefix})
+				}
 			case "--body-file":
 				refs = append(refs, fileArgument{index: i, name: "body", path: value, prefix: prefix, file: true})
 			}
@@ -182,7 +186,9 @@ func approvalFileArguments(args []string) ([]fileArgument, error) {
 			}
 			switch flag {
 			case "-b":
-				refs = append(refs, fileArgument{index: valueIndex, name: "body", value: value})
+				refs = append(refs, fileArgument{index: valueIndex, name: "body", value: value, prefix: prefix})
+			case "-c":
+				refs = append(refs, fileArgument{index: valueIndex, name: "comment", value: value, prefix: prefix})
 			case "-F":
 				refs = append(refs, fileArgument{index: valueIndex, name: "body", path: value, prefix: prefix, file: true})
 			}
@@ -253,7 +259,7 @@ func apiFieldArgument(index int, value, prefix string, allowFile bool) (fileArgu
 	if !ok {
 		return fileArgument{}, false
 	}
-	ref := fileArgument{index: index, name: name, value: raw}
+	ref := fileArgument{index: index, name: name, value: raw, prefix: strings.TrimSuffix(prefix+value, raw)}
 	if allowFile && strings.HasPrefix(raw, "@") {
 		ref.path = strings.TrimPrefix(raw, "@")
 		ref.prefix = strings.TrimSuffix(prefix+value, ref.path)
