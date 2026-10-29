@@ -240,7 +240,9 @@ never more than 10% of it, or under a set `--max-disk-percent` limit), and, for 
 when fewer heavy units run than the node's limit. That free-disk rule is the
 only one: a node whose disk starts to block work warns each room's root once,
 with the queue's own words, and its new work waits in its queue until space is
-freed. Work that waits is oldest
+freed. Recovery frees that same boundary: a run that starts with the disk
+blocking removes Dyna's own caches and idle scratch builds first, so the node
+that frees its own space admits work again. Work that waits is oldest
 first and rooms take turns, and the check's log names the reason it waits, such
 as `local CI: 4 of 4 IO-heavy jobs running, position 3 of 7`. The owner or the
 room's root sets a node's limits with `dyna machine edit <name> --max-io-heavy

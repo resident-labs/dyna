@@ -21,6 +21,25 @@ import (
 	"time"
 )
 
+// TestNodeSourceCarriesTheDiskRule is the regression test for the CI runner's
+// admission gate: the machine record the queue reads must carry the node's
+// probed disk and its limit, so a node whose disk is full holds new work
+// instead of admitting it as never probed.
+func TestNodeSourceCarriesTheDiskRule(t *testing.T) {
+	full := nodeSource{node: &Node{Name: "pve", Enabled: true, Disk: machines.Disk{Total: 100 << 30, Free: 3 << 30}}}.machine()
+	if why := full.DiskBlock(); why == "" {
+		t.Fatal("a node whose disk is full must block new work through its machine record")
+	}
+	limited := nodeSource{node: &Node{Name: "pve", Enabled: true, Disk: machines.Disk{Total: 100 << 30, Free: 5 << 30}, MaxDiskPercent: 90}}.machine()
+	if why := limited.DiskBlock(); why == "" {
+		t.Fatal("a node over its used-percent limit must block new work through its machine record")
+	}
+	roomy := nodeSource{node: &Node{Name: "pve", Enabled: true, Disk: machines.Disk{Total: 100 << 30, Free: 40 << 30}}}.machine()
+	if why := roomy.DiskBlock(); why != "" {
+		t.Fatalf("a node with room blocks no work, got %q", why)
+	}
+}
+
 // Every failed check keeps its own output, a typed cause, a local log file and a
 // saved result, even when the report copy fails afterwards. The cases cover the
 // causes a node proves from its exit status and from the marker it writes.
