@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/ciexcerpt"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/repoid"
@@ -672,6 +673,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		if err := blob.record(checkExit{Cause: sr.Cause, Status: sr.Status, ExitCode: blob.exitCode}); err != nil {
 			log.Printf("local CI %s: record check cause: %v", node.Name, err)
 		}
+		if sr.Status != OutcomePassed {
+			result.Suites[i].FailureExcerpt = checkFailureExcerpt(blob.path)
+		}
 		if err := blob.Close(); err != nil {
 			log.Printf("local CI %s: finish check log: %v", node.Name, err)
 		}
@@ -973,6 +977,18 @@ func checkExitCode(err error, markers [][]string) int {
 	}
 	code, _ := jobs.CommandExitStatus(err)
 	return code
+}
+
+// checkFailureExcerpt reads a check's whole saved log and keeps its failing part.
+// The stored log tail is short, so a failing test block earlier in the log is kept
+// only here. Readers sanitize the excerpt, as they do the stored tail.
+func checkFailureExcerpt(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("local CI keep failure excerpt: %v", err)
+		return ""
+	}
+	return ciexcerpt.Failure(string(raw), true)
 }
 
 // checkLogHead and checkLogTail bound what one check keeps in its local log: the
