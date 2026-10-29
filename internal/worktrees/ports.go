@@ -78,7 +78,7 @@ func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except 
 		if rec.Port == 0 || rec.Path == except {
 			continue
 		}
-		if _, err := os.Lstat(rec.Path); errors.Is(err, fs.ErrNotExist) {
+		if provenMissingPath(rec.Path) {
 			// Only a proven absent path counts; any other error is uncertain.
 			if ok, err := releaseRecord(ctx, db, rec, true); err == nil && ok {
 				freed = true
@@ -95,15 +95,7 @@ func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except 
 	})
 	reclaimable := map[string]map[string]bool{}
 	for _, rec := range held {
-		if rec.Repo == "" || !blockFree(rec.Port, portFree) {
-			continue
-		}
-		paths, seen := reclaimable[rec.Repo]
-		if !seen {
-			paths = reclaimablePaths(ctx, rec.Repo)
-			reclaimable[rec.Repo] = paths
-		}
-		if !paths[filepath.Clean(rec.Path)] {
+		if !heldPortReclaimable(ctx, rec, reclaimable) {
 			continue
 		}
 		if ok, err := releaseRecord(ctx, db, rec, false); err == nil && ok {
@@ -111,6 +103,52 @@ func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except 
 		}
 	}
 	return false
+}
+
+// reclaimablePortBlockCount counts records whose blocks allocation can reuse.
+// It is read-only, so capacity alerts can use the same eligibility checks as
+// allocation without changing records. The repository cache bounds ownership
+// scans to one per repository, however many candidate blocks it holds.
+// Tests replace it to isolate alert state transitions from the host.
+var reclaimablePortBlockCount = func(ctx context.Context, records []Record) int {
+	count := 0
+	reclaimable := map[string]map[string]bool{}
+	for _, rec := range records {
+		if rec.Port == 0 {
+			continue
+		}
+		if provenMissingPath(rec.Path) {
+			// Reclaiming the record does not free a socket held by another process.
+			if blockFree(rec.Port, portFree) {
+				count++
+			}
+			continue
+		}
+		if heldPortReclaimable(ctx, rec, reclaimable) {
+			count++
+		}
+	}
+	return count
+}
+
+// provenMissingPath is true only when the path is positively absent.
+func provenMissingPath(path string) bool {
+	_, err := os.Lstat(path)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// heldPortReclaimable applies the closed-owner and free-socket checks to a
+// record whose path was not proven absent. Unknown owners and errors keep it.
+func heldPortReclaimable(ctx context.Context, rec Record, reclaimable map[string]map[string]bool) bool {
+	if rec.Repo == "" || !blockFree(rec.Port, portFree) {
+		return false
+	}
+	paths, seen := reclaimable[rec.Repo]
+	if !seen {
+		paths = reclaimablePaths(ctx, rec.Repo)
+		reclaimable[rec.Repo] = paths
+	}
+	return paths[filepath.Clean(rec.Path)]
 }
 
 // releaseRecord deletes orig, or clears its port, in one transaction. It does
