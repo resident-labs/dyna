@@ -114,6 +114,13 @@ export function issueEvent(post: EventPost): IssueEvent | undefined {
   return isIssueEvent(post.payload) ? post.payload : undefined
 }
 
+// issueWatchEvent returns the typed payload of an upstream issue fact. A watched
+// issue's comment, close or reopen carries it, and the card reads it.
+export function issueWatchEvent(post: EventPost): IssueWatchEvent | undefined {
+  if (post.kind !== 'issue-watch') return undefined
+  return isIssueWatchEvent(post.payload) ? post.payload : undefined
+}
+
 // goalEvent returns the typed payload of a goal post. A post stored before the
 // typed events has no payload, and returns undefined; the goal row then reads
 // its stored text.
