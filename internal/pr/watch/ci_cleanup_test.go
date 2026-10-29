@@ -35,7 +35,7 @@ func TestTerminalPRCleansUpRunsOnce(t *testing.T) {
 			}
 			e.tick()
 			r := e.record()
-			if r.Watching || !r.CICleanupDone || r.State != name {
+			if r.Watching || !r.CICleanupDone || string(r.State) != name {
 				t.Fatalf("unexpected record: %+v", r)
 			}
 			calls, _ := os.ReadFile(e.calls)

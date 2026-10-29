@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	prstate "dyna-agent/internal/pr/state"
 	"fmt"
 	"strings"
 	"testing"
@@ -158,7 +159,7 @@ func TestFlushPreservesCommentsAcrossStateChanges(t *testing.T) {
 			s := &Service{Store: &Store{Root: t.TempDir()}}
 			r := Record{Key: "pr", Head: "old", State: "open", Watching: true}
 			notice(&r, "author", "GitHub comment from owner (comment 1):\nPlease keep this feedback.", "batch:1")
-			r.Head, r.State = "new", state
+			r.Head, r.State = "new", prstate.PRState(state)
 			if err := s.Store.update(func(st *State) error { st.Records[r.Key] = &r; return nil }); err != nil {
 				t.Fatal(err)
 			}

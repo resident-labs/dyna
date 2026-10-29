@@ -10,7 +10,7 @@ import (
 func (s State) AuthoredBy(roomID, session string, since time.Time) []*Record {
 	var out []*Record
 	for _, r := range s.Records {
-		if r != nil && r.RoomID == roomID && r.Author == session && (r.State == "open" || !r.ClosedAt.Before(since)) {
+		if r != nil && r.RoomID == roomID && r.Author == session && (r.State == PROpen || !r.ClosedAt.Before(since)) {
 			out = append(out, r)
 		}
 	}

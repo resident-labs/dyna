@@ -47,7 +47,7 @@ func NeedsReview(r state.Record) bool {
 	if r.RoundHead == r.Head && r.StopReason != "" {
 		return false
 	}
-	return r.Watching && r.State == "open" && !r.IsDraft && HeadVerified(r) && r.CI != "failed" &&
+	return r.Watching && r.State == state.PROpen && !r.IsDraft && HeadVerified(r) && r.CI != state.CIFailed &&
 		!r.HasPendingVerdict(r.Head) && (r.Verdict == "" || r.RoundHead != r.Head)
 }
 func Busy(r state.Record, info subagent.Info, turn subagent.Turn) bool {
@@ -93,7 +93,7 @@ func UnmergedDependency(r state.Record, records map[string]*state.Record) (strin
 				}
 			}
 		}
-		if dependency == nil || dependency.State != "merged" {
+		if dependency == nil || dependency.State != state.PRMerged {
 			return id, true
 		}
 	}
@@ -101,21 +101,21 @@ func UnmergedDependency(r state.Record, records map[string]*state.Record) (strin
 }
 
 func Ready(r state.Record, g GitHub, records map[string]*state.Record) bool {
-	return ready(r, g, records, "passed")
+	return ready(r, g, records, state.CIPassed)
 }
 
 // ReadyWithoutHeadCI reports a change whose head has no CI to read. A repository
 // that publishes no CI for pull request heads cannot supply one, so waiting for
 // it would never end: the merge trial runs the checks instead.
 func ReadyWithoutHeadCI(r state.Record, g GitHub, records map[string]*state.Record) bool {
-	return ready(r, g, records, "absent")
+	return ready(r, g, records, state.CIAbsent)
 }
 
 // ready applies the one readiness rule to a head whose CI may be ci.
-func ready(r state.Record, g GitHub, records map[string]*state.Record, ci string) bool {
+func ready(r state.Record, g GitHub, records map[string]*state.Record, ci state.CIState) bool {
 	_, dependencyWaiting := UnmergedDependency(r, records)
-	return !dependencyWaiting && len(MissingRequiredReviewers(r)) == 0 && !OpenOwnerFinding(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head) && r.Watching && r.State == "open" && HeadCurrent(r, g.Head) && ApprovedAtHead(r) && r.CI == ci &&
-		g.CIHead == r.Head && g.CI == ci && !g.IsDraft &&
+	return !dependencyWaiting && len(MissingRequiredReviewers(r)) == 0 && !OpenOwnerFinding(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head) && r.Watching && r.State == state.PROpen && HeadCurrent(r, g.Head) && ApprovedAtHead(r) && r.CI == ci &&
+		g.CIHead == r.Head && g.CI == string(ci) && !g.IsDraft &&
 		g.Mergeable != nil && *g.Mergeable && g.DefaultBranch != "" && g.Base == g.DefaultBranch && g.Base == r.BaseRef
 }
 func ReadyAt(r state.Record, g GitHub) time.Time {
@@ -134,5 +134,5 @@ func ReadyAt(r state.Record, g GitHub) time.Time {
 // FromRecord projects the last confirmed remote facts for display and notice suppression.
 // Actions that refresh GitHub must use their fresh observation instead.
 func FromRecord(r state.Record) GitHub {
-	return GitHub{Head: r.Head, Base: r.BaseRef, DefaultBranch: r.DefaultBranch, IsDraft: r.IsDraft, Mergeable: r.Mergeable, CIHead: r.Head, CI: r.CI, ChecksAt: r.ChecksAt}
+	return GitHub{Head: r.Head, Base: r.BaseRef, DefaultBranch: r.DefaultBranch, IsDraft: r.IsDraft, Mergeable: r.Mergeable, CIHead: r.Head, CI: string(r.CI), ChecksAt: r.ChecksAt}
 }

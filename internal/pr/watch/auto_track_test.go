@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/notify"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
@@ -305,7 +306,7 @@ func TestRepoPollDiscoversReusedWorktreeBranch(t *testing.T) {
 			e, _ := autoTrackEnv(t)
 			if err := e.s.Store.update(func(st *State) error {
 				old := st.Records["github.com/owner/repo#17"]
-				old.Branch, old.State, old.Watching = "feature/auto", state, false
+				old.Branch, old.State, old.Watching = "feature/auto", prstate.PRState(state), false
 				if state == "open-unwatched" {
 					old.State = "open"
 				}
@@ -323,7 +324,7 @@ func TestRepoPollDiscoversReusedWorktreeBranch(t *testing.T) {
 			if state == "open-unwatched" {
 				want = "open"
 			}
-			if err != nil || old.State != want || old.Watching {
+			if err != nil || old.State != prstate.PRState(want) || old.Watching {
 				t.Fatalf("historical PR changed: state=%s watching=%v err=%v", old.State, old.Watching, err)
 			}
 		})

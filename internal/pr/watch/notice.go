@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"dyna-agent/internal/pr/state"
 	"fmt"
 	"slices"
 	"strings"
@@ -21,7 +22,7 @@ func staleNotice(st State, r Record, n Notice) string {
 	// A required-review re-assignment is live only while its head is current,
 	// the change is open and the requirement still waits for this reviewer.
 	if n.Kind == "required-review" {
-		if r.State == "closed" || r.State == "merged" || !r.Watching {
+		if r.State == state.PRClosed || r.State == state.PRMerged || !r.Watching {
 			return "change-ended"
 		}
 		// A draft holds the assignment, exactly as it holds the review pool.
@@ -45,7 +46,7 @@ func staleNotice(st State, r Record, n Notice) string {
 	}
 	_, rest, hasHead := strings.Cut(n.Text, "\nHead: ")
 	head, body, hasBody := strings.Cut(rest, "\n\n")
-	if r.State == "closed" || r.State == "merged" {
+	if r.State == state.PRClosed || r.State == state.PRMerged {
 		return "change-ended"
 	}
 	if hasHead && hasBody && head != r.Head {
@@ -84,7 +85,7 @@ func staleNotice(st State, r Record, n Notice) string {
 		}
 		return "budget-verdict-changed"
 	}
-	if n.Kind == "ci" && strings.HasPrefix(body, "CI failed (") && r.CI != "failed" {
+	if n.Kind == "ci" && strings.HasPrefix(body, "CI failed (") && r.CI != state.CIFailed {
 		return "ci-verdict-changed"
 	}
 	return ""
@@ -109,15 +110,15 @@ func systemReviewNotice(r *Record, target, text, token string) {
 // Cleanup remains a separate informational notice. All merge observation
 // paths call endRecord, including publication by the merge engine.
 func outcomeNotice(r *Record) {
-	id := "msg_" + digest(r.Key + "/outcome/" + r.State)[:16]
+	id := "msg_" + digest(r.Key + "/outcome/" + string(r.State))[:16]
 	for _, n := range r.Notices {
 		if n.ID == id {
 			return
 		}
 	}
-	typ := map[string]room.PRType{"merged": room.PRMerged, "closed": room.PRClosed}[r.State]
+	typ := map[string]room.PRType{"merged": room.PRMerged, "closed": room.PRClosed}[string(r.State)]
 	r.Notices = append(r.Notices, Notice{
-		ID: id, Target: r.Author, Kind: r.State, Type: typ,
+		ID: id, Target: r.Author, Kind: string(r.State), Type: typ,
 		Text: fmt.Sprintf("%s %s. Mark its goal done if it has no other open PRs. Clean up its worktree and end your turn. %s", changeLabel(*r), r.State, changeLocation(*r)),
 	})
 }

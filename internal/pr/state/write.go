@@ -89,7 +89,7 @@ func write(root string, st State) (err error) {
 	cutoff := time.Now().Add(-14 * 24 * time.Hour)
 	var pruned []string
 	for key, r := range st.Records {
-		if r != nil && (r.State == "closed" || r.State == "merged") && !r.ClosedAt.IsZero() && r.ClosedAt.Before(cutoff) {
+		if r != nil && (r.State == PRClosed || r.State == PRMerged) && !r.ClosedAt.IsZero() && r.ClosedAt.Before(cutoff) {
 			pruned = append(pruned, fmt.Sprintf("PR state: pruned %s record %s (#%d), closed %s", r.State, key, r.Number, r.ClosedAt.Format(time.DateOnly)))
 			delete(st.Records, key)
 			delete(st.Responses, key)
@@ -220,7 +220,7 @@ func prepareRows(old State, oldIndex []byte, st State) (preparedRows, error) {
 		row := preparedRecord{key: key, body: body, parts: upsert, removeParts: remove}
 		if r != nil {
 			row.room, row.repo, row.number = r.RoomID, r.Repo, r.Number
-			row.closed = r.State == "closed" || r.State == "merged"
+			row.closed = r.State == PRClosed || r.State == PRMerged
 		}
 		rows.upserts = append(rows.upserts, row)
 	}

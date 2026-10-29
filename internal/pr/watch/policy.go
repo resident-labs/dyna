@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"dyna-agent/internal/pr/state"
 	"fmt"
 	"slices"
 	"strings"
@@ -84,7 +85,7 @@ func (s *Service) SetChangePolicyOverride(key, author string, o PolicyOverride) 
 		if r == nil {
 			return fmt.Errorf("change is not tracked")
 		}
-		if r.State != "open" {
+		if r.State != state.PROpen {
 			return fmt.Errorf("policy overrides require an open change")
 		}
 		if err := sameAuthor(r, author); err != nil {

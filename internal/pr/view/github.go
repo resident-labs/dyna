@@ -426,7 +426,7 @@ func (s *Service) TrackPR(ctx context.Context, roomRef, sessionRef string, numbe
 		return ChangeView{}, err
 	}
 	p := s.Watcher()
-	if !created && !r.Watching && r.State == "open" {
+	if !created && !r.Watching && r.State == prstate.PROpen {
 		if err := p.Resume(r.Key); err != nil {
 			return ChangeView{}, err
 		}

@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -468,7 +469,7 @@ func (s *Service) exportBody(ctx context.Context, repo, integration string, prev
 		}
 	}
 	for key, r := range st.Records {
-		if changeKind(*r) != "local" || r.RepoPath != repo || r.State != "merged" {
+		if changeKind(*r) != "local" || r.RepoPath != repo || r.State != state.PRMerged {
 			continue
 		}
 		if gitexec.Command(ctx, repo, "merge-base", "--is-ancestor", r.Head, integration).Run() != nil {

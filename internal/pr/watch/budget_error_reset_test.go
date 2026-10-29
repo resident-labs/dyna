@@ -70,7 +70,7 @@ BEGIN SELECT RAISE(ABORT, 'second budget reset refused'); END`)
 			t.Fatalf("later run did not retain its real write error: %v", err)
 		}
 		got := e.record()
-		if got.CI != ci || got.CIKey != key || got.CIReason != "" || got.CIBudgetRuns["81/1"] != "within budget" ||
+		if string(got.CI) != ci || got.CIKey != key || got.CIReason != "" || got.CIBudgetRuns["81/1"] != "within budget" ||
 			got.CIBudgetRuns["82/1"] != "warned" || got.Failures != 3 || !got.CIPaused || got.PauseReason != pause || reprocessingReads != 1 {
 			t.Fatalf("failed budget phase lost its committed result or failure pause: CI=%s, key=%s, budgets=%v, failures=%d, paused=%v, reason=%s, reprocessing reads=%d",
 				got.CI, got.CIKey, got.CIBudgetRuns, got.Failures, got.CIPaused, got.PauseReason, reprocessingReads)
@@ -82,7 +82,7 @@ BEGIN SELECT RAISE(ABORT, 'second budget reset refused'); END`)
 	for range 2 {
 		runBudgetFixture(t, e, snap)
 		got := e.record()
-		if got.CI != ci || got.CIKey != key || got.CIBudgetRuns["81/1"] != "within budget" || got.CIBudgetRuns["82/1"] != "within budget" ||
+		if string(got.CI) != ci || got.CIKey != key || got.CIBudgetRuns["81/1"] != "within budget" || got.CIBudgetRuns["82/1"] != "within budget" ||
 			got.Failures != 0 || got.CIPaused || got.PauseReason != "" || reprocessingReads != 2 {
 			t.Fatalf("successful budget phase did not reset once: CI=%s, key=%s, budgets=%v, failures=%d, paused=%v, reprocessing reads=%d",
 				got.CI, got.CIKey, got.CIBudgetRuns, got.Failures, got.CIPaused, reprocessingReads)

@@ -54,7 +54,7 @@ func retireWallBudget(record map[string]json.RawMessage) (bool, error) {
 	history := r.ReviewHistory
 	history = append(history, map[string]json.RawMessage{"ciBudget": archive})
 	record["reviewHistory"], _ = json.Marshal(history)
-	if reset && !remainingFailure && r.Head == r.CIBudgetHead && r.CI == "failed" {
+	if reset && !remainingFailure && r.Head == r.CIBudgetHead && r.CI == CIFailed {
 		record["ci"] = json.RawMessage(`"pending"`)
 		delete(record, "ciReason")
 	}

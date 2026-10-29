@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"dyna-agent/internal/pr/state"
 	"strings"
 
 	"dyna-agent/internal/room"
@@ -99,9 +100,9 @@ func noticeTypeOf(r Record, n Notice) room.PRType {
 		return room.PRChanges
 	case strings.Contains(n.Text, " is ready to land at "):
 		return room.PRReady
-	case r.State == "merged":
+	case r.State == state.PRMerged:
 		return room.PRMerged
-	case r.State == "closed":
+	case r.State == state.PRClosed:
 		return room.PRClosed
 	}
 	return room.PRUpdate
@@ -113,10 +114,10 @@ func ciType(r Record) room.PRType {
 	if r.CIPaused {
 		return room.PRCIPaused
 	}
-	if r.CI == "failed" {
+	if r.CI == state.CIFailed {
 		return room.PRCIFailed
 	}
-	if r.CI == "passed" {
+	if r.CI == state.CIPassed {
 		return room.PRCIPassed
 	}
 	return room.PRUpdate

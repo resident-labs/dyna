@@ -5,6 +5,7 @@ import (
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/facts"
+	"dyna-agent/internal/pr/state"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -412,9 +413,9 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 				r.Polling.Next = time.Time{}
 			}
 			if r.Polling.CIVersion != probe.ciVersion() {
-				r.CI = "pending"
+				r.CI = state.CIPending
 				if probe.CI == "FAILURE" || probe.CI == "ERROR" {
-					r.CI = "failed"
+					r.CI = state.CIFailed
 				}
 				r.Polling.Next = time.Time{}
 			}

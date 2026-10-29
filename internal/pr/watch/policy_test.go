@@ -71,7 +71,7 @@ func TestSourceReviewDoesNotRequireCI(t *testing.T) {
 	for _, kind := range []string{"local", "github"} {
 		for _, ci := range []string{"passed", "pending", "absent", "failed"} {
 			st := State{Policies: map[string]ChangePolicy{"room": changepolicy.Default()}}
-			if !policyReviewReady(st, Record{Head: "head", RoomID: "room", Kind: kind, CI: ci}) {
+			if !policyReviewReady(st, Record{Head: "head", RoomID: "room", Kind: kind, CI: state.CIState(ci)}) {
 				t.Errorf("%s %s blocked source review", kind, ci)
 			}
 		}
@@ -229,7 +229,7 @@ func TestStackedPullRequestRetargetedToDefaultBranchKeepsApproval(t *testing.T) 
 					parent := *st.Records[r.Key]
 					parent.Number, parent.Key = 16, "github.com/owner/repo#16"
 					parent.ChangeID, parent.Branch, parent.BaseRef = parent.Key, "feat/parent", "main"
-					parent.State, parent.Head, parent.Checked, parent.Watching = p.state, p.head, checked, false
+					parent.State, parent.Head, parent.Checked, parent.Watching = state.PRState(p.state), p.head, checked, false
 					st.Records[parent.Key] = &parent
 					return nil
 				}); err != nil {

@@ -42,8 +42,8 @@ func (s *Service) Watcher() *watch.Service {
 }
 
 func prStatus(r watch.Record, reviewState string) string {
-	if r.State == "merged" || r.State == "closed" {
-		return r.State
+	if r.State == state.PRMerged || r.State == state.PRClosed {
+		return string(r.State)
 	}
 	if !r.Watching {
 		return "untracked"
@@ -51,10 +51,10 @@ func prStatus(r watch.Record, reviewState string) string {
 	if r.CIPaused || r.PauseReason != "" {
 		return "paused"
 	}
-	if r.CI == "failed" {
+	if r.CI == state.CIFailed {
 		return "ci-failed"
 	}
-	if r.CI != "passed" && r.CI != "absent" {
+	if r.CI != state.CIPassed && r.CI != state.CIAbsent {
 		return "ci-running"
 	}
 	switch reviewState {
@@ -113,7 +113,7 @@ func changeView(facts watch.ReviewFacts, r watch.Record) ChangeView {
 		HeldCommentCount  int      `json:"heldCommentCount,omitempty"`
 	}{detailsOf(st, r), r.RequiredReviewers, len(r.HeldComments)})
 	detailVersion := fmt.Sprintf("%x", sha256.Sum256(detailJSON))
-	return ChangeView{HeldCommentCount: len(r.HeldComments), GoalID: r.GoalID, Fixes: r.Fixes, MergeCommit: r.MergeCommit, RequiredReviewers: slices.Clone(r.RequiredReviewers), MissingRequiredReviewers: prfacts.MissingRequiredReviewers(r), IsDraft: r.IsDraft, DetailVersion: detailVersion, HasPolicyOverride: !r.PolicyOverride.Empty(), ChangeID: r.ChangeID, Kind: r.Kind, ReviewState: reviewState, QueuePosition: queuePosition, ReviewBlocked: reviewBlocked, Branch: r.Branch, BaseRef: r.BaseRef, Base: r.Base, Key: r.Key, Repo: r.Repo, Number: r.Number, URL: r.URL, Title: r.Title, RoomID: r.RoomID, AuthorSession: r.Author, ReviewerSession: r.Reviewer, ReviewerMode: r.ReviewerMode, ReviewPublishing: reviewPublishing(r), ReviewerName: r.ReviewerName, State: r.State, Watching: r.Watching, Status: prStatus(r, reviewState), CI: r.CI, LocalCIConfig: r.LocalCIConfig, CIReason: r.CIReason, CITestReportNote: r.CITestReportNote, BotReviews: botReviews, Checks: checks, ConsecutiveFailures: r.Failures, CIPaused: r.CIPaused, PauseReason: r.PauseReason, Error: errorText, ReviewRound: r.Round, ReviewHead: r.RoundHead, Verdict: r.Verdict, ReviewAt: reviewAt, FindingCount: len(r.Findings), HasReviewSummary: r.Summary != "", ReviewURL: reviewURL, Head: r.Head, Created: r.Created, Checked: r.Checked, FilteredComments: filtered, Overlaps: state.SharedOverlaps(r.Overlaps)}
+	return ChangeView{HeldCommentCount: len(r.HeldComments), GoalID: r.GoalID, Fixes: r.Fixes, MergeCommit: r.MergeCommit, RequiredReviewers: slices.Clone(r.RequiredReviewers), MissingRequiredReviewers: prfacts.MissingRequiredReviewers(r), IsDraft: r.IsDraft, DetailVersion: detailVersion, HasPolicyOverride: !r.PolicyOverride.Empty(), ChangeID: r.ChangeID, Kind: r.Kind, ReviewState: reviewState, QueuePosition: queuePosition, ReviewBlocked: reviewBlocked, Branch: r.Branch, BaseRef: r.BaseRef, Base: r.Base, Key: r.Key, Repo: r.Repo, Number: r.Number, URL: r.URL, Title: r.Title, RoomID: r.RoomID, AuthorSession: r.Author, ReviewerSession: r.Reviewer, ReviewerMode: string(r.ReviewerMode), ReviewPublishing: reviewPublishing(r), ReviewerName: r.ReviewerName, State: string(r.State), Watching: r.Watching, Status: prStatus(r, reviewState), CI: string(r.CI), LocalCIConfig: r.LocalCIConfig, CIReason: r.CIReason, CITestReportNote: r.CITestReportNote, BotReviews: botReviews, Checks: checks, ConsecutiveFailures: r.Failures, CIPaused: r.CIPaused, PauseReason: r.PauseReason, Error: errorText, ReviewRound: r.Round, ReviewHead: r.RoundHead, Verdict: r.Verdict, ReviewAt: reviewAt, FindingCount: len(r.Findings), HasReviewSummary: r.Summary != "", ReviewURL: reviewURL, Head: r.Head, Created: r.Created, Checked: r.Checked, FilteredComments: filtered, Overlaps: state.SharedOverlaps(r.Overlaps)}
 }
 
 // A historical GitHub ID records a public review, regardless of today's default.

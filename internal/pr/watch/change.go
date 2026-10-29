@@ -210,7 +210,7 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 	if opts.Title == "" {
 		opts.Title = branch
 	}
-	record := Record{PolicyOverride: opts.PolicyOverride, Key: key, ChangeID: key, Kind: "local", Repo: repo, RepoPath: path, Branch: branch, Base: base, BaseRef: baseRef, Title: Sanitize(opts.Title), Head: head, Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: dir, LookupDir: dir, State: "open", Watching: true, Created: s.now(), Notes: cleanNotes(opts.Notes), Category: opts.Category, Dependencies: opts.Dependencies, Seen: map[string]string{}, Findings: []Finding{}, ReviewRounds: []state.ReviewRound{}}
+	record := Record{PolicyOverride: opts.PolicyOverride, Key: key, ChangeID: key, Kind: "local", Repo: repo, RepoPath: path, Branch: branch, Base: base, BaseRef: baseRef, Title: Sanitize(opts.Title), Head: head, Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: dir, LookupDir: dir, State: state.PROpen, Watching: true, Created: s.now(), Notes: cleanNotes(opts.Notes), Category: opts.Category, Dependencies: opts.Dependencies, Seen: map[string]string{}, Findings: []Finding{}, ReviewRounds: []state.ReviewRound{}}
 	created := false
 	// A run-owned caller of the same controller first takes over a change
 	// this branch holds whose earlier run author closed or whose role a close
@@ -241,7 +241,7 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 			if old.RoomID != author.RoomID || old.Author != author.ID {
 				return fmt.Errorf("this branch belongs to another room or author")
 			}
-			if old.State != "open" {
+			if old.State != state.PROpen {
 				return fmt.Errorf("this change is closed; open a new branch")
 			}
 			record.Notes = mergeNotes(old.Notes, record.Notes)
@@ -300,7 +300,7 @@ func resetReview(r *Record, head string) {
 	// The fast head pass has no CI snapshot, so a new GitHub head marks CI
 	// pending; the full observation pass overwrites it in applyCI.
 	if headChanged && changeKind(*r) == "github" {
-		r.CI = "pending"
+		r.CI = state.CIPending
 	}
 	r.CIKey = ""
 	r.RoundHead = ""
@@ -316,7 +316,7 @@ func resetReview(r *Record, head string) {
 	if !r.CIPaused {
 		r.PauseReason = ""
 	}
-	if headChanged && r.State == "open" {
+	if headChanged && r.State == state.PROpen {
 		requiredReviewNotices(r)
 	}
 }
@@ -415,7 +415,7 @@ func (s *Service) ReplyFinding(ctx context.Context, key, author, by, findingID, 
 		if r == nil {
 			return fmt.Errorf("change is not tracked")
 		}
-		if !r.Watching || r.State != "open" {
+		if !r.Watching || r.State != state.PROpen {
 			return fmt.Errorf("change is not open and watched")
 		}
 		if err := sameAuthor(r, author); err != nil {
@@ -591,9 +591,9 @@ func endRecord(r *Record, merged bool, at time.Time) {
 	if r.ClosedAt.IsZero() {
 		r.ClosedAt = at
 	}
-	r.State = "closed"
+	r.State = state.PRClosed
 	if merged {
-		r.State = "merged"
+		r.State = state.PRMerged
 	}
 	if r.Watching {
 		outcomeNotice(r)

@@ -203,7 +203,7 @@ func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *su
 		}
 		var links []string
 		for _, pr := range prs.Records {
-			if pr.Author == child.ID && pr.ClosedAt.IsZero() && pr.State != "closed" && pr.State != "merged" {
+			if pr.Author == child.ID && pr.ClosedAt.IsZero() && pr.State != prstate.PRClosed && pr.State != prstate.PRMerged {
 				links = append(links, openChangeLink(*pr))
 			}
 		}

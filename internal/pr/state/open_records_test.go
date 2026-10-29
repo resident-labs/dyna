@@ -32,7 +32,7 @@ func TestReadForSessionsDecodesOnlyTheSessionsRecords(t *testing.T) {
 	root := newRoot(t)
 	rec := func(n int, room, state, author, reviewer string) *Record {
 		key := fmt.Sprintf("github.com/acme/widgets#%d", n)
-		return &Record{Key: key, Repo: "acme/widgets", Number: n, RoomID: room, State: state, Author: author, Reviewer: reviewer}
+		return &Record{Key: key, Repo: "acme/widgets", Number: n, RoomID: room, State: PRState(state), Author: author, Reviewer: reviewer}
 	}
 	st := State{Version: 1, Records: map[string]*Record{}}
 	for _, r := range []*Record{
