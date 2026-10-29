@@ -63,7 +63,7 @@ A file system that lives in memory, such as a RAM-backed `/tmp`, is judged
 against its own size instead: it is low under 15 percent free.
 The alert names the path that is low.
 One owner alert reports space freed and the reasons other directories were kept.
-The port pool holds 1,000 blocks. Dyna posts a typed capacity alert to every room at 90% and 95% use. A high-capacity period posts each alert once, and retries a delivery that failed. Use below 90%, observed at allocation or cleanup, rearms those alerts for a later period.
+The port pool holds 1,000 blocks. Dyna posts a typed capacity alert to every room at 90% and 95% effective use. The count excludes blocks that allocation can safely reclaim from missing directories or closed owners; busy sockets and uncertain ownership stay counted. A high-capacity period posts each alert once, and retries a delivery that failed. Use below 90%, observed at allocation or cleanup, rearms those alerts for a later period.
 
 When no block is free, Dyna can release one from a retained tree whose recorded and inferred session and workflow owners are all closed. The tree, including dirty files and unmerged commits, stays unchanged. Open or unknown owners, locked trees, inspection errors, and blocks with active sockets prevent release. `dyna git worktrees env` and the next session turn allocate a new block on demand.
 

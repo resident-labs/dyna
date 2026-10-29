@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -44,6 +45,7 @@ type portAlertReader interface {
 // oldest first, and records a new crossing when use reaches one. Crossings
 // persist in SQLite until acknowledged, so repeated allocations and engine
 // restarts do not repeat a delivered alert and never lose an undelivered one.
+// At high raw use, the count excludes blocks that allocation can safely reuse.
 // Use below 90%, observed at allocation or release, ends the period: the next
 // crossing starts a new generation.
 func ObservePortCapacity() ([]*PortCapacityAlert, error) {
@@ -52,30 +54,54 @@ func ObservePortCapacity() ([]*PortCapacityAlert, error) {
 		return nil, err
 	}
 	ctx := context.Background()
-	current, err := readPortAlertState(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	if portCapacityBand(current.used) <= current.band && len(current.pending) == 0 {
-		return nil, nil
-	}
-	var pending []*PortCapacityAlert
-	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		current, err := readPortAlertState(ctx, conn)
+	for {
+		current, err := readPortAlertState(ctx, db)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := applyPortAlertState(ctx, conn, &current); err != nil {
-			return err
+		raw := current.used
+		rawBand := portCapacityBand(raw)
+		measure := rawBand > current.band || (rawBand > 0 && current.band > 0)
+		if rawBand <= current.band && len(current.pending) == 0 && !measure {
+			return nil, nil
 		}
-		pending = alertsOf(current.pending)
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		if measure {
+			records, err := loadRecords(ctx, db, "")
+			if err == nil {
+				// Filesystem, ownership and socket checks stay outside the write
+				// transaction. An allocation during measurement retries the step.
+				current.used -= reclaimablePortBlockCount(ctx, records)
+			}
+			// A registry read error leaves the raw count in place.
+		}
+		used := current.used
+		var pending []*PortCapacityAlert
+		err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			current, err := readPortAlertState(ctx, conn)
+			if err != nil {
+				return err
+			}
+			if current.used != raw {
+				return errPortCapacityChanged
+			}
+			current.used = used
+			if err := applyPortAlertState(ctx, conn, &current); err != nil {
+				return err
+			}
+			pending = alertsOf(current.pending)
+			return nil
+		})
+		if errors.Is(err, errPortCapacityChanged) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return pending, nil
 	}
-	return pending, nil
 }
+
+var errPortCapacityChanged = errors.New("worktree port capacity changed during observation")
 
 // applyPortAlertState writes one state step: a new crossing is appended to
 // the pending list, superseding an undelivered crossing of the same
