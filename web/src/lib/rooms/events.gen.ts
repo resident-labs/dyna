@@ -51,6 +51,15 @@ export type HelperOutcomeReason = "parent-unavailable" | "no-artifact"
 // TerminalVerdict is a named string type of an event payload.
 export type TerminalVerdict = "done" | "failed" | "declined" | "denied" | "withdrawn"
 
+// ApprovalClass is a named string type of an event payload.
+export type ApprovalClass = "agent" | "owner"
+
+// ApprovalAction is a named string type of an event payload.
+export type ApprovalAction = "approve" | "deny" | "pass" | "auto"
+
+// ApprovalState is a named string type of an event payload.
+export type ApprovalState = "done" | "failed" | "denied" | "expired" | "cancelled"
+
 // ShellState is a named string type of an event payload.
 export type ShellState = "completed" | "failed" | "stopped"
 
@@ -461,6 +470,41 @@ export interface QuestionEvent {
   detail?: string
 }
 
+// ApprovalRequestedEvent is the payload of the approval/requested events.
+export interface ApprovalRequestedEvent {
+  requestId: string
+  kind: string
+  class: ApprovalClass
+  requester: string
+  at: string
+  repository?: string
+  server?: string
+  command?: string
+  tool?: string
+  title?: string
+  body?: string
+}
+
+// ApprovalDecidedEvent is the payload of the approval/decided events.
+export interface ApprovalDecidedEvent {
+  requestId: string
+  actor: string
+  action: ApprovalAction
+  reason?: string
+  at?: string
+}
+
+// ApprovalResultEvent is the payload of the approval/result events.
+export interface ApprovalResultEvent {
+  requestId: string
+  state: ApprovalState
+  actor?: string
+  reason?: string
+  exitCode?: number
+  url?: string
+  output?: string[]
+}
+
 // TerminalRequestEvent is the payload of the terminal/request events.
 export interface TerminalRequestEvent {
   requestId: string
@@ -541,10 +585,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | JobEvent | RunEvent | TurnEvent
+export type EventPayload = MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | JobEvent | RunEvent | TurnEvent
 
-export type EventFamily = "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "job" | "run" | "turn"
-export type EventType = "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
+export type EventFamily = "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "approval" | "terminal" | "shell" | "job" | "run" | "turn"
+export type EventType = "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1294,6 +1338,36 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "Question {questionId} was withdrawn: {reason}",
   },
   {
+    family: "approval",
+    type: "requested",
+    renderer: "ApprovalRequestCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "Approval {requestId} from {requester} waits on {at}: {title}",
+  },
+  {
+    family: "approval",
+    type: "decided",
+    renderer: "ApprovalDecisionRow",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "Approval {requestId}: {actor} chose {action}.",
+  },
+  {
+    family: "approval",
+    type: "result",
+    renderer: "ApprovalResultCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "session",
+    text: "Approval {requestId} ended: {state}.",
+  },
+  {
     family: "terminal",
     type: "request",
     renderer: "TerminalRequestCard",
@@ -1422,6 +1496,9 @@ const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
 const HELPER_OUTCOME_REASON: ReadonlySet<unknown> = new Set(["parent-unavailable", "no-artifact"])
 const TERMINAL_VERDICT: ReadonlySet<unknown> = new Set(["done", "failed", "declined", "denied", "withdrawn"])
+const APPROVAL_CLASS: ReadonlySet<unknown> = new Set(["agent", "owner"])
+const APPROVAL_ACTION: ReadonlySet<unknown> = new Set(["approve", "deny", "pass", "auto"])
+const APPROVAL_STATE: ReadonlySet<unknown> = new Set(["done", "failed", "denied", "expired", "cancelled"])
 const SHELL_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped", "interrupted"])
 const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
@@ -1829,6 +1906,41 @@ export function isQuestionEvent(v: unknown): v is QuestionEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isApprovalRequestedEvent(v: unknown): v is ApprovalRequestedEvent {
+  return isRecord(v) &&
+    typeof v.requestId === "string" &&
+    typeof v.kind === "string" &&
+    APPROVAL_CLASS.has(v.class) &&
+    typeof v.requester === "string" &&
+    typeof v.at === "string" &&
+    (v.repository === undefined || typeof v.repository === "string") &&
+    (v.server === undefined || typeof v.server === "string") &&
+    (v.command === undefined || typeof v.command === "string") &&
+    (v.tool === undefined || typeof v.tool === "string") &&
+    (v.title === undefined || typeof v.title === "string") &&
+    (v.body === undefined || typeof v.body === "string")
+}
+
+export function isApprovalDecidedEvent(v: unknown): v is ApprovalDecidedEvent {
+  return isRecord(v) &&
+    typeof v.requestId === "string" &&
+    typeof v.actor === "string" &&
+    APPROVAL_ACTION.has(v.action) &&
+    (v.reason === undefined || typeof v.reason === "string") &&
+    (v.at === undefined || typeof v.at === "string")
+}
+
+export function isApprovalResultEvent(v: unknown): v is ApprovalResultEvent {
+  return isRecord(v) &&
+    typeof v.requestId === "string" &&
+    APPROVAL_STATE.has(v.state) &&
+    (v.actor === undefined || typeof v.actor === "string") &&
+    (v.reason === undefined || typeof v.reason === "string") &&
+    (v.exitCode === undefined || Number.isInteger(v.exitCode)) &&
+    (v.url === undefined || typeof v.url === "string") &&
+    (v.output === undefined || isStringList(v.output))
+}
+
 export function isTerminalRequestEvent(v: unknown): v is TerminalRequestEvent {
   return isRecord(v) &&
     typeof v.requestId === "string" &&
@@ -1982,6 +2094,9 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "service" && type === "helper-outcome") return isHelperOutcomeEvent(v)
   if (family === "engine" && type === "root-flush") return isEngineEvent(v)
   if (family === "question" && type === "withdrawn") return isQuestionEvent(v)
+  if (family === "approval" && type === "requested") return isApprovalRequestedEvent(v)
+  if (family === "approval" && type === "decided") return isApprovalDecidedEvent(v)
+  if (family === "approval" && type === "result") return isApprovalResultEvent(v)
   if (family === "terminal" && type === "request") return isTerminalRequestEvent(v)
   if (family === "terminal" && type === "request.done") return isTerminalDoneEvent(v)
   if (family === "shell" && type === "result") return isShellEvent(v)

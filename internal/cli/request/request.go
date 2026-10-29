@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/questions"
@@ -81,20 +82,38 @@ func NewCommand() *cobra.Command {
 		return listMine(c, s, snd, roomRef, jsonOut)
 	}}
 
-	approve := &cobra.Command{Use: "approve <id>", Short: "Pass a request you hold up to your parent; the root's approval shows it to the owner", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+	approve := &cobra.Command{Use: "approve <id>", Short: "Approve an approval or pass a terminal request to your parent", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+		if approvalID(args[0]) {
+			return decideApproval(c, roomRef, args[0], approvals.ActionApprove, "")
+		}
 		return call(c, roomRef, "ApproveRequest", func(ref string) []any { return []any{ref, args[0]} })
 	}}
-	var why string
+	var why, approvalWhy string
 	deny := &cobra.Command{Use: "deny <id> --reason <why>", Short: "Refuse a request you hold; the filer reads your reason", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+		if approvalID(args[0]) {
+			if strings.TrimSpace(approvalWhy) == "" {
+				return fmt.Errorf("--why is required when denying an approval")
+			}
+			return decideApproval(c, roomRef, args[0], approvals.ActionDeny, approvalWhy)
+		}
 		return call(c, roomRef, "DenyRequest", func(ref string) []any { return []any{ref, args[0], why} })
 	}}
-	deny.Flags().StringVar(&why, "reason", "", "why you refuse it (required)")
+	deny.Flags().StringVar(&why, "reason", "", "why you refuse a terminal request (required)")
+	deny.Flags().StringVar(&approvalWhy, "why", "", "why you refuse an approval (required)")
 	var withdrawWhy string
 	withdraw := &cobra.Command{Use: "withdraw <id>", Short: "Withdraw a request", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		return call(c, roomRef, "WithdrawRequest", func(ref string) []any { return []any{ref, args[0], withdrawWhy} })
 	}}
 	withdraw.Flags().StringVar(&withdrawWhy, "why", "", "why the request no longer matters")
-	cmd.AddCommand(terminal, newQuestion(&roomRef, &jsonOut), newAnswer(&roomRef), list, approve, deny, withdraw)
+	var passWhy string
+	pass := &cobra.Command{Use: "pass A-<n>", Short: "Pass an approval to your parent, or from root to the owner", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+		return decideApproval(c, roomRef, args[0], approvals.ActionPass, passWhy)
+	}}
+	pass.Flags().StringVar(&passWhy, "why", "", "why the next holder should decide")
+	cancel := &cobra.Command{Use: "cancel A-<n>", Short: "Cancel your pending approval request", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+		return call(c, roomRef, "ApprovalCancel", func(ref string) []any { return []any{ref, args[0]} })
+	}}
+	cmd.AddCommand(terminal, newQuestion(&roomRef, &jsonOut), newAnswer(&roomRef), list, approve, deny, pass, cancel, withdraw)
 	return cmd
 }
 

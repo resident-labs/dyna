@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isJobEvent, isMachineCacheEvent, isMachineCacheCleanFailedEvent, isMachineEvent, isMachineLimitsEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRoomCapEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTerminalDoneEvent, isTerminalRequestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent, isWorktreePortsEvent } from './events.gen.ts'
-import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, JobEvent, MachineCacheEvent, MachineCacheCleanFailedEvent, MachineEvent, MachineLimitsEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RoomCapEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TerminalDoneEvent, TerminalRequestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent, WorktreePortsEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isApprovalDecidedEvent, isApprovalRequestedEvent, isApprovalResultEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isJobEvent, isMachineCacheEvent, isMachineCacheCleanFailedEvent, isMachineEvent, isMachineLimitsEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRoomCapEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTerminalDoneEvent, isTerminalRequestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent, isWorktreePortsEvent } from './events.gen.ts'
+import type { AlertEvent, ApprovalDecidedEvent, ApprovalRequestedEvent, ApprovalResultEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, JobEvent, MachineCacheEvent, MachineCacheCleanFailedEvent, MachineEvent, MachineLimitsEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RoomCapEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TerminalDoneEvent, TerminalRequestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent, WorktreePortsEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -269,4 +269,22 @@ export function terminalRequestEvent(post: EventPost): TerminalRequestEvent | un
 export function terminalDoneEvent(post: EventPost): TerminalDoneEvent | undefined {
   if (post.kind !== 'terminal' || post.notice?.kind !== 'request.done') return undefined
   return isTerminalDoneEvent(post.payload) ? post.payload : undefined
+}
+
+// approvalRequestedEvent returns the typed payload of an approval request.
+export function approvalRequestedEvent(post: EventPost): ApprovalRequestedEvent | undefined {
+  if (post.kind !== 'approval' || post.notice?.kind !== 'requested') return undefined
+  return isApprovalRequestedEvent(post.payload) ? post.payload : undefined
+}
+
+// approvalDecidedEvent returns the typed payload of a decision on a request.
+export function approvalDecidedEvent(post: EventPost): ApprovalDecidedEvent | undefined {
+  if (post.kind !== 'approval' || post.notice?.kind !== 'decided') return undefined
+  return isApprovalDecidedEvent(post.payload) ? post.payload : undefined
+}
+
+// approvalResultEvent returns the typed payload of how a held write ended.
+export function approvalResultEvent(post: EventPost): ApprovalResultEvent | undefined {
+  if (post.kind !== 'approval' || post.notice?.kind !== 'result') return undefined
+  return isApprovalResultEvent(post.payload) ? post.payload : undefined
 }
