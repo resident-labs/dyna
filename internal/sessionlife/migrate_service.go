@@ -14,7 +14,7 @@ import (
 // sessions once, before readers rely only on the stored flag.
 func migrateService(db *sql.DB) error {
 	return database.Migrate(db, "sessions.service", 1, func(conn *sql.Conn, _ int) error {
-		rows, err := conn.QueryContext(context.Background(), "SELECT id, meta FROM session_records ORDER BY id")
+		rows, err := conn.QueryContext(context.Background(), "SELECT id,meta,"+instructionReadProjection+" FROM session_records ORDER BY id")
 		if err != nil {
 			return err
 		}
@@ -29,10 +29,17 @@ func migrateService(db *sql.DB) error {
 		var ids []string
 		for rows.Next() {
 			var id, raw string
-			if err := rows.Scan(&id, &raw); err != nil {
+			var instructions instructionRead
+			if err := rows.Scan(&id, &raw, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
 				rows.Close()
 				return err
 			}
+			joined, err := instructions.join([]byte(raw))
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			raw = string(joined)
 			var r record
 			if err := json.Unmarshal([]byte(raw), &r); err != nil {
 				rows.Close()
