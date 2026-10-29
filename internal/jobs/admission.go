@@ -60,7 +60,13 @@ const admissionSchema = `CREATE TABLE admissions (
 	owner_start INTEGER NOT NULL DEFAULT 0,
 	timeout_ms INTEGER NOT NULL DEFAULT 1800000,
 	expires_ms INTEGER NOT NULL DEFAULT 0,
-	created_ms INTEGER NOT NULL
+	created_ms INTEGER NOT NULL,
+	check_name TEXT NOT NULL DEFAULT '',
+	kind TEXT NOT NULL DEFAULT '',
+	number INTEGER NOT NULL DEFAULT 0,
+	trial INTEGER NOT NULL DEFAULT 0,
+	branch TEXT NOT NULL DEFAULT '',
+	head TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX admissions_open ON admissions(node, state);
 CREATE UNIQUE INDEX admissions_port ON admissions(node, port) WHERE state = 'admitted';`
@@ -85,6 +91,12 @@ type Demand struct {
 	// merge queue never waits behind its room's pull-request checks. Other
 	// rooms keep their turns, and each list stays oldest first.
 	Ahead bool
+	// Check names the check, so a queue view words its row. Empty keeps the
+	// ID as the row's name.
+	Check string
+	// Source says what the check's run tests, so the same view words the
+	// work instead of reading the ID. A zero kind stores no source.
+	Source CheckSource
 }
 
 // Admission is the engine-side queue of every node: the one place that
@@ -150,13 +162,29 @@ func (a Admission) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := database.Migrate(db, "admissions.version", 2, func(conn *sql.Conn, old int) error {
+	if err := database.Migrate(db, "admissions.version", 3, func(conn *sql.Conn, old int) error {
 		if old == 0 {
 			_, err := conn.ExecContext(context.Background(), admissionSchema)
 			return err
 		}
-		_, err := conn.ExecContext(context.Background(), "ALTER TABLE admissions ADD COLUMN ahead INTEGER NOT NULL DEFAULT 0")
-		return err
+		if old == 1 {
+			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE admissions ADD COLUMN ahead INTEGER NOT NULL DEFAULT 0"); err != nil {
+				return err
+			}
+		}
+		for _, alter := range []string{
+			"ALTER TABLE admissions ADD COLUMN check_name TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE admissions ADD COLUMN kind TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE admissions ADD COLUMN number INTEGER NOT NULL DEFAULT 0",
+			"ALTER TABLE admissions ADD COLUMN trial INTEGER NOT NULL DEFAULT 0",
+			"ALTER TABLE admissions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE admissions ADD COLUMN head TEXT NOT NULL DEFAULT ''",
+		} {
+			if _, err := conn.ExecContext(context.Background(), alter); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -182,18 +210,19 @@ type admissionRow struct {
 	Created time.Time
 }
 
-const admissionColumns = "id,node,room,cpus,memory_mib,heavy,ahead,port,state,reason,engine,owner_pid,owner_start,timeout_ms,expires_ms,created_ms"
+const admissionColumns = "id,node,room,cpus,memory_mib,heavy,ahead,port,state,reason,engine,owner_pid,owner_start,timeout_ms,expires_ms,created_ms,check_name,kind,number,trial,branch,head"
 
 func scanAdmission(row interface{ Scan(...any) error }) (admissionRow, error) {
 	var r admissionRow
-	var heavy, ahead, engine int
+	var heavy, ahead, engine, trial int
 	var created, timeout, expires int64
-	if err := row.Scan(&r.ID, &r.Node, &r.Room, &r.CPUs, &r.MemoryMiB, &heavy, &ahead, &r.Port, &r.State, &r.Reason, &engine, &r.PID, &r.Start, &timeout, &expires, &created); err != nil {
+	var number int
+	if err := row.Scan(&r.ID, &r.Node, &r.Room, &r.CPUs, &r.MemoryMiB, &heavy, &ahead, &r.Port, &r.State, &r.Reason, &engine, &r.PID, &r.Start, &timeout, &expires, &created, &r.Check, &r.Source.Kind, &number, &trial, &r.Source.Branch, &r.Source.Head); err != nil {
 		return admissionRow{}, err
 	}
 	r.Timeout = time.Duration(timeout) * time.Millisecond
-	r.Heavy, r.Engine, r.Ahead = heavy == 1, engine == 1, ahead == 1
-	r.Created = time.UnixMilli(created)
+	r.Heavy, r.Engine, r.Ahead, r.Source.Trial = heavy == 1, engine == 1, ahead == 1, trial == 1
+	r.Source.Number, r.Created = number, time.UnixMilli(created)
 	return r, nil
 }
 
@@ -282,8 +311,8 @@ func (a Admission) Hold(ctx context.Context, d Demand) (int, error) {
 		if a.Engine {
 			pid, start = 0, 0
 		}
-		_, err = conn.ExecContext(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, ahead=excluded.ahead, port=excluded.port, state='admitted', reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
-			d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), boolInt(d.Ahead), port, "admitted", "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
+		_, err = conn.ExecContext(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, ahead=excluded.ahead, port=excluded.port, state='admitted', reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms, check_name=excluded.check_name, kind=excluded.kind, number=excluded.number, trial=excluded.trial, branch=excluded.branch, head=excluded.head",
+			d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), boolInt(d.Ahead), port, "admitted", "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli(), d.Check, d.Source.Kind, d.Source.Number, boolInt(d.Source.Trial), d.Source.Branch, d.Source.Head)
 		return err
 	})
 	return port, err
@@ -383,8 +412,8 @@ func (a Admission) upsert(ctx context.Context, d Demand, admitted bool) error {
 	if admitted {
 		state = "admitted"
 	}
-	return a.write(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, ahead=excluded.ahead, state=excluded.state, reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
-		d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), boolInt(d.Ahead), -1, state, "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
+	return a.write(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, ahead=excluded.ahead, state=excluded.state, reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms, check_name=excluded.check_name, kind=excluded.kind, number=excluded.number, trial=excluded.trial, branch=excluded.branch, head=excluded.head",
+		d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), boolInt(d.Ahead), -1, state, "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli(), d.Check, d.Source.Kind, d.Source.Number, boolInt(d.Source.Trial), d.Source.Branch, d.Source.Head)
 }
 
 // nodeQueue is one node's queue in one shape: the checks and jobs that wait
