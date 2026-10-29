@@ -27,6 +27,7 @@ import CallCard from './CallCard.svelte'
 import VoiceSessionCard from './VoiceSessionCard.svelte'
 import PRCard from '../prs/PRCard.svelte'
 import IssueCard from '../issues/IssueCard.svelte'
+import IssueWatchCard from '../issues/IssueWatchCard.svelte'
 import GoalPost from '../goals/GoalPost.svelte'
 import CheckinCard from './CheckinCard.svelte'
 import SlowTestCard from './SlowTestCard.svelte'
@@ -125,7 +126,7 @@ export type EventRenderer = Component<EventProps>
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
 export const eventComponents: Record<string, EventRenderer> = {
-  WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineCacheCleanCard, MachineScratchCard, MachineLimitsCard, RoomCapCard, WorktreePortsCard,
+  WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, IssueWatchCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineCacheCleanCard, MachineScratchCard, MachineLimitsCard, RoomCapCard, WorktreePortsCard,
   CallCard, VoiceSessionCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, ServiceWaitCard, HelperOutcomeRow, MCPCallRow, EngineNoticeCard, QuestionNoteCard, TerminalRequestCard, ReviewResultCard,
   ApprovalRequestCard, ApprovalDecisionRow, ApprovalResultCard,
   ShellResultRow, ShellSilenceCard, RunResultCard, JobCard, TurnCompletionRow,
