@@ -5,12 +5,30 @@ import (
 	"testing"
 )
 
-func TestMergeEnvironmentDropsEngineSecrets(t *testing.T) {
-	base := []string{"PATH=/usr/bin", "GH_TOKEN=must-not-reach-computers", "ANTHROPIC_API_KEY=must-not-reach-computers", "HOME=/home/owner"}
-	got := mergeEnvironment(base, map[string]string{"DISPLAY": ":1"})
-	slices.Sort(got)
-	want := []string{"DISPLAY=:1", "HOME=/home/owner", "PATH=/usr/bin"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("computer environment = %q, want %q", got, want)
+func TestEnvironmentKeepsTheLaunchCredentials(t *testing.T) {
+	base := []string{"PATH=/usr/bin", "GH_TOKEN=session-token", "ANTHROPIC_API_KEY=harness-key", "HOME=/home/owner"}
+	got, err := Environment(Meta{SessionID: "ses_test"}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"GH_TOKEN=session-token", "ANTHROPIC_API_KEY=harness-key"} {
+		if !slices.Contains(got, want) {
+			t.Fatalf("Environment dropped %q", want)
+		}
+	}
+}
+
+func TestEngineEnvironmentDropsEngineSecrets(t *testing.T) {
+	t.Setenv("GH_TOKEN", "must-not-reach-computers")
+	t.Setenv("ANTHROPIC_API_KEY", "must-not-reach-computers")
+	t.Setenv("DYNA_TEST_KEEP", "kept")
+	got := engineEnvironment()
+	for _, entry := range got {
+		if entry == "GH_TOKEN=must-not-reach-computers" || entry == "ANTHROPIC_API_KEY=must-not-reach-computers" {
+			t.Fatalf("engine environment kept %q", entry)
+		}
+	}
+	if !slices.Contains(got, "DYNA_TEST_KEEP=kept") {
+		t.Fatal("engine environment dropped a configuration entry")
 	}
 }
