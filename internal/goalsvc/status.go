@@ -1,6 +1,9 @@
 package goalsvc
 
 import (
+	"errors"
+	"fmt"
+
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/rolesession"
@@ -43,13 +46,19 @@ func (s *Service) goalFacts(roomID string, g goals.Goal) (goals.Facts, error) {
 	}
 	for _, holder := range g.Holders {
 		info, err := s.Notify.Sessions.Store.Info(holder)
-		if err != nil {
-			continue
-		}
-		if rolesession.Busy(info) {
+		switch {
+		case errors.Is(err, subagent.ErrNotFound):
+			// No session record: only its session facts are unknown.
+		case err != nil:
+			return f, fmt.Errorf("read session %s: %w", holder, err)
+		case rolesession.Busy(info):
 			f.Busy = true
-		} else if info.Turns > 0 {
-			if turn, err := s.Notify.Sessions.Store.ReadTurn(holder, info.Turns); err == nil && turn.Status == subagent.TurnError {
+		case info.Turns > 0:
+			turn, err := s.Notify.Sessions.Store.ReadTurn(holder, info.Turns)
+			if err != nil {
+				return f, fmt.Errorf("read turn %d of session %s: %w", info.Turns, holder, err)
+			}
+			if turn.Status == subagent.TurnError {
 				f.LastFailed = true
 			}
 		}
