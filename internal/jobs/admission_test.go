@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -247,5 +248,98 @@ func TestAdmissionRestartPreservesCheckPorts(t *testing.T) {
 	}
 	if portA != 0 || portB != 1 || portC != 2 || again != portB {
 		t.Fatalf("ports = %d, %d, %d, %d; want 0, 1, 2, 1", portA, portB, portC, again)
+	}
+}
+
+// A running job holds its requested resource after a restart. The waiter
+// names that holder and starts when the holder's stored run ends.
+func TestAdmissionResourceWaitNamesHolderAndReleases(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	node := machines.Machine{Name: "node", Enabled: true, Resources: map[machines.ResourceName]int{"ghidra": 1}}
+	queue := Admission{
+		DataDir: dir, Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, Engine: true,
+		RoomName: func(string) string { return "cozycraft" },
+	}
+	store := Store{DataDir: dir}
+	first := Job{ID: "job_ab12", RoomID: "room_cozycraft", Node: "node", State: StateRunning, Host: true, Created: time.Now(), Resources: []machines.ResourceName{"ghidra"}}
+	second := Job{ID: "job_cd34", RoomID: "room_cozycraft", Node: "node", State: StateQueued, Host: true, Created: first.Created.Add(time.Second), Resources: []machines.ResourceName{"ghidra"}}
+	for _, job := range []Job{first, second} {
+		if err := store.Save(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admitted, reasons, err := queue.Pass(ctx, []Job{second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admitted[second.ID] {
+		t.Fatal("waiter admitted while the resource was held")
+	}
+	want := "waiting: resource ghidra held by job_ab12 (room cozycraft), position 1 of 1"
+	if reasons[second.ID] != want {
+		t.Fatalf("wait reason = %q, want %q", reasons[second.ID], want)
+	}
+	first.State = StatePassed
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	admitted, _, err = queue.Pass(ctx, []Job{second})
+	if err != nil || !admitted[second.ID] {
+		t.Fatalf("admission after release = %v, %v", admitted, err)
+	}
+}
+
+// A resource name with no node declaration is a one-unit lock.
+func TestAdmissionUndeclaredResourceIsOneUnitLock(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	node := machines.Machine{Name: "node", Enabled: true}
+	queue := Admission{DataDir: dir, Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, Engine: true}
+	store := Store{DataDir: dir}
+	now := time.Now()
+	first := Job{ID: "job_a", Node: "node", State: StateQueued, Host: true, Created: now, Resources: []machines.ResourceName{"cozybodies-test"}}
+	second := Job{ID: "job_b", Node: "node", State: StateQueued, Host: true, Created: now.Add(time.Second), Resources: []machines.ResourceName{"cozybodies-test"}}
+	for _, job := range []Job{first, second} {
+		if err := store.Save(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admitted, reasons, err := queue.Pass(ctx, []Job{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admitted[first.ID] || admitted[second.ID] {
+		t.Fatalf("default lock admissions = %v, want only the first job", admitted)
+	}
+	if !strings.Contains(reasons[second.ID], "resource cozybodies-test held by job_a") {
+		t.Fatalf("default lock wait reason = %q", reasons[second.ID])
+	}
+}
+
+// A declared count admits that many holders of the same resource.
+func TestAdmissionDeclaredResourceCountAdmitsTwo(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	node := machines.Machine{Name: "node", Enabled: true, Resources: map[machines.ResourceName]int{"gpu-slot": 2}}
+	queue := Admission{DataDir: dir, Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, Engine: true}
+	store := Store{DataDir: dir}
+	now := time.Now()
+	jobs := []Job{
+		{ID: "job_a", Node: "node", State: StateQueued, Host: true, Created: now, Resources: []machines.ResourceName{"gpu-slot"}},
+		{ID: "job_b", Node: "node", State: StateQueued, Host: true, Created: now.Add(time.Second), Resources: []machines.ResourceName{"gpu-slot"}},
+		{ID: "job_c", Node: "node", State: StateQueued, Host: true, Created: now.Add(2 * time.Second), Resources: []machines.ResourceName{"gpu-slot"}},
+	}
+	for _, job := range jobs {
+		if err := store.Save(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admitted, _, err := queue.Pass(ctx, jobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admitted["job_a"] || !admitted["job_b"] || admitted["job_c"] {
+		t.Fatalf("two-unit resource admissions = %v, want job_a and job_b only", admitted)
 	}
 }

@@ -19,10 +19,12 @@ import (
 // newJobsService builds the engine's job service: the machine registry for
 // nodes and the room event contract for results.
 func newJobsService(rooms *roomsvc.Service) *jobs.Service {
+	reporter := jobsReporter{rooms: rooms}
 	return &jobs.Service{
 		Store:    jobs.Store{},
 		Machines: machines.Store{},
-		Reporter: jobsReporter{rooms: rooms},
+		Reporter: reporter,
+		RoomName: reporter.roomName,
 	}
 }
 
@@ -40,6 +42,15 @@ func (r jobsReporter) roomStore(job jobs.Job) (*room.Store, string) {
 		return nil, ""
 	}
 	return rooms, rec.Name
+}
+
+// roomName names a resource holder's room, and keeps its ID if it is gone.
+func (r jobsReporter) roomName(id string) string {
+	_, name := r.roomStore(jobs.Job{RoomID: id})
+	if name == "" {
+		return id
+	}
+	return name
 }
 
 // sessionName reads the display name of a session ID.
@@ -122,6 +133,8 @@ type runJobInput struct {
 	// IO is heavy or light: an IO-heavy job shares a node with only a few
 	// other IO-heavy ones.
 	IO string `json:"io"`
+	// Resources are named units the job holds for its whole run.
+	Resources []string `json:"resources"`
 }
 
 func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) {
@@ -129,11 +142,15 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 		return jobs.Job{}, fmt.Errorf("this engine runs no jobs")
 	}
 	actor := authority.Of(ctx)
+	resources, err := machines.ParseResourceNames(in.Resources)
+	if err != nil {
+		return jobs.Job{}, err
+	}
 	input := jobs.Input{
 		Node: in.Node, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second,
-		Artifacts: in.Artifacts, Heavy: in.IO == "heavy",
+		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources,
 	}
 	if in.IO != "" && in.IO != "heavy" && in.IO != "light" {
 		return jobs.Job{}, fmt.Errorf("io must be heavy or light, not %q", in.IO)

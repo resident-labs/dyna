@@ -53,7 +53,7 @@ func checkMachineWrite(actor authority.Actor, args []json.RawMessage) error {
 		if rootMayPatch(patch) {
 			return nil
 		}
-		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, roles, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, CI slots and the node queue limits (for example %s)", hostChecksCommand)
+		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, roles, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, CI slots, node queue limits and named resources (for example %s)", hostChecksCommand)
 	}
 	return fmt.Errorf("SaveMachine is owner only; the owner allows host checks with %s", hostChecksCommand)
 }
@@ -74,7 +74,7 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 // rootMayPatch reports whether a room root may apply the patch. A root changes
 // the operating settings of a machine: host checks, the SSH connect timeout,
 // the check temporary folder, a local container runtime socket, the CI slot
-// count and the node queue's limits (IO-heavy work and disk). Those set
+// count, the node queue's limits (IO-heavy work and disk) and named resources. Those set
 // capacity and route no work; the patch carries no roles, so a root cannot
 // give a machine the ci role through them, and a slot count on a machine
 // without the role changes nothing. The creation, name, roles, switch, route,

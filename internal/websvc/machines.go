@@ -100,9 +100,10 @@ type MachineSummary struct {
 	AllowHostChecks bool            `json:"allowHostChecks"`
 	// MaxIOHeavy and MaxDiskPercent are the node queue's stored limits; zero
 	// keeps each default.
-	MaxIOHeavy     *int     `json:"maxIOHeavy,omitempty"`
-	MaxDiskPercent *int     `json:"maxDiskPercent,omitempty"`
-	Rooms          []string `json:"rooms,omitempty"`
+	MaxIOHeavy     *int                          `json:"maxIOHeavy,omitempty"`
+	MaxDiskPercent *int                          `json:"maxDiskPercent,omitempty"`
+	Resources      map[machines.ResourceName]int `json:"resources,omitempty"`
+	Rooms          []string                      `json:"rooms,omitempty"`
 	// Suites limits the local CI work the machine takes to those suites; empty
 	// means every suite.
 	Suites    []string       `json:"suites,omitempty"`
@@ -213,6 +214,8 @@ type MachinePatch struct {
 	// MaxDiskPercent is the used-disk percent above which this node admits no
 	// new work; zero keeps the default of 90.
 	MaxDiskPercent *int `json:"maxDiskPercent,omitempty"`
+	// Resources replaces the node's declared named resource counts.
+	Resources *map[machines.ResourceName]int `json:"resources,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -378,6 +381,9 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	}
 	if patch.MaxDiskPercent != nil {
 		m.MaxDiskPercent = *patch.MaxDiskPercent
+	}
+	if patch.Resources != nil {
+		m.Resources = *patch.Resources
 	}
 	if m.HasRole(machines.RoleCI) && m.CISlots < 1 && patch.CISlots == nil {
 		m.CISlots = 1
@@ -587,6 +593,7 @@ func machineSummary(m machines.Machine) MachineSummary {
 		Suites:          m.Suites,
 		MaxIOHeavy:      &m.MaxIOHeavy,
 		MaxDiskPercent:  &m.MaxDiskPercent,
+		Resources:       m.Resources,
 	}
 	if !m.Local && m.Load.CPUPercent != nil {
 		cpu := int(math.Round(*m.Load.CPUPercent))

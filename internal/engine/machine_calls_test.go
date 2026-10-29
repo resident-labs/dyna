@@ -74,13 +74,13 @@ func TestRoomRootChangesOperatingSettings(t *testing.T) {
 	root := localCallerContext(t,
 		websvc.Caller{Kind: websvc.Session, Session: "root"},
 		authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
-	for _, patch := range []string{`{"sshConnectTimeoutSeconds":60}`, `{"containerSocket":"unix:///run/user/1000/podman/podman.sock"}`, `{"ciSlots":8}`, `{"checkTmp":"/dev/shm"}`} {
+	for _, patch := range []string{`{"sshConnectTimeoutSeconds":60}`, `{"containerSocket":"unix:///run/user/1000/podman/podman.sock"}`, `{"ciSlots":8}`, `{"checkTmp":"/dev/shm"}`, `{"resources":{"ghidra":1}}`} {
 		if _, err := calls["SaveMachine"](root, saveMachineArgs(patch)); err != nil {
 			t.Fatalf("a root sending %s = %v, want it allowed", patch, err)
 		}
 	}
-	if len(*patches) != 4 || (*patches)[3].CheckTmp == nil || *(*patches)[3].CheckTmp != "/dev/shm" {
-		t.Fatalf("saved patches = %+v, want all four settings", *patches)
+	if len(*patches) != 5 || (*patches)[3].CheckTmp == nil || *(*patches)[3].CheckTmp != "/dev/shm" || (*patches)[4].Resources == nil || (*(*patches)[4].Resources)["ghidra"] != 1 {
+		t.Fatalf("saved patches = %+v, want all five settings", *patches)
 	}
 	// A remote container endpoint sends every room's workflow containers to
 	// another host, so it stays the owner's; restoring the default is allowed.
@@ -90,14 +90,14 @@ func TestRoomRootChangesOperatingSettings(t *testing.T) {
 	if _, err := calls["SaveMachine"](root, saveMachineArgs(`{"containerSocket":""}`)); err != nil {
 		t.Fatalf("a root restoring the default socket = %v, want it allowed", err)
 	}
-	*patches = (*patches)[:4]
+	*patches = (*patches)[:5]
 	session := localCallerContext(t,
 		websvc.Caller{Kind: websvc.Session, Session: "ses_1"},
 		authority.Actor{Role: authority.Session, Session: "ses_1", Room: "room_dyna"})
 	if _, err := calls["SaveMachine"](session, saveMachineArgs(`{"sshConnectTimeoutSeconds":60}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("a session changing the timeout = %v, want an owner-only refusal", err)
 	}
-	if len(*patches) != 4 {
+	if len(*patches) != 5 {
 		t.Fatalf("saved patches = %+v, want the session's patch refused", *patches)
 	}
 }

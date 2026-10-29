@@ -14,6 +14,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
@@ -87,6 +88,8 @@ type Job struct {
 	CPUs      int
 	MemoryMiB int64
 	Heavy     bool
+	// Resources are named units the job holds for its whole run.
+	Resources []machines.ResourceName
 	Timeout   time.Duration
 	State     State
 	// ExitCode is the command's status; nil while the job has not ended.
@@ -129,7 +132,7 @@ type Job struct {
 // Topic is the hub topic a jobs-table write publishes under.
 const Topic = "jobs"
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 const schema = `CREATE TABLE jobs (
 	id TEXT PRIMARY KEY,
@@ -159,7 +162,8 @@ const schema = `CREATE TABLE jobs (
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
 	start_posted INTEGER NOT NULL DEFAULT 0,
 	launched INTEGER NOT NULL DEFAULT 0,
-	artifacts TEXT NOT NULL DEFAULT '[]'
+	artifacts TEXT NOT NULL DEFAULT '[]',
+	resources TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(resources))
 );
 CREATE INDEX jobs_open ON jobs(created_ms) WHERE state IN ('queued','running');`
 
@@ -195,6 +199,12 @@ func (s Store) db() (*sql.DB, error) {
 		}
 		if old > 0 && old < 2 {
 			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN artifacts TEXT NOT NULL DEFAULT '[]'"); err != nil {
+				return err
+			}
+		}
+		if old > 0 && old < 4 {
+			// A job written before named resources requested none.
+			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN resources TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(resources))"); err != nil {
 				return err
 			}
 		}
@@ -457,23 +467,27 @@ func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exi
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, wait_reason=excluded.wait_reason, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched, artifacts=excluded.artifacts`,
-		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, boolInt(job.Heavy), int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, job.WaitReason, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched), string(artifacts))
+	resources, err := json.Marshal(job.Resources)
+	if err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, wait_reason=excluded.wait_reason, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched, artifacts=excluded.artifacts, resources=excluded.resources`,
+		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, boolInt(job.Heavy), int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, job.WaitReason, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched), string(artifacts), string(resources))
 	return err
 }
 
-const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts"
+const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources"
 
 func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	var job Job
-	var command, artifacts string
+	var command, artifacts, resources string
 	var exit sql.NullInt64
 	var requested, posted, launched, heavy int
 	var host, timeout int64
 	var created, started, ended int64
-	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &heavy, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &job.WaitReason, &requested, &posted, &launched, &artifacts); err != nil {
+	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &heavy, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &job.WaitReason, &requested, &posted, &launched, &artifacts, &resources); err != nil {
 		return job, err
 	}
 	job.Timeout = time.Duration(timeout) * time.Second
@@ -500,6 +514,9 @@ func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	job.Command = words
 	if err := json.Unmarshal([]byte(artifacts), &job.Artifacts); err != nil {
 		return job, fmt.Errorf("job artifacts %q: %w", artifacts, err)
+	}
+	if err := json.Unmarshal([]byte(resources), &job.Resources); err != nil {
+		return job, fmt.Errorf("job resources %q: %w", resources, err)
 	}
 	return job, nil
 }

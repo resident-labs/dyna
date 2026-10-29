@@ -59,6 +59,8 @@ func RepoKey(repo string) string {
 type Service struct {
 	Store    Store
 	Machines MachineSource
+	// RoomName resolves a resource holder's room for its wait reason.
+	RoomName func(string) string
 	Reporter Reporter
 	// DataDir is the engine's data folder, where job logs live.
 	DataDir string
@@ -136,6 +138,8 @@ type Input struct {
 	Artifacts []string
 	// Heavy marks an IO-heavy job, which a node runs only a few of.
 	Heavy bool
+	// Resources are validated named units the job holds for its whole run.
+	Resources []machines.ResourceName
 }
 
 // Submit stores a queued job and starts it. The job runs detached, so Submit
@@ -176,7 +180,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 		ID: id, RoomID: in.RoomID, Session: in.Session, Node: machine.Name,
 		Command: in.Command, Host: host, Image: in.Image,
 		CPUs: in.CPUs, Timeout: in.Timeout, Heavy: in.Heavy, Artifacts: in.Artifacts,
-		State: StateQueued, Created: s.Store.now(),
+		Resources: in.Resources, State: StateQueued, Created: s.Store.now(),
 		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
 	}
 	if in.Memory != "" {
@@ -385,7 +389,7 @@ func (s *Service) stopRequested(ctx context.Context) {
 
 // admission is the node queue this engine decides with.
 func (s *Service) admission() Admission {
-	return Admission{DataDir: s.dataDir(), Machines: s.Machines, Engine: true}
+	return Admission{DataDir: s.dataDir(), Machines: s.Machines, RoomName: s.RoomName, Engine: true}
 }
 
 // claim admits the queued jobs through the node queue: what fits starts now,
