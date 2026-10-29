@@ -41,7 +41,6 @@ const (
 	KeyPiCodeMode            = "harness.piCodeMode"
 	KeyMaxCardBytes          = "content.maxCardBytes"
 	KeyMaxFileBytes          = "content.maxFileBytes"
-	KeyCIDiskFloorGB         = "machines.ciDiskFloorGB"
 	SourceDefault            = "default"
 	SourceFile               = "file"
 	SourceEnv                = "env"
@@ -106,10 +105,6 @@ type Values struct {
 	WorktreesRetention     string
 	WorktreesRoot          string
 	WorktreesMinFreeBytes  int64
-	// CIDiskFloorGB is the free space a CI machine must keep on the filesystem
-	// that holds its /var/tmp, in gigabytes. Zero starts CI on any machine the
-	// probe reaches.
-	CIDiskFloorGB int
 	// SubagentMaxDepth caps subagent-session nesting (top-level sessions are
 	// depth 1).
 	SubagentMaxDepth int
@@ -162,7 +157,6 @@ func Defaults() Values {
 		WorktreesRetention:       WorktreesRetentionChanged,
 		WorktreesRoot:            "~/.dyna-worktrees",
 		WorktreesMinFreeBytes:    DefaultWorktreesMinFreeBytes,
-		CIDiskFloorGB:            DefaultCIDiskFloorGB,
 		SubagentMaxDepth:         DefaultSubagentMaxDepth,
 		SteeringMaxToolWait:      DefaultSteeringToolWait,
 		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
@@ -381,20 +375,6 @@ func Load(path string) (Values, error) {
 			v.fromFile[KeyIdleUnloadMinutes] = true
 		}
 	}
-	if section, exists := raw["machines"]; exists {
-		registry, ok := section.(map[string]any)
-		if !ok {
-			return Values{}, fmt.Errorf("machines settings must be an object")
-		}
-		if value, exists := registry["ciDiskFloorGB"]; exists {
-			n, err := parseCIDiskFloorGB(numberText(value))
-			if err != nil {
-				return Values{}, err
-			}
-			v.CIDiskFloorGB = n
-			v.fromFile[KeyCIDiskFloorGB] = true
-		}
-	}
 	if section, exists := raw["content"]; exists {
 		content, ok := section.(map[string]any)
 		if !ok {
@@ -581,13 +561,6 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.WorktreesMinFreeBytes = n
 		v.fromFile[key] = true
-	case KeyCIDiskFloorGB:
-		n, err := parseCIDiskFloorGB(value)
-		if err != nil {
-			return err
-		}
-		v.CIDiskFloorGB = n
-		v.fromFile[key] = true
 	case KeyRootProfile:
 		v.RootProfile = strings.TrimSpace(value)
 		v.fromFile[key] = true
@@ -680,9 +653,6 @@ func (v Values) Save() error {
 	worktrees["root"] = v.WorktreesRoot
 	worktrees["minFreeBytes"] = v.WorktreesMinFreeBytes
 	raw["worktrees"] = worktrees
-	machines := nested(raw, "machines")
-	machines["ciDiskFloorGB"] = v.CIDiskFloorGB
-	raw["machines"] = machines
 	root := nested(raw, "root")
 	root["profile"] = v.RootProfile
 	raw["root"] = root

@@ -500,9 +500,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// does any work, so a fleet that is only busy keeps the job waiting without
 	// a fetch.
 	chosen := s.availableCINode(ctx, enabled, job.record.RoomID, retriedFrom)
-	if pinned, wait := pinnedCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom); wait {
-		return false, nil
-	} else if pinned != nil {
+	if pinned := pinnedCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom); pinned != nil {
 		chosen = pinned
 	}
 	if chosen == nil && retriedFrom != "" {
@@ -554,13 +552,11 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	// Only a machine that allows the run's room and every suite of it takes the
 	// run. A suite that no machine of that room allows never arrives, so the
-	// caller gets a typed error that names it; a fleet that is only busy or low
-	// on disk keeps waiting.
+	// caller gets a typed error that names it; a fleet that is only busy or
+	// whose disks are full keeps waiting, in the node queue.
 	suited := localci.NodesForSuites(enabled, plan.suites)
 	chosen = s.availableCINode(ctx, suited, job.record.RoomID, retriedFrom)
-	if pinned, wait := pinnedCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom); wait {
-		return false, nil
-	} else if pinned != nil {
+	if pinned := pinnedCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom); pinned != nil {
 		chosen = pinned
 	}
 	if chosen == nil && retriedFrom != "" {
@@ -764,31 +760,27 @@ type attachedCINodes interface {
 // pinnedCINode pins a run to the machine that still runs its checks from before
 // an engine restart. Those checks already hold the machine's queue rows, so
 // the machine takes the run back; any other machine would start the checks
-// again and abandon the first ones. When
-// the machine cannot take work for now, such as a low disk, the run waits for it
-// instead. It returns no pin when there is no record, when the run just failed
-// there, or when the machine is no longer registered, enabled or allowed for
-// the room.
-func pinnedCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, roomID, skip string) (pinned *localci.Node, wait bool) {
+// again and abandon the first ones. A machine whose disk is full takes the run
+// too, and its checks wait in its queue like any other work. It returns no pin
+// when there is no record, when the run just failed there, or when the machine
+// is no longer registered, enabled or allowed for the room.
+func pinnedCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, roomID, skip string) *localci.Node {
 	finder, ok := registry.(attachedCINodes)
 	if !ok {
-		return nil, false
+		return nil
 	}
 	name, err := finder.AttachedNode(ctx, repo, head)
 	if err != nil || name == "" || name == skip {
-		return nil, false
+		return nil
 	}
 	for i := range nodes {
 		node := &nodes[i]
 		if node.Name != name || !node.Enabled || !node.AllowsRoom(roomID) {
 			continue
 		}
-		if node.LowDisk {
-			return nil, true
-		}
-		return node, false
+		return node
 	}
-	return nil, false
+	return nil
 }
 
 func availableCINode(nodes []localci.Node, roomID, skip string, free func(node localci.Node) int) *localci.Node {
@@ -796,7 +788,7 @@ func availableCINode(nodes []localci.Node, roomID, skip string, free func(node l
 	roomiest := 0
 	for i := range nodes {
 		node := &nodes[i]
-		if node.LowDisk || !node.AllowsRoom(roomID) || node.Name == skip || !node.Enabled {
+		if !node.AllowsRoom(roomID) || node.Name == skip || !node.Enabled {
 			continue
 		}
 		if available := free(*node); available > roomiest {
