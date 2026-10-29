@@ -142,6 +142,40 @@ func TestProbeRestoresThePreviousActiveAccount(t *testing.T) {
 	}
 }
 
+// A switch that lands after the probe reads its previous account and before it
+// switches to the held account is the previous account for the restore. The
+// restore must not put back the account that was active before that switch.
+func TestProbeRestoreKeepsASwitchBeforeTheHeldSwitch(t *testing.T) {
+	a, _, work := scopedClaudeAccounts(t)
+	if err := a.SetRepos(work.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, err := reposcope.Open(filepath.Dir(a.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkReset(work.ID, time.Now().Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	other := signedClaude(t, a, "other", "aaaaaaaa-bbbb-cccc-dddd-000000000003")
+	probeBeforeHeldSwitch = func() {
+		if err := a.Switch(context.Background(), other.ID, "/fake/native"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { probeBeforeHeldSwitch = nil }()
+	r := &Runtime{Accounts: a, Bundles: manager(t)}
+	p := profile.Profile{Harness: "claude-code", RuntimeVersion: "1.2.3"}
+	_, _, restore, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore()
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != other.ID {
+		t.Fatalf("after the restore, active = %s; want the switch made before the probe, %s", active.ID, other.ID)
+	}
+}
+
 // A switch made by another turn during the probe stays active after the restore,
 // so the restore never overwrites a choice it did not make.
 func TestProbeRestoreKeepsAConcurrentSwitch(t *testing.T) {
