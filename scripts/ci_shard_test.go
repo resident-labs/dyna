@@ -12,8 +12,7 @@ import (
 // TestShardMapCoversEveryPackageOnce pins the properties a shard map must
 // keep: every package is tested, heavy packages keep their measured assignments,
 // and no other package is repeated. Only packages with explicit CI_SLICE
-// assignments may repeat. A balanced map that loses a package would show up as
-// fewer tests, not a failure.
+// assignments may repeat, and they run in "sliced" mode, never whole.
 func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 	packages := []string{
 		"dyna-agent/cmd/dyna",
@@ -34,22 +33,32 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 		"dyna-agent/internal/pr/watch": "0,7,8",
 		"dyna-agent/internal/subagent": "1,9",
 	}
-	shards := map[string][]string{}
+	whole := map[string][]string{}
+	slices := map[string][]string{}
 	for i := 0; i < 10; i++ {
-		for _, pkg := range shardPackages(t, i, 10, packages) {
-			shards[pkg] = append(shards[pkg], fmt.Sprint(i))
+		for _, pkg := range shardPackages(t, i, 10, "whole", packages) {
+			whole[pkg] = append(whole[pkg], fmt.Sprint(i))
+		}
+		for _, pkg := range shardPackages(t, i, 10, "sliced", packages) {
+			slices[pkg] = append(slices[pkg], fmt.Sprint(i))
 		}
 	}
 	for _, pkg := range packages {
-		got := shards[pkg]
-		if len(got) == 0 {
-			t.Fatalf("%s is on no shard", pkg)
-		}
 		if want, ok := sliced[pkg]; ok {
-			if strings.Join(got, ",") != want {
-				t.Fatalf("sliced package %s is on shards %v, want %s", pkg, got, want)
+			if len(whole[pkg]) != 0 {
+				t.Fatalf("sliced package %s also runs whole on shards %v", pkg, whole[pkg])
+			}
+			if strings.Join(slices[pkg], ",") != want {
+				t.Fatalf("sliced package %s is on shards %v, want %s", pkg, slices[pkg], want)
 			}
 			continue
+		}
+		if len(slices[pkg]) != 0 {
+			t.Fatalf("whole package %s is in sliced mode on shards %v", pkg, slices[pkg])
+		}
+		got := whole[pkg]
+		if len(got) == 0 {
+			t.Fatalf("%s is on no shard", pkg)
 		}
 		if pkg == "dyna-agent/internal/visual" && strings.Join(got, ",") != "9" {
 			t.Fatalf("internal/visual is on shards %v, want 9", got)
@@ -65,7 +74,7 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 
 // shardPackages runs the real script against a fake go command, so the test
 // proves the script's own map without depending on this checkout's packages.
-func shardPackages(t *testing.T, index, count int, packages []string) []string {
+func shardPackages(t *testing.T, index, count int, mode string, packages []string) []string {
 	t.Helper()
 	dir := t.TempDir()
 	lines := []string{
@@ -79,7 +88,7 @@ func shardPackages(t *testing.T, index, count int, packages []string) []string {
 	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(strings.Join(lines, "\n")+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "ci-shard.sh", fmt.Sprint(index), fmt.Sprint(count))
+	cmd := exec.Command("bash", "ci-shard.sh", fmt.Sprint(index), fmt.Sprint(count), mode)
 	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.Output()
 	if err != nil {
