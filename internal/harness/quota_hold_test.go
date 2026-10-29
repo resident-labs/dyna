@@ -5,11 +5,31 @@ import (
 	"time"
 
 	"dyna-agent/internal/account/reposcope"
+	harnessruntime "dyna-agent/internal/harness/runtime"
 )
 
 const kimiQuotaText = `HTTP 429: {"message":"You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.","type":"exceeded_current_quota_error"}; usage limit reached`
 
 const creditsText = `HTTP 402: "You have run out of credits or need a Grok subscription."`
+
+// Only a failure that names the five-hour window probes that window's reset.
+// Credit failures and other window lengths name none, so their holds never
+// take a five-hour reset.
+func TestProbeWindowIsNamedByTheFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		text string
+		want string
+	}{
+		"five-hour limit": {kimiQuotaText, harnessruntime.FiveHourWindow},
+		"credits":         {creditsText, ""},
+		"weekly limit":    {`HTTP 429: You've reached your 168-hour usage limit.`, ""},
+		"no window named": {`HTTP 429: busy, try again`, ""},
+	} {
+		if got := probeWindowFor(tc.text); got != tc.want {
+			t.Errorf("%s: probeWindowFor = %q, want %q", name, got, tc.want)
+		}
+	}
+}
 
 // Without a stated reset, each failure after the last hold ended waits longer:
 // 1 h, 2 h, 4 h, then the 5 h window length, which caps the wait.

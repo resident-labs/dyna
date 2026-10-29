@@ -35,11 +35,11 @@ func TestHoldSurvivesRestartAndClears(t *testing.T) {
 	if got.Until.Unix() != want.Until.Unix() || got.Level != want.Level || got.Stated {
 		t.Fatalf("LimitOf after restart = %+v, want until %d level %d unstated", got, want.Until.Unix(), want.Level)
 	}
-	if err := reopened.ClearLimit("acct"); err != nil {
+	if err := reopened.ClearUnstated("acct", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := reopened.LimitOf("acct"); err != nil || !got.Until.IsZero() || got.Level != 0 {
-		t.Fatalf("LimitOf after ClearLimit = %+v, %v; want no hold", got, err)
+		t.Fatalf("LimitOf after ClearUnstated = %+v, %v; want no hold", got, err)
 	}
 }
 
