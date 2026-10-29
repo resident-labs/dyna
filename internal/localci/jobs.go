@@ -93,6 +93,11 @@ func (s nodeSource) GetLocal(ctx context.Context) (machines.Machine, error) {
 	return s.current(ctx)
 }
 
+func (s nodeSource) List(ctx context.Context) ([]machines.Machine, error) {
+	machine, err := s.current(ctx)
+	return []machines.Machine{machine}, err
+}
+
 // current reads the registered record of the node, or the scheduling snapshot
 // when the registry holds no such machine.
 func (s nodeSource) current(ctx context.Context) (machines.Machine, error) {
