@@ -1,27 +1,31 @@
 package roomsvc
 
 import (
-	"os"
-	"path/filepath"
+	"context"
+	"database/sql"
 	"testing"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/store"
 )
 
-func TestSpoolWritesWakeHookWorker(t *testing.T) {
+func TestQueueRowsWakeHookWorker(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	svc := new(Service)
 	version := ""
 	var events []Event
 	emit := func(ev Event) { events = append(events, ev) }
 	svc.scanHookSpool(&version, true, emit)
-	// The scanner observes a spool write, independent of repository identity.
+	// The scanner observes a queue row, whatever process wrote it.
 	// Enqueue and durable event contents are covered by the hooks tests.
-	spool := filepath.Join(store.DataDir(), "hook-spool")
-	if err := os.MkdirAll(spool, 0700); err != nil {
+	db, err := database.Open(store.DataDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(spool, "00000000000000000001.json"), []byte(`{"event":"after-land"}`), 0600); err != nil {
+	if err := database.Immediate(context.Background(), db, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), "INSERT INTO hook_queue(body) VALUES(?)", `{"event":"after-land"}`)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	svc.scanHookSpool(&version, false, emit)
@@ -30,7 +34,7 @@ func TestSpoolWritesWakeHookWorker(t *testing.T) {
 	}
 	svc.scanHookSpool(&version, false, emit)
 	if len(events) != 1 {
-		t.Fatal("unchanged spool woke worker")
+		t.Fatal("unchanged queue woke worker")
 	}
 	version = ""
 	svc.scanHookSpool(&version, true, emit)
