@@ -176,7 +176,7 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 			return fmt.Errorf("%w; the engine may still apply it, so check before you repeat it", err)
 		}
 		if callspec.IsLate(err) && callspec.WriteCalls[method] {
-			return fmt.Errorf("outcome unknown: %w; the engine may still apply %s, so read the state it changes before you repeat it", err, method)
+			return callspec.OutcomeUnknown(method, err)
 		}
 		var remote *RemoteError
 		starting := errors.As(err, &remote) && remote.Code == callspec.CodeEngineStarting

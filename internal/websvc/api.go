@@ -208,6 +208,11 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, rt Route, p Princi
 	}
 	res, err := c(ctx, args)
 	if err != nil {
+		if r.Context().Err() == nil && callspec.IsLate(err) && callspec.WriteCalls[name] {
+			// 422 keeps the reply final, so a caller does not send the write again.
+			writeCallError(w, http.StatusUnprocessableEntity, callspec.CodeOutcomeUnknown, callspec.OutcomeUnknown(name, err))
+			return
+		}
 		status, code := callFailure(r.Context().Err(), err)
 		if status == http.StatusServiceUnavailable && !errors.Is(r.Context().Err(), context.Canceled) {
 			logTransient(name, err)
