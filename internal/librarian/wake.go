@@ -239,7 +239,7 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	if err := syncTree(ctx, r.Main, tree, target); err != nil {
 		return Result{}, err
 	}
-	task := Task(r.Main, tree, st.Head, target, reason, v.LibraryReadmeMaxLines)
+	task := Task(r.Main, repo, tree, st.Head, target, reason, v.LibraryReadmeMaxLines)
 	action, n := "assigned", 0
 	if usable && info.Profile == name && !rolesession.NeedsRecreation(info, turn) {
 		n, err = s.Sessions.Assign(ctx, info.ID, task)
