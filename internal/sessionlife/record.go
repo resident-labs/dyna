@@ -288,8 +288,7 @@ func StoredVersion(ctx context.Context, q state.Reader, id string) (Version, err
 func loadStored(ctx context.Context, q querier, id string) ([]byte, Version, error) {
 	var meta string
 	var revision int64
-	var instructions instructionRead
-	err := q.QueryRowContext(ctx, "SELECT meta,revision,"+instructionReadProjection+" FROM session_records WHERE id = ?", id).Scan(&meta, &revision, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1])
+	instructions, err := scanInstructionRead(q.QueryRowContext(ctx, "SELECT meta,revision,"+instructionReadProjection+" FROM session_records WHERE id = ?", id), &meta, &revision)
 	if err != nil {
 		return nil, "", err
 	}
@@ -706,16 +705,13 @@ func Each(sessions string, open bool, fn func(id string, raw []byte, err error) 
 	var records []record
 	for res.Next() {
 		var r record
-		var meta []byte
-		var instructions instructionRead
-		if err := res.Scan(&r.id, &meta, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+		instructions, err := scanInstructionRead(res, &r.id, &r.raw)
+		if err != nil {
 			res.Close()
 			return err
 		}
-		if instructions.hashes == [2]string{} {
-			r.raw = meta
-		} else {
-			r.raw, r.err = instructions.join(meta)
+		if instructions.hashes != [2]string{} {
+			r.raw, r.err = instructions.join(r.raw)
 			if r.err != nil {
 				r.err = fmt.Errorf("%w: session %s: %v", ErrRecord, r.id, r.err)
 			}
@@ -830,8 +826,8 @@ func MoveSpawnItemTx(conn *sql.Conn, room, goal, item, toGoal, toItem string, lo
 	var records []record
 	for rows.Next() {
 		var r record
-		var instructions instructionRead
-		if err := rows.Scan(&r.id, &r.meta, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+		instructions, err := scanInstructionRead(rows, &r.id, &r.meta)
+		if err != nil {
 			rows.Close()
 			return err
 		}
@@ -892,7 +888,7 @@ func RemapSpawnGoalsTx(conn *sql.Conn, remap func(room, goal string) (parent, it
 	var records []record
 	for rows.Next() {
 		var r record
-		if err := rows.Scan(&r.id, &r.room, &r.meta, &r.instructions.hashes[0], &r.instructions.hashes[1], &r.instructions.bodies[0], &r.instructions.bodies[1]); err != nil {
+		if r.instructions, err = scanInstructionRead(rows, &r.id, &r.room, &r.meta); err != nil {
 			rows.Close()
 			return err
 		}

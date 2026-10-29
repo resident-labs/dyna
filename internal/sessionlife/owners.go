@@ -61,8 +61,8 @@ func Owners(sessions string, visit func(OwnerRow) error) error {
 		// RawBytes stays valid only until the next Next, so the digest is
 		// checked before the meta bytes are released.
 		var meta sql.RawBytes
-		var instructions instructionRead
-		if err := res.Scan(&r.owner.ID, &r.metaID, &r.owner.Room, &r.owner.Name, &closed, &r.owner.Dir, &r.owner.Service, &meta, &r.digest, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+		instructions, err := scanInstructionRead(res, &r.owner.ID, &r.metaID, &r.owner.Room, &r.owner.Name, &closed, &r.owner.Dir, &r.owner.Service, &meta, &r.digest)
+		if err != nil {
 			res.Close()
 			return err
 		}

@@ -25,8 +25,8 @@ func migrateLifecycle(db *sql.DB) error {
 		var records []record
 		for rows.Next() {
 			var id, raw string
-			var instructions instructionRead
-			if err := rows.Scan(&id, &raw, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+			instructions, err := scanInstructionRead(rows, &id, &raw)
+			if err != nil {
 				rows.Close()
 				return err
 			}
@@ -35,14 +35,13 @@ func migrateLifecycle(db *sql.DB) error {
 				rows.Close()
 				return err
 			}
-			raw = string(joined)
 			var fields map[string]json.RawMessage
 			var lifecycle struct {
 				Closed   time.Time
 				Finished time.Time
 				Status   string
 			}
-			if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			if err := json.Unmarshal(joined, &fields); err != nil {
 				rows.Close()
 				return fmt.Errorf("%w: lifecycle session %s: %v", ErrRecord, id, err)
 			}
@@ -50,7 +49,7 @@ func migrateLifecycle(db *sql.DB) error {
 				rows.Close()
 				return fmt.Errorf("%w: lifecycle session %s is not an object", ErrRecord, id)
 			}
-			if err := json.Unmarshal([]byte(raw), &lifecycle); err != nil {
+			if err := json.Unmarshal(joined, &lifecycle); err != nil {
 				rows.Close()
 				return err
 			}
