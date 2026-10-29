@@ -99,6 +99,8 @@ func Migrate(dataDir string) error {
 	return err
 }
 
+const recordSchemaVersion = 5
+
 // records opens dyna.db for the sessions folder and prepares the table, for
 // writes. It takes the database writer when the table is new.
 func records(sessions string) (*sql.DB, error) {
@@ -109,7 +111,7 @@ func records(sessions string) (*sql.DB, error) {
 	// Version 2 adds session_records_closed, version 3
 	// session_records_effective_name, version 4 the ownership columns, and
 	// version 5 the instruction blob import; the schema is idempotent.
-	err = database.Migrate(db, "sessions.records", 5, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "sessions.records", recordSchemaVersion, func(conn *sql.Conn, old int) error {
 		if _, err := conn.ExecContext(context.Background(), recordSchema); err != nil {
 			return err
 		}
@@ -144,6 +146,18 @@ func Prepare(sessions string) error {
 // tables remembers the handles whose record table exists.
 var tables sync.Map // *sql.DB -> true
 
+var recordSchemaRetry = func(err error) bool { return database.IsUpdatingSchema(err, "sessions.records") }
+var recordSchemaPause = func(ctx context.Context) error {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 // readable opens dyna.db for reads. It never creates the table, so a read
 // inside another store's transaction never waits for the writer; until the
 // first write there are no rows.
@@ -161,6 +175,27 @@ func readable(sessions string) (*sql.DB, bool, error) {
 	}
 	if n == 0 {
 		return db, false, nil
+	}
+	if !database.OwnsSchema() {
+		// An installed client can start before the engine migrates a new schema.
+		// Migrate only checks the version outside the engine, so its migration
+		// callback is unreachable here. Wait for the engine, never migrate or
+		// query a table whose schema is not ready. The attempt bound and context
+		// deadline keep an unavailable engine from blocking a reader forever.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		for attempt := 0; ; attempt++ {
+			err = database.Migrate(db, "sessions.records", recordSchemaVersion, nil)
+			if err == nil {
+				break
+			}
+			if !recordSchemaRetry(err) || attempt == 120 {
+				return nil, false, err
+			}
+			if waitErr := recordSchemaPause(ctx); waitErr != nil {
+				return nil, false, errors.Join(err, waitErr)
+			}
+		}
 	}
 	tables.Store(db, true)
 	return db, true, nil
