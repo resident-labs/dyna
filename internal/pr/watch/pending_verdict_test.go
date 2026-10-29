@@ -90,20 +90,23 @@ func TestPausedWatcherSavesVerdictUntilConfirmedRefresh(t *testing.T) {
 }
 
 func TestPendingVerdictStillChecksReviewerAndAssignedHead(t *testing.T) {
+	// Every rejected verdict leaves the watcher state unchanged, so the
+	// scenarios share one fixture. Setup dominates this test's time.
+	e := newEnv(t)
+	accountGH(t, e)
+	e.setCI("success", 1)
+	e.track()
+	e.tick()
+	r := e.record()
+	if err := e.s.Store.update(func(st *State) error {
+		st.RateLimits = map[string]RateLimit{(RateLimitScope{Host: "github.com", Account: "fixture", Resource: "core"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}, (RateLimitScope{Host: "github.com", Account: "fixture", Resource: "graphql"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for _, scenario := range []string{"author", "unassigned", "missing head", "wrong head"} {
 		t.Run(scenario, func(t *testing.T) {
-			e := newEnv(t)
-			accountGH(t, e)
-			e.setCI("success", 1)
-			e.track()
-			e.tick()
-			r := e.record()
-			if err := e.s.Store.update(func(st *State) error {
-				st.RateLimits = map[string]RateLimit{(RateLimitScope{Host: "github.com", Account: "fixture", Resource: "core"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}, (RateLimitScope{Host: "github.com", Account: "fixture", Resource: "graphql"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
+			e.t = t
 			actor, head := r.Reviewer, r.Head
 			switch scenario {
 			case "author":
