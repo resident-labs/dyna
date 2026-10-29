@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
@@ -46,6 +47,14 @@ func (x Executor) PushCommit(ctx context.Context, repo, cache, sha string) error
 	args = append(args, "push", "--no-verify", dest, sha+":refs/dyna/ci/"+sha)
 	push := append([]string{"GIT_LFS_SKIP_PUSH=1", "git"}, args...)
 	if err := x.Run(ctx, repo, &output, "env", push...); err != nil {
+		// A second job of the same commit can lose the race to the first one: the
+		// first creates the same ref after this push reads the remote. The ref then
+		// holds the commit this push wants, so the upload has succeeded.
+		var ref TailBuffer
+		read := "git --git-dir=" + q(cache) + " rev-parse --verify -q refs/dyna/ci/" + sha
+		if x.NodeCommand(ctx, &ref, &ref, read) == nil && strings.TrimSpace(ref.String()) == sha {
+			return nil
+		}
 		return fmt.Errorf("push commit to node: %w: %s", err, &output)
 	}
 	return nil
