@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -556,6 +557,27 @@ func TestGCInfersAllSessionOwnersBeforeRemoval(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("fresh tree with closed owners kept: %v", err)
+	}
+}
+
+// A cleanup pass reads each session's ownership once. Without that, every
+// clean, merged tree of the session costs a store read for usage and another
+// for planning, and the store read waits behind any writer.
+func TestGCReadsSessionOwnershipOncePerPass(t *testing.T) {
+	repo := gcRepo(t)
+	for _, b := range []string{"one", "two", "three"} {
+		gcTree(t, repo, b, "ses_shared")
+	}
+	var reads atomic.Int64
+	closed := func(string) (bool, error) {
+		reads.Add(1)
+		return false, nil
+	}
+	if _, err := GC(t.Context(), repo, GCOptions{DryRun: true, OwnerClosed: closed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads.Load(); got != 1 {
+		t.Fatalf("store reads for ses_shared = %d, want 1", got)
 	}
 }
 

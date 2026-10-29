@@ -598,6 +598,26 @@ func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, 
 	}
 }
 
+// passClosed answers one cleanup pass's ownership reads from one store read
+// per session. Trees are inspected in parallel, so the map needs the lock.
+type passClosed struct {
+	fresh func(string) (bool, error)
+	mu    sync.Mutex
+	seen  map[string]sessionClosedResult
+}
+
+// Closed reports whether the session is closed, reading the store only once.
+func (p *passClosed) Closed(id string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result, ok := p.seen[id]
+	if !ok {
+		result.closed, result.err = p.fresh(id)
+		p.seen[id] = result
+	}
+	return result.closed, result.err
+}
+
 // usageNeeded asks the same retention rule whether file activity can matter.
 // The top directory already proves a recently touched unknown tree must
 // stay. Older candidates need the full walk to find recent nested files.
@@ -791,13 +811,17 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	}
 
 	opts.history = &runHistory{}
+	// Planning shares one ownership read per session. Removal rechecks keep
+	// the fresh reader, so each deletion still checks the store right before it.
+	fresh := opts.OwnerClosed
+	if fresh == nil {
+		fresh = SessionClosed
+	}
+	planned := &passClosed{fresh: fresh, seen: map[string]sessionClosedResult{}}
+	opts.OwnerClosed = planned.Closed
 	trees, err := scanBlocks(ctx, repo, &opts, blocks)
 	if err != nil {
 		return nil, err
-	}
-	closed := opts.OwnerClosed
-	if closed == nil {
-		closed = SessionClosed
 	}
 	result := make([]Tree, 0, len(trees))
 	var pending []int
@@ -808,7 +832,7 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 		if opts.Path != "" && t.Path != opts.Path {
 			continue
 		}
-		t = decide(t, closed)
+		t = decide(t, planned.Closed)
 		if t.Action == "would remove" && !opts.DryRun {
 			pending = append(pending, len(result))
 		}
@@ -838,7 +862,7 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 				if opts.beforeLock != nil {
 					beforeLock = func() { opts.beforeLock(result[i].Path) }
 				}
-				result[i] = remove(ctx, repo, result[i], history, closed, beforeLock, collected)
+				result[i] = remove(ctx, repo, result[i], history, fresh, beforeLock, collected)
 			}
 		}()
 	}
