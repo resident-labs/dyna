@@ -430,6 +430,8 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 	});
 
 	it("allows local package install to initialize fresh project settings", async () => {
+		// Host skills above the temporary directory can require trust; this test covers settings initialization.
+		new ProjectTrustStore(agentDir).set(projectDir, true);
 		await main(["install", "-l", packageDir]);
 
 		const settingsPath = join(projectDir, ".pi", "settings.json");
