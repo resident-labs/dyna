@@ -208,6 +208,28 @@ func TestCancelledHostedOnlyJobDoesNotBlockLocalPass(t *testing.T) {
 	}
 }
 
+// The engine cancels a hosted run after its hosted-only helpers such as
+// "changes" already passed. Ignoring that suite drops the passed rows too, so
+// the gate must still count them, or the local pass waits forever.
+func TestHostedOnlyPassInCancelledSuiteReleasesLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	snap := Snapshot{
+		Checks: []Check{
+			actionsCheck(Check{ID: 1, Name: "changes", Status: "completed", Conclusion: "success"}),
+			actionsCheck(Check{ID: 2, Name: "unit", Status: "completed", Conclusion: "cancelled"}),
+		},
+		Runs: []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
+	}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap.Checks[1].CheckSuite.ID = 1
+	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPassed {
+		t.Fatalf("a hosted-only pass in a cancelled suite held the local pass: %+v", observation)
+	}
+}
+
 // A matrix job that never expanded keeps GitHub's template name, and the
 // engine's cancellation ends it before any shard starts. Local CI reports the
 // real shard names, so the template row must not become a need that never

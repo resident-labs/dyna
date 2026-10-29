@@ -840,7 +840,9 @@ func missingRequiredCIChecks(required []selectedHostedCheck, result localci.Resu
 	}
 	var missing []selectedHostedCheck
 	for _, check := range required {
-		if localPassed[check.Name] || hostedPassed[check.hostedCheckID] {
+		// Ignoring an engine-cancelled suite drops its passed rows too, so the
+		// retained selection state is the only evidence left for them.
+		if localPassed[check.Name] || hostedPassed[check.hostedCheckID] || check.Selected && check.State == "success" {
 			continue
 		}
 		if !check.Selected && (hostedNamePassed[check.Name] || statusPassed[check.Name]) {
