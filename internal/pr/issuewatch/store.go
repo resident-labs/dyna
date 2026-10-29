@@ -13,7 +13,11 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const schemaVersion = 1
+// schemaVersion 2 adds the events column. Version 1 stores of this branch
+// migrate by adding it.
+const schemaVersion = 2
+
+const addEvents = `ALTER TABLE issue_watches ADD COLUMN events TEXT NOT NULL DEFAULT ''`
 
 const schema = `
 CREATE TABLE issue_watches (
@@ -40,8 +44,9 @@ const newToken = `lower(hex(randomblob(8)))`
 // Watch is the saved read cursor of one issue in one room. Updated is the
 // issue's updated_at at the last read. CommentAt is the newest comment
 // update seen, CommentID is the highest comment ID seen, and EventID is the
-// highest issue event ID seen. Token identifies one watch: Advance writes only
-// while the token still matches.
+// highest issue event ID seen. Events holds the saved events pages, with their
+// ETags, as JSON that the watcher owns. Token identifies one watch: Advance
+// writes only while the token still matches.
 type Watch struct {
 	Room      string
 	Host      string
@@ -55,6 +60,7 @@ type Watch struct {
 	EventID   int64
 	ETag      string
 	Body      string
+	Events    string
 	Token     string
 }
 
@@ -73,9 +79,18 @@ func (s Store) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "issuewatch.version", schemaVersion, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
-		return err
+	err = database.Migrate(db, "issuewatch.version", schemaVersion, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, schema); err != nil {
+				return err
+			}
+		}
+		if old < 2 {
+			_, err := conn.ExecContext(ctx, addEvents)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -91,12 +106,12 @@ func (s Store) Save(ctx context.Context, w Watch) error {
 		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `INSERT INTO issue_watches (room, host, repo, number, title, state, updated, comment_at, comment_id, event_id, etag, body, watch_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, `+newToken+`)
+		_, err := conn.ExecContext(ctx, `INSERT INTO issue_watches (room, host, repo, number, title, state, updated, comment_at, comment_id, event_id, etag, body, events, watch_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, `+newToken+`)
 		ON CONFLICT (room, host, repo, number) DO UPDATE SET title = excluded.title, state = excluded.state,
 		updated = excluded.updated, comment_at = excluded.comment_at, comment_id = excluded.comment_id,
-		event_id = excluded.event_id, etag = excluded.etag, body = excluded.body, watch_id = `+newToken,
-			w.Room, w.Host, w.Repo, w.Number, w.Title, w.State, w.Updated, w.CommentAt, w.CommentID, w.EventID, w.ETag, w.Body)
+		event_id = excluded.event_id, etag = excluded.etag, body = excluded.body, events = excluded.events, watch_id = `+newToken,
+			w.Room, w.Host, w.Repo, w.Number, w.Title, w.State, w.Updated, w.CommentAt, w.CommentID, w.EventID, w.ETag, w.Body, w.Events)
 		return err
 	})
 }
@@ -112,9 +127,9 @@ func (s Store) Advance(ctx context.Context, w Watch) (bool, error) {
 	var n int64
 	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		res, err := conn.ExecContext(ctx, `UPDATE issue_watches SET title = ?, state = ?, updated = ?, comment_at = ?, comment_id = ?,
-			event_id = ?, etag = ?, body = ?
+			event_id = ?, etag = ?, body = ?, events = ?
 			WHERE room = ? AND host = ? AND repo = ? AND number = ? AND watch_id = ?`,
-			w.Title, w.State, w.Updated, w.CommentAt, w.CommentID, w.EventID, w.ETag, w.Body,
+			w.Title, w.State, w.Updated, w.CommentAt, w.CommentID, w.EventID, w.ETag, w.Body, w.Events,
 			w.Room, w.Host, w.Repo, w.Number, w.Token)
 		if err != nil {
 			return err
@@ -149,7 +164,7 @@ func (s Store) List(ctx context.Context) ([]Watch, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT room, host, repo, number, title, state, updated, comment_at, comment_id, event_id, etag, body, watch_id FROM issue_watches`)
+	rows, err := db.QueryContext(ctx, `SELECT room, host, repo, number, title, state, updated, comment_at, comment_id, event_id, etag, body, events, watch_id FROM issue_watches`)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +172,7 @@ func (s Store) List(ctx context.Context) ([]Watch, error) {
 	var out []Watch
 	for rows.Next() {
 		var w Watch
-		if err := rows.Scan(&w.Room, &w.Host, &w.Repo, &w.Number, &w.Title, &w.State, &w.Updated, &w.CommentAt, &w.CommentID, &w.EventID, &w.ETag, &w.Body, &w.Token); err != nil {
+		if err := rows.Scan(&w.Room, &w.Host, &w.Repo, &w.Number, &w.Title, &w.State, &w.Updated, &w.CommentAt, &w.CommentID, &w.EventID, &w.ETag, &w.Body, &w.Events, &w.Token); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
