@@ -140,8 +140,7 @@ func TestUnverifiedGoalCallerKeepsSessionAuthority(t *testing.T) {
 
 // The old check that every protected name was a bound call is gone: a
 // policy rides on its binding, so it cannot name a call the table does not
-// bind. TestCallerPoliciesMatchMain in policy_calls_test.go proves the move
-// kept every name.
+// bind.
 
 // CloseForEngine and StartForEngine check no caller, so no engine call may
 // reach them.
