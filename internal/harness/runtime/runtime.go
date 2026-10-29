@@ -16,7 +16,6 @@ import (
 	"dyna-agent/internal/fsutil"
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
-	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
@@ -177,7 +176,7 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	provider := providerForModel(a.Harness, p.Model)
 	// Dyna never copies a personal login on its own. The user signs in, or
 	// chooses the personal login, on the Harnesses page or with dyna harness login.
-	active, err := r.Accounts.activeFor(a.Harness, provider, p.Env[mode.EnvRoomID], p.RuntimeRepo)
+	active, err := r.Accounts.turnAccount(a.Harness, provider, p)
 	if err != nil {
 		if errors.Is(err, errScopeRefused) || errors.Is(err, ErrPiAnthropicOAuth) {
 			return p, Pin{}, err

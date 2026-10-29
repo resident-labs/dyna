@@ -538,18 +538,15 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 		rt := harnessruntime.New()
 		var withRepo profile.Profile
 		var heldID string
-		var restoreAccount func()
 		var err error
 		if exec.ProbeHeldAccount {
-			withRepo, heldID, restoreAccount, err = rt.SelectProbeAccount(ctx, p, cwd)
+			withRepo, heldID, err = rt.SelectProbeAccount(ctx, p, cwd)
 		} else {
 			withRepo, err = rt.SelectAccount(ctx, p, cwd)
-			restoreAccount = func() {}
 		}
 		if err != nil {
 			return Result{}, notReady(ctx, p, err)
 		}
-		defer restoreAccount()
 		p = withRepo
 
 		selected, pin, release, err := PrepareRuntime(ctx, p, session.RuntimePin)
