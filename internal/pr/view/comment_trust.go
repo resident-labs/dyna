@@ -53,18 +53,13 @@ func (s *Service) HeldPRComments(ctx context.Context, roomRef string) ([]HeldPRC
 		}
 		roomID = rec.ID
 	}
-	st, err := s.Watcher().Store.Read()
+	refs, err := state.ReadHeldComments(s.Watcher().Store.Root, roomID)
 	if err != nil {
 		return nil, err
 	}
 	out := []HeldPRComment{}
-	for _, r := range st.Records {
-		if roomID != "" && r.RoomID != roomID {
-			continue
-		}
-		for _, held := range r.HeldComments {
-			out = append(out, HeldPRComment{Key: r.Key, RoomID: r.RoomID, Number: r.Number, HeldComment: held})
-		}
+	for _, ref := range refs {
+		out = append(out, HeldPRComment{Key: ref.Key, RoomID: ref.RoomID, Number: ref.Number, HeldComment: ref.Held})
 	}
 	slices.SortFunc(out, func(a, b HeldPRComment) int { return strings.Compare(a.Key+"/"+a.ID, b.Key+"/"+b.ID) })
 	return out, nil
