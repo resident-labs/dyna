@@ -450,6 +450,10 @@ func (f ReviewFacts) ReviewState(r Record) (string, *int, string) {
 	if f.Paused[r.RoomID] {
 		return "blocked", nil, "Room sessions are paused."
 	}
+	// Maintainers of the upstream review a PR that Dyna only tracks (D-503).
+	if f.UpstreamPR(r) {
+		return "off", nil, ""
+	}
 
 	if r.Watching && r.State == state.PROpen && r.IsDraft {
 		return "blocked", nil, "The PR is a draft."
