@@ -608,8 +608,12 @@ func checkWorkerPolicy(args []string) error {
 	}
 	if len(args) >= 2 {
 		switch args[0] + " " + args[1] {
-		case "issue create", "pr create", "pr edit", "pr ready":
+		case "issue create", "issue edit", "issue comment", "pr create", "pr edit", "pr ready", "pr comment":
 			return nil
+		case "pr review":
+			if commentOnlyReview(parseArgs(args[:2], args[2:])) {
+				return nil
+			}
 		}
 	}
 	if isRepoFork(args) {
