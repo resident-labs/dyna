@@ -508,8 +508,12 @@ func hostedRunCheckID(run Run) hostedCheckID {
 }
 
 // selectedHostedCIChecks names the jobs the hosted provider selected for this
-// head. Skipped jobs were not selected. A cancelled run without job rows keeps
-// its workflow name as the only check identity another path can satisfy.
+// head. Skipped jobs were not selected, and neither were cancelled jobs or
+// names that still carry an unexpanded matrix template: a cancellation ended
+// them before they tested the head — in local mode the engine cancels hosted
+// runs on purpose — so they are not a selection signal and create no need. A
+// job that queued, ran, or finished with success or failure still counts, and
+// base-required names always count.
 func selectedHostedCIChecks(snap Snapshot) []selectedHostedCheck {
 	selected := []selectedHostedCheck{}
 	add := func(id hostedCheckID, state string) {
@@ -519,7 +523,7 @@ func selectedHostedCIChecks(snap Snapshot) []selectedHostedCheck {
 		selected = append(selected, selectedHostedCheck{hostedCheckID: id, State: state})
 	}
 	for _, check := range snap.currentSuiteChecks() {
-		if check.App.Slug == "github-actions" && check.Conclusion != "skipped" {
+		if check.App.Slug == "github-actions" && check.Conclusion != "skipped" && check.Conclusion != "cancelled" && !strings.Contains(check.Name, "${{") {
 			id := hostedCheckID{Name: check.Name, Suite: check.CheckSuite.ID, Selected: true}
 			add(id, checkState(check.Status, check.Conclusion))
 		}
@@ -531,7 +535,7 @@ func selectedHostedCIChecks(snap Snapshot) []selectedHostedCheck {
 		}
 	}
 	for _, run := range currentRuns(snap.Runs) {
-		if run.Conclusion != "skipped" && !suitesWithChecks[run.CheckSuiteID] {
+		if run.Conclusion != "skipped" && run.Conclusion != "cancelled" && !strings.Contains(run.Name, "${{") && !suitesWithChecks[run.CheckSuiteID] {
 			add(hostedRunCheckID(run), checkState(run.Status, run.Conclusion))
 		}
 	}
