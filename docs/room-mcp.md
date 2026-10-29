@@ -15,6 +15,15 @@ Only the owner runs these steps, in this order:
 
 `dyna room mcp detach <name>` is the kill switch. The owner or root can run it. It refuses new calls and cancels calls in flight. `attach` restores the server. `remove` deletes the server, its grants and its token.
 
+## Let an agent call the server
+
+`dyna room mcp block-term <name> <term>` and `dyna room mcp allow-login <name> <login>` are owner commands that tune the argument scanner. A granted session then sees two tools:
+
+- `room_mcp_tools` lists the allowed tools of the servers it may use, with their input schemas.
+- `room_mcp_call` calls one allowed tool. The engine scans the arguments first. If they hold a saved secret, a token-like string, the owner's name or email, a GitHub login not allowed for this server, a blocked term, a local path, or a Dyna ID, Dyna sends nothing. The error names the kind of data, never the value. The room gets an event without the arguments.
+
+If Dyna cannot read the owner's identities, it refuses the call.
+
 ## What the engine does on each call
 
 - It takes the caller from the engine socket, never from an argument.
