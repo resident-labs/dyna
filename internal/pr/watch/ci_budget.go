@@ -68,7 +68,7 @@ func budgetFailure(r Record, snap Snapshot, policy ChangePolicy) (string, string
 }
 
 func (s *Service) enforceCIBudget(ctx context.Context, gh GitHub, r Record, snap Snapshot, policy ChangePolicy) error {
-	if snap.Pull.State == "closed" {
+	if snap.Pull.State == "closed" || upstreamPR(r, s.roomUpstreams()) {
 		return nil
 	}
 	warn, fail, err := policy.CIBudget()
