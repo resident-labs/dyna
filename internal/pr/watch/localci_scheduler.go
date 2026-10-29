@@ -31,6 +31,12 @@ type localCIRegistry interface {
 	SaveHostedRuns(context.Context, string, string, localci.HostedRuns) error
 }
 
+// orphanedCIRuns is the registry seam for runs a stopped engine left behind.
+type orphanedCIRuns interface {
+	OrphanedAttachments(context.Context) ([]localci.OrphanedAttachment, error)
+	AbandonOrphanedRun(context.Context, localci.OrphanedAttachment) error
+}
+
 func (s *Service) ciRegistry() localCIRegistry {
 	if s.LocalCIRegistry != nil {
 		return s.LocalCIRegistry
@@ -348,14 +354,28 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	runs := s.nodeRuns()
 	runs.Lock()
 	started := false
+	var orphanRegistry orphanedCIRuns
+	var abandon []localci.OrphanedAttachment
 	defer func() {
 		runs.Unlock()
+		for _, orphan := range abandon {
+			if runs.closed.Load() {
+				break
+			}
+			go func(orphan localci.OrphanedAttachment) {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
+				defer cancel()
+				if err := orphanRegistry.AbandonOrphanedRun(ctx, orphan); err != nil {
+					log.Printf("local CI: abandon orphaned run %s on %s: %v", orphan.RunID, orphan.Node, err)
+				}
+			}(orphan)
+		}
 		if started {
 			s.runningCIChanged()
 		}
 	}()
 	desired := map[string]registeredCIJob{}
-	var jobs []registeredCIJob
+	var admitJobs []registeredCIJob
 	modes := map[string]string{}
 	wanted := registeredCIJobs(st)
 	// Trials come first: they hold merges that the heads wait behind.
@@ -399,11 +419,44 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		key := registeredJobKey(job)
 		if _, exists := desired[key]; !exists {
 			desired[key] = job
-			jobs = append(jobs, job)
+			admitJobs = append(admitJobs, job)
 		}
 	}
 	runs.cancelUnwanted(desired, enabled)
-	for _, job := range jobs {
+	if registry, ok := registry.(orphanedCIRuns); ok {
+		orphans, err := registry.OrphanedAttachments(ctx)
+		if err != nil {
+			return err
+		}
+		orphanRegistry = registry
+		for _, orphan := range orphans {
+			wanted := false
+			switch {
+			case orphan.Source.Kind == jobs.CheckKindPullRequest,
+				orphan.Source.Kind == jobs.CheckKindLocalChange && orphan.Source.Trial:
+				for _, job := range admitJobs {
+					wanted = wanted || job.head == orphan.SHA
+				}
+			case orphan.Source.Kind == jobs.CheckKindSync:
+				if s.SyncRunActive == nil {
+					continue
+				}
+				active, err := s.SyncRunActive(orphan.Repo, orphan.SHA)
+				if err != nil {
+					return err
+				}
+				wanted = active
+			default:
+				// Standalone commands and legacy rows may still have a caller that
+				// resumes them. Their keepers retain the existing three-hour bound.
+				continue
+			}
+			if !wanted {
+				abandon = append(abandon, orphan)
+			}
+		}
+	}
+	for _, job := range admitJobs {
 		// A stopping engine admits no new run: the runs it has are being torn
 		// down, and a keeper would outlive the process.
 		if runs.closed.Load() {

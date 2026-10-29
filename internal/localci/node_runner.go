@@ -319,7 +319,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	output.Reset()
 	// The record of started checks lasts until the run ends for good. An engine
 	// stop keeps it, so the next engine reattaches.
-	attached := attachment{RunID: runID}
+	attached := attachment{RunID: runID, Source: req.Source}
 	if resume != nil {
 		attached = *resume
 	}
@@ -471,12 +471,16 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// Record each check before admission. If the engine stops between
 	// admission and launch, recovery can inspect the node and release its
 	// reservation when no detached check was started.
-	recordCheck := func(id Suite) error {
+	recordCheck := func(check nodeCheck) error {
 		attachedMu.Lock()
 		defer attachedMu.Unlock()
-		if !slices.Contains(attached.Checks, id) {
-			attached.Checks = append(attached.Checks, id)
+		if !slices.Contains(attached.Checks, check.id) {
+			attached.Checks = append(attached.Checks, check.id)
 		}
+		if attached.CheckKinds == nil {
+			attached.CheckKinds = map[Suite]attachmentCheckKind{}
+		}
+		attached.CheckKinds[check.id] = attachmentCheckKind{Host: check.host, Container: check.image != "", Job: check.job != nil}
 		return localStore.saveAttachment(control, attachKey, sha, node.Name, attached)
 	}
 	resumed := func(id Suite) bool { return resume != nil && resume.has(id) }
@@ -540,7 +544,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				source := req.Source
 				source.Head = sha[:7]
 				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB, Timeout: req.Timeout, Ahead: req.Ahead, Check: string(check.name), Source: source}
-				runErr := recordCheck(check.id)
+				runErr := recordCheck(check)
 				port := 0
 				if runErr != nil {
 					runErr = fmt.Errorf("record check before admission: %w", runErr)
