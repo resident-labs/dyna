@@ -90,6 +90,9 @@ type Admission struct {
 	// Machines resolves a node's probed capacity and its limits. Nil uses the
 	// machine registry of the data folder.
 	Machines MachineSource
+	// RoomName resolves a holder's room ID for a readable wait reason. Nil
+	// keeps the ID.
+	RoomName func(string) string
 	// Engine marks rows this process holds: they end through the normal end
 	// path of their job or check, never through a pid check. A holder outside
 	// the engine, such as the manual CI command, leaves this off, so the pass
@@ -429,6 +432,7 @@ func lowestPort(held []admissionRow, exceptID string) int {
 // A check also needs a port index; a job does not.
 type waiter struct {
 	demand     Demand
+	resources  []machines.ResourceName
 	created    time.Time
 	id         string
 	isJob      bool
@@ -508,7 +512,7 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 				}
 				current = append(current, job)
 			}
-			if err := passNode(ctx, conn, a.now(), node, facts[node], factErrors[node], waiting[node], current, held[node], running[node], admitted, reasons); err != nil {
+			if err := passNode(ctx, conn, a.now(), node, facts[node], factErrors[node], waiting[node], current, held[node], running[node], a.RoomName, admitted, reasons); err != nil {
 				return err
 			}
 		}
@@ -588,7 +592,7 @@ func (a Admission) sweep(ctx context.Context) error {
 // jobs plus the admitted rows; capacity, limits and disk use come from the
 // machine's last probe and its stored limits. Reads and writes of admission
 // state share the caller's transaction.
-func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, waiting []admissionRow, candidates []Job, heldRows []admissionRow, running []Job, admitted map[string]bool, reasons map[string]string) error {
+func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, waiting []admissionRow, candidates []Job, heldRows []admissionRow, running []Job, roomName func(string) string, admitted map[string]bool, reasons map[string]string) error {
 	capacityCPUs, capacityMemMiB := 0, int64(0)
 	limits := machines.Machine{}
 	if machineErr == nil {
@@ -603,17 +607,25 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 	}
 	for _, job := range candidates {
 		demand := jobDemand(job, limits)
-		waiters = append(waiters, waiter{demand: demand, created: job.Created, id: job.ID, isJob: true})
+		waiters = append(waiters, waiter{demand: demand, resources: job.Resources, created: job.Created, id: job.ID, isJob: true})
 	}
 	ordered := orderWaiters(waiters)
 	// Held work first: what runs now, and what an earlier pass admitted.
 	heldCPUs, heldMemMiB, heavyHeld := 0, int64(0), 0
+	type holder struct {
+		id   string
+		room string
+	}
+	resourceHolders := make(map[machines.ResourceName][]holder)
 	for _, job := range running {
 		demand := jobDemand(job, limits)
 		heldCPUs += demand.CPUs
 		heldMemMiB += demand.MemoryMiB
 		if demand.Heavy {
 			heavyHeld++
+		}
+		for _, name := range job.Resources {
+			resourceHolders[name] = append(resourceHolders[name], holder{id: job.ID, room: job.RoomID})
 		}
 	}
 	portsUsed := make([]bool, maxPortsPerNode)
@@ -650,12 +662,38 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 				}
 			}
 		}
+		resourceBlock := ""
+		for _, name := range unit.resources {
+			limit := limits.Resources[name]
+			if limit == 0 {
+				// An undeclared name is a lock with one unit.
+				limit = 1
+			}
+			holders := resourceHolders[name]
+			if len(holders) < limit {
+				continue
+			}
+			holder := holders[0]
+			room := holder.room
+			if roomName != nil {
+				if resolved := roomName(room); resolved != "" {
+					room = resolved
+				}
+			}
+			resourceBlock = fmt.Sprintf("resource %s held by %s", name, holder.id)
+			if room != "" {
+				resourceBlock += fmt.Sprintf(" (room %s)", room)
+			}
+			break
+		}
 		var why string
 		switch {
 		case machineErr != nil:
 			why = "machine " + node + " is not registered"
 		case diskBlock != "":
 			why = diskBlock
+		case resourceBlock != "":
+			why = resourceBlock
 		case d.Heavy && heavyHeld >= limits.IOHeavyLimit():
 			why = fmt.Sprintf("%d of %d IO-heavy jobs running", heavyHeld, limits.IOHeavyLimit())
 		case capacityCPUs > 0 && d.CPUs > freeCPUs:
@@ -682,6 +720,9 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 				}
 				if count == 1 {
 					admitted[unit.id] = true
+					for _, name := range unit.resources {
+						resourceHolders[name] = append(resourceHolders[name], holder{id: unit.id, room: d.Room})
+					}
 				}
 			} else {
 				portsUsed[port] = true

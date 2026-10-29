@@ -54,6 +54,37 @@ func ParseRole(name string) (Role, error) {
 	return role, nil
 }
 
+// ResourceName identifies one counted resource or one-unit lock on a node.
+type ResourceName string
+
+var resourceNamePattern = regexp.MustCompile(`^[a-z0-9._-]{1,64}$`)
+
+// ParseResourceName validates a resource name at an external boundary.
+func ParseResourceName(name string) (ResourceName, error) {
+	if !resourceNamePattern.MatchString(name) {
+		return "", fmt.Errorf("resource name %q must use lowercase letters, digits, '-', '_' or '.', and be at most 64 characters", name)
+	}
+	return ResourceName(name), nil
+}
+
+// ParseResourceNames validates and deduplicates a job's resource requests.
+func ParseResourceNames(names []string) ([]ResourceName, error) {
+	var out []ResourceName
+	seen := make(map[ResourceName]bool, len(names))
+	for _, name := range names {
+		parsed, err := ParseResourceName(name)
+		if err != nil {
+			return nil, err
+		}
+		if !seen[parsed] {
+			seen[parsed] = true
+			out = append(out, parsed)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 // Machine is one row of the registry.
 type Machine struct {
 	ID      string `json:"id"`
@@ -67,6 +98,9 @@ type Machine struct {
 	// MaxDiskPercent is the used-disk percent above which the node admits no
 	// new work. Zero keeps a free-space floor instead; see DiskBlock.
 	MaxDiskPercent int `json:"maxDiskPercent"`
+	// Resources declares named counts available to jobs on this node. A name
+	// that is not declared acts as a one-unit lock when a job requests it.
+	Resources map[ResourceName]int `json:"resources,omitempty"`
 	// HostChecksGrants lists who allows repository-defined CI commands to run
 	// on this machine outside a container: the owner for every room, or the
 	// root of one room for that room's CI work. It is empty unless someone
@@ -350,6 +384,14 @@ func (m Machine) Validate() error {
 	if m.MaxDiskPercent < 0 || m.MaxDiskPercent > 100 {
 		return errors.New("the disk limit percent must be between 0, the default, and 100")
 	}
+	for name, count := range m.Resources {
+		if _, err := ParseResourceName(string(name)); err != nil {
+			return err
+		}
+		if count <= 0 {
+			return fmt.Errorf("resource %s count must be positive", name)
+		}
+	}
 	if err := validateRoomList(m.Rooms); err != nil {
 		return err
 	}
@@ -404,7 +446,7 @@ func validateSuiteList(suites []string) error {
 	return nil
 }
 
-const schemaVersion = 11
+const schemaVersion = 12
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -430,7 +472,8 @@ const schema = `CREATE TABLE machines (
 	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
 	check_tmp TEXT NOT NULL DEFAULT '',
 	max_io_heavy INTEGER NOT NULL DEFAULT 0 CHECK(max_io_heavy >= 0),
-	max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100)
+	max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100),
+	resources TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resources))
 );
 
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
@@ -467,7 +510,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -576,6 +619,12 @@ func prepare(conn *sql.Conn, old int) error {
 		// A machine with no suite list takes every suite, which is what every
 		// machine allowed before it could name suites.
 		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN suites TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(suites))`); err != nil {
+			return err
+		}
+	}
+	if old < 12 {
+		// A machine with no declared resources still accepts one-unit named locks.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN resources TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resources))`); err != nil {
 			return err
 		}
 	}
@@ -853,13 +902,19 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites string
+	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites, resources string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
+	if err := json.Unmarshal([]byte(resources), &m.Resources); err != nil {
+		return Machine{}, fmt.Errorf("machine %s resources: %w", m.Name, err)
+	}
+	if len(m.Resources) == 0 {
+		m.Resources = nil
+	}
 	if err := json.Unmarshal([]byte(grants), &m.HostChecksGrants); err != nil {
 		return Machine{}, fmt.Errorf("machine %s host-check grants: %w", m.Name, err)
 	}
@@ -1047,6 +1102,7 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		return Machine{}, err
 	}
 	rooms, suites := marshalNames(m.Rooms), marshalNames(m.Suites)
+	resources := marshalResources(m.Resources)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
 			// An edit keeps who allows host checks: the engine changes grants
@@ -1057,8 +1113,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if !m.HasRole(RoleCI) {
 				grants = "host_checks_grants='[]'"
 			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1068,9 +1124,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
 		return err
 	})
 	if err != nil {
@@ -1258,6 +1314,18 @@ func marshalNames(names []string) string {
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return "[]"
+	}
+	return string(raw)
+}
+
+// marshalResources stores the node's declared resource counts as JSON.
+func marshalResources(resources map[ResourceName]int) string {
+	if len(resources) == 0 {
+		return "{}"
+	}
+	raw, err := json.Marshal(resources)
+	if err != nil {
+		return "{}"
 	}
 	return string(raw)
 }

@@ -7,7 +7,7 @@ machine's node queue, and store their log and exit code.
 
 ## Run a job
 
-`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--timeout 2h] [--image IMG | --host] [--artifact PATH]... -- CMD`
+`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--timeout 2h] [--image IMG | --host] [--artifact PATH]... -- CMD`
 
 - With no `--node`, the job runs on the local node (the engine host), so a
   one-machine owner needs no setup.
@@ -36,6 +36,26 @@ machine's node queue, and store their log and exit code.
 The command returns at once with the job's ID. The job is detached: it keeps
 running when the submitting session's turn ends or the engine restarts, which
 reattaches through the stored job folder and unit.
+
+## Resources
+
+Repeat `--resource NAME` to hold one unit of each named resource for the
+job's whole run. Names use lowercase letters, digits, `-`, `_` and `.`,
+up to 64 characters. A name that the node does not declare is a one-unit lock,
+so it needs no setup. Declare a larger count with
+`dyna machine edit N --resource NAME=COUNT`; repeat the flag for more
+resources, and use `NAME=0` to remove a declaration. `dyna machine show N`
+lists the declarations.
+
+For example, cozycraft can serialize access to its one shared test container:
+
+```sh
+dyna job run --node hermeslab --resource cozybodies-test --image cozycraft-test -- ./run-tests
+```
+
+A job that waits for a resource shows the holding job and its room in
+`dyna job show`. Admission counts the resources of running jobs again after
+an engine restart.
 
 ## Read and control
 
