@@ -52,6 +52,11 @@ var ownerAlive = func(pid int, start uint64) bool {
 	return err != nil || got == start
 }
 
+// OrphanedAttachment identifies a run whose owner process is gone.
+type OrphanedAttachment struct {
+	Repo, SHA, Node, RunID string
+}
+
 // attachmentRow is one stored run record and its owner.
 type attachmentRow struct {
 	attachment
@@ -150,6 +155,49 @@ func (s Store) attachmentRows(ctx context.Context, repo, sha string) ([]attachme
 	return out, errors.Join(rows.Err(), rows.Close())
 }
 
+// OrphanedAttachments lists every kept run whose owner process is gone.
+func (s Store) OrphanedAttachments(ctx context.Context) ([]OrphanedAttachment, error) {
+	db, err := s.open()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT repo, sha, node, run_id, owner_pid, owner_start, saved_at FROM local_ci_attachments ORDER BY saved_at DESC")
+	if isMissingAttachmentTable(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []OrphanedAttachment
+	for rows.Next() {
+		var row attachmentRow
+		var saved int64
+		if err := rows.Scan(&row.Repo, &row.SHA, &row.Node, &row.RunID, &row.ownerPID, &row.ownerStart, &saved); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		row.saved = time.Unix(saved, 0)
+		if row.orphaned() {
+			out = append(out, OrphanedAttachment{Repo: row.Repo, SHA: row.SHA, Node: row.Node, RunID: row.RunID})
+		}
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
+}
+
+// AbandonOrphanedRun finds the registered machine and tears down one kept run.
+func (s Store) AbandonOrphanedRun(ctx context.Context, orphan OrphanedAttachment) error {
+	nodes, err := s.Nodes(ctx)
+	if err != nil {
+		return err
+	}
+	for i := range nodes {
+		if nodes[i].Name == orphan.Node {
+			return (Runner{DataDir: s.DataDir, Node: &nodes[i], Engine: true}).AbandonOrphanedRun(ctx, s, orphan)
+		}
+	}
+	return fmt.Errorf("abandon local CI run %s: node %s: %w", orphan.RunID, orphan.Node, os.ErrNotExist)
+}
+
 // claimAttachment takes over the newest record of a commit on a machine whose run
 // has no live process, and returns it. It returns os.ErrNotExist when there is
 // none. A record of a run that another engine or command is executing is not
@@ -207,6 +255,20 @@ func (s Store) AttachedNode(ctx context.Context, repo, sha string) (string, erro
 	return "", nil
 }
 
+// AbandonOrphanedRun claims one kept run and tears it down. A failed machine
+// call hands the record back so the next scheduler tick can try again.
+func (r Runner) AbandonOrphanedRun(ctx context.Context, store Store, orphan OrphanedAttachment) error {
+	att, err := store.claimAttachment(ctx, orphan.Repo, orphan.SHA, orphan.Node)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("claim orphaned local CI run %s on %s: %w", orphan.RunID, orphan.Node, err)
+	}
+	cache := path.Join(cacheBase(orphan.Node), repoKey(orphan.Repo)+".git")
+	return r.teardownAttachment(ctx, store, orphan.Repo, orphan.SHA, cache, att, nil)
+}
+
 // resumeRun finds the checks an earlier engine left on this machine for the same
 // commit and takes the record over. It asks the machine once. A check that was
 // recorded but never launched has no folder and starts afresh in the resumed
@@ -230,6 +292,7 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 			log.Printf("local CI %s: hand back started checks: %v", r.Node.Name, e)
 		}
 	}
+	original := att
 	base := cacheBase(r.Node.Name)
 	runDir := path.Join(base, "runs", att.RunID)
 	stale := len(att.Checks) == 0
@@ -276,37 +339,56 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 	if !stale {
 		return &att, nil
 	}
+	if err := r.teardownAttachment(ctx, store, repo, sha, cache, original, checks); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// teardownAttachment stops every recorded check, removes the run folder,
+// releases its queue reservations and forgets its attachment. It hands the
+// record back after a failure so a later run or scheduler tick can retry.
+func (r Runner) teardownAttachment(ctx context.Context, store Store, repo, sha, cache string, att attachment, checks []nodeCheck) error {
+	giveBack := func() {
+		if e := store.releaseAttachment(context.WithoutCancel(ctx), repo, sha, r.Node.Name, att.RunID); e != nil {
+			log.Printf("local CI %s: hand back started checks: %v", r.Node.Name, e)
+		}
+	}
+	base := cacheBase(r.Node.Name)
+	runDir := path.Join(base, "runs", att.RunID)
+	specs := make([]jobs.RunSpec, 0, len(att.Checks))
+	var recorded []nodeCheck
+	for _, id := range att.Checks {
+		specs = append(specs, jobs.RunSpec{ID: string(id), Dir: detachedDir(runDir, id), Unit: checkUnit(att.RunID, id)})
+		if i := slices.IndexFunc(checks, func(c nodeCheck) bool { return c.id == id }); i >= 0 {
+			recorded = append(recorded, checks[i])
+		} else {
+			recorded = append(recorded, nodeCheck{id: id})
+		}
+	}
 	// Tear down everything the old run left, containers and host scopes included,
 	// and remove the folder only after that worked: a sibling that still runs must
 	// not lose its workspace and its cache protection underneath it. The run's
 	// keeper removes the folder when its own lifetime ends; the removal here only
 	// speeds that up.
-	var recorded []nodeCheck
-	for _, spec := range specs {
-		if i := slices.IndexFunc(checks, func(c nodeCheck) bool { return c.id == Suite(spec.ID) }); i >= 0 {
-			recorded = append(recorded, checks[i])
-		} else {
-			recorded = append(recorded, nodeCheck{id: Suite(spec.ID)})
-		}
-	}
 	var out tailBuffer
 	if e := r.nodeCommand(ctx, &out, &out, teardownScript(*r.Node, cache, runDir, att.RunID, recorded)); e != nil {
 		giveBack()
-		return nil, fmt.Errorf("stop the checks of the old run on %s: %w: %s", r.Node.Name, e, out.String())
+		return fmt.Errorf("stop the checks of the old run on %s: %w: %s", r.Node.Name, e, out.String())
 	}
 	if e := r.nodeCommand(ctx, &out, &out, removeRunDir(base, path.Join(runDir, ".active"))); e != nil {
 		giveBack()
-		return nil, fmt.Errorf("remove the old run on %s: %w: %s", r.Node.Name, e, out.String())
+		return fmt.Errorf("remove the old run on %s: %w: %s", r.Node.Name, e, out.String())
 	}
 	// Teardown stopped every old check, so their ports and capacity are free.
 	for _, spec := range specs {
 		if err := r.queue().Release(ctx, r.Node.Name, att.RunID+"-"+spec.ID); err != nil {
 			giveBack()
-			return nil, fmt.Errorf("release stopped check %s: %w", spec.ID, err)
+			return fmt.Errorf("release stopped check %s: %w", spec.ID, err)
 		}
 	}
 	if err := store.deleteAttachment(ctx, repo, sha, r.Node.Name, att.RunID); err != nil {
 		log.Printf("local CI %s: forget started checks: %v", r.Node.Name, err)
 	}
-	return nil, nil
+	return nil
 }
