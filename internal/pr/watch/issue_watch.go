@@ -251,7 +251,9 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error 
 	}
 	var comments []Comment
 	var log []issueEvent
-	if issue.Updated != w.Updated {
+	// A 304 means GitHub's ETag still matches, so the issue is unchanged. Its
+	// updated_at has one-second resolution, so it cannot prove that alone.
+	if !cache.notModified[key] {
 		if comments, err = issueComments(ctx, gh, ref, w.CommentAt); err != nil {
 			return err
 		}
