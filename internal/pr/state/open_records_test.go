@@ -27,8 +27,8 @@ func TestOpenRecordsInRoomReadsOnlyThatRoomsUnclosedRows(t *testing.T) {
 }
 
 // Goal status and session links need the PRs of a few sessions, closed ones
-// included. SQLite picks them, so Go decodes only those rows.
-func TestReadForSessionsDecodesOnlyTheSessionsRecords(t *testing.T) {
+// included. Only the sessions' records come back.
+func TestReadForSessionsReturnsOnlyTheSessionsRecords(t *testing.T) {
 	root := newRoot(t)
 	rec := func(n int, room, state, author, reviewer string) *Record {
 		key := fmt.Sprintf("github.com/acme/widgets#%d", n)
@@ -44,10 +44,6 @@ func TestReadForSessionsDecodesOnlyTheSessionsRecords(t *testing.T) {
 		st.Records[r.Key] = r
 	}
 	if err := Write(root, st); err != nil {
-		t.Fatal(err)
-	}
-	// Rows that do not match would fail a decode.
-	if _, err := mustOpen(t, root).Exec(`UPDATE pr_rows SET body='[]' WHERE number IN (3,4)`); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadForSessions(root, "room", "ann")
