@@ -51,8 +51,8 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 			}
 			continue
 		}
-		if pkg == "dyna-agent/internal/visual" && strings.Join(got, ",") != "3" {
-			t.Fatalf("internal/visual is on shards %v, want 3", got)
+		if pkg == "dyna-agent/internal/visual" && strings.Join(got, ",") != "9" {
+			t.Fatalf("internal/visual is on shards %v, want 9", got)
 		}
 		if pkg == "dyna-agent/internal/workflow" && strings.Join(got, ",") != "5" {
 			t.Fatalf("internal/workflow is on shards %v, want 5", got)
