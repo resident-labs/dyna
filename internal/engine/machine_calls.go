@@ -83,6 +83,20 @@ func containerAccessForRoom(patch websvc.MachinePatch, room string) bool {
 			}
 		}
 	}
+	if patch.RemoveMounts != nil {
+		for _, mount := range *patch.RemoveMounts {
+			if mount.Room != room {
+				return false
+			}
+		}
+	}
+	if patch.RemoveDevices != nil {
+		for _, device := range *patch.RemoveDevices {
+			if device.Room != room {
+				return false
+			}
+		}
+	}
 	return true
 }
 

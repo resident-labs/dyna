@@ -33,6 +33,18 @@ type DeviceGrant struct {
 	Room string `json:"room"`
 }
 
+// MountRef identifies one room's named mount for removal.
+type MountRef struct {
+	Name MountName `json:"name"`
+	Room string    `json:"room"`
+}
+
+// DeviceRef identifies one room's allowed device for removal.
+type DeviceRef struct {
+	Path string `json:"path"`
+	Room string `json:"room"`
+}
+
 // ParseMountName validates a registered mount name at an external boundary.
 func ParseMountName(name string) (MountName, error) {
 	if !resourceNamePattern.MatchString(name) {
@@ -75,6 +87,50 @@ func (m NamedMount) Validate() error {
 	}
 	if m.Mode != MountRO && m.Mode != MountRW {
 		return fmt.Errorf("mount %s mode must be ro or rw, not %q", m.Name, m.Mode)
+	}
+	return nil
+}
+
+// ParseMountRef reads the name and room of a registration to remove.
+func ParseMountRef(name, room string) (MountRef, error) {
+	parsedName, err := ParseMountName(name)
+	if err != nil {
+		return MountRef{}, err
+	}
+	ref := MountRef{Name: parsedName, Room: room}
+	if err := ref.Validate(); err != nil {
+		return MountRef{}, err
+	}
+	return ref, nil
+}
+
+// Validate checks a mount reference decoded from an external patch.
+func (r MountRef) Validate() error {
+	if _, err := ParseMountName(string(r.Name)); err != nil {
+		return err
+	}
+	if err := validateRoomList([]string{r.Room}); err != nil {
+		return fmt.Errorf("mount %s: %w", r.Name, err)
+	}
+	return nil
+}
+
+// ParseDeviceRef reads the path and room of a device grant to remove.
+func ParseDeviceRef(pathValue, room string) (DeviceRef, error) {
+	ref := DeviceRef{Path: pathValue, Room: room}
+	if err := ref.Validate(); err != nil {
+		return DeviceRef{}, err
+	}
+	return ref, nil
+}
+
+// Validate checks a device reference decoded from an external patch.
+func (r DeviceRef) Validate() error {
+	if err := cleanAbsolutePath(r.Path); err != nil {
+		return fmt.Errorf("device: %w", err)
+	}
+	if err := validateRoomList([]string{r.Room}); err != nil {
+		return fmt.Errorf("device %s: %w", r.Path, err)
 	}
 	return nil
 }

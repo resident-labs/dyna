@@ -118,7 +118,7 @@ func TestRoomRootRegistersOnlyOwnRoomContainerAccess(t *testing.T) {
 	root := localCallerContext(t,
 		websvc.Caller{Kind: websvc.Session, Session: "root"},
 		authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
-	own := `{"mounts":[{"name":"data","source":"/srv/data","room":"room_dyna","mode":"ro"}],"devices":[{"path":"/dev/dri","room":"room_dyna"}]}`
+	own := `{"mounts":[{"name":"data","source":"/srv/data","room":"room_dyna","mode":"ro"}],"devices":[{"path":"/dev/dri","room":"room_dyna"}],"removeMounts":[{"name":"old","room":"room_dyna"}],"removeDevices":[{"path":"/dev/old","room":"room_dyna"}]}`
 	if _, err := calls["SaveNode"](root, saveMachineArgs(own)); err != nil {
 		t.Fatalf("a root registering its room's container access = %v", err)
 	}
@@ -129,6 +129,10 @@ func TestRoomRootRegistersOnlyOwnRoomContainerAccess(t *testing.T) {
 	otherDevice := `{"devices":[{"path":"/dev/dri","room":"room_other"}]}`
 	if _, err := calls["SaveNode"](root, saveMachineArgs(otherDevice)); err == nil || !strings.Contains(err.Error(), "own room") {
 		t.Fatalf("a root registering another room's device = %v", err)
+	}
+	otherRemove := `{"removeMounts":[{"name":"data","room":"room_other"}],"removeDevices":[{"path":"/dev/dri","room":"room_other"}]}`
+	if _, err := calls["SaveNode"](root, saveMachineArgs(otherRemove)); err == nil || !strings.Contains(err.Error(), "own room") {
+		t.Fatalf("a root revoking another room's access = %v", err)
 	}
 	if len(*patches) != 1 {
 		t.Fatalf("saved patches = %d, want only the root's own-room registration", len(*patches))
