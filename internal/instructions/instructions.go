@@ -159,12 +159,13 @@ func Changes(frozen, desired Snapshot) []Change {
 				out = append(out, Change{Name: sec.Name, Action: ChangeBody, Body: now.body()})
 				continue
 			}
-			out = append(out, Change{
-				Name:    sec.Name,
-				Action:  ChangeItems,
-				Added:   missing(now.Items, was.Items),
-				Removed: missing(was.Items, now.Items),
-			})
+			added, removed := missing(now.Items, was.Items), missing(was.Items, now.Items)
+			if len(added) == 0 && len(removed) == 0 {
+				// Only the order moved, so no line names the change. Show the new text.
+				out = append(out, Change{Name: sec.Name, Action: ChangeBody, Body: now.body()})
+				continue
+			}
+			out = append(out, Change{Name: sec.Name, Action: ChangeItems, Added: added, Removed: removed})
 		case hadIt && paragraphChange(was.Text, now.Text) != "":
 			added, removed, body := paragraphChangeParts(was.Text, now.Text)
 			out = append(out, Change{Name: sec.Name, Action: ChangeBody, Added: added, Removed: removed, Body: body})
