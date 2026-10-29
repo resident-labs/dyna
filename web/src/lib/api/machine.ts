@@ -166,3 +166,68 @@ export interface MachinePatch {
   // create adds the machine that the reference names when none exists.
   create?: boolean
 }
+
+// MachineWorkKind says what a unit of work is: a command submitted with
+// dyna job run, or one local CI check.
+export type MachineWorkKind = 'job' | 'check'
+
+// MachineWorkItem is one unit of work on a machine, running or waiting.
+// Source: WorkItem in internal/jobs/work.go and MachineWorkItem in
+// internal/websvc/machines.go.
+export interface MachineWorkItem {
+  kind: MachineWorkKind
+  id: string
+  // label is a job's command or a check's ID.
+  label: string
+  room?: string
+  roomName?: string
+  session?: string
+  sessionName?: string
+  // cpus and memoryMiB are what the machine holds or will hold for the unit.
+  cpus: number
+  memoryMiB: number
+  heavy: boolean
+  resources?: string[]
+  // since is when a running unit started, or when a check entered the queue.
+  since: string
+  // position and reason describe a waiting unit: its place in admission order
+  // and the queue's own words for why it waits.
+  position?: number
+  reason?: string
+}
+
+// MachineResourceUse is one named resource of a machine and the units running
+// work holds.
+export interface MachineResourceUse {
+  name: string
+  used: number
+  limit: number
+}
+
+// MachineCapacity is what a machine's queue counts against. Totals of zero
+// mean no probe read them yet.
+export interface MachineCapacity {
+  cpus: number
+  memoryMiB: number
+  cpusUsed: number
+  memoryMiBUsed: number
+  // diskFree and diskTotal are bytes; diskFloor is the free space admission
+  // keeps, and maxDiskPercent replaces it when set.
+  diskFree: number
+  diskTotal: number
+  diskFloor: number
+  maxDiskPercent?: number
+  // diskBlock is the queue's words for a disk that admits no work.
+  diskBlock?: string
+  heavyRunning: number
+  heavyLimit: number
+  resources?: MachineResourceUse[]
+}
+
+// MachineWork is the Work section of the Machine page. waiting keeps
+// admission order.
+export interface MachineWork {
+  capacity: MachineCapacity
+  running: MachineWorkItem[]
+  waiting: MachineWorkItem[]
+}

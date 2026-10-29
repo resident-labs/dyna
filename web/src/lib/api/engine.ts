@@ -18,7 +18,7 @@ import type { GitHubDetail, GitHubListResult } from './github.ts'
 import type { Goal, GoalEvent, GoalItem, GoalJournalEntry, GoalRule, GoalStatus, RulesView } from './goal.ts'
 import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, SignInState } from './harness.ts'
 import type { SyncStarted, SyncStatus } from './lanesync.ts'
-import type { MachineDetail, MachinePatch, MachineSummary } from './machine.ts'
+import type { MachineDetail, MachinePatch, MachineSummary, MachineWork } from './machine.ts'
 import type { LibraryView } from './library.ts'
 import type { ProfileCheck, ProfileEdit, ProfileList, ProfileUsageSnapshot, ProfileView } from './profile.ts'
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SetRoomLimitResult, SpawnResult, TerminalVerdict, Visual } from './room.ts'
@@ -98,6 +98,8 @@ export interface Engine {
   // ProbeMachine reads one machine now and answers with its page after it.
   Machines(): Promise<MachineSummary[]>
   Machine(id: string): Promise<MachineDetail>
+  // MachineWork reads the Work section of one machine's page.
+  MachineWork(id: string): Promise<MachineWork>
   SaveMachine(id: string, patch: MachinePatch): Promise<MachineDetail>
   ProbeMachine(id: string): Promise<MachineDetail>
   SyncStatus(): Promise<SyncStatus>

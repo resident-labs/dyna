@@ -130,6 +130,7 @@ export const api = {
   // machines is the registry behind the Machines list and the Machine page.
   machines: () => app.Machines(),
   machine: (id: string) => app.Machine(id),
+  machineWork: (id: string) => app.MachineWork(id),
   saveMachine: (id: string, patch: MachinePatch) => app.SaveMachine(id, patch),
   probeMachine: (id: string) => app.ProbeMachine(id),
   rooms: () => app.Rooms(),

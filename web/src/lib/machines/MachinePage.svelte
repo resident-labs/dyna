@@ -11,13 +11,14 @@
   import Switch from '../ui/Switch.svelte'
   import Skeleton from '../ui/Skeleton.svelte'
   import ScopeList from './ScopeList.svelte'
+  import MachineWorkCard from './MachineWorkCard.svelte'
   import type { Room } from '../api/room.ts'
   import SystemLoadCard from '../system/SystemLoadCard.svelte'
   import { pollLoad } from '../system/systemLoad.ts'
   import { ago, roomLabel } from '../ui/format.ts'
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
-  import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
+  import type { MachineAgent, MachineDetail, MachinePatch, MachineRole, MachineWork } from '../api/machine.ts'
   import { ciRunDetail, ciRunText, computersText, count, diskText, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, rooms = [], owner = true, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
@@ -43,6 +44,20 @@
     load = null
     if (!machine?.local) return
     return pollLoad(() => api.systemLoad(), (value) => { load = value })
+  })
+
+  // The Work section reads again whenever the page's machine answers anew: the
+  // engine's machines event and the page's own read both replace it, so no
+  // timer is added here. A slow answer never replaces a newer one, and an
+  // answer for a machine that closed is dropped.
+  let workRead = $state<{ id: string; value: MachineWork | null } | null>(null)
+  let workRequest = 0
+  let workHere = $derived(workRead && workRead.id === machine?.id ? workRead : null)
+  $effect(() => {
+    const id = machine?.id
+    if (!id) return
+    const request = ++workRequest
+    api.machineWork(id).then((value) => { if (request === workRequest) workRead = { id, value } }, () => { if (request === workRequest) workRead = { id, value: null } })
   })
 
   // What the last probe read. A machine no probe has reached has no
@@ -200,7 +215,9 @@
         </Card>
       {/if}
 
-      {#if machine.ci}
+      <MachineWorkCard work={workHere?.value ?? null} failed={workHere !== null && workHere.value === null} />
+
+      {#if machine.ci && machine.roles.includes('ci')}
         {@const ci = machine.ci}
         {@const runs = machine.ciRuns ?? []}
         <Card title="CI" count={runs.length || null}>
