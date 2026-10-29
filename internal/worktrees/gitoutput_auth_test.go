@@ -70,7 +70,7 @@ done
 	if reason, err := refreshDefaultBranch(ctx, repo); err != nil || reason != "" {
 		t.Fatalf("cleanup fetch: %s: %v", reason, err)
 	}
-	out, err := gitOriginOutput(ctx, repo, "ls-remote", "--exit-code", "origin", "refs/heads/main")
+	out, err := gitRemoteOutput(ctx, repo, "origin", "ls-remote", "--exit-code", "origin", "refs/heads/main")
 	if err != nil || !strings.Contains(string(out), "refs/heads/main") {
 		t.Fatalf("cleanup remote check: %v: %s", err, out)
 	}
