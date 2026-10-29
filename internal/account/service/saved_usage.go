@@ -1,9 +1,11 @@
 package service
 
 import (
+	"path/filepath"
 	"time"
 
 	"dyna-agent/internal/account/native"
+	"dyna-agent/internal/account/reposcope"
 	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/harness/runtime"
 )
@@ -83,6 +85,7 @@ func (s *Service) AccountUsageCached() Snapshot {
 			a.Stale = a.Stale || a.ObservedAt.IsZero() || now.Sub(a.ObservedAt) >= ttl
 			resetWindows(a, now)
 		}
+		applyStatedFailoverLimits(out.Accounts, s.o.Store, now)
 		ApplyBlockingQuota(out.Accounts, now)
 		return out
 	}
@@ -114,6 +117,44 @@ func CachedUsage(store *accountstore.Store, now time.Time) Snapshot {
 		applySavedObservation(&a, e, now)
 		out.Accounts = append(out.Accounts, a)
 	}
+	applyStatedFailoverLimits(out.Accounts, store, now)
 	ApplyBlockingQuota(out.Accounts, now)
 	return out
+}
+
+// applyStatedFailoverLimits reflects a z.ai 1308 response in the saved account
+// view. A newer provider observation replaces the failure-derived reading.
+func applyStatedFailoverLimits(accounts []Account, store *accountstore.Store, now time.Time) {
+	if store == nil {
+		return
+	}
+	scopes, err := reposcope.Open(filepath.Dir(store.Root))
+	if err != nil {
+		return
+	}
+	resets, err := scopes.Stated(now)
+	if err != nil || len(resets) == 0 {
+		return
+	}
+	recorded, err := scopes.LimitRecordedAt(now)
+	if err != nil {
+		return
+	}
+	spent := 100.0
+	for i := range accounts {
+		a := &accounts[i]
+		reset, ok := resets[a.ID]
+		if a.Provider != accountstore.ProviderZAI || !ok || a.ObservedAt.After(recorded[a.ID]) {
+			continue
+		}
+		for j := range a.Windows {
+			w := &a.Windows[j]
+			if w.ID != "five_hour" {
+				continue
+			}
+			w.UsedPercent, w.Used, w.Limit = &spent, nil, nil
+			w.Reason, w.Unit = "", "percent"
+			w.ResetsAt = reset.UTC().Format(time.RFC3339)
+		}
+	}
 }

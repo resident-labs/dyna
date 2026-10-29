@@ -186,7 +186,9 @@ func (s *Service) publish(accounts []Account, problems []runtime.AccountProblem,
 		}
 		return a.ID < b.ID
 	})
-	ApplyBlockingQuota(out.Accounts, s.o.Now())
+	now := s.o.Now()
+	applyStatedFailoverLimits(out.Accounts, s.o.Store, now)
+	ApplyBlockingQuota(out.Accounts, now)
 	s.last = out
 	return out
 }
