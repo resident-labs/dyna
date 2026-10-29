@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/repoid"
 	statewrite "dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 // Enqueue persists an event without running hooks. The queue row's
@@ -49,31 +52,40 @@ func (s Service) Enqueue(e Event) error {
 			e.Branch, _ = repoid.Git(context.Background(), e.Worktree, "symbolic-ref", "--short", "-q", "HEAD")
 		}
 	}
-	body, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
-	db, err := s.queueDB()
-	if err != nil {
-		return err
-	}
-	return statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(context.Background(), "INSERT INTO hook_queue(body) VALUES(?)", string(body))
-		return err
-	})
+	return s.appendQueued(context.Background(), e)
 }
 
 // drainRetry is how soon a drain that could not finish runs again.
 const drainRetry = time.Minute
 
+// drainLock is the flock that keeps one drain running at a time, in any
+// process. An flock releases on crash, and a drain of any length keeps it.
+func (s Service) drainLock() (unlock func(), owned bool, err error) {
+	dir := filepath.Join(s.dataDir(), "hooks")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, false, err
+	}
+	return store.TryLock(filepath.Join(dir, "queue-drain.lock"))
+}
+
 // Drain runs each queued event through Dispatch, then removes its row, and
 // returns the ids of the rows it ran. Hook failures are reported and consumed.
-// A drain that cannot finish (a database error stops it) returns when to try
-// again, counted from now; otherwise retry is zero. Cancellation leaves the
-// event for the next engine. A crash after Dispatch but before removal can
-// run the event again.
+// A drain that cannot finish (another process drains, or a database error
+// stops it) returns when to try again, counted from now; otherwise retry is
+// zero. Cancellation leaves the event for the next engine. A crash after
+// Dispatch but before removal can run the event again.
 func (s Service) Drain(ctx context.Context, now time.Time) (ran []string, retry time.Time, err error) {
 	retry = now.Add(drainRetry)
+	unlock, owned, err := s.drainLock()
+	if err != nil || !owned {
+		return nil, retry, err
+	}
+	defer unlock()
+	// Events a previous-release emitter still appends as files join the queue
+	// here, until no old emitter remains.
+	if err := s.importSpoolFiles(ctx); err != nil {
+		return nil, retry, err
+	}
 	pending, err := s.queued(ctx)
 	if err != nil {
 		return nil, retry, err

@@ -317,6 +317,36 @@ func TestQueuedLifecycleHooksSurviveRemovedExecutionTree(t *testing.T) {
 	}
 }
 
+// A drain that another process holds returns when to retry. A drain that
+// finishes returns the rows it ran and no retry.
+func TestDrainRetriesOnlyWhenItCannotFinish(t *testing.T) {
+	s, repo := setup(t)
+	add(t, s, repo, hook("ok", AfterLand))
+	s.Exec = func(ctx context.Context, p processguard.Process) error {
+		if p.Args[0] == "git" {
+			return processguard.Execute(ctx, p)
+		}
+		return nil
+	}
+	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err != nil {
+		t.Fatal(err)
+	}
+	unlock, owned, err := s.drainLock()
+	if err != nil || !owned {
+		t.Fatal(owned, err)
+	}
+	now := time.Now()
+	ran, retry, err := s.Drain(context.Background(), now)
+	if err != nil || len(ran) != 0 || !retry.Equal(now.Add(drainRetry)) {
+		t.Fatalf("held drain = %v, %v, %v; want a retry at %v", ran, retry, err, now.Add(drainRetry))
+	}
+	unlock()
+	ran, retry, err = s.Drain(context.Background(), now)
+	if err != nil || len(ran) != 1 || !retry.IsZero() {
+		t.Fatalf("finished drain = %v, %v, %v; want one row and no retry", ran, retry, err)
+	}
+}
+
 func TestQueuedMainHookUsesLiveMainTree(t *testing.T) {
 	s, repo := setup(t)
 	add(t, s, repo, hook("main", PRMerged))

@@ -104,8 +104,9 @@ func (s Service) importRuntime(conn *sql.Conn) error {
 	return nil
 }
 
-// Migrate prepares the runtime table and imports the legacy file spool
-// into the queue table once.
+// Migrate prepares the runtime and queue tables. The queue imports legacy
+// file-spool events on every drain, until no previous-release emitter
+// remains.
 func Migrate(dataDir string) error {
 	s := Service{DataDir: dataDir}
 	if _, err := s.queueDB(); err != nil {
