@@ -1,8 +1,12 @@
 package goals
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/settings"
 )
 
 func TestRuleLines(t *testing.T) {
@@ -24,18 +28,33 @@ func TestRuleLines(t *testing.T) {
 	}
 }
 
-func TestRuleLinesGuard(t *testing.T) {
-	rules := []Rule{
-		{ID: "r1", Text: strings.Repeat("界", MaxRulesText), Setter: "owner"},
-		{ID: "r2", Text: "overflow", Setter: "owner"},
-		{ID: "r3", Text: "also omitted", Setter: "owner"},
+func TestInstructionsKeepRulesWhenSettingsAreBroken(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.AddRule("room", "owner", "owner", "Run tests."); err != nil {
+		t.Fatal(err)
 	}
-	got := strings.Join(RuleLines(rules), "\n")
-	if !strings.Contains(got, rules[0].Text) || !strings.HasSuffix(got, "+2 more: dyna rules") || strings.Contains(got, "overflow") {
-		t.Fatal("guard did not count runes or omitted rules")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(settings.DefaultPath()), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	rules[0].Text += "界"
-	if got := strings.Join(RuleLines(rules), "\n"); !strings.HasSuffix(got, "+3 more: dyna rules") {
-		t.Fatal(got)
+	if err := os.WriteFile(settings.DefaultPath(), []byte(`{"rules":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.InstructionSections("room")[1].Items; len(got) != 1 || !strings.HasPrefix(got[0], "r1 Run tests.") {
+		t.Fatalf("broken settings hid accepted rules: %q", got)
+	}
+}
+
+func TestLoweredCapKeepsAcceptedRules(t *testing.T) {
+	s := testStore(t)
+	for range 3 {
+		if _, err := s.AddRule("room", "owner", "owner", strings.Repeat("x", 500)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setRulesCap(t, 500)
+	sections := s.InstructionSections("room")
+	if got := sections[1].Items; len(got) != 3 || strings.Contains(strings.Join(got, "\n"), "more: dyna rules") {
+		t.Fatalf("lowered cap dropped accepted rules: %q", got)
 	}
 }
