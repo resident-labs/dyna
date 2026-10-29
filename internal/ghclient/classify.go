@@ -144,11 +144,10 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 	// authored reports whether the room's account authored the one item that a
 	// state change names. A missing target, several targets or a failed lookup
 	// give false.
-	authored := func(kind ItemKind, targets []string) bool {
-		if in.Login == "" || in.AuthorOf == nil || len(targets) > 1 || (len(targets) == 0 && kind != ItemPR) {
+	authored := func(ref ItemRef, targets []string) bool {
+		if in.Login == "" || in.AuthorOf == nil || len(targets) > 1 || (len(targets) == 0 && ref.Kind != ItemPR) {
 			return false
 		}
-		ref := ItemRef{Kind: kind, Host: in.Host, Repo: in.Repo}
 		if len(targets) == 1 {
 			ref.Target = targets[0]
 		}
@@ -156,14 +155,14 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 		return err == nil && strings.EqualFold(author, in.Login)
 	}
 	byAuthor := func(kind ItemKind, targets []string) approvals.Class {
-		if authored(kind, targets) {
+		if authored(ItemRef{Kind: kind, Host: in.Host, Repo: in.Repo}, targets) {
 			return approvals.ClassAgent
 		}
 		return approvals.ClassOwner
 	}
 
 	if args[0] == "api" {
-		return classifyAPI(args, authored)
+		return classifyAPI(args, in.Host, authored)
 	}
 	if len(args) < 2 {
 		return approvals.ClassOwner
@@ -221,7 +220,7 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 
 // classifyAPI classifies a gh api write: REST POST and PATCH to a repository's
 // issues, pulls and comments. Closing or reopening an item needs authorship.
-func classifyAPI(args []string, authored func(ItemKind, []string) bool) approvals.Class {
+func classifyAPI(args []string, host string, authored func(ItemRef, []string) bool) approvals.Class {
 	call := parseAPICall(args)
 	p := parseArgs(args[:1], args[1:])
 	if call.graphql || len(p.positional) != 1 {
@@ -236,6 +235,11 @@ func classifyAPI(args []string, authored func(ItemKind, []string) bool) approval
 	if len(parts) < 4 || parts[0] != "repos" || (method != "POST" && method != "PATCH") {
 		return approvals.ClassOwner
 	}
+	// The lookup binds to the repository the endpoint names, not the checkout's.
+	if h := p.flags["--hostname"]; h != "" {
+		host = h
+	}
+	ref := ItemRef{Host: host, Repo: parts[1] + "/" + parts[2]}
 	rest := parts[3:]
 	last := rest[len(rest)-1]
 	_, number := strconv.Atoi(rest[len(rest)-1])
@@ -247,12 +251,12 @@ func classifyAPI(args []string, authored func(ItemKind, []string) bool) approval
 	case method == "POST" && len(rest) == 1 && (rest[0] == "issues" || rest[0] == "pulls"):
 		return approvals.ClassAgent
 	case method == "PATCH" && len(rest) == 2 && number == nil && (rest[0] == "issues" || rest[0] == "pulls"):
-		kind := ItemIssue
+		ref.Kind = ItemIssue
 		if rest[0] == "pulls" {
-			kind = ItemPR
+			ref.Kind = ItemPR
 		}
 		changesState := call.input || slices.ContainsFunc(call.keys, func(key string) bool { return strings.HasPrefix(key, "state") })
-		if !changesState || authored(kind, rest[1:]) {
+		if !changesState || authored(ref, rest[1:]) {
 			return approvals.ClassAgent
 		}
 	}
