@@ -176,6 +176,7 @@ not-state internal/pr/watch/review_context.go Service.prepareReviewTask 1 # revi
 not-state internal/pr/watch/review_context.go writeDiff 1 # a diff file that a reviewer reads
 not-state internal/pr/watch/review_context.go generatedDiffFiles 1 # a throwaway git index that reads .gitattributes at the assigned head, removed at once
 not-state internal/pr/watch/sync_operations.go Service.publishLaneExport 2 # a temporary folder and PR body file for gh, removed on return
+not-state internal/pr/watch/edit.go Service.Edit 2 # a temporary folder and PR body file for gh pr edit, removed on return
 not-state internal/processguard/helper.go runGuard 2 # removes the temporary Unix-socket control directory for one process group
 not-state internal/profile/migrate.go Migrate 1 # atomic upgrade of hand-edited profile configuration
 not-state internal/profile/migrate.go profileV2Backup 1 # checked private backup of hand-edited profile configuration
