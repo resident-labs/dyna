@@ -26,7 +26,7 @@ func TestStoredPRSnapshotFeedsSessionLinks(t *testing.T) {
 	} {
 		links, err := prlinks.ForSession(store.Root, session, record.RoomID)
 		want := []prlinks.Link{{Key: record.Key, Number: record.Number, URL: record.URL, Dir: record.Dir,
-			LookupDir: record.LookupDir, Head: record.Head, State: record.State, Watching: true, Roles: roles}}
+			LookupDir: record.LookupDir, Head: record.Head, State: string(record.State), Watching: true, Roles: roles}}
 		if err != nil || !reflect.DeepEqual(links, want) {
 			t.Fatalf("%s links: %+v, %v; want %+v", session, links, err, want)
 		}

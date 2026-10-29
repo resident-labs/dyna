@@ -17,7 +17,7 @@ import (
 // closes nothing. A close that fails leaves that issue open and returns an
 // error so the merge report shows it.
 func (s *Service) closeFixedIssues(ctx context.Context, r Record, mergeCommit string) error {
-	if r.State != "merged" || len(r.Fixes) == 0 || s.Notify == nil || s.Notify.Rooms == nil {
+	if r.State != state.PRMerged || len(r.Fixes) == 0 || s.Notify == nil || s.Notify.Rooms == nil {
 		return nil
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)

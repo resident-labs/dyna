@@ -166,7 +166,7 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	if err != nil {
 		return Record{}, false, err
 	}
-	rec := Record{PolicyOverride: override, Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(), Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: author.Dir, LookupDir: lookupDir, Head: snap.Pull.Head.SHA, State: "open", Watching: true, Created: s.now(), HeadSeen: s.now(), HeadVerifiedAt: s.now(), Seen: map[string]string{}}
+	rec := Record{PolicyOverride: override, Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(), Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: author.Dir, LookupDir: lookupDir, Head: snap.Pull.Head.SHA, State: state.PROpen, Watching: true, Created: s.now(), HeadSeen: s.now(), HeadVerifiedAt: s.now(), Seen: map[string]string{}}
 	rec.Kind = "github"
 	rec.ChangeID = rec.Key
 	rec.RepoPath = matchingCheckout(ctx, rec, lookupDir)
@@ -187,13 +187,13 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	if snap.Pull.State == "closed" {
 		endRecord(&rec, snap.Pull.Merged, s.now())
 		rec.Watching = false
-		rec.PauseReason = "PR is " + rec.State
+		rec.PauseReason = "PR is " + string(rec.State)
 	}
 	// A run-owned caller of the same controller first takes over the local
 	// change its earlier run author left on this branch (issue D-252), so the
 	// attach checks below read state that already names it as the author.
 	if moved, err := s.takeoverRunChange(ctx, author, lookupDir, func(old Record) bool {
-		return old.Kind == "local" && old.State == "open" && old.Branch == rec.Branch &&
+		return old.Kind == "local" && old.State == state.PROpen && old.Branch == rec.Branch &&
 			(old.RepoPath == rec.RepoPath || matchingCheckout(ctx, rec, old.Dir) != "")
 	}); err != nil {
 		return Record{}, false, err
@@ -205,7 +205,7 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	// Git probes use the read snapshot, before taking the publication guard.
 	// Validate the complete candidate set again under that guard below.
 	localCandidate := func(r *Record) bool {
-		return r.Kind == "local" && r.State == "open" && r.Branch != "" && r.Branch == rec.Branch
+		return r.Kind == "local" && r.State == state.PROpen && r.Branch != "" && r.Branch == rec.Branch
 	}
 	checkoutMatches := map[string]bool{}
 	for key, old := range st.Records {
@@ -260,7 +260,7 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 			}
 		}
 		check := sessionlife.Check
-		if rec.State == "open" && rec.Watching {
+		if rec.State == state.PROpen && rec.Watching {
 			check = sessionlife.Activate
 		}
 		if err := check(filepath.Join(filepath.Dir(s.Store.Root), "sessions"), author.ID); err != nil {
@@ -352,7 +352,7 @@ func (s *Service) Resume(key string) error {
 		if r == nil {
 			return fmt.Errorf("PR is not tracked")
 		}
-		if r.State != "open" {
+		if r.State != state.PROpen {
 			return fmt.Errorf("PR is %s", r.State)
 		}
 		r.Watching = true
@@ -449,10 +449,10 @@ func baseMerged(st *State, r *Record, newBase string, seen, now time.Time) (merg
 		if p == r || p.Host != r.Host || p.Repo != r.Repo || p.Branch != r.BaseRef || changeKind(*p) != "github" {
 			continue
 		}
-		if p.State == "merged" && p.BaseRef == newBase && p.Head != "" && p.Head == r.Base {
+		if p.State == state.PRMerged && p.BaseRef == newBase && p.Head != "" && p.Head == r.Base {
 			return true, false
 		}
-		if p.State == "open" && p.Checked.Before(seen) && now.Before(seen.Add(retargetWait)) {
+		if p.State == state.PROpen && p.Checked.Before(seen) && now.Before(seen.Add(retargetWait)) {
 			wait = true
 		}
 	}
@@ -689,8 +689,8 @@ func (s *Service) closeRecord(r *Record, snap Snapshot, n *pollNotices, out *pro
 		copy := *r
 		out.cleanup = &copy
 	}
-	r.PauseReason = "PR is " + r.State
-	n.changes = append(n.changes, r.State)
+	r.PauseReason = "PR is " + string(r.State)
+	n.changes = append(n.changes, string(r.State))
 }
 
 const cancelledCIReason = "The last CI run was cancelled. Push or rerun CI to test this commit."
@@ -698,7 +698,7 @@ const cancelledCIReason = "The last CI run was cancelled. Push or rerun CI to te
 // applyCI records the CI state and its reason, counts consecutive failures,
 // and queues a CI notice for the author.
 func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string, jobs, logs []string, budgetsDue bool, n *pollNotices) {
-	r.CI = ci
+	r.CI = state.CIState(ci)
 	r.LocalCIConfig = snap.localCIConfig
 	r.CIReason, _ = budgetFailure(*r, snap, EffectivePolicy(*st, *r))
 	if ci == "pending" && r.CIReason == "" && snap.localCI != nil {
@@ -1049,7 +1049,7 @@ func staleVerdict(r Record, actor, head string, pull Pull, reviewID int64, named
 			assigned = true
 		}
 	}
-	ended := !r.Watching || r.State != "open" || pull.State == "closed"
+	ended := !r.Watching || r.State != state.PROpen || pull.State == "closed"
 	changed := head != "" && (head != r.Head || (!named && head != r.RoundHead) || (pull.Head.SHA != "" && pull.Head.SHA != head))
 	if !ended && !changed {
 		return nil
@@ -1228,7 +1228,8 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		}
 		if changeKind(*r) == "github" {
 			// Readiness below needs CI on this head now, not the last poll.
-			r.CI, _, _, _ = s.ciStatus(snap, *r, freshPolicy)
+			ci, _, _, _ := s.ciStatus(snap, *r, freshPolicy)
+			r.CI = state.CIState(ci)
 		}
 		if changeKind(*r) == "local" {
 			r.ReviewPublishing = PublishingLocal
@@ -1299,7 +1300,7 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		if approved(verdict) {
 			target = ""
 			status := "Dyna merges automatically when approved and green."
-			if changeKind(*r) == "github" && (r.CI == "pending" || r.CI == "failed") {
+			if changeKind(*r) == "github" && (r.CI == state.CIPending || r.CI == state.CIFailed) {
 				status = "CI has not passed on this head yet. Dyna reports ready when it passes."
 			}
 			if noQueue {
@@ -1561,7 +1562,7 @@ func (s *Service) escalate(ctx context.Context, r Record, n Notice) (subagent.In
 			return root, nil
 		}
 	}
-	if err == nil && spawned && r.Watching && r.State == "open" {
+	if err == nil && spawned && r.Watching && r.State == state.PROpen {
 		if e := s.Transfer(ctx, r.Key, "author", info, ""); e != nil {
 			log.Printf("PR #%d: started %s but could not make it the author: %v", r.Number, info.Address(), e)
 		}

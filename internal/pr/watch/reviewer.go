@@ -378,7 +378,7 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 		// The pool releases a closed PR's reviewer within a pass. Older closed
 		// PRs only name closed reviewers, and reading those sessions on every
 		// call only to drop them was the engine's largest CPU cost.
-		if (r.State == "closed" || r.State == "merged") && !r.ClosedAt.IsZero() && s.now().Sub(r.ClosedAt) > closedReviewerWindow {
+		if (r.State == state.PRClosed || r.State == state.PRMerged) && !r.ClosedAt.IsZero() && s.now().Sub(r.ClosedAt) > closedReviewerWindow {
 			continue
 		}
 		if r.Reviewer != "" {
@@ -398,8 +398,8 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 		a, b := facts.Need[i], facts.Need[j]
 		// Passing CI gets the next slot. Other eligible heads can still be
 		// reviewed in parallel with CI. Equal priority uses a stable key.
-		if (a.CI == "passed") != (b.CI == "passed") {
-			return a.CI == "passed"
+		if (a.CI == state.CIPassed) != (b.CI == state.CIPassed) {
+			return a.CI == state.CIPassed
 		}
 		return a.Key < b.Key
 	})
@@ -443,10 +443,10 @@ func (f ReviewFacts) ReviewState(r Record) (string, *int, string) {
 		return "blocked", nil, "Room sessions are paused."
 	}
 
-	if r.Watching && r.State == "open" && r.IsDraft {
+	if r.Watching && r.State == state.PROpen && r.IsDraft {
 		return "blocked", nil, "The PR is a draft."
 	}
-	if r.Watching && r.State == "open" && !headVerified(r) {
+	if r.Watching && r.State == state.PROpen && !headVerified(r) {
 		return "blocked", nil, "The PR head is unverified; waiting for a successful refresh."
 	}
 	if r.RoundHead == r.Head {
@@ -462,10 +462,10 @@ func (f ReviewFacts) ReviewState(r Record) (string, *int, string) {
 			return "blocked", nil, "The reviewer stopped early: " + string(r.StopReason) + ". Push a new head or run dyna git pr reviewer --restart."
 		}
 	}
-	if !r.Watching || r.State != "open" || EffectivePolicy(f.State, r).Review == "off" {
+	if !r.Watching || r.State != state.PROpen || EffectivePolicy(f.State, r).Review == "off" {
 		return "off", nil, ""
 	}
-	if r.CI == "failed" {
+	if r.CI == state.CIFailed {
 		return "blocked", nil, "CI failed for the current head."
 	}
 	if f.Busy[r.Key].Info.ID != "" {
@@ -835,7 +835,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			live.Round, live.RoundHead, live.RoundStarted = r.Round, r.Head, r.RoundStarted
 			live.Verdict, live.Summary, live.ReviewID = "", "", 0
 			live.StopReason, live.FastLand = "", nil
-			live.Reviewer, live.ReviewerName, live.ReviewerMode = id, r.ReviewerName, "session"
+			live.Reviewer, live.ReviewerName, live.ReviewerMode = id, r.ReviewerName, state.ReviewerModeSession
 			live.ReviewPublishing = r.ReviewPublishing
 			live.PauseReason = ""
 			rememberReviewAssignment(live)
@@ -869,7 +869,7 @@ func (s *Service) cleanupEndedRoom(ctx context.Context, roomID string) error {
 func dependencyWaiting(st State, r Record) bool {
 	for _, id := range r.Dependencies {
 		for _, base := range st.Records {
-			if (base.Key == id || changeID(*base) == id) && base.State == "open" && !prfacts.ApprovedAtHead(*base) {
+			if (base.Key == id || changeID(*base) == id) && base.State == state.PROpen && !prfacts.ApprovedAtHead(*base) {
 				return true
 			}
 		}

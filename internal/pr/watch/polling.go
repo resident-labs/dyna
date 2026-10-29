@@ -55,7 +55,7 @@ func (s *Service) refreshUnwatched(ctx context.Context, key string, force bool, 
 		applyRateLimits(current, st.RateLimits, s.now())
 		live := current.Records[key]
 		// A resumed or completed watch owns its state and response cache again.
-		if live == nil || live.Watching || live.State != "open" || changeKind(*live) == "local" {
+		if live == nil || live.Watching || live.State != state.PROpen || changeKind(*live) == "local" {
 			return nil
 		}
 		if current.Responses == nil {
@@ -100,7 +100,7 @@ func (s *Service) refreshUnwatched(ctx context.Context, key string, force bool, 
 // shouldRefreshUnwatched also lets Tick skip historical records without another
 // full state read for each one. Refresh still rechecks under a fresh snapshot.
 func shouldRefreshUnwatched(st State, r *Record, now time.Time, force bool) bool {
-	return r != nil && !r.Watching && r.State == "open" && changeKind(*r) != "local" &&
+	return r != nil && !r.Watching && r.State == state.PROpen && changeKind(*r) != "local" &&
 		!now.Before(quotaFor(st, r, now).PauseUntil) && (force || !now.Before(r.Polling.Next))
 }
 
@@ -180,7 +180,7 @@ func quietPull(r Record, policy ChangePolicy, pull Pull, ciProbe string, notModi
 // A budget failure can mask a check that is still running, so it stays
 // unsettled.
 func settledCI(r Record) bool {
-	if r.CI == "" || r.CI == "pending" {
+	if r.CI == "" || r.CI == state.CIPending {
 		return false
 	}
 	for _, check := range r.Checks {

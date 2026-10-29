@@ -31,7 +31,7 @@ func VerdictNotice(err error) (string, bool) {
 }
 
 func validateVerdictReviewer(r Record, actor, head string, reviewID int64, named bool) error {
-	if !r.Watching || r.State != "open" {
+	if !r.Watching || r.State != state.PROpen {
 		return fmt.Errorf("PR is not open and watched")
 	}
 	if actor == r.Author {

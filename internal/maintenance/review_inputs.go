@@ -31,7 +31,7 @@ func sweepReviewInputs(ctx context.Context, root string, now time.Time, dry bool
 			continue
 		}
 		at := time.Time{}
-		if r.State == "closed" || r.State == "merged" {
+		if r.State == state.PRClosed || r.State == state.PRMerged {
 			at = r.ClosedAt
 		}
 		closedAt[filepath.Base(state.ReviewInputsDir(root, key))] = at

@@ -388,7 +388,7 @@ func pruneShellJobs(ctx context.Context, shs *shells.Store, now time.Time) (int,
 func liveCommits(st state.State) map[string]bool {
 	keep := map[string]bool{}
 	for _, r := range st.Records {
-		if r == nil || r.State != "open" {
+		if r == nil || r.State != state.PROpen {
 			continue
 		}
 		for _, sha := range []string{r.Head, r.RoundHead, r.LastReviewHead, r.CIBudgetHead, r.CITestHead} {

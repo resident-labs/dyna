@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/pr/state"
 	"log"
 	"os"
 	"path/filepath"
@@ -271,7 +272,7 @@ func (s *Service) discoveryRecords(ctx context.Context, st State, owners worktre
 	})
 	trackedBranches := map[string]bool{}
 	for _, r := range st.Records {
-		if r.Watching && r.State == "open" {
+		if r.Watching && r.State == state.PROpen {
 			trackedBranches[strings.ToLower(r.Host+"/"+r.Repo)+"\n"+r.Branch] = true
 		}
 	}

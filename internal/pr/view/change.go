@@ -265,7 +265,7 @@ func (s *Service) SendWorktreeComments(ctx context.Context, roomRef, sessionRef 
 	// The change for this worktree: opened by the session, from the session's directory.
 	var keys []string
 	for _, r := range st.Records {
-		if r.Author == info.ID && r.RoomID == info.RoomID && r.State == "open" && r.Watching && sameDir(r.Dir, info.Dir) {
+		if r.Author == info.ID && r.RoomID == info.RoomID && r.State == state.PROpen && r.Watching && sameDir(r.Dir, info.Dir) {
 			keys = append(keys, r.Key)
 		}
 	}
@@ -292,9 +292,9 @@ func pageRecords(st watch.State, roomID, before string, limit int, prsOnly bool,
 	}
 	return listpage.Select(records, before, limit, now, func(r *watch.Record) listpage.Meta {
 		at := r.ClosedAt
-		if r.State == "open" {
+		if r.State == state.PROpen {
 			at = r.Created
 		}
-		return listpage.Meta{ID: r.Key, At: at, Open: r.State == "open"}
+		return listpage.Meta{ID: r.Key, At: at, Open: r.State == state.PROpen}
 	})
 }

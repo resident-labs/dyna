@@ -101,7 +101,7 @@ func (s *Service) runTakeoverAllowed(old Record, controller state.Controller) bo
 	if old.Controller == "" || old.Controller != controller {
 		return false
 	}
-	if old.State != "open" || !old.Watching {
+	if old.State != state.PROpen || !old.Watching {
 		return false
 	}
 	return s.authorRoleVacant(old)

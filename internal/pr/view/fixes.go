@@ -11,7 +11,7 @@ func (s *Service) IssueFixes(roomID string) (map[int]int, error) {
 	}
 	out := map[int]int{}
 	for _, r := range records {
-		if r.RoomID != roomID || r.State != "open" || r.Number == 0 {
+		if r.RoomID != roomID || r.State != state.PROpen || r.Number == 0 {
 			continue
 		}
 		for _, fix := range r.Fixes {

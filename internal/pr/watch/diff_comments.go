@@ -49,7 +49,7 @@ func (s *Service) SendDiffComments(ctx context.Context, key string, comments []D
 		if r == nil {
 			return fmt.Errorf("change is not tracked")
 		}
-		if !r.Watching || r.State != "open" {
+		if !r.Watching || r.State != state.PROpen {
 			return fmt.Errorf("change is not open and watched")
 		}
 		first := len(r.Findings)
