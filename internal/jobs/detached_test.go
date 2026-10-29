@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -123,6 +125,54 @@ func TestDetachedCheckReportsItsExitStatus(t *testing.T) {
 	err := poller.Run(t.Context(), testSpec("a"), io.Discard)
 	if code, ok := CommandExitStatus(err); !ok || code != 3 {
 		t.Fatalf("err = %v, want exit status 3", err)
+	}
+}
+
+// The real stop protocol answers only after the log writer ended: a writer
+// held past its wait bound fails the stop, so the run reconciles through its
+// poll instead of trusting a log that can still grow, and a writer that ended
+// lets the stop succeed. The script runs for real against a local wrapper
+// process group and a held writer process.
+func TestStopScriptFailsWhileTheLogWriterRuns(t *testing.T) {
+	// The runner scrubs the environment, so the writer bound rides in as the
+	// first line of the same script: the stop text itself runs unchanged, and
+	// a bound of zero tenths checks the writer at once without a real sleep.
+	stop := "DYNA_CI_WRITER_WAIT_TENTHS=0\n" + StopScript
+	dir := t.TempDir()
+	wrapper := exec.Command("setsid", "sleep", "60")
+	if err := wrapper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// The wrapper only stands in for a stopped check: end and reap it before
+	// the calls, so a zombie group never looks running to the script.
+	_ = wrapper.Process.Kill()
+	_ = wrapper.Wait()
+	writer := exec.Command("sleep", "60")
+	if err := writer.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = wrapper.Process.Kill()
+		_ = writer.Process.Kill()
+		_, _ = writer.Process.Wait()
+	})
+	if err := os.WriteFile(filepath.Join(dir, "pid"), []byte(strconv.Itoa(wrapper.Process.Pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "writer.pid"), []byte(strconv.Itoa(writer.Process.Pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	x := Executor{Node: Conn{Name: "here"}}
+	var out, stderr TailBuffer
+	err := x.NodeExec(t.Context(), nil, &out, &stderr, stop, dir, "dyna-924-test.unit")
+	if err == nil || !strings.Contains(stderr.String(), "log writer") {
+		t.Fatalf("stop with a held writer = %v, stderr %q; want the writer failure", err, stderr.String())
+	}
+	_ = writer.Process.Kill()
+	_ = writer.Wait()
+	var second TailBuffer
+	if err := x.NodeExec(t.Context(), nil, &out, &second, stop, dir, "dyna-924-test.unit"); err != nil {
+		t.Fatalf("stop after the writer ended = %v, stderr %q; want success", err, second.String())
 	}
 }
 
