@@ -300,11 +300,11 @@ func matchesUpstream(rec room.Record, r repository) bool {
 	})
 }
 
-// matchesForkParent asks GitHub for the parent of the origin of the room's
-// checkout that cmdDir uses: the room's repository, or a registered extra one.
-func matchesForkParent(ctx context.Context, rec room.Record, cmdDir string, r repository) bool {
-	if rec.Repo == "" || r.name == "" {
-		return false
+// checkoutOrigin returns the origin repository of the room's checkout that
+// cmdDir uses: the room's repository, or a registered extra one.
+func checkoutOrigin(ctx context.Context, rec room.Record, cmdDir string) (repository, bool) {
+	if rec.Repo == "" {
+		return repository{}, false
 	}
 	checkout := rec.Repo
 	for _, path := range rec.ExtraRepos {
@@ -314,22 +314,87 @@ func matchesForkParent(ctx context.Context, rec room.Record, cmdDir string, r re
 	}
 	remote, err := repoid.Git(ctx, checkout, "remote", "get-url", "origin")
 	if err != nil {
-		return false
+		return repository{}, false
 	}
 	identity, err := repoid.RemoteIdentity(checkout, remote)
 	if err != nil {
-		return false
+		return repository{}, false
 	}
 	parts := strings.Split(identity, "/")
-	if len(parts) != 3 || !strings.EqualFold(r.host, parts[0]) {
+	if len(parts) != 3 {
+		return repository{}, false
+	}
+	return repository{parts[0], parts[1] + "/" + parts[2]}, true
+}
+
+// matchesForkParent asks GitHub for the parent of the origin of the room's
+// checkout that cmdDir uses: the room's repository, or a registered extra one.
+func matchesForkParent(ctx context.Context, rec room.Record, cmdDir string, r repository) bool {
+	origin, ok := checkoutOrigin(ctx, rec, cmdDir)
+	if !ok || r.name == "" || !strings.EqualFold(r.host, origin.host) {
 		return false
 	}
-	origin := repository{parts[0], parts[1] + "/" + parts[2]}
+	checkout := rec.Repo
+	for _, path := range rec.ExtraRepos {
+		if sameCheckout(cmdDir, path) {
+			checkout = path
+		}
+	}
 	parent, ok := parentRepo(ctx, Command(ctx, "", checkout), origin)
 	return ok && strings.EqualFold(r.name, parent)
 }
 
+// pullHeadRepo returns the repository a pull request's head branch lives in.
+// Tests replace it.
+var pullHeadRepo = fetchPullHeadRepo
+
+func fetchPullHeadRepo(ctx context.Context, cmd *exec.Cmd, r repository, number string) (string, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	rec, err := roomFor(ctx, cmd.Dir, r)
+	if err != nil && !errors.Is(err, errNotInRoom) {
+		return "", false
+	}
+	_, token, err := selectAccountForRoom(ctx, cmd, r, rec, false)
+	if err != nil {
+		return "", false
+	}
+	raw, err := authOutput(ctx, cmd, token, "api", "--hostname", r.host, "repos/"+r.name+"/pulls/"+number)
+	if err != nil {
+		return "", false
+	}
+	var body struct {
+		Head struct {
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+	}
+	if json.Unmarshal(raw, &body) != nil || !repoName.MatchString(body.Head.Repo.FullName) {
+		return "", false
+	}
+	return body.Head.Repo.FullName, true
+}
+
+var pullNumber = regexp.MustCompile(`^[0-9]+$`)
+
+// editsForkPull reports whether gh pr edit names a pull request on r whose head
+// branch lives in the room's own fork. Only a plain number names one.
+func editsForkPull(ctx context.Context, rec room.Record, cmdDir string, r repository, command []string) bool {
+	positional := parseArgs(command[:2], command[2:]).positional
+	if len(positional) != 1 || !pullNumber.MatchString(positional[0]) {
+		return false
+	}
+	origin, ok := checkoutOrigin(ctx, rec, cmdDir)
+	if !ok {
+		return false
+	}
+	head, ok := pullHeadRepo(ctx, Command(ctx, "", cmdDir), r, positional[0])
+	return ok && strings.EqualFold(head, origin.name)
+}
+
 var mutation = regexp.MustCompile(`\bmutation\b`)
+var errUpstreamEdit = errors.New("gh pr edit on the upstream repository is allowed only for a pull request number whose head branch is in the room's fork")
 var errAgentGitHubWrite = errors.New("GitHub writes are not allowed for agents; post in the room with dyna post instead")
 
 func commandArgs(args []string) []string {
@@ -688,18 +753,37 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 		allowed := false
 		if len(command) >= 2 {
 			switch command[0] + " " + command[1] {
-			case "issue create", "pr create", "pr edit", "pr ready":
+			case "issue create", "issue comment", "pr create", "pr comment", "pr edit", "pr ready", "pr review":
 				allowed = true
 			}
 		}
 		if !errors.Is(err, errNotInRoom) || !allowed {
 			return err
 		}
+		owned := matchesUpstream(rec, r)
+		// A comment on a repository that is not the room's is a room mismatch,
+		// whatever the access, so the owner learns which repository was wrong.
+		if !owned && Access(ctx, rec) != ReadWrite && command[1] != "create" && command[1] != "edit" && command[1] != "ready" {
+			owned = matchesForkParent(ctx, rec, cmdDir, r)
+			if !owned {
+				return err
+			}
+		}
 		if Access(ctx, rec) != ReadWrite {
 			return errReadOnly
 		}
-		if !matchesForkParent(ctx, rec, cmdDir, r) {
+		if !owned && !matchesForkParent(ctx, rec, cmdDir, r) {
 			return err
+		}
+		switch command[0] + " " + command[1] {
+		case "issue create":
+			if len(command) == len(args) && !createNamesRepo(command[2:]) {
+				return err
+			}
+		case "pr edit":
+			if !editsForkPull(ctx, rec, cmdDir, r, command) {
+				return errUpstreamEdit
+			}
 		}
 	}
 	if Access(ctx, rec) != ReadWrite && !isRead(args) {
