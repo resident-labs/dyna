@@ -47,6 +47,20 @@ func (s *Service) SetRoomCheckIn(ctx context.Context, ref, value string) error {
 	return err
 }
 
+// SetRoomUpstream names the parent repository of a room's fork checkout, so
+// `pr track` accepts a PR opened on that parent. "off" clears it. Only the
+// owner and the room's root may change it.
+func (s *Service) SetRoomUpstream(ctx context.Context, ref, value string) error {
+	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return err
+	}
+	upstream, err := room.ParseUpstream(value)
+	if err != nil {
+		return err
+	}
+	return s.rooms().SetUpstream(ref, upstream)
+}
+
 // SetRoomLimitResult is the answer to a saved limit: ApplyWarning names why
 // the live slice did not pick the saved limit up, empty when it did. The
 // saved value is the source of truth: later launches and applies use it even
