@@ -299,12 +299,15 @@ func TestPublicReadOutsideTheRoomRunsAnonymouslyAndNothingElseDoes(t *testing.T)
 	if strings.Join(asked, " ") != "ludovic111/horizon ludovic111/horizon" {
 		t.Fatalf("visibility asked for %v, want one check per access of the endpoint's repository", asked)
 	}
-	for _, args := range [][]string{
-		{"api", "repos/ludovic111/horizon/issues", "-X", "POST"},
-		{"issue", "create", "--repo", "ludovic111/horizon"},
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"api", "repos/ludovic111/horizon/issues", "-X", "POST"}, "does not belong to the acting room"},
+		{[]string{"issue", "create", "--repo", "ludovic111/horizon"}, "read-only"},
 	} {
-		if err := run(args...); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
-			t.Fatalf("%q = %v, want the acting-room refusal", args, err)
+		if err := run(tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("%q = %v, want an error containing %q", tt.args, err, tt.want)
 		}
 	}
 	publicRepo = func(context.Context, repository) bool { return false }

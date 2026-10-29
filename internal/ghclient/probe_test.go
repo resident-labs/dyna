@@ -101,13 +101,17 @@ func probeRoom(t *testing.T) probeEnv {
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
 		t.Fatal(err)
 	}
+	stored, err := room.DefaultStore().Resolve(records[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	exe := filepath.Join(t.TempDir(), "gh")
 	if err := os.WriteFile(exe, []byte(fakeGH), 0700); err != nil {
 		t.Fatal(err)
 	}
 	r := repository{"github.com", "resident-labs/project"}
 	cmd := Command(context.Background(), exe, records[0].Repo)
-	return probeEnv{exe: exe, key: accountKey(cmd, r) + records[0].ID + ReadWrite, r: r}
+	return probeEnv{exe: exe, key: accountProofKey(context.Background(), cmd, r, stored, true), r: r}
 }
 
 // reply returns an environment where the fake gh answers with the given reply.

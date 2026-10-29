@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -62,6 +63,7 @@ func Access(_ context.Context, rec room.Record) string {
 
 // errNotInRoom is the refusal for a repository that is not the acting room's.
 var errNotInRoom = errors.New("GitHub repository does not belong to the acting room")
+var errReadOnly = errors.New("GitHub writes are disabled: this room is read-only")
 
 // outsideReadError explains a refused read of a repository outside the room. Only
 // a REST read of a public repository outside every room is allowed (D-272), so
@@ -105,7 +107,7 @@ func roomFor(ctx context.Context, cmdDir string, r repository) (room.Record, err
 		if err := ctx.Err(); err != nil {
 			return room.Record{}, err
 		}
-		return room.Record{}, errNotInRoom
+		return rec, errNotInRoom
 	}
 	var matches []room.Record
 	for _, rec := range records {
@@ -151,6 +153,28 @@ func matchesRepository(ctx context.Context, rec room.Record, r repository) bool 
 	}
 	identity, err := repoid.RemoteIdentity(rec.Repo, remote)
 	return err == nil && strings.EqualFold(identity, r.host+"/"+r.name)
+}
+
+// matchesForkParent asks GitHub for the parent of the room's origin repository.
+func matchesForkParent(ctx context.Context, rec room.Record, r repository) bool {
+	if rec.Repo == "" || r.name == "" {
+		return false
+	}
+	remote, err := repoid.Git(ctx, rec.Repo, "remote", "get-url", "origin")
+	if err != nil {
+		return false
+	}
+	identity, err := repoid.RemoteIdentity(rec.Repo, remote)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(identity, "/")
+	if len(parts) != 3 || !strings.EqualFold(r.host, parts[0]) {
+		return false
+	}
+	origin := repository{parts[0], parts[1] + "/" + parts[2]}
+	parent, ok := parentRepo(ctx, Command(ctx, "", rec.Repo), origin)
+	return ok && strings.EqualFold(r.name, parent)
 }
 
 var mutation = regexp.MustCompile(`\bmutation\b`)
@@ -367,6 +391,36 @@ func fetchPublicRepo(ctx context.Context, r repository) bool {
 	return resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body) == nil && !body.Private
 }
 
+// parentRepo returns the GitHub parent of a fork. Tests replace it.
+var parentRepo = fetchParentRepo
+
+// fetchParentRepo reads the parent with the room's credential on the origin's host.
+func fetchParentRepo(ctx context.Context, cmd *exec.Cmd, r repository) (string, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	rec, err := roomFor(ctx, cmd.Dir, r)
+	if err != nil {
+		return "", false
+	}
+	_, token, err := selectAccountForRoom(ctx, cmd, r, rec, false)
+	if err != nil {
+		return "", false
+	}
+	raw, err := authOutput(ctx, cmd, token, "api", "--hostname", r.host, "repos/"+r.name)
+	if err != nil {
+		return "", false
+	}
+	var body struct {
+		Parent struct {
+			FullName string `json:"full_name"`
+		} `json:"parent"`
+	}
+	if json.Unmarshal(raw, &body) != nil || !repoName.MatchString(body.Parent.FullName) {
+		return "", false
+	}
+	return body.Parent.FullName, true
+}
+
 func checkWorkerPolicy(args []string) error {
 	args = commandArgs(args)
 	if isRead(args) {
@@ -388,7 +442,7 @@ func checkWorkerPolicy(args []string) error {
 	}
 	if len(args) >= 2 {
 		switch args[0] + " " + args[1] {
-		case "pr create", "pr edit", "pr ready",
+		case "issue create", "pr create", "pr edit", "pr ready",
 			"agent-task list", "agent-task view",
 			"attestation download", "attestation trusted-root", "attestation verify",
 			"cache list", "codespace list", "codespace logs", "codespace view",
@@ -444,10 +498,26 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	}
 	rec, err := roomFor(ctx, cmdDir, r)
 	if err != nil {
-		return err
+		command := commandArgs(args)
+		allowed := false
+		if len(command) >= 2 {
+			switch command[0] + " " + command[1] {
+			case "issue create", "pr create", "pr edit", "pr ready":
+				allowed = true
+			}
+		}
+		if !errors.Is(err, errNotInRoom) || !allowed {
+			return err
+		}
+		if Access(ctx, rec) != ReadWrite {
+			return errReadOnly
+		}
+		if !matchesForkParent(ctx, rec, r) {
+			return err
+		}
 	}
 	if Access(ctx, rec) != ReadWrite && !isRead(args) {
-		return errors.New("GitHub writes are disabled: this room is read-only")
+		return errReadOnly
 	}
 	return nil
 }
