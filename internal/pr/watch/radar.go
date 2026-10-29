@@ -25,7 +25,7 @@ func (s *Service) refreshOverlaps(ctx context.Context) error {
 	}
 	groups := map[string][]Record{}
 	for _, r := range st.Records {
-		if r.Watching && r.State == "open" && commitID(r.Head) && r.RepoPath != "" && !basedOnBranch(*r) {
+		if r.Watching && r.State == state.PROpen && commitID(r.Head) && r.RepoPath != "" && !basedOnBranch(*r) {
 			groups[defaultRepo(*r)] = append(groups[defaultRepo(*r)], *r)
 		}
 	}
@@ -65,7 +65,7 @@ func (s *Service) refreshOverlaps(ctx context.Context) error {
 	return s.Store.update(func(cur *State) error {
 		open := map[string]*Record{}
 		for _, r := range cur.Records {
-			if r.Watching && r.State == "open" {
+			if r.Watching && r.State == state.PROpen {
 				open[changeID(*r)] = r
 			}
 		}

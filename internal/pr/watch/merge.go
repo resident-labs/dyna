@@ -143,7 +143,7 @@ func schedulerTakesTrial(r Record) bool {
 func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 	var queue []MergeQueueItem
 	for _, r := range st.Records {
-		if !r.Watching || r.State != "open" {
+		if !r.Watching || r.State != state.PROpen {
 			continue
 		}
 		if changeKind(*r) == "local" && !st.RepositoryFacts[defaultRepo(*r)].MergeTrialCI {
@@ -193,7 +193,7 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 			}
 		case !facts.HeadVerified(*r):
 			item.State, item.Reason = "waiting", "waiting for a verified head"
-		case r.CI == "failed":
+		case r.CI == state.CIFailed:
 			item.State, item.Reason = "ci-failed", ciFailedReason(*r)
 		// TODO: legacy/shim remove later — a stored review from before the typed
 		// results may still say question; remove when that history ages out.
@@ -203,7 +203,7 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 			item.State, item.Reason = "stopped", "the reviewer stopped early: "+string(r.StopReason)
 		case !facts.ApprovedAtHead(*r):
 			item.State, item.Reason = "review", "needs review"
-		case r.CI != "passed":
+		case r.CI != state.CIPassed:
 			item.State, item.Reason = "ci", "waiting for CI"
 		default:
 			item.State, item.Reason = "waiting", "waiting for GitHub to confirm the PR can merge"
@@ -326,7 +326,7 @@ func mergeDependency(st State, id string) *MergeDependency {
 // fastLandable reports a reviewer's approve-fast decision at the current head.
 // The merge-ready gate has already proved required CI at that exact head.
 func fastLandable(r Record) bool {
-	return r.Verdict == state.VerdictApproveFast && r.CI == "passed" && r.RoundHead == r.Head
+	return r.Verdict == state.VerdictApproveFast && r.CI == state.CIPassed && r.RoundHead == r.Head
 }
 
 // fastLand publishes one change without the batch trial. Every existing merge
@@ -354,7 +354,7 @@ func (s *Service) fastLand(ctx context.Context, candidate Record, base *state.Re
 // through the repository's registered local or hosted gate. This check adds the
 // other fact: the current default-branch tip is an ancestor of that head.
 func (s *Service) testedHeadLandable(ctx context.Context, candidate Record, base state.RepositoryFacts) (bool, error) {
-	if changeKind(candidate) != "github" || candidate.CI != "passed" || candidate.Head == "" || base.Head == "" || base.DefaultBranch == "" {
+	if changeKind(candidate) != "github" || candidate.CI != state.CIPassed || candidate.Head == "" || base.Head == "" || base.DefaultBranch == "" {
 		return false, nil
 	}
 	var comparison struct {
@@ -448,7 +448,7 @@ func (s *Service) mergeRecorded(expected Record) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return saved.State == "merged" && !saved.Watching && saved.Head == expected.Head, nil
+	return saved.State == state.PRMerged && !saved.Watching && saved.Head == expected.Head, nil
 }
 
 func mergeReadKeys(r Record) []string {
@@ -463,7 +463,7 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 		return Record{}, false, err
 	}
 	current := st.Records[expected.Key]
-	if current == nil || current.Head != expected.Head || !current.Watching || current.State != "open" {
+	if current == nil || current.Head != expected.Head || !current.Watching || current.State != state.PROpen {
 		return Record{}, false, nil
 	}
 	if paused, err := s.RoomPaused(current.RoomID); err != nil {
@@ -497,7 +497,7 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 		return Record{}, false, err
 	}
 	current = st.Records[expected.Key]
-	if current == nil || current.Head != expected.Head || !current.Watching || current.State != "open" {
+	if current == nil || current.Head != expected.Head || !current.Watching || current.State != state.PROpen {
 		return Record{}, false, nil
 	}
 	// The queue re-reads a ready PR every poll. Revalidate its saved copies so
@@ -575,7 +575,7 @@ func (s *Service) refreshMergeFacts(ctx context.Context) (map[string]headProbe, 
 	failures := []error{localErr, refreshErr}
 	for _, key := range keys {
 		r := st.Records[key]
-		if !r.Watching || r.State != "open" || changeKind(*r) != "github" || !facts.HeadVerified(*r) {
+		if !r.Watching || r.State != state.PROpen || changeKind(*r) != "github" || !facts.HeadVerified(*r) {
 			continue
 		}
 		if paused, err := s.RoomPaused(r.RoomID); err != nil {

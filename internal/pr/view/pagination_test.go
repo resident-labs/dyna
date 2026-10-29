@@ -19,7 +19,7 @@ func TestChangesAndPRsCutoffAndCursor(t *testing.T) {
 		id, state string
 		at        time.Time
 	}{{"open", "open", old}, {"recent", "closed", now}, {"old", "merged", old}} {
-		st.Records[item.id] = &watch.Record{Key: item.id, RoomID: r.ID, Created: item.at, Checked: item.at, ClosedAt: item.at, State: item.state, Watching: item.state == "open"}
+		st.Records[item.id] = &watch.Record{Key: item.id, RoomID: r.ID, Created: item.at, Checked: item.at, ClosedAt: item.at, State: state.PRState(item.state), Watching: item.state == "open"}
 	}
 	prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, st)
 	t.Run("Changes", func(t *testing.T) {

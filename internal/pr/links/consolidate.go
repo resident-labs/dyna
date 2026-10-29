@@ -19,7 +19,7 @@ func Consolidate(root, roomID, target string, absorbed map[string]bool) error {
 	}
 	return prstate.Update(context.Background(), root, func(st *prstate.State) error {
 		for _, r := range st.Records {
-			if r == nil || r.RoomID != roomID || r.State != "open" {
+			if r == nil || r.RoomID != roomID || r.State != prstate.PROpen {
 				continue
 			}
 			// Stopping a watch does not end the PR or its author responsibility.

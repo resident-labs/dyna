@@ -817,5 +817,5 @@ func (s *Service) confirmTrialProbes(st State, probes map[string]headProbe, b st
 }
 
 func currentTrialMember(r *Record, frozen state.MergeTrialChange) bool {
-	return r != nil && r.Watching && r.State == "open" && r.Head == frozen.Head
+	return r != nil && r.Watching && r.State == state.PROpen && r.Head == frozen.Head
 }

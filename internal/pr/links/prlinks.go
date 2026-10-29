@@ -64,7 +64,7 @@ func RoleLinks(st state.State, roomID string) []RoleLink {
 		if r.RoomID != roomID {
 			continue
 		}
-		active := r.Watching && r.State == "open"
+		active := r.Watching && r.State == state.PROpen
 		roles := map[string][]string{}
 		if r.Author != "" {
 			roles[r.Author] = append(roles[r.Author], "author")
@@ -76,7 +76,7 @@ func RoleLinks(st state.State, roomID string) []RoleLink {
 			roles[r.ReviewerOverride] = append(roles[r.ReviewerOverride], "reviewer")
 		}
 		for session, held := range roles {
-			links = append(links, RoleLink{Session: session, Link: Link{ChangeID: r.ChangeID, Kind: r.Kind, Dir: r.Dir, LookupDir: r.LookupDir, Head: r.Head, Key: key, Number: r.Number, URL: r.URL, State: r.State, Watching: r.Watching, Roles: held}})
+			links = append(links, RoleLink{Session: session, Link: Link{ChangeID: r.ChangeID, Kind: r.Kind, Dir: r.Dir, LookupDir: r.LookupDir, Head: r.Head, Key: key, Number: r.Number, URL: r.URL, State: string(r.State), Watching: r.Watching, Roles: held}})
 		}
 	}
 	sort.Slice(links, func(i, j int) bool {

@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	prstate "dyna-agent/internal/pr/state"
 	"strings"
 	"testing"
 	"time"
@@ -176,7 +177,7 @@ func TestReviewQueuePrioritizesPassingCIOverAge(t *testing.T) {
 		{"green-z", "passed", -time.Hour},
 		{"green-a", "passed", 0},
 	} {
-		st.Records[item.key] = &Record{Key: item.key, Head: "head", Watching: true, State: "open", RoomID: "room", CI: item.ci, Created: now.Add(item.age)}
+		st.Records[item.key] = &Record{Key: item.key, Head: "head", Watching: true, State: "open", RoomID: "room", CI: prstate.CIState(item.ci), Created: now.Add(item.age)}
 	}
 	s := &Service{}
 	facts, err := s.ReviewFacts(st)
