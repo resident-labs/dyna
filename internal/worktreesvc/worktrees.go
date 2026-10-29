@@ -72,13 +72,13 @@ func New(ctx context.Context, repo, branch, base string, noDeps bool, session st
 		if err != nil {
 			return NewResult{}, err
 		}
-		if rec.Upstream != "" {
+		if len(rec.Upstreams()) > 0 {
 			root, err := room.RepoRoot(repo)
 			if err != nil {
 				return NewResult{}, err
 			}
-			if root == rec.Repo {
-				base, err = worktrees.UpstreamBase(ctx, repo, rec.Upstream)
+			if up := rec.UpstreamOf(root); up != "" {
+				base, err = worktrees.UpstreamBase(ctx, repo, up)
 				if err != nil {
 					return NewResult{}, err
 				}
