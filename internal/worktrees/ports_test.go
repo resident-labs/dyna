@@ -2,6 +2,7 @@ package worktrees
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net"
@@ -11,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionlife/recordtest"
 )
 
 func alwaysFree(int) bool { return true }
@@ -323,6 +327,139 @@ func TestReleaseRecordSkipsReplacedRecord(t *testing.T) {
 	}
 	if rec, err := Get(path); err != nil || rec.RunID != "wf_new" || rec.Port != snapshot.Port {
 		t.Fatalf("Get() = %#v, %v; want the replaced record intact", rec, err)
+	}
+}
+
+func TestTrackReclaimsDirtyTreeOnlyAfterEveryOwnerCloses(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	onlyBlockFree(t)
+	repo := initRepo(t)
+	tree := addGitWorktree(t, repo)
+	for _, id := range []string{"recorded-owner", "inferred-owner"} {
+		recordtest.Write(t, runstore.SessionsDir(), id, map[string]any{"id": id, "dir": tree})
+	}
+	if err := Track(Record{Path: tree, Repo: repo, Session: "recorded-owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "uncommitted"), []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := pathsWithBlock(t, 20000, 1)[0]
+	if err := Track(Record{Path: other}); err == nil {
+		t.Fatal("Track() reclaimed a block with open owners")
+	}
+
+	recordtest.Write(t, runstore.SessionsDir(), "recorded-owner", map[string]any{
+		"id": "recorded-owner", "dir": tree, "closed": time.Now(),
+	})
+	if err := Track(Record{Path: other}); err == nil {
+		t.Fatal("Track() reclaimed a block with an open inferred owner")
+	}
+	recordtest.Write(t, runstore.SessionsDir(), "inferred-owner", map[string]any{
+		"id": "inferred-owner", "dir": tree, "closed": time.Now(),
+	})
+	if err := Track(Record{Path: other}); err != nil {
+		t.Fatalf("Track() did not reclaim the closed owners' block: %v", err)
+	}
+	released, err := Get(tree)
+	if err != nil || released.Port != 0 || released.Session != "recorded-owner" {
+		t.Fatalf("released record = %#v, %v; want ownership kept without a port", released, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(tree, "uncommitted")); err != nil || string(body) != "keep me" {
+		t.Fatalf("dirty tree changed: body %q, err %v", body, err)
+	}
+
+	portFree = alwaysFree
+	reallocated, err := ForDir(context.Background(), tree)
+	if err != nil || reallocated.Port == 0 {
+		t.Fatalf("ForDir() = %#v, %v; want a lazily allocated port", reallocated, err)
+	}
+	claimed, err := Get(other)
+	if err != nil || claimed.Port == 0 || claimed.Port == reallocated.Port {
+		t.Fatalf("ports after reallocation: reclaimed %d, new %d, err %v", reallocated.Port, claimed.Port, err)
+	}
+}
+
+func TestForDirReallocationUsesCurrentRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		remove bool
+	}{{"metadata update", false}, {"removal", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_DATA_HOME", t.TempDir())
+			repo := initRepo(t)
+			tree := addGitWorktree(t, repo)
+			if err := Track(Record{Path: tree, Repo: repo, Session: "old", Head: "old", Status: "old"}); err != nil {
+				t.Fatal(err)
+			}
+			db, err := registryDB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := Get(tree)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok, err := releaseRecord(context.Background(), db, snapshot, false); err != nil || !ok {
+				t.Fatalf("releaseRecord() = %v, %v", ok, err)
+			}
+
+			probed := make(chan struct{})
+			proceed := make(chan struct{})
+			saved := portFree
+			var once sync.Once
+			portFree = func(int) bool {
+				once.Do(func() {
+					close(probed)
+					<-proceed
+				})
+				return true
+			}
+			t.Cleanup(func() { portFree = saved })
+			type result struct {
+				rec Record
+				err error
+			}
+			results := make(chan result, 1)
+			go func() {
+				rec, err := ForDir(context.Background(), tree)
+				results <- result{rec, err}
+			}()
+			<-probed
+
+			var updateErr error
+			if tc.remove {
+				_, updateErr = db.Exec("DELETE FROM worktree_records WHERE path=?", tree)
+			} else {
+				current, err := Get(tree)
+				if err != nil {
+					updateErr = err
+				} else {
+					current.Session, current.Head, current.Status = "new", "new", "new"
+					body, err := json.Marshal(current)
+					if err == nil {
+						_, updateErr = db.Exec("UPDATE worktree_records SET body=? WHERE path=?", body, tree)
+					}
+				}
+			}
+			close(proceed)
+			got := <-results
+			if updateErr != nil {
+				t.Fatal(updateErr)
+			}
+			if tc.remove {
+				if got.err == nil {
+					t.Error("ForDir() recreated a concurrently removed record")
+				}
+				if _, err := Get(tree); err == nil {
+					t.Error("removed record exists after ForDir()")
+				}
+				return
+			}
+			if got.err != nil || got.rec.Session != "new" || got.rec.Head != "new" || got.rec.Status != "new" || got.rec.Port == 0 {
+				t.Fatalf("ForDir() = %#v, %v; want current metadata and a port", got.rec, got.err)
+			}
+		})
 	}
 }
 
