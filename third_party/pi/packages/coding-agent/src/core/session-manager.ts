@@ -18,11 +18,9 @@ import {
 	closeSync,
 	createReadStream,
 	existsSync,
-	fstatSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
-	readFileSync,
 	readSync,
 	type Stats,
 	statSync,
@@ -626,7 +624,7 @@ function parseSessionEntryLine(line: string): FileEntry | null {
 	}
 }
 
-/** Exported for testing. The injected limit selects the streaming path with a small fixture. */
+/** Exported for testing. The injected limit bounds read chunks so tests can use a small fixture. */
 export function loadEntriesFromFile(
 	filePath: string,
 	maxStringLength = bufferConstants.MAX_STRING_LENGTH,
@@ -638,35 +636,26 @@ export function loadEntriesFromFile(
 	let pending = "";
 	const fd = openSync(resolvedFilePath, "r");
 	try {
-		if (fstatSync(fd).size <= maxStringLength) {
-			const lines = readFileSync(fd, "utf8").split("\n");
-			pending = lines.pop() ?? "";
-			for (const line of lines) {
-				const entry = parseSessionEntryLine(line);
+		const decoder = new StringDecoder("utf8");
+		const buffer = Buffer.allocUnsafe(Math.min(SESSION_READ_BUFFER_SIZE, maxStringLength));
+
+		while (true) {
+			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+			if (bytesRead === 0) break;
+
+			pending += decoder.write(buffer.subarray(0, bytesRead));
+			let lineStart = 0;
+			let newlineIndex = pending.indexOf("\n", lineStart);
+			while (newlineIndex !== -1) {
+				const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
 				if (entry) entries.push(entry);
+				lineStart = newlineIndex + 1;
+				newlineIndex = pending.indexOf("\n", lineStart);
 			}
-		} else {
-			const decoder = new StringDecoder("utf8");
-			const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
-
-			while (true) {
-				const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
-				if (bytesRead === 0) break;
-
-				pending += decoder.write(buffer.subarray(0, bytesRead));
-				let lineStart = 0;
-				let newlineIndex = pending.indexOf("\n", lineStart);
-				while (newlineIndex !== -1) {
-					const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
-					if (entry) entries.push(entry);
-					lineStart = newlineIndex + 1;
-					newlineIndex = pending.indexOf("\n", lineStart);
-				}
-				pending = pending.slice(lineStart);
-			}
-
-			pending += decoder.end();
+			pending = pending.slice(lineStart);
 		}
+
+		pending += decoder.end();
 		const finalEntry = parseSessionEntryLine(pending);
 		if (finalEntry) entries.push(finalEntry);
 	} finally {
