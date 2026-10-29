@@ -77,6 +77,7 @@ var eventFamilyFacts = []familyFacts{
 	{Family: FamilyShell, Renderers: []string{"ShellResultRow", "ShellSilenceCard"}, Producers: []EventProducer{ProducerShell}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceSession, AudienceRoom}},
 	{Family: FamilyJob, Renderers: []string{"JobCard"}, Producers: []EventProducer{ProducerJobs}, Wakes: []WakeRule{WakeNever, WakeTarget}, Audiences: []Audience{AudienceSession}},
 	{Family: FamilyRun, Renderers: []string{"RunResultCard"}, Producers: []EventProducer{ProducerWorkflow}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyMCP, Renderers: []string{"MCPCallRow"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyTurn, Renderers: []string{"TurnCompletionRow"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 }
 

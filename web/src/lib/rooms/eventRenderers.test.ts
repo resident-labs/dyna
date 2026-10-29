@@ -180,6 +180,15 @@ const fixtures: Record<string, EventPayload> = {
     text: 'A subagent commits to its parent branch.',
     sessions: ['dyna:notice-one', 'dyna:notice-two'],
   },
+  'mcp/result': {
+    server: 'board',
+    tool: 'list_issues',
+    session: 'ses_0123',
+    arguments: '{"state":"open"}',
+    resultBytes: 512,
+    durationMs: 40,
+    outcome: 'ok',
+  },
   'review/result': {
     kind: 'changes',
     changeId: 'github.com/acme/app#542',
@@ -466,6 +475,7 @@ test('a stopped job card states its cause without an exit code', () => {
 // fixtureTip is a value every payload fixture shows, so a card that renders
 // nothing meaningful fails.
 function fixtureTip(payload: EventPayload): string {
+  if ('resultBytes' in payload) return `${payload.server} / ${payload.tool}`
   if ('kind' in payload && 'changeId' in payload) return payload.label
   if ('note' in payload) return payload.note ?? ''
   if ('hook' in payload) return payload.label || payload.hook
