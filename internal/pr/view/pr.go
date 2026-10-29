@@ -241,10 +241,10 @@ func (s *Service) UntrackPR(ctx context.Context, roomRef, key string) error {
 	return p.Untrack(ctx, key)
 }
 
-// PRHold returns the hold on the tracked change named by ref in roomRef, or nil when
-// no hold applies. ref is a PR URL or the change's branch name. A change that is
-// not tracked in the room has no hold.
-func (s *Service) PRHold(roomRef, ref string) (*state.Hold, error) {
+// PRHold returns the hold on the tracked change that repo and ref name in roomRef, or
+// nil when no hold applies. ref is a PR URL, or a branch name in repo. A change that
+// is not tracked in the room has no hold.
+func (s *Service) PRHold(roomRef, repo, ref string) (*state.Hold, error) {
 	rec, err := s.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return nil, err
@@ -253,12 +253,22 @@ func (s *Service) PRHold(roomRef, ref string) (*state.Hold, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range projection.state.Records {
-		if r.RoomID == rec.ID && (r.URL == ref || r.Branch == ref) {
-			return r.Hold, nil
+	return holdFor(projection.state.Records, rec.ID, repo, ref), nil
+}
+
+// holdFor returns a hold on a change in roomID that repo and ref name. A branch
+// names an open change in its repository only. Several matches return a hold if
+// any has one, so an ambiguous name never lifts a hold.
+func holdFor(records map[string]*state.Record, roomID, repo, ref string) *state.Hold {
+	for _, r := range records {
+		if r.RoomID != roomID || r.Hold == nil {
+			continue
+		}
+		if r.URL == ref || (repo != "" && r.State == state.PROpen && r.Repo == repo && r.Branch == ref) {
+			return r.Hold
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 // EditPR changes a PR title or body through the engine.

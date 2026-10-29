@@ -44,20 +44,27 @@ func (s *Service) SetDraft(ctx context.Context, key string, draft bool, reason s
 	args = append(args, "--", r.URL)
 	// The hold is saved first, so a failed GitHub call still leaves the PR held.
 	// Dyna keeps the hold until release, whatever GitHub's draft state says.
+	// Release clears the hold before gh pr ready, because the guard refuses that
+	// command while the hold stands. A failed call puts the hold back.
+	released := !draft && r.Hold != nil
 	if draft {
 		actor := authority.Of(ctx)
 		hold := &state.Hold{Reason: reason, By: actor.Session, At: time.Now().UTC()}
 		if err := s.setHold(key, hold); err != nil {
 			return err
 		}
-	}
-	if _, err := s.github(r.RoomID).command(ctx, "", false, args...); err != nil {
-		return err
-	}
-	if !draft {
+	} else if released {
 		if err := s.setHold(key, nil); err != nil {
 			return err
 		}
+	}
+	if _, err := s.github(r.RoomID).command(ctx, "", false, args...); err != nil {
+		if released {
+			if restoreErr := s.setHold(key, r.Hold); restoreErr != nil {
+				return restoreErr
+			}
+		}
+		return err
 	}
 	if _, err := s.deliver(ctx, r, Notice{Text: text}); err != nil {
 		return fmt.Errorf("GitHub draft status changed, but the room post failed: %w", err)
