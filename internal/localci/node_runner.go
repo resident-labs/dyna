@@ -438,13 +438,16 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	poller, stopPoller := r.exec().NewPoller(control)
 	defer stopPoller()
 	var attachedMu sync.Mutex
-	poller.Started = func(spec jobs.RunSpec) {
+	// Record each check before admission. If the engine stops between
+	// admission and launch, recovery can inspect the node and release its
+	// reservation when no detached check was started.
+	recordCheck := func(id Suite) error {
 		attachedMu.Lock()
 		defer attachedMu.Unlock()
-		attached.Checks = append(attached.Checks, Suite(spec.ID))
-		if e := localStore.saveAttachment(control, attachKey, sha, node.Name, attached); e != nil {
-			log.Printf("local CI %s: record started check: %v", node.Name, e)
+		if !slices.Contains(attached.Checks, id) {
+			attached.Checks = append(attached.Checks, id)
 		}
+		return localStore.saveAttachment(control, attachKey, sha, node.Name, attached)
 	}
 	resumed := func(id Suite) bool { return resume != nil && resume.has(id) }
 	noExpand := r.systemdNeedsNoExpandFlag(control)
@@ -505,12 +508,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				// takes its place back.
 				queue := r.queue()
 				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB}
-				var runErr error
+				runErr := recordCheck(check.id)
 				port := 0
-				if spec.Attach {
+				if runErr != nil {
+					runErr = fmt.Errorf("record check before admission: %w", runErr)
+				} else if spec.Attach {
 					held, holdErr := queue.Hold(checkCtx, demand)
 					if holdErr != nil {
-						log.Printf("local CI %s: record the running check %s in the queue: %v", node.Name, check.id, holdErr)
+						runErr = fmt.Errorf("record the running check %s in the queue: %w", check.id, holdErr)
 					} else {
 						port = held
 					}
@@ -534,9 +539,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				// The check's place in the queue ends with the check, whatever
 				// ended it; a released row frees its room and its port at the next
 				// pass.
-				releaseCtx, releaseStop := context.WithTimeout(context.WithoutCancel(checkCtx), 10*time.Second)
-				_ = queue.Release(releaseCtx, node.Name, demand.ID)
-				releaseStop()
+				if !r.Engine || !EngineStopping() {
+					releaseCtx, releaseStop := context.WithTimeout(context.WithoutCancel(checkCtx), 10*time.Second)
+					_ = queue.Release(releaseCtx, node.Name, demand.ID)
+					releaseStop()
+				}
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				if runErr != nil || len(markers) == 0 {

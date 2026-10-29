@@ -75,7 +75,8 @@ type Demand struct {
 // decides which waiting work a node takes. The queue is the admissions table
 // plus the jobs table; nothing else holds admission state, so an engine
 // restart rebuilds it from the rows that survived. The pass is the only
-// writer of admission decisions, and it runs on the engine's one claim loop.
+// writer of admission decisions. Passes serialize through a SQLite write
+// transaction, including passes made by standalone check runners.
 type Admission struct {
 	// DataDir is the engine's data folder. Empty uses the default.
 	DataDir string
@@ -188,8 +189,7 @@ func (a Admission) Acquire(ctx context.Context, d Demand, wait func(context.Cont
 	lastReason := ""
 	for {
 		// Whoever waits drives a pass too, so a queue with no engine watching
-		// it still admits. A failed pass, such as two passes that picked one
-		// port and one hit the port index, retries on the next tick.
+		// it still admits. A failed pass retries on the next tick.
 		_, _, _ = a.Pass(ctx, nil)
 		row, err := a.get(ctx, d.ID)
 		if errors.Is(err, os.ErrNotExist) {
@@ -218,25 +218,42 @@ func (a Admission) Acquire(ctx context.Context, d Demand, wait func(context.Cont
 	}
 }
 
-// Hold records work that already runs on the node, such as the checks a
-// restarted engine reattaches to, and returns the port index it may use. It
-// never waits.
+// Hold reattaches running work while preserving its original port.
 func (a Admission) Hold(ctx context.Context, d Demand) (int, error) {
-	if err := a.upsert(ctx, d, true); err != nil {
-		return -1, err
-	}
-	held, err := a.rows(ctx, "admitted")
+	db, err := a.db()
 	if err != nil {
 		return -1, err
 	}
-	port := lowestPort(held[d.Node], d.ID)
-	if port < 0 {
-		return -1, errors.New("node " + d.Node + " has no free check port")
-	}
-	if err := a.write(ctx, "UPDATE admissions SET port=?, reason='' WHERE id=?", port, d.ID); err != nil {
-		return -1, err
-	}
-	return port, nil
+	port := -1
+	err = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+		row, err := scanAdmission(conn.QueryRowContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE id=?", d.ID))
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && row.State == "admitted" {
+			if row.Node != d.Node {
+				return fmt.Errorf("admission %s belongs to node %s", d.ID, row.Node)
+			}
+			port = row.Port
+			return nil
+		}
+		rows, err := rowsConn(ctx, conn, "admitted")
+		if err != nil {
+			return err
+		}
+		port = lowestPort(rows[d.Node], d.ID)
+		if port < 0 {
+			return errors.New("node " + d.Node + " has no free check port")
+		}
+		pid, start := admissionOwner()
+		if a.Engine {
+			pid, start = 0, 0
+		}
+		_, err = conn.ExecContext(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, port=excluded.port, state='admitted', reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start",
+			d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), port, "admitted", "", boolInt(a.Engine), pid, start, time.Now().UnixMilli())
+		return err
+	})
+	return port, err
 }
 
 // Release ends this holder's row. Its capacity and its port index return at
@@ -249,12 +266,10 @@ func (a Admission) Release(ctx context.Context, node, id string) error {
 	return a.write(ctx, "UPDATE admissions SET state='released' WHERE id=? AND node=? AND owner_pid=? AND owner_start=?", id, node, pid, start)
 }
 
-// ResetEngine drops every engine-held row. The engine calls it once, at its
-// start under the worker lock: the engine that held those rows is gone, and
-// this engine rebuilds the queue from the running job rows and the checks it
-// reattaches to.
+// ResetEngine removes abandoned waiters, but keeps detached check reservations.
+// Those checks retain their capacity and ports until they finish or are stopped.
 func (a Admission) ResetEngine(ctx context.Context) error {
-	return a.write(ctx, "DELETE FROM admissions WHERE engine=1")
+	return a.write(ctx, "DELETE FROM admissions WHERE engine=1 AND state IN ('waiting','released')")
 }
 
 func (a Admission) get(ctx context.Context, id string) (admissionRow, error) {
@@ -344,32 +359,18 @@ type waiter struct {
 	portWanted bool
 }
 
-// Pass is the queue's one decision: for every node that has waiting work, it
-// admits what fits, oldest first with rooms taking turns, and records why the
-// rest still waits. Candidates are the queued jobs; waiting checks come from
-// the table. It returns which candidate job IDs were admitted and the wait
-// reason of each that was not.
+// Pass serializes capacity reads and admission writes in one SQLite writer
+// transaction. A job is reserved by changing its row to running before the
+// transaction commits. This closes the gap before its launch goroutine starts.
 func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool, map[string]string, error) {
-	// The sweep runs first: released rows, and the rows of outside holders
-	// that are gone, free their capacity before this pass counts it.
 	if err := a.sweep(ctx); err != nil {
 		return nil, nil, err
 	}
+	// Resolve machine facts before taking the writer lock. A newly queued node
+	// not in this snapshot is considered on the next pass.
 	waiting, err := a.rows(ctx, "waiting")
 	if err != nil {
 		return nil, nil, err
-	}
-	held, err := a.rows(ctx, "admitted")
-	if err != nil {
-		return nil, nil, err
-	}
-	running, err := (Store{DataDir: a.DataDir}).Running(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	runningByNode := map[string][]Job{}
-	for _, job := range running {
-		runningByNode[job.Node] = append(runningByNode[job.Node], job)
 	}
 	nodes := map[string]bool{}
 	for node := range waiting {
@@ -378,19 +379,87 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 	for _, job := range candidates {
 		nodes[job.Node] = true
 	}
-	admitted, reasons := map[string]bool{}, map[string]string{}
+	facts := map[string]machines.Machine{}
+	factErrors := map[string]error{}
 	for node := range nodes {
-		var nodeCandidates []Job
-		for _, job := range candidates {
-			if job.Node == node {
-				nodeCandidates = append(nodeCandidates, job)
+		facts[node], factErrors[node] = a.machines().Get(ctx, node)
+	}
+	if _, err := (Store{DataDir: a.DataDir}).db(); err != nil {
+		return nil, nil, err
+	}
+	db, err := a.db()
+	if err != nil {
+		return nil, nil, err
+	}
+	admitted, reasons := map[string]bool{}, map[string]string{}
+	err = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+		waiting, err := rowsConn(ctx, conn, "waiting")
+		if err != nil {
+			return err
+		}
+		held, err := rowsConn(ctx, conn, "admitted")
+		if err != nil {
+			return err
+		}
+		rows, err := conn.QueryContext(ctx, "SELECT "+columns+" FROM jobs WHERE state='running'")
+		if err != nil {
+			return err
+		}
+		running := map[string][]Job{}
+		for rows.Next() {
+			job, err := scanJob(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			running[job.Node] = append(running[job.Node], job)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		for node := range nodes {
+			var current []Job
+			for _, candidate := range candidates {
+				if candidate.Node != node {
+					continue
+				}
+				job, err := scanJob(conn.QueryRowContext(ctx, "SELECT "+columns+" FROM jobs WHERE id=? AND state='queued' AND cancel_requested=0", candidate.ID))
+				if errors.Is(err, sql.ErrNoRows) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				current = append(current, job)
+			}
+			if err := passNode(ctx, conn, node, facts[node], factErrors[node], waiting[node], current, held[node], running[node], admitted, reasons); err != nil {
+				return err
 			}
 		}
-		if err := a.passNode(ctx, node, waiting[node], nodeCandidates, held[node], runningByNode[node], admitted, reasons); err != nil {
-			return nil, nil, err
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	return admitted, reasons, nil
+}
+
+// rowsConn reads queue rows on the same transaction as the admission decision.
+func rowsConn(ctx context.Context, conn *sql.Conn, status string) (map[string][]admissionRow, error) {
+	rows, err := conn.QueryContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE state=? ORDER BY created_ms, id", status)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]admissionRow{}
+	for rows.Next() {
+		row, err := scanAdmission(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out[row.Node] = append(out[row.Node], row)
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
 }
 
 // sweep deletes released rows and the rows of outside holders that are gone.
@@ -440,11 +509,9 @@ func (a Admission) sweep(ctx context.Context) error {
 
 // passNode admits the waiting work of one node. Held work is the running
 // jobs plus the admitted rows; capacity, limits and disk use come from the
-// machine's last probe and its stored limits. All row writes of the pass land
-// in one transaction, and each guards on the waiting state, so a Hold that
-// reattached a check while the pass read it cannot be undone.
-func (a Admission) passNode(ctx context.Context, node string, waiting []admissionRow, candidates []Job, heldRows []admissionRow, running []Job, admitted map[string]bool, reasons map[string]string) error {
-	machine, machineErr := a.machines().Get(ctx, node)
+// machine's last probe and its stored limits. Reads and writes of admission
+// state share the caller's transaction.
+func passNode(ctx context.Context, conn *sql.Conn, node string, machine machines.Machine, machineErr error, waiting []admissionRow, candidates []Job, heldRows []admissionRow, running []Job, admitted map[string]bool, reasons map[string]string) error {
 	capacityCPUs, capacityMemMiB := 0, int64(0)
 	limits := machines.Machine{}
 	if machineErr == nil {
@@ -525,7 +592,17 @@ func (a Admission) passNode(ctx context.Context, node string, waiting []admissio
 				heavyHeld++
 			}
 			if unit.isJob {
-				admitted[unit.id] = true
+				result, err := conn.ExecContext(ctx, "UPDATE jobs SET state='running', started_ms=? WHERE id=? AND state='queued' AND cancel_requested=0", time.Now().UnixMilli(), unit.id)
+				if err != nil {
+					return err
+				}
+				count, err := result.RowsAffected()
+				if err != nil {
+					return err
+				}
+				if count == 1 {
+					admitted[unit.id] = true
+				}
 			} else {
 				portsUsed[port] = true
 				writes = append(writes, rowWrite{id: unit.id, port: port})
@@ -539,32 +616,16 @@ func (a Admission) passNode(ctx context.Context, node string, waiting []admissio
 			writes = append(writes, rowWrite{id: unit.id, reason: reason})
 		}
 	}
-	if len(writes) == 0 {
-		return nil
-	}
-	return a.writeRows(ctx, writes)
-}
-
-func (a Admission) writeRows(ctx context.Context, writes []rowWrite) error {
-	db, err := a.db()
-	if err != nil {
-		return err
-	}
-	_ = db // one shared handle per data folder; never closed
-	return state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
-		for _, write := range writes {
-			if write.reason == "" {
-				if _, err := conn.ExecContext(ctx, "UPDATE admissions SET state='admitted', port=?, reason='' WHERE id=? AND state='waiting'", write.port, write.id); err != nil {
-					return err
-				}
-				continue
-			}
-			if _, err := conn.ExecContext(ctx, "UPDATE admissions SET reason=? WHERE id=? AND state='waiting'", write.reason, write.id); err != nil {
+	for _, write := range writes {
+		if write.reason == "" {
+			if _, err := conn.ExecContext(ctx, "UPDATE admissions SET state='admitted', port=?, reason='' WHERE id=? AND state='waiting'", write.port, write.id); err != nil {
 				return err
 			}
+		} else if _, err := conn.ExecContext(ctx, "UPDATE admissions SET reason=? WHERE id=? AND state='waiting'", write.reason, write.id); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // rowWrite is one queued-row write of a pass: admit with a port, or record
