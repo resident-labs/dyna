@@ -1097,11 +1097,9 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		// alpine or distroless images have no bash. The first word replaces the
 		// image's entrypoint, which would otherwise take the command as its
 		// own arguments.
-		docker := "docker=(docker)"
-		if machine.SSH == "" {
-			docker = "docker=(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi"
-		}
-		inner += docker + "; "
+		// A user manager that started before its user joined the docker group
+		// keeps the old groups, on this node or over SSH alike.
+		inner += "docker=(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
 		// The work folder lives on the node, so the container mounts it and
 		// works there, exactly as a CI check container does, and what the job
 		// writes there stays for its artifacts.
