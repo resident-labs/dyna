@@ -70,6 +70,21 @@ func TestSameNamedChecksInDifferentWorkflowsNeedSeparatePassesHostedOnly(t *test
 	}
 }
 
+// An external CI app reruns a required check in a new suite. Only its latest
+// result per app and name judges the head, so a successful rerun clears an
+// older failure instead of the gate holding both suites against it.
+func TestExternalCheckRerunKeepsOnlyTheLatestResult(t *testing.T) {
+	external := Check{ID: 1, Name: "security", Status: "completed", Conclusion: "failure"}
+	external.App.Slug = "scanner"
+	external.CheckSuite.ID = 1
+	rerun := external
+	rerun.ID, rerun.Conclusion, rerun.CheckSuite.ID = 2, "success", 2
+	state, _, _, _ := (Snapshot{Checks: []Check{external, rerun}}).CIStatus("security")
+	if state != "passed" {
+		t.Fatalf("an old failure outlived its successful rerun: %s", state)
+	}
+}
+
 // A review bot's status never counts as CI: the reviewer starts at once, but
 // Dyna reports ready only after real CI passes.
 func TestFakeGHReviewBotDoesNotPassCI(t *testing.T) {
