@@ -186,6 +186,43 @@ func TestFailoverRefreshesTheChosenReadingFirst(t *testing.T) {
 	}
 }
 
+// D-500: a successful usage probe ends a provider-stated hold only when the
+// fresh reading shows weekly quota left. A spent or partial reading keeps it.
+func TestSuccessfulProbeKeepsAStatedHoldUnlessQuotaIsBack(t *testing.T) {
+	reset := time.Now().Add(6 * 24 * time.Hour)
+	for _, tc := range []struct {
+		label, body string
+		kept        bool
+	}{
+		{"spent", usageBody(10, 100, reset), true},
+		{"unrelated", `{"five_hour":{"utilization":10}}`, true},
+		{"open", usageBody(10, 20, reset), false},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			a := testAccounts(t)
+			n := signedClaude(t, a, tc.label, "aaaaaaaa-bbbb-cccc-dddd-00000000000e")
+			scopes, err := a.scopes()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := scopes.Hold(n.ID, reposcope.Hold{Until: time.Now().Add(2 * time.Hour), Stated: true}); err != nil {
+				t.Fatal(err)
+			}
+			fixtureUsageEndpoint(t, map[string]string{tc.label + "-access": tc.body})
+			if a.refreshReading(context.Background(), n) == nil {
+				t.Fatal("the probe recorded no reading")
+			}
+			got, err := a.LimitOf(n.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kept := !got.Until.IsZero(); kept != tc.kept {
+				t.Fatalf("stated hold kept = %v after the %s reading, want %v", kept, tc.label, tc.kept)
+			}
+		})
+	}
+}
+
 func weeklyOf(o *store.Observation) *store.Window {
 	for i := range o.Windows {
 		if o.Windows[i].ID == "seven_day" {
