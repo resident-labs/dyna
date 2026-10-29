@@ -76,6 +76,27 @@ func TestSubmitPlacesLabelsOnTheRoomiestEligibleMachine(t *testing.T) {
 	}
 }
 
+// Host placement skips a matching remote machine without a host-check grant,
+// even when it has more free CPUs than the machine that can run the job.
+func TestSubmitHostLabelsChooseAGrantedMachine(t *testing.T) {
+	ungranted := machines.Machine{Name: "ungranted", SSH: "build@ungranted", Enabled: true, Labels: []string{"gpu"}, Capabilities: machines.Capabilities{CPUs: 16}}
+	granted := machines.Machine{
+		Name: "granted", SSH: "build@granted", Enabled: true, Labels: []string{"gpu"}, Capabilities: machines.Capabilities{CPUs: 4},
+		HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}},
+	}
+	service := &Service{Store: Store{DataDir: t.TempDir()}, Machines: fakeMachines{byName: map[string]machines.Machine{
+		"ungranted": ungranted, "granted": granted,
+	}}}
+	job, err := service.Submit(t.Context(), Input{RoomID: "room_a", Labels: []string{"gpu"}, Command: []string{"true"}})
+	if err != nil || job.Node != "granted" {
+		t.Fatalf("default host job chose %q, %v; want the granted machine", job.Node, err)
+	}
+	service.Machines = fakeMachines{byName: map[string]machines.Machine{"ungranted": ungranted}}
+	if _, err := service.Submit(t.Context(), Input{RoomID: "room_a", Labels: []string{"gpu"}, Command: []string{"true"}}); err == nil || !strings.Contains(err.Error(), "host-check grant") {
+		t.Fatalf("host placement without a grant = %v, want the grant error", err)
+	}
+}
+
 // chanReporter hands each event to a test through a channel, so a test waits
 // for the service by receiving, with no clock of its own.
 type chanReporter struct {
