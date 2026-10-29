@@ -82,6 +82,15 @@ func TestOfflineDestroyWaitsForEmptyEnvironment(t *testing.T) {
 		return real(p)
 	}
 	t.Cleanup(func() { readProcessEnviron = real })
+	ticks := 0
+	tick := browserEnvTick
+	browserEnvTick = func() <-chan time.Time {
+		ticks++
+		fired := make(chan time.Time)
+		close(fired)
+		return fired
+	}
+	t.Cleanup(func() { browserEnvTick = tick })
 	if err := destroyOffline(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +101,9 @@ func TestOfflineDestroyWaitsForEmptyEnvironment(t *testing.T) {
 	}
 	if reads < 4 {
 		t.Fatalf("the empty environment was read %d times, want it read again until readable", reads)
+	}
+	if ticks < reads-1 {
+		t.Fatalf("waited on %d ticks for %d reads, want each retry to wait on browserEnvTick", ticks, reads)
 	}
 }
 
