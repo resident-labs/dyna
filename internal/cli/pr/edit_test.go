@@ -61,7 +61,7 @@ func TestEditPRCommandUsesEngineAndAuthorRules(t *testing.T) {
 	script := `#!/bin/sh
 case "$*" in *--include*) printf 'HTTP/2.0 200 OK\r\n\r\n';; esac
 case "$*" in
- *"--method PATCH"*) printf '%s\n' "$@" >> "$PR_EDIT_WRITES"; printf '{}';;
+ "pr edit "*) printf '%s\n' "$@" >> "$PR_EDIT_WRITES"; while [ $# -gt 0 ]; do [ "$1" = --body-file ] && cat "$2" >> "$PR_EDIT_WRITES"; shift; done;;
  *) printf '{"user":{"login":"owner"},"state":"open","head":{"sha":"head"}}';;
 esac
 `
@@ -96,8 +96,8 @@ esac
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"repos/owner/repo/pulls/17", "PATCH", "title=Edited title",
-		"body=    Literal `dyna node list`.\nCredential: [redacted]\n\n",
+		"pr\nedit\n" + url + "\n--title\nEdited title\n--body-file\n",
+		"    Literal `dyna node list`.\nCredential: [redacted]\n",
 	} {
 		if !strings.Contains(string(written), want) {
 			t.Errorf("GitHub write misses %q:\n%s", want, written)
