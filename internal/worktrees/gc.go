@@ -643,7 +643,7 @@ func treeUsage(ctx context.Context, path string) (int64, time.Time, error) {
 // workflows are read again; unchanged metadata comes from the first scan. A
 // removed tree is handed to collected; its registry record is committed with
 // every other removal after the workers finish, outside the removal lock.
-func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error), beforeLock func(), collected func(string)) (out Tree) {
+func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error), beforeLock func(), collected func(Record)) (out Tree) {
 	// Whichever check stops it, a tree kept only because time ran out is
 	// retried by the scheduled cleanup.
 	defer func() {
@@ -696,13 +696,19 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 			t.Action, t.Reason = "kept", reason
 			return nil
 		}
+		// The record version this removal observed, taken before the removal: a
+		// tree recreated at the same path tracks a different record afterwards,
+		// and the batch commit deletes only this version.
+		observed, obsErr := Get(t.Path)
 		beforeWorktreeRemoval(t.Path)
 		if out, e := gitOutput(ctx, repo, "worktree", "remove", t.Path); e != nil {
 			t.Action, t.Reason = "kept", fmt.Sprintf("git refused removal: %v: %s", e, strings.TrimSpace(string(out)))
 			return nil
 		}
 		t.Action = "removed"
-		collected(t.Path)
+		if obsErr == nil {
+			collected(observed)
+		}
 		return nil
 	}); err != nil {
 		t.Action, t.Reason = "kept", "cannot serialize removal with run publication: "+err.Error()
@@ -807,10 +813,10 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	// Removed trees hand their paths to one batch: the registry commit runs
 	// after the workers finish, outside the removal lock.
 	var batchMu sync.Mutex
-	removedPaths := []string{}
-	collected := func(path string) {
+	removedRecords := []Record{}
+	collected := func(rec Record) {
 		batchMu.Lock()
-		removedPaths = append(removedPaths, path)
+		removedRecords = append(removedRecords, rec)
 		batchMu.Unlock()
 	}
 	jobs := make(chan int)
@@ -834,12 +840,12 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	}
 	close(jobs)
 	wg.Wait()
-	if len(removedPaths) > 0 {
+	if len(removedRecords) > 0 {
 		// The batch commits on its own context: a cleanup whose deadline
 		// expired keeps the progress its workers already made, and the next
 		// scheduled cleanup retries the trees that stayed.
 		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), batchTimeout)
-		err := markRemovedBatch(bctx, removedPaths)
+		err := markRemovedBatch(bctx, removedRecords)
 		cancel()
 		if err != nil {
 			for i := range result {

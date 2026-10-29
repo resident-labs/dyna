@@ -179,7 +179,7 @@ func TestRegistryWritesUseWriterWithoutUnusedEvents(t *testing.T) {
 	if err != nil || len(records) != 1 {
 		t.Fatalf("records = %v, %v", records, err)
 	}
-	if err := MarkRemoved(path); err != nil {
+	if err := MarkRemoved(records[0]); err != nil {
 		t.Fatal(err)
 	}
 	records, err = List()

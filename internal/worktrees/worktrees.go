@@ -399,50 +399,25 @@ func Get(nameOrPath string) (Record, error) {
 	return Record{}, fmt.Errorf("worktree %q is not registered (%d registry warnings)", nameOrPath, len(warnings))
 }
 
-// MarkRemoved deletes the registry record for path. It is idempotent.
-func MarkRemoved(path string) error {
-	key, err := recordKey(path)
+// MarkRemoved deletes the registry record of a removed tree, but only the
+// version it is given: a path recreated and tracked after the removal keeps
+// its new record and its port. It is idempotent.
+func MarkRemoved(rec Record) error {
+	key, err := recordKey(rec.Path)
 	if err != nil {
 		return err
 	}
+	rec.Path = key
 	db, err := registryDB()
 	if err != nil {
 		return err
 	}
 	// Worktree records have no change-bus consumer.
-	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(context.Background(), `DELETE FROM worktree_records WHERE path=?`, key); err != nil {
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		if err := removeObservedRecord(context.Background(), conn, rec); err != nil {
 			return err
 		}
 		return rearmPortCapacity(context.Background(), conn)
-	})
-	if err != nil {
-		return fmt.Errorf("remove worktree registry record: %w", err)
-	}
-	return nil
-}
-
-// markRemovedBatch deletes the registry records of all paths in one
-// transaction, then rearms the port alert once for the whole release. Cleanup
-// collects the trees its workers removed and commits them together after the
-// removals, so one slow commit neither serializes behind every removal nor
-// times out with the cleanup deadline. Tests replace it.
-var markRemovedBatch = func(ctx context.Context, paths []string) error {
-	db, err := registryDB()
-	if err != nil {
-		return err
-	}
-	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		for _, path := range paths {
-			key, err := recordKey(path)
-			if err != nil {
-				return err
-			}
-			if _, err := conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, key); err != nil {
-				return err
-			}
-		}
-		return rearmPortCapacity(ctx, conn)
 	})
 }
 
@@ -527,7 +502,7 @@ func Remove(rec Record, force bool) error {
 		if err := os.RemoveAll(registered.Path); err != nil {
 			return fmt.Errorf("remove orphaned worktree: %w", err)
 		}
-		return MarkRemoved(registered.Path)
+		return MarkRemoved(registered)
 	}
 
 	listed, err := repoHasWorktree(registered.Repo, registered.Path)
@@ -536,14 +511,14 @@ func Remove(rec Record, force bool) error {
 	}
 	if !listed {
 		if state == StateMissing {
-			return MarkRemoved(registered.Path)
+			return MarkRemoved(registered)
 		}
 		return fmt.Errorf("refusing to remove %s: it is not listed by source repository %s", registered.Path, registered.Repo)
 	}
 	if out, err := gitOutput(context.Background(), registered.Repo, "worktree", "remove", "--force", registered.Path); err != nil {
 		return fmt.Errorf("remove git worktree %s: %v: %s", registered.Path, err, strings.TrimSpace(string(out)))
 	}
-	return MarkRemoved(registered.Path)
+	return MarkRemoved(registered)
 }
 
 // ApplyRunDisposition applies one explicit run-deletion disposition to all
