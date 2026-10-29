@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Model, OAuthAuth, OAuthCredential, Provider } from "@earendil-works/pi-ai";
@@ -129,6 +129,41 @@ describe("native auth login command", () => {
 });
 
 describe("native auth refresh command", () => {
+	it("forces an OAuth refresh and persists the new grant", async () => {
+		const initial: OAuthCredential = {
+			type: "oauth",
+			access: "old-access",
+			refresh: "old-refresh",
+			expires: Date.now() + 60 * 60 * 1000,
+		};
+		const renewed: OAuthCredential = {
+			type: "oauth",
+			access: "new-access",
+			refresh: "new-refresh",
+			expires: initial.expires + 60 * 60 * 1000,
+		};
+		const credentials = AuthStorage.inMemory({ "fake-oauth": initial });
+		const refresh = vi.fn(async () => renewed);
+		const runtime = await ModelRuntime.create({
+			credentials,
+			modelsPath: null,
+			allowModelNetwork: false,
+			refreshOnCreate: false,
+		});
+		runtime.registerNativeProvider(
+			fakeProvider(
+				oauth({
+					refresh,
+					toAuth: async (credential) => ({ headers: { Authorization: `Bearer ${credential.access}` } }),
+				}),
+			),
+		);
+
+		await expect(runAuthRefresh(runtime, "fake-oauth")).resolves.toEqual({ status: "renewed" });
+		expect(refresh).toHaveBeenCalledTimes(1);
+		await expect(credentials.read("fake-oauth")).resolves.toEqual(renewed);
+	});
+
 	it("reports no credential and a renewed grant", async () => {
 		await expect(runAuthRefresh(await fakeRuntime(oauth()), "fake-oauth")).resolves.toEqual({
 			status: "no_credential",
@@ -216,14 +251,29 @@ describe("native auth refresh command", () => {
 				},
 			}),
 		);
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected network request"));
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					access_token: "renewed-access",
+					refresh_token: "renewed-refresh",
+					expires_in: 3600,
+				}),
+				{ headers: { "content-type": "application/json" } },
+			),
+		);
 		const output: string[] = [];
 		vi.spyOn(console, "log").mockImplementation((line) => output.push(String(line)));
 		try {
 			await main(["auth", "refresh", "--provider", "radius-dev", "--json"]);
 			expect(output).toEqual([JSON.stringify({ status: "renewed" })]);
 			expect(process.exitCode).toBe(0);
-			expect(fetchSpy).not.toHaveBeenCalled();
+			expect(fetchSpy).toHaveBeenCalledTimes(1);
+			const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf8")) as Record<string, OAuthCredential>;
+			expect(stored["radius-dev"]).toMatchObject({
+				type: "oauth",
+				access: "renewed-access",
+				refresh: "renewed-refresh",
+			});
 		} finally {
 			process.exitCode = previousExitCode;
 			if (previousAgentDir === undefined) delete process.env[ENV_AGENT_DIR];

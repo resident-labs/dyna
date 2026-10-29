@@ -76,8 +76,8 @@ export async function runAuthLogin(
 /** Renews a saved grant through Pi's provider runtime and its credential lock. */
 export async function runAuthRefresh(runtime: ModelRuntime, providerId: string): Promise<AuthRefreshResult> {
 	try {
-		const resolution = await runtime.getAuth(providerId);
-		if (!resolution?.auth.apiKey) return { status: "no_credential" };
+		const resolution = await runtime.getAuth(providerId, { forceOAuthRefresh: true });
+		if (!resolution) return { status: "no_credential" };
 		return { status: "renewed" };
 	} catch (error) {
 		return classifyAuthRefreshFailure(error);

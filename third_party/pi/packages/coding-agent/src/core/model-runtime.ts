@@ -130,6 +130,8 @@ export interface ModelRuntimeAuthOverrides extends AuthOperationOptions {
 	env?: Record<string, string>;
 	/** Require this much remaining OAuth-token validity; defaults to five minutes. */
 	minOAuthValidityMs?: number;
+	/** Refresh a stored OAuth credential even when its access token remains valid. */
+	forceOAuthRefresh?: boolean;
 }
 
 export type CredentialSynchronizationOperation = "login" | "logout" | "setRuntimeApiKey" | "removeRuntimeApiKey";
