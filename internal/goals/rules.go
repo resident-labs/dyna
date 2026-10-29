@@ -3,6 +3,7 @@ package goals
 import (
 	"crypto/sha256"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -14,7 +15,6 @@ import (
 
 const MaxRules = 20
 const MaxRuleText = 500
-const MaxRulesText = 3000
 
 type Rule struct {
 	ID         string    `json:"id"`
@@ -67,12 +67,23 @@ func (s *Store) Rules(scope string) ([]Rule, error) {
 	return out, nil
 }
 
+// rulesLimit is the one place that reads the owner's rule text cap. Every
+// store reads the same settings file, so room, global and instruction paths agree.
+func (s *Store) rulesLimit() (int, error) {
+	v, err := settings.Load(settings.DefaultPath())
+	return v.RulesMaxChars, err
+}
+
 func (s *Store) RulesView(scope string) (View, error) {
 	rules, err := s.Rules(scope)
 	if err != nil {
 		return View{}, err
 	}
-	v := View{Rules: rules, Max: MaxRulesText}
+	limit, err := s.rulesLimit()
+	if err != nil {
+		return View{}, err
+	}
+	v := View{Rules: rules, Max: limit}
 	pairs := make([][2]string, 0, len(rules))
 	for _, rule := range rules {
 		v.Used += utf8.RuneCountInString(rule.Text)
@@ -95,7 +106,7 @@ func ruleText(text string) (string, error) {
 	return text, nil
 }
 
-func ruleCapacity(r *RuleSet, id, text string) error {
+func ruleCapacity(r *RuleSet, id, text string, limit int) error {
 	used := 0
 	for _, rule := range r.Rules {
 		used += utf8.RuneCountInString(rule.Text)
@@ -104,8 +115,8 @@ func ruleCapacity(r *RuleSet, id, text string) error {
 	if old := r.Rules[id]; old != nil {
 		next -= utf8.RuneCountInString(old.Text)
 	}
-	if next > MaxRulesText {
-		return fmt.Errorf("Rules are full (%s / 3 000 characters). Shorten or remove a rule first.", ruleNumber(used))
+	if next > limit {
+		return fmt.Errorf("Rules are full (%s / %s characters). Shorten or remove a rule first.", ruleNumber(used), ruleNumber(limit))
 	}
 	if id == "" && len(r.Rules) >= MaxRules {
 		return fmt.Errorf("this scope has 20 rules. Shorten or remove a rule first.")
@@ -129,6 +140,10 @@ func (s *Store) AddRule(scope, by, byName, text string) (Rule, error) {
 	if err != nil {
 		return out, err
 	}
+	limit, err := s.rulesLimit()
+	if err != nil {
+		return out, err
+	}
 	err = s.UpdateOpen(func(st *State) error {
 		prefix := "r"
 		r := st.rules(scope)
@@ -141,7 +156,7 @@ func (s *Store) AddRule(scope, by, byName, text string) (Rule, error) {
 		} else if r == nil {
 			r = &st.Room(scope).RuleSet
 		}
-		if err := ruleCapacity(r, "", text); err != nil {
+		if err := ruleCapacity(r, "", text, limit); err != nil {
 			return err
 		}
 		if r.Rules == nil {
@@ -158,12 +173,16 @@ func (s *Store) AddRule(scope, by, byName, text string) (Rule, error) {
 
 // EditRule checks authorizeAs for permission and records by in the edit history.
 func (s *Store) EditRule(scope, id, by, authorizeAs, text string) (Rule, error) {
+	limit, err := s.rulesLimit()
+	if err != nil {
+		return Rule{}, err
+	}
 	return s.changeRule(scope, id, authorizeAs, func(r *RuleSet, rule *Rule) error {
 		text, err := ruleText(text)
 		if err != nil {
 			return err
 		}
-		if err := ruleCapacity(r, id, text); err != nil {
+		if err := ruleCapacity(r, id, text, limit); err != nil {
 			return err
 		}
 		rule.Edits = append(rule.Edits, Edit{At: s.now(), By: by, OldText: rule.Text})

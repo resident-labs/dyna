@@ -11,6 +11,7 @@ import (
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -60,6 +61,7 @@ func Command(o Options) *cobra.Command {
 			}
 			fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s  %s\n", rule.ID, who, age(rule.UpdatedAt), rule.Text)
 		}
+		fmt.Fprintf(c.OutOrStdout(), "%d of %d characters used. Owner sets the limit with dyna settings set %s <characters>.\n", v.Used, v.Max, settings.KeyRulesMaxChars)
 		return nil
 	}
 	root.RunE = list
