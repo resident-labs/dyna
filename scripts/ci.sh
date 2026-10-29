@@ -128,22 +128,22 @@ case "$suite" in
         # cached results. The nightly workflow runs the race phase below.
         # CI_SHARD=INDEX/COUNT tests one slice of the packages; no value tests all.
         pkgs=(./...)
+        sliced=()
         if [[ -n ${CI_SHARD:-} ]]; then
           mapfile -t pkgs < <(bash scripts/ci-shard.sh "${CI_SHARD%/*}" "${CI_SHARD#*/}")
-          if ((${#pkgs[@]} == 0)); then echo "Shard $CI_SHARD has no packages" >&2; exit 1; fi
+          mapfile -t sliced < <(bash scripts/ci-shard.sh "${CI_SHARD%/*}" "${CI_SHARD#*/}" sliced)
+          if ((${#pkgs[@]} + ${#sliced[@]} == 0)); then echo "Shard $CI_SHARD has no packages" >&2; exit 1; fi
         fi
-        # CI_SLICE=I/N runs every Nth top-level test of the one package in the shard,
-        # so the slowest package can span shards.
-        run=()
-        if [[ -n ${CI_SLICE:-} ]]; then
-          mapfile -t names < <(go test -list '^Test' "${pkgs[@]}" | grep '^Test' | sort)
-          picked=()
-          for i in "${!names[@]}"; do
-            if ((i % ${CI_SLICE#*/} == ${CI_SLICE%/*})); then picked+=("${names[$i]}"); fi
+        # CI_SLICE=I/N runs every Nth top-level test of each sliced package on the
+        # shard, so a slow package can span shards. Whole packages run unfiltered.
+        {
+          if ((${#pkgs[@]})); then ci_diag_go test -json -timeout 5m "${pkgs[@]}"; fi
+          for pkg in "${sliced[@]}"; do
+            mapfile -t picked < <(bash scripts/ci-slice.sh "$pkg" "${CI_SLICE%/*}" "${CI_SLICE#*/}")
+            if ((${#picked[@]} == 0)); then continue; fi
+            ci_diag_go test -json -timeout 5m -run "^($(IFS='|'; echo "${picked[*]}"))\$" "$pkg"
           done
-          run=(-run "^($(IFS='|'; echo "${picked[*]}"))\$")
-        fi
-        ci_diag_go test -json -timeout 5m "${run[@]}" "${pkgs[@]}" | tee "$RUNNER_TEMP/go-test.json" | "$RUNNER_TEMP/dyna-ci" git ci tests --isolate-over 1s --junit-output "$RUNNER_TEMP/go-test.xml"
+        } | tee "$RUNNER_TEMP/go-test.json" | "$RUNNER_TEMP/dyna-ci" git ci tests --isolate-over 1s --junit-output "$RUNNER_TEMP/go-test.xml"
         ;;
       # The nightly race run on main. It has no time budget and no checker.
       race) ci_diag_go test -race -timeout 10m ./... ;;
