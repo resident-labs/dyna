@@ -87,10 +87,17 @@ var handlerCallerChecks = map[string]string{
 	"WithdrawQuestion":            "questionSender resolves the caller before withdrawing the question.",
 }
 
-// A Write binding must have a caller policy or remain named in the existing
-// unchecked debt. Neither Local nor ScopeAdmin authenticates local sessions.
-// The unchecked list may only shrink; new writes need a real caller policy.
+// A Write binding must carry a caller policy on its Binding, apply its own
+// in-method check, or remain named in the existing unchecked debt. Neither
+// Local nor ScopeAdmin authenticates local sessions. The unchecked list may
+// only shrink; new writes need a real caller policy.
 func TestWriteCallsHaveCallerPolicy(t *testing.T) {
+	// Inspect the real table without starting services or opening any stores.
+	table := bindings(services{rooms: &roomsvc.Service{}})
+	byName := map[string]websvc.Binding{}
+	for _, binding := range table {
+		byName[binding.Name] = binding
+	}
 	policies := map[string]string{}
 	add := func(name, reason string) {
 		t.Helper()
@@ -101,10 +108,13 @@ func TestWriteCallsHaveCallerPolicy(t *testing.T) {
 			t.Fatalf("%s has two caller policies: %s; %s", name, old, reason)
 		}
 		policies[name] = reason
-	}
-	for _, names := range [][]string{goalCalls, sessionCalls, prCalls, issueCalls, machineCalls, ownerCalls, cliCalls} {
-		for _, name := range names {
-			add(name, "protectCalls")
+		binding, ok := byName[name]
+		if !ok || binding.Access != websvc.Write {
+			t.Errorf("caller policy for %s has no Write binding; remove its stale entry", name)
+			return
+		}
+		if binding.Policy != 0 {
+			t.Errorf("%s carries a binding policy and names its own check; keep one", name)
 		}
 	}
 	for name, reason := range handlerCallerChecks {
@@ -138,17 +148,12 @@ func TestWriteCallsHaveCallerPolicy(t *testing.T) {
 	if unchecked < maxUncheckedWrites {
 		t.Errorf("unchecked Write bindings shrank to %d; lower maxUncheckedWrites to %d", unchecked, unchecked)
 	}
-	// Inspect the real table without starting services or opening any stores.
-	for _, binding := range bindings(services{rooms: &roomsvc.Service{}}) {
-		if binding.Access != websvc.Write {
+	for _, binding := range table {
+		if binding.Access != websvc.Write || binding.Policy != 0 {
 			continue
 		}
 		if _, ok := policies[binding.Name]; !ok {
 			t.Errorf("write binding %s has no caller policy; protect it or identify its in-method check; the unchecked list may only shrink", binding.Name)
 		}
-		delete(policies, binding.Name)
-	}
-	for name := range policies {
-		t.Errorf("caller policy for %s has no Write binding; remove its stale entry", name)
 	}
 }
