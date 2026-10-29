@@ -235,8 +235,8 @@ its only memory bound, so it gets exactly the granted memory.
 
 Every check, and every `dyna job` job, joins one queue per node. The queue
 admits a unit of work when its CPUs and memory fit the node's free capacity,
-when the node keeps enough free disk (at least 20 GiB and 5% of the disk, or
-under a set `--max-disk-percent` limit), and, for an IO-heavy unit,
+when the node keeps enough free disk (at least 20 GiB and 5% of the disk, but
+never more than 10% of it, or under a set `--max-disk-percent` limit), and, for an IO-heavy unit,
 when fewer heavy units run than the node's limit. Work that waits is oldest
 first and rooms take turns, and the check's log names the reason it waits, such
 as `local CI: 4 of 4 IO-heavy jobs running, position 3 of 7`. The owner or the
