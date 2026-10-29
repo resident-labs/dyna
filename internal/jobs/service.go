@@ -136,16 +136,39 @@ func remoteScratchReference(command []string, scratchDir string) bool {
 		if strings.Contains(word, "$DYNA_SCRATCH") || strings.Contains(word, "${DYNA_SCRATCH}") {
 			return true
 		}
-		if scratchDir != "" {
-			if strings.Contains(word, scratchDir+string(filepath.Separator)) {
-				return true
-			}
-			if filepath.IsAbs(word) && filepath.Clean(word) == scratchDir {
-				return true
-			}
+		if scratchDir != "" && containsScratchPath(word, scratchDir) {
+			return true
 		}
 	}
 	return false
+}
+
+// containsScratchPath finds the scratch root or one of its descendants only
+// where shell syntax gives the path a complete start and end.
+func containsScratchPath(word, scratchDir string) bool {
+	for offset := 0; offset < len(word); {
+		at := strings.Index(word[offset:], scratchDir)
+		if at < 0 {
+			return false
+		}
+		start := offset + at
+		end := start + len(scratchDir)
+		if (start == 0 || scratchPathDelimiter(word[start-1])) &&
+			(end == len(word) || word[end] == '/' || scratchPathDelimiter(word[end])) {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+func scratchPathDelimiter(b byte) bool {
+	switch b {
+	case ' ', '\t', '\r', '\n', '\'', '"', ';', '=', '|', '&', '(', ')', '<', '>', ':', ',', '{', '}', '[', ']':
+		return true
+	default:
+		return false
+	}
 }
 
 // Input is one job to submit.
