@@ -26,6 +26,8 @@ type reattachFixture struct {
 	release chan struct{}
 	setups  atomic.Int32
 	removed atomic.Int32
+	// onReports runs when the node copies the reports, after every check ended.
+	onReports func()
 }
 
 func newReattachFixture(t *testing.T) *reattachFixture {
@@ -48,6 +50,9 @@ func newReattachFixture(t *testing.T) *reattachFixture {
 		case strings.Contains(script, "init.lock"):
 			f.setups.Add(1)
 		case strings.Contains(script, "tar -C"):
+			if f.onReports != nil {
+				f.onReports()
+			}
 			return fakeNodeReports(out, checks, false)
 		case strings.Contains(script, "rm -rf --one-file-system") && !strings.Contains(script, "trap "):
 			f.removed.Add(1)
@@ -141,6 +146,26 @@ func TestResumedRunThatFailsToStartKeepsItsChecksDuringAnEngineStop(t *testing.T
 	key, _ := canonicalKey(f.request.Repo)
 	if rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40)); err != nil || len(rows) != 1 {
 		t.Fatalf("records = %+v, %v, want the record kept for a restarted engine", rows, err)
+	}
+}
+
+// A resumed run whose checks all ended removes its folder when the engine stops
+// as the run finishes, so no keeper waits for it (D-489).
+func TestResumedRunThatFinishesDuringAnEngineStopRemovesItsFolder(t *testing.T) {
+	f := newReattachFixture(t)
+	f.stopEngineDuringRun(t)
+	close(f.release)
+	f.onReports = func() { MarkEngineStopping() }
+	if result, err := f.runner.Run(t.Context(), f.request); err != nil || result.Status != OutcomePassed {
+		t.Fatalf("resumed run = %+v, %v, want a pass", result, err)
+	}
+	if got := f.removed.Load(); got != 1 {
+		t.Fatalf("run folder removals = %d, want 1 once every check ended", got)
+	}
+	store := Store{DataDir: f.runner.DataDir}
+	key, _ := canonicalKey(f.request.Repo)
+	if rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40)); err != nil || len(rows) != 0 {
+		t.Fatalf("records = %+v, %v, want the finished run's record deleted", rows, err)
 	}
 }
 

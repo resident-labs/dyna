@@ -288,10 +288,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	reports := path.Join(runDir, "reports")
 	// A check whose exit the engine did not see may still run on the machine. Only
 	// such a run keeps its folder and record for a restarted engine. A resumed run
-	// starts with its checks already on the machine, so it counts as unsettled
-	// until it ends, even if it returns before its workers observe an exit.
-	var unsettled atomic.Bool
-	unsettled.Store(resume != nil)
+	// starts with its checks already on the machine, so it stays pending until its
+	// workers have seen every check end, which covers an early return too.
+	var unsettled, resumePending atomic.Bool
+	resumePending.Store(resume != nil)
+	keepsForRestart := func() bool { return EngineStopping() && (unsettled.Load() || resumePending.Load()) }
 	control, cancel := context.WithTimeout(ctx, time.Duration(len(checks))*(req.Timeout+admissionWait)+2*time.Minute)
 	defer cancel()
 	// A run removes its own directory on the node, whatever ended it: a finished
@@ -301,7 +302,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// own context, so a cancelled run still removes it, and it runs last, after
 	// the reports were copied back.
 	defer func() {
-		if EngineStopping() && unsettled.Load() {
+		if keepsForRestart() {
 			// An engine stop leaves an unfinished run on its machine: its checks keep
 			// running and a restarted engine reattaches. A run whose checks all ended
 			// has nothing to reattach to, so its folder goes now and no keeper waits.
@@ -323,7 +324,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	defer func() {
 		background := context.WithoutCancel(ctx)
-		if EngineStopping() && unsettled.Load() {
+		if keepsForRestart() {
 			// The checks stay on the machine, and the record passes to whoever runs
 			// the commit next.
 			if e := localStore.releaseAttachment(background, attachKey, sha, node.Name, runID); e != nil {
@@ -388,7 +389,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		taggedWorkflows[string(check.id)] = string(tagged)
 	}
 	defer func() {
-		if EngineStopping() && unsettled.Load() {
+		if keepsForRestart() {
 			return
 		}
 		script := teardownScript(node, cache, runDir, runID, checks)
@@ -636,6 +637,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}()
 	}
 	wg.Wait()
+	// Every worker has seen its check end. An uncertain exit still keeps the run
+	// through unsettled.
+	resumePending.Store(false)
 	// A cancelled or expired run still reports what each check proved. A failed
 	// report copy stays an error on the result, but it never hides the checks'
 	// own causes or their local logs.
