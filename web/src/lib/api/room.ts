@@ -1,5 +1,6 @@
 import type { EventPayload, IssueState } from '../rooms/events.gen.ts'
 
+import type { Room, RoomLimits } from './room.gen.ts'
 import type { RunList } from './workflow.ts'
 import type { Reference } from '../rooms/references.ts'
 import type { Responsibilities } from '../rooms/responsibilities.ts'
@@ -7,36 +8,8 @@ import type { Responsibilities } from '../rooms/responsibilities.ts'
 // Rooms, posts and sessions. Sources: internal/roomsvc/roomsvc.go,
 // internal/roomsvc/spawn.go, internal/room/room.go, internal/room/attach.go.
 
-// Room is roomsvc.Room.
-export interface Room {
-  id: string
-  name: string
-  displayName?: string
-  repo?: string
-  rootProfile?: string
-  // checkIn is the room's own parent check-in cadence, as typed: a duration
-  // such as 30m, or off. Empty uses the hook's global interval.
-  checkIn?: string
-  // limits are the room's resource slice limits, as typed: a size such as
-  // 2G for memory, a count such as 512 for tasks, or off. Empty uses the
-  // machine default.
-  limits?: RoomLimits
-  lastActivity: string
-  unread: number
-  running: number
-  members: number
-  pinned: boolean
-  pinOrder: number
-  archived: boolean
-  paused?: boolean
-}
-
-// RoomLimits is roomsvc.RoomLimits: one limit per field, as typed.
-export interface RoomLimits {
-  memoryHigh?: string
-  memoryMax?: string
-  tasksMax?: string
-}
+// Room and RoomLimits are generated from roomsvc.Room in room.gen.ts.
+export type { Room, RoomLimits }
 
 // RoomLimitField names one of a room's limits, as the engine call takes it.
 export type RoomLimitField = keyof RoomLimits
