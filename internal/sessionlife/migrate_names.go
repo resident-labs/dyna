@@ -25,8 +25,8 @@ func migrateNames(db *sql.DB) error {
 		var pending []record
 		for rows.Next() {
 			var id, raw string
-			var instructions instructionRead
-			if err := rows.Scan(&id, &raw, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+			instructions, err := scanInstructionRead(rows, &id, &raw)
+			if err != nil {
 				rows.Close()
 				return err
 			}
@@ -35,9 +35,8 @@ func migrateNames(db *sql.DB) error {
 				rows.Close()
 				return err
 			}
-			raw = string(joined)
 			var fields map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(raw), &fields); err != nil || fields == nil {
+			if err := json.Unmarshal(joined, &fields); err != nil || fields == nil {
 				rows.Close()
 				return fmt.Errorf("%w: session %s name metadata is not an object", ErrRecord, id)
 			}
