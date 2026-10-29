@@ -41,6 +41,13 @@ type instructionRead struct {
 	bodies [2]sql.NullString
 }
 
+// scanInstructionRead keeps the projection column order beside its destinations.
+func scanInstructionRead(row interface{ Scan(...any) error }, dest ...any) (read instructionRead, err error) {
+	dest = append(dest, &read.hashes[0], &read.hashes[1], &read.bodies[0], &read.bodies[1])
+	err = row.Scan(dest...)
+	return
+}
+
 func instructionHash(body []byte) string {
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
