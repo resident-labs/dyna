@@ -65,7 +65,7 @@ type Machine struct {
 	// Zero reads the default of one per sixteen probed CPUs, at least one.
 	MaxIOHeavy int `json:"maxIOHeavy"`
 	// MaxDiskPercent is the used-disk percent above which the node admits no
-	// new work. Zero reads the default of 90.
+	// new work. Zero keeps a free-space floor instead; see DiskBlock.
 	MaxDiskPercent int `json:"maxDiskPercent"`
 	// HostChecksGrants lists who allows repository-defined CI commands to run
 	// on this machine outside a container: the owner for every room, or the
@@ -202,28 +202,38 @@ func (m Machine) IOHeavyLimit() int {
 	return max(1, m.Capabilities.CPUs/16)
 }
 
-// DiskLimitPercent is the used-disk percent above which this node admits no
-// new work. Zero reads the default of 90.
-func (m Machine) DiskLimitPercent() int {
+// DiskBlock says why the node's disk admits no new work, and is empty when it
+// admits it. A set MaxDiskPercent is a limit on the used percent. Without one,
+// the node keeps at least the larger of DiskFloorMin and DiskFloorShare of its
+// disk free, so a large disk is not called full while it still has plenty of
+// room. A node that was never probed is not blocked.
+func (m Machine) DiskBlock() string {
+	disk := m.Capabilities.Disk
+	if disk.Total == 0 {
+		return ""
+	}
 	if m.MaxDiskPercent > 0 {
-		return m.MaxDiskPercent
+		if used := int(100 * (disk.Total - disk.Free) / disk.Total); used >= m.MaxDiskPercent {
+			return fmt.Sprintf("disk %d%% at the %d%% limit", used, m.MaxDiskPercent)
+		}
+		return ""
 	}
-	return DefaultDiskLimitPercent
+	floor := min(max(DiskFloorMin, disk.Total/100*DiskFloorShare), disk.Total/DiskFloorCapDivisor)
+	if disk.Free < floor {
+		return fmt.Sprintf("disk has %d GiB free, below the %d GiB floor", disk.Free>>30, floor>>30)
+	}
+	return ""
 }
 
-// DefaultDiskLimitPercent is the used-disk percent a node with no stored limit
-// keeps its work under.
-const DefaultDiskLimitPercent = 90
-
-// DiskUsedPercent is the used share of the filesystem that holds this node's
-// Dyna work, as the last probe read it. It is -1 when no probe read a total.
-func (m Machine) DiskUsedPercent() int {
-	total := m.Capabilities.Disk.Total
-	if total == 0 {
-		return -1
-	}
-	return int(100 * (total - m.Capabilities.Disk.Free) / total)
-}
+// DiskFloorMin and DiskFloorShare are the free space a node with no percent
+// limit keeps: at least 20 GiB, and at least 5% of the disk. The floor never
+// exceeds a tenth of the disk (DiskFloorCapDivisor), so a disk under 200 GiB
+// keeps 10% free and an empty small disk always admits work.
+const (
+	DiskFloorMin        = uint64(20) << 30
+	DiskFloorShare      = 5
+	DiskFloorCapDivisor = 10
+)
 
 // HasHostChecksGrants reports whether anyone allows host checks on this
 // machine, whatever the room.
