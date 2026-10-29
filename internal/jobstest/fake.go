@@ -39,22 +39,33 @@ type Fake struct {
 	legacy RunFunc
 	proto  Protocol
 
-	mu      sync.Mutex
-	procs   map[string]*fakeProc
-	folders map[string]bool
-	starts  []Start
-	polls   int
-	stops   int
-	now     time.Time
+	mu              sync.Mutex
+	procs           map[string]*fakeProc
+	folders         map[string]bool
+	starts          []Start
+	polls           int
+	stops           int
+	stopFailures    int
+	capLogs         bool
+	outputEveryPoll bool
+	now             time.Time
 	// Down makes every call fail like a dropped connection while it returns
 	// true.
 	Down func() bool
+	// StopHook runs after a stop attempt, outside the fake lock. failed says
+	// whether the fake rejected the stop instead of stopping its unit.
+	StopHook func(call int, failed bool)
+	// ExitHook runs after a fake job records its exit, outside the fake lock.
+	ExitHook func(code int)
 }
 
 type fakeProc struct {
 	log      []byte
 	exited   bool
 	code     int
+	modified time.Time
+	activity time.Time
+	capped   bool
 	cancel   context.CancelFunc
 	vanished bool
 }
@@ -121,7 +132,24 @@ func (m *Fake) command(ctx context.Context, dir string, in io.Reader, out, stder
 	case m.proto.Poll:
 		return m.poll(out, positional)
 	case m.proto.Stop:
+		m.mu.Lock()
+		m.stops++
+		calls := m.stops
+		fail := m.stopFailures > 0
+		if fail {
+			m.stopFailures--
+		}
+		m.mu.Unlock()
+		if fail {
+			if m.StopHook != nil {
+				m.StopHook(calls, true)
+			}
+			return errors.New("fake stop failure")
+		}
 		m.stop(positional[0])
+		if m.StopHook != nil {
+			m.StopHook(calls, false)
+		}
 		return nil
 	}
 	return m.legacy(ctx, dir, in, out, stderr, name, args...)
@@ -140,7 +168,7 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(m.t.Context())
-	proc := &fakeProc{cancel: cancel}
+	proc := &fakeProc{cancel: cancel, modified: m.now, capped: m.capLogs}
 	m.procs[dir] = proc
 	m.mu.Unlock()
 	callName, callArgs := "bash", []string{"-o", "pipefail", "-c", string(body)}
@@ -165,6 +193,9 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		m.mu.Lock()
 		proc.exited, proc.code = true, code
 		m.mu.Unlock()
+		if m.ExitHook != nil {
+			m.ExitHook(code)
+		}
 	}()
 	return nil
 }
@@ -176,6 +207,25 @@ func (m *Fake) Mkdir(dir string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.folders[dir] = true
+}
+
+// CapLogs makes every fake job discard later output, as the node's
+// retained-log cap does. The fake still runs and can end normally.
+func (m *Fake) CapLogs() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.capLogs = true
+	for _, proc := range m.procs {
+		proc.capped = true
+	}
+}
+
+// OutputEveryPoll writes output from each running job as part of its poll.
+// It keeps output and the fake clock in step, without depending on scheduling.
+func (m *Fake) OutputEveryPoll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.outputEveryPoll = true
 }
 
 // VanishAll makes every unit disappear without an exit record, as a machine
@@ -204,6 +254,13 @@ func (m *Fake) Vanish(dir string) {
 	}
 }
 
+// FailStops makes the next count stop calls fail without stopping the unit.
+func (m *Fake) FailStops(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopFailures = count
+}
+
 // StopCount is how many stops the machine received.
 func (m *Fake) StopCount() int {
 	m.mu.Lock()
@@ -213,7 +270,6 @@ func (m *Fake) StopCount() int {
 
 func (m *Fake) stop(dir string) {
 	m.mu.Lock()
-	m.stops++
 	proc := m.procs[dir]
 	m.mu.Unlock()
 	if proc != nil {
@@ -237,7 +293,7 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 			if m.folders[dir] {
 				state = "gone"
 			}
-			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code= size=0 bytes=0\n\n", dir, state)
+			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code= size=0 quiet_s=0 bytes=0\n\n", dir, state)
 			continue
 		}
 		state, code := "running", ""
@@ -246,11 +302,34 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 		} else if proc.exited {
 			state, code = "exited", strconv.Itoa(proc.code)
 		}
+		if m.outputEveryPoll && state == "running" {
+			proc.write(m.now, []byte("working\n"))
+		}
 		size := len(proc.log)
 		chunk := proc.log[min(offset, size):min(size, offset+256<<10)]
-		fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code=%s size=%d bytes=%d\n%s\n", dir, state, code, size, len(chunk), chunk)
+		modified := proc.modified
+		if !proc.activity.IsZero() {
+			modified = proc.activity
+		}
+		quiet := time.Duration(0)
+		if !modified.IsZero() && m.now.After(modified) {
+			quiet = m.now.Sub(modified)
+		}
+		fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code=%s size=%d quiet_s=%d bytes=%d\n%s\n", dir, state, code, size, quiet/time.Second, len(chunk), chunk)
 	}
 	return nil
+}
+
+func (p *fakeProc) write(now time.Time, data []byte) {
+	if !p.capped {
+		p.log = append(p.log, data...)
+	}
+	if len(data) > 0 {
+		p.activity = now
+		if !p.capped {
+			p.modified = now
+		}
+	}
 }
 
 // fakeLog is the output of a running fake job.
@@ -262,7 +341,7 @@ type fakeLog struct {
 func (l fakeLog) Write(p []byte) (int, error) {
 	l.m.mu.Lock()
 	defer l.m.mu.Unlock()
-	l.proc.log = append(l.proc.log, p...)
+	l.proc.write(l.m.now, p)
 	return len(p), nil
 }
 
