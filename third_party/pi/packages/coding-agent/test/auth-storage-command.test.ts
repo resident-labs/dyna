@@ -1,7 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import lockfile from "proper-lockfile";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthCommandError, parseAuthCommand, runAuthStorageCommand } from "../src/cli/auth-command.ts";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { FileAuthStorageBackend } from "../src/core/auth-storage.ts";
@@ -178,22 +179,71 @@ describe("auth storage commands", () => {
 	});
 
 	it("waits for a second writer holding the lock", async () => {
+		// The locked function runs only after the backend holds the lock, so
+		// its first statement proves the holder owns the lock; it then waits on
+		// a deferred promise the test resolves, not on a timer.
+		let releaseHolder: () => void = () => {};
+		const holderGate = new Promise<void>((resolve) => {
+			releaseHolder = resolve;
+		});
+		let lockAcquired: () => void = () => {};
+		const lockAcquiredPromise = new Promise<void>((resolve) => {
+			lockAcquired = resolve;
+		});
 		const holder = backend.withLockAsync(async () => {
-			await new Promise((resolve) => {
-				setTimeout(resolve, 150);
-			});
+			lockAcquired();
+			await holderGate;
 			return { result: undefined };
 		});
-		const started = Date.now();
-		await runAuthStorageCommand(
+		await lockAcquiredPromise;
+
+		// The writer's blocked state is observed, not assumed: a pass-through
+		// spy on proper-lockfile resolves contentionPromise when the second
+		// writer's lock attempt rejects with ELOCKED because the lock is held.
+		let contention: () => void = () => {};
+		const contentionPromise = new Promise<void>((resolve) => {
+			contention = resolve;
+		});
+		const realLock = lockfile.lock;
+		const lock = vi.spyOn(lockfile, "lock").mockImplementation(async (file, options) => {
+			try {
+				return await realLock(file, options);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ELOCKED") contention();
+				throw error;
+			}
+		});
+
+		let setFinished = false;
+		const set = runAuthStorageCommand(
 			storageCommand(["auth", "set", "--provider", "beta"]),
 			JSON.stringify({ type: "api_key", key: "beta-key" }),
 			backend,
-		);
-		const waited = Date.now() - started;
-		await holder;
+		).then(() => {
+			setFinished = true;
+		});
 
-		expect(waited).toBeGreaterThanOrEqual(100);
+		try {
+			const firstOutcome = await Promise.race([
+				contentionPromise.then(() => "contention" as const),
+				set.then(() => "writer completion" as const),
+			]);
+			if (firstOutcome === "writer completion") {
+				throw new Error("The second writer finished before its lock attempt reported contention");
+			}
+			// The second writer reached the held lock and is blocked, so it has
+			// neither finished nor written.
+			expect(setFinished).toBe(false);
+			expect(JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"))).toEqual({});
+		} finally {
+			// A failed assertion must not leave the lock held.
+			releaseHolder();
+			await holder;
+			await set.catch(() => {});
+			lock.mockRestore();
+		}
+
+		expect(setFinished).toBe(true);
 		const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"));
 		expect(stored).toEqual({ beta: { type: "api_key", key: "beta-key" } });
 	});
