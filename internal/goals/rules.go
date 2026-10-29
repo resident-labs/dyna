@@ -67,12 +67,11 @@ func (s *Store) Rules(scope string) ([]Rule, error) {
 	return out, nil
 }
 
-// rulesLimit is the one place that picks the rule text cap for an operation.
+// rulesLimit is the one place that reads the owner's rule text cap. Every
+// store reads the same settings file, so room, global and instruction paths agree.
 func (s *Store) rulesLimit() (int, error) {
-	if s.RulesLimit == nil {
-		return settings.DefaultRulesMaxChars, nil
-	}
-	return s.RulesLimit()
+	v, err := settings.Load(settings.DefaultPath())
+	return v.RulesMaxChars, err
 }
 
 func (s *Store) RulesView(scope string) (View, error) {
