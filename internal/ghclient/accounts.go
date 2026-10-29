@@ -315,7 +315,7 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 func selectAccountAfterPolicy(ctx context.Context, cmd *exec.Cmd, r repository) (string, string, error) {
 	rec, err := roomFor(ctx, cmd.Dir, r)
 	write := Access(ctx, rec) == ReadWrite
-	if errors.Is(err, errNotInRoom) && write {
+	if errors.Is(err, errNotInRoom) {
 		err = nil
 		write = false
 	}

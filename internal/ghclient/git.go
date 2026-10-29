@@ -28,7 +28,7 @@ func RunGit(ctx context.Context, ghBinary string, cmd *exec.Cmd) error {
 		return err
 	}
 	gh := Command(ctx, ghBinary, cmd.Dir)
-	_, token, err := selectAccount(ctx, gh, r)
+	_, token, err := selectAccountAfterPolicy(ctx, gh, r)
 	if err != nil {
 		return err
 	}
