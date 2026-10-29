@@ -41,6 +41,7 @@ const (
 	KeyPiCodeMode            = "harness.piCodeMode"
 	KeyMaxCardBytes          = "content.maxCardBytes"
 	KeyMaxFileBytes          = "content.maxFileBytes"
+	KeyDatabaseCallerDetail  = "database.callerDetail"
 	SourceDefault            = "default"
 	SourceFile               = "file"
 	SourceEnv                = "env"
@@ -101,10 +102,13 @@ type Values struct {
 	MaxCardBytes           int64
 	MaxFileBytes           int64
 	AutoCheck              bool
-	RunsRetention          time.Duration
-	WorktreesRetention     string
-	WorktreesRoot          string
-	WorktreesMinFreeBytes  int64
+	// DatabaseCallerDetail counts writer transactions by caller for the
+	// database status line. It costs a stack walk per write, so it is off by default.
+	DatabaseCallerDetail  bool
+	RunsRetention         time.Duration
+	WorktreesRetention    string
+	WorktreesRoot         string
+	WorktreesMinFreeBytes int64
 	// SubagentMaxDepth caps subagent-session nesting (top-level sessions are
 	// depth 1).
 	SubagentMaxDepth int
@@ -296,6 +300,12 @@ func Load(path string) (Values, error) {
 	}
 	if err := v.loadLibrary(raw); err != nil {
 		return Values{}, err
+	}
+	if database, ok := raw["database"].(map[string]any); ok {
+		if on, ok := database["callerDetail"].(bool); ok {
+			v.DatabaseCallerDetail = on
+			v.fromFile[KeyDatabaseCallerDetail] = true
+		}
 	}
 	if updater, ok := raw["updater"].(map[string]any); ok {
 		if auto, ok := updater["autoCheck"].(bool); ok {
@@ -522,6 +532,13 @@ func (v *Values) Set(key, value string) error {
 			v.MaxFileBytes = n
 		}
 		v.fromFile[key] = true
+	case KeyDatabaseCallerDetail:
+		b, err := parseBool(value)
+		if err != nil {
+			return err
+		}
+		v.DatabaseCallerDetail = b
+		v.fromFile[key] = true
 	case KeyAutoCheck:
 		b, err := parseBool(value)
 		if err != nil {
@@ -645,6 +662,9 @@ func (v Values) Save() error {
 	updater := nested(raw, "updater")
 	updater["autoCheck"] = v.AutoCheck
 	raw["updater"] = updater
+	database := nested(raw, "database")
+	database["callerDetail"] = v.DatabaseCallerDetail
+	raw["database"] = database
 	runs := nested(raw, "runs")
 	runs["retention"] = formatRunsRetention(v.RunsRetention)
 	raw["runs"] = runs
