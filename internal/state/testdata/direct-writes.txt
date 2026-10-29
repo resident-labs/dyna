@@ -150,9 +150,7 @@ not-state internal/hooks/events.go cleanupSnapshot 1 # removes a private Git exe
 not-state internal/hooks/events.go snapshot 1 # removes a failed private Git execution worktree directory
 not-state internal/hooks/install.go Service.settleLeftRun 1 # appends why a run ended to the run's own log file, which holds its raw output
 not-state internal/hooks/runs.go Service.newRun 1 # raw command output stays in log files
-not-state internal/hooks/spool.go Service.Drain 1 # allowed inbox, requirement 2: the git hook spool the engine drains
-not-state internal/hooks/spool.go Service.Enqueue 1 # allowed inbox, requirement 2: the git hook spool the engine drains
-not-state internal/hooks/spool.go quarantineSpoolFile 1 # allowed inbox, requirement 2: the git hook spool the engine drains
+not-state internal/hooks/queue_sqlite.go Service.importSpoolFile 1 # removes one retired hook-spool inbox file after its row committed into dyna.db (allowed inbox, requirement 2)
 not-state internal/localci/node_runner.go Runner.runNode 1 # removes the run's still empty report folder when taking over a record fails
 not-state internal/localci/node_runner.go Runner.fetchReports 1 # temporary report transport archive, removed when the copy returns
 not-state internal/localci/node_runner.go newCheckLog 1 # a check's own log blob beside the other report blobs; its result and cause stay in SQLite
