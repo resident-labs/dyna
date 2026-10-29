@@ -333,14 +333,23 @@ func ReadRecord(root, key string) (Record, bool, error) {
 }
 
 // ReadForSessions returns a State that holds only the room's PRs that any of
-// sessions authors or reviews, closed ones included. It filters the shared
-// snapshot under its lock and copies only the matches, so a scan with no PR
-// change reads no PR rows. The State has no metadata and no saved responses.
+// sessions authors or reviews, closed ones included. In a process that already
+// holds the snapshot for root, it filters the shared snapshot under its lock and
+// copies only the matches, so a scan with no PR change reads no PR rows. A
+// short-lived process has no snapshot yet. Loading one would decode every row,
+// so it filters the rows in SQLite instead. The State has no metadata and no
+// saved responses.
 func ReadForSessions(root, roomID string, sessions ...string) (State, error) {
 	st := newState()
 	st.Records = map[string]*Record{}
 	if len(sessions) == 0 {
 		return st, nil
+	}
+	snapshot.Lock()
+	warm := snapshot.root == root && snapshot.index != nil
+	snapshot.Unlock()
+	if !warm {
+		return ReadForSessionsFresh(root, roomID, sessions...)
 	}
 	db, err := open(root)
 	if err != nil {
