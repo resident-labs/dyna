@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/state"
@@ -46,9 +47,119 @@ func (m *Manager) Responsibilities(ctx context.Context, info Info) ([]Responsibi
 // Each store is read once for all of them, so a room's member list costs one
 // pass instead of one pass for every session. The kinds and their ownership
 // rules are the ones Responsibilities uses: both read the same collectors.
+// The store collectors are served from the count cache while their revisions
+// hold. Shells are read on every call, because a shell has no revision.
 func (m *Manager) ResponsibilityCounts(ctx context.Context, infos []Info) (map[string]map[string]int, error) {
-	items, err := m.ownedBy(ctx, infos, false)
-	counts := make(map[string]map[string]int, len(items))
+	key, err := m.countKey()
+	if err != nil {
+		return nil, err
+	}
+	cache := m.countCache()
+	cached, missing := cache.lookup(key, infos)
+	var fresh []owned
+	if len(missing) > 0 {
+		fresh, err = m.cachedOwned(ctx, missing, false)
+		if err == nil {
+			cache.store(key, missing, fresh)
+		}
+	}
+	shells, shellErr := m.shellsOwned(ctx, infos)
+	return countsOf(append(append(cached, fresh...), shells...)), errors.Join(err, shellErr)
+}
+
+// countKey names the revisions that a count depends on. It reads every
+// revision before any collector runs. A write that lands during a count then
+// leaves a newer revision than the key, so the next count reads again.
+func (m *Manager) countKey() (string, error) {
+	pr, err := state.Revision(state.Root(filepath.Dir(m.store().root())))
+	if err != nil {
+		return "", err
+	}
+	goals, err := m.goalStore().Revision()
+	if err != nil {
+		return "", err
+	}
+	items, err := m.goalStore().ItemsRevision()
+	if err != nil {
+		return "", err
+	}
+	questions, err := m.questionStore().Revision()
+	if err != nil {
+		return "", err
+	}
+	runs, err := runstore.Revision()
+	if err != nil {
+		return "", err
+	}
+	sessions, err := sessionlife.CacheRevision(m.store().root())
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("pr=%s goals=%s items=%s questions=%s runs=%d sessions=%s", pr, goals, items, questions, runs, sessions), nil
+}
+
+// countCache keeps the store items that each session owns, for one revision
+// key. A new key empties it, so a count never mixes two revisions.
+type countCache struct {
+	mu        sync.Mutex
+	key       string
+	bySession map[string][]owned
+	// recounts counts the reads stored. A test reads it to see a reuse.
+	recounts int
+}
+
+// countCache returns the manager's count cache. The package lock guards only
+// the first allocation, so a Manager copied after that shares the cache.
+var countCacheInit sync.Mutex
+
+func (m *Manager) countCache() *countCache {
+	countCacheInit.Lock()
+	defer countCacheInit.Unlock()
+	if m.counts == nil {
+		m.counts = &countCache{}
+	}
+	return m.counts
+}
+
+// lookup returns the cached items of infos under key, and the infos that the
+// cache lacks. A new key empties the cache first.
+func (c *countCache) lookup(key string, infos []Info) (cached []owned, missing []Info) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.key != key {
+		c.key = key
+		c.bySession = map[string][]owned{}
+	}
+	for _, info := range infos {
+		items, ok := c.bySession[info.ID]
+		if !ok {
+			missing = append(missing, info)
+		}
+		cached = append(cached, items...)
+	}
+	return cached, missing
+}
+
+// store keeps the items that a read of missing found. It skips the store when
+// another key has replaced this one, because the read may be stale.
+func (c *countCache) store(key string, missing []Info, items []owned) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.key != key {
+		return
+	}
+	c.recounts++
+	for _, info := range missing {
+		c.bySession[info.ID] = nil
+	}
+	for _, item := range items {
+		c.bySession[item.info.ID] = append(c.bySession[item.info.ID], item)
+	}
+}
+
+// countsOf groups the owned items by session and kind.
+func countsOf(items []owned) map[string]map[string]int {
+	counts := make(map[string]map[string]int)
 	for _, item := range items {
 		byKind := counts[item.info.ID]
 		if byKind == nil {
@@ -57,7 +168,7 @@ func (m *Manager) ResponsibilityCounts(ctx context.Context, infos []Info) (map[s
 		}
 		byKind[string(item.r.Kind)]++
 	}
-	return counts, err
+	return counts
 }
 
 // ownedBy reads each store once and returns what infos own, with the error of
@@ -66,10 +177,15 @@ func (m *Manager) ResponsibilityCounts(ctx context.Context, infos []Info) (map[s
 // path repairs a session whose turn runner is gone (repair), because a web read
 // must not change a session or a room file.
 func (m *Manager) ownedBy(ctx context.Context, infos []Info, repair bool) ([]owned, error) {
-	byID := make(map[string]Info, len(infos))
-	for _, info := range infos {
-		byID[info.ID] = info
-	}
+	items, err := m.cachedOwned(ctx, infos, repair)
+	shells, shellErr := m.shellsOwned(ctx, infos)
+	return append(items, shells...), errors.Join(err, shellErr)
+}
+
+// cachedOwned reads the store collectors that the count cache may keep. It
+// never reads shells, which have no revision.
+func (m *Manager) cachedOwned(ctx context.Context, infos []Info, repair bool) ([]owned, error) {
+	byID := byIDOf(infos)
 	base := filepath.Dir(m.store().root())
 	var out []owned
 	collect := func(list func() ([]owned, error)) func() error {
@@ -84,11 +200,30 @@ func (m *Manager) ownedBy(ctx context.Context, infos []Info, repair bool) ([]own
 		collect(func() ([]owned, error) { return m.goalOwned(byID) })(),
 		collect(func() ([]owned, error) { return m.itemOwned(byID) })(),
 		collect(func() ([]owned, error) { return m.questionOwned(byID) })(),
-		sessionlife.WithPublication(ctx, filepath.Join(base, "shells"), "publication.lock", collect(func() ([]owned, error) { return m.shellOwned(byID) })),
 		sessionlife.WithPublication(ctx, filepath.Join(base, "runs"), "publication.lock", collect(func() ([]owned, error) { return m.runOwned(byID) })),
 		collect(func() ([]owned, error) { return m.childOwned(byID, repair) })(),
 	)
 	return out, err
+}
+
+// shellsOwned reads the live shell jobs under the shells publication lock.
+func (m *Manager) shellsOwned(ctx context.Context, infos []Info) ([]owned, error) {
+	var out []owned
+	err := sessionlife.WithPublication(ctx, filepath.Join(filepath.Dir(m.store().root()), "shells"), "publication.lock", func() error {
+		items, err := m.shellOwned(byIDOf(infos))
+		out = items
+		return err
+	})
+	return out, err
+}
+
+// byIDOf indexes the sessions by ID.
+func byIDOf(infos []Info) map[string]Info {
+	byID := make(map[string]Info, len(infos))
+	for _, info := range infos {
+		byID[info.ID] = info
+	}
+	return byID
 }
 
 func responsibilityError(verb string, items []Responsibility) error {
