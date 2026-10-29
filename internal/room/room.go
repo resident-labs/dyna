@@ -60,6 +60,9 @@ type Record struct {
 	// Upstream is the parent repository, as host/owner/repo, of this room's
 	// fork checkout (see ParseUpstream). Empty means the room has no parent.
 	Upstream string `json:"upstream,omitempty"`
+	// Attribution is the line that agent-created pull request and issue bodies
+	// end with. Empty means the room sets none.
+	Attribution string `json:"attribution,omitempty"`
 	// LibraryPinSet is true when this room has its own librarian profile.
 	// LibraryPin is that profile; empty means auto for this room only.
 	// When LibraryPinSet is false, the room uses the global library.profile.
