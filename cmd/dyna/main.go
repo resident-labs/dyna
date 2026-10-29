@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"dyna-agent/internal/ghclient"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -79,22 +78,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "dyna:", err)
 		os.Exit(2)
 	}
-	tool := filepath.Base(os.Args[0])
-	if (tool == "gh" || tool == "git") && os.Getenv(ghclient.ReadOnlyEnv) != "" {
+	if filepath.Base(os.Args[0]) == "gh" && os.Getenv(ghclient.ReadOnlyEnv) != "" {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		var err error
-		if tool == "gh" {
-			err = ghclient.SessionCommand(ctx, os.Args[1:])
-		} else {
-			err = ghclient.SessionGitCommand(ctx, os.Args[1:], home.LaunchEnv())
-		}
-		if err != nil {
-			var exit interface{ ExitCode() int }
-			if errors.As(err, &exit) {
-				os.Exit(exit.ExitCode())
-			}
-			fmt.Fprintln(os.Stderr, tool+":", err)
+		if err := ghclient.SessionCommand(ctx, os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "gh:", err)
 			os.Exit(1)
 		}
 		return
