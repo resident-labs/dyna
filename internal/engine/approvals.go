@@ -33,7 +33,7 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 	}
 	return s.rooms.Approvals.Create(ctx, actor, approvals.CreateInput{
 		Kind: approvals.KindGH, Class: class, Payload: payload, Repository: in.Repo,
-		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: stored.DisplayBody(),
+		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: ghclient.DisplayApprovalBody(stored),
 	})
 }
 

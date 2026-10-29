@@ -23,6 +23,12 @@ const schema = `CREATE TABLE approval_requests (
  class TEXT NOT NULL,
  payload TEXT NOT NULL CHECK(json_valid(payload)),
  payload_hash TEXT NOT NULL,
+ repository TEXT NOT NULL DEFAULT '',
+ server TEXT NOT NULL DEFAULT '',
+ command TEXT NOT NULL DEFAULT '',
+ tool TEXT NOT NULL DEFAULT '',
+ title TEXT NOT NULL DEFAULT '',
+ body TEXT NOT NULL DEFAULT '',
  state TEXT NOT NULL,
  at TEXT NOT NULL,
  expires_at INTEGER NOT NULL,
@@ -62,9 +68,17 @@ func Migrate(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "approvals.schema", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
-		return err
+	return database.Migrate(db, "approvals.schema", 2, func(conn *sql.Conn, from int) error {
+		if from == 0 {
+			_, err := conn.ExecContext(context.Background(), schema)
+			return err
+		}
+		for _, column := range []string{"repository", "server", "command", "tool", "title", "body"} {
+			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE approval_requests ADD COLUMN "+column+" TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -76,14 +90,14 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-const requestColumns = `room,id,requester,kind,class,payload,payload_hash,state,at,expires_at,result,created_at,updated_at`
+const requestColumns = `room,id,requester,kind,class,payload,payload_hash,repository,server,command,tool,title,body,state,at,expires_at,result,created_at,updated_at`
 
 func scanRequest(row rowScanner) (Request, error) {
 	var r Request
 	var payload, result string
 	var expires, created, updated int64
 	var nullableResult sql.NullString
-	err := row.Scan(&r.Room, &r.ID, &r.Requester, &r.Kind, &r.Class, &payload, &r.PayloadHash, &r.State, &r.atID, &expires, &nullableResult, &created, &updated)
+	err := row.Scan(&r.Room, &r.ID, &r.Requester, &r.Kind, &r.Class, &payload, &r.PayloadHash, &r.Repository, &r.Server, &r.Command, &r.Tool, &r.Title, &r.Body, &r.State, &r.atID, &expires, &nullableResult, &created, &updated)
 	if err != nil {
 		return Request{}, err
 	}
@@ -195,8 +209,8 @@ func insertRequest(ctx context.Context, conn *sql.Conn, r *Request) error {
 		return err
 	}
 	r.ID = fmt.Sprintf("A-%d", number)
-	_, err := conn.ExecContext(ctx, `INSERT INTO approval_requests(room,id,requester,kind,class,payload,payload_hash,state,at,expires_at,result,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?,?)`,
-		r.Room, r.ID, r.Requester, r.Kind, r.Class, []byte(r.Payload), r.PayloadHash, r.State, r.atID, r.ExpiresAt.UnixNano(), r.CreatedAt.UnixNano(), r.UpdatedAt.UnixNano())
+	_, err := conn.ExecContext(ctx, `INSERT INTO approval_requests(room,id,requester,kind,class,payload,payload_hash,repository,server,command,tool,title,body,state,at,expires_at,result,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`,
+		r.Room, r.ID, r.Requester, r.Kind, r.Class, []byte(r.Payload), r.PayloadHash, r.Repository, r.Server, r.Command, r.Tool, r.Title, r.Body, r.State, r.atID, r.ExpiresAt.UnixNano(), r.CreatedAt.UnixNano(), r.UpdatedAt.UnixNano())
 	return err
 }
 
