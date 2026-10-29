@@ -8,8 +8,8 @@ import (
 )
 
 func TestInvalidOpenRecordNamesSupplyingIndex(t *testing.T) {
-	dir := t.TempDir()
-	root := Root(dir)
+	root := newRoot(t)
+	dir := filepath.Dir(root)
 	if err := os.MkdirAll(filepath.Join(root, "closed"), 0700); err != nil {
 		t.Fatal(err)
 	}

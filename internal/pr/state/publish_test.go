@@ -1,7 +1,6 @@
 package state
 
 import (
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 // A committed PR state write publishes one prstate event through the state
 // write path, so the engine can turn it into room rows (item 16).
 func TestWritePublishesOnePRStateEvent(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "prs")
+	root := newRoot(t)
 	db, err := open(root)
 	if err != nil {
 		t.Fatal(err)

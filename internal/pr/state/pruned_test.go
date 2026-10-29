@@ -1,7 +1,6 @@
 package state
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -9,7 +8,7 @@ import (
 // Write counts the closed records it removes; TakePruned returns the count
 // once and resets it.
 func TestTakePrunedCountsRemovedClosedRecords(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "prs")
+	root := newRoot(t)
 	now := time.Now()
 	st := State{Version: 1, Records: map[string]*Record{
 		"open":       {Key: "open", State: "open"},

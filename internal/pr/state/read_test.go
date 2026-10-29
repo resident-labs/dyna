@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/database"
 )
 
 // newRoot returns an empty PR folder inside its own data folder.
@@ -15,6 +17,11 @@ func newRoot(t *testing.T) string {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := database.Close(filepath.Dir(root)); err != nil {
+			t.Error(err)
+		}
+	})
 	return root
 }
 
