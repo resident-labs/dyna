@@ -156,6 +156,7 @@ func bindings(s services) []websvc.Binding {
 		// only the probe fields, and it spends one SSH connection, so it needs
 		// the admin scope too.
 		{Name: "ProbeNode", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: machine.ProbeNode},
+		{Name: "AbandonLocalCIRun", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwnerOrRoot, Method: s.abandonLocalCIRun},
 		{Name: "Rooms", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Rooms},
 		{Name: "FeedTail", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.FeedTail},
 		{Name: "FeedAfter", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.FeedAfter},

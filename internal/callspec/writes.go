@@ -124,6 +124,7 @@ var WriteCalls = map[string]bool{
 	"PinRoom":                     true,
 	"Post":                        true,
 	"PostPRReview":                true,
+	"AbandonLocalCIRun":           true,
 	"ProbeNode":                   true,
 	"ProfileModels":               true,
 	"PromoteSession":              true,
