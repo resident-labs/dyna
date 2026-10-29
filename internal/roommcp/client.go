@@ -22,6 +22,8 @@ const (
 	maxResponseBytes = 8 << 20
 	// clientVersion is part of the fixed identity every server sees.
 	clientVersion = "1"
+	// maxRetryAfter caps how long one 429 answer can hold the client.
+	maxRetryAfter = time.Hour
 )
 
 // Client uses a fixed identity and keeps the session ID returned by the server.
@@ -121,7 +123,10 @@ func (c *Client) request(ctx context.Context, method string, params json.RawMess
 			until = now.Add(time.Duration(seconds) * time.Second)
 			err = nil
 		}
-		if err == nil && until.After(now) {
+		if limit := now.Add(maxRetryAfter); until.After(limit) {
+				until = limit
+			}
+			if err == nil && until.After(now) {
 			c.mu.Lock()
 			if until.After(c.retryUntil) {
 				c.retryUntil = until
