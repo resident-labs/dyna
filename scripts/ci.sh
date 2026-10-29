@@ -2,7 +2,7 @@
 # Shared CI commands. Reports live outside the checkout.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-suite=${1:?usage: scripts/ci.sh relay|frontend|go|cross-build|android [phase]}
+suite=${1:?usage: scripts/ci.sh relay|frontend|pi|go|cross-build|android [phase]}
 phase=${2:-all}
 export RUNNER_TEMP=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 # web/embed.go embeds all:dist, but only the frontend suite builds it. Every
@@ -64,6 +64,17 @@ case "$suite" in
       all) type_checks; npm run build; run_tests; clean_tree ;;
       *) echo "Unknown frontend phase: $phase" >&2; exit 2 ;;
     esac
+    ;;
+  pi)
+    started=$SECONDS
+    cd third_party/pi
+    npm ci --ignore-scripts
+    bash ../../scripts/pi-hydrate.sh
+    npm run build:offline
+    npm test --workspace=@earendil-works/pi-coding-agent -- --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/pi-test.xml}"
+    cd ../..
+    PI_PACK_SKIP_BUILD=1 bash scripts/pi-pack.sh "$RUNNER_TEMP/pi-fork.tgz"
+    echo "Pi suite completed in $((SECONDS - started)) seconds." >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
     ;;
   android)
     # TODO: legacy/shim remove later — engines released before the Android app

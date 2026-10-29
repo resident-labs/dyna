@@ -3,7 +3,7 @@ version: 1
 # Pull requests select only the trial suites whose file patterns match. Merge
 # trials run every suite in this list. The other suites remain available to
 # `dyna git ci run --suite` for focused manual runs.
-trial: [relay, go, cross, computer-smoke]
+trial: [relay, pi, go, cross, computer-smoke]
 
 caches:
   - name: go-build
@@ -20,6 +20,12 @@ checks:
   - id: relay
     image: node:22
     command: bash scripts/ci.sh relay
+    caches: [npm]
+    reports: junit
+
+  - id: pi
+    image: node:22
+    command: bash scripts/ci.sh pi
     caches: [npm]
     reports: junit
 
@@ -329,6 +335,10 @@ suites:
   - id: relay
     files: ['^\.github/', '^scripts/ci\.sh$', '^relay/']
     checks: [relay]
+
+  - id: pi
+    files: ['^third_party/pi/', '^scripts/pi-(hydrate|pack)\.sh$', '^scripts/ci\.sh$', '^\.github/']
+    checks: [pi]
 
   - id: frontend
     checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build]
