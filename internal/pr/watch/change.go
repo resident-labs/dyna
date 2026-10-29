@@ -282,6 +282,10 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 	})
 	return record, created, err
 }
+
+// resetReview owns the head-change reset: it retires the current review
+// round, clears the whole reviewer assignment and re-asks required reviewers.
+// A call with an unchanged head (a base retarget) resets the round only.
 func resetReview(r *Record, head string) {
 	headChanged := r.Head != head
 	rememberReviewAssignment(r)
@@ -293,6 +297,8 @@ func resetReview(r *Record, head string) {
 		}
 	}
 	r.Head = head
+	// The fast head pass has no CI snapshot, so a new GitHub head marks CI
+	// pending; the full observation pass overwrites it in applyCI.
 	if headChanged && changeKind(*r) == "github" {
 		r.CI = "pending"
 	}
@@ -302,8 +308,14 @@ func resetReview(r *Record, head string) {
 	r.Verdict = ""
 	r.Summary = ""
 	r.Reviewer = ""
+	r.ReviewerMode = ""
+	r.ReviewerName = ""
 	r.ReviewID = 0
-	r.PauseReason = ""
+	// A CI wake pause outlives a push: its reason stays until CI passes
+	// again or dyna git pr resume clears it.
+	if !r.CIPaused {
+		r.PauseReason = ""
+	}
 	if headChanged && r.State == "open" {
 		requiredReviewNotices(r)
 	}
