@@ -540,3 +540,67 @@ func TestEndingOperationsClearStateBeforeDroppingConnections(t *testing.T) {
 		})
 	}
 }
+
+// pauseAfterDial stops the next connection between dialing and registering.
+// It returns a channel that closes when a call is paused, and a release function.
+func pauseAfterDial(f *fixture) (paused <-chan struct{}, release func()) {
+	reached, resume := make(chan struct{}), make(chan struct{})
+	f.svc.afterDial = func() {
+		f.svc.afterDial = nil
+		close(reached)
+		<-resume
+	}
+	return reached, func() { close(resume) }
+}
+
+func TestAttachRacingTokenRemovalLeavesTheServerDetached(t *testing.T) {
+	f := newFixture(t)
+	if err := f.svc.SetToken(owner, f.room.ID, "board", f.server.URL, fixtureToken); err != nil {
+		t.Fatal(err)
+	}
+	paused, release := pauseAfterDial(f)
+	attached := make(chan error, 1)
+	go func() { attached <- f.svc.Attach(owner, f.room.ID, "board") }()
+	<-paused
+	// Attach has read the token. Removal finishes before Attach registers.
+	if err := f.svc.RemoveToken(owner, f.room.ID, "board"); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-attached; err == nil {
+		t.Fatal("attach succeeded with a token that was removed")
+	}
+	if len(f.server.methods) != 0 {
+		t.Fatalf("the removed token reached the server: %v", f.server.methods)
+	}
+	servers, err := f.svc.List(owner, f.room.ID)
+	if err != nil || len(servers) != 1 || servers[0].Attached {
+		t.Fatalf("servers = %+v, %v; want one detached server", servers, err)
+	}
+}
+
+func TestStaleCallRacingTokenRemovalRegistersNothing(t *testing.T) {
+	f := newFixture(t)
+	f.ready(t)
+	f.svc.drop(serverKey{f.room.ID, "board"})
+	paused, release := pauseAfterDial(f)
+	result := make(chan error, 1)
+	go func() {
+		_, err := f.svc.connection(context.Background(), f.room.ID, "board")
+		result <- err
+	}()
+	<-paused
+	if err := f.svc.RemoveToken(owner, f.room.ID, "board"); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-result; err == nil {
+		t.Fatal("a stale call registered a connection after the token was removed")
+	}
+	f.svc.mu.Lock()
+	live := len(f.svc.active)
+	f.svc.mu.Unlock()
+	if live != 0 {
+		t.Fatalf("%d connection(s) stayed live", live)
+	}
+}
