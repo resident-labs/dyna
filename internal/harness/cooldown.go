@@ -6,9 +6,11 @@ import (
 	"log"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"dyna-agent/internal/account/reposcope"
 	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/modelcooldown"
 	"dyna-agent/internal/profile"
@@ -145,6 +147,55 @@ func UsageResetAt(text string, at time.Time) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// defaultQuotaWindow caps an unstated hold when the text names no window. It is
+// the longest window the providers Dyna runs use.
+const defaultQuotaWindow = 5 * time.Hour
+
+var windowLength = regexp.MustCompile(`(?i)\b(\d+)-hour (?:usage limit|window)\b`)
+
+var creditsOut = regexp.MustCompile(`(?i)\b402\b|run out of credits`)
+
+// quotaWindow returns the window length that a quota text names, such as the
+// "5-hour usage limit" of Kimi. It is a cap on the hold, not the time left.
+func quotaWindow(text string) time.Duration {
+	m := windowLength.FindStringSubmatch(text)
+	if m == nil {
+		return defaultQuotaWindow
+	}
+	hours, err := strconv.Atoi(m[1])
+	if err != nil || hours <= 0 {
+		return defaultQuotaWindow
+	}
+	return time.Duration(hours) * time.Hour
+}
+
+// quotaHold returns the account hold after a quota failure. A reset that the
+// provider states wins: current is the reset read from the account's usage, and
+// the text is checked next. A credit failure (402) has no timer. An active hold
+// is kept as it is. Otherwise the wait starts at one hour and doubles per
+// failure, capped at the window length.
+func quotaHold(text string, at time.Time, prev reposcope.Hold, current time.Time) reposcope.Hold {
+	if !current.IsZero() {
+		return reposcope.Hold{Until: current, Stated: true}
+	}
+	if reset := UsageResetAt(text, at); !reset.IsZero() {
+		return reposcope.Hold{Until: reset, Stated: true}
+	}
+	if creditsOut.MatchString(text) {
+		return reposcope.Hold{Until: reposcope.OpenEnded}
+	}
+	if prev.Until.After(at) {
+		return prev
+	}
+	window := quotaWindow(text)
+	wait := time.Hour
+	for i := 0; i < prev.Level && wait < window; i++ {
+		wait *= 2
+	}
+	wait = min(wait, window)
+	return reposcope.Hold{Until: at.Add(wait), Level: prev.Level + 1}
 }
 
 // UnavailableUntil keeps a profile out for one hour after a provider failure,

@@ -27,8 +27,21 @@ CREATE TABLE IF NOT EXISTS account_limits (
  account_id TEXT PRIMARY KEY,
  until INTEGER NOT NULL,
  stated INTEGER NOT NULL DEFAULT 0,
- recorded_at INTEGER NOT NULL DEFAULT 0
+ recorded_at INTEGER NOT NULL DEFAULT 0,
+ backoff INTEGER NOT NULL DEFAULT 0
 );`
+
+// OpenEnded is the end of a hold with no timer. A credit failure (402) holds
+// until a later account refresh or health probe clears it.
+var OpenEnded = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
+
+// Hold is one account's usage-limit hold. Level counts the failures that
+// stepped the backoff, so the next unstated hold waits longer.
+type Hold struct {
+	Until  time.Time
+	Stated bool
+	Level  int
+}
 
 // Store reads and writes account_repo_scopes in one data directory.
 type Store struct {
@@ -51,13 +64,18 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account_repo_scopes.version", 4, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account_repo_scopes.version", 5, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if _, err := conn.ExecContext(ctx, schema); err != nil {
 			return err
 		}
 		if old == 2 {
 			if _, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN stated INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
+		if old >= 2 && old < 5 {
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN backoff INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return err
 			}
 		}
@@ -171,21 +189,46 @@ const writeWait = 10 * time.Second
 // A shorter limit never replaces a longer one: the upsert keeps the later end.
 // The end is a guess; MarkReset records one the provider stated.
 func (s *Store) MarkLimited(accountID string, until time.Time) error {
-	return s.mark(accountID, until, false)
+	return s.Hold(accountID, Hold{Until: until})
 }
 
 // MarkReset is MarkLimited for an end the provider stated, so Stated reports it.
 func (s *Store) MarkReset(accountID string, reset time.Time) error {
-	return s.mark(accountID, reset, true)
+	return s.Hold(accountID, Hold{Until: reset, Stated: true})
 }
 
-func (s *Store) mark(accountID string, until time.Time, stated bool) error {
+// Hold records a limit hold. The later end wins, and its stated flag and level go with it.
+func (s *Store) Hold(accountID string, h Hold) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
 	defer cancel()
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx,
-			`INSERT INTO account_limits(account_id, until, stated, recorded_at) VALUES(?,?,?,?)
- ON CONFLICT(account_id) DO UPDATE SET stated=CASE WHEN excluded.until>=until THEN excluded.stated ELSE stated END, until=MAX(until, excluded.until), recorded_at=excluded.recorded_at`, accountID, until.Unix(), stated, time.Now().UnixNano())
+			`INSERT INTO account_limits(account_id, until, stated, recorded_at, backoff) VALUES(?,?,?,?,?)
+ ON CONFLICT(account_id) DO UPDATE SET stated=CASE WHEN excluded.until>=until THEN excluded.stated ELSE stated END, backoff=CASE WHEN excluded.until>=until THEN excluded.backoff ELSE backoff END, until=MAX(until, excluded.until), recorded_at=excluded.recorded_at`, accountID, h.Until.Unix(), h.Stated, time.Now().UnixNano(), h.Level)
+		return err
+	})
+}
+
+// LimitOf returns the account's stored hold, ended or not. A missing row is the zero Hold.
+func (s *Store) LimitOf(accountID string) (Hold, error) {
+	var until, backoff int64
+	var stated bool
+	err := s.db.QueryRow("SELECT until, stated, backoff FROM account_limits WHERE account_id=?", accountID).Scan(&until, &stated, &backoff)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Hold{}, nil
+	}
+	if err != nil {
+		return Hold{}, err
+	}
+	return Hold{Until: time.Unix(until, 0), Stated: stated, Level: int(backoff)}, nil
+}
+
+// ClearLimit removes the account's hold, because a turn or probe on it succeeded.
+func (s *Store) ClearLimit(accountID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
+	defer cancel()
+	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=?", accountID)
 		return err
 	})
 }
