@@ -423,9 +423,8 @@ with:
 dyna machine edit build-machine --disallow-host-checks
 ```
 
-Removing a machine's CI role also clears the permission. A host check on a
-machine without permission does not run. Its local result is an infrastructure
-error, so hosted CI can resume when available.
+A host check on a machine without permission does not run. Its local result is
+an infrastructure error, so hosted CI can resume when available.
 
 ## Aggregates and hosted cancellation
 

@@ -1,5 +1,5 @@
 // Package machine exposes the machines registry as `dyna machine`: the engine
-// host, the machines that run agents, and the machines that run local CI.
+// host, marked local, and every other machine Dyna reaches over SSH.
 package machine
 
 import (
@@ -27,11 +27,11 @@ import (
 func NewCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "machine",
-		Short: "List and change the machines that run CI and agents",
+		Short: "List and change the machines that run CI and jobs",
 		Long: "The registry holds this machine, marked local, and each machine that Dyna\n" +
-			"can use. A machine has one or more roles: engine (this machine only),\n" +
-			"agents, and ci. A ci machine needs an SSH destination and at least one CI\n" +
-			"slot. `dyna git ci node` still works and forwards to these commands.\n\n" +
+			"can use. A machine that is enabled and whose room list allows a room takes\n" +
+			"that room's local CI work and jobs; the admission queue bounds how much\n" +
+			"runs. A machine other than this one needs an SSH destination.\n\n" +
 			"`dyna machine probe` reads a machine's capabilities and load over SSH. The\n" +
 			"engine also probes every enabled machine when it starts, when a machine\n" +
 			"changes, and every five minutes.",
@@ -81,7 +81,7 @@ func listCommand() *cobra.Command {
 // that runs this engine.
 func writeTable(w io.Writer, list []machines.Machine) error {
 	out := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(out, "NAME\tROLES\tSTATUS\tSSH\tROOMS\tSLOTS\tENABLED\tLOCAL")
+	fmt.Fprintln(out, "NAME\tSTATUS\tSSH\tROOMS\tENABLED\tLOCAL")
 	for _, m := range list {
 		ssh, local := m.SSH, ""
 		if ssh == "" {
@@ -90,7 +90,7 @@ func writeTable(w io.Writer, list []machines.Machine) error {
 		if m.Local {
 			local = "*"
 		}
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%d\t%t\t%s\n", m.Name, m.RoleNames(), m.Status(), ssh, roomList(m.Rooms), m.CISlots, m.Enabled, local)
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%t\t%s\n", m.Name, m.Status(), ssh, roomList(m.Rooms), m.Enabled, local)
 	}
 	return out.Flush()
 }
@@ -143,12 +143,10 @@ func showCommand() *cobra.Command {
 			}
 			fmt.Fprintf(out, "Name:     %s\n", m.Name)
 			fmt.Fprintf(out, "ID:       %s\n", m.ID)
-			fmt.Fprintf(out, "Roles:    %s\n", m.RoleNames())
 			fmt.Fprintf(out, "SSH:      %s\n", ssh)
 			if !m.Local {
 				fmt.Fprintf(out, "SSH connect timeout: %s\n", m.ConnectTimeout())
 			}
-			fmt.Fprintf(out, "CI slots: %d\n", m.CISlots)
 			if len(m.Resources) > 0 {
 				parts := make([]string, 0, len(m.Resources))
 				for _, name := range slices.Sorted(maps.Keys(m.Resources)) {
@@ -156,11 +154,9 @@ func showCommand() *cobra.Command {
 				}
 				fmt.Fprintf(out, "Resources: %s\n", strings.Join(parts, ", "))
 			}
-			if m.HasRole(machines.RoleCI) {
-				fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
-				fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
-				fmt.Fprintf(out, "Suites:   %s\n", suiteList(m.Suites))
-			}
+			fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
+			fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
+			fmt.Fprintf(out, "Suites:   %s\n", suiteList(m.Suites))
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
 			fmt.Fprintf(out, "Status:   %s\n", m.Status())
@@ -293,49 +289,29 @@ func writeProbe(out io.Writer, m machines.Machine, took time.Duration) {
 
 func addCommand() *cobra.Command {
 	var ssh string
-	var roleNames []string
-	var slots int
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Add a machine, or update the machine with this name",
 		Long: "Add a machine. Its name must be new: use edit to change a stored machine.\n" +
-			"The default role is ci with one slot. A positive --ci-slots adds the ci\n" +
-			"role.",
+			"A machine other than this one needs an SSH destination.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			roles, err := parseRoles(roleNames)
-			if err != nil {
-				return err
-			}
-			if len(roles) == 0 {
-				roles = []machines.Role{machines.RoleCI}
-			}
-			if c.Flags().Changed("ci-slots") && slots > 0 && !slices.Contains(roles, machines.RoleCI) {
-				roles = append(roles, machines.RoleCI)
-			}
 			enabled := true
-			patch := websvc.MachinePatch{Create: true, Enabled: &enabled, Roles: &roles, SSH: &ssh}
-			if slices.Contains(roles, machines.RoleCI) {
-				patch.CISlots = &slots
-			}
+			patch := websvc.MachinePatch{Create: true, Enabled: &enabled, SSH: &ssh}
 			saved, err := saveMachine(c.Context(), args[0], patch)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", saved.Name, roleList(saved.Roles))
+			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s.\n", saved.Name)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&ssh, "ssh", "", "SSH destination as host or user@host")
-	cmd.Flags().StringArrayVar(&roleNames, "role", nil, "role to give the machine: ci or agents (repeatable; default ci)")
-	cmd.Flags().IntVar(&slots, "ci-slots", 1, "maximum concurrent CI checks; a positive value adds the ci role")
 	return cmd
 }
 
 func editCommand() *cobra.Command {
 	var rename, ssh string
-	var roleNames []string
-	var slots int
 	var maxIOHeavy, maxDiskPercent int
 	var resourceEdits []string
 	var enable, disable bool
@@ -348,9 +324,9 @@ func editCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
 		Short: "Change a machine",
-		Long: "Change a machine. --role replaces every role, so give all of the roles the\n" +
-			"machine should keep. A positive --ci-slots adds the ci role, and a machine\n" +
-			"that gets the ci role without a slot count gets one slot.",
+		Long: "Change a machine's route, switch, room list, suite list or limits.\n" +
+			"A machine that is enabled and whose room list allows a room takes that\n" +
+			"room's local CI work and jobs.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			current, err := store().Get(c.Context(), args[0])
@@ -359,27 +335,11 @@ func editCommand() *cobra.Command {
 			}
 			patch := websvc.MachinePatch{}
 			changed := false
-			roles := append([]machines.Role(nil), current.Roles...)
 			if c.Flags().Changed("rename") {
 				patch.Name, changed = &rename, true
 			}
 			if c.Flags().Changed("ssh") {
 				patch.SSH, changed = &ssh, true
-			}
-			if c.Flags().Changed("role") {
-				if roles, err = parseRoles(roleNames); err != nil {
-					return err
-				}
-				patch.Roles, changed = &roles, true
-			}
-			if c.Flags().Changed("ci-slots") {
-				patch.CISlots, changed = &slots, true
-				// A positive slot count gives the machine the ci role it needs
-				// to hold those slots.
-				if slots > 0 && !slices.Contains(roles, machines.RoleCI) {
-					roles = append(roles, machines.RoleCI)
-					patch.Roles = &roles
-				}
 			}
 			if enable || disable {
 				patch.Enabled, changed = &enable, true
@@ -453,14 +413,12 @@ func editCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", saved.Name, roleList(saved.Roles))
+			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s.\n", saved.Name)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&rename, "rename", "", "new name for the machine")
 	cmd.Flags().StringVar(&ssh, "ssh", "", "SSH destination as host or user@host")
-	cmd.Flags().StringArrayVar(&roleNames, "role", nil, "replace the roles with these: engine, agents or ci (repeatable)")
-	cmd.Flags().IntVar(&slots, "ci-slots", 0, "maximum concurrent CI checks; a positive value adds the ci role")
 	cmd.Flags().BoolVar(&enable, "enable", false, "allow work on the machine")
 	cmd.Flags().BoolVar(&disable, "disable", false, "stop new work on the machine")
 	cmd.Flags().BoolVar(&allowHostChecks, "allow-host-checks", false, "allow repository checks to run outside containers")
@@ -507,27 +465,6 @@ func removeCommand() *cobra.Command {
 			return nil
 		},
 	}
-}
-
-// roleList lists roles as the saved message spells them.
-func roleList(roles []machines.Role) string {
-	names := make([]string, len(roles))
-	for i, role := range roles {
-		names[i] = string(role)
-	}
-	return strings.Join(names, ", ")
-}
-
-func parseRoles(names []string) ([]machines.Role, error) {
-	roles := make([]machines.Role, 0, len(names))
-	for _, name := range names {
-		role, err := machines.ParseRole(name)
-		if err != nil {
-			return nil, err
-		}
-		roles = append(roles, role)
-	}
-	return roles, nil
 }
 
 // stamp prints a probe time, or a dash before the first probe.

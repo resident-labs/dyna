@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computersText, diskText, loadText, machinesSub, memoryPct, roleLabel, runtimeText, statusText, summaryText, systemText, versionText, editScope } from './machines.ts'
-import type { MachineCapabilities, MachineRole, MachineSummary } from '../api/machine.ts'
+import { computersText, diskText, loadText, machinesSub, memoryPct, runtimeText, statusText, summaryText, systemText, versionText, editScope } from './machines.ts'
+import type { MachineCapabilities, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
-  id: 'm_1', name: 'this-machine', roles: ['engine', 'agents'], local: true, enabled: true, status: 'online', ciSlots: 0, allowHostChecks: false, ...over,
+  id: 'm_1', name: 'this-machine', local: true, enabled: true, status: 'online', allowHostChecks: false, ...over,
 })
 
 test('a machine row shows one count for each figure the machine reports', () => {
@@ -13,9 +13,8 @@ test('a machine row shows one count for each figure the machine reports', () => 
   assert.equal(summaryText(machine()), '', 'a machine with no live figure shows no counts')
 })
 
-test('a CI machine shows its queue, and its waiting count once the node queue reports it', () => {
-  const ci = machine({ roles: ['ci'], ciSlots: 16, agents: 0 })
-  assert.equal(summaryText(ci), '0 agents · CI')
+test('a machine shows its queue, and its waiting count once the node queue reports it', () => {
+  const ci = machine({ agents: 0 })
   assert.equal(summaryText({ ...ci, ci: { running: 2, waiting: 5 } }), '0 agents · 2 running · 5 waiting')
   assert.equal(summaryText({ ...ci, ci: { running: 1, waiting: 0 } }), '0 agents · 1 running', 'no waiting work hides the waiting count')
   assert.equal(summaryText({ ...ci, enabled: false, status: 'disabled', ci: { running: 0, waiting: 0 } }), '0 agents · CI off', 'a disabled machine takes no CI work')
@@ -46,11 +45,6 @@ test('the Disk row words the free space and the rule the node keeps, or the bloc
   assert.equal(diskText({ freeDisk: 40 * GiB }), '40.0 GiB free', 'no rule words shows only what is free')
   assert.equal(diskText({ freeDisk: 2 * TiB }), '2.0 TiB free')
   assert.equal(diskText({}), '', 'no reading shows no row')
-})
-
-test('role chips name CI in capitals and other roles as they are', () => {
-  const roles: MachineRole[] = ['engine', 'agents', 'ci']
-  assert.deepEqual(roles.map(roleLabel), ['engine', 'agents', 'CI'])
 })
 
 test('the page words what the probe read, and leaves out what it could not', () => {

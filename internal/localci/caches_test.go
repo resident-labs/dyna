@@ -38,7 +38,7 @@ func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := tc.node
-			node.Name, node.Slots, node.Enabled = "local", 1, true
+			node.Name, node.Enabled = "local", true
 			cleaned := false
 			runner := Runner{DataDir: t.TempDir(), Node: &node}
 			legacy := func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
@@ -66,7 +66,7 @@ func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 // TestCleanCachesReturnsOneBoundedFailure checks the public cleanup boundary:
 // the caller gets the managed path and one reason, not rm's output flood.
 func TestCleanCachesReturnsOneBoundedFailure(t *testing.T) {
-	node := Node{Name: "local", Slots: 1, Enabled: true}
+	node := Node{Name: "local", Enabled: true}
 	runner := Runner{Node: &node}
 	path := "/var/tmp/dyna-local-ci/runs/old/web/node_modules"
 	legacy := func(_ context.Context, _ string, _ io.Reader, _, stderr io.Writer, _ string, _ ...string) error {

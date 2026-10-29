@@ -29,7 +29,7 @@ func TestRunNeedsARegisteredNode(t *testing.T) {
 
 // A mistyped suite never starts work on the node.
 func TestRunRejectsUnknownSuiteBeforeAnyCommand(t *testing.T) {
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}, Command: func(context.Context, string, io.Reader, io.Writer, io.Writer, string, ...string) error {
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}, Command: func(context.Context, string, io.Reader, io.Writer, io.Writer, string, ...string) error {
 		t.Fatal("ran a command for an unknown suite")
 		return nil
 	}}
@@ -174,7 +174,7 @@ func TestNodeRunArchivesOnlyRequiredReportFiles(t *testing.T) {
 	unwanted := map[string]string{"relay/dyna-ci": "binary contents", "relay/suite.log": "unrelated output", "relay/unrelated.jsonl": "ignored log", "relay/nested/report.xml/tool": "directory contents", "relay/node_modules/tool/package.json": `{"name":"tool"}`, "orphan.json": `{"unconsumed":true}`}
 	var archived map[string]string
 	var remoteReports string
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}}
 	legacy := func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
 		if name == "git" {
 			if args[0] == "rev-parse" {

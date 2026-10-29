@@ -51,21 +51,18 @@ func TestMachinesListAndPatch(t *testing.T) {
 	if local.Name == "" || local.Status != MachineOnline {
 		t.Fatalf("local machine = %+v, want a name and the online status", local)
 	}
-	if !slices.Contains(local.Roles, machines.RoleEngine) || !slices.Contains(local.Roles, machines.RoleAgents) {
-		t.Fatalf("local roles = %v, want engine and agents", local.Roles)
-	}
 	if local.CPU == nil || *local.CPU != 42 || local.Agents == nil || *local.Agents != 3 || local.Computers == nil || *local.Computers != 1 {
 		t.Fatalf("live figures = %+v, want 42 percent and 3 agents and 1 computer", local)
 	}
-	if local.CI != nil {
-		t.Fatalf("ci = %+v, want no slot use before the CI PR", local.CI)
+	if local.CI == nil || local.CI.Running != 0 || local.CI.Waiting != 0 {
+		t.Fatalf("ci = %+v, want an empty queue figure", local.CI)
 	}
 
 	detail, err := api.Machine(t.Context(), local.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.DynaVersion != "1.2.3" || len(detail.Harnesses) != 1 || detail.SSH != "" || detail.CISlots != 0 {
+	if detail.DynaVersion != "1.2.3" || len(detail.Harnesses) != 1 || detail.SSH != "" {
 		t.Fatalf("detail = %+v, want the version, one harness and no route", detail)
 	}
 	if len(detail.Running) != 1 || detail.Running[0].Name != "lead" || detail.Running[0].Address != "dyna:lead" {
@@ -74,7 +71,7 @@ func TestMachinesListAndPatch(t *testing.T) {
 
 	// A machine other than this one stores its route and reports no figure the
 	// engine has not probed.
-	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermes", CISlots: 4, Enabled: true})
+	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", SSH: "pip@hermes", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +79,8 @@ func TestMachinesListAndPatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != MachineUnknown || got.Agents != nil || got.CPU != nil || got.CISlots != 4 || got.SSH != "pip@hermes" {
-		t.Fatalf("remote = %+v, want unknown with its stored route and slots", got)
+	if got.Status != MachineUnknown || got.Agents != nil || got.CPU != nil || got.SSH != "pip@hermes" {
+		t.Fatalf("remote = %+v, want unknown with its stored route", got)
 	}
 	if got.Running != nil {
 		t.Fatalf("remote running = %+v; this engine cannot name its sessions", got.Running)
@@ -98,14 +95,6 @@ func TestMachinesListAndPatch(t *testing.T) {
 	}
 	if disabled.Enabled || disabled.Status != MachineDisabled {
 		t.Fatalf("disabled = %+v, want the disabled status", disabled)
-	}
-	if _, err := api.SaveMachine(t.Context(), local.ID, MachinePatch{Roles: &[]machines.Role{machines.RoleAgents}}); !errors.Is(err, machines.ErrLocal) {
-		t.Fatalf("removing the engine role = %v, want ErrLocal", err)
-	}
-	slots := 8
-	kept, err := api.SaveMachine(t.Context(), local.ID, MachinePatch{CISlots: &slots})
-	if err != nil || kept.CISlots != 0 {
-		t.Fatalf("slots without the ci role = %d, %v; want 0", kept.CISlots, err)
 	}
 	if _, err := api.Machine(t.Context(), "m_missing"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unknown machine = %v, want os.ErrNotExist", err)
@@ -122,7 +111,7 @@ func TestHostChecksGrantsNameTheirRoom(t *testing.T) {
 		}
 		return roomID
 	}
-	node, err := api.Store.Save(t.Context(), machines.Machine{Name: "pve", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true})
+	node, err := api.Store.Save(t.Context(), machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +171,7 @@ dyna=dyna 0.4.3`
 // with the page after it. A failed probe keeps what the last good one read.
 func TestProbeMachineStoresWhatItRead(t *testing.T) {
 	api := machineAPI(t)
-	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermes", CISlots: 4, Enabled: true})
+	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", SSH: "pip@hermes", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +244,7 @@ func TestProbeMachineCallHonorsConnectTimeout(t *testing.T) {
 func probeCallLeft(t *testing.T, connect, min time.Duration) {
 	t.Helper()
 	api := machineAPI(t)
-	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermes", CISlots: 4, Enabled: true, SSHConnectTimeout: connect})
+	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", SSH: "pip@hermes", Enabled: true, SSHConnectTimeout: connect})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +288,7 @@ func probeCallLeft(t *testing.T, connect, min time.Duration) {
 // A machine's summary carries its room and suite limits, so the Machine page
 // can show them.
 func TestMachineSummaryCarriesRoomsAndSuites(t *testing.T) {
-	got := machineSummary(machines.Machine{ID: "m_1", Name: "ci-box", Roles: []machines.Role{machines.RoleCI}, Rooms: []string{"room_a"}, Suites: []string{"unit", "web"}})
+	got := machineSummary(machines.Machine{ID: "m_1", Name: "ci-box", Rooms: []string{"room_a"}, Suites: []string{"unit", "web"}})
 	if len(got.Rooms) != 1 || got.Rooms[0] != "room_a" || len(got.Suites) != 2 || got.Suites[1] != "web" {
 		t.Fatalf("summary = %+v, want the rooms and suites", got)
 	}

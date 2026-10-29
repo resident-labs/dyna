@@ -23,7 +23,7 @@ import (
 type runningCIRegistry struct{ hostedCIRegistry }
 
 func (r *runningCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "hermes", Slots: 16, Enabled: true}}, nil
+	return []localci.Node{{Name: "hermes", Enabled: true}}, nil
 }
 func (r *runningCIRegistry) Mode(context.Context, string) (string, error) {
 	return localci.ModeLocal, nil

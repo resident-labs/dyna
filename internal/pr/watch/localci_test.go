@@ -387,7 +387,7 @@ func (r *requiredCIRegistry) Mode(context.Context, string) (string, error) {
 	return localci.ModeLocal, nil
 }
 func (r *requiredCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "node", Slots: 1, Enabled: true}}, nil
+	return []localci.Node{{Name: "node", Enabled: true}}, nil
 }
 func (r *requiredCIRegistry) LoadResult(context.Context, string, string) (localci.Result, error) {
 	return r.result, nil
