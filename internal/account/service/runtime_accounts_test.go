@@ -270,6 +270,53 @@ func writeSavedLogin(t *testing.T, home string, c native.Captured) {
 	}
 }
 
+func TestNativeHomeAccountsIncludesLatestRenewal(t *testing.T) {
+	now := time.Now().UTC()
+	root := filepath.Join(t.TempDir(), "accounts")
+	accounts := &runtime.Accounts{Root: root}
+	n, err := accounts.Create("kimi-code", "saved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeKimiLogin(t, accounts, now.Add(time.Hour))
+	accountsStore := &store.Store{Root: root}
+	if err := accountsStore.SetActive(store.ProviderKimiCode, "kimi-code", "", n.ID); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := accounts.Manager(n.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured, err := manager.Capture(t.Context(), "")
+	if err != nil || len(captured) != 1 {
+		t.Fatalf("capture = %+v, %v", captured, err)
+	}
+	writeSavedLogin(t, n.Home, captured[0])
+	if err := accountsStore.Update(func(state *store.State) error {
+		entry := state.Find(n.ID)
+		entry.Identity, entry.NeedsLogin = captured[0].Identity, false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	attemptedAt := now.Add(-2 * time.Minute)
+	if err := accountsStore.RecordRenewal(t.Context(), store.Renewal{
+		AccountID: n.ID, Harness: n.Harness, Provider: n.Provider,
+		AttemptedAt: attemptedAt, Result: store.RenewalResultRenewed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Store: accountsStore, Now: func() time.Time { return now }})
+	rows, _, err := s.nativeHomeAccounts(t.Context(), false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("accounts = %+v, %v", rows, err)
+	}
+	got := rows[0].LastRenewal
+	if got == nil || got.Result != store.RenewalResultRenewed || !got.AttemptedAt.Equal(attemptedAt) {
+		t.Fatalf("last renewal = %+v, want renewed at %v", got, attemptedAt)
+	}
+}
+
 // A saved Kimi Code account still reports usage and renews without a bundle:
 // usage comes from the provider with the saved grant, and renewal saves the
 // rotated credential. Both requests are faked.

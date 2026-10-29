@@ -54,7 +54,7 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 9, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 10, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
@@ -95,6 +95,11 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 		}
 		if old < 9 {
 			if err := retireRemovedHarnessSelections(ctx, conn); err != nil {
+				return err
+			}
+		}
+		if old < 10 {
+			if _, err := conn.ExecContext(ctx, renewalSchema); err != nil {
 				return err
 			}
 		}

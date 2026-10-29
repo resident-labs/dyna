@@ -19,6 +19,7 @@ type Account struct {
 	UsageReason          store.UsageReason `json:"usageReason,omitempty"`
 	ExpiresAt            *time.Time        `json:"expiresAt,omitempty"`
 	RefreshMessage       string            `json:"refreshMessage,omitempty"`
+	LastRenewal          *store.Renewal    `json:"lastRenewal,omitempty"`
 	QuotaBlocked         bool              `json:"quotaBlocked"`
 	QuotaBlockedUntil    *time.Time        `json:"quotaBlockedUntil,omitempty"`
 	BlockingQuotaWindows []string          `json:"blockingQuotaWindows,omitempty"`
