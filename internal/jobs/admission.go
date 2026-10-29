@@ -380,27 +380,148 @@ func (a Admission) upsert(ctx context.Context, d Demand, admitted bool) error {
 		d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), -1, state, "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
 }
 
-// rows lists the queue rows in one state, grouped by node, oldest first.
-func (a Admission) rows(ctx context.Context, state string) (map[string][]admissionRow, error) {
+// nodeQueue is one node's queue in one shape: the checks and jobs that wait
+// for room on the node, and the work the node already holds. The pass builds
+// it inside its transaction; the snapshot counts, the free-CPU figure and the
+// machine page read it. Every projection of a node's work shapes this one
+// result, so a new held dimension needs one edit, not one per projection.
+type nodeQueue struct {
+	waitingRows []admissionRow
+	heldRows    []admissionRow
+	running     []Job
+	queued      []Job
+}
+
+// readQueue loads one node's queue from the admissions rows and the open
+// jobs. It does not sweep; each reader sweeps for itself.
+func (a Admission) readQueue(ctx context.Context, node string) (nodeQueue, error) {
+	db, err := a.db()
+	if err != nil {
+		return nodeQueue{}, err
+	}
+	_ = db // one shared handle per data folder; never closed
+	query, err := db.QueryContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE node=? AND state IN ('waiting','admitted') ORDER BY created_ms, id", node)
+	if err != nil {
+		return nodeQueue{}, err
+	}
+	var q nodeQueue
+	for query.Next() {
+		row, err := scanAdmission(query)
+		if err != nil {
+			query.Close()
+			return nodeQueue{}, err
+		}
+		if row.State == "waiting" {
+			q.waitingRows = append(q.waitingRows, row)
+		} else {
+			q.heldRows = append(q.heldRows, row)
+		}
+	}
+	if err := errors.Join(query.Err(), query.Close()); err != nil {
+		return nodeQueue{}, err
+	}
+	open, err := (Store{DataDir: a.DataDir}).List(ctx, true)
+	if err != nil {
+		return nodeQueue{}, err
+	}
+	// List answers newest first; both of the queue's job lists keep oldest
+	// first, the order the running list shows.
+	slices.Reverse(open)
+	for _, job := range open {
+		if job.Node != node {
+			continue
+		}
+		switch job.State {
+		case StateRunning:
+			q.running = append(q.running, job)
+		case StateQueued:
+			q.queued = append(q.queued, job)
+		}
+	}
+	return q, nil
+}
+
+// waiters lists the node's waiting units in one slice: checks and jobs.
+// Checks want a port; jobs carry the named resources they will hold.
+func (q nodeQueue) waiters(limits machines.Machine) []waiter {
+	out := make([]waiter, 0, len(q.waitingRows)+len(q.queued))
+	for _, row := range q.waitingRows {
+		out = append(out, waiter{demand: row.Demand, created: row.Created, id: row.ID})
+	}
+	for _, job := range q.queued {
+		out = append(out, waiter{demand: jobDemand(job, limits), resources: job.Resources, created: job.Created, id: job.ID, isJob: true})
+	}
+	return out
+}
+
+// holder names one unit that holds a node's capacity, for wait reasons and
+// resource counts.
+type holder struct {
+	id   string
+	room string
+}
+
+// heldWork is what one node's queue already holds: its running jobs and
+// admitted check rows, counted over every dimension admission tracks. The
+// pass adds each unit it admits; the counts and the machine page read the
+// same totals, so no projection can disagree with the admission decision.
+type heldWork struct {
+	cpus      int
+	memMiB    int64
+	heavy     int
+	portsUsed []bool
+	resources map[machines.ResourceName][]holder
+}
+
+// hold counts the work the node's queue already holds. limits clamp each
+// running job's demand the way the reader's own machine facts clamp it.
+func (q nodeQueue) hold(limits machines.Machine) heldWork {
+	held := heldWork{portsUsed: make([]bool, maxPortsPerNode), resources: map[machines.ResourceName][]holder{}}
+	for _, job := range q.running {
+		demand := jobDemand(job, limits)
+		held.cpus += demand.CPUs
+		held.memMiB += demand.MemoryMiB
+		if demand.Heavy {
+			held.heavy++
+		}
+		for _, name := range job.Resources {
+			held.resources[name] = append(held.resources[name], holder{id: job.ID, room: job.RoomID})
+		}
+	}
+	for _, row := range q.heldRows {
+		held.cpus += row.CPUs
+		held.memMiB += row.MemoryMiB
+		if row.Heavy {
+			held.heavy++
+		}
+		if row.Port >= 0 && row.Port < maxPortsPerNode {
+			held.portsUsed[row.Port] = true
+		}
+	}
+	return held
+}
+
+// waitingNodes lists the nodes that have at least one waiting row.
+func (a Admission) waitingNodes(ctx context.Context) ([]string, error) {
 	db, err := a.db()
 	if err != nil {
 		return nil, err
 	}
 	_ = db // one shared handle per data folder; never closed
-	query, err := db.QueryContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE state=? ORDER BY created_ms, id", state)
+	rows, err := db.QueryContext(ctx, "SELECT DISTINCT node FROM admissions WHERE state='waiting'")
 	if err != nil {
 		return nil, err
 	}
-	defer query.Close()
-	out := map[string][]admissionRow{}
-	for query.Next() {
-		row, err := scanAdmission(query)
-		if err != nil {
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var node string
+		if err := rows.Scan(&node); err != nil {
 			return nil, err
 		}
-		out[row.Node] = append(out[row.Node], row)
+		out = append(out, node)
 	}
-	return out, query.Err()
+	return out, rows.Err()
 }
 
 func (a Admission) write(ctx context.Context, query string, args ...any) error {
@@ -432,14 +553,14 @@ func lowestPort(held []admissionRow, exceptID string) int {
 }
 
 // waiter is one waiting unit in a pass: a queued job or a waiting check row.
-// A check also needs a port index; a job does not.
+// A check also needs a port index; a job does not, so a waiter that is not a
+// job wants a port.
 type waiter struct {
-	demand     Demand
-	resources  []machines.ResourceName
-	created    time.Time
-	id         string
-	isJob      bool
-	portWanted bool
+	demand    Demand
+	resources []machines.ResourceName
+	created   time.Time
+	id        string
+	isJob     bool
 }
 
 // Pass serializes capacity reads and admission writes in one SQLite writer
@@ -451,12 +572,12 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 	}
 	// Resolve machine facts before taking the writer lock. A newly queued node
 	// not in this snapshot is considered on the next pass.
-	waiting, err := a.rows(ctx, "waiting")
+	waiting, err := a.waitingNodes(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	nodes := map[string]bool{}
-	for node := range waiting {
+	for _, node := range waiting {
 		nodes[node] = true
 	}
 	for _, job := range candidates {
@@ -501,7 +622,7 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 			return err
 		}
 		for node := range nodes {
-			var current []Job
+			var queued []Job
 			for _, candidate := range candidates {
 				if candidate.Node != node {
 					continue
@@ -513,9 +634,10 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 				if err != nil {
 					return err
 				}
-				current = append(current, job)
+				queued = append(queued, job)
 			}
-			if err := passNode(ctx, conn, a.now(), node, facts[node], factErrors[node], waiting[node], current, held[node], running[node], a.RoomName, admitted, reasons); err != nil {
+			q := nodeQueue{waitingRows: waiting[node], heldRows: held[node], running: running[node], queued: queued}
+			if err := passNode(ctx, conn, a.now(), node, facts[node], factErrors[node], q, a.RoomName, admitted, reasons); err != nil {
 				return err
 			}
 		}
@@ -605,53 +727,17 @@ func (a Admission) sweep(ctx context.Context) error {
 // jobs plus the admitted rows; capacity, limits and disk use come from the
 // machine's last probe and its stored limits. Reads and writes of admission
 // state share the caller's transaction.
-func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, waiting []admissionRow, candidates []Job, heldRows []admissionRow, running []Job, roomName func(string) string, admitted map[string]bool, reasons map[string]string) error {
+func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, q nodeQueue, roomName func(string) string, admitted map[string]bool, reasons map[string]string) error {
 	capacityCPUs, capacityMemMiB := 0, int64(0)
 	limits := machines.Machine{}
 	if machineErr == nil {
 		capacityCPUs, capacityMemMiB = machine.Capabilities.CPUs, int64(machine.Capabilities.MemTotal/(1<<20))
 		limits = machine
 	}
-	// Every waiting unit of this node, jobs and checks in one order.
-	waiters := make([]waiter, 0, len(waiting)+len(candidates))
-	for _, row := range waiting {
-		// A waiting row is a check, and every check wants a port.
-		waiters = append(waiters, waiter{demand: row.Demand, created: row.Created, id: row.ID, portWanted: true})
-	}
-	for _, job := range candidates {
-		demand := jobDemand(job, limits)
-		waiters = append(waiters, waiter{demand: demand, resources: job.Resources, created: job.Created, id: job.ID, isJob: true})
-	}
-	ordered := orderWaiters(waiters)
-	// Held work first: what runs now, and what an earlier pass admitted.
-	heldCPUs, heldMemMiB, heavyHeld := 0, int64(0), 0
-	type holder struct {
-		id   string
-		room string
-	}
-	resourceHolders := make(map[machines.ResourceName][]holder)
-	for _, job := range running {
-		demand := jobDemand(job, limits)
-		heldCPUs += demand.CPUs
-		heldMemMiB += demand.MemoryMiB
-		if demand.Heavy {
-			heavyHeld++
-		}
-		for _, name := range job.Resources {
-			resourceHolders[name] = append(resourceHolders[name], holder{id: job.ID, room: job.RoomID})
-		}
-	}
-	portsUsed := make([]bool, maxPortsPerNode)
-	for _, row := range heldRows {
-		heldCPUs += row.CPUs
-		heldMemMiB += row.MemoryMiB
-		if row.Heavy {
-			heavyHeld++
-		}
-		if row.Port >= 0 && row.Port < maxPortsPerNode {
-			portsUsed[row.Port] = true
-		}
-	}
+	// Every waiting unit of this node in one order, and the work the node
+	// already holds: what runs now and what an earlier pass admitted.
+	ordered := orderWaiters(q.waiters(limits))
+	held := q.hold(limits)
 	diskBlock := ""
 	if machineErr == nil {
 		diskBlock = machine.DiskBlock()
@@ -661,14 +747,14 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		d := unit.demand
 		freeCPUs, freeMemMiB := 0, int64(0)
 		if capacityCPUs > 0 {
-			freeCPUs = capacityCPUs - heldCPUs
+			freeCPUs = capacityCPUs - held.cpus
 		}
 		if capacityMemMiB > 0 {
-			freeMemMiB = capacityMemMiB - heldMemMiB
+			freeMemMiB = capacityMemMiB - held.memMiB
 		}
 		port := -1
-		if unit.portWanted {
-			for candidate, taken := range portsUsed {
+		if !unit.isJob {
+			for candidate, taken := range held.portsUsed {
 				if !taken {
 					port = candidate
 					break
@@ -683,7 +769,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 				// internal name always stays a one-unit lock.
 				limit = 1
 			}
-			holders := resourceHolders[name]
+			holders := held.resources[name]
 			if len(holders) < limit {
 				continue
 			}
@@ -712,20 +798,20 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			why = diskBlock
 		case resourceBlock != "":
 			why = resourceBlock
-		case d.Heavy && heavyHeld >= limits.IOHeavyLimit():
-			why = fmt.Sprintf("%d of %d IO-heavy jobs running", heavyHeld, limits.IOHeavyLimit())
+		case d.Heavy && held.heavy >= limits.IOHeavyLimit():
+			why = fmt.Sprintf("%d of %d IO-heavy jobs running", held.heavy, limits.IOHeavyLimit())
 		case capacityCPUs > 0 && d.CPUs > freeCPUs:
 			why = fmt.Sprintf("asks %d CPUs, %d free", d.CPUs, max(freeCPUs, 0))
 		case capacityMemMiB > 0 && d.MemoryMiB > freeMemMiB:
 			why = fmt.Sprintf("asks %s, %s free", MemoryLabel(d.MemoryMiB), MemoryLabel(max(freeMemMiB, 0)))
-		case unit.portWanted && port < 0:
+		case !unit.isJob && port < 0:
 			why = "all check ports in use"
 		}
 		if why == "" {
-			heldCPUs += d.CPUs
-			heldMemMiB += d.MemoryMiB
+			held.cpus += d.CPUs
+			held.memMiB += d.MemoryMiB
 			if d.Heavy {
-				heavyHeld++
+				held.heavy++
 			}
 			if unit.isJob {
 				result, err := conn.ExecContext(ctx, "UPDATE jobs SET state='running', started_ms=? WHERE id=? AND state='queued' AND cancel_requested=0", time.Now().UnixMilli(), unit.id)
@@ -739,11 +825,11 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 				if count == 1 {
 					admitted[unit.id] = true
 					for _, name := range unit.resources {
-						resourceHolders[name] = append(resourceHolders[name], holder{id: unit.id, room: d.Room})
+						held.resources[name] = append(held.resources[name], holder{id: unit.id, room: d.Room})
 					}
 				}
 			} else {
-				portsUsed[port] = true
+				held.portsUsed[port] = true
 				writes = append(writes, rowWrite{id: unit.id, port: port})
 			}
 			continue
@@ -830,30 +916,11 @@ func (a Admission) Snapshot(ctx context.Context, node string) (running, waiting 
 	if err := a.sweep(ctx); err != nil {
 		return 0, 0, err
 	}
-	waitingRows, err := a.rows(ctx, "waiting")
+	q, err := a.readQueue(ctx, node)
 	if err != nil {
 		return 0, 0, err
 	}
-	held, err := a.rows(ctx, "admitted")
-	if err != nil {
-		return 0, 0, err
-	}
-	open, err := (Store{DataDir: a.DataDir}).List(ctx, true)
-	if err != nil {
-		return 0, 0, err
-	}
-	running, waiting = len(held[node]), len(waitingRows[node])
-	for _, job := range open {
-		if job.Node != node {
-			continue
-		}
-		if job.State == StateRunning {
-			running++
-		} else if job.State == StateQueued {
-			waiting++
-		}
-	}
-	return running, waiting, nil
+	return len(q.heldRows) + len(q.running), len(q.waitingRows) + len(q.queued), nil
 }
 
 // FreeCPUs reports the CPUs a node has free after the work its queue holds:
@@ -868,32 +935,17 @@ func (a Admission) FreeCPUs(ctx context.Context, node string, capacity int) int 
 	if err := a.sweep(ctx); err != nil {
 		return 0
 	}
+	q, err := a.readQueue(ctx, node)
+	if err != nil {
+		return capacity
+	}
 	limits := machines.Machine{}
 	limits.Capabilities.CPUs = capacity
-	used := 0
-	count := func(d Demand) { used += d.CPUs }
-	waiting, err := a.rows(ctx, "waiting")
-	if err != nil {
-		return capacity
-	}
-	held, err := a.rows(ctx, "admitted")
-	if err != nil {
-		return capacity
-	}
-	for _, row := range waiting[node] {
-		count(row.Demand)
-	}
-	for _, row := range held[node] {
-		count(row.Demand)
-	}
-	running, err := (Store{DataDir: a.DataDir}).Running(ctx)
-	if err != nil {
-		return capacity
-	}
-	for _, job := range running {
-		if job.Node == node {
-			count(jobDemand(job, limits))
-		}
+	// Waiting checks count too: each takes its CPUs as soon as the node has
+	// room for it.
+	used := q.hold(limits).cpus
+	for _, row := range q.waitingRows {
+		used += row.CPUs
 	}
 	return max(capacity-used, 0)
 }
