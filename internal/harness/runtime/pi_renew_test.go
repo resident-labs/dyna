@@ -330,3 +330,51 @@ func TestPiRenewalWithoutALoginFileReportsItMissing(t *testing.T) {
 		t.Fatalf("reason = %q, want the missing login file named", reason)
 	}
 }
+
+// A successful renewal must update the stored credential too, so no later
+// activation can restore a refresh token the provider already replaced.
+func TestPiRenewalSavesTheRenewedCredentialInTheStore(t *testing.T) {
+	accounts := testAccounts(t)
+	account, err := accounts.CreateProvider("pi", store.ProviderChatGPT, store.KindOAuth, "ChatGPT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePiGrants(t, account, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "stale-access", Refresh: "grant", Expires: time.Now().Add(-time.Hour).UnixMilli(), AccountID: "workspace"}})
+	captured, err := savePiLogin(t, accounts, account, "stale-access")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = accounts.setActiveAccount(captured); err != nil {
+		t.Fatal(err)
+	}
+	// The store starts from the sign-in day credential, as a live account does.
+	if err = accounts.transaction(func(state *store.State) error {
+		state.Find(account.ID).Credential = piLoginOf(t, "stale-access").Credential
+		return nil
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	piRenewRunner = func(_ context.Context, _, _, _ string) error {
+		writePiGrants(t, account, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "fresh-access", Refresh: "grant2", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "workspace"}})
+		return nil
+	}
+	if _, err = accounts.RefreshCredentials(t.Context(), account.ID, "/bundle/bin/pi"); err != nil {
+		t.Fatal(err)
+	}
+	var access string
+	if err = accounts.transaction(func(state *store.State) error {
+		_, got, _, _, grantErr := native.PiGrant(state.Find(account.ID).Credential)
+		if grantErr != nil {
+			return grantErr
+		}
+		access = got
+		return nil
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if access != "fresh-access" {
+		t.Fatalf("stored access = %q, want the renewed credential saved in the store", access)
+	}
+}
