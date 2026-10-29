@@ -38,6 +38,15 @@ func WithRooms(ctx context.Context, rooms *room.Store) context.Context {
 	return context.WithValue(ctx, roomsKey{}, rooms)
 }
 
+type holdReleaseKey struct{}
+
+// WithHoldRelease lets the engine's own gh pr ready on the PR at url pass the hold
+// guard, during dyna git pr release. Only engine code sets it. Agent commands run in
+// their own process and never carry it.
+func WithHoldRelease(ctx context.Context, url string) context.Context {
+	return context.WithValue(ctx, holdReleaseKey{}, url)
+}
+
 const ReadOnly = "read-only"
 const ReadWrite = "read-write"
 
@@ -146,11 +155,18 @@ func refuseHeldReady(ctx context.Context, rec room.Record, cmdDir string, r repo
 		return nil
 	}
 	target, repo := readyTarget(command)
+	if parts := strings.Split(repo, "/"); len(parts) == 3 {
+		// gh also takes HOST/OWNER/REPO and reads the host from it.
+		r.host, repo = parts[0], parts[1]+"/"+parts[2]
+	}
 	if repo != "" {
 		r.name = repo
 	}
 	ref, err := holdRef(ctx, cmdDir, r, target)
 	if err != nil || ref == "" {
+		return nil
+	}
+	if released, _ := ctx.Value(holdReleaseKey{}).(string); released == ref {
 		return nil
 	}
 	hold, err := engineHold(ctx, rec.ID, r.name, ref)
