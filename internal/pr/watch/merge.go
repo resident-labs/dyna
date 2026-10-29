@@ -14,6 +14,7 @@ import (
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
 )
 
@@ -174,17 +175,27 @@ func upstreamPR(r Record, upstreams RoomUpstreams) bool {
 	return false
 }
 
-// readOnlyUpstreamPR reports an upstream pull request from a fork other than the
-// room's own repository. Dyna only reads it, so it sends no CI notes about it.
+// readOnlyUpstreamPR reports an upstream pull request whose head is a fork other
+// than the room's own checkout. Dyna only reads it, so it sends no CI notes about
+// it. A room whose checkout cannot be resolved keeps its notes.
 func (s *Service) readOnlyUpstreamPR(r Record) bool {
 	if !upstreamPR(r, s.roomUpstreams()) {
 		return false
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)
+	if err != nil || rec.Repo == "" {
+		return false
+	}
+	own, err := resolveCheckoutRepo(context.Background(), rec.Repo)
 	if err != nil {
 		return false
 	}
-	return !strings.EqualFold(rec.Repo, r.HeadRepo)
+	host := r.Host
+	if host == "" {
+		host = "github.com"
+	}
+	head, err := repoid.RemoteIdentity("", "https://"+host+"/"+r.HeadRepo)
+	return err != nil || head != own.ID
 }
 
 func mergeQueue(st State, where LocalTrialRooms, upstreams RoomUpstreams) []MergeQueueItem {
