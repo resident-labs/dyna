@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -96,7 +97,7 @@ func (m *Manager) featureIndex(meta Meta) instructions.Section {
 		section.Items = append(section.Items, item)
 	}
 	if len(section.Items) > 0 {
-		section.Text = "[DYNA FEATURES]\nTop-level features of this repository, from its library map. Look one up with `dyna library show <id>`; see every feature with `dyna library list --tree`."
+		section.Text = "[DYNA FEATURES]\nTop-level features of this repository, from its library map. Before work, run `dyna library show <id>` for each feature your task touches. See every feature with `dyna library list --tree`."
 	}
 	return section
 }
@@ -165,16 +166,40 @@ func (m *Manager) profileInstructions(meta Meta) instructions.Section {
 	if meta.Service && meta.Role != RoleRoot {
 		usable = (*profile.Profile).ForServices
 	}
+	var shown []profile.Profile
 	for _, p := range profiles.EnabledProfiles() {
-		if !usable(&p) {
-			continue
+		if usable(&p) {
+			shown = append(shown, p)
 		}
+	}
+	if len(shown) == 0 {
+		section.Items = []string{"No enabled subagent profiles."}
+		return section
+	}
+	// The strongest profiles come first, so a capped list still shows them.
+	slices.SortFunc(shown, compareProfileRank)
+	for _, p := range shown[:min(len(shown), maxProfileItems)] {
 		section.Items = append(section.Items, fmt.Sprintf("- %s | taste: %d/10 | diagnostics: %d/10 | intelligence: %d/10 | cost-efficiency: %d/10 | max-concurrent: %d | max-calls-per-run: %d | uses: %s", p.Name, p.Taste, p.EffectiveDiagnostics(), p.Intelligence, p.Cost, p.MaxConcurrent, p.MaxCallsPerRun, strings.Join(p.EffectiveUses(), ",")))
 	}
-	if len(section.Items) == 0 {
-		section.Items = []string{"No enabled subagent profiles."}
+	if more := len(shown) - maxProfileItems; more > 0 {
+		section.Items = append(section.Items, fmt.Sprintf("- %d more enabled profiles: run `dyna profiles list` for all.", more))
 	}
 	return section
+}
+
+// maxProfileItems caps the profile lines in a session's instructions.
+const maxProfileItems = 10
+
+// compareProfileRank orders profiles by intelligence, then diagnostics, both
+// highest first, then by name.
+func compareProfileRank(a, b profile.Profile) int {
+	if c := cmp.Compare(b.Intelligence, a.Intelligence); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(b.EffectiveDiagnostics(), a.EffectiveDiagnostics()); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Name, b.Name)
 }
 
 // workerContext is the part of the worker context that does not change
