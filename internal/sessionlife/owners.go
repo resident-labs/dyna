@@ -22,9 +22,8 @@ import (
 // not secrecy, is the goal; the checksum runs at line rate on this path.
 var ownerDigestTable = crc32.MakeTable(crc32.Castagnoli)
 
-// ownerDigest is the stored digest of the canonical full record written with
-// the ownership columns. Instruction blobs participate in that record, so
-// changing either the hot row or a referenced blob also breaks the digest.
+// ownerDigest is the stored digest of raw, the exact meta bytes written with
+// the ownership columns.
 func ownerDigest(raw []byte) string {
 	return strconv.FormatUint(uint64(crc32.Checksum(raw, ownerDigestTable)), 16)
 }
@@ -45,7 +44,7 @@ func Owners(sessions string, visit func(OwnerRow) error) error {
 	if err != nil || !ok {
 		return err
 	}
-	res, err := db.Query(`SELECT id, meta_id, room, name, closed, dir, service, meta, meta_digest, ` + instructionReadProjection + ` FROM session_records ORDER BY id`)
+	res, err := db.Query(`SELECT id, meta_id, room, name, closed, dir, service, meta, meta_digest FROM session_records ORDER BY id`)
 	if err != nil {
 		return err
 	}
@@ -61,18 +60,9 @@ func Owners(sessions string, visit func(OwnerRow) error) error {
 		// RawBytes stays valid only until the next Next, so the digest is
 		// checked before the meta bytes are released.
 		var meta sql.RawBytes
-		instructions, err := scanInstructionRead(res, &r.owner.ID, &r.metaID, &r.owner.Room, &r.owner.Name, &closed, &r.owner.Dir, &r.owner.Service, &meta, &r.digest)
-		if err != nil {
+		if err := res.Scan(&r.owner.ID, &r.metaID, &r.owner.Room, &r.owner.Name, &closed, &r.owner.Dir, &r.owner.Service, &meta, &r.digest); err != nil {
 			res.Close()
 			return err
-		}
-		if instructions.hashes != [2]string{} {
-			raw, err := instructions.join(meta)
-			if err != nil {
-				res.Close()
-				return fmt.Errorf("%w: session %s: %v", ErrRecord, r.owner.ID, err)
-			}
-			meta = sql.RawBytes(raw)
 		}
 		r.owner.Closed = closed != 0
 		if r.metaID != "" && r.metaID != r.owner.ID {
