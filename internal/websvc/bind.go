@@ -42,6 +42,12 @@ const (
 	ScopeAdmin Scope = "admin"
 )
 
+// Policy is the caller policy a binding's mutation acts under: which actor
+// it acts for. The serving engine defines each value and what it does;
+// websvc never reads this, so it stays free of engine imports. The zero
+// value is no policy: the method resolves its own caller.
+type Policy uint8
+
 func ValidScope(s Scope) bool {
 	switch s {
 	case ScopeRead, ScopeOperate, ScopeFiles, ScopeTerminal, ScopeComputers, ScopeAdmin:
@@ -61,6 +67,8 @@ type Binding struct {
 	// a Connect user is refused whatever its scopes. A call that deletes or
 	// forces something, or that only a local process can make, sets it.
 	Local bool
+	// Policy is the caller policy the serving engine applies to this call.
+	Policy Policy
 }
 
 var (
