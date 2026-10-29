@@ -24,6 +24,7 @@ const (
 	Version = 1
 
 	KeyPRTrustedBots         = "pr.trustedBots"
+	KeyPROutsideComments     = "pr.outsideComments"
 	KeyLocalLaneRepos        = "lane.local.repos"
 	KeyShellSilenceMinutes   = "shells.silenceMinutes"
 	KeyComputersEnabled      = "computers.enabled"
@@ -71,10 +72,20 @@ const (
 	MinRulesMaxChars = 500
 )
 
+// OutsideComments says whether comments from outside commenters reach the author.
+type OutsideComments string
+
+const (
+	OutsideCommentsDeliver OutsideComments = "deliver"
+	OutsideCommentsHold    OutsideComments = "hold"
+)
+
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
 type Values struct {
-	PRTrustedBots  []string
-	LocalLaneRepos []string
+	PRTrustedBots []string
+	// PROutsideComments is deliver by default. Hold keeps outside comments for the owner.
+	PROutsideComments OutsideComments
+	LocalLaneRepos    []string
 	// DoctorCondition holds the thresholds of the doctor hook; empty uses the default.
 	DoctorCondition string
 	// AdmissionMode is off or observe.
@@ -147,6 +158,7 @@ func DefaultPath() string {
 func Defaults() Values {
 	return Values{
 		PRTrustedBots:            []string{"coderabbitai", "copilot-pull-request-reviewer"},
+		PROutsideComments:        OutsideCommentsDeliver,
 		LocalCIRemote:            DefaultLocalCIRemote,
 		RootProfile:              "opus",
 		BrowserUseFlagsFile:      true,
@@ -227,6 +239,15 @@ func Load(path string) (Values, error) {
 				return Values{}, err
 			}
 			if err := v.Set(KeyPRTrustedBots, string(data)); err != nil {
+				return Values{}, err
+			}
+		}
+		if outside, exists := pr["outsideComments"]; exists {
+			value, ok := outside.(string)
+			if !ok {
+				return Values{}, fmt.Errorf("pr.outsideComments must be deliver or hold")
+			}
+			if err := v.Set(KeyPROutsideComments, value); err != nil {
 				return Values{}, err
 			}
 		}
@@ -478,6 +499,13 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.PRTrustedBots = bots
 		v.fromFile[key] = true
+	case KeyPROutsideComments:
+		mode := OutsideComments(strings.ToLower(strings.TrimSpace(value)))
+		if mode != OutsideCommentsDeliver && mode != OutsideCommentsHold {
+			return fmt.Errorf("pr.outsideComments must be deliver or hold")
+		}
+		v.PROutsideComments = mode
+		v.fromFile[key] = true
 	case KeyLocalLaneRepos:
 		var repos []string
 		if err := json.Unmarshal([]byte(value), &repos); err != nil {
@@ -654,6 +682,7 @@ func (v Values) Save() error {
 	raw["version"] = Version
 	pr := nested(raw, "pr")
 	pr["trustedBots"] = v.PRTrustedBots
+	pr["outsideComments"] = string(v.PROutsideComments)
 	raw["pr"] = pr
 	lane := nested(raw, "lane")
 	local := nested(lane, "local")
