@@ -45,8 +45,9 @@
     if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
     return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
   })
-  let exit = $derived(payload && payload.exitCode !== undefined && payload.state !== 'running' && payload.state !== 'queued' ? `exit ${payload.exitCode}` : '')
-  let summary = $derived([node, exit, elapsed].filter(Boolean).join(' · '))
+  let exit = $derived(payload && payload.exitCode !== undefined && payload.exitCode >= 0 && payload.state !== 'running' && payload.state !== 'queued' ? `exit ${payload.exitCode}` : '')
+  let outcome = $derived(payload && payload.exitCode === undefined ? (payload.outcome ?? '') : '')
+  let summary = $derived([node, exit || outcome, elapsed].filter(Boolean).join(' · '))
   let hasBody = $derived(!!payload?.detail || !!payload?.waitReason)
 </script>
 

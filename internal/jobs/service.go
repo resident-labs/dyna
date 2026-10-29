@@ -219,7 +219,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 		job.Repo, job.SHA = repo, sha
 	}
 	if in.Workspace {
-		job.Workspace = newWorkspacePath(job.Node, job.Session, job.Repo, job.ID)
+		job.Workspace = newWorkspacePath(job.Node, job.Session, job.Repo)
 		resource := workspaceResource(job.Session, job.Repo)
 		if !slices.Contains(job.Resources, resource) {
 			job.Resources = append(job.Resources, resource)
