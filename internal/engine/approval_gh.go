@@ -58,28 +58,24 @@ func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
 // bindApprovalFiles restores every snapshot and points the original argument
 // at it. The request's argv and working directory otherwise stay unchanged.
 func bindApprovalFiles(payload approvals.GHPayload) ([]string, func(), error) {
-	argv := append([]string(nil), payload.Argv...)
-	if len(payload.Files) == 0 {
-		return argv, func() {}, nil
-	}
 	dir, err := os.MkdirTemp("", "dyna-approval-files-")
 	if err != nil {
 		return nil, nil, err
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
+	replacements := map[string]string{}
 	for i, snapshot := range payload.Files {
 		path := filepath.Join(dir, strconv.Itoa(i)+"-"+filepath.Base(snapshot.Path))
 		if err := os.WriteFile(path, snapshot.Data, 0600); err != nil {
 			cleanup()
 			return nil, nil, err
 		}
-		for j, arg := range argv {
-			if arg == snapshot.Path {
-				argv[j] = path
-			} else if strings.HasPrefix(arg, "--") && strings.HasSuffix(arg, "="+snapshot.Path) {
-				argv[j] = strings.TrimSuffix(arg, snapshot.Path) + path
-			}
-		}
+		replacements[snapshot.Path] = path
+	}
+	argv, err := ghclient.RewriteFileArgs(payload.Argv, replacements)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
 	}
 	return argv, cleanup, nil
 }

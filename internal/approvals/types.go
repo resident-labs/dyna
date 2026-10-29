@@ -77,6 +77,9 @@ func (p GHPayload) DisplayBody() string {
 		return body
 	}
 	path := argument(p.Argv, "--body-file")
+	if path == "" {
+		path = argument(p.Argv, "-F")
+	}
 	for _, file := range p.Files {
 		if file.Path == path {
 			return string(file.Data)
