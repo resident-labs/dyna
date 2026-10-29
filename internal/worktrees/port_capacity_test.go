@@ -146,6 +146,26 @@ func TestObservePortCapacityCountsReclaimableBlocksAsFree(t *testing.T) {
 	assertPending(t, observePortCapacity(t))
 	busy[1] = true
 	assertPending(t, observePortCapacity(t), wantAlert{90, 2})
+	ack(t, 2, 90)
+
+	// Fifty missing paths bring raw use to 950 while effective use stays 900.
+	missing := make([]string, 50)
+	for i := range missing {
+		missing[i] = root + fmt.Sprintf("/missing-release-%02d", i)
+	}
+	seedPortRecords(t, db, 900, len(missing), missing...)
+	current, err := loadRecords(context.Background(), db, "WHERE path=?", protected[1])
+	if err != nil || len(current) != 1 {
+		t.Fatalf("load release candidate = %#v, %v", current, err)
+	}
+	// Releasing a protected record leaves raw use at 949 but effective use at
+	// 899. The release itself must end the alert period.
+	if released, err := releaseRecord(context.Background(), db, current[0], true); err != nil || !released {
+		t.Fatalf("releaseRecord() = %v, %v; want a release", released, err)
+	}
+	replacement := root + strings.Repeat("/.", 1000)
+	seedPortRecords(t, db, 950, 1, replacement)
+	assertPending(t, observePortCapacity(t), wantAlert{90, 3})
 	if scans != 3 {
 		t.Fatalf("ownership scans = %d; want one per observation with a free candidate", scans)
 	}

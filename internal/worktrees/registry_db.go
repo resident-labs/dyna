@@ -145,13 +145,14 @@ var markRemovedBatch = func(ctx context.Context, removed []Record) error {
 	if err != nil {
 		return err
 	}
+	used, raw, measured := observePortUseAfterRelease(ctx, db, removed)
 	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		for _, rec := range removed {
 			if err := removeObservedRecord(ctx, conn, rec); err != nil {
 				return err
 			}
 		}
-		return rearmPortCapacity(ctx, conn)
+		return rearmPortCapacity(ctx, conn, used, raw, measured)
 	})
 }
 
