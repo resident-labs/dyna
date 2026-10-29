@@ -27,6 +27,7 @@ import (
 
 	"dyna-agent/internal/account/service"
 	accountstore "dyna-agent/internal/account/store"
+	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/automations"
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/callspec"
@@ -584,7 +585,11 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	}
 	dropDynaEnv()
 	rooms := roomsvc.New(nil)
-	rooms.Notify.Sessions.CloseApprovals = rooms.Approvals.CloseSession
+	rooms.Approvals.Register(approvals.KindGH, ghApprovalExecutor(rooms.Notify.Rooms))
+	rooms.Approvals.SetLifetime(ctx)
+	rooms.Notify.Sessions.CloseApprovals = func(ctx context.Context, info, heir subagent.Info) error {
+		return rooms.Approvals.CloseSession(ctx, info.RoomID, info.ID, heir.ID)
+	}
 	files := &filesvc.Service{Rooms: rooms.Notify.Rooms, SessionInRoom: rooms.SessionInRoom, AttachmentBytes: rooms.AttachmentBytes}
 	rooms.Notify.Sessions.Executable, err = fsutil.RunningExecutable()
 	if err != nil {

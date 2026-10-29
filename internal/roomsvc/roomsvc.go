@@ -213,7 +213,7 @@ func New(n *notify.Service) *Service {
 	}
 	s := &Service{Notify: n, results: newResultCache(), prWake: make(chan struct{}, 1), storeWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
 	s.PRs = &prview.Service{Notify: n, SessionInRoom: s.SessionInRoom, WorkspaceRoot: s.files().WorkspaceRoot}
-	s.Approvals = approvals.New(n.Rooms, n.Sessions.Store)
+	s.Approvals = approvals.New(n.Rooms, n.Sessions.Store.Root)
 	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]sessionclose.Outcome, error) {
 		return s.PRs.Watcher().CloseSession(ctx, from, heir)
 	}

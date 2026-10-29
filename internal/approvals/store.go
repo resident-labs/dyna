@@ -31,7 +31,7 @@ const schema = `CREATE TABLE approval_requests (
  updated_at INTEGER NOT NULL,
  UNIQUE(room,id)
 );
-CREATE UNIQUE INDEX approval_request_duplicate ON approval_requests(room,requester,payload_hash) WHERE state='pending';
+CREATE UNIQUE INDEX approval_request_duplicate ON approval_requests(room,requester,kind,class,payload_hash) WHERE state='pending';
 CREATE INDEX approval_request_holder ON approval_requests(at,state);
 CREATE INDEX approval_request_expiry ON approval_requests(state,expires_at);
 CREATE TABLE approval_decisions (
@@ -69,11 +69,7 @@ func Migrate(dataDir string) error {
 }
 
 func (s *Service) db() (*sql.DB, error) {
-	dataDir := s.DataDir
-	if dataDir == "" {
-		dataDir = filepath.Dir(s.Rooms.Root)
-	}
-	return database.Open(dataDir)
+	return database.Open(filepath.Dir(s.Rooms.Root))
 }
 
 type rowScanner interface {
@@ -122,16 +118,37 @@ func (s *Service) get(roomID, id string) (Request, error) {
 	return r, err
 }
 
-func (s *Service) duplicate(roomID, requester, hash string) (Request, error) {
+func (s *Service) duplicate(roomID, requester string, kind Kind, class Class, hash string) (Request, error) {
 	db, err := s.db()
 	if err != nil {
 		return Request{}, err
 	}
-	r, err := scanRequest(db.QueryRow(`SELECT `+requestColumns+` FROM approval_requests WHERE room=? AND requester=? AND payload_hash=? AND state='pending'`, roomID, requester, hash))
+	r, err := scanRequest(db.QueryRow(`SELECT `+requestColumns+` FROM approval_requests WHERE room=? AND requester=? AND kind=? AND class=? AND payload_hash=? AND state='pending'`, roomID, requester, kind, class, hash))
 	if err == sql.ErrNoRows {
 		return Request{}, nil
 	}
 	return r, err
+}
+
+func (s *Service) withState(state State) ([]Request, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT `+requestColumns+` FROM approval_requests WHERE state=? ORDER BY seq`, state)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Request
+	for rows.Next() {
+		r, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 func (s *Service) pending(roomID string) ([]Request, error) {
