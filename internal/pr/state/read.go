@@ -333,10 +333,39 @@ func ReadRecord(root, key string) (Record, bool, error) {
 }
 
 // ReadForSessions returns a State that holds only the room's PRs that any of
-// sessions authors or reviews, closed ones included. SQLite filters the rows,
-// so Go decodes a few records instead of every stored PR. The State has no
-// metadata and no saved responses.
+// sessions authors or reviews, closed ones included. It filters the shared
+// snapshot under its lock and copies only the matches, so a scan with no PR
+// change reads no PR rows. The State has no metadata and no saved responses.
 func ReadForSessions(root, roomID string, sessions ...string) (State, error) {
+	st := newState()
+	st.Records = map[string]*Record{}
+	if len(sessions) == 0 {
+		return st, nil
+	}
+	db, err := open(root)
+	if err != nil {
+		return State{}, err
+	}
+	want := make(map[string]bool, len(sessions))
+	for _, session := range sessions {
+		want[session] = true
+	}
+	snapshot.Lock()
+	defer snapshot.Unlock()
+	if err := refreshFrom(appstate.For(db), root); err != nil {
+		return State{}, err
+	}
+	for key, r := range snapshot.state.Records {
+		if r != nil && r.RoomID == roomID && (want[r.Author] || want[r.Reviewer] || want[r.ReviewerOverride]) {
+			st.Records[key] = copyForRecord(r)
+		}
+	}
+	return st, nil
+}
+
+// ReadForSessionsFresh is the close-path read. SQLite filters the rows of the
+// store as it is now, so a close decision never uses the shared snapshot.
+func ReadForSessionsFresh(root, roomID string, sessions ...string) (State, error) {
 	st := newState()
 	st.Records = map[string]*Record{}
 	if len(sessions) == 0 {
@@ -460,6 +489,9 @@ type fetched struct {
 	rows               []storedRow
 }
 
+// onRowsRead is replaced by tests to count refreshes that read every PR row.
+var onRowsRead = func() {}
+
 // unmarshalRecord is replaced by tests.
 var unmarshalRecord = func(data []byte, record *diskRecord) error { return json.Unmarshal(data, record) }
 
@@ -492,6 +524,7 @@ func fetch(q querier, root string) (fetched, error) {
 	if snapshot.index != nil && f.revision == snapshot.revision {
 		return fetched{unchanged: true}, nil
 	}
+	onRowsRead()
 	rows, err = q.QueryContext(ctx, "SELECT key, rev, body FROM pr_rows")
 	if err != nil {
 		return fetched{}, err
