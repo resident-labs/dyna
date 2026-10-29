@@ -44,7 +44,7 @@ func TestRetryBusyAlwaysMakesTheFirstAttempt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
-	if err := retryBusy(ctx, func() error { calls++; return nil }); err != nil || calls != 1 {
-		t.Fatalf("retryBusy on an ended context = %v after %d attempts, want one successful attempt", err, calls)
+	if err := Retry(ctx, func() error { calls++; return nil }); err != nil || calls != 1 {
+		t.Fatalf("Retry on an ended context = %v after %d attempts, want one successful attempt", err, calls)
 	}
 }
