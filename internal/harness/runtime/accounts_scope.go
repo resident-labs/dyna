@@ -164,46 +164,58 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 	return p, r.Accounts.SelectForRepo(ctx, p.Harness, ProviderForModel(p.Harness, p.Model), p.Env[mode.EnvRoomID], p.RuntimeRepo, b.Executable)
 }
 
-// SelectProbeAccount runs before a health probe of p. When a ready account that
-// runs p's provider has a stated usage hold, it makes that account active, so the
-// probe runs p's own model on the account whose limit the provider named. The
-// returned restore makes the previously active account active again; it is a
-// no-op when the probe did not move the account. Otherwise it selects as
-// SelectAccount does.
-func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, func(), error) {
+// SelectProbeAccount runs before a health probe of p in dir. When a ready account
+// that runs p's provider and may run in dir's repo has a stated usage hold, it
+// makes that account active, so the probe runs p's own model on the account whose
+// limit the provider named. It returns that account's ID as heldID. The returned
+// restore makes the previously active account active again, unless another
+// switch has moved the held account away; it is a no-op when the probe did not
+// move the account. Otherwise it selects as SelectAccount does and heldID is "".
+func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, string, func(), error) {
 	noRestore := func() {}
 	provider := ProviderForModel(p.Harness, p.Model)
-	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, provider, time.Now())
+	repo := RepoIdentity(ctx, dir)
+	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, provider, repo, time.Now())
 	if err != nil {
-		return p, noRestore, err
+		return p, "", noRestore, err
 	}
 	if !ok {
 		selected, err := r.SelectAccount(ctx, p, dir)
-		return selected, noRestore, err
+		return selected, "", noRestore, err
 	}
+	p.RuntimeRepo = repo
 	b, _, err := (&FirstUse{Bundles: r.Bundles}).EnsureBundle(ctx, p.Harness, p.RuntimeVersion)
 	if err != nil {
-		return p, noRestore, err
+		return p, "", noRestore, err
 	}
 	previous, err := r.Accounts.activeAccount(p.Harness, provider, "")
 	if err != nil {
-		return p, noRestore, err
+		return p, "", noRestore, err
 	}
 	if err := r.Accounts.Switch(ctx, held.ID, b.Executable); err != nil {
-		return p, noRestore, err
+		return p, "", noRestore, err
 	}
 	restore := func() {
+		active, err := r.Accounts.activeAccount(p.Harness, provider, "")
+		if err != nil {
+			log.Printf("read active account after a health probe: %v", err)
+			return
+		}
+		// Another switch moved the account during the probe. Keep that choice.
+		if active.ID != held.ID {
+			return
+		}
 		if err := r.Accounts.Switch(context.WithoutCancel(ctx), previous.ID, b.Executable); err != nil {
 			log.Printf("restore active account %s after a health probe: %v", previous.Label, err)
 		}
 	}
-	return p, restore, nil
+	return p, held.ID, restore, nil
 }
 
-// StatedHoldAccount returns the ready account that runs provider for harness
-// whose stated usage hold is still in force at now and ends first. An unstated
-// hold is a guess, so it never selects an account.
-func (a *Accounts) StatedHoldAccount(harness string, provider store.Provider, now time.Time) (NativeAccount, bool, error) {
+// StatedHoldAccount returns the ready account that runs provider for harness,
+// may run in repo, and whose stated usage hold is still in force at now and ends
+// first. An unstated hold is a guess, so it never selects an account.
+func (a *Accounts) StatedHoldAccount(harness string, provider store.Provider, repo string, now time.Time) (NativeAccount, bool, error) {
 	h, err := canonicalAccountHarness(harness)
 	if err != nil {
 		return NativeAccount{}, false, err
@@ -220,12 +232,16 @@ func (a *Accounts) StatedHoldAccount(harness string, provider store.Provider, no
 	if err != nil {
 		return NativeAccount{}, false, err
 	}
+	rules, err := scopes.Rules()
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
 	var held NativeAccount
 	var heldEnd time.Time
 	found := false
 	for _, n := range all {
 		end, hit := stated[n.ID]
-		if !hit || n.Status != "ready" || !accountRuns(h, n, provider) {
+		if !hit || n.Status != "ready" || !accountRuns(h, n, provider) || !rules.Allows(n.ID, repo) {
 			continue
 		}
 		if !found || end.Before(heldEnd) {

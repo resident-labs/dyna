@@ -65,22 +65,27 @@ func probeWindowFor(text string) string {
 }
 
 // clearAccountHold drops the account's hold after a turn on the account succeeded.
-// A hold recorded after the turn began stays, so a concurrent failure is kept.
-// A hold store error is logged, because the turn itself already succeeded.
-func clearAccountHold(accountID string, turnStart time.Time) {
-	if accountID == "" {
+// A stated hold stays unless the turn was a held-account probe, because a turn on
+// another model does not prove the provider's limit ended. A hold recorded after
+// the turn began stays, so a concurrent failure is kept. A hold store error is
+// logged, because the turn itself already succeeded.
+func clearAccountHold(res Result, turnStart time.Time) {
+	if res.AccountID == "" {
 		return
 	}
 	rt := harnessruntime.New()
-	hold, err := rt.Accounts.LimitOf(accountID)
+	hold, err := rt.Accounts.LimitOf(res.AccountID)
 	if err != nil || hold.Until.IsZero() {
 		if err != nil {
-			log.Printf("read account hold %s: %v", accountID, err)
+			log.Printf("read account hold %s: %v", res.AccountID, err)
 		}
 		return
 	}
-	if err := rt.Accounts.ClearHold(accountID, turnStart); err != nil {
-		log.Printf("clear account hold %s: %v", accountID, err)
+	if hold.Stated && !res.HeldAccountProbed {
+		return
+	}
+	if err := rt.Accounts.ClearHold(res.AccountID, turnStart); err != nil {
+		log.Printf("clear account hold %s: %v", res.AccountID, err)
 	}
 }
 
@@ -99,7 +104,7 @@ func withAccountFailover(ctx context.Context, p profile.Profile, cwd string, exe
 	turnStart := time.Now()
 	res, err := once(exec, "")
 	if err == nil {
-		clearAccountHold(res.AccountID, turnStart)
+		clearAccountHold(res, turnStart)
 		return res, nil
 	}
 	if isNativeAdmissionError(err) || ctx.Err() != nil || exec.ProcessRunner != nil || !providerfailure.Is(err, providerfailure.Quota) {
