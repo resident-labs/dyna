@@ -637,6 +637,13 @@
     const open = id ? await api.approvalList(id) : null
     if (id === roomId) approvals = open ?? []
   }
+  // The open requests follow the room and every approval post the feed gets.
+  let approvalPosts = $derived(posts.filter((p) => p.kind === 'approval').length)
+  $effect(() => {
+    void roomId
+    void approvalPosts
+    untrack(() => { loadApprovals() })
+  })
   async function decideApproval(id: string, action: ApprovalDecision, reason: string) {
     await api.approvalDecide(roomId, id, action, reason)
     await loadApprovals()
@@ -728,7 +735,6 @@
     runsError = ''
     workflowData.loadJobs()
     loadQuestions()
-    loadApprovals()
   }
   function visitRoomControls(id: string) {
     roomSessionController?.destroy()
@@ -1300,7 +1306,6 @@
     if (!roomId) return
     loadMembers()
     loadQuestions()
-    loadApprovals()
     loadPins()
     loadSync()
     loadIssues()
@@ -1439,7 +1444,6 @@
     if (ev.kind === 'questions' && evRoom === roomId && !item) loadQuestions()
     if (reloadsUnread(ev, roomId, item)) soonRooms('feed')
     if (ev.kind === 'posts' && evRoom === roomId) {
-      loadApprovals()
       if (changesVisuals(ev)) loadVisuals()
       if (roomSessionController && (roomControls?.loading || roomControls?.state?.paused !== false)) roomSessionController.load()
     }
