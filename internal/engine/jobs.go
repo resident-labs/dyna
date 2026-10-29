@@ -154,7 +154,7 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 		idle = &duration
 	}
 	input := jobs.Input{
-		Node: in.Node, Labels: labels, Command: in.Command,
+		IdempotencyKey: in.IdempotencyKey, Node: in.Node, Labels: labels, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second, Idle: idle,
 		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources, Workspace: in.Workspace,

@@ -177,6 +177,8 @@ type Input struct {
 	Session string
 	// Run is the workflow run that submitted the job, when one did.
 	Run string
+	// IdempotencyKey returns the original job when a workflow retries a call.
+	IdempotencyKey string
 	// Node names the registered machine. Empty means the local node, unless
 	// Labels selects an eligible machine.
 	Node    string
@@ -208,6 +210,18 @@ type Input struct {
 // Submit stores a queued job and starts it. The job runs detached, so Submit
 // returns as soon as the row is stored.
 func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
+	if len(in.IdempotencyKey) > 128 {
+		return Job{}, errors.New("a job idempotency key is too long")
+	}
+	if in.IdempotencyKey != "" {
+		existing, err := s.Store.GetByIdempotencyKey(ctx, in.IdempotencyKey)
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return Job{}, err
+		}
+	}
 	if len(in.Command) == 0 {
 		return Job{}, errors.New("a job needs a command")
 	}
@@ -252,7 +266,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 		return Job{}, err
 	}
 	job := Job{
-		ID: id, RoomID: in.RoomID, Session: in.Session, Run: in.Run, Node: machine.Name,
+		ID: id, RoomID: in.RoomID, Session: in.Session, Run: in.Run, IdempotencyKey: in.IdempotencyKey, Node: machine.Name,
 		Command: in.Command, Host: host, Image: in.Image,
 		CPUs: in.CPUs, Timeout: in.Timeout, Heavy: in.Heavy, Artifacts: in.Artifacts,
 		Resources: in.Resources, State: StateQueued, Created: s.Store.now(),
@@ -296,6 +310,13 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	job, err = s.Store.saveSubmitted(ctx, job)
 	if err != nil {
+		// Another submission with this key may have committed after the first
+		// lookup. The unique index picks one winner; return that original job.
+		if in.IdempotencyKey != "" {
+			if existing, lookupErr := s.Store.GetByIdempotencyKey(ctx, in.IdempotencyKey); lookupErr == nil {
+				return existing, nil
+			}
+		}
 		return Job{}, err
 	}
 	// A standby engine, one without the worker lock, only queues the job. The

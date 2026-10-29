@@ -40,12 +40,15 @@ type Engine struct {
 
 	// JobHold keeps submitted jobs unfinished until its channel closes. Nil
 	// finishes each job when WaitJob arrives. SaveJob seeds a resumed job.
-	JobHold   <-chan struct{}
-	jobMu     sync.Mutex
-	jobRows   map[string]jobs.Job
-	jobStarts []callspec.RunJobInput
-	jobWaits  []string
-	jobStops  []string
+	JobHold <-chan struct{}
+	// JobSubmitErrors returns errors after storing new jobs, simulating a lost
+	// submission response. A retry with the same key recovers the stored row.
+	JobSubmitErrors []error
+	jobMu           sync.Mutex
+	jobRows         map[string]jobs.Job
+	jobStarts       []callspec.RunJobInput
+	jobWaits        []string
+	jobStops        []string
 }
 
 type agent struct {
@@ -121,6 +124,13 @@ func (f *Engine) JobStarts() []callspec.RunJobInput {
 	return append([]callspec.RunJobInput(nil), f.jobStarts...)
 }
 
+// JobCount counts distinct stored jobs, excluding idempotent retries.
+func (f *Engine) JobCount() int {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	return len(f.jobRows)
+}
+
 // JobWaits lists the job IDs passed to WaitJob, in order.
 func (f *Engine) JobWaits() []string {
 	f.jobMu.Lock()
@@ -142,14 +152,26 @@ func (f *Engine) runJob(spec callspec.RunJobInput, result any) error {
 	if f.jobRows == nil {
 		f.jobRows = map[string]jobs.Job{}
 	}
+	if spec.IdempotencyKey != "" {
+		for _, existing := range f.jobRows {
+			if existing.IdempotencyKey == spec.IdempotencyKey {
+				return writeJobResult(result, existing)
+			}
+		}
+	}
 	job := jobs.Job{
-		ID: fmt.Sprintf("job_%d", len(f.jobStarts)), Node: spec.Node,
-		Command: spec.Command, State: jobs.StateQueued,
+		ID: fmt.Sprintf("job_%d", len(f.jobRows)+1), Node: spec.Node,
+		IdempotencyKey: spec.IdempotencyKey, Command: spec.Command, State: jobs.StateQueued,
 	}
 	if job.Node == "" {
 		job.Node = "local"
 	}
 	f.jobRows[job.ID] = job
+	if len(f.JobSubmitErrors) > 0 {
+		err := f.JobSubmitErrors[0]
+		f.JobSubmitErrors = f.JobSubmitErrors[1:]
+		return err
+	}
 	return writeJobResult(result, job)
 }
 
