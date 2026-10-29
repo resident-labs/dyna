@@ -75,10 +75,18 @@ func startedRecently(start string) bool {
 	return err == nil && seconds*100-float64(ticks) < 500
 }
 
+// browserEnvReads bounds the reads of a process whose environment is still
+// empty. 40 reads at 5 ms each is about 200 ms on an idle host.
+const browserEnvReads = 40
+
+// browserEnvTick returns the channel that releases the next empty-environment
+// read. A test replaces it with a closed channel, so its reads never wait.
+var browserEnvTick = func() <-chan time.Time { return time.After(5 * time.Millisecond) }
+
 // findBrowserDaemons adds a scan of every process to the pid files. A daemon
 // writes its pid file only after it starts, so a stop right after start would
 // otherwise leave it running. A process whose environment is not readable yet
-// is read again, for at most 200 ms, until it is readable or gone.
+// is read again, up to browserEnvReads times, until it is readable or gone.
 func findBrowserDaemons(id string) map[int]string {
 	out := browserDaemonPIDs(id)
 	root := browserSocketDir(os.Getenv("XDG_RUNTIME_DIR"), id)
@@ -88,7 +96,8 @@ func findBrowserDaemons(id string) map[int]string {
 			pending[pid] = true
 		}
 	}
-	for deadline := time.Now().Add(200 * time.Millisecond); len(pending) > 0 && time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+	for attempt := 0; len(pending) > 0 && attempt < browserEnvReads; attempt++ {
+		<-browserEnvTick()
 		for pid := range pending {
 			if !addBrowserDaemon(out, pid, root) {
 				delete(pending, pid)

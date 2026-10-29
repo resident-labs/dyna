@@ -3,29 +3,46 @@
 package runprocs
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"syscall"
 	"testing"
 )
 
+// startSleeper starts a process that waits with env. It returns once the shell
+// has printed its ready line. The shell then blocks on stdin instead of
+// exec'ing another program: an exec would empty /proc/<pid>/environ again, and
+// Kill finds a process through that environment.
+func startSleeper(t *testing.T, env ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "echo ready; read _")
+	cmd.Env = append(os.Environ(), env...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if _, err := cmd.StdinPipe(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	if _, err := bufio.NewReader(out).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	return cmd
+}
+
 // D-185: a canceled run's workers can sit in process groups of their own. Kill
 // ends the groups that carry the run's stamp and leaves other processes alone.
 func TestKillEndsStampedGroupsOnly(t *testing.T) {
-	start := func(env ...string) *exec.Cmd {
-		cmd := exec.Command("sleep", "600")
-		cmd.Env = append(os.Environ(), env...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-		return cmd
-	}
 	const run = "wf_20261026-010101-abcdef01"
-	stamped := start("DYNA_WORKER_RUN=" + run)
-	other := start("DYNA_WORKER_RUN=wf_20261026-010101-00000000")
-	plain := start()
+	stamped := startSleeper(t, "DYNA_WORKER_RUN="+run)
+	other := startSleeper(t, "DYNA_WORKER_RUN=wf_20261026-010101-00000000")
+	plain := startSleeper(t)
 	if err := Kill(run, 0, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -43,18 +60,8 @@ func TestKillEndsStampedGroupsOnly(t *testing.T) {
 // same pass still ends a stamped process of another group.
 func TestKillSparesProcessesOfKeptJobs(t *testing.T) {
 	const run = "wf_20261026-010101-abcdef01"
-	start := func(env ...string) *exec.Cmd {
-		cmd := exec.Command("sleep", "600")
-		cmd.Env = append(os.Environ(), env...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-		return cmd
-	}
-	worker := start("DYNA_WORKER_RUN=" + run)
-	kept := start("DYNA_WORKER_RUN="+run, "DYNA_SHELL_JOB=sh_kept")
+	worker := startSleeper(t, "DYNA_WORKER_RUN="+run)
+	kept := startSleeper(t, "DYNA_WORKER_RUN="+run, "DYNA_SHELL_JOB=sh_kept")
 	if err := Kill(run, 0, nil, []string{"DYNA_SHELL_JOB=sh_kept"}); err != nil {
 		t.Fatal(err)
 	}
