@@ -358,11 +358,36 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r2"); err != nil {
 		t.Fatal(err)
 	}
-	orphans, err := store.OrphanedAttachments(t.Context())
-	if err != nil || len(orphans) != 1 || orphans[0].Source.Kind != jobs.CheckKindPullRequest {
-		t.Fatalf("orphans = %+v, %v, want the host run and its source", orphans, err)
+	// A newer standalone run shares the repository, SHA and node. Abandoning
+	// the selected PR run must not claim or stop this run instead.
+	standalone := attachment{RunID: "r3", Checks: []Suite{"host"}, Source: jobs.CheckSource{Kind: jobs.CheckKindLocalChange}, CheckKinds: map[Suite]attachmentCheckKind{"host": {Host: true}}}
+	if err := store.saveAttachment(t.Context(), repo, sha, "pve", standalone); err != nil {
+		t.Fatal(err)
 	}
-	if err := runner.AbandonOrphanedRun(t.Context(), store, orphans[0]); err != nil {
+	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r3"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), "UPDATE local_ci_attachments SET saved_at=? WHERE repo=? AND sha=? AND node=? AND run_id=?", resultClock().Add(time.Minute).Unix(), repo, sha, "pve", "r3"); err != nil {
+		t.Fatal(err)
+	}
+	orphans, err := store.OrphanedAttachments(t.Context())
+	if err != nil || len(orphans) != 2 {
+		t.Fatalf("orphans = %+v, %v, want both runs", orphans, err)
+	}
+	var selected OrphanedAttachment
+	for _, orphan := range orphans {
+		if orphan.RunID == "r2" {
+			selected = orphan
+		}
+	}
+	if selected.Source.Kind != jobs.CheckKindPullRequest {
+		t.Fatalf("selected run = %+v, want the host run and its source", selected)
+	}
+	if err := runner.AbandonOrphanedRun(t.Context(), store, selected); err != nil {
 		t.Fatal(err)
 	}
 	if len(scripts) != 4 {
@@ -371,6 +396,10 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	cleanup := scripts[2]
 	if strings.Contains(cleanup, "; no_container ") || strings.Contains(cleanup, "; no_labelled ") || !strings.Contains(cleanup, "dyna-ci-r2-host.scope") {
 		t.Fatalf("host cleanup invokes containers or misses the scope: %q", cleanup)
+	}
+	rows, err := store.attachmentRows(t.Context(), repo, sha)
+	if err != nil || len(rows) != 1 || rows[0].RunID != "r3" {
+		t.Fatalf("remaining attachments = %+v, %v, want only the standalone run", rows, err)
 	}
 }
 
