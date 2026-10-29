@@ -427,6 +427,9 @@ func ArchiveRun(id string) (ArchiveResult, error) {
 	if err := moveDir(live, dest); err != nil {
 		return res, fmt.Errorf("archive %s: %w", id, err)
 	}
+	if err := bumpRunsRev(); err != nil {
+		return res, fmt.Errorf("archive %s: record change: %w", id, err)
+	}
 	res.Dir = dest
 	return res, nil
 }
@@ -462,6 +465,9 @@ func UnarchiveRun(id string) (string, error) {
 	}
 	if err := moveDir(src, live); err != nil {
 		return "", fmt.Errorf("unarchive %s: %w", id, err)
+	}
+	if err := bumpRunsRev(); err != nil {
+		return "", fmt.Errorf("unarchive %s: record change: %w", id, err)
 	}
 	return live, nil
 }
