@@ -241,18 +241,15 @@
           {/snippet}
           {#snippet detail()}<ScopeList label="Rooms" values={machine.rooms ?? []} options={roomOptions} everyText="Every room" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ rooms: list })} />{/snippet}
         </Row>
-        <Row dense text="Suites">
-          {#snippet meta()}
-            <span class="note">Local CI takes only these suites. None chosen means every suite.</span>
-            {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
-          {/snippet}
-          {#snippet detail()}<ScopeList label="Suites" values={machine.suites ?? []} everyText="Every suite" placeholder="Suite name" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ suites: list })} />{/snippet}
-        </Row>
-        <Row dense text="Labels">
+        <Row dense text="Owner labels">
           {#snippet meta()}
             <span class="note">The ci label makes this machine run local CI checks. dyna machine edit {machine.name} --label ci sets it.</span>
           {/snippet}
           {#snippet detail()}<span class="note">{machine.labels?.length ? machine.labels.join(', ') : 'none'}</span>{/snippet}
+        </Row>
+        <Row dense text="Probed labels">
+          {#snippet meta()}<span class="note">Read from the last successful probe.</span>{/snippet}
+          {#snippet detail()}<span class="note">{machine.probedLabels?.length ? machine.probedLabels.join(', ') : 'none'}</span>{/snippet}
         </Row>
         <Row dense text="Host checks">
           {#snippet meta()}

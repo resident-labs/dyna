@@ -86,10 +86,14 @@ type SuiteBlockedError struct {
 
 func (e SuiteBlockedError) Error() string {
 	if e.Suite != "" {
-		return fmt.Sprintf("no enabled CI machine allows the %s suite that this run needs; allow it with dyna machine edit <name> --suites %s", e.Suite, e.Suite)
+		return fmt.Sprintf("no enabled CI machine allows the %s suite that this run needs; allow it with dyna machine edit <name> --label suite=%s", e.Suite, e.Suite)
 	}
-	return fmt.Sprintf("no enabled CI machine allows every suite that this run needs (%s); allow them on one machine with dyna machine edit <name> --suites %s",
-		strings.Join(SuiteNames(e.Suites), ", "), strings.Join(SuiteNames(e.Suites), ","))
+	flags := make([]string, 0, len(e.Suites))
+	for _, suite := range e.Suites {
+		flags = append(flags, "--label suite="+string(suite))
+	}
+	return fmt.Sprintf("no enabled CI machine allows every suite that this run needs (%s); allow them on one machine with dyna machine edit <name> %s",
+		strings.Join(SuiteNames(e.Suites), ", "), strings.Join(flags, " "))
 }
 
 // RoomNotServedError names a room that no enabled CI machine serves. The
@@ -116,7 +120,7 @@ func NodesForRoom(nodes []Node, roomID string) []Node {
 }
 
 // NodesForSuites keeps the machines that allow every suite of a run. A machine
-// that names no suite allows every suite, so it stays.
+// without suite= labels allows every suite; imported labels restrict the rest.
 func NodesForSuites(nodes []Node, suites []Suite) []Node {
 	kept := make([]Node, 0, len(nodes))
 	for _, node := range nodes {
@@ -140,7 +144,7 @@ func BlockedSuite(nodes []Node, suites []Suite) error {
 	for _, suite := range suites {
 		allowed := false
 		for _, node := range nodes {
-			allowed = allowed || node.AllowsSuite(suite)
+			allowed = allowed || allowsSuite(node, suite)
 		}
 		if !allowed {
 			return SuiteBlockedError{Suite: suite, Suites: suites}
@@ -152,9 +156,56 @@ func BlockedSuite(nodes []Node, suites []Suite) error {
 // allowsSuites reports whether the machine allows every suite of the run.
 func allowsSuites(node Node, suites []Suite) bool {
 	for _, suite := range suites {
-		if !node.AllowsSuite(suite) {
+		if !allowsSuite(node, suite) {
 			return false
 		}
 	}
 	return true
+}
+
+// allowsSuite preserves the old filter with owner labels: no suite= label means
+// every suite, while one or more labels limit the node to the suites they name.
+func allowsSuite(node Node, suite Suite) bool {
+	restricted := false
+	for _, label := range node.Labels {
+		if !strings.HasPrefix(label, "suite=") {
+			continue
+		}
+		restricted = true
+		if label == "suite="+string(suite) {
+			return true
+		}
+	}
+	return !restricted
+}
+
+// NodesForLabels keeps nodes that have every label a check run needs.
+func NodesForLabels(nodes []Node, labels []string) []Node {
+	kept := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		matches := true
+		for _, label := range labels {
+			matches = matches && node.HasLabel(label)
+		}
+		if matches {
+			kept = append(kept, node)
+		}
+	}
+	return kept
+}
+
+// LabelsBlockedError names the check labels no one machine carries together.
+type LabelsBlockedError struct{ Labels []string }
+
+func (e LabelsBlockedError) Error() string {
+	return fmt.Sprintf("no enabled CI machine has every check label this run needs (%s); add the missing labels with dyna machine edit <name> --label <label>", strings.Join(e.Labels, ", "))
+}
+
+// BlockedLabels reports a label set that no machine can satisfy. Busy machines
+// still count, so their work waits for capacity instead of failing.
+func BlockedLabels(nodes []Node, labels []string) error {
+	if len(labels) == 0 || len(NodesForLabels(nodes, labels)) > 0 {
+		return nil
+	}
+	return LabelsBlockedError{Labels: labels}
 }

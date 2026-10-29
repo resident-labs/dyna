@@ -179,13 +179,12 @@ export function diskText(caps: Pick<MachineCapabilities, 'freeDisk' | 'diskKeeps
   return rule ? `${free} · ${rule}` : free
 }
 
-// ScopeEdit is one change to a CI machine's room or suite list.
+// ScopeEdit is one change to a CI machine's room list.
 export type ScopeEdit = { add: string } | { remove: string }
 
-// editScope applies a change to a room or suite list and returns the new list,
-// or null when nothing changes. A value is trimmed, kept once and the list is
-// sorted, as dyna machine edit --suites keeps it; an empty list means every
-// room or suite.
+// editScope applies a change to a room list and returns the new list, or null
+// when nothing changes. A value is trimmed, kept once and sorted; an empty list
+// means every room.
 export function editScope(list: readonly string[], edit: ScopeEdit): string[] | null {
   const value = ('add' in edit ? edit.add : edit.remove).trim()
   if (!value) return null

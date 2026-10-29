@@ -61,18 +61,22 @@ type Node struct {
 	// Rooms limits the machine to those rooms' CI work. An empty list takes
 	// work from every room.
 	Rooms []string `json:"rooms,omitempty"`
-	// Suites limits the machine to those suites' CI work. An empty list takes
-	// every suite.
-	Suites []string `json:"suites,omitempty"`
-	// Labels mark what the machine takes. The ci label says it runs local CI
-	// checks; an unlabeled machine still takes jobs when enabled.
+	// Labels are the owner's placement labels. The ci label says the machine
+	// runs local CI checks. suite= labels retain an imported suite filter.
 	Labels []string `json:"labels,omitempty"`
+	// ProbedLabels come from the machine's last good probe.
+	ProbedLabels []string `json:"probedLabels,omitempty"`
 }
 
 // TakesCI reports whether the machine runs local CI checks: enabled and
 // carrying the ci label. Jobs use any enabled machine.
 func (n Node) TakesCI() bool {
 	return n.Enabled && slices.Contains(n.Labels, machines.LabelCI)
+}
+
+// HasLabel reports whether the owner or the last probe gave the node a label.
+func (n Node) HasLabel(label string) bool {
+	return slices.Contains(n.Labels, label) || slices.Contains(n.ProbedLabels, label)
 }
 
 // AllowsRoom reports whether the machine takes CI work for the room. A machine
@@ -85,12 +89,6 @@ func (n Node) AllowsRoom(roomID string) bool {
 // work of a room.
 func (n Node) HostChecksAllowed(room string) bool {
 	return machines.HostChecksAllowed(n.HostChecksGrants, room)
-}
-
-// AllowsSuite reports whether the machine takes CI work for the suite. A
-// machine that names no suite takes every suite.
-func (n Node) AllowsSuite(suite Suite) bool {
-	return len(n.Suites) == 0 || slices.Contains(n.Suites, string(suite))
 }
 
 type Store struct{ DataDir string }
@@ -242,7 +240,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 	}
 	nodes := []Node{}
 	for _, m := range list {
-		node := Node{Name: m.Name, SSH: m.SSH, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Suites: m.Suites, Labels: m.Labels, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
+		node := Node{Name: m.Name, SSH: m.SSH, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Labels: m.Labels, ProbedLabels: m.ProbedLabels(), ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil

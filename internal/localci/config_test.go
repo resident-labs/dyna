@@ -90,6 +90,39 @@ func testDynaDefinition(t *testing.T) *Definition {
 	return definition
 }
 
+func TestCheckLabelsSelectOnlyMatchingNodes(t *testing.T) {
+	definition, err := ParseDefinition([]byte(`version: 1
+trial: [test]
+checks:
+  - id: gpu-test
+    image: golang:1
+    command: go test ./...
+    labels: [gpu, arch=x86_64]
+  - id: plain-test
+    image: golang:1
+    command: go vet ./...
+suites:
+  - id: test
+    checks: [gpu-test, plain-test]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := definition.LabelsForSuites([]Suite{"test"})
+	if want := []string{"arch=x86_64", "gpu"}; !reflect.DeepEqual(labels, want) {
+		t.Fatalf("run labels = %v, want %v", labels, want)
+	}
+	nodes := []Node{
+		{Name: "plain", Labels: []string{machines.LabelCI}},
+		{Name: "gpu", Labels: []string{machines.LabelCI}, ProbedLabels: []string{"gpu", "arch=x86_64"}},
+		{Name: "partial", Labels: []string{machines.LabelCI, "gpu"}},
+	}
+	matched := NodesForLabels(nodes, labels)
+	if len(matched) != 1 || matched[0].Name != "gpu" {
+		t.Fatalf("matching nodes = %#v, want only the node with every check label", matched)
+	}
+}
+
 func TestLoadDefinitionAbsentAndStrict(t *testing.T) {
 	repo := t.TempDir()
 	definitionGit(t, repo, "init", "--quiet")

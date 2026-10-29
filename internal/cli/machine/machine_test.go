@@ -67,7 +67,7 @@ func TestMachineListShowsRooms(t *testing.T) {
 }
 
 // The ci label says a machine runs local CI checks: edit adds and removes
-// labels, show lists them, and a name the resource rule refuses is rejected.
+// labels, show lists them, and an invalid name is rejected.
 func TestMachineEditSetsLabels(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)
@@ -81,7 +81,7 @@ func TestMachineEditSetsLabels(t *testing.T) {
 	if err != nil || !m.HasLabel(machines.LabelCI) {
 		t.Fatalf("labeled machine = %#v, %v", m, err)
 	}
-	if out, err := run(t, "show", "build"); err != nil || !strings.Contains(out, "Labels:   ci") {
+	if out, err := run(t, "show", "build"); err != nil || !strings.Contains(out, "Owner labels:  ci") {
 		t.Fatalf("show labels = %q, %v", out, err)
 	}
 	if _, err := run(t, "edit", "build", "--unlabel", "ci"); err != nil {
@@ -91,7 +91,7 @@ func TestMachineEditSetsLabels(t *testing.T) {
 		t.Fatalf("unlabeled machine = %#v, %v", m, err)
 	}
 	if _, err := run(t, "edit", "build", "--label", "not a label!"); err == nil {
-		t.Fatal("a label the resource rule refuses was accepted")
+		t.Fatal("an invalid label was accepted")
 	}
 }
 
@@ -399,35 +399,5 @@ func TestMachineRemoveNamesTheMachineByID(t *testing.T) {
 	}
 	if _, err := (machines.Store{}).Get(context.Background(), alpha.ID); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the renamed machine remains: %v", err)
-	}
-}
-
-// A machine can be limited to chosen suites, and the limit is shown and can be
-// cleared again. An empty list keeps the default of every suite.
-func TestMachineEditLimitsSuites(t *testing.T) {
-	storetest.DataDir(t)
-	stubEngine(t)
-	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run(t, "edit", "hermes", "--suites", "go,frontend"); err != nil {
-		t.Fatal(err)
-	}
-	hermes, ok := find(listed(t), "hermes")
-	if !ok || !reflect.DeepEqual(hermes.Suites, []string{"frontend", "go"}) {
-		t.Fatalf("suite limit = %v", hermes.Suites)
-	}
-	if out, err := run(t, "show", "hermes"); err != nil || !strings.Contains(out, "Suites:   frontend, go") {
-		t.Fatalf("shown suite limit = %q, %v", out, err)
-	}
-	if _, err := run(t, "edit", "hermes", "--suites", ""); err != nil {
-		t.Fatal(err)
-	}
-	hermes, _ = find(listed(t), "hermes")
-	if len(hermes.Suites) != 0 || !hermes.AllowsSuite("relay") {
-		t.Fatalf("cleared suite limit = %v", hermes.Suites)
-	}
-	if out, err := run(t, "show", "hermes"); err != nil || !strings.Contains(out, "Suites:   every suite") {
-		t.Fatalf("shown cleared limit = %q, %v", out, err)
 	}
 }

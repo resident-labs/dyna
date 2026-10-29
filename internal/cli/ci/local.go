@@ -65,9 +65,15 @@ func localCommands() []*cobra.Command {
 		if err != nil {
 			return err
 		}
+		runSuites := requested
+		if len(runSuites) == 0 {
+			runSuites = definition.WorkflowSuites()
+		}
+		labels := definition.LabelsForSuites(runSuites)
+		eligible := localci.NodesForLabels(localci.NodesForSuites(nodes, runSuites), labels)
 		var node localci.Node
 		if nodeName == "" {
-			node, err = defaultNode(nodes)
+			node, err = defaultNode(eligible)
 			if err != nil {
 				return err
 			}
@@ -77,6 +83,9 @@ func localCommands() []*cobra.Command {
 				return fmt.Errorf("enabled CI node %q was not found", nodeName)
 			}
 			node = found
+			if len(localci.NodesForLabels(localci.NodesForSuites([]localci.Node{node}, runSuites), labels)) == 0 {
+				return fmt.Errorf("CI machine %s does not allow every suite and check label of this run", node.Name)
+			}
 		}
 		runner.Node = &node
 		// A JSON result stays machine readable, so the choice goes to stderr.
@@ -135,13 +144,13 @@ func localCommands() []*cobra.Command {
 func findNode(nodes []localci.Node, name string) (localci.Node, bool) {
 	for _, node := range nodes {
 		if node.Name == name {
-			return node, node.Enabled
+			return node, node.TakesCI()
 		}
 	}
 	if name == "local" {
 		for _, node := range nodes {
 			if node.SSH == "" {
-				return node, node.Enabled
+				return node, node.TakesCI()
 			}
 		}
 	}

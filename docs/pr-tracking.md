@@ -372,22 +372,24 @@ trials skip a machine that does not allow their room, so that room's work waits
 for a machine that does instead of running next to another room's work.
 `dyna machine show <name>` prints the list.
 
-### Suites of a machine
+### Suites and labels of a machine
 
-A machine can also name the suites it takes, so a merge trial runs where its
-suites can run:
+Old per-machine suite lists are imported once as owner labels named
+`suite=<suite>`. A machine with one or more of these labels takes only those
+suites:
 
 ```sh
-dyna machine edit hermeslab --suites go
-dyna machine edit arch --suites go,frontend
-dyna machine edit hermeslab --suites ""
+dyna machine edit hermeslab --label suite=go
+dyna machine edit arch --label suite=go --label suite=frontend
+dyna machine edit hermeslab --unlabel suite=go
 ```
 
 The suite IDs come from the `trial` list in
 [the repository definition](local-ci.md), such as `go`, `cross-build` or
-`computer-smoke`. An empty list is the default and lets the machine take every
-suite. Merge trial scheduling sends a run only to a machine that allows every
-suite of that run, and an integration sync follows the same rule. When no
+`computer-smoke`. A machine without `suite=` labels takes every suite, as
+before. Merge trial scheduling sends a run only to a machine that allows every
+suite of that run, and an integration sync follows the same rule. Checks can
+also name owner or probed labels; see [Checks](local-ci.md#checks). When no
 enabled machine of the run's room allows a suite of it, the trial fails at once
 with an error that names the suite, so a trial never waits for a machine that
 cannot take it. A machine that is only busy or low on disk still counts, so its

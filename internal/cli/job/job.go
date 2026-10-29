@@ -63,8 +63,8 @@ func NewCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
 		Long: "A job is one command that runs on a machine, detached: it survives the\n" +
-			"end of this command, an SSH drop and an engine restart. With no --node it\n" +
-			"runs on this machine, so one machine needs no setup. The machine's node\n" +
+			"end of this command, an SSH drop and an engine restart. With no --node or --label it\n" +
+			"runs on this machine, so one machine needs no setup. --label chooses the eligible machine with the most free queue capacity. The machine's node\n" +
 			"queue admits the job when its CPUs, memory, IO weight and named resources fit; a job that\n" +
 			"waits shows why in dyna job show. Its log and exit code are stored; the\n" +
 			"session that submitted it is woken when the job ends. --artifact keeps\n" +
@@ -77,12 +77,12 @@ func NewCommand() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	var node, commit, image, memory, ioWeight string
-	var artifacts, resourceNames []string
+	var artifacts, resourceNames, labels []string
 	var cpus int
 	var host, workspace bool
 	var timeout, idle time.Duration
 	c := &cobra.Command{
-		Use:   "run [--node N] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG | --host] -- CMD",
+		Use:   "run [--node N | --label L] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG | --host] -- CMD",
 		Short: "Submit a job and return",
 		Args: func(c *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -109,7 +109,7 @@ func runCmd() *cobra.Command {
 				repo, _ = os.Getwd()
 			}
 			request := map[string]any{
-				"node": node, "command": args, "repo": repo, "ref": commit,
+				"node": node, "labels": labels, "command": args, "repo": repo, "ref": commit,
 				"host": host, "image": image, "cpus": cpus, "memory": memory,
 				"timeoutSec": int(timeout / time.Second), "io": ioWeight, "artifacts": artifacts,
 				"resources": resources, "workspace": workspace,
@@ -125,7 +125,8 @@ func runCmd() *cobra.Command {
 			return printJSON(c.OutOrStdout(), view(job))
 		},
 	}
-	c.Flags().StringVar(&node, "node", "", "machine to run on (empty: this machine)")
+	c.Flags().StringVar(&node, "node", "", "machine to run on (empty: this machine, or the roomiest machine with --label)")
+	c.Flags().StringArrayVar(&labels, "label", nil, "run on the roomiest machine with every label, such as arch=x86_64 (repeatable)")
 	c.Flags().StringVar(&commit, "commit", "", "push this commit of the current repository and check it out (empty: no source)")
 	c.Flags().IntVar(&cpus, "cpus", 0, "CPUs the job may use")
 	c.Flags().StringVar(&memory, "memory", "", "memory the job may use, such as 16g or 512m")

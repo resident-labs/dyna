@@ -8,9 +8,11 @@ import (
 	"io"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/repoid"
 	"github.com/goccy/go-yaml"
 )
@@ -61,6 +63,7 @@ type ExecutableCheck struct {
 	// instead of running Command itself. Command, Image, Host, HostUser, Setup
 	// and Caches are empty then.
 	Job      *JobRef
+	Labels   []string
 	Command  string
 	Image    string
 	Host     bool
@@ -151,6 +154,7 @@ type checkFile struct {
 	Name          CheckName         `yaml:"name"`
 	Command       string            `yaml:"command"`
 	Job           *jobFile          `yaml:"job"`
+	Labels        []string          `yaml:"labels"`
 	Image         string            `yaml:"image"`
 	Host          bool              `yaml:"host"`
 	HostUser      bool              `yaml:"hostUser"`
@@ -316,6 +320,10 @@ func ParseDefinition(body []byte) (*Definition, error) {
 	checks := make(map[Suite]ExecutableCheck, len(file.Checks))
 	checkNames := map[CheckName]Suite{}
 	for _, input := range file.Checks {
+		labels, err := machines.ParseLabels(input.Labels)
+		if err != nil {
+			return nil, fmt.Errorf("check %q labels: %w", input.ID, err)
+		}
 		if !definitionID.MatchString(string(input.ID)) {
 			return nil, fmt.Errorf("invalid check id %q", input.ID)
 		}
@@ -398,6 +406,7 @@ func ParseDefinition(body []byte) (*Definition, error) {
 		}
 		check := ExecutableCheck{
 			Check:     Check{ID: input.ID, Name: input.Name},
+			Labels:    labels,
 			Command:   input.Command,
 			Image:     input.Image,
 			Host:      input.Host,
@@ -542,6 +551,7 @@ func cloneStrings(input map[string]string) map[string]string {
 func cloneExecutableCheck(input ExecutableCheck) ExecutableCheck {
 	input.Env = cloneStrings(input.Env)
 	input.Caches = append([]CacheDefinition(nil), input.Caches...)
+	input.Labels = append([]string(nil), input.Labels...)
 	return input
 }
 
@@ -603,6 +613,26 @@ func (d *Definition) ExecutableChecks(id Suite) ([]ExecutableCheck, bool) {
 		out[i] = cloneExecutableCheck(check)
 	}
 	return out, true
+}
+
+// LabelsForSuites returns every placement label the selected checks need.
+func (d *Definition) LabelsForSuites(suites []Suite) []string {
+	var labels []string
+	for _, id := range suites {
+		checks, ok := d.ExecutableChecks(id)
+		if !ok {
+			continue
+		}
+		for _, check := range checks {
+			for _, label := range check.Labels {
+				if !slices.Contains(labels, label) {
+					labels = append(labels, label)
+				}
+			}
+		}
+	}
+	slices.Sort(labels)
+	return labels
 }
 
 // Checks expands one suite into check identities in run order.

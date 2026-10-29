@@ -28,6 +28,7 @@ const DefaultTimeout = 30 * time.Minute
 type MachineSource interface {
 	Get(ctx context.Context, name string) (machines.Machine, error)
 	GetLocal(ctx context.Context) (machines.Machine, error)
+	List(ctx context.Context) ([]machines.Machine, error)
 }
 
 // Reporter posts a job's typed events. The engine implements it with the room
@@ -122,8 +123,10 @@ func (s *Service) executor(conn Conn) Executor {
 type Input struct {
 	RoomID  string
 	Session string
-	// Node names the registered machine. Empty means the local node.
+	// Node names the registered machine. Empty means the local node, unless
+	// Labels selects an eligible machine.
 	Node    string
+	Labels  []string
 	Command []string
 	// Repo is a local repository path and Ref the commit to check out. Both
 	// empty runs the command with no source.
@@ -165,7 +168,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 			return Job{}, err
 		}
 	}
-	machine, err := s.machine(ctx, in.Node)
+	machine, err := s.machine(ctx, in)
 	if err != nil {
 		return Job{}, err
 	}
@@ -179,7 +182,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	// local node is the machine the submitter already works on, so it needs no
 	// grant: a one-machine owner runs jobs with no setup.
 	if host && machine.SSH != "" && !machine.HostChecksAllowed(in.RoomID) {
-		return Job{}, fmt.Errorf("machine %s allows host jobs only with a host-check grant; the owner or the room root allows them with: dyna machine edit %s --allow-host-checks", machine.Name, machine.Name)
+		return Job{}, hostGrantError(machine)
 	}
 	id, err := s.Store.NewID()
 	if err != nil {
@@ -269,16 +272,70 @@ func ParseMemory(request string) (int64, error) {
 	return value * mult, nil
 }
 
-// machine resolves the node a job runs on. Empty means the local node.
-func (s *Service) machine(ctx context.Context, name string) (machines.Machine, error) {
-	if name == "" {
+// machine resolves the node a job runs on. Labels choose the eligible node
+// with the most free CPUs in its queue; no node or labels keeps the local node.
+func (s *Service) machine(ctx context.Context, in Input) (machines.Machine, error) {
+	if in.Node != "" {
+		if len(in.Labels) > 0 {
+			return machines.Machine{}, errors.New("--node and --label cannot be used together")
+		}
+		machine, err := s.Machines.Get(ctx, in.Node)
+		if errors.Is(err, os.ErrNotExist) {
+			return machine, fmt.Errorf("no machine named %s is registered", in.Node)
+		}
+		return machine, err
+	}
+	if len(in.Labels) == 0 {
 		return s.Machines.GetLocal(ctx)
 	}
-	machine, err := s.Machines.Get(ctx, name)
-	if errors.Is(err, os.ErrNotExist) {
-		return machine, fmt.Errorf("no machine named %s is registered", name)
+	list, err := s.Machines.List(ctx)
+	if err != nil {
+		return machines.Machine{}, err
 	}
-	return machine, err
+	for _, label := range in.Labels {
+		if !slices.ContainsFunc(list, func(machine machines.Machine) bool { return machine.HasLabel(label) }) {
+			return machines.Machine{}, fmt.Errorf("no machine has label %q", label)
+		}
+	}
+	chosen := -1
+	grantBlocked := -1
+	mostFree := -1
+	host := in.Host || in.Image == ""
+	queue := s.admission()
+	for i, machine := range list {
+		if !machine.Enabled || in.RoomID != "" && !machine.AllowsRoom(in.RoomID) {
+			continue
+		}
+		matches := true
+		for _, label := range in.Labels {
+			matches = matches && machine.HasLabel(label)
+		}
+		if !matches {
+			continue
+		}
+		if host && machine.SSH != "" && !machine.HostChecksAllowed(in.RoomID) {
+			grantBlocked = i
+			continue
+		}
+		free := queue.FreeCPUs(ctx, machine.Name, machine.Capabilities.CPUs)
+		if free > mostFree {
+			chosen, mostFree = i, free
+		}
+	}
+	if chosen < 0 {
+		if grantBlocked >= 0 {
+			return machines.Machine{}, hostGrantError(list[grantBlocked])
+		}
+		if in.RoomID != "" {
+			return machines.Machine{}, fmt.Errorf("no enabled machine serving room %s has every label (%s)", in.RoomID, strings.Join(in.Labels, ", "))
+		}
+		return machines.Machine{}, fmt.Errorf("no enabled machine has every label (%s)", strings.Join(in.Labels, ", "))
+	}
+	return list[chosen], nil
+}
+
+func hostGrantError(machine machines.Machine) error {
+	return fmt.Errorf("machine %s allows host jobs only with a host-check grant; the owner or the room root allows them with: dyna machine edit %s --allow-host-checks", machine.Name, machine.Name)
 }
 
 // resolveCommit reads the exact commit the job checks out. It returns the

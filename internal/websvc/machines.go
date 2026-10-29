@@ -91,16 +91,14 @@ type MachineSummary struct {
 	MaxDiskPercent *int                          `json:"maxDiskPercent,omitempty"`
 	Resources      map[machines.ResourceName]int `json:"resources,omitempty"`
 	Rooms          []string                      `json:"rooms,omitempty"`
-	// Suites limits the local CI work the machine takes to those suites; empty
-	// means every suite.
-	Suites []string `json:"suites,omitempty"`
-	// Labels mark what the machine takes; the ci label says it runs local CI
-	// checks.
-	Labels    []string       `json:"labels,omitempty"`
-	CPU       *int           `json:"cpu,omitempty"`
-	Agents    *int           `json:"agents,omitempty"`
-	Computers *int           `json:"computers,omitempty"`
-	CI        *MachineCIWork `json:"ci,omitempty"`
+	// Labels are the owner's placement labels; the ci label runs local CI.
+	Labels []string `json:"labels,omitempty"`
+	// ProbedLabels come from the last good probe and are read-only.
+	ProbedLabels []string       `json:"probedLabels,omitempty"`
+	CPU          *int           `json:"cpu,omitempty"`
+	Agents       *int           `json:"agents,omitempty"`
+	Computers    *int           `json:"computers,omitempty"`
+	CI           *MachineCIWork `json:"ci,omitempty"`
 }
 
 // MachineWorkItem is one unit of work on a machine, with the names the page
@@ -200,7 +198,6 @@ type MachinePatch struct {
 	Enabled         *bool     `json:"enabled"`
 	AllowHostChecks *bool     `json:"allowHostChecks"`
 	Rooms           *[]string `json:"rooms"`
-	Suites          *[]string `json:"suites"`
 	Labels          *[]string `json:"labels"`
 	SSH             *string   `json:"ssh"`
 	Create          bool      `json:"create,omitempty"`
@@ -391,9 +388,6 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	}
 	if patch.Rooms != nil {
 		m.Rooms = *patch.Rooms
-	}
-	if patch.Suites != nil {
-		m.Suites = *patch.Suites
 	}
 	if patch.Labels != nil {
 		m.Labels = *patch.Labels
@@ -596,8 +590,8 @@ func machineSummary(m machines.Machine) MachineSummary {
 		Status:          machineStatus(m),
 		AllowHostChecks: m.HasHostChecksGrants(),
 		Rooms:           m.Rooms,
-		Suites:          m.Suites,
 		Labels:          m.Labels,
+		ProbedLabels:    m.ProbedLabels(),
 		MaxIOHeavy:      &m.MaxIOHeavy,
 		MaxDiskPercent:  &m.MaxDiskPercent,
 		Resources:       m.Resources,
