@@ -128,17 +128,19 @@ func (*RemoteScratchError) Error() string {
 	return "a remote job cannot use the caller's DYNA_SCRATCH; send files with --workspace or --artifact"
 }
 
-// remoteScratchReference recognizes shell references and absolute paths that
-// the caller's shell already expanded. Session and scratch.Root are trusted
-// engine values, so the path needs no client-supplied validation.
+// remoteScratchReference recognizes shell references and expanded paths,
+// including a path embedded in a shell command argument. Session and
+// scratch.Root are trusted engine values, so the path needs no client validation.
 func remoteScratchReference(command []string, scratchDir string) bool {
 	for _, word := range command {
 		if strings.Contains(word, "$DYNA_SCRATCH") || strings.Contains(word, "${DYNA_SCRATCH}") {
 			return true
 		}
-		if scratchDir != "" && filepath.IsAbs(word) {
-			clean := filepath.Clean(word)
-			if clean == scratchDir || strings.HasPrefix(clean, scratchDir+string(filepath.Separator)) {
+		if scratchDir != "" {
+			if strings.Contains(word, scratchDir+string(filepath.Separator)) {
+				return true
+			}
+			if filepath.IsAbs(word) && filepath.Clean(word) == scratchDir {
 				return true
 			}
 		}
