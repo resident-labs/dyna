@@ -137,7 +137,7 @@ globalThis.run = function (command, opts) {
   return __exec(command, applyPlanCtx(opts));
 };
 
-globalThis.__planJob = function (planNodeId, functionScope, ...args) {
+globalThis.__planJob = function (planNodeId, replayUnsafe, ...args) {
   let ctx;
   const last = args[args.length - 1];
   if (last && __planContexts.has(last)) {
@@ -145,7 +145,7 @@ globalThis.__planJob = function (planNodeId, functionScope, ...args) {
   }
   const opts = applyPlanCtx({}, ctx);
   opts.__planNodeId = String(planNodeId);
-  opts.__planFunctionScope = functionScope;
+  opts.__planReplayUnsafe = replayUnsafe;
   return __job(args[0], opts);
 };
 
@@ -154,7 +154,7 @@ globalThis.__planJob = function (planNodeId, functionScope, ...args) {
 globalThis.job = function (spec) {
   const opts = applyPlanCtx({});
   // Uninstrumented calls have no proof of a stable top-level call position.
-  opts.__planFunctionScope = true;
+  opts.__planReplayUnsafe = true;
   return __job(spec, opts);
 };
 

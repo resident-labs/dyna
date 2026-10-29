@@ -9,13 +9,15 @@ import (
 
 func TestJobResumeParallelBranchesKeepCallIdentity(t *testing.T) {
 	script := `
-async function branch(shouldYield, command) {
-  if (shouldYield) await Promise.resolve()
-  return (await job({command: [command]})).id
-}
 return await parallel([
-  () => branch(args.wait === 'a', 'a'),
-  () => branch(args.wait === 'b', 'b'),
+  async () => {
+    if (args.wait === 'a') await Promise.resolve()
+    return (await job({command: ['a']})).id
+  },
+  async () => {
+    if (args.wait === 'b') await Promise.resolve()
+    return (await job({command: ['b']})).id
+  },
 ])
 `
 	source, err := runstore.Create("job parallel source", script, nil)
@@ -39,6 +41,47 @@ return await parallel([
 	raw, _, err = runCommandScript(t, script, Options{Run: resumed, Args: map[string]any{"wait": "b"}, Engine: fake, Cache: NewCache(entries), JobNamespace: source.Meta.ID})
 	if err != nil || raw != want {
 		t.Fatalf("reordered resume = %s, %v; want original branch mapping %s", raw, err, want)
+	}
+	if got := len(fake.JobStarts()); got != 2 {
+		t.Fatalf("RunJob calls = %d, want no replay submissions", got)
+	}
+}
+
+func TestJobResumeNestedParallelDifferentCommandsKeepJobs(t *testing.T) {
+	script := `
+return await parallel([
+  async () => await parallel([
+    async () => {
+      if (args.wait === 'a') await Promise.resolve()
+      return (await job({command: ['a']})).id
+    },
+    async () => {
+      if (args.wait === 'b') await Promise.resolve()
+      return (await job({command: ['b']})).id
+    },
+  ]),
+])
+`
+	source, err := runstore.Create("nested different job source", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &enginefake.Engine{}
+	raw, _, err := runCommandScript(t, script, Options{Run: source, Args: map[string]any{"wait": "a"}, Engine: fake, JobNamespace: source.Meta.ID})
+	if err != nil || raw != `[["job_1","job_2"]]` {
+		t.Fatalf("nested different source = %s, %v", raw, err)
+	}
+	entries, err := runstore.ReadJournal(source.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := runstore.Create("nested different job resumed", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err = runCommandScript(t, script, Options{Run: resumed, Args: map[string]any{"wait": "b"}, Engine: fake, Cache: NewCache(entries), JobNamespace: source.Meta.ID})
+	if err != nil || raw != `[["job_1","job_2"]]` {
+		t.Fatalf("nested different resume = %s, %v", raw, err)
 	}
 	if got := len(fake.JobStarts()); got != 2 {
 		t.Fatalf("RunJob calls = %d, want no replay submissions", got)
@@ -119,15 +162,57 @@ return await Promise.all([
 	}
 }
 
-func TestJobResumeParallelIdenticalCallsKeepResults(t *testing.T) {
+func TestJobResumeRejectsNestedPartialConcurrentJournal(t *testing.T) {
 	script := `
-async function branch(shouldYield) {
+async function nested(shouldYield, skip) {
+  if (skip) return -1
   if (shouldYield) await Promise.resolve()
   return (await job({command: ['same']})).exitCode
 }
 return await parallel([
-  () => branch(args.wait === 'a'),
-  () => branch(args.wait === 'b'),
+  async () => await Promise.all([
+    nested(args.wait === 'a', args.skip === 'a'),
+    nested(args.wait === 'b', args.skip === 'b'),
+  ]),
+])
+`
+	source, err := runstore.Create("nested partial job source", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &enginefake.Engine{JobExitCodes: map[string]int{"job_1": 0, "job_2": 7}}
+	raw, _, err := runCommandScript(t, script, Options{Run: source, Args: map[string]any{"wait": "a", "skip": "a"}, Engine: fake, JobNamespace: source.Meta.ID})
+	if err != nil || raw != `[[-1,0]]` {
+		t.Fatalf("nested partial source = %s, %v", raw, err)
+	}
+	entries, err := runstore.ReadJournal(source.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := runstore.Create("nested partial job resumed", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err = runCommandScript(t, script, Options{Run: resumed, Args: map[string]any{"wait": "b"}, Engine: fake, Cache: NewCache(entries), JobNamespace: source.Meta.ID})
+	if err != nil || raw != `[null]` {
+		t.Fatalf("nested partial resume = %s, %v; want rejected branch calls", raw, err)
+	}
+	if got := len(fake.JobStarts()); got != 1 {
+		t.Fatalf("RunJob calls = %d, want no nested partial-journal submission", got)
+	}
+}
+
+func TestJobResumeParallelIdenticalCallsKeepResults(t *testing.T) {
+	script := `
+return await parallel([
+  async () => {
+    if (args.wait === 'a') await Promise.resolve()
+    return (await job({command: ['same']})).exitCode
+  },
+  async () => {
+    if (args.wait === 'b') await Promise.resolve()
+    return (await job({command: ['same']})).exitCode
+  },
 ])
 `
 	source, err := runstore.Create("identical job source", script, nil)
