@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -93,7 +94,39 @@ func Command(ctx context.Context, executable string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// MetadataEnv removes session stamps and Git routing from child commands.
+// secretNames are the engine's credential variables and auth paths. A shell,
+// workflow, hook, job or computer never inherits them: each launch gets its
+// account from the session that starts it (D-414). Explicit per-launch
+// credentials, such as a harness's own key for its turn, are set after the
+// filter and are not listed here.
+var secretNames = []string{
+	// GitHub tokens (D-414).
+	"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+	// Claude Code sign-ins and auth paths.
+	"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_HOST_CREDS_FILE", "CLAUDE_CODE_MESSAGING_TOKEN",
+	// Provider API keys.
+	"OPENAI_API_KEY", "OPENCODE_API_KEY", "META_API_KEY", "XAI_API_KEY",
+	"KIMI_API_KEY", "KIMI_REGISTRY_API_KEY", "KIMI_CODE_PASSWORD", "KIMI_MODEL_API_KEY", "KIMI_MODEL_REASONING_KEY", "KIMI_WEB_SEARCH_API_KEY", "KIMI_WEB_FETCH_API_KEY",
+	"DASHSCOPE_API_KEY", "STEPFUN_API_KEY", "MINICPM_O_AUTH_TOKEN", "GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_LIVE_API_KEY",
+	"DOUBAO_API_KEY", "SEEDUPLEX_API_KEY", "VOLCENGINE_DOUBAO_API_KEY",
+	// Package registry tokens.
+	"NODE_AUTH_TOKEN", "NPM_TOKEN",
+}
+
+// SecretName reports whether key names an engine credential or auth path.
+func SecretName(key string) bool {
+	return slices.Contains(secretNames, key)
+}
+
+// WithoutSecrets returns a copy of env without the engine's credential entries.
+func WithoutSecrets(env []string) []string {
+	return slices.DeleteFunc(slices.Clone(env), func(entry string) bool {
+		key, _, _ := strings.Cut(entry, "=")
+		return SecretName(key)
+	})
+}
+
+// MetadataEnv removes session stamps, Git routing and engine secrets from child commands.
 func MetadataEnv() []string {
 	var env []string
 	hasGoFlags := false
@@ -103,7 +136,7 @@ func MetadataEnv() []string {
 		case "CLAUDE_CODE_SESSION_ID":
 			continue
 		}
-		if strings.HasPrefix(key, "DYNA_") || strings.HasPrefix(key, "GIT_") {
+		if strings.HasPrefix(key, "DYNA_") || strings.HasPrefix(key, "GIT_") || SecretName(key) {
 			continue
 		}
 		if key == "GOFLAGS" {
