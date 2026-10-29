@@ -219,6 +219,9 @@ func TestTransferAndDraftActForTheirCaller(t *testing.T) {
 		"SetPRDraft release": func(ctx context.Context) error {
 			return e.svc.PRs.SetPRDraft(ctx, alpha.ID, "github.com/owner/repo#1", false, "")
 		},
+		"ClosePR": func(ctx context.Context) error {
+			return e.svc.PRs.ClosePR(ctx, alpha.ID, "github.com/owner/repo#1", "abandoned")
+		},
 		"CloseChange": func(ctx context.Context) error { return e.svc.PRs.CloseChange(ctx, alpha.ID, "change") },
 		"ReplyToFinding": func(ctx context.Context) error {
 			return e.svc.PRs.ReplyToFinding(ctx, alpha.ID, "change", "f1", "fixed", "Done")

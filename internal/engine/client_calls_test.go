@@ -89,7 +89,7 @@ func TestClientCallsAreServedByTheEngine(t *testing.T) {
 var dynamicCallSites = map[string][]string{
 	"internal/cli/request/question.go method":       {"AskQuestion", "AnswerQuestion"},
 	"internal/cli/hooks/hooks.go method":            {"RunHook", "TestHook"},
-	"internal/cli/pr/pr.go call":                    {"MergeFixPR", "UntrackPR", "ResumePR", "SetPRDraft", "RequirePRReviewers"},
+	"internal/cli/pr/pr.go call":                    {"MergeFixPR", "UntrackPR", "ClosePR", "ResumePR", "SetPRDraft", "RequirePRReviewers"},
 	"internal/cli/room/pins.go call":                {"Pin", "Unpin"},
 	"internal/cli/room/session_controls.go method":  {"PauseRoomSessions", "ResumeRoomSessions", "ClearDormantSessions"},
 	"internal/cli/request/request.go method":        {"ApproveRequest", "DenyRequest", "WithdrawRequest"},

@@ -199,6 +199,15 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return prWrite(c, s, r.Key(), "UntrackPR")
 	}}
+	closePR := &cobra.Command{Use: "close <number|url>", Short: "Close a PR on GitHub and stop tracking it", Args: cobra.ExactArgs(1)}
+	closeReason := closePR.Flags().String("reason", "", "reason to record in the room")
+	closePR.RunE = func(c *cobra.Command, a []string) error {
+		s, r, err := resolve(c, a[0])
+		if err != nil {
+			return err
+		}
+		return prWrite(c, s, r.Key(), "ClosePR", *closeReason)
+	}
 
 	transfer := &cobra.Command{Use: "transfer <number|url>", Short: "Move a tracked PR author to another session", Args: cobra.ExactArgs(1)}
 	target := transfer.Flags().String("to", "", "open session in the PR's room (required)")
@@ -671,7 +680,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return output(c, out)
 	}}
 	root.AddCommand(admit, dismiss, held)
-	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, transfer, resume, hold, release, require, unrequire, reviewer, review, verdict, comment, publishing, noise)
+	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, closePR, transfer, resume, hold, release, require, unrequire, reviewer, review, verdict, comment, publishing, noise)
 	root.AddCommand(cliexport.NewCommand())
 	return root
 }
