@@ -29,6 +29,8 @@ P8 adds the native headless auth commands `pi auth login [--provider <id>] --jso
 
 The large-session test follow-up adds an optional `maxStringLength` parameter to `loadEntriesFromFile` (`packages/coding-agent/src/core/session-manager.ts`). The default remains Node's `buffer.constants.MAX_STRING_LENGTH`, which preserves the existing 1 MiB production read chunks. The parameter bounds each read chunk, and the loader always retains its streaming behavior. The test injects a 64 KiB limit, so an 80 KiB fixture requires multiple streamed reads without a 512 MB file. This repair removes no Dyna code, adds no Dyna dependency, and leaves the fork level unchanged.
 
+The lock-wait repair rewrites the `waits for a second writer holding the lock` test (`packages/coding-agent/test/auth-storage-command.test.ts`): the holder now keeps the login-file lock on a deferred promise the test resolves, and the second writer is observed through event-loop turns, replacing a real 150 ms `setTimeout` hold and a `Date.now()` advance assertion that failed merge trial 1008 under load. This repair removes no Dyna code, adds no Dyna dependency, and leaves the fork level unchanged.
+
 ## Known upstream test failures
 
 - `packages/coding-agent/test/model-runtime-classifiers.test.ts > ModelRuntime classifiers > applies provider compat from models.json to classifier models` is skipped. At upstream v1.4.0 (`4a080252f06caf63a525d7873c5d94d3c23887e0`), the pinned model catalog declares `typesafe/jev-latest` with `input: ["text"]`. The test sends an image, so input validation returns an error before provider compatibility is exercised. This also fails on a clean upstream v1.4.0 checkout with the same pinned catalog. Remove the skip when upstream fixes the test or model metadata.
