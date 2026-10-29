@@ -304,6 +304,10 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 	if errors.As(err, &blocked) {
 		return trialCI{Status: VerdictFailed, Logs: blocked.Error(), Reason: blocked.Error()}, nil
 	}
+	var labelsBlocked localci.LabelsBlockedError
+	if errors.As(err, &labelsBlocked) {
+		return trialCI{Status: VerdictFailed, Logs: labelsBlocked.Error(), Reason: labelsBlocked.Error()}, nil
+	}
 	if err != nil {
 		return trialCI{}, err
 	}

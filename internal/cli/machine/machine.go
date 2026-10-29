@@ -156,8 +156,8 @@ func showCommand() *cobra.Command {
 			}
 			fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
 			fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
-			fmt.Fprintf(out, "Suites:   %s\n", suiteList(m.Suites))
-			fmt.Fprintf(out, "Labels:   %s\n", labelList(m.Labels))
+			fmt.Fprintf(out, "Owner labels:  %s\n", labelList(m.Labels))
+			fmt.Fprintf(out, "Probed labels: %s\n", joinOr(m.ProbedLabels(), "none"))
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
 			fmt.Fprintf(out, "Status:   %s\n", m.Status())
@@ -321,11 +321,10 @@ func editCommand() *cobra.Command {
 	var containerSocket string
 	var connectTimeout time.Duration
 	var checkTmp string
-	var suites []string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
 		Short: "Change a machine",
-		Long: "Change a machine's route, switch, room list, suite list or limits.\n" +
+		Long: "Change a machine's route, switch, room list, labels or limits.\n" +
 			"A machine that is enabled and whose room list allows a room takes that\n" +
 			"room's local CI work and jobs.",
 		Args: cobra.ExactArgs(1),
@@ -358,10 +357,6 @@ func editCommand() *cobra.Command {
 					return err
 				}
 				patch.Labels, changed = &list, true
-			}
-			if c.Flags().Changed("suites") {
-				list := parseSuites(suites)
-				patch.Suites, changed = &list, true
 			}
 			if c.Flags().Changed("container-socket") {
 				if containerSocket != "" && !strings.HasPrefix(containerSocket, "unix://") {
@@ -415,7 +410,7 @@ func editCommand() *cobra.Command {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
 			if !changed {
-				return fmt.Errorf("edit %s: give a machine, host-check, room or suite setting to change", args[0])
+				return fmt.Errorf("edit %s: give a machine, host-check, room, label or limit setting to change", args[0])
 			}
 			saved, err := saveMachine(c.Context(), current.ID, patch)
 			if err != nil {
@@ -432,7 +427,6 @@ func editCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&allowHostChecks, "allow-host-checks", false, "allow repository checks to run outside containers")
 	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
-	cmd.Flags().StringSliceVar(&suites, "suites", nil, "limit local CI to these suites (comma separated; empty allows every suite)")
 	cmd.Flags().StringArrayVar(&labels, "label", nil, "add a label, such as ci to run local CI checks (repeatable)")
 	cmd.Flags().StringArrayVar(&unlabels, "unlabel", nil, "remove a label (repeatable)")
 	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
@@ -557,11 +551,10 @@ func labelList(labels []string) string {
 	return strings.Join(labels, ", ")
 }
 
-// editLabels adds and removes labels on a machine's list. Label names follow
-// the resource name rule, and the result is sorted and free of repeats.
+// editLabels adds and removes owner labels, sorted and free of repeats.
 func editLabels(current, add, remove []string) ([]string, error) {
 	for _, name := range add {
-		if _, err := machines.ParseResourceName(strings.TrimSpace(name)); err != nil {
+		if _, err := machines.ParseLabel(strings.TrimSpace(name)); err != nil {
 			return nil, fmt.Errorf("label %s: %w", name, err)
 		}
 	}
@@ -574,33 +567,6 @@ func editLabels(current, add, remove []string) ([]string, error) {
 	}
 	slices.Sort(out)
 	return out, nil
-}
-
-// parseSuites reads the suite names a command line names. A suite ID comes from
-// a repository definition, so there is nothing to resolve: the list only has to
-// be trimmed, sorted and free of repeats.
-func parseSuites(names []string) []string {
-	suites := make([]string, 0, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		if !slices.Contains(suites, name) {
-			suites = append(suites, name)
-		}
-	}
-	slices.Sort(suites)
-	return suites
-}
-
-// suiteList words a machine's suite limit: the suites it takes work for, or
-// every suite when it names none.
-func suiteList(suites []string) string {
-	if len(suites) == 0 {
-		return "every suite"
-	}
-	return strings.Join(suites, ", ")
 }
 
 // orNone prints a value, or a dash when the probe read none.
