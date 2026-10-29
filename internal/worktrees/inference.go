@@ -11,8 +11,10 @@ import (
 	"sort"
 	"sync"
 
+	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/store"
 )
 
 type ownerRef struct {
@@ -184,13 +186,34 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 	if err != nil {
 		return nil, fmt.Errorf("infer run owners: %w", err)
 	}
+	runsSnapshotted()
 	metas := make(map[string]runstore.Meta, len(runs))
 	for _, m := range runs {
 		metas[m.ID] = m
 	}
 	visitRun := func(_ *os.Root, name string) error {
 		meta, ok := metas[name]
+		if !ok && runstore.ValidateRunID(name) == nil {
+			// The folder can be newer than the snapshot above. A launch
+			// commits its starting row before it creates the folder, so a
+			// fresh read finds that row; no coordinator record is needed yet.
+			fresh, found, err := runstore.StoredMeta(ctx, name)
+			if err != nil {
+				return err
+			}
+			if found {
+				meta, ok = fresh, true
+			}
+		}
 		if !ok {
+			alive, err := rowlessWorkflowAlive(ctx, name)
+			if err != nil {
+				return err
+			}
+			// A folder left by a worker that never started owns nothing.
+			if !alive {
+				return nil
+			}
 			reportRowless(name)
 		}
 		ref := ownerRef{ID: name, Address: name, Closed: ok && runstore.IsFinishedStatus(meta.Status) && !meta.EndedAt.IsZero()}
@@ -258,6 +281,14 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 		owners[key] = item
 	}
 	return owners, nil
+}
+
+func rowlessWorkflowAlive(ctx context.Context, id string) (bool, error) {
+	launches, err := callerid.OpenStore(store.DataDir())
+	if err != nil {
+		return false, err
+	}
+	return launches.WorkflowDaemonAlive(ctx, id)
 }
 
 func inferenceCanonicalPath(path string) (string, error) {
@@ -340,6 +371,10 @@ func inferenceStore(ctx context.Context, path string, visit func(*os.Root, strin
 		}
 	}
 }
+
+// runsSnapshotted runs after inferOwners reads the stored rows and before
+// it scans run folders. Tests stage a launch in that interval.
+var runsSnapshotted = func() {}
 
 // rowless holds the run folders already reported for having no row.
 var rowless sync.Map
