@@ -72,8 +72,8 @@ type Options struct {
 	// routing. A non-nil error with a non-empty result ID means the post was
 	// stored but at least one delivery failed.
 	Poster func(ctx context.Context, runID string, mentions []string, text string) (PostResult, error)
-	// Engine starts the leaf session that serves each agent() call. A run
-	// coordinator passes its engine connection; tests pass a fake.
+	// Engine starts agent() sessions and submits and waits for job() calls. A
+	// run coordinator passes its engine connection; tests pass a fake.
 	Engine EngineCaller
 	// Commands runs the commands of run() calls as managed shells. Nil makes
 	// run() fail; the run coordinator passes the shells-backed runner.
@@ -87,6 +87,9 @@ type Options struct {
 	// ResumeFrom is the prior run id when this execution is a --resume.
 	// Recorded on plan.json as resumedFrom; it does not change cache keys.
 	ResumeFrom string
+	// JobNamespace is the stable identity shared by every run in a resume
+	// chain. The workflow service sets it for durable job idempotency keys.
+	JobNamespace string
 }
 
 type outcome struct {
@@ -111,7 +114,9 @@ type sharedState struct {
 	scratchID         string
 	scratchWarning    sync.Once
 	agentSeq          int
-	execSeq           int // run() calls; counted apart from agents and their cap
+	execSeq           int // run() and job() steps; counted apart from agents and their cap
+	jobNamespace      string
+	jobOccurrences    map[string]int
 	workflowSeq       int
 	profSems          map[string]chan struct{}
 	profCalls         map[string]int
@@ -139,16 +144,23 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 	}
 	var worktreeWarning string
 	if shared == nil {
+		jobNamespace := o.JobNamespace
+		if jobNamespace == "" {
+			jobNamespace = parentRunID(o.Run)
+		}
+		if jobNamespace == "" {
+			jobNamespace = runstore.NewID()
+		}
 		worktreeRetention, warning, err := resolveWorktreeRetention(o.WorktreeRetention)
 		if err != nil {
 			return "", err
 		}
 		worktreeWarning = warning
 		shared = &sharedState{
-			scratchID: runstore.NewID(),
-			sem:       make(chan struct{}, maxConc),
-			cmdSem:    newCommandLimit(o.MaxCommands),
-			profSems:  map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
+			scratchID: runstore.NewID(), jobNamespace: jobNamespace, jobOccurrences: map[string]int{},
+			sem:      make(chan struct{}, maxConc),
+			cmdSem:   newCommandLimit(o.MaxCommands),
+			profSems: map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
 		}
 	}
 	if warning := resumeNondeterminismWarning(o.ScriptSrc); warning != "" && o.OnWarning != nil {
@@ -189,6 +201,7 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 
 	loop.RunOnLoop(func(vm *goja.Runtime) {
 		console.Enable(vm)
+		vm.SetAsyncContextTracker(planAsyncContextTracker{vm: vm})
 		// goja cannot see the context. A script that never yields, such as
 		// while (true) {}, would hold the loop forever; a cancel or deadline
 		// interrupts it. loop.Stop runs before cancel, so a finished run is never interrupted.

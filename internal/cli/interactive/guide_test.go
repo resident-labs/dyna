@@ -37,7 +37,7 @@ func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 		"Parallel writers need disjoint scopes or worktrees",
 		"A child must not call `workflow()`", "share parent concurrency and lifetime limits",
 		"regular agent session that cannot start subagents or runs",
-		"maxCallsPerRun", "--max-concurrent", "--max-agents", "### `run(command, opts?)`", "--max-commands", "reattaches to a shell still running",
+		"maxCallsPerRun", "--max-concurrent", "--max-agents", "### `run(command, opts?)`", "--max-commands", "reattaches to a shell still running", "### `job(spec)`", "waits for the original job ID", "labels: ['os=linux']",
 		"`phase(title)`", "`log(message)`", "`sleep(ms)`", "`args`", "`process`", "`profiles`", "`worktrees()`",
 		`provenance: "workflow"`, `provenance: "system"`,
 	}

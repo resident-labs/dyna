@@ -83,11 +83,14 @@ func InstrumentWorkflow(src string, p *Plan, wfID string) (string, error) {
 			return "", fmt.Errorf("instrument: invalid callee span for %s", n.PlanNodeID)
 		}
 		idArg := fmt.Sprintf("%q, ", instrumentID(n))
+		if n.Kind == KindJob {
+			idArg = fmt.Sprintf("%q, %t, ", instrumentID(n), n.ReplayUnsafe)
+		}
 		edits = append(edits,
 			sourceEdit{start: paren + 1, end: paren + 1, text: idArg},
 			sourceEdit{start: calleeStart, end: calleeEnd, text: helper},
 		)
-		if n.Kind == KindAgent {
+		if n.Kind == KindAgent || n.Kind == KindJob {
 			if ctxName := callbackCtx[n.StageCallback]; ctxName != "" {
 				contextArg := ", " + ctxName
 				if n.CallArguments == 0 {
@@ -311,6 +314,8 @@ func instrumentHelper(n Node) string {
 	switch n.Kind {
 	case KindAgent:
 		return "__planAgent"
+	case KindJob:
+		return "__planJob"
 	case KindWorkflow:
 		if n.PlanNodeID == RootWorkflowID {
 			return ""

@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 )
 
@@ -129,28 +131,9 @@ func (r jobsReporter) JobQueued(ctx context.Context, job jobs.Job) error   { ret
 func (r jobsReporter) JobStarted(ctx context.Context, job jobs.Job) error  { return r.post(job) }
 func (r jobsReporter) JobFinished(ctx context.Context, job jobs.Job) error { return r.post(job) }
 
-// runJobInput is the RunJob call's argument.
-type runJobInput struct {
-	Node    string   `json:"node"`
-	Labels  []string `json:"labels"`
-	Command []string `json:"command"`
-	Repo    string   `json:"repo"`
-	Ref     string   `json:"ref"`
-	Host    bool     `json:"host"`
-	Image   string   `json:"image"`
-	CPUs    int      `json:"cpus"`
-	Memory  string   `json:"memory"`
-	Timeout int      `json:"timeoutSec"`
-	Idle    *int     `json:"idleSec"`
-	// Artifacts are paths of the job's work folder to keep after it ends.
-	Artifacts []string `json:"artifacts"`
-	// IO is heavy or light: an IO-heavy job shares a node with only a few
-	// other IO-heavy ones.
-	IO string `json:"io"`
-	// Resources are named units the job holds for its whole run.
-	Resources []string `json:"resources"`
-	Workspace bool     `json:"workspace"`
-}
+// runJobInput keeps the engine's tests and handler concise while the RPC
+// boundary shares one typed request with workflow coordinators and the CLI.
+type runJobInput = callspec.RunJobInput
 
 func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) {
 	if s.jobs == nil {
@@ -171,7 +154,7 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 		idle = &duration
 	}
 	input := jobs.Input{
-		Node: in.Node, Labels: labels, Command: in.Command,
+		IdempotencyKey: in.IdempotencyKey, RequestHash: in.RequestHash, Node: in.Node, Labels: labels, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second, Idle: idle,
 		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources, Workspace: in.Workspace,
@@ -182,7 +165,17 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 	if actor.Room != "" {
 		input.RoomID = actor.Room
 	}
-	if actor.Session != "" {
+	if actor.Role == authority.Worker && actor.Run != "" {
+		input.Run = actor.Run
+		meta, err := runstore.ReadMeta(actor.Run)
+		if err != nil {
+			return jobs.Job{}, fmt.Errorf("read workflow run %s: %w", actor.Run, err)
+		}
+		input.Session = meta.ParentSession
+		if input.Session == "" {
+			input.Session = meta.Session
+		}
+	} else {
 		input.Session = actor.Session
 	}
 	return s.jobs.Submit(ctx, input)
@@ -202,6 +195,47 @@ func (s services) jobList(ctx context.Context, open bool) ([]jobs.Job, error) {
 	return s.jobs.Store.List(ctx, open)
 }
 
+// waitJob waits for committed jobs events, never for a timer or a polling
+// interval. The initial read after subscribing closes the missed-event race.
+func (s services) waitJob(ctx context.Context, id string) (jobs.WaitResult, error) {
+	if s.jobs == nil {
+		return jobs.WaitResult{}, fmt.Errorf("this engine runs no jobs")
+	}
+	if s.events == nil {
+		return jobs.WaitResult{}, fmt.Errorf("this engine has no job events")
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, callspec.JobWaitBound)
+	defer cancel()
+	changes, _, unsubscribe := s.events.Subscribe()
+	defer unsubscribe()
+	for {
+		job, err := s.jobs.Store.Get(waitCtx, id)
+		if err != nil {
+			return jobs.WaitResult{}, err
+		}
+		if job.State.Finished() {
+			return jobs.WaitResult{Job: job, Done: true}, nil
+		}
+	wait:
+		for {
+			select {
+			case <-waitCtx.Done():
+				if ctx.Err() != nil {
+					return jobs.WaitResult{}, ctx.Err()
+				}
+				return jobs.WaitResult{}, nil
+			case event, ok := <-changes:
+				if !ok {
+					return jobs.WaitResult{}, fmt.Errorf("the job event stream ended")
+				}
+				if event.Topic == jobs.Topic {
+					break wait
+				}
+			}
+		}
+	}
+}
+
 func (s services) cancelJob(ctx context.Context, id string) (jobs.Job, error) {
 	if s.jobs == nil {
 		return jobs.Job{}, fmt.Errorf("this engine runs no jobs")
@@ -210,11 +244,13 @@ func (s services) cancelJob(ctx context.Context, id string) (jobs.Job, error) {
 	if err != nil {
 		return jobs.Job{}, err
 	}
-	// The owner, the session that submitted the job and the root of the job's
-	// own room may stop it; nobody else.
+	// The owner, the session or workflow run that submitted the job, and the
+	// root of the job's own room may stop it; nobody else.
 	actor := authority.Of(ctx)
-	if actor.Role != authority.Owner && actor.Session != job.Session && !(actor.Role == authority.Root && actor.Room == job.RoomID) {
-		return jobs.Job{}, fmt.Errorf("only the owner, the session that submitted job %s or the root of its room may cancel it", job.ID)
+	submitter := actor.Session != "" && actor.Session == job.Session ||
+		actor.Role == authority.Worker && actor.Run != "" && actor.Run == job.Run
+	if actor.Role != authority.Owner && !submitter && !(actor.Role == authority.Root && actor.Room == job.RoomID) {
+		return jobs.Job{}, fmt.Errorf("only the owner, the session or run that submitted job %s, or the root of its room may cancel it", job.ID)
 	}
 	return s.jobs.Cancel(ctx, id)
 }

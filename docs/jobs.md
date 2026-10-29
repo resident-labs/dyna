@@ -89,6 +89,39 @@ A job that waits for a resource shows the holding job and its room in
 `dyna job show`. Admission counts the resources of running jobs again after
 an engine restart.
 
+## Use a job from a workflow
+
+Workflow scripts call `job(spec)`. The spec accepts `command`, `node`,
+`labels`, `commit`, `cpus`, `memory`, `workspace`, `timeout`, `idle`,
+`image`, `host` and `artifacts`, matching `dyna job run`. Durations are
+strings such as `"20m"`. The function waits for the engine's finished event
+and returns `{ id, node, state, exitCode, log }`, where `log` is the
+`dyna job logs ID` command. Other final states resolve normally; API failures
+reject. It does not poll. Each invocation has a durable idempotency key based
+on its run, normalized spec hash, source call and async branch path, and an
+occurrence number for that combined identity. Different requests and identical
+direct calls in structured parallel branches cannot exchange jobs when
+completion order changes. A
+resumed workflow recovers the original job even if the submission response or
+journal write was lost. The engine verifies the request hash when recovering a
+key. Replay rejects calls in helper or nested functions and loops, because an
+enclosing branch path cannot distinguish repeated concurrent calls. It also
+rejects identical invocations it cannot distinguish instead of submitting or
+returning the wrong job. Stopping the run cancels an unfinished
+job.
+
+```js
+const check = await job({
+  command: ['go', 'test', './...'],
+  labels: ['os=linux', 'docker'],
+  commit: 'HEAD',
+  image: 'go:1.25',
+  timeout: '20m',
+})
+```
+
+Read `dyna guide workflows` for the result contract and error handling.
+
 ## Read and control
 
 - `dyna job show ID` — the job's state, exit code, command and requested resources.

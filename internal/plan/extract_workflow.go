@@ -69,6 +69,38 @@ func (ex *extractor) hookAgent(call *ast.CallExpression, ctx walkCtx, sc *scope)
 	ex.flow(ctx, id)
 }
 
+func jobContextReplayUnsafe(ctx walkCtx) bool {
+	return ctx.replayUnsafe ||
+		ctx.groupID == "" && (ctx.functionDepth > 0 || ctx.loopDepth > 0) ||
+		ctx.groupID != "" && (ctx.functionDepth != ctx.groupDepth || ctx.loopDepth != ctx.groupLoopDepth)
+}
+
+func (ex *extractor) hookJob(call *ast.CallExpression, ctx walkCtx, sc *scope) {
+	ex.visitCallArguments(call, ctx, sc)
+	card := ctx.card
+	if !ctx.inLoop {
+		card = exactOne()
+	}
+	node := Node{
+		Kind: KindJob, ParentID: ctx.parentID, GroupID: ctx.groupID,
+		Label: "job", Phase: phaseOf(ctx), StageCallback: ctx.stageCallback,
+		ReplayUnsafe:  jobContextReplayUnsafe(ctx),
+		CallArguments: len(call.ArgumentList), CallTrailingComma: ex.callTrailingComma(call),
+		Certainty: certOf(ctx), Cardinality: card,
+	}
+	ex.setCallMetadata(&node, call)
+	id := ex.addNode(node)
+	ex.edge(ctx.parentID, id, EdgeContains)
+	if ctx.groupID != "" {
+		kind := EdgeParallel
+		if parentKind(ex, ctx.parentID) == KindPipeline {
+			kind = EdgePipeline
+		}
+		ex.edge(ctx.groupID, id, kind)
+	}
+	ex.flow(ctx, id)
+}
+
 func (ex *extractor) hookPhase(call *ast.CallExpression, ctx walkCtx, sc *scope) {
 	title, ok := firstStaticString(call.ArgumentList)
 	if !ok {
@@ -237,6 +269,9 @@ func (ex *extractor) hookParallel(call *ast.CallExpression, ctx walkCtx, sc *sco
 	inner := ctx
 	inner.parentID = id
 	inner.groupID = gid
+	inner.replayUnsafe = jobContextReplayUnsafe(ctx)
+	inner.groupDepth = ctx.functionDepth + 1
+	inner.groupLoopDepth = ctx.loopDepth
 	inner.lastFlow = new(string)
 	if len(call.ArgumentList) > 0 {
 		ex.visitParallelArg(call.ArgumentList[0], inner, sc)
