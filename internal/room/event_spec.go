@@ -47,6 +47,15 @@ type EventSpec struct {
 // writes the web types.
 var eventSpecs = []EventSpec{
 	{
+		Family:   FamilyMCP,
+		Type:     TypeResult,
+		Renderer: "MCPCallRow",
+		Payload:  reflect.TypeOf(MCPCallEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "MCP call {server}/{tool} by {session}: {outcome}.",
+	},
+	{
 		Family:   FamilyWorktree,
 		Type:     TypeKept,
 		Renderer: "WorktreeCard",
@@ -933,6 +942,7 @@ type eventEnum struct {
 const checkinText = "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting."
 
 var eventEnums = []eventEnum{
+	{Type: reflect.TypeOf(MCPOutcome("")), Values: enumValues(mcpOutcomes)},
 	{Type: reflect.TypeOf(JobState("")), Values: enumValues(jobStates)},
 	{Type: reflect.TypeOf(PRType("")), Values: enumValues(prTypes)},
 	{Type: reflect.TypeOf(MergeStep("")), Values: enumValues(mergeSteps)},
