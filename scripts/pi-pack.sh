@@ -13,7 +13,7 @@ vendor="$repo_root/third_party/pi"
 # characters of the third_party/pi tree hash, so two builds at one level never
 # collide. The package manifest's dynaFork stays the level alone.
 fork_tree=$(git -C "$repo_root" rev-parse "HEAD:third_party/pi")
-version="1.4.0-dyna.9.${fork_tree:0:12}"
+version="1.4.0-dyna.10.${fork_tree:0:12}"
 # The build name comes from the committed tree, but the tarball packs the
 # working files: uncommitted Pi changes would ship under a stale build name
 # and collide with the real build of that tree. Refuse them.
@@ -111,7 +111,7 @@ for (const file of files) {
   const path = join(stage, file);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   manifest.version = version;
-  manifest.dynaFork = 9;
+  manifest.dynaFork = 10;
   if (file !== "package.json") {
     // Match how upstream publishes its internal packages: no dependencies of
     // their own. npm treats bundleDependencies as complete and never installs
