@@ -75,7 +75,7 @@ check_install_dir() {
 bold "dyna installer"
 check_install_dir "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
+INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
 BIN="$INSTALL_DIR/dyna"
 check_install_dir "$INSTALL_DIR"
 
@@ -137,6 +137,10 @@ fi
 
 "$BIN" --help >/dev/null 2>&1 || fail "installed binary failed to run"
 ok "$("$BIN" --help 2>/dev/null | head -1)"
+
+# Bind a custom installation to its canonical executable before a service can
+# start it. Direct launches need no DYNA_INSTALL_DIR from the installer's shell.
+printf '%s\n' "$BIN" > "$INSTALL_DIR/.dyna-installed"
 
 # PATH check
 case ":$PATH:" in
