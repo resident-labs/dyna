@@ -2,16 +2,13 @@ package roommcp
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"regexp"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -478,59 +475,6 @@ func (s *Service) Grant(ctx context.Context, roomRef, name string, kind GrantKin
 		}
 		_, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO room_mcp_grants(room,server,kind,subject,granted_by) VALUES(?,?,?,?,?)", rec.ID, name, kind, subject, by)
 		return err
-	})
-}
-
-// termHash is the stored form of a block term: case-folded words, hashed, so
-// the list is not a second copy of personal data. words is the word count the
-// argument scanner needs to slice text the same way.
-func termHash(term string) (hash string, words int) {
-	fields := strings.Fields(strings.ToLower(term))
-	sum := sha256.Sum256([]byte(strings.Join(fields, " ")))
-	return hex.EncodeToString(sum[:]), len(fields)
-}
-
-// BlockTerm adds or removes a term the argument scanner must block.
-func (s *Service) BlockTerm(ctx context.Context, roomRef, name, term string, remove bool) error {
-	rec, err := s.manage(ctx, roomRef, true)
-	if err != nil {
-		return err
-	}
-	hash, words := termHash(term)
-	if words == 0 {
-		return errors.New("a block term is required")
-	}
-	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		if remove {
-			_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_block_terms WHERE room=? AND server=? AND hash=?", rec.ID, name, hash)
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO room_mcp_block_terms(room,server,hash,words) VALUES(?,?,?,?)", rec.ID, name, hash, words); err != nil {
-			return errors.New("no such MCP server")
-		}
-		return nil
-	})
-}
-
-// AllowLogin adds or removes a GitHub login the argument scanner lets through.
-func (s *Service) AllowLogin(ctx context.Context, roomRef, name, login string, remove bool) error {
-	rec, err := s.manage(ctx, roomRef, true)
-	if err != nil {
-		return err
-	}
-	login = strings.ToLower(strings.TrimSpace(login))
-	if login == "" {
-		return errors.New("a login is required")
-	}
-	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		if remove {
-			_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_logins WHERE room=? AND server=? AND login=?", rec.ID, name, login)
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO room_mcp_logins(room,server,login) VALUES(?,?,?)", rec.ID, name, login); err != nil {
-			return errors.New("no such MCP server")
-		}
-		return nil
 	})
 }
 

@@ -99,6 +99,24 @@ func TestRetryAfter(t *testing.T) {
 	}
 }
 
+func TestRetryAfterIsCapped(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "2000000000")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	c, err := NewClient(server.URL, "fixture-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.now = func() time.Time { return now }
+	_, _ = c.request(context.Background(), "tools/list", nil)
+	if want := now.Add(maxRetryAfter); !c.retryUntil.Equal(want) {
+		t.Fatalf("hold until %v, want %v", c.retryUntil, want)
+	}
+}
+
 func TestClientRejectsNonLoopbackHTTP(t *testing.T) {
 	if _, err := NewClient("http://example.com/mcp", "fixture-secret"); err == nil {
 		t.Fatal("accepted HTTP")
