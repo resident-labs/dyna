@@ -205,6 +205,50 @@ func TestCredentialRefreshInvalidGrantMarksLogin(t *testing.T) {
 	}
 }
 
+func TestCredentialRefreshRecordsRenewalResults(t *testing.T) {
+	privateErr := errors.New("fixture-private-provider-error")
+	for _, tc := range []struct {
+		name    string
+		err     error
+		want    accountstore.RenewalResult
+		wantErr error
+	}{
+		{name: "renewed", want: accountstore.RenewalResultRenewed},
+		{name: "no credential", err: native.ErrNotSignedIn, want: accountstore.RenewalResultNoCredential, wantErr: native.ErrNotSignedIn},
+		{name: "invalid grant", err: native.ErrInvalidGrant, want: accountstore.RenewalResultInvalidGrant, wantErr: native.ErrInvalidGrant},
+		{name: "transient", err: privateErr, want: accountstore.RenewalResultTransient, wantErr: privateErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, n, m := setupCredentialRefresh(t, false)
+			m.refreshErr = tc.err
+			_, err := a.RefreshCredentials(t.Context(), n.ID, "/fake/pi")
+			if tc.wantErr == nil && err != nil || tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("refresh error = %v, want %v", err, tc.wantErr)
+			}
+			latest, err := (&accountstore.Store{Root: a.Root}).LatestRenewals(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(latest) != 1 {
+				t.Fatalf("renewal rows = %+v, want one", latest)
+			}
+			got := latest[n.ID]
+			if got.AccountID != n.ID || got.Harness != n.Harness || got.Provider != n.Provider || got.Result != tc.want || got.AttemptedAt.IsZero() {
+				t.Fatalf("renewal = %+v, want result %q for account %+v", got, tc.want, n)
+			}
+			if tc.want == accountstore.RenewalResultRenewed && got.Reason != "" {
+				t.Fatalf("successful renewal reason = %q", got.Reason)
+			}
+			if tc.want != accountstore.RenewalResultRenewed && got.Reason == "" {
+				t.Fatal("failed renewal has no reason")
+			}
+			if strings.Contains(got.Reason, "fixture-private") {
+				t.Fatalf("renewal reason leaked provider text: %q", got.Reason)
+			}
+		})
+	}
+}
+
 func TestCredentialRefreshRecoversBeforeProvider(t *testing.T) {
 	a, n, m := setupCredentialRefresh(t, false)
 	m.recovered = m.next

@@ -1,5 +1,5 @@
 // Presentation only. Account identity and allowance arithmetic belong to the host.
-import type { Account, AccountKind, AccountProblem, Provider, ScopeAccount, UsageWindow } from '../../api/account.ts'
+import type { Account, AccountKind, AccountProblem, AccountRenewal, Provider, ScopeAccount, UsageWindow } from '../../api/account.ts'
 import { quotaBlock } from './reset.ts'
 
 // The account fields these helpers read. The engine sends Account; a test or a
@@ -79,6 +79,21 @@ export function dateTime(value?: string | null): string {
   if (!value) return ''
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+// renewalText words an engine renewal from its typed result. Stored reason text
+// stays available to the CLI, but the app never renders provider or reader prose.
+export function renewalText(renewal?: Pick<AccountRenewal, 'attemptedAt' | 'result' | 'reason'> | null): string {
+  if (!renewal) return ''
+  const at = dateTime(renewal.attemptedAt)
+  const suffix = at ? ` · ${at}` : ''
+  switch (renewal.result) {
+    case 'renewed': return `Renewed${suffix}`
+    case 'no_credential': return `Failed: no saved credential${suffix}`
+    case 'invalid_grant': return `Failed: sign-in expired${suffix}`
+    case 'transient': return `Failed: temporary error${suffix}`
+    default: return `Outcome not reported${suffix}`
+  }
 }
 
 // observation says where a reading came from and how old it is.

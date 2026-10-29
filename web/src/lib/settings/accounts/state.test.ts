@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, problemText, providerName, remainingPercent, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
+import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, problemText, providerName, remainingPercent, renewalText, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
 import { account } from '../../../../test/account-fixtures.ts'
 import type { UsageWindow } from '../../api/account.ts'
 
@@ -129,6 +129,21 @@ test('an account without readable usage says why in words, never raw engine text
   assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'meta-muse', usageReason: 'not-readable' }), 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse through Pi to read it.')
   assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'zai', usageReason: 'not-readable' }), 'This provider does not publish usage that Dyna can read.')
   assert.equal(observation({ usageError: 'provider said 403', rateLimitedUntil: '2000-01-01T00:00:00Z' }), '')
+})
+
+test('renewal status uses the typed result, never raw stored prose', () => {
+  const at = '2026-10-28T21:00:00Z'
+  const cases = [
+    { result: 'renewed', want: /^Renewed / },
+    { result: 'no_credential', want: /^Failed: no saved credential / },
+    { result: 'invalid_grant', want: /^Failed: sign-in expired / },
+    { result: 'transient', want: /^Failed: temporary error / },
+  ] as const
+  for (const { result, want } of cases) {
+    const text = renewalText({ attemptedAt: at, result, reason: 'raw provider secret' })
+    assert.match(text, want)
+    assert.doesNotMatch(text, /raw provider secret/)
+  }
 })
 
 test('Pi offers an Anthropic key but never an Anthropic OAuth sign-in', () => {
