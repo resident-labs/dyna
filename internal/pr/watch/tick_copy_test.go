@@ -1,6 +1,8 @@
 package watch
 
 import (
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,5 +115,32 @@ func TestTickReadViewKeepsRetainedRowsAndMetadataIsolated(t *testing.T) {
 	mutable.Records[r.Key].Notes.Intent = "uncommitted caller edit"
 	if third.Records[r.Key].Notes.Intent != "committed next row" {
 		t.Fatal("a mutable public reader changed the private Tick row")
+	}
+}
+
+func TestMergeTickReusesUnchangedReadRows(t *testing.T) {
+	e := newEnv(t)
+	e.write()
+	e.track()
+	if _, err := e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	whole, rows := 0, 0
+	read, copyRow := readStore, copyTickRecord
+	readStore = func(root string) (State, error) {
+		pc, _, _, _ := runtime.Caller(2)
+		name := runtime.FuncForPC(pc).Name()
+		if strings.HasSuffix(name, ".mergeTickLocked") || strings.HasSuffix(name, ".advanceMergeTrial") {
+			whole++
+		}
+		return read(root)
+	}
+	copyTickRecord = func(snapshot state.Snapshot, key string) (Record, bool) { rows++; return copyRow(snapshot, key) }
+	t.Cleanup(func() { readStore, copyTickRecord = read, copyRow })
+	if _, err := e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if whole != 0 || rows != 0 {
+		t.Fatalf("unchanged merge tick copied %d whole states and %d records", whole, rows)
 	}
 }
