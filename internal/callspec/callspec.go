@@ -130,6 +130,10 @@ var LongCalls = map[string]time.Duration{
 	"VoiceSay": 75 * time.Second,
 	// Explicit account sync performs the same synchronous private generation.
 	"SyncCatalogAccount": 10 * time.Minute,
+	// Each save below commits first, then marks every open session, which can take longer than 5 s with many sessions.
+	"SaveProfile": 2 * time.Minute, "RemoveProfile": 2 * time.Minute, "SetDefaultProfile": 2 * time.Minute,
+	"SetProfileDisabled": 2 * time.Minute, "UpsertProfile": 2 * time.Minute, "SetProfileUses": 2 * time.Minute,
+	"AddRule": 2 * time.Minute, "EditRule": 2 * time.Minute, "RemoveRule": 2 * time.Minute,
 }
 
 // Deadline is how long the engine may take to answer method.
