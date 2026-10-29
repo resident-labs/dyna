@@ -221,7 +221,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, fmt.Errorf("resolve commit: %w: %s", err, &output)
 	}
 	sha := strings.TrimSpace(output.String())
-	if !regexp.MustCompile(`^[0-9a-f]{40,64}$`).MatchString(sha) {
+	if !commitSHA.MatchString(sha) {
 		return result, fmt.Errorf("git returned invalid commit SHA")
 	}
 	if req.Definition == nil {
