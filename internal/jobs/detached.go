@@ -57,9 +57,10 @@ const (
 // running unit and no exit record, so the retry prepares it again.
 //
 // The wrapper writes the check's output to the log up to a limit and discards
-// the rest, so one noisy check cannot fill the node's disk. The check's own
-// exit markers go to a file of their own and are appended to the log only after
-// the output has drained, so they are always the end of the log. The writer of
+// the rest, so one noisy check cannot fill the node's disk. Output discarded
+// after the cap touches an activity file, so idle tracking still sees it. The
+// check's own exit markers go to a file of their own and are appended to the
+// log only after the output has drained, so they are always the end of the log. The writer of
 // the log runs in a session of its own, so the cleanup of a host check, which
 // kills the rest of its process group, cannot cut the log off. A daemon that
 // keeps the output open cannot hold the check: the wrapper waits a short time for
@@ -83,7 +84,18 @@ cat > "$d/run.sh"
 cat > "$d/wrap.sh" <<'WRAP'
 export DYNA_CI_TRAILER="$1/trailer"
 mkfifo "$1/out"
-setsid bash -c 'head -c "${DYNA_CI_LOG_CAP:-134217728}" >> "$1/log"; if IFS= read -r -n 1 _; then printf "\n[... the rest of the output was discarded on the node ...]\n" >> "$1/log"; cat > /dev/null; fi' dyna-cap "$1" < "$1/out" &
+setsid bash -c '
+head -c "${DYNA_CI_LOG_CAP:-134217728}" >> "$1/log"
+if IFS= read -r -n 1 _; then
+  printf "\n[... the rest of the output was discarded on the node ...]\n" >> "$1/log"
+  touch "$1/activity"
+  while dd of="$1/discard" bs=262144 count=1 2>/dev/null; do
+    [ -s "$1/discard" ] || break
+    touch "$1/activity"
+  done
+  rm -f "$1/discard"
+fi
+' dyna-cap "$1" < "$1/out" &
 writer=$!
 exec 4> "$1/out"
 bash -o pipefail "$1/run.sh" >&4 2>&1 </dev/null
@@ -120,12 +132,14 @@ fi
 // PollScript runs on the node. Its arguments are groups of three: a
 // check's folder, its unit name and the offset of the log bytes the engine has.
 // For each group it prints one header line, the new log bytes, and a newline.
-// The header includes the log modification time, so an idle deadline survives
-// an engine restart. The state is read before the size, so a check that exited
-// is reported with its whole log. One poll returns at most 256 KiB of log
+// The header includes the node-measured quiet time, so an idle deadline
+// survives an engine restart and never mixes node and engine clocks. The state
+// is read before the size, so a check that exited is reported with its whole
+// log. One poll returns at most 256 KiB of log
 // per check, so a check that prints a lot cannot make a poll on a slow route
 // run for minutes.
 const PollScript = `chunk=262144
+now=$(date +%s)
 while [ "$#" -ge 3 ]; do
   d=$1; unit=$2; off=$3; shift 3
   alive() { systemctl --user is-active --quiet "$unit" 2>/dev/null || { [ -s "$d/pid" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; }; }
@@ -137,9 +151,11 @@ while [ "$#" -ge 3 ]; do
   code=
   if [ "$state" = exited ]; then code=$(sed -n 's/.*"exitCode":\(-\{0,1\}[0-9]\{1,\}\).*/\1/p' "$d/exit.json" | head -n 1); fi
   size=$(wc -c < "$d/log" 2>/dev/null || echo 0); size=$((size + 0))
-  mtime=$(stat -c %Y "$d/log" 2>/dev/null || echo 0); mtime=$((mtime + 0))
+  activity="$d/log"; [ ! -f "$d/activity" ] || activity="$d/activity"
+  mtime=$(stat -c %Y "$activity" 2>/dev/null || echo 0); mtime=$((mtime + 0))
+  quiet=0; if [ "$mtime" -gt 0 ]; then quiet=$((now - mtime)); [ "$quiet" -ge 0 ] || quiet=0; fi
   n=$((size - off)); [ "$n" -gt 0 ] || n=0; [ "$n" -le "$chunk" ] || n=$chunk
-  printf 'DYNA_DETACH dir=%s state=%s code=%s size=%s mtime=%s bytes=%s\n' "$d" "$state" "$code" "$size" "$mtime" "$n"
+  printf 'DYNA_DETACH dir=%s state=%s code=%s size=%s quiet_s=%s bytes=%s\n' "$d" "$state" "$code" "$size" "$quiet" "$n"
   if [ "$n" -gt 0 ]; then tail -c +"$((off + 1))" "$d/log" | head -c "$n"; fi
   printf '\n'
 done
@@ -429,6 +445,11 @@ func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 	}
 	select {
 	case err := <-w.done:
+		var idle *idleTimeoutError
+		if errors.As(err, &idle) {
+			_ = p.x.StopDetached(ctx, spec)
+			p.drainIdle(ctx, w)
+		}
 		return err
 	case <-ctx.Done():
 		p.release(w)
@@ -453,6 +474,28 @@ func (p *Poller) drain(ctx context.Context, w *watch) {
 	}
 	if frame, ok := frames[w.spec.Dir]; ok {
 		_, _ = w.out.Write(frame.Payload)
+	}
+}
+
+// drainIdle copies every log chunk left after an idle stop. The regular poll
+// bounds each reply, so one last chunk is not enough when the engine was behind.
+func (p *Poller) drainIdle(ctx context.Context, w *watch) {
+	last, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopTimeout)
+	defer cancel()
+	for {
+		frames, err := p.x.pollNode(last, []*watch{w})
+		if err != nil {
+			return
+		}
+		frame, ok := frames[w.spec.Dir]
+		if !ok {
+			return
+		}
+		n, writeErr := w.out.Write(frame.Payload)
+		w.offset += int64(n)
+		if writeErr != nil || n != len(frame.Payload) || len(frame.Payload) == 0 || w.offset >= frame.Size {
+			return
+		}
 	}
 }
 
@@ -539,7 +582,7 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 				p.applied(w.spec.Dir)
 			}
 		}
-		if frame.Unit == UnitRunning && w.spec.Idle > 0 && !frame.ModTime.IsZero() && !p.x.now().Before(frame.ModTime.Add(w.spec.Idle)) {
+		if frame.Unit == UnitRunning && w.spec.Idle > 0 && frame.QuietFor >= w.spec.Idle {
 			p.finish(w, &idleTimeoutError{idle: w.spec.Idle})
 			continue
 		}
@@ -573,14 +616,14 @@ const (
 
 // Frame is what one poll learned about one job.
 type Frame struct {
-	Unit    UnitState
-	Code    int
-	Size    int64
-	ModTime time.Time
-	Payload []byte
+	Unit     UnitState
+	Code     int
+	Size     int64
+	QuietFor time.Duration
+	Payload  []byte
 }
 
-var pollHeader = regexp.MustCompile(`^DYNA_DETACH dir=(\S+) state=(running|exited|gone|missing) code=(-?[0-9]*) size=([0-9]+) mtime=([0-9]+) bytes=([0-9]+)$`)
+var pollHeader = regexp.MustCompile(`^DYNA_DETACH dir=(\S+) state=(running|exited|gone|missing) code=(-?[0-9]*) size=([0-9]+) quiet_s=([0-9]+) bytes=([0-9]+)$`)
 
 // Poll asks the node about every job in specs with one call, and retries the
 // call when the connection fails. The offset of each job's log bytes comes
@@ -637,12 +680,9 @@ func ParsePoll(reply io.Reader) (map[string]Frame, error) {
 			return nil, fmt.Errorf("unexpected poll header %q", line)
 		}
 		size, _ := strconv.ParseInt(match[4], 10, 64)
-		modified, _ := strconv.ParseInt(match[5], 10, 64)
+		quiet, _ := strconv.ParseInt(match[5], 10, 64)
 		n, _ := strconv.Atoi(match[6])
-		frame := Frame{Unit: UnitState(match[2]), Size: size, Payload: make([]byte, n)}
-		if modified > 0 {
-			frame.ModTime = time.Unix(modified, 0)
-		}
+		frame := Frame{Unit: UnitState(match[2]), Size: size, QuietFor: time.Duration(quiet) * time.Second, Payload: make([]byte, n)}
 		if match[3] != "" {
 			frame.Code, _ = strconv.Atoi(match[3])
 		}

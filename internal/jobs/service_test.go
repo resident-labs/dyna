@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -239,14 +240,51 @@ func TestIdleTimeoutStopsTheJob(t *testing.T) {
 	}
 }
 
-// Output before each idle deadline keeps a running job alive, even after it
-// has run for longer than the idle duration in all.
-func TestOutputPreventsIdleTimeout(t *testing.T) {
+// An idle stop drains every log chunk that the regular 256 KiB polls have
+// not copied yet before the finished event.
+func TestIdleTimeoutDrainsRemainingLog(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 2<<20)
+	svc, _, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			return nil
+		}
+		if _, err := out.Write(payload); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	defer svc.Stop()
+	idle := 5 * time.Second
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished := <-reporter.finished; finished.State != StateTimedOut {
+		t.Fatalf("finished = %+v, want timed_out", finished)
+	}
+	stored, err := svc.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := os.ReadFile(stored.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != len(payload) {
+		t.Fatalf("log has %d bytes, want all %d after the idle stop", len(log), len(payload))
+	}
+}
+
+// Output before each idle deadline keeps a running job alive, even after the
+// retained log reached its cap and stopped growing.
+func TestOutputAfterLogCapPreventsIdleTimeout(t *testing.T) {
 	var fake *jobstest.Fake
 	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
 		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
 			return nil
 		}
+		fake.CapLogs()
 		for range 4 {
 			polls := fake.PollCount()
 			fmt.Fprintln(out, "working")
