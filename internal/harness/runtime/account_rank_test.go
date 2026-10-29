@@ -199,6 +199,8 @@ func TestSuccessfulProbeKeepsAStatedHoldUnlessQuotaIsBack(t *testing.T) {
 		{"weekly without utilization", `{"five_hour":{"utilization":10},"seven_day":{"resets_at":"2026-11-04T13:05:15Z"}}`, true},
 		{"session without utilization", `{"five_hour":{},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`, true},
 		{"no session window", `{"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`, true},
+		{"model-scoped limit spent", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":100,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`, true},
+		{"model-scoped limit healthy", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":20,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`, false},
 		{"open", usageBody(10, 20, reset), false},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
@@ -244,6 +246,7 @@ func TestReadingRefutesStatedHoldNeedsBothPercentages(t *testing.T) {
 		{"session without a percentage", []store.Window{{ID: "five_hour"}, weekly}, false},
 		{"no session window", []store.Window{weekly}, false},
 		{"weekly spent", []store.Window{session, {ID: "seven_day", UsedPercent: pct(100)}}, false},
+		{"model-scoped spent", []store.Window{session, weekly, {ID: "scoped:Opus", UsedPercent: pct(100)}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := readingRefutesStatedHold(&store.Observation{Windows: tc.windows}, now); got != tc.want {
