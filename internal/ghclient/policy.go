@@ -79,10 +79,13 @@ func (e *HeldError) Error() string {
 	return fmt.Sprintf("PR %s is held in Dyna: %s. Run dyna git pr release %s to lift the hold.", e.Ref, e.Reason, e.Ref)
 }
 
-// engineHold asks the engine for the hold on a PR named by URL or branch. Tests replace it.
-var engineHold = func(ctx context.Context, roomID, ref string) (*state.Hold, error) {
+// engineHold asks the engine for the hold on a PR named by URL, or by branch in repo.
+// With no engine it returns ErrNotRunning at once, without the default wait for a
+// restart. Tests replace it.
+var engineHold = func(ctx context.Context, roomID, repo, ref string) (*state.Hold, error) {
 	var hold *state.Hold
-	err := engineclient.New("").Call(ctx, "PRHold", []any{roomID, ref}, &hold)
+	client := engineclient.New("", engineclient.RestartWait(0), engineclient.Notices(nil))
+	err := client.Call(ctx, "PRHold", []any{roomID, repo, ref}, &hold)
 	return hold, err
 }
 
@@ -90,6 +93,30 @@ var engineHold = func(ctx context.Context, roomID, ref string) (*state.Hold, err
 var gitBranch = func(ctx context.Context, dir string) (string, error) {
 	out, err := childenv.Clean(exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")).Output()
 	return strings.TrimSpace(string(out)), err
+}
+
+// readyTarget returns the PR argument of gh pr ready and the repository its -R or
+// --repo flag names. gh takes those flags before or after the target, and a flag
+// value is not a target.
+func readyTarget(command []string) (target, repo string) {
+	for i := 2; i < len(command); i++ {
+		a := command[i]
+		switch {
+		case a == "-R" || a == "--repo":
+			if i+1 < len(command) {
+				repo = command[i+1]
+			}
+			i++
+		case strings.HasPrefix(a, "--repo="):
+			repo = strings.TrimPrefix(a, "--repo=")
+		case strings.HasPrefix(a, "-R"):
+			repo = strings.TrimPrefix(a, "-R")
+		case strings.HasPrefix(a, "-"):
+		case target == "":
+			target = a
+		}
+	}
+	return target, repo
 }
 
 // holdRef names the PR a gh pr ready target refers to, as a URL or a branch. A bare
@@ -118,18 +145,15 @@ func refuseHeldReady(ctx context.Context, rec room.Record, cmdDir string, r repo
 	if len(command) < 2 || command[0] != "pr" || command[1] != "ready" || slices.Contains(command, "--undo") {
 		return nil
 	}
-	target := ""
-	for _, a := range command[2:] {
-		if !strings.HasPrefix(a, "-") {
-			target = a
-			break
-		}
+	target, repo := readyTarget(command)
+	if repo != "" {
+		r.name = repo
 	}
 	ref, err := holdRef(ctx, cmdDir, r, target)
 	if err != nil || ref == "" {
 		return nil
 	}
-	hold, err := engineHold(ctx, rec.ID, ref)
+	hold, err := engineHold(ctx, rec.ID, r.name, ref)
 	if errors.Is(err, engineclient.ErrNotRunning) {
 		return nil
 	}
