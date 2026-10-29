@@ -55,6 +55,8 @@ type Fake struct {
 	// StopHook runs after a stop attempt, outside the fake lock. failed says
 	// whether the fake rejected the stop instead of stopping its unit.
 	StopHook func(call int, failed bool)
+	// ExitHook runs after a fake job records its exit, outside the fake lock.
+	ExitHook func(code int)
 }
 
 type fakeProc struct {
@@ -191,6 +193,9 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		m.mu.Lock()
 		proc.exited, proc.code = true, code
 		m.mu.Unlock()
+		if m.ExitHook != nil {
+			m.ExitHook(code)
+		}
 	}()
 	return nil
 }

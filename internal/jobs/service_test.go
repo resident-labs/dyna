@@ -278,9 +278,17 @@ func TestIdleStopAcceptsSuccessfulExit(t *testing.T) {
 	})
 	defer svc.Stop()
 	stopFailed := make(chan struct{})
+	releaseStop := make(chan struct{})
+	exitRecorded := make(chan struct{})
 	fake.StopHook = func(call int, failed bool) {
 		if call == 1 && failed {
 			close(stopFailed)
+			<-releaseStop
+		}
+	}
+	fake.ExitHook = func(code int) {
+		if code == 0 {
+			close(exitRecorded)
 		}
 	}
 	fake.FailStops(1)
@@ -291,8 +299,13 @@ func TestIdleStopAcceptsSuccessfulExit(t *testing.T) {
 	}
 	<-stopFailed
 	close(exit)
+	<-exitRecorded
+	close(releaseStop)
 	if finished := <-reporter.finished; finished.State != StateTimedOut || finished.Note != "no output for 5s" {
 		t.Fatalf("finished = %+v, want the confirmed idle stop", finished)
+	}
+	if got := fake.StopCount(); got != 1 {
+		t.Fatalf("stop calls = %d, want no retry after the recorded exit", got)
 	}
 }
 
