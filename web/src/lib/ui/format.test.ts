@@ -62,6 +62,14 @@ test('elapsed reads like a stopwatch, and calls over 30 s are long', async () =>
   assert.equal(isLongCall(30001), true)
 })
 
+test('durationMs reads a finished span down to its milliseconds', async () => {
+  const { durationMs } = await import('./format.ts')
+  assert.equal(durationMs(0), '')
+  assert.equal(durationMs(250), '250 ms')
+  assert.equal(durationMs(12_300), '12.3 s')
+  assert.equal(durationMs(207_000), '3m 27s')
+})
+
 // A schedule shows when the next run is, so a hook row reads a future time
 // with the same words as a past one.
 test('until reads a future time from now', async (t) => {
