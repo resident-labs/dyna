@@ -11,15 +11,18 @@ import {
 	type UserMessage,
 	uuidv7,
 } from "@earendil-works/pi-ai";
+import { constants as bufferConstants } from "buffer";
 import { randomUUID } from "crypto";
 import {
 	appendFileSync,
 	closeSync,
 	createReadStream,
 	existsSync,
+	fstatSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
+	readFileSync,
 	readSync,
 	type Stats,
 	statSync,
@@ -623,8 +626,11 @@ function parseSessionEntryLine(line: string): FileEntry | null {
 	}
 }
 
-/** Exported for testing */
-export function loadEntriesFromFile(filePath: string): FileEntry[] {
+/** Exported for testing. The injected limit selects the streaming path with a small fixture. */
+export function loadEntriesFromFile(
+	filePath: string,
+	maxStringLength = bufferConstants.MAX_STRING_LENGTH,
+): FileEntry[] {
 	const resolvedFilePath = normalizePath(filePath);
 	if (!existsSync(resolvedFilePath)) return [];
 
@@ -632,26 +638,35 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	let pending = "";
 	const fd = openSync(resolvedFilePath, "r");
 	try {
-		const decoder = new StringDecoder("utf8");
-		const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
-
-		while (true) {
-			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
-			if (bytesRead === 0) break;
-
-			pending += decoder.write(buffer.subarray(0, bytesRead));
-			let lineStart = 0;
-			let newlineIndex = pending.indexOf("\n", lineStart);
-			while (newlineIndex !== -1) {
-				const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
+		if (fstatSync(fd).size <= maxStringLength) {
+			const lines = readFileSync(fd, "utf8").split("\n");
+			pending = lines.pop() ?? "";
+			for (const line of lines) {
+				const entry = parseSessionEntryLine(line);
 				if (entry) entries.push(entry);
-				lineStart = newlineIndex + 1;
-				newlineIndex = pending.indexOf("\n", lineStart);
 			}
-			pending = pending.slice(lineStart);
-		}
+		} else {
+			const decoder = new StringDecoder("utf8");
+			const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
 
-		pending += decoder.end();
+			while (true) {
+				const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+				if (bytesRead === 0) break;
+
+				pending += decoder.write(buffer.subarray(0, bytesRead));
+				let lineStart = 0;
+				let newlineIndex = pending.indexOf("\n", lineStart);
+				while (newlineIndex !== -1) {
+					const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
+					if (entry) entries.push(entry);
+					lineStart = newlineIndex + 1;
+					newlineIndex = pending.indexOf("\n", lineStart);
+				}
+				pending = pending.slice(lineStart);
+			}
+
+			pending += decoder.end();
+		}
 		const finalEntry = parseSessionEntryLine(pending);
 		if (finalEntry) entries.push(finalEntry);
 	} finally {

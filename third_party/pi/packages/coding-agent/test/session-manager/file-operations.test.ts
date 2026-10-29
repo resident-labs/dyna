@@ -1,4 +1,3 @@
-import { constants as bufferConstants } from "buffer";
 import {
 	appendFileSync,
 	closeSync,
@@ -8,6 +7,7 @@ import {
 	openSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 	writeSync,
 } from "fs";
@@ -159,8 +159,9 @@ describe("loadEntriesFromFile", () => {
 		}
 	});
 
-	it("opens session files larger than Node's max string length", () => {
+	it("loads session files larger than an injected max string length", () => {
 		const file = join(tempDir, "large.jsonl");
+		const maxStringLength = 64 * 1024;
 		writeFileSync(
 			file,
 			'{"type":"session","version":3,"id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n',
@@ -169,8 +170,8 @@ describe("loadEntriesFromFile", () => {
 		const fd = openSync(file, "r+");
 		try {
 			const newline = Buffer.from("\n");
-			const stride = 16 * 1024 * 1024;
-			for (let offset = stride; offset <= bufferConstants.MAX_STRING_LENGTH + stride; offset += stride) {
+			const stride = 16 * 1024;
+			for (let offset = stride; offset <= maxStringLength + stride; offset += stride) {
 				writeSync(fd, newline, 0, newline.length, offset);
 			}
 		} finally {
@@ -182,7 +183,9 @@ describe("loadEntriesFromFile", () => {
 			'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n',
 		);
 
-		const sessionManager = SessionManager.open(file, tempDir);
+		expect(statSync(file).size).toBeGreaterThan(maxStringLength);
+		const entries = loadEntriesFromFile(file, maxStringLength);
+		const sessionManager = SessionManager.inMemory(tempDir, undefined, entries);
 		expect(sessionManager.getSessionId()).toBe("abc");
 		expect(sessionManager.getEntries()).toHaveLength(1);
 		expect(sessionManager.buildSessionContext().messages).toEqual([{ role: "user", content: "hi", timestamp: 1 }]);
