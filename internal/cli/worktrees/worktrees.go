@@ -128,8 +128,14 @@ func newCommand() *cobra.Command {
 			for _, notice := range result.Notices {
 				fmt.Fprintln(c.ErrOrStderr(), notice)
 			}
-			_, err = fmt.Fprintln(c.OutOrStdout(), result.Record.Path)
-			return err
+			if _, err := fmt.Fprintln(c.OutOrStdout(), result.Record.Path); err != nil {
+				return err
+			}
+			// The tree exists even when a hook fails, so the path prints first.
+			if err := result.Err(); err != nil {
+				return fmt.Errorf("the worktree was created at %s, but a worktree-created hook failed: %w", result.Record.Path, err)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&repo, "repo", ".", "repository path (defaults to the current directory)")
