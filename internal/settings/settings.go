@@ -106,9 +106,11 @@ type Values struct {
 	WorktreesRetention     string
 	WorktreesRoot          string
 	WorktreesMinFreeBytes  int64
-	// CIDiskFloorGB is the free space a CI machine must keep on the filesystem
-	// that holds its /var/tmp, in gigabytes. Zero starts CI on any machine the
-	// probe reaches.
+	// CIDiskFloorGB is the free space a CI machine keeps for Dyna's own
+	// recovery on the filesystem that holds its /var/tmp, in gigabytes. A run
+	// below it removes Dyna's caches and scratch first; the node's own disk
+	// rule, not this setting, decides which work starts. Zero turns that
+	// recovery off.
 	CIDiskFloorGB int
 	// SubagentMaxDepth caps subagent-session nesting (top-level sessions are
 	// depth 1).
