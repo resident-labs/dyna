@@ -569,6 +569,38 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return nil
 	}
+	edit := &cobra.Command{Use: "edit <number|url>", Short: "Edit a tracked PR title or body through the engine", Long: "Change a tracked PR title, body, or both. The PR author, root, or the owner may edit it. Read the body from a file, or pass - to read stdin. At least one of --title or --body-file is required.", Args: cobra.ExactArgs(1)}
+	editTitle := edit.Flags().String("title", "", "new PR title")
+	editBodyFile := edit.Flags().String("body-file", "", "read the new PR body from a file (- for stdin)")
+	edit.RunE = func(c *cobra.Command, a []string) error {
+		if !c.Flags().Changed("title") && !c.Flags().Changed("body-file") {
+			return fmt.Errorf("--title or --body-file is required")
+		}
+		change := watch.PREdit{}
+		if c.Flags().Changed("title") {
+			change.Title = editTitle
+		}
+		if c.Flags().Changed("body-file") {
+			var data []byte
+			var err error
+			if *editBodyFile == "-" {
+				data, err = io.ReadAll(c.InOrStdin())
+			} else {
+				data, err = os.ReadFile(*editBodyFile)
+			}
+			if err != nil {
+				return err
+			}
+			body := string(data)
+			change.Body = &body
+		}
+		s, r, err := resolve(c, a[0])
+		if err != nil {
+			return err
+		}
+		return prWrite(c, s, r.Key(), "EditPR", change)
+	}
+
 	comment := &cobra.Command{Use: "comment <number|url> [body]", Short: "Post a GitHub comment through gh and record its comment ID for routing", Args: cobra.RangeArgs(1, 2)}
 	commentBody := comment.Flags().String("body", "", "comment body text, as an alternative to the positional body")
 	publishComment := comment.Flags().Bool("publish", false, "explicitly publish this comment to GitHub even when the room defaults to local")
@@ -680,7 +712,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return output(c, out)
 	}}
 	root.AddCommand(admit, dismiss, held)
-	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, closePR, transfer, resume, hold, release, require, unrequire, reviewer, review, verdict, comment, publishing, noise)
+	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, closePR, transfer, resume, hold, release, require, unrequire, reviewer, review, verdict, edit, comment, publishing, noise)
 	root.AddCommand(cliexport.NewCommand())
 	return root
 }

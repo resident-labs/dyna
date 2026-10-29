@@ -286,6 +286,7 @@ func bindings(s services) []websvc.Binding {
 		}},
 		{Name: "PRSettings", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.PRSettings},
 		{Name: "CommentPR", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.CommentPR},
+		{Name: "EditPR", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.EditPR},
 		{Name: "PostPRReview", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.PostPRReview},
 		{Name: "HeldPRComments", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.HeldPRComments},
 		{Name: "DismissPRComment", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.DismissPRComment},

@@ -42,7 +42,7 @@ Do these tasks in order.
    When something needs a fix:
    - Create your own worktree: dyna git worktrees new librarian/docs-%s --repo %s. Edit and commit only there.
    - In that worktree, run dyna library check-readme. README.md must stay within library.readmeMaxLines (%d lines). If it is over, shorten README.md. If it is still over, do not open a pull request; say so in your summary.
-   - Open the pull request with gh pr create and track it with dyna git pr track <number>. The assigned reviewer and CI check it. Keep at most one open docs pull request; push to it instead of opening another.
+   - Write the PR body to a file in $DYNA_SCRATCH. Open the pull request with gh pr create --body-file FILE, never an inline --body, and track it with dyna git pr track <number>. Use dyna git pr edit to fix its title or body. The assigned reviewer and CI check it. Keep at most one open docs pull request; push to it instead of opening another.
 
 Rules: change the map only through dyna library. Never merge anything. Do not start subagents or workflows. Answer review findings on your docs pull request with dyna git change reply.
 End the turn with a short summary: entries added, updated and retired, the docs pull request if any, and the lint warning count before and after.`, short(target), main, reason, tree, short(target), changes, short(target), main, readmeMax)
