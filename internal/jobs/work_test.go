@@ -109,3 +109,29 @@ func TestWorkReadPublishesOnlyWhenItSweepsARow(t *testing.T) {
 		t.Fatalf("sweeping an expired row published %v, want one admission event", events)
 	}
 }
+
+// A holder that admits its row between the sweep's read and its delete keeps
+// the reservation: the sweep deletes only a row still waiting for the dead owner.
+func TestSweepKeepsRowAdmittedWhileItRuns(t *testing.T) {
+	ctx := context.Background()
+	queue := Admission{DataDir: t.TempDir()}
+	demand := Demand{ID: "check", Node: "node", CPUs: 1}
+	if err := queue.upsert(ctx, demand, false); err != nil {
+		t.Fatal(err)
+	}
+	oldAlive := ownerAlive
+	t.Cleanup(func() { ownerAlive = oldAlive })
+	ownerAlive = func(int, uint64) bool {
+		if err := queue.upsert(ctx, demand, true); err != nil {
+			t.Error(err)
+		}
+		return false
+	}
+	if err := queue.sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	row, err := queue.get(ctx, "check")
+	if err != nil || row.State != "admitted" {
+		t.Fatalf("row = %+v, err = %v, want the admitted reservation kept", row, err)
+	}
+}
