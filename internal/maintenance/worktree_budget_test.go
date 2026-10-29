@@ -1,0 +1,202 @@
+package maintenance
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"dyna-agent/internal/store"
+	"dyna-agent/internal/worktrees"
+)
+
+func TestRunStepGivesLaterStepTimeAfterSlowStep(t *testing.T) {
+	var result Result
+	slowErr := runStep(context.Background(), &result, "slow", 0, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	laterRan := false
+	laterErr := runStep(context.Background(), &result, "later", time.Hour, func(ctx context.Context) error {
+		laterRan = ctx.Err() == nil
+		return nil
+	})
+	if !errors.Is(slowErr, context.DeadlineExceeded) {
+		t.Fatalf("slow step err = %v, want its share's deadline", slowErr)
+	}
+	if laterErr != nil || !laterRan {
+		t.Fatalf("later step ran = %v, err = %v; want it to run with time left", laterRan, laterErr)
+	}
+	if len(result.Steps) != 2 || result.Steps[0].Name != "slow" || result.Steps[1].Name != "later" {
+		t.Fatalf("steps = %+v, want slow then later", result.Steps)
+	}
+}
+
+func TestRunStepSkipsStepsAfterExternalCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var result Result
+	if err := runStep(ctx, &result, "first", time.Hour, func(context.Context) error {
+		cancel()
+		return nil
+	}); err != nil {
+		t.Fatalf("first step err = %v, want nil", err)
+	}
+	ran := false
+	err := runStep(ctx, &result, "second", time.Hour, func(context.Context) error {
+		ran = true
+		return nil
+	})
+	if ran {
+		t.Fatal("second step ran after the pass context ended, want it skipped")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("second step err = %v, want context.Canceled", err)
+	}
+}
+
+// A removal needs its repository scanned first, so the worktree step must not
+// stop at the per-step share. It still leaves sweepReserve for the sweeps.
+func TestWorktreeCleanupIsNotCutAtTheStepShare(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	var left time.Duration
+	old := gcWorktrees
+	gcWorktrees = func(ctx context.Context, _ string, _ worktrees.GCOptions) ([]worktrees.Tree, error) {
+		deadline, _ := ctx.Deadline()
+		left = time.Until(deadline)
+		return nil, nil
+	}
+	t.Cleanup(func() { gcWorktrees = old })
+	if _, err := Run(context.Background(), Options{Repos: []string{"repo"}}); err != nil {
+		t.Fatal(err)
+	}
+	if left <= stepShare || left > runTimeout-sweepReserve {
+		t.Fatalf("worktree cleanup had %v left, want more than %v and at most %v so the sweeps keep %v", left, stepShare, runTimeout-sweepReserve, sweepReserve)
+	}
+}
+
+// Steps before the sweeps stop sweepReserve before the pass deadline, so their
+// work cannot use the sweeps' time. A pass with less time than the reserve gives
+// all of it to those steps.
+func TestEarlierStepsCannotUseTheSweepReserve(t *testing.T) {
+	passEnd := time.Now().Add(runTimeout)
+	if got := passEnd.Sub(workDeadline(passEnd)); got != sweepReserve {
+		t.Fatalf("earlier steps stop %v before the pass end, want %v", got, sweepReserve)
+	}
+	short := time.Now().Add(3 * time.Second)
+	if got := workDeadline(short); !got.Equal(short) {
+		t.Fatalf("short pass gave earlier steps deadline %v, want the whole pass %v", got, short)
+	}
+}
+
+// Each call opens the report database again, as a new hook process does, so
+// the turn must come from storage rather than from process memory.
+func TestWorktreeTurnSurvivesProcessRestart(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	for want := 0; want < 3; want++ {
+		got, err := nextWorktreeTurn(context.Background(), store.DataDir())
+		if err != nil || got != want {
+			t.Fatalf("turn = %d, %v; want %d", got, err, want)
+		}
+	}
+}
+
+func TestFromTurnStartsAtNextRepositoryAndWraps(t *testing.T) {
+	repos := []string{"a", "b", "c"}
+	for turn, want := range [][]string{{"a", "b", "c"}, {"b", "c", "a"}, {"c", "a", "b"}, {"a", "b", "c"}} {
+		if got := fromTurn(repos, turn); !reflect.DeepEqual(got, want) {
+			t.Fatalf("turn %d order = %v, want %v", turn, got, want)
+		}
+	}
+	if got := fromTurn(nil, 3); len(got) != 0 {
+		t.Fatalf("no repositories gave %v, want none", got)
+	}
+}
+
+// On odd turns the worktree cleanup runs after the sweeps, so a slow cleanup
+// cannot take the sweeps' share on every pass.
+func TestWorktreeCleanupFollowsSweepsOnOddTurns(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	old := gcWorktrees
+	gcWorktrees = func(context.Context, string, worktrees.GCOptions) ([]worktrees.Tree, error) { return nil, nil }
+	t.Cleanup(func() { gcWorktrees = old })
+	if _, err := nextWorktreeTurn(context.Background(), store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreeAt, scratchAt := -1, -1
+	for i, step := range result.Steps {
+		switch step.Name {
+		case "worktrees":
+			worktreeAt = i
+		case "scratch":
+			scratchAt = i
+		}
+	}
+	if worktreeAt < 0 || scratchAt < 0 || worktreeAt < scratchAt {
+		t.Fatalf("steps = %+v, want worktrees after scratch on an odd turn", result.Steps)
+	}
+}
+
+// Each pass starts the sweeps at the next sweep, so a slow sweep cannot take the
+// reserve first on every pass. Scratch starts on turn 0 and archived runs on turn 1.
+func TestSweepsStartAtANewStepEachPass(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	old := gcWorktrees
+	gcWorktrees = func(context.Context, string, worktrees.GCOptions) ([]worktrees.Tree, error) { return nil, nil }
+	t.Cleanup(func() { gcWorktrees = old })
+	stepAt := func(result Result, name string) int {
+		for i, step := range result.Steps {
+			if step.Name == name {
+				return i
+			}
+		}
+		return -1
+	}
+	first, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepAt(first, "scratch") > stepAt(first, "archived runs") {
+		t.Fatalf("turn 0 steps = %+v, want scratch first", first.Steps)
+	}
+	second, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepAt(second, "archived runs") > stepAt(second, "scratch") {
+		t.Fatalf("turn 1 steps = %+v, want archived runs first", second.Steps)
+	}
+}
+
+// A repository whose removal runs out of time must name itself in the pass
+// report, so repeated skips are visible.
+func TestDeferredWorktreesAreNamedInPassReport(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	old := gcWorktrees
+	gcWorktrees = func(context.Context, string, worktrees.GCOptions) ([]worktrees.Tree, error) {
+		return []worktrees.Tree{{Path: "/managed/tree", Deferred: true}}, nil
+	}
+	t.Cleanup(func() { gcWorktrees = old })
+	_, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err == nil || !strings.Contains(err.Error(), "worktree cleanup repo: removal incomplete, 1 tree(s) deferred") {
+		t.Fatalf("err = %v, want the repository and the incomplete removal named", err)
+	}
+}
