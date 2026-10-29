@@ -17,6 +17,8 @@ import (
 
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/cihealth"
+	"dyna-agent/internal/jobs"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/notices"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/runstore"
@@ -88,13 +90,19 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	defer cancel()
 	result := Result{Kept: map[string]int{}, Pruned: map[string]Pruned{}}
 	errs := []error{}
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	workspaceJobs := jobs.Service{Store: jobs.Store{DataDir: store.DataDir()}, Machines: machines.Store{DataDir: store.DataDir()}, DataDir: store.DataDir()}
+	n, workspaceErr := workspaceJobs.CleanupWorkspaces(ctx, jobs.WorkspaceCleanup{Session: opts.Session, Now: now})
+	result.add("job workspaces", Pruned{Items: n})
+	if workspaceErr != nil {
+		errs = append(errs, fmt.Errorf("job workspaces: %w", workspaceErr))
+	}
 	// Run SQLite retention before filesystem sweeps. Those sweeps used to spend
 	// the whole shared deadline first, so later retention never ran.
 	if opts.Session == "" {
-		now := opts.Now
-		if now.IsZero() {
-			now = time.Now()
-		}
 		// PR state removes closed records 14 days after close on each write;
 		// the pass reports how many it removed since the last pass.
 		if n, err := state.TakePruned(state.Root(store.DataDir())); err != nil {
@@ -137,10 +145,6 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	errs = append(errs, scratchErr)
 	// Session cleanup must not remove unrelated archived workflow runs.
 	if opts.Session == "" {
-		now := opts.Now
-		if now.IsZero() {
-			now = time.Now()
-		}
 		v, err := settings.Load("")
 		if err == nil {
 			freed, sweepErr := sweepArchivedRuns(ctx, now, v.RunsRetention, opts.Logf)

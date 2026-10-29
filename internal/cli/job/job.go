@@ -32,10 +32,11 @@ type jobView struct {
 	// Artifacts names the kept outputs and how to fetch them.
 	Artifacts []string `json:"artifacts,omitempty"`
 	Fetch     string   `json:"fetch,omitempty"`
+	Workspace string   `json:"workspace,omitempty"`
 }
 
 func view(job jobs.Job) jobView {
-	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID}
+	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID, Workspace: job.Workspace}
 	if job.Idle > 0 {
 		v.Idle = job.Idle.String()
 	}
@@ -77,10 +78,10 @@ func runCmd() *cobra.Command {
 	var node, commit, image, memory, ioWeight string
 	var artifacts, resourceNames []string
 	var cpus int
-	var host bool
+	var host, workspace bool
 	var timeout, idle time.Duration
 	c := &cobra.Command{
-		Use:   "run [--node N] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--timeout D] [--idle D] [--image IMG | --host] -- CMD",
+		Use:   "run [--node N] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG | --host] -- CMD",
 		Short: "Submit a job and return",
 		Args: func(c *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -89,6 +90,9 @@ func runCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(c *cobra.Command, args []string) error {
+			if workspace && commit == "" {
+				return fmt.Errorf("--workspace needs --commit")
+			}
 			if host && image != "" {
 				return fmt.Errorf("a job runs either on the host or in an image, not both")
 			}
@@ -107,7 +111,7 @@ func runCmd() *cobra.Command {
 				"node": node, "command": args, "repo": repo, "ref": commit,
 				"host": host, "image": image, "cpus": cpus, "memory": memory,
 				"timeoutSec": int(timeout / time.Second), "io": ioWeight, "artifacts": artifacts,
-				"resources": resources,
+				"resources": resources, "workspace": workspace,
 			}
 			if c.Flags().Changed("idle") {
 				request["idleSec"] = int(idle / time.Second)
@@ -131,6 +135,7 @@ func runCmd() *cobra.Command {
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
 	c.Flags().StringVar(&ioWeight, "io", "light", "the job's IO weight: a node runs only a few heavy jobs at once")
 	c.Flags().StringArrayVar(&resourceNames, "resource", nil, "hold one unit of this named resource for the job's whole run (repeatable)")
+	c.Flags().BoolVar(&workspace, "workspace", false, "reuse this session's kept checkout on the node (needs --commit)")
 	return c
 }
 

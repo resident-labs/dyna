@@ -658,8 +658,8 @@ func TestStoreRoundTrip(t *testing.T) {
 }
 
 // Named resources used version 4. Their existing databases still need the
-// idle column when this store moves them to version 5.
-func TestStoreMigrationAddsIdleToVersionFour(t *testing.T) {
+// idle and workspace columns when this store moves them to version 6.
+func TestStoreMigrationUpdatesVersionFour(t *testing.T) {
 	dir := t.TempDir()
 	db, err := database.Open(dir)
 	if err != nil {
@@ -676,17 +676,17 @@ func TestStoreMigrationAddsIdleToVersionFour(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name='idle_s'`).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name IN ('idle_s','workspace')`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatal("the version 4 database did not gain idle_s")
+	if count != 2 {
+		t.Fatal("the version 4 database did not gain idle_s and workspace")
 	}
 	var version string
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key='jobs.version'`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != "5" {
-		t.Fatalf("jobs.version = %s, want 5", version)
+	if version != "6" {
+		t.Fatalf("jobs.version = %s, want 6", version)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -142,6 +143,9 @@ type Input struct {
 	Heavy bool
 	// Resources are validated named units the job holds for its whole run.
 	Resources []machines.ResourceName
+	// Workspace keeps this session's checkout on the node between jobs. It
+	// needs a commit and takes an internal one-unit admission resource.
+	Workspace bool
 }
 
 // Submit stores a queued job and starts it. The job runs detached, so Submit
@@ -149,6 +153,9 @@ type Input struct {
 func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	if len(in.Command) == 0 {
 		return Job{}, errors.New("a job needs a command")
+	}
+	if in.Workspace && (in.Repo == "" || in.Ref == "") {
+		return Job{}, errors.New("a kept workspace needs a commit")
 	}
 	if in.Host && in.Image != "" {
 		return Job{}, errors.New("a job runs either on the host or in an image, not both")
@@ -211,10 +218,18 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 		}
 		job.Repo, job.SHA = repo, sha
 	}
+	if in.Workspace {
+		job.Workspace = newWorkspacePath(job.Node, job.Session, job.Repo, job.ID)
+		resource := workspaceResource(job.Session, job.Repo)
+		if !slices.Contains(job.Resources, resource) {
+			job.Resources = append(job.Resources, resource)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
 		return Job{}, err
 	}
-	if err := s.Store.Save(ctx, job); err != nil {
+	job, err = s.Store.saveSubmitted(ctx, job)
+	if err != nil {
 		return Job{}, err
 	}
 	// A standby engine, one without the worker lock, only queues the job. The
@@ -862,6 +877,23 @@ func (l *logStore) snapshot() Job {
 	return *l.job
 }
 
+// workDir is the command's working directory and the root of artifact paths.
+func workDir(job Job) string {
+	if job.Workspace != "" {
+		return job.Workspace
+	}
+	return path.Join(job.Dir, "work")
+}
+
+// workspaceCheckoutScript resets a kept checkout to one exact commit. Its git
+// worktree stays in place, and clean without -x preserves ignored build output.
+func workspaceCheckoutScript(cache, work, sha string) string {
+	q := shellquote.Quote
+	lock := cache + ".worktrees.lock"
+	return "if [ ! -e " + q(path.Join(work, ".git")) + " ]; then flock " + q(lock) + " git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) +
+		"; else git -C " + q(work) + " checkout --detach --force " + q(sha) + "; fi; git -C " + q(work) + " clean -fd"
+}
+
 // jobScript is the script a job runs on its node: it checks out the commit
 // when the job has one and runs the command under the job's deadline. The
 // node queue admitted the job before it started, so the script waits for
@@ -869,12 +901,16 @@ func (l *logStore) snapshot() Job {
 func jobScript(machine machines.Machine, job Job, resources Resources) string {
 	q := shellquote.Quote
 	base := NodeBase(machine.Name)
-	work := path.Join(job.Dir, "work")
+	work := workDir(job)
 	seconds := int64((job.Timeout + time.Second - 1) / time.Second)
 	inner := "set -euo pipefail; mkdir -p " + q(path.Dir(work)) + "; "
 	if job.SHA != "" {
 		cache := path.Join(base, RepoKey(job.Repo)+".git")
-		inner += "flock " + q(cache+".worktrees.lock") + " git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(job.SHA) + " && "
+		if job.Workspace != "" {
+			inner += workspaceCheckoutScript(cache, work, job.SHA) + "; "
+		} else {
+			inner += "flock " + q(cache+".worktrees.lock") + " git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(job.SHA) + " && "
+		}
 	} else {
 		// A job with no source still gets its own work folder, so its outputs
 		// have one place to live and --artifact paths one root.

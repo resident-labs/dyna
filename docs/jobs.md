@@ -7,7 +7,7 @@ machine's node queue, and store their log and exit code.
 
 ## Run a job
 
-`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--timeout 2h] [--idle 20m] [--image IMG | --host] [--artifact PATH]... -- CMD`
+`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG | --host] [--artifact PATH]... -- CMD`
 
 - With no `--node`, the job runs on the local node (the engine host), so a
   one-machine owner needs no setup.
@@ -34,11 +34,28 @@ machine's node queue, and store their log and exit code.
   engine copies them back before it posts the job's end and removes the folder,
   so the woken session can fetch them at once. A path the job never made is
   named in the job's note; the job's result does not change. One job keeps at
-  most 4 GiB.
+  most 4 GiB. Artifact paths are relative to the kept workspace too.
 
 The command returns at once with the job's ID. The job is detached: it keeps
 running when the submitting session's turn ends or the engine restarts, which
 reattaches through the stored job folder and unit.
+
+## Workspaces
+
+`--workspace` needs `--commit`. The job uses its session's kept checkout for
+that repository on the selected node. Jobs of other sessions and other
+repositories use other folders. Dyna forces a detached checkout of the exact
+commit and runs `git clean -fd`, so tracked changes and untracked files are
+reset while ignored build output such as `target/` stays warm. The workspace
+is the command's working directory and `/workspace` in a container. One job
+runs at a time in a workspace; another job that uses it waits with a visible
+reason. `dyna job show ID` names the workspace.
+
+The per-job log folder is still removed when the job ends, but the workspace
+stays. The engine removes it when its session closes, after 24 hours without
+use, or when the node is below its admission disk floor. Low-disk cleanup
+uses the least recently used workspace first. A queued or running job always
+protects its workspace from cleanup.
 
 ## Resources
 
@@ -78,4 +95,4 @@ Each job posts typed events to the session that submitted it: `job.queued`
 state and exit code), which wake that session. Agents never poll for a job's
 end; the finished event is the wake.
 
-The jobs table lives in `dyna.db`; the logs live under `<data>/jobs/<id>/log` and kept artifacts under `<data>/jobs/<id>/artifacts`.
+The jobs and workspaces tables live in `dyna.db`; the logs live under `<data>/jobs/<id>/log` and kept artifacts under `<data>/jobs/<id>/artifacts`.
