@@ -18,6 +18,7 @@ type Cache struct {
 	mu         sync.Mutex
 	current    map[string]any
 	execs      map[string]execRecord
+	jobs       map[string]jobRecord
 	priorCalls int
 	hits       int
 }
@@ -31,20 +32,25 @@ type CacheStats struct {
 // NewCache builds a resume cache. Counts include errors and isolated calls:
 // dropping holes before checking uniqueness could replay another job's result.
 func NewCache(entries []runstore.JournalEntry) *Cache {
-	c := &Cache{current: map[string]any{}, execs: map[string]execRecord{}}
+	c := &Cache{current: map[string]any{}, execs: map[string]execRecord{}, jobs: map[string]jobRecord{}}
 	keys := map[string]int{}
-	var execEntries []runstore.JournalEntry
+	var execEntries, jobEntries []runstore.JournalEntry
 	for _, e := range entries {
-		if e.Kind == "exec" {
+		switch e.Kind {
+		case "exec":
 			execEntries = append(execEntries, e)
+			continue
+		case "job":
+			jobEntries = append(jobEntries, e)
 			continue
 		}
 		c.priorCalls++
 		keys[e.Key]++
 	}
 	c.addExecs(execEntries)
+	c.addJobs(jobEntries)
 	for _, e := range entries {
-		if e.Kind == "exec" {
+		if e.Kind == "exec" || e.Kind == "job" {
 			continue
 		}
 		// Older keys cannot prove that the execution configuration matches.
@@ -82,6 +88,39 @@ func (c *Cache) addExecs(entries []runstore.JournalEntry) {
 			c.execs[e.Key] = execRecord{Shell: e.Shell, Stderr: e.Stderr}
 		}
 	}
+}
+
+// addJobs keeps one record per job() call. Any entry with a submitted job ID
+// stays resumable, including an interrupted wait: another submission could run
+// the command twice. Only a finished result resolves without a new wait.
+func (c *Cache) addJobs(entries []runstore.JournalEntry) {
+	last := map[int]runstore.JournalEntry{}
+	for _, e := range entries {
+		last[e.ID] = e
+	}
+	calls := map[string]int{}
+	for _, e := range last {
+		calls[e.Key]++
+	}
+	for _, e := range last {
+		c.priorCalls++
+		if calls[e.Key] != 1 || !strings.HasPrefix(e.Key, "j1:") || e.Job == "" {
+			continue
+		}
+		record := jobRecord{Job: e.Job, Done: e.State == "done", Result: e.Result}
+		c.jobs[e.Key] = record
+	}
+}
+
+func (c *Cache) popJob(key string) (jobRecord, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	record, ok := c.jobs[key]
+	if ok {
+		delete(c.jobs, key)
+		c.hits++
+	}
+	return record, ok
 }
 
 func (c *Cache) popExec(key string) (execRecord, bool) {

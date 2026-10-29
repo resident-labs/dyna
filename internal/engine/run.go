@@ -656,7 +656,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		}
 	}
 	jobsSvc := newJobsService(rooms)
-	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc}, readOnly)
+	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc, events: events}, readOnly)
 	if err != nil {
 		return err
 	}

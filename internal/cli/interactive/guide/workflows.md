@@ -97,6 +97,14 @@ await agent('Review the landing: ' + JSON.stringify(gate.json), { schema })
 
 For long-running workflows, use `run()` to read a changing manifest at each dispatch. Dyna does not reload workflow variables or source automatically.
 
+### `job(spec)`
+
+Runs a command through the node queue and waits for completion. Returns `{id,node,state,exitCode,log}`. Resume waits for the original job ID; stopping cancels it.
+
+```js
+const check = await job({ command: ['make', 'test'], labels: ['os=linux'] })
+```
+
 ### `parallel(thunks)`
 
 Starts all thunks, waits for all, and preserves input order; rejected calls log errors and become `null`. Child failures do not reject the barrier. Handle `null` results. Thunks can contain whole per-item stage chains.
