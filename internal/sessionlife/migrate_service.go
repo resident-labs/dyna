@@ -14,7 +14,7 @@ import (
 // sessions once, before readers rely only on the stored flag.
 func migrateService(db *sql.DB) error {
 	return database.Migrate(db, "sessions.service", 1, func(conn *sql.Conn, _ int) error {
-		rows, err := conn.QueryContext(context.Background(), "SELECT id,meta,"+instructionReadProjection+" FROM session_records ORDER BY id")
+		rows, err := conn.QueryContext(context.Background(), "SELECT id, meta FROM session_records ORDER BY id")
 		if err != nil {
 			return err
 		}
@@ -29,22 +29,16 @@ func migrateService(db *sql.DB) error {
 		var ids []string
 		for rows.Next() {
 			var id, raw string
-			instructions, err := scanInstructionRead(rows, &id, &raw)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			joined, err := instructions.join([]byte(raw))
-			if err != nil {
+			if err := rows.Scan(&id, &raw); err != nil {
 				rows.Close()
 				return err
 			}
 			var r record
-			if err := json.Unmarshal(joined, &r); err != nil {
+			if err := json.Unmarshal([]byte(raw), &r); err != nil {
 				rows.Close()
 				return err
 			}
-			if err := json.Unmarshal(joined, &r.fields); err != nil || r.fields == nil {
+			if err := json.Unmarshal([]byte(raw), &r.fields); err != nil || r.fields == nil {
 				rows.Close()
 				return fmt.Errorf("%w: session %s service metadata is not an object", ErrRecord, id)
 			}
