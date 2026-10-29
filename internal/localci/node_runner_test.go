@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"database/sql"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 	"encoding/json"
@@ -453,9 +455,15 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	var started, crossStarted atomic.Bool
 	slotsStarted := make(chan struct{})
 	release := make(chan struct{})
+	type waitNote struct {
+		check  CheckName
+		reason string
+	}
+	waitNoted := make(chan waitNote, 1)
+	dataDir := t.TempDir()
 	// Eight probed CPUs against two per check bound the node to four checks
 	// at once through the admission queue, whatever worker count the run has.
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true, CPUs: 8}, wait: func(context.Context, time.Duration) error { return nil }}
+	runner := Runner{DataDir: dataDir, Node: &Node{Name: "local", Enabled: true, CPUs: 8}}
 	legacy := func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -531,19 +539,57 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		return nil
 	}
 	newFakeMachine(t, legacy).attach(&runner)
+	wait := runner.wait
+	runner.wait = func(ctx context.Context, delay time.Duration) error {
+		if err := wait(ctx, delay); err != nil {
+			return err
+		}
+		// The node poller shares this hook with a two-second interval. Only
+		// admission uses one second, so this call is the sole queued check
+		// running after its own wait reason reached the log.
+		if delay != time.Second {
+			return nil
+		}
+		db, err := database.Open(dataDir)
+		if err != nil {
+			return err
+		}
+		var name, reason string
+		err = db.QueryRowContext(ctx, `SELECT check_name, reason FROM admissions WHERE state = 'waiting' AND reason <> '' LIMIT 1`).Scan(&name, &reason)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case waitNoted <- waitNote{check: CheckName(name), reason: reason}:
+		default:
+		}
+		return nil
+	}
 	type outcome struct {
 		result Result
 		err    error
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), RepoDir: t.TempDir(), Suites: []Suite{"go", "cross-build"}, Parallelism: 32, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
+		result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), RepoDir: t.TempDir(), Suites: []Suite{"go", "cross-build"}, Parallelism: slots + 1, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
 		done <- outcome{result, err}
 	}()
 	select {
 	case <-slotsStarted:
 	case got := <-done:
 		t.Fatalf("run ended before its checks started: result=%+v err=%v", got.result, got.err)
+	}
+	// Five workers leave exactly one check queued behind the four blocked
+	// commands. Its wait hook runs after the runner writes the wait reason to
+	// that check's log, so releasing the slots now cannot skip the message.
+	var waited waitNote
+	select {
+	case waited = <-waitNoted:
+	case got := <-done:
+		t.Fatalf("run ended before a check logged its queue wait reason: result=%+v err=%v", got.result, got.err)
 	}
 	close(release)
 	got := <-done
@@ -577,16 +623,19 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	if len(wanted) != 0 {
 		t.Fatalf("missing checks: %v", wanted)
 	}
-	// A check that waited shows why in its log: the queue writes a wait reason
-	// into every row it holds back, and the runner prints it.
-	waited := false
+	// The known queued check keeps the exact reason its wait row carried.
+	waitLogged := false
 	for _, check := range got.result.Checks {
-		if strings.Contains(check.LogTail, "local CI: ") {
-			waited = true
+		if check.CheckName != waited.check {
+			continue
+		}
+		waitLogged = true
+		if want := "local CI: " + waited.reason + "\n"; !strings.Contains(check.LogTail, want) {
+			t.Errorf("queued check %s log lacks %q", waited.check, want)
 		}
 	}
-	if !waited {
-		t.Error("no check logged its queue wait reason")
+	if !waitLogged {
+		t.Errorf("queued check %s is missing from the result", waited.check)
 	}
 }
 
