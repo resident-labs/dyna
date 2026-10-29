@@ -123,7 +123,7 @@ func repositoryFor(ctx context.Context, cmd *exec.Cmd) repository {
 			}
 			continue
 		}
-		if len(command) == 2 && command[0] == "repo" && command[1] == "view" && !strings.HasPrefix(arg, "-") {
+		if len(command) == 2 && command[0] == "repo" && (command[1] == "view" || command[1] == "fork") && !strings.HasPrefix(arg, "-") {
 			repo = arg
 		}
 		if len(command) < 2 {
@@ -302,7 +302,8 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 	rec, err := roomFor(ctx, cmd.Dir, r)
 	write := Access(ctx, rec) == ReadWrite
 	if errors.Is(err, errNotInRoom) && matchesUpstream(rec, r) {
-		err, write = nil, false
+		// A fork is made in the signed-in account, so it needs that account's write access.
+		err, write = nil, isRepoFork(cmd.Args[1:])
 	}
 	if err != nil {
 		return "", "", err
@@ -316,8 +317,8 @@ func selectAccountAfterPolicy(ctx context.Context, cmd *exec.Cmd, r repository) 
 	rec, err := roomFor(ctx, cmd.Dir, r)
 	write := Access(ctx, rec) == ReadWrite
 	if errors.Is(err, errNotInRoom) {
-		err = nil
-		write = false
+		// Only a fork of a recorded upstream needs write access; other admitted reads and parents do not.
+		err, write = nil, isRepoFork(cmd.Args[1:])
 	}
 	if err != nil {
 		return "", "", err
