@@ -684,6 +684,9 @@ func checkWorkerPolicy(args []string) error {
 	if isRepoFork(args) {
 		return nil
 	}
+	if _, ok := ownCommentCall(args); ok {
+		return nil
+	}
 	return errAgentGitHubWrite
 }
 
@@ -746,6 +749,11 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	}
 	rec, err := roomFor(ctx, cmdDir, r)
 	if errors.Is(err, errNotInRoom) && (isRead(args) || isRepoFork(args)) && matchesUpstream(rec, r) {
+		err = nil
+	}
+	// A comment of the room's account on the recorded upstream may be edited or
+	// deleted. refuseForeignComment checks the author once the account is known.
+	if _, ok := ownCommentCall(args); ok && errors.Is(err, errNotInRoom) && matchesUpstream(rec, r) {
 		err = nil
 	}
 	if err != nil {
