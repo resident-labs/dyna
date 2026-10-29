@@ -773,6 +773,9 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 		return nil, err
 	}
 	repo = main
+	if !opts.DryRun {
+		defer func() { _ = releaseClosedPorts(ctx, repo) }()
+	}
 	blocks, err := worktreeBlocks(ctx, repo)
 	if err != nil {
 		return nil, err
