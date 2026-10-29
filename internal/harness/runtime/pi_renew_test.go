@@ -230,3 +230,103 @@ func TestPiRenewalResultClassification(t *testing.T) {
 		})
 	}
 }
+
+// Every renewal failure records a reason that names the exact error class, so
+// a stored live record shows which path failed instead of one shared label.
+func TestRenewalOutcomeNamesTheExactError(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantResult store.RenewalResult
+		wantReason string
+	}{
+		{"rejected grant", native.ErrInvalidGrant, store.RenewalResultInvalidGrant, "invalid_grant"},
+		{"no sign-in", native.ErrNotSignedIn, store.RenewalResultNoCredential, "not signed in"},
+		{"changed identity", native.ErrNoIdentity, store.RenewalResultNoCredential, "identity mismatch"},
+		{"unsupported", native.ErrUnsupported, store.RenewalResultNoCredential, "unsupported"},
+		{"missing login file", os.ErrNotExist, store.RenewalResultNoCredential, "login file missing"},
+		{"canceled", context.Canceled, store.RenewalResultTransient, "canceled"},
+		{"other failure", errors.New("boom"), store.RenewalResultTransient, "transient"},
+		{"renewed", nil, store.RenewalResultRenewed, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := CredentialRefreshResult{Refreshed: tc.err == nil}
+			gotResult, gotReason := renewalOutcome(result, tc.err)
+			if gotResult != tc.wantResult || gotReason != tc.wantReason {
+				t.Fatalf("outcome = %q, %q; want %q, %q", gotResult, gotReason, tc.wantResult, tc.wantReason)
+			}
+		})
+	}
+}
+
+// A Pi manager whose host carries no agent dir cannot locate the account home;
+// the recorded renewal names that gap instead of hiding it.
+func TestPiRenewalWithoutTheAgentHomeReportsUnsupported(t *testing.T) {
+	m, ok := NativeRuntimeManager("pi", native.Host{Env: func(string) string { return "" }})
+	if !ok {
+		t.Fatal("pi has a native manager")
+	}
+	_, err := m.(*nativeFilesManager).root("")
+	if !errors.Is(err, native.ErrUnsupported) {
+		t.Fatalf("error = %v, want ErrUnsupported", err)
+	}
+	if _, reason := renewalOutcome(CredentialRefreshResult{}, err); reason != "unsupported" {
+		t.Fatalf("reason = %q, want the unsupported gap named", reason)
+	}
+}
+
+// A renewal that lands under a different provider id is an identity mismatch,
+// never a silent success.
+func TestPiRenewalWithAChangedProviderReportsIdentityMismatch(t *testing.T) {
+	accounts := testAccounts(t)
+	account, err := accounts.CreateProvider("pi", store.ProviderChatGPT, store.KindOAuth, "ChatGPT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePiGrants(t, account, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "stale-access", Refresh: "grant", Expires: time.Now().Add(-time.Hour).UnixMilli(), AccountID: "workspace"}})
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	piRenewRunner = func(_ context.Context, _, _, _ string) error {
+		writePiGrants(t, account, map[string]piAuthFixture{"another-provider": {Type: "oauth", Access: "fresh-access", Refresh: "grant", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "workspace"}})
+		return nil
+	}
+	m, _, err := accounts.scopedManager("pi", account.Home, "/fake/pi/bin/pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.(*nativeFilesManager).Refresh(context.Background(), piLoginOf(t, "stale-access"))
+	if !errors.Is(err, native.ErrNoIdentity) {
+		t.Fatalf("error = %v, want ErrNoIdentity", err)
+	}
+	if _, reason := renewalOutcome(CredentialRefreshResult{}, err); reason != "identity mismatch" {
+		t.Fatalf("reason = %q, want the identity mismatch named", reason)
+	}
+}
+
+// A renewal whose login file disappeared is reported as a missing file, with
+// the account untouched.
+func TestPiRenewalWithoutALoginFileReportsItMissing(t *testing.T) {
+	accounts := testAccounts(t)
+	account, err := accounts.CreateProvider("pi", store.ProviderChatGPT, store.KindOAuth, "ChatGPT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePiGrants(t, account, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "stale-access", Refresh: "grant", Expires: time.Now().Add(-time.Hour).UnixMilli(), AccountID: "workspace"}})
+	if err = os.Remove(filepath.Join(account.Home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	piRenewRunner = func(context.Context, string, string, string) error { return nil }
+	m, _, err := accounts.scopedManager("pi", account.Home, "/fake/pi/bin/pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.(*nativeFilesManager).Refresh(context.Background(), piLoginOf(t, "stale-access"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("error = %v, want the missing login file", err)
+	}
+	if _, reason := renewalOutcome(CredentialRefreshResult{}, err); reason != "login file missing" {
+		t.Fatalf("reason = %q, want the missing login file named", reason)
+	}
+}
