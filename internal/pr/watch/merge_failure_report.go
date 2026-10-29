@@ -340,7 +340,7 @@ func mergeReportSafePath(name string) bool {
 func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, logs string) (lines, files []string) {
 	suites := s.localCIFailedSuites(ctx, s.ciRegistry(), r, head)
 	for _, suite := range suites {
-		text := suite.Error + "\n" + strings.Join(suite.Failures, "\n") + "\n" + suite.LogTail
+		text := suite.Error + "\n" + strings.Join(suite.Failures, "\n") + "\n" + suite.FailureText()
 		evidence, named := localCFirstEvidence(text)
 		line := string(suite.Name())
 		// The cause tells an infrastructure failure from a failed test, which is
