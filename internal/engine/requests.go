@@ -154,7 +154,7 @@ func (r *requestRunner) run(ctx context.Context, key, name string, call websvc.C
 		saved, done, lookupErr := r.w.RequestDone(ctx, key)
 		if errors.Is(lookupErr, state.ErrRequestConflict) {
 			err = lookupErr
-		} else if lookupErr != nil || !done || !bytes.Equal(saved, result) {
+		} else if lookupErr != nil || !done || !bytes.Equal(nullIfEmpty(saved), result) {
 			// A failed lookup keeps the existing finalization attempt.
 			err = r.w.FinishRequest(ctx, key, name, result)
 		}

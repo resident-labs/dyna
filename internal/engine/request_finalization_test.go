@@ -32,6 +32,7 @@ func TestRequestFinalizationSQLCounts(t *testing.T) {
 		{"atomic null response", "CommitThing", true, []byte("null"), nil, 1},
 		{"different JSON bytes", "CommitThing", false, []byte(` { "cursor" : 7 } `), subagent.ClaimedInput{Cursor: 7}, 2},
 		{"mutation-only receipt", "CommitThing", true, nil, "reply", 2},
+		{"mutation-only null response", "CommitThing", true, nil, nil, 1},
 		{"changed response", "CommitThing", true, []byte(`"earlier"`), "reply", 2},
 		{"first receipt without mutation", "CommitThing", false, nil, "reply", 1},
 	} {
@@ -74,7 +75,7 @@ func TestRequestFinalizationSQLCounts(t *testing.T) {
 				t.Errorf("SQL commits = %d, want %d", commits, tc.commits)
 			}
 			saved, done, err := w.RequestDone(t.Context(), "finalize-1")
-			if err != nil || !done || !bytes.Equal(saved, want) {
+			if err != nil || !done || !bytes.Equal(nullIfEmpty(saved), want) {
 				t.Fatalf("saved response = %s, done %v, error %v; want %s", saved, done, err, want)
 			}
 			// A lost reply uses a fresh request runner and still writes nothing.
