@@ -105,7 +105,7 @@ func engineRoomMCP() *shellmcp.RoomMCP {
 			err := engineClient().Call(ctx, "RoomMCPAgentTools", nil, &text)
 			return text, err
 		},
-		Call: func(ctx context.Context, in callspec.RoomMCPCallRequest) (string, error) {
+		Invoke: func(ctx context.Context, in callspec.RoomMCPCallRequest) (string, error) {
 			var text string
 			err := engineClient().Call(ctx, "RoomMCPCall", []any{in}, &text)
 			return text, err
