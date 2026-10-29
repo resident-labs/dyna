@@ -128,3 +128,25 @@ func TestStatementCacheSchemaChange(t *testing.T) {
 		t.Fatalf("cached: %v, fresh: %v", cachedErr, freshErr)
 	}
 }
+
+func TestStatementCachePragmaTracksSetting(t *testing.T) {
+	db, count := cacheTestDB(t)
+	var before, after int
+	if err := db.QueryRow("/* setting */ pragma busy_timeout").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"PRAGMA busy_timeout = 123", "PRAGMA busy_timeout = 456", "PRAGMA busy_timeout = 123"} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.QueryRow("/* setting */ pragma busy_timeout").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != 123 {
+		t.Fatalf("busy_timeout before %d, after %d; want 123", before, after)
+	}
+	if count.conn.prepares != 0 {
+		t.Fatalf("cached %d PRAGMA statements; want none", count.conn.prepares)
+	}
+}
