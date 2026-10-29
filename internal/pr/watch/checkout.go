@@ -15,7 +15,9 @@ import (
 
 var resolveCheckoutRepo = repoid.Resolve
 
-// matchingCheckout compares the full remote identity, including its host.
+// matchingCheckout compares the full remote identity, including its host. A
+// checkout matches the PR's base repository or its head repository, the fork
+// that opened the PR.
 func matchingCheckout(ctx context.Context, r Record, dir string) string {
 	if dir == "" || changeKind(r) != "github" {
 		return ""
@@ -24,13 +26,18 @@ func matchingCheckout(ctx context.Context, r Record, dir string) string {
 	if host == "" {
 		host = "github.com"
 	}
-	want, err := repoid.RemoteIdentity("", "https://"+host+"/"+r.Repo)
+	repo, err := resolveCheckoutRepo(ctx, dir)
 	if err != nil {
 		return ""
 	}
-	repo, err := resolveCheckoutRepo(ctx, dir)
-	if err == nil && repo.ID == want {
-		return repo.Root
+	for _, name := range []string{r.Repo, r.HeadRepo} {
+		if name == "" {
+			continue
+		}
+		want, err := repoid.RemoteIdentity("", "https://"+host+"/"+name)
+		if err == nil && repo.ID == want {
+			return repo.Root
+		}
 	}
 	return ""
 }
