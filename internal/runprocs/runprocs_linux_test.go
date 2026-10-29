@@ -10,14 +10,18 @@ import (
 	"testing"
 )
 
-// startSleeper starts a sleeping process with env. It returns once the process
-// has exec'd its shell, so /proc/<pid>/environ is readable. Kill finds a
-// process through that environment, so an earlier return could miss it.
+// startSleeper starts a process that waits with env. It returns once the shell
+// has printed its ready line. The shell then blocks on stdin instead of
+// exec'ing another program: an exec would empty /proc/<pid>/environ again, and
+// Kill finds a process through that environment.
 func startSleeper(t *testing.T, env ...string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command("sh", "-c", "echo ready; exec sleep 600")
+	cmd := exec.Command("sh", "-c", "echo ready; read _")
 	cmd.Env = append(os.Environ(), env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if _, err := cmd.StdinPipe(); err != nil {
+		t.Fatal(err)
+	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
