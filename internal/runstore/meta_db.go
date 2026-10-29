@@ -406,6 +406,29 @@ func listIn(root, where string) ([]Meta, error) {
 	return out, nil
 }
 
+// StoredMeta reads one run's current row. Found is false when the run has no
+// row, so a caller can tell a fresh read from an older snapshot.
+func StoredMeta(ctx context.Context, id string) (Meta, bool, error) {
+	if err := validateRunID(id); err != nil {
+		return Meta{}, false, err
+	}
+	db, err := runsDB()
+	if err != nil {
+		return Meta{}, false, err
+	}
+	m, err := LoadStored(ctx, db, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Meta{}, false, nil
+	}
+	if err != nil {
+		return Meta{}, false, err
+	}
+	if m.ID != id {
+		return Meta{}, false, fmt.Errorf("stored run identity does not match %s", id)
+	}
+	return m, true, nil
+}
+
 // StoredMetadata lists canonical run rows even when their artifact folder is
 // missing. Ownership checks cannot discard those rows based on file presence.
 func StoredMetadata() ([]Meta, error) {
