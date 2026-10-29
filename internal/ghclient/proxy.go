@@ -34,6 +34,9 @@ func (e *sessionExitError) Error() string { return e.message }
 
 // SessionExitCode preserves gh's result and uses EX_TEMPFAIL for a held write.
 func SessionExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
 	var held *sessionExitError
 	if errors.As(err, &held) {
 		return held.code
@@ -73,11 +76,21 @@ func SessionCommand(ctx context.Context, args []string) error {
 }
 
 func sessionApproval(ctx context.Context, cmd *exec.Cmd, roomID string, args []string) error {
-	files, err := SnapshotFiles(args, cmd.Dir, os.Stdin)
-	if err != nil {
+	cmd.Stdin = os.Stdin
+	if err := refuseOwnerIdentity(ctx, cmd); err != nil {
 		return err
 	}
 	repository := repositoryFor(ctx, cmd)
+	cleanup, err := withAttribution(ctx, cmd, repository)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	args = cmd.Args[1:]
+	files, err := SnapshotFiles(args, cmd.Dir, cmd.Stdin)
+	if err != nil {
+		return err
+	}
 	request, err := requestApproval(ctx, approvals.RequestInput{Argv: args, Cwd: cmd.Dir, Repo: repository.name, Files: files})
 	if err != nil {
 		return err
@@ -86,16 +99,23 @@ func sessionApproval(ctx context.Context, cmd *exec.Cmd, roomID string, args []s
 	if err != nil {
 		return err
 	}
-	return approvalResult(result, os.Stdout)
+	return approvalResult(result, os.Stdout, os.Stderr)
 }
 
-func approvalResult(request approvals.Request, stdout io.Writer) error {
+func approvalResult(request approvals.Request, stdout, stderr io.Writer) error {
 	result := request.Result
 	switch request.State {
 	case approvals.StateDone, approvals.StateFailed:
 		if result != nil {
-			for _, line := range result.Output {
+			stdoutLines, stderrLines := result.Stdout, result.Stderr
+			if stdoutLines == nil && stderrLines == nil {
+				stdoutLines = result.Output
+			}
+			for _, line := range stdoutLines {
 				fmt.Fprintln(stdout, line)
+			}
+			for _, line := range stderrLines {
+				fmt.Fprintln(stderr, line)
 			}
 			code := 1
 			if result.ExitCode != nil {
