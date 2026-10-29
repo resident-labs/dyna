@@ -386,7 +386,7 @@ func editsForkPull(ctx context.Context, rec room.Record, cmdDir string, r reposi
 		return false
 	}
 	origin, ok := checkoutOrigin(ctx, rec, cmdDir)
-	if !ok {
+	if !ok || !strings.EqualFold(origin.host, r.host) {
 		return false
 	}
 	head, ok := pullHeadRepo(ctx, Command(ctx, "", cmdDir), r, positional[0])
