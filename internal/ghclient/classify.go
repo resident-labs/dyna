@@ -38,6 +38,10 @@ type ClassifyInput struct {
 	Upstream string
 	// Login is the login of the room's GitHub account.
 	Login string
+	// APIHost is the host that gh api uses without --hostname: GH_HOST or gh's
+	// configured default. It can differ from the checkout's host. When empty, a
+	// REST state change cannot be bound to a host and gives owner.
+	APIHost string
 	// AuthorOf returns the login that authored an item. The engine supplies the
 	// real lookup. An error, or a nil function, makes the class owner.
 	AuthorOf func(ctx context.Context, ref ItemRef) (string, error)
@@ -145,7 +149,7 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 	// state change names. A missing target, several targets or a failed lookup
 	// give false.
 	authored := func(ref ItemRef, targets []string) bool {
-		if in.Login == "" || in.AuthorOf == nil || len(targets) > 1 || (len(targets) == 0 && ref.Kind != ItemPR) {
+		if in.Login == "" || in.AuthorOf == nil || len(targets) > 1 || ref.Host == "" || (len(targets) == 0 && ref.Kind != ItemPR) {
 			return false
 		}
 		if len(targets) == 1 {
@@ -162,7 +166,7 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 	}
 
 	if args[0] == "api" {
-		return classifyAPI(args, in.Host, authored)
+		return classifyAPI(args, in.APIHost, authored)
 	}
 	if len(args) < 2 {
 		return approvals.ClassOwner
