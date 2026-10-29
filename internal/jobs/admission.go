@@ -20,6 +20,9 @@ import (
 // AdmissionTopic is the hub topic an admissions-table write publishes under.
 const AdmissionTopic = "admission"
 
+// ErrNoReservation reports that no admitted reservation remains for reattachment.
+var ErrNoReservation = errors.New("reservation is missing")
+
 // pollEvery is how long a holder waits between reads of its waiting row. The
 // engine's pass writes the row; this only notices.
 const pollEvery = time.Second
@@ -293,7 +296,7 @@ func (a Admission) Reattach(ctx context.Context, d Demand) (int, error) {
 	err = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
 		row, err := scanAdmission(conn.QueryRowContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE id=? AND node=? AND state='admitted'", d.ID, d.Node))
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("reservation for check %s on %s is missing", d.ID, d.Node)
+			return fmt.Errorf("check %s on %s: %w", d.ID, d.Node, ErrNoReservation)
 		}
 		if err != nil {
 			return err

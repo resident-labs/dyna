@@ -114,6 +114,50 @@ func TestRestartedEngineReattachesToARunningCheck(t *testing.T) {
 	}
 }
 
+// A check that ended before the restart has released its reservation. Once
+// the queue sweeps that row, the resumed run must still read the check's result.
+func TestRestartedEngineReadsAnEndedCheckAfterReservationSweep(t *testing.T) {
+	f := newReattachFixture(t)
+	f.stopEngineDuringRun(t)
+
+	store := Store{DataDir: f.runner.DataDir}
+	key, err := canonicalKey(f.request.Repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40))
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("attachments = %+v, %v, want the interrupted run", rows, err)
+	}
+	runDir := cacheBase("pve") + "/runs/" + rows[0].RunID
+	spec := jobs.RunSpec{ID: string(SuiteGoStatic), Dir: detachedDir(runDir, SuiteGoStatic), Unit: checkUnit(rows[0].RunID, SuiteGoStatic), Attach: true}
+	close(f.release)
+	poller, stop := f.runner.exec().NewPoller(t.Context())
+	if err := poller.Run(t.Context(), spec, io.Discard); err != nil {
+		t.Fatalf("finish the detached check: %v", err)
+	}
+	stop()
+
+	queue := f.runner.queue()
+	if err := queue.Release(t.Context(), "pve", rows[0].RunID+"-"+string(SuiteGoStatic)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := queue.Pass(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := f.runner.Run(t.Context(), f.request)
+	if err != nil {
+		t.Fatalf("resumed run failed: %v", err)
+	}
+	if result.Status != OutcomePassed || len(result.Checks) != 1 || result.Checks[0].Status != OutcomePassed {
+		t.Fatalf("result = %+v, want the ended check's own pass", result)
+	}
+	if got := len(f.machine.StartCalls()); got != 1 {
+		t.Fatalf("check started %d times, want once", got)
+	}
+}
+
 // A machine that lost the check, such as after a reboot, starts the run afresh.
 func TestRestartedEngineStartsAgainWhenTheCheckIsGone(t *testing.T) {
 	f := newReattachFixture(t)

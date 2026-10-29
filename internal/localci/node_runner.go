@@ -534,7 +534,17 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					runErr = fmt.Errorf("record check before admission: %w", runErr)
 				} else if spec.Attach {
 					held, holdErr := queue.Reattach(checkCtx, demand)
-					if holdErr != nil {
+					// Only an exit record proves that a missing reservation is safe to
+					// ignore. A live check keeps the error, so existing cleanup stops it.
+					if errors.Is(holdErr, jobs.ErrNoReservation) {
+						frames, pollErr := r.exec().Poll(checkCtx, []jobs.RunSpec{spec}, nil)
+						switch {
+						case pollErr != nil:
+							runErr = fmt.Errorf("poll the detached check %s: %w", check.id, pollErr)
+						case frames[spec.Dir].Unit != jobs.UnitExited:
+							runErr = fmt.Errorf("record the running check %s in the queue: %w", check.id, holdErr)
+						}
+					} else if holdErr != nil {
 						runErr = fmt.Errorf("record the running check %s in the queue: %w", check.id, holdErr)
 					} else {
 						port = held
