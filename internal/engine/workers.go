@@ -365,6 +365,14 @@ func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *w
 		}
 	}
 	syncer := lanesync.New()
+	prs.SyncRunActive = func(repo, sha string) (bool, error) {
+		st, err := syncer.Read()
+		if err != nil {
+			return false, err
+		}
+		op, ok := st.Operations[repo]
+		return ok && op.Head == sha && lanesync.Active(op.State), nil
+	}
 	spool := hookService
 	// globalSchedule lets one global hook pass run at a time. It outlives the
 	// pass that schedules it, so the closure below needs the engine context.

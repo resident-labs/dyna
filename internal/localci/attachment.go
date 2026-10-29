@@ -24,12 +24,23 @@ import (
 // record older than that points at nothing.
 const attachmentTTL = 3 * time.Hour
 
+// attachmentCheckKind records which teardown a check needs. A legacy row
+// without this metadata keeps the conservative teardown of every check type.
+type attachmentCheckKind struct {
+	Host      bool `json:"host,omitempty"`
+	Container bool `json:"container,omitempty"`
+	Job       bool `json:"job,omitempty"`
+}
+
 // attachment is what a restarted engine needs to follow the checks a run
 // started on a machine: the run, and the checks that were already launched.
-// The folders and the unit names derive from them.
+// The folders and the unit names derive from them. Source and CheckKinds stay
+// in this JSON payload so older engines can read the same table.
 type attachment struct {
-	RunID  string  `json:"runID"`
-	Checks []Suite `json:"checks"`
+	RunID      string                        `json:"runID"`
+	Checks     []Suite                       `json:"checks"`
+	Source     jobs.CheckSource              `json:"source"`
+	CheckKinds map[Suite]attachmentCheckKind `json:"checkKinds,omitempty"`
 }
 
 func (a attachment) has(id Suite) bool { return slices.Contains(a.Checks, id) }
@@ -55,6 +66,7 @@ var ownerAlive = func(pid int, start uint64) bool {
 // OrphanedAttachment identifies a run whose owner process is gone.
 type OrphanedAttachment struct {
 	Repo, SHA, Node, RunID string
+	Source                 jobs.CheckSource
 }
 
 // attachmentRow is one stored run record and its owner.
@@ -161,7 +173,7 @@ func (s Store) OrphanedAttachments(ctx context.Context) ([]OrphanedAttachment, e
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT repo, sha, node, run_id, owner_pid, owner_start, saved_at FROM local_ci_attachments ORDER BY saved_at DESC")
+	rows, err := db.QueryContext(ctx, "SELECT repo, sha, node, payload, owner_pid, owner_start, saved_at FROM local_ci_attachments ORDER BY saved_at DESC")
 	if isMissingAttachmentTable(err) {
 		return nil, nil
 	}
@@ -171,14 +183,19 @@ func (s Store) OrphanedAttachments(ctx context.Context) ([]OrphanedAttachment, e
 	var out []OrphanedAttachment
 	for rows.Next() {
 		var row attachmentRow
+		var raw []byte
 		var saved int64
-		if err := rows.Scan(&row.Repo, &row.SHA, &row.Node, &row.RunID, &row.ownerPID, &row.ownerStart, &saved); err != nil {
+		if err := rows.Scan(&row.Repo, &row.SHA, &row.Node, &raw, &row.ownerPID, &row.ownerStart, &saved); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &row.attachment); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		row.saved = time.Unix(saved, 0)
 		if row.orphaned() {
-			out = append(out, OrphanedAttachment{Repo: row.Repo, SHA: row.SHA, Node: row.Node, RunID: row.RunID})
+			out = append(out, OrphanedAttachment{Repo: row.Repo, SHA: row.SHA, Node: row.Node, RunID: row.RunID, Source: row.Source})
 		}
 	}
 	return out, errors.Join(rows.Err(), rows.Close())
@@ -309,7 +326,7 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 			giveBack()
 			return nil, fmt.Errorf("reattach to the run of %s on %s: %w", sha[:12], r.Node.Name, err)
 		}
-		launched := attachment{RunID: att.RunID}
+		launched := attachment{RunID: att.RunID, Source: att.Source, CheckKinds: att.CheckKinds}
 		var missing []string
 		for _, spec := range specs {
 			switch frames[spec.Dir].Unit {
@@ -362,9 +379,17 @@ func (r Runner) teardownAttachment(ctx context.Context, store Store, repo, sha, 
 		specs = append(specs, jobs.RunSpec{ID: string(id), Dir: detachedDir(runDir, id), Unit: checkUnit(att.RunID, id)})
 		if i := slices.IndexFunc(checks, func(c nodeCheck) bool { return c.id == id }); i >= 0 {
 			recorded = append(recorded, checks[i])
-		} else {
-			recorded = append(recorded, nodeCheck{id: id})
+			continue
 		}
+		kind, known := att.CheckKinds[id]
+		check := nodeCheck{id: id, host: kind.Host}
+		if known && kind.Container {
+			check.image = "recorded"
+		}
+		if known && kind.Job {
+			check.job = &JobRef{}
+		}
+		recorded = append(recorded, check)
 	}
 	// Tear down everything the old run left, containers and host scopes included,
 	// and remove the folder only after that worked: a sibling that still runs must

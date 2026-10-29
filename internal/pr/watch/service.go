@@ -39,7 +39,10 @@ type Service struct {
 	// request head use.
 	LocalCIRegistry localCIRegistry
 	RunNodeCI       func(context.Context, localci.Node, localci.Request) (localci.Result, error)
-	registeredRuns  *registeredCIRuns
+	// SyncRunActive reports whether an active sync operation still needs a run.
+	// Nil keeps an orphaned sync run because this service cannot prove it obsolete.
+	SyncRunActive  func(repo, sha string) (bool, error)
+	registeredRuns *registeredCIRuns
 	// RunningCIChanged tells clients that the local CI runs in flight changed,
 	// so they read the machine view again. nil when no client hears of them.
 	RunningCIChanged func()
