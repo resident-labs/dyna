@@ -56,21 +56,19 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: third_party/pi/package-lock.json
-      # The upstream prepare script installs Husky hooks. CI does not need Git
-      # hooks, and the build and tests need no dependency install scripts.
-      - name: Install Pi dependencies
-        run: npm ci --ignore-scripts
-      - name: Hydrate the pinned model catalog offline
-        run: bash ../../scripts/pi-hydrate.sh
-      - name: Build Pi without live catalog updates
-        run: npm run build:offline
-      - name: Test coding-agent
-        run: npm test --workspace=@earendil-works/pi-coding-agent
-      - name: Pack and verify the fork tarball
+      - name: Test and pack Pi
         working-directory: .
         env:
-          PI_PACK_SKIP_BUILD: "1"
-        run: bash scripts/pi-pack.sh "${RUNNER_TEMP}/pi-fork.tgz"
+          JUNIT_REPORT_PATH: ${{ runner.temp }}/pi-test.xml
+        run: bash scripts/ci.sh pi
+      - name: Upload Pi test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-test-report
+          path: ${{ runner.temp }}/pi-test.xml
+          if-no-files-found: error
+          retention-days: 1
 
   relay:
     needs: changes
