@@ -739,6 +739,15 @@ var removeMu sync.Mutex
 // it to observe the locks the removal holds.
 var beforeWorktreeRemoval = func(path string) {}
 
+// phaseErr names the cleanup phase that failed, so a pass report says where a
+// repository stopped. A nil error stays nil.
+func phaseErr(phase string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", phase, err)
+}
+
 // pruneTimeout bounds git worktree prune on its own context.
 const pruneTimeout = 10 * time.Second
 
@@ -809,14 +818,14 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 				trees[i].Action = "kept"
 				trees[i].Reason = reason
 			}
-			return trees, errors.Join(fetchErr, scanErr)
+			return trees, errors.Join(phaseErr("fetch", fetchErr), phaseErr("scan", scanErr))
 		}
 	}
 
 	opts.history = &runHistory{}
 	trees, err := scan()
 	if err != nil {
-		return nil, err
+		return nil, phaseErr("scan", err)
 	}
 	closed := opts.OwnerClosed
 	if closed == nil {

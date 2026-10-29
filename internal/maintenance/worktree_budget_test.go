@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,5 +132,23 @@ func TestWorktreeCleanupFollowsSweepsOnOddTurns(t *testing.T) {
 	}
 	if worktreeAt < 0 || scratchAt < 0 || worktreeAt < scratchAt {
 		t.Fatalf("steps = %+v, want worktrees after scratch on an odd turn", result.Steps)
+	}
+}
+
+// A repository whose removal runs out of time must name itself in the pass
+// report, so repeated skips are visible.
+func TestDeferredWorktreesAreNamedInPassReport(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	old := gcWorktrees
+	gcWorktrees = func(context.Context, string, worktrees.GCOptions) ([]worktrees.Tree, error) {
+		return []worktrees.Tree{{Path: "/managed/tree", Deferred: true}}, nil
+	}
+	t.Cleanup(func() { gcWorktrees = old })
+	_, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err == nil || !strings.Contains(err.Error(), "worktree cleanup repo: removal incomplete, 1 tree(s) deferred") {
+		t.Fatalf("err = %v, want the repository and the incomplete removal named", err)
 	}
 }
