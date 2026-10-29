@@ -180,20 +180,21 @@ func (s *Service) UnwatchIssue(ctx context.Context, roomID string, ref Ref) (boo
 }
 
 // pollIssueWatches reads every watched issue once. A changed issue is read
-// again for its comments, and each new fact posts to its room root.
-func (s *Service) pollIssueWatches(ctx context.Context) error {
+// again for its comments, and each new fact posts to its room root. It reports
+// whether any issue is watched, so the tick stays due when no PR is watched.
+func (s *Service) pollIssueWatches(ctx context.Context) (bool, error) {
 	watches, err := s.issueStore().List(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var first error
 	for _, w := range watches {
 		if err := ctx.Err(); err != nil {
-			return errors.Join(first, err)
+			return true, errors.Join(first, err)
 		}
 		first = errors.Join(first, s.pollIssueWatch(ctx, w))
 	}
-	return first
+	return len(watches) > 0, first
 }
 
 func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error {
