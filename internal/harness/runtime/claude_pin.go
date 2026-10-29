@@ -178,10 +178,12 @@ func (a *Accounts) switchPinned(ctx context.Context, id, executable string, onAc
 		return err
 	}
 	if n.Harness == "pi" {
-		if err := a.keepActive(n.Harness, keep); err != nil {
-			return err
-		}
-		return a.selectPinned(n)
+		return a.transaction(func(*store.State) error {
+			if err := a.keepActive(n.Harness, keep); err != nil {
+				return err
+			}
+			return a.selectPinned(n)
+		}, true)
 	}
 	return a.transaction(func(state *store.State) error {
 		entry := state.Find(id)
