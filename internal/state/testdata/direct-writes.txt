@@ -77,6 +77,7 @@ not-state internal/database/statement_cache.go cacheConn.BeginTx 1 # driver wrap
 not-state internal/database/statement_cache.go cacheConn.ExecContext 2 # driver wrapper forwards writes and holds no durable state
 violation internal/devicegrant/grant.go Store.Delete 1
 violation internal/devicegrant/grant.go Store.Put 1
+not-state internal/engine/approval_gh.go bindApprovalFiles 2 # temporary files hold the exact approved payload only while the engine executes it
 not-state internal/engine/socket.go writeSocketOwner 1 # a record beside the engine socket that names the data folder it serves; it is not Dyna state and is read only by the bind check
 not-state internal/engine/runner_spool.go reserve 1 # reserves an empty frozen spool or rejected-artifact name with O_EXCL before the rename fills it; the spool is a transport log, not state
 not-state internal/engine/runner_spool.go runnerSpool.apply 1 # removes a taken runner spool file once every line went through the runner calls; the spool is a transport log, not state
