@@ -161,12 +161,12 @@ func TestPiInstallUsesApprovedRecipe(t *testing.T) {
 	piTestHome(t)
 	m := manager(t)
 	m.Run = func(ctx context.Context, args, env []string) error {
-		if !reflect.DeepEqual(args, []string{"npm", "install", "--global", "--prefix", args[4], "--package-lock", "--ignore-scripts", piNPMPackage + "@1.3.0-dyna.9"}) {
+		if !reflect.DeepEqual(args, []string{"npm", "install", "--global", "--prefix", args[4], "--package-lock", "--ignore-scripts", piNPMPackage + "@1.3.0-dyna.10"}) {
 			t.Fatalf("install argv = %q", args)
 		}
 		return fixtureInstall(ctx, args, env)
 	}
-	b := install(t, m, "pi", "1.3.0-dyna.9")
+	b := install(t, m, "pi", "1.3.0-dyna.10")
 	raw, err := os.ReadFile(filepath.Join(b.Directory, "bundle.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -194,11 +194,11 @@ func TestPiInstallRejectsLooseVersionsAndBadBundles(t *testing.T) {
 		t.Fatal("rejected versions reached installer")
 	}
 	m.Run = func(context.Context, []string, []string) error { return errors.New("npm exploded: secret-token-value") }
-	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.9"); err == nil || strings.Contains(err.Error(), "secret-token-value") {
+	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.10"); err == nil || strings.Contains(err.Error(), "secret-token-value") {
 		t.Fatal("installer error was lost or exposed", err)
 	}
 	m.Run = func(context.Context, []string, []string) error { return nil }
-	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.9"); err == nil {
+	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.10"); err == nil {
 		t.Fatal("accepted missing executable")
 	}
 }
@@ -226,10 +226,10 @@ func TestPiInstallRecordsPackageIntegrityFallback(t *testing.T) {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"@earendil-works/pi-coding-agent","version":"1.3.0-dyna.9","_integrity":"sha512-Zml4dHVyZQ=="}`), 0600)
+		return os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"@earendil-works/pi-coding-agent","version":"1.3.0-dyna.10","_integrity":"sha512-Zml4dHVyZQ=="}`), 0600)
 	}
 
-	b := install(t, m, "pi", "1.3.0-dyna.9")
+	b := install(t, m, "pi", "1.3.0-dyna.10")
 	raw, _ := os.ReadFile(filepath.Join(b.Directory, "bundle.json"))
 	var manifest bundleManifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
