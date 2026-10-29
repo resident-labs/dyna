@@ -188,6 +188,9 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 				if !valid(next) {
 					return accountnative.ErrNoIdentity
 				}
+				// Track the renewed credential in the store too, so no later
+				// activation restores a refresh token the provider replaced.
+				entry.Credential = next.Credential
 				// Capture prefers a pending login. Keep it current until Switch
 				// completes that login and removes the pending snapshot.
 				pending := filepath.Join(current.Home, ".login-pending.json")
@@ -239,6 +242,7 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 				repairNative = accountnative.NewerCredential(c, *actual)
 				if !repairNative {
 					c = *actual
+					entry.Credential = c.Credential
 					if err = save(c); err != nil {
 						return err
 					}
