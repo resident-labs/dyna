@@ -230,7 +230,7 @@ func openDatabase(dataDir string) (*sql.DB, error) {
 	}
 	query := url.Values{"_pragma": connectionPragmas(testing.Testing())}
 	name := url.URL{Scheme: "file", Path: path, RawQuery: query.Encode()}
-	db, err := sql.Open("sqlite", name.String())
+	db, err := sql.Open("dyna-sqlite", name.String())
 	if err != nil {
 		return nil, err
 	}
