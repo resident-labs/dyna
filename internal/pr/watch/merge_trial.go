@@ -120,7 +120,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		delete(st.MergePauses, roomID)
 	}
 	where := s.LocalTrialRooms(ctx)
-	for _, item := range mergeQueue(st, where) {
+	for _, item := range mergeQueue(st, where, s.roomUpstreams()) {
 		next = s.now().Add(pollEvery)
 		if item.State != "ready" {
 			continue
@@ -410,6 +410,11 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		member := st.Records[change.Key]
 		if member == nil {
 			return errors.New("merge trial lost a tracked PR")
+		}
+		// A PR into an upstream repository is never published by Dyna, even when a
+		// trial made before the room recorded its upstream still holds it.
+		if upstreamPR(*member, s.roomUpstreams()) {
+			return s.discardMergeTrial(ctx, repo, *r, b)
 		}
 		if why, err := s.trialRoomHold(ctx, *member); err != nil {
 			return err

@@ -164,7 +164,7 @@ func TestApproveFastWaitsForDependency(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantDependency := &MergeDependency{ChangeID: "dependency-change", Number: 2, Title: "Prepare the base"}
-	for _, row := range mergeQueue(st, nil) {
+	for _, row := range mergeQueue(st, nil, nil) {
 		if row.ChangeID == key && (row.State != "waiting-dependency" || row.Reason != "" || !reflect.DeepEqual(row.Dependency, wantDependency)) {
 			t.Fatalf("dependent PR queue state = %+v", row)
 		}
@@ -767,7 +767,7 @@ func TestMergeQueueNamesWhatEachPRWaitsFor(t *testing.T) {
 		st.Records[r.Key] = r
 	}
 	got := map[int][2]string{}
-	for _, item := range mergeQueue(st, nil) {
+	for _, item := range mergeQueue(st, nil, nil) {
 		n, _ := strconv.Atoi(item.ChangeID[strings.LastIndex(item.ChangeID, "#")+1:])
 		got[n] = [2]string{item.State, item.Reason}
 	}
@@ -832,7 +832,7 @@ func TestMergeQueueItemsCarryTheMainCIResult(t *testing.T) {
 		st := State{Records: map[string]*Record{r.Key: r}, RepositoryFacts: map[string]state.RepositoryFacts{
 			"github.com/owner/repo": {DefaultBranch: "main", Head: "main-head", Verdict: verdict, CheckedAt: time.Now()},
 		}}
-		items := mergeQueue(st, nil)
+		items := mergeQueue(st, nil, nil)
 		// A PR that is not ready still carries the result: the Checks tab shows it for every PR.
 		if len(items) != 1 || items[0].State != "review" || items[0].Main == nil || !reflect.DeepEqual(*items[0].Main, want) {
 			t.Fatalf("verdict %q: items=%+v want main %+v", verdict, items, want)
