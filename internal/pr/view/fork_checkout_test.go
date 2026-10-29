@@ -52,3 +52,27 @@ func TestTrackPRRefAcceptsAForkCheckoutOfTheRoomsUpstream(t *testing.T) {
 		t.Fatalf("a fork checkout whose upstream is another repository was accepted: %v", err)
 	}
 }
+
+// A PR that another contributor opened from their own fork into the room's
+// upstream is tracked read only from the room's fork checkout (D-503).
+func TestTrackPRRefAcceptsAnotherForksPRIntoTheRoomsUpstream(t *testing.T) {
+	e, rec, root := workspaceEnv(t)
+	author := e.start(rec, "author", nil)
+	pull := watch.Pull{Number: 3964, Title: "Contributor change", State: "open"}
+	pull.Head.SHA = strings.Repeat("b", 40)
+	pull.Head.Repo.FullName = "levzzz/horizon"
+	prfixture.FakeGHWithPull(t, pull)
+	if out, err := exec.Command("git", "-C", root, "remote", "set-url", "origin", "https://github.com/arismoko/horizon.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote set-url: %v %s", err, out)
+	}
+	if err := e.svc.Notify.Rooms.UpdatePreferences(rec.ID, func(r *room.Record) error {
+		r.Upstream = "github.com/horizon-rust/horizon"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ref := "https://github.com/horizon-rust/horizon/pull/3964"
+	if _, err := e.svc.PRs.TrackPRRef(ownerCtx, rec.ID, author.ID, ref, root, "", nil); err != nil {
+		t.Fatalf("a contributor's PR into the room's upstream was refused from the fork checkout: %v", err)
+	}
+}
