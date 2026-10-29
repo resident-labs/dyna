@@ -120,7 +120,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		delete(st.MergePauses, roomID)
 	}
 	where := s.LocalTrialRooms(ctx)
-	for _, item := range mergeQueue(st, where) {
+	for _, item := range mergeQueue(st, where, s.roomUpstreams()) {
 		next = s.now().Add(pollEvery)
 		if item.State != "ready" {
 			continue
