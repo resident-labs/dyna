@@ -23,7 +23,7 @@ func (e *BlockError) Error() string { return e.Err.Error() }
 func (e *BlockError) Unwrap() error { return e.Err }
 
 // Emit runs blocking before-land hooks synchronously. Other hooks wait in
-// an on-disk spool drained by the engine. They wait while the engine is down.
+// a SQLite queue drained by the engine. They wait while the engine is down.
 // Callers may ignore errors except for before-land.
 func Emit(ctx context.Context, e Event) error { return New().Emit(ctx, e) }
 func (s Service) Emit(ctx context.Context, e Event) error {

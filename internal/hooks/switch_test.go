@@ -72,12 +72,8 @@ func TestDisabledScheduleHookIsNotClaimed(t *testing.T) {
 	if err := s.Tick(ctx, repo, time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
-	files, err := spoolFiles(s.spoolDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 1 {
-		t.Fatalf("the spool holds %d events; want 1, from the enabled hook only", len(files))
+	if got := len(queuedEvents(t, s)); got != 1 {
+		t.Fatalf("the queue holds %d events; want 1, from the enabled hook only", got)
 	}
 	disabled := false
 	if err := s.Edit(ctx, repo, "off", "owner", Patch{Disabled: &disabled}); err != nil {

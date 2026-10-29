@@ -104,10 +104,11 @@ func (s Service) importRuntime(conn *sql.Conn) error {
 	return nil
 }
 
-// Migrate validates pending records and prepares the runtime table.
+// Migrate prepares the runtime table and imports the legacy file spool
+// into the queue table once.
 func Migrate(dataDir string) error {
 	s := Service{DataDir: dataDir}
-	if err := s.validateStartupSpool(); err != nil {
+	if _, err := s.queueDB(); err != nil {
 		return err
 	}
 	_, err := s.runtimeDB()

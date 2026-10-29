@@ -300,9 +300,9 @@ func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 	if refs := changeGit(t, dir, "for-each-ref", "--format=%(refname)", "refs/heads/dyna/merge-trial/"); refs != "" {
 		t.Fatalf("trial refs remain: %s", refs)
 	}
-	spool, err := os.ReadDir(filepath.Join(store.DataDir(), "hook-spool"))
-	if err != nil || len(spool) == 0 {
-		t.Fatalf("hook spool: %v, %v", spool, err)
+	queued, err := hooks.Service{DataDir: store.DataDir()}.QueuedEvents(t.Context())
+	if err != nil || len(queued) == 0 {
+		t.Fatalf("hook queue: %v, %v", queued, err)
 	}
 	// One landed event for the trial and one per local change that merged.
 	if landed := mergeNotices(e.sent, room.MergeLanded); len(landed) != len(records)+1 {

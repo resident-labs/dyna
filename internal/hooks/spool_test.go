@@ -2,10 +2,11 @@ package hooks
 
 import (
 	"context"
+	"database/sql"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
-	"dyna-agent/internal/store"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,36 +14,45 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
 
 func queuedEvents(t *testing.T, s Service) []Event {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(s.DataDir, "hook-spool"))
-	if os.IsNotExist(err) {
-		return nil
-	}
+	events, err := s.QueuedEvents(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var events []Event
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(s.DataDir, "hook-spool", entry.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var e Event
-		if err := json.Unmarshal(b, &e); err != nil {
-			t.Fatal(err)
-		}
-		events = append(events, e)
-	}
 	return events
+}
+
+// setQueued replaces the queue's rows, writing each event directly, as a
+// previous-release emitter would have, without Enqueue's resolution.
+func setQueued(t *testing.T, s Service, events ...Event) {
+	t.Helper()
+	db, err := database.Open(s.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = database.Immediate(context.Background(), db, func(conn *sql.Conn) error {
+		if _, err := conn.ExecContext(context.Background(), "DELETE FROM hook_queue"); err != nil {
+			return err
+		}
+		for _, e := range events {
+			body, err := json.Marshal(e)
+			if err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(context.Background(), "INSERT INTO hook_queue(body) VALUES(?)", string(body)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEmitSpoolsWithoutStartingAProcess(t *testing.T) {
@@ -56,7 +66,7 @@ func TestEmitSpoolsWithoutStartingAProcess(t *testing.T) {
 		commands++
 		return nil
 	}
-	// The test executable is not a Dyna CLI. Emit must only write the spool.
+	// The test executable is not a Dyna CLI. Emit must only queue the event.
 	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand, Branch: "first"}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,9 +135,7 @@ func TestSpoolCancellationPreservesCapturedEvent(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { cleanupSnapshot(e) })
-				if err := store.WriteJSON(filepath.Join(s.spoolDir(), "00000000000000000001.json"), e, 0600); err != nil {
-					t.Fatal(err)
-				}
+				setQueued(t, s, e)
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -203,6 +211,8 @@ func TestBlockingHookWaitsForCommand(t *testing.T) {
 	}
 }
 
+// Twelve concurrent writers append through separate pooled connections; the
+// queue's rowids keep every event, in one append order.
 func TestConcurrentSpoolWritersKeepEveryEvent(t *testing.T) {
 	s, repo := setup(t)
 	var wg sync.WaitGroup
@@ -307,101 +317,6 @@ func TestQueuedLifecycleHooksSurviveRemovedExecutionTree(t *testing.T) {
 	}
 }
 
-func TestDrainQuarantinesUnparsableEventAndRunsLaterEvent(t *testing.T) {
-	s, repo := setup(t)
-	add(t, s, repo, hook("queued", AfterLand))
-	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err != nil {
-		t.Fatal(err)
-	}
-	first := filepath.Join(s.spoolDir(), "00000000000000000001.json")
-	if err := os.WriteFile(first, []byte("{broken"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(authority.InEngine())
-	if _, _, err := s.Drain(context.Background(), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if data, err := os.ReadFile(first + ".bad"); err != nil || string(data) != "{broken" {
-		t.Fatalf("quarantine: %q; %v", data, err)
-	}
-	runs, err := s.Runs(context.Background(), repo, "queued")
-	if err != nil || len(runs) != 1 || runs[0].Result != "pass" {
-		t.Fatalf("runs: %#v; %v", runs, err)
-	}
-	if len(queuedEvents(t, s)) != 0 {
-		t.Fatal("later event was not drained")
-	}
-}
-
-func TestSpoolQuarantinesNonNumericNames(t *testing.T) {
-	for _, operation := range []string{"enqueue", "drain"} {
-		t.Run(operation, func(t *testing.T) {
-			s, repo := setup(t)
-			add(t, s, repo, hook("queued", AfterLand))
-			if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err != nil {
-				t.Fatal(err)
-			}
-			bad := filepath.Join(s.spoolDir(), "not-a-number.json")
-			if err := os.WriteFile(bad, []byte("{}"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if operation == "enqueue" {
-				if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			t.Cleanup(authority.InEngine())
-			if _, _, err := s.Drain(context.Background(), time.Now()); err != nil {
-				t.Fatal(err)
-			}
-			if data, err := os.ReadFile(bad + ".bad"); err != nil || string(data) != "{}" {
-				t.Fatalf("quarantine: %q; %v", data, err)
-			}
-			runs, err := s.Runs(context.Background(), repo, "queued")
-			want := 1
-			if operation == "enqueue" {
-				want = 2
-			}
-			if err != nil || len(runs) != want {
-				t.Fatalf("runs: %#v; %v", runs, err)
-			}
-		})
-	}
-}
-
-// A drain that another process holds returns when to retry. A drain that
-// finishes returns the spool files it ran and no retry.
-func TestDrainRetriesOnlyWhenItCannotFinish(t *testing.T) {
-	s, repo := setup(t)
-	add(t, s, repo, hook("ok", AfterLand))
-	s.Exec = func(ctx context.Context, p processguard.Process) error {
-		if p.Args[0] == "git" {
-			return processguard.Execute(ctx, p)
-		}
-		return nil
-	}
-	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err != nil {
-		t.Fatal(err)
-	}
-	unlock, owned, err := store.TryLock(filepath.Join(s.spoolDir(), "drain.lock"))
-	if err != nil || !owned {
-		t.Fatal(owned, err)
-	}
-	now := time.Now()
-	ran, retry, err := s.Drain(context.Background(), now)
-	if err != nil || len(ran) != 0 || !retry.Equal(now.Add(drainRetry)) {
-		t.Fatalf("held drain = %v, %v, %v; want a retry at %v", ran, retry, err, now.Add(drainRetry))
-	}
-	unlock()
-	ran, retry, err = s.Drain(context.Background(), now)
-	if err != nil || len(ran) != 1 || !retry.IsZero() {
-		t.Fatalf("finished drain = %v, %v, %v; want one file and no retry", ran, retry, err)
-	}
-}
-
 func TestQueuedMainHookUsesLiveMainTree(t *testing.T) {
 	s, repo := setup(t)
 	add(t, s, repo, hook("main", PRMerged))
@@ -446,43 +361,5 @@ func TestQueuedMainHookUsesLiveMainTree(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("main hook was not called")
-	}
-}
-
-func TestReadSpoolEventRejectsUnsafeEntries(t *testing.T) {
-	dir := t.TempDir()
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer root.Close()
-	for _, name := range []string{"regular", "large", "link", "pipe"} {
-		path := filepath.Join(dir, name)
-		switch name {
-		case "regular":
-			err = os.WriteFile(path, []byte("{}"), 0600)
-		case "large":
-			var f *os.File
-			f, err = os.Create(path)
-			if err == nil {
-				err = f.Truncate(maxSpoolEvent + 1)
-				f.Close()
-			}
-		case "link":
-			err = os.Symlink("regular", path)
-		case "pipe":
-			err = syscall.Mkfifo(path, 0600)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = readSpoolEvent(root, name)
-		if name == "regular" {
-			if err != nil {
-				t.Fatal(err)
-			}
-		} else if !errors.Is(err, errSpoolRefused) {
-			t.Fatalf("%s: %v", name, err)
-		}
 	}
 }
