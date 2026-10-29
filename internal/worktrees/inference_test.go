@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/callerid"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/store"
@@ -37,6 +39,18 @@ func inferenceTestBytes(t *testing.T, path string, content []byte) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func inferenceTestLiveRun(t *testing.T, id string) {
+	t.Helper()
+	err := callerid.RecordStarted(t.Context(), os.Getpid(), callerid.Launch{
+		DataDir:  store.DataDir(),
+		Actor:    callerid.Identity{Kind: callerid.Worker, Run: id},
+		Launcher: "workflow",
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -173,6 +187,7 @@ func TestInferOwnersMissingStoresAndMetadata(t *testing.T) {
 		t.Fatalf("missing stores: owners = %#v, error = %v", got, err)
 	}
 	inferenceTestWrite(t, filepath.Join(runstore.RunsDir(), "orphan", "events.jsonl"), map[string]any{"dir": tree})
+	inferenceTestLiveRun(t, "orphan")
 	if err := os.MkdirAll(filepath.Join(runstore.SessionsDir(), "missing"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -328,6 +343,7 @@ func TestSessionScanStillChecksWorkflowOwners(t *testing.T) {
 	recordtest.Write(t, runstore.SessionsDir(), "worker", map[string]any{"id": "worker", "dir": tree, "closed": time.Now()})
 	run := filepath.Join(runstore.RunsDir(), "active")
 	inferenceTestWrite(t, filepath.Join(run, "meta.json"), map[string]any{"id": "active", "status": "running"})
+	inferenceTestLiveRun(t, "active")
 	inferenceTestWrite(t, filepath.Join(run, "journal.jsonl"), map[string]any{"cwd": tree})
 	trees, err := GC(context.Background(), repo, GCOptions{Session: "worker"})
 	if err != nil || len(trees) != 1 || trees[0].Action != "kept" || !strings.Contains(trees[0].Reason, "inferred owner is still open") {
@@ -339,13 +355,40 @@ func TestSessionScanStillChecksWorkflowOwners(t *testing.T) {
 	}
 }
 
-// A run folder whose meta.json is broken has no row, so it is an open owner:
-// cleanup keeps its tree, and the scan does not fail for every other tree.
+// Invalid launch evidence cannot prove that a rowless run has ended.
+func TestRowlessRunRejectsInvalidLivenessEvidence(t *testing.T) {
+	tree := inferenceTestStore(t)
+	id := "wf_invalid_launch"
+	if err := os.MkdirAll(filepath.Join(runstore.RunsDir(), id), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callerid.OpenStore(store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(store.DataDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO caller_records(unit,pid,start,actor,session,run,worker,launcher,recorded) VALUES('',-1,1,'worker','',?,'','workflow',0)`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inferOwners(context.Background(), []string{tree}, nil); err == nil {
+		t.Fatal("inference ignored invalid liveness evidence")
+	}
+	if _, err := workflowClosed(id); err == nil {
+		t.Fatal("registered ownership ignored invalid liveness evidence")
+	}
+}
+
+// A live run folder whose meta.json is broken has no row, so its unknown
+// directories keep every candidate without failing the scan.
 func TestInferOwnersKeepsARowlessRunOpen(t *testing.T) {
 	for _, body := range []string{"{", `{"id":"other"}`, `{"id":"wf_owner","endedAt":"invalid"}`} {
 		tree := inferenceTestStore(t)
 		dir := filepath.Join(runstore.RunsDir(), "wf_owner")
 		inferenceTestBytes(t, filepath.Join(dir, "meta.json"), []byte(body))
+		inferenceTestLiveRun(t, "wf_owner")
 		inferenceTestWrite(t, filepath.Join(dir, "events.jsonl"), map[string]any{"dir": tree})
 		got, err := inferOwners(context.Background(), []string{tree}, nil)
 		if err != nil {

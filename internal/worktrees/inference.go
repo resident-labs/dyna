@@ -11,8 +11,10 @@ import (
 	"sort"
 	"sync"
 
+	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/store"
 )
 
 type ownerRef struct {
@@ -191,6 +193,14 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 	visitRun := func(_ *os.Root, name string) error {
 		meta, ok := metas[name]
 		if !ok {
+			alive, err := rowlessWorkflowAlive(ctx, name)
+			if err != nil {
+				return err
+			}
+			// A folder left by a worker that never started owns nothing.
+			if !alive {
+				return nil
+			}
 			reportRowless(name)
 		}
 		ref := ownerRef{ID: name, Address: name, Closed: ok && runstore.IsFinishedStatus(meta.Status) && !meta.EndedAt.IsZero()}
@@ -258,6 +268,14 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 		owners[key] = item
 	}
 	return owners, nil
+}
+
+func rowlessWorkflowAlive(ctx context.Context, id string) (bool, error) {
+	launches, err := callerid.OpenStore(store.DataDir())
+	if err != nil {
+		return false, err
+	}
+	return launches.WorkflowDaemonAlive(ctx, id)
 }
 
 func inferenceCanonicalPath(path string) (string, error) {

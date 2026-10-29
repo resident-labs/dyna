@@ -757,9 +757,9 @@ func TestGCKeepsUnverifiedOwner(t *testing.T) {
 	t.Fatal("unverified owner's worktree is missing")
 }
 
-// A tree recorded for a run whose folder exists with no row and no logs
-// stays: the run counts as open, not as an unknown owner.
-func TestGCKeepsTreeOfRunWithoutRow(t *testing.T) {
+// A folder left by a run that never started has no row and no live daemon.
+// It owns no inferred or registered tree, including trees in other repositories.
+func TestGCRemovesTreeOfRunWithoutRowOrDaemon(t *testing.T) {
 	repo := gcRepo(t)
 	path, _, _, err := CreateForRun(context.Background(), repo, settings.WorktreesRetentionNone, "wf_rowless", "")
 	if err != nil {
@@ -767,6 +767,16 @@ func TestGCKeepsTreeOfRunWithoutRow(t *testing.T) {
 	}
 	if err := os.MkdirAll(filepath.Join(runstore.RunsDir(), "wf_rowless"), 0700); err != nil {
 		t.Fatal(err)
+	}
+	otherRepoTree := t.TempDir()
+	owners, err := inferOwners(context.Background(), []string{path, otherRepoTree}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range []string{path, otherRepoTree} {
+		if len(owners[candidate].Runs) != 0 {
+			t.Fatalf("dead rowless run owns %s: %#v", candidate, owners[candidate].Runs)
+		}
 	}
 	old := time.Now().Add(-25 * time.Hour)
 	for _, p := range []string{path, git(t, path, "rev-parse", "--absolute-git-dir")} {
@@ -782,8 +792,8 @@ func TestGCKeepsTreeOfRunWithoutRow(t *testing.T) {
 	if _, err := GC(context.Background(), repo, GCOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("tree of a run without a row was removed: %v", err)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("tree of a dead rowless run remains: %v", err)
 	}
 }
 
