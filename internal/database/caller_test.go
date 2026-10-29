@@ -72,3 +72,31 @@ func TestCallerDetailCountsWriterTransactionsAndCapsNames(t *testing.T) {
 			len(callerSnapshot()), other, maxCallers+1)
 	}
 }
+
+// A goals store read is named with the caller outside internal/goals, so the
+// barrier shows which lifecycle check asked for it.
+func TestWriterLabelNamesGoalsBarrierByItsUpstreamCaller(t *testing.T) {
+	const (
+		tx       = "dyna-agent/internal/database.transact"
+		write    = "dyna-agent/internal/state.(*Writer).Write"
+		list     = "dyna-agent/internal/goals.(*Store).list"
+		openHeld = "dyna-agent/internal/goals.(*Store).OpenHeldBy"
+		closed   = "dyna-agent/internal/worktrees.(*Store).SessionClosed"
+	)
+	tests := []struct {
+		name  string
+		stack []string
+		want  string
+	}{
+		{"goals barrier names its upstream caller", []string{tx, write, list, openHeld, closed}, list + " via " + closed},
+		{"other store keeps its own name", []string{tx, write, "dyna-agent/internal/worktrees.(*Store).Save"}, "dyna-agent/internal/worktrees.(*Store).Save"},
+		{"goalsvc is not the goals store", []string{tx, "dyna-agent/internal/goalsvc.(*Service).Note"}, "dyna-agent/internal/goalsvc.(*Service).Note"},
+		{"goals with no outside caller names itself", []string{tx, list}, list},
+		{"empty stack is unknown", []string{tx, write}, "unknown"},
+	}
+	for _, tc := range tests {
+		if got := writerLabel(tc.stack); got != tc.want {
+			t.Errorf("%s: writerLabel = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
