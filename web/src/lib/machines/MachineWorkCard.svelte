@@ -8,13 +8,13 @@
   import Chip from '../ui/Chip.svelte'
   import type { MachineWork, MachineWorkItem } from '../api/machine.ts'
   import { duration } from '../ui/format.ts'
-  import { cpuUseText, diskLimitText, memoryUseText, workHoldsText, workKindText, workWhoText } from './machines.ts'
+  import { cpuUseText, diskLimitText, memoryUseText, workHoldsText, workKindText, workLabelText, workWhoText } from './machines.ts'
 
   let { work, failed = false }: { work: MachineWork | null; failed?: boolean } = $props()
 </script>
 
 {#snippet item(unit: MachineWorkItem)}
-  <Row dense text={unit.label}>
+  <Row dense text={workLabelText(unit)}>
     {#snippet lead()}<Chip tone={unit.kind === 'job' ? 'iris' : ''} outline>{workKindText(unit.kind)}</Chip>{/snippet}
     {#snippet meta()}
       {#if workWhoText(unit)}<span>{workWhoText(unit)}</span>{/if}
@@ -24,6 +24,7 @@
     {/snippet}
     {#snippet trail()}
       {#if unit.kind === 'job'}<span class="id mono" title="Job ID">{unit.id}</span>{/if}
+      {#if unit.source?.head}<span class="id mono" title="Commit">{unit.source.head}</span>{/if}
       {#if unit.position === undefined}<span class="note">{duration(unit.since)}</span>{/if}
     {/snippet}
     {#snippet detail()}
