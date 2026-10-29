@@ -6,6 +6,7 @@ import (
 )
 
 func TestEnvironmentKeepsTheLaunchCredentials(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	base := []string{"PATH=/usr/bin", "GH_TOKEN=session-token", "ANTHROPIC_API_KEY=harness-key", "HOME=/home/owner"}
 	got, err := Environment(Meta{SessionID: "ses_test"}, base)
 	if err != nil {
