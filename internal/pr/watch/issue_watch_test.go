@@ -7,6 +7,29 @@ import (
 	"dyna-agent/internal/room"
 )
 
+// The tick stays due while an issue is watched, even with no PR watched. The
+// watch's room is missing, so its poll fails before any GitHub read; the
+// watched count still reports true.
+func TestIssueWatchKeepsTickDueWithoutPRWatch(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	s := &Service{}
+	dir := s.dataDir()
+	if err := issuewatch.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	watched, err := s.pollIssueWatches(t.Context())
+	if err != nil || watched {
+		t.Fatalf("no watch: watched=%v err=%v, want false and nil", watched, err)
+	}
+	if err := (issuewatch.Store{DataDir: dir}).Save(t.Context(), issuewatch.Watch{Room: "missing", Host: "github.com", Repo: "owner/repo", Number: 3}); err != nil {
+		t.Fatal(err)
+	}
+	watched, err = s.pollIssueWatches(t.Context())
+	if err == nil || !watched {
+		t.Fatalf("watched issue: watched=%v err=%v, want true and an error", watched, err)
+	}
+}
+
 // A watched issue reports a new comment and a state change once each. An edit
 // to a comment the cursor already passed is not news.
 func TestIssueWatchReportsOnlyNewFacts(t *testing.T) {
