@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"dyna-agent/internal/callerid"
@@ -19,9 +18,17 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+const (
+	installMarker        = ".dyna-installed"
+	installMarkerContent = "installed by install.sh\n"
+)
+
 // migrateStores lets startup tests inject a failing migration. Production and
 // the fake engine both run the shared ordered registry.
 var migrateStores = stores.Migrate
+
+// installedExecutable lets startup tests simulate a direct launch.
+var installedExecutable = fsutil.InstalledExecutable
 
 // ownStores makes this engine the one process that migrates dyna.db, and
 // migrates every store. A read-only engine never writes, so it does neither
@@ -46,7 +53,7 @@ func checkLiveMigration(dataDir, ownerDataDir string) error {
 	if ownerDataDir == "" || !sameFolder(dataDir, ownerDataDir) || os.Getenv("DYNA_ALLOW_DEV_MIGRATION") == "1" {
 		return nil
 	}
-	exe, err := fsutil.InstalledExecutable()
+	exe, err := installedExecutable()
 	if err == nil {
 		exe, err = filepath.Abs(exe)
 	}
@@ -60,16 +67,19 @@ func checkLiveMigration(dataDir, ownerDataDir string) error {
 	// installer uses ~/.local/bin; the WSL and managed images use /usr/local/bin.
 	home := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Clean(ownerDataDir))))
 	installed := []string{filepath.Join(home, ".local", "bin", "dyna"), "/usr/local/bin/dyna"}
-	if dir := os.Getenv("DYNA_INSTALL_DIR"); dir != "" {
-		installed = append(installed, filepath.Join(dir, "dyna"))
-	}
 	for _, path := range installed {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err == nil && resolved == exe {
 			return nil
 		}
 	}
-	return fmt.Errorf("migrate dyna.db: only the installed engine may migrate the default data directory %s; running executable is %s, not %s; for owner-directed hand recovery set DYNA_ALLOW_DEV_MIGRATION=1", ownerDataDir, exe, strings.Join(installed, " or "))
+	// install.sh leaves a marker beside custom installations, so a direct
+	// launch does not depend on the installer's temporary environment.
+	marker, err := os.ReadFile(filepath.Join(filepath.Dir(exe), installMarker))
+	if err == nil && string(marker) == installMarkerContent {
+		return nil
+	}
+	return fmt.Errorf("migrate dyna.db: only the installed engine may migrate the default data directory %s; running executable is %s, not %s or %s, and has no install.sh marker; for owner-directed hand recovery set DYNA_ALLOW_DEV_MIGRATION=1", ownerDataDir, exe, installed[0], installed[1])
 }
 
 func sameFolder(a, b string) bool {

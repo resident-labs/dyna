@@ -118,6 +118,10 @@ esac
 	if string(installed) != string(releaseBody) {
 		t.Fatalf("installed body = %q, want %q", installed, releaseBody)
 	}
+	marker, err := os.ReadFile(filepath.Join(installDir, ".dyna-installed"))
+	if err != nil || string(marker) != "installed by install.sh\n" {
+		t.Fatalf("install marker = %q, %v", marker, err)
+	}
 	stillOld, err := io.ReadAll(oldHandle)
 	if err != nil {
 		t.Fatal(err)

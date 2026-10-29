@@ -193,17 +193,28 @@ func TestLiveMigrationRequiresInstalledExecutable(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts a configured custom install directory", func(t *testing.T) {
+	t.Run("accepts a custom install marker without environment", func(t *testing.T) {
 		keepSchemaOwner(t)
 		ownerData, _ := newPaths(t)
 		installDir := filepath.Join(t.TempDir(), "opt", "dyna")
 		if err := os.MkdirAll(installDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(exe, filepath.Join(installDir, "dyna")); err != nil {
+		binary, err := os.ReadFile(exe)
+		if err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("DYNA_INSTALL_DIR", installDir)
+		customExecutable := filepath.Join(installDir, "dyna")
+		if err := os.WriteFile(customExecutable, binary, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		savedExecutable := installedExecutable
+		installedExecutable = func() (string, error) { return customExecutable, nil }
+		t.Cleanup(func() { installedExecutable = savedExecutable })
+		if err := os.WriteFile(filepath.Join(installDir, installMarker), []byte(installMarkerContent), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("DYNA_INSTALL_DIR", "")
 		readOnly, status, _, cause := startMode(ownerData, false, "", ownerData)
 		t.Cleanup(func() { database.Close(ownerData) })
 		if readOnly || cause != nil {

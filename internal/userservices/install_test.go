@@ -263,13 +263,6 @@ func TestWriteCarriesTheInstallPathIntoTheUnits(t *testing.T) {
 			t.Fatalf("%s lacks the install PATH %q:\n%s", name, want, body)
 		}
 	}
-	body, err := os.ReadFile(filepath.Join(dir, Engine))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := `Environment="DYNA_INSTALL_DIR=/opt/dyna/bin"`; !strings.Contains(string(body), want) {
-		t.Fatalf("engine lacks the configured install directory %q:\n%s", want, body)
-	}
 }
 
 func TestEngineUnitBoundsMemory(t *testing.T) {
