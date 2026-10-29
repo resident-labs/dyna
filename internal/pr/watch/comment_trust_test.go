@@ -193,3 +193,30 @@ func TestAuthenticatedOwnerIsNotPullAuthor(t *testing.T) {
 		t.Fatalf("pull author text was not wrapped as outside data: %q", got)
 	}
 }
+
+func TestDismissedOutsideCommentStaysOutOfReviewerContext(t *testing.T) {
+	e, _ := steerEnv(t)
+	holdOutsideComments(t)
+	e.s.Triage = keepAllComments{}
+	e.addComment(702, "issue-comments", "dismissed payload", "outsider")
+	e.f.Pull.Updated = e.clock.Add(time.Minute).Format(time.RFC3339)
+	e.tick()
+	if err := e.s.DismissComment(e.record().Key, "issue-comments:702"); err != nil {
+		t.Fatal(err)
+	}
+	// The default setting is deliver, so the dismissed comment now triages as keep.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments, err := e.s.reviewComments(context.Background(), st, e.record())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, comment := range comments {
+		if strings.Contains(comment.Body, "dismissed payload") {
+			t.Fatalf("dismissed comment reached review context: %+v", comment)
+		}
+	}
+}
