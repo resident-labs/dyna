@@ -6,6 +6,7 @@ import (
 	"context"
 	"dyna-agent/internal/transcript"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -274,9 +275,12 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 
 // lateStart looks up the session a StartSubagent call created when the engine
 // answered past its deadline. The caller names the session, so the lookup is
-// exact, and no second start is needed.
+// exact, and no second start is needed. A local late call and an engine reply
+// with the outcome-unknown code both count.
 func lateStart(m *subagent.Manager, id string, err error, stderr io.Writer) (subagent.Info, bool) {
-	if id == "" || !(callspec.IsLate(err) || callspec.IsCutOff(err) || strings.Contains(err.Error(), "session "+id+" already exists")) {
+	var remote *engineclient.RemoteError
+	outcomeUnknown := errors.As(err, &remote) && remote.Code == callspec.CodeOutcomeUnknown
+	if id == "" || !(callspec.IsLate(err) || outcomeUnknown || callspec.IsCutOff(err) || strings.Contains(err.Error(), "session "+id+" already exists")) {
 		return subagent.Info{}, false
 	}
 	info, lookupErr := m.Store.Info(id)

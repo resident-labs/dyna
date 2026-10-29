@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/roomsvc"
@@ -145,6 +147,11 @@ func TestLateStartReportsTheCreatedSession(t *testing.T) {
 		if _, ok := lateStart(m, id, cut, &stderr); !ok {
 			t.Fatalf("%v was not reported as a created start", cut)
 		}
+	}
+	// The engine's outcome-unknown reply is a late answer too.
+	outcome := &engineclient.RemoteError{Status: http.StatusUnprocessableEntity, Code: callspec.CodeOutcomeUnknown, Message: "outcome unknown: engine did not answer StartSubagent in 600 s"}
+	if _, ok := lateStart(m, id, outcome, &stderr); !ok {
+		t.Fatal("an outcome-unknown reply was not reported as a created start")
 	}
 	// Any other failure is not a late answer.
 	if _, ok := lateStart(m, id, errors.New("socket closed"), &stderr); ok {
