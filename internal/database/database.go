@@ -243,7 +243,7 @@ func openDatabase(dataDir string) (*sql.DB, error) {
 	// connection's WAL switch, and the open must still succeed. A disk that
 	// truly hangs keeps Open waiting; do not add a timeout back, because
 	// cancelling never stopped the sync, it only left it running behind.
-	err = retryBusy(ctx, func() error {
+	err = Retry(ctx, func() error {
 		openAttempt(ctx)
 		attempt := context.WithoutCancel(ctx)
 		var exists bool
@@ -373,7 +373,7 @@ func transact(ctx context.Context, db *sql.DB, update func(*sql.Conn) error) err
 			writeHold.record(now().Sub(began))
 		}
 	}()
-	err = retryBusy(begin, func() error { return beginImmediate(begin, conn) })
+	err = Retry(begin, func() error { return beginImmediate(begin, conn) })
 	if err != nil {
 		return err
 	}
@@ -501,11 +501,12 @@ type migrated struct {
 
 var migrations sync.Map // migrated -> version (int)
 
-// busyCount counts SQLITE_BUSY answers that were retried, for the engine's
-// Health call.
+// busyCount counts transient lock answers (SQLITE_BUSY, SQLITE_PROTOCOL)
+// that were retried, for the engine's Health call.
 var busyCount atomic.Int64
 
-// BusyRetries returns how many SQLITE_BUSY answers this process retried.
+// BusyRetries returns how many transient SQLite lock answers this process
+// retried.
 func BusyRetries() int64 { return busyCount.Load() }
 
 // waiting counts writers that wait for the in-process writer lock.
@@ -519,11 +520,16 @@ func Waiting() int64 { return waiting.Load() }
 const (
 	sqliteBusy   = 5
 	sqliteLocked = 6
+	// sqliteProtocol is WAL's answer when its wal-index stayed contended past
+	// SQLite's own retries, under IO pressure (D-448).
+	sqliteProtocol = 15
 )
 
 // primaryCode is err's SQLite primary result code, or 0 when err does not
-// come from SQLite.
-func primaryCode(err error) int {
+// come from SQLite. Tests replace it to feed a result code through the retry
+// paths, because a wal-index contended enough to answer SQLITE_PROTOCOL
+// cannot be staged deterministically.
+var primaryCode = func(err error) int {
 	var sqliteError *sqlite.Error
 	if !errors.As(err, &sqliteError) {
 		return 0
@@ -538,20 +544,25 @@ func Busy(err error) bool {
 	return code == sqliteBusy || code == sqliteLocked
 }
 
-// retryBusy always makes the first attempt, and checks ctx only after an
-// SQLITE_BUSY failure, so a deadline stops retries but never prevents the
-// first try.
-func retryBusy(ctx context.Context, try func() error) error {
+// Retry always makes the first attempt, and checks ctx only after a
+// transient lock answer, so a deadline stops retries but never prevents the
+// first try. A transient lock answer is SQLITE_BUSY, or WAL's SQLITE_PROTOCOL,
+// which a wal-index contended past SQLite's own retries returns; both pass
+// when the other connection ends its transaction or lets the wal-index
+// settle. try must repeat its whole read, because a retry runs it from the
+// start. When the deadline ends first, the returned error keeps both the
+// cancellation and the last SQLite answer.
+func Retry(ctx context.Context, try func() error) error {
 	for {
 		err := try()
-		if primaryCode(err) != sqliteBusy {
+		if code := primaryCode(err); code != sqliteBusy && code != sqliteProtocol {
 			return err
 		}
 		busyCount.Add(1)
 		busyRetry()
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("database stayed busy: %w (%v)", ctx.Err(), err)
+			return fmt.Errorf("database stayed busy: %w: %w", ctx.Err(), err)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
