@@ -32,7 +32,7 @@ func TestPiProfileRefusesAnthropicOAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundles := manager(t)
-	install(t, bundles, "pi", "1.3.0-dyna.8")
+	install(t, bundles, "pi", "1.3.0-dyna.9")
 	r := &Runtime{Bundles: bundles, Accounts: accounts, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(t.TempDir(), "generations")}
 	p := profile.Profile{Name: "pi-claude", Harness: "pi", Model: "anthropic/claude-fable-5", RuntimeVersion: piForkVersion}
 	if _, _, err := r.Prepare(context.Background(), p, nil); !errors.Is(err, ErrPiAnthropicOAuth) {
@@ -47,7 +47,7 @@ func TestPiProfileRefusesAnthropicOAuth(t *testing.T) {
 // caller asks for the anthropic provider directly.
 func TestPiSignInRefusesAnthropicOAuth(t *testing.T) {
 	r := providerKeysRuntime(t)
-	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.8")
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.9")
 	if _, err := r.beginPiProviderSignIn(bundle.Executable, "", accountstore.ProviderAnthropic); !errors.Is(err, ErrPiAnthropicOAuth) {
 		t.Fatalf("Pi anthropic sign-in = %v, want the Anthropic OAuth refusal", err)
 	}

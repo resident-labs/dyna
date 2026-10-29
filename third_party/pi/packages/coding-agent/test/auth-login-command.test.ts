@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Model, OAuthAuth, OAuthCredential, Provider } from "@earendil-works/pi-ai";
@@ -184,6 +184,46 @@ describe("native auth refresh command", () => {
 			await main(["auth", "refresh", "--provider", "openai-codex", "--json"]);
 			expect(output).toEqual([JSON.stringify({ status: "no_credential" })]);
 			expect(process.exitCode).toBe(3);
+		} finally {
+			process.exitCode = previousExitCode;
+			if (previousAgentDir === undefined) delete process.env[ENV_AGENT_DIR];
+			else process.env[ENV_AGENT_DIR] = previousAgentDir;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("loads a configured OAuth provider for refresh", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "pi-auth-refresh-configured-"));
+		const previousAgentDir = process.env[ENV_AGENT_DIR];
+		const previousExitCode = process.exitCode;
+		process.env[ENV_AGENT_DIR] = dir;
+		writeFileSync(
+			join(dir, "models.json"),
+			JSON.stringify({
+				providers: {
+					"radius-dev": { name: "Radius dev", baseUrl: "https://radius.example.test", oauth: "radius" },
+				},
+			}),
+		);
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				"radius-dev": {
+					type: "oauth",
+					access: "fake-access",
+					refresh: "fake-refresh",
+					expires: Date.now() + 60 * 60 * 1000,
+				},
+			}),
+		);
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected network request"));
+		const output: string[] = [];
+		vi.spyOn(console, "log").mockImplementation((line) => output.push(String(line)));
+		try {
+			await main(["auth", "refresh", "--provider", "radius-dev", "--json"]);
+			expect(output).toEqual([JSON.stringify({ status: "renewed" })]);
+			expect(process.exitCode).toBe(0);
+			expect(fetchSpy).not.toHaveBeenCalled();
 		} finally {
 			process.exitCode = previousExitCode;
 			if (previousAgentDir === undefined) delete process.env[ENV_AGENT_DIR];
