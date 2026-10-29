@@ -189,6 +189,7 @@ func exitWith(t *testing.T, code int) error {
 // that local path, so submission refuses it before the node starts anything.
 func TestJobScratchEnvironment(t *testing.T) {
 	storetest.Isolate(t)
+	t.Setenv(scratch.RootEnv, t.TempDir())
 	const session = "ses_scratch"
 	scratchDir := filepath.Join(scratch.Root(), session)
 
@@ -225,6 +226,7 @@ func TestJobScratchEnvironment(t *testing.T) {
 			{"${DYNA_SCRATCH}/run.sh"},
 			{filepath.Join(scratchDir, "run.sh")},
 			{"bash", "-c", "cat " + filepath.Join(scratchDir, "input")},
+			{"bash", "-c", "cd " + scratchDir + " && ls"},
 		} {
 			_, err := svc.Submit(t.Context(), Input{Node: "remote", RoomID: "dyna", Session: session, Command: command, Host: true})
 			var scratchErr *RemoteScratchError
