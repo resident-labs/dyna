@@ -4,9 +4,17 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestDisplayBodyUsesImmutableFileSnapshot(t *testing.T) {
+	payload := GHPayload{Argv: []string{"pr", "create", "--body-file", "body.md"}, Files: []FileSnapshot{{Path: "body.md", Data: []byte("approved body")}}}
+	if got := payload.DisplayBody(); got != "approved body" {
+		t.Fatalf("body = %q", got)
+	}
+}
 
 func TestApprovedRequestExecutesAndDeliversResult(t *testing.T) {
 	f := newFixture(t)
@@ -62,6 +70,34 @@ func TestApprovedRequestRunsOnceAfterRestart(t *testing.T) {
 	got, err := restarted.Get(f.actor(f.child), f.rec.ID, r.ID)
 	if err != nil || got.State != StateDone || got.Result.Actor != f.parent.Address() {
 		t.Fatalf("restarted result = %+v, %v", got, err)
+	}
+}
+
+func TestInterruptedExecutionIsUncertainAndNeverReplays(t *testing.T) {
+	f := newFixture(t)
+	r := f.create(t, ClassAgent)
+	if _, err := f.service.Decide(context.Background(), f.actor(f.parent), DecisionInput{Room: f.rec.ID, RequestID: r.ID, Action: ActionApprove}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.markRunning(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(f.rooms, f.service.SessionRoot)
+	restarted.Now = f.service.Now
+	calls := 0
+	restarted.Register(Kind("fake"), func(context.Context, Request) (Result, error) {
+		calls++
+		return Result{}, nil
+	})
+	if err := restarted.RunApproved(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Fatalf("interrupted write ran %d times", calls)
+	}
+	got, err := restarted.Get(f.actor(f.child), f.rec.ID, r.ID)
+	if err != nil || got.State != StateFailed || !strings.Contains(got.Result.Reason, "uncertain") {
+		t.Fatalf("reconciled request = %+v, %v", got, err)
 	}
 }
 
