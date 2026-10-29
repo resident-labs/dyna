@@ -76,6 +76,7 @@ while waiting, before the old turn stops.`, Args: cobra.ExactArgs(1), RunE: func
 	cmd.Flags().StringVar(&opts.Model, "model", "", "model override (default: the profile's model)")
 	cmd.Flags().IntVar(&opts.WaitSeconds, "wait-seconds", 30, "seconds to wait for a written handoff (0 to 120)")
 	cmd.Flags().BoolVar(&opts.Retry, "retry", false, "retry a failed or cancelled transfer")
+	cmd.Flags().StringVar(&opts.Dir, "dir", "", "root override: existing task worktree for a fresh conversation (default: the session's current or newest retained worktree)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print durable transfer state as JSON")
 	statusJSON := false
 	status := &cobra.Command{Use: "status <session>", Short: "Show transfer progress and recovery information", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
