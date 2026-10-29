@@ -545,6 +545,9 @@ func argument(argv []string, flag string) string {
 		if value, ok := strings.CutPrefix(arg, flag+"="); ok {
 			return value
 		}
+		if len(flag) == 2 && strings.HasPrefix(arg, flag) {
+			return strings.TrimPrefix(arg[len(flag):], "=")
+		}
 	}
 	return ""
 }

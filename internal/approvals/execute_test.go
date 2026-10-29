@@ -10,9 +10,11 @@ import (
 )
 
 func TestDisplayBodyUsesImmutableFileSnapshot(t *testing.T) {
-	payload := GHPayload{Argv: []string{"pr", "create", "--body-file", "body.md"}, Files: []FileSnapshot{{Path: "body.md", Data: []byte("approved body")}}}
-	if got := payload.DisplayBody(); got != "approved body" {
-		t.Fatalf("body = %q", got)
+	for _, argv := range [][]string{{"pr", "create", "--body-file", "body.md"}, {"pr", "create", "--body-file=body.md"}, {"pr", "create", "-Fbody.md"}} {
+		payload := GHPayload{Argv: argv, Files: []FileSnapshot{{Path: "body.md", Data: []byte("approved body")}}}
+		if got := payload.DisplayBody(); got != "approved body" {
+			t.Fatalf("body = %q for %q", got, argv)
+		}
 	}
 }
 

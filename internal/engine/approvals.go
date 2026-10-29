@@ -15,6 +15,9 @@ import (
 
 func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput) (approvals.Request, error) {
 	actor := authority.Of(ctx)
+	if err := ghclient.ValidateFileSnapshots(in.Argv, in.Files); err != nil {
+		return approvals.Request{}, err
+	}
 	ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, actor.Room), s.rooms.Notify.Rooms)
 	class, err := ghclient.ClassifyForApproval(ctx, "", in.Cwd, in.Argv)
 	if err != nil {
