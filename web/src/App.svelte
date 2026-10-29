@@ -132,7 +132,7 @@
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
   import type { Room, Member, Post, Opened, Question, Visual, ProfileChoice, Attachment, CloseOutcome, RoomLimitField } from './lib/api/room.ts'
   import type { AttachmentRef } from './lib/api/engine.ts'
-  import type { ApprovalDecision } from './lib/api/approvals.ts'
+  import type { ApprovalDecision, ApprovalOpen } from './lib/api/approvals.ts'
   import type { Session as SessionData, QueueItem, MemberProfile } from './lib/api/session.ts'
   import type { Goal } from './lib/api/goal.ts'
   import type { RunList, RunDetail, RunSummary } from './lib/api/workflow.ts'
@@ -631,8 +631,15 @@
     dockRequest++
     dockReview = { request: dockRequest, id, run: true }
   }
+  let approvals = $state<ApprovalOpen[]>([])
+  async function loadApprovals() {
+    const id = roomId
+    const open = id ? await api.approvalList(id) : null
+    if (id === roomId) approvals = open ?? []
+  }
   async function decideApproval(id: string, action: ApprovalDecision, reason: string) {
     await api.approvalDecide(roomId, id, action, reason)
+    await loadApprovals()
   }
   async function declineTerminalRequest(id: string, reason: string) {
     await api.termRequestReport(roomId, id, 'declined', reason, false)
@@ -721,6 +728,7 @@
     runsError = ''
     workflowData.loadJobs()
     loadQuestions()
+    loadApprovals()
   }
   function visitRoomControls(id: string) {
     roomSessionController?.destroy()
@@ -1292,6 +1300,7 @@
     if (!roomId) return
     loadMembers()
     loadQuestions()
+    loadApprovals()
     loadPins()
     loadSync()
     loadIssues()
@@ -1430,6 +1439,7 @@
     if (ev.kind === 'questions' && evRoom === roomId && !item) loadQuestions()
     if (reloadsUnread(ev, roomId, item)) soonRooms('feed')
     if (ev.kind === 'posts' && evRoom === roomId) {
+      loadApprovals()
       if (changesVisuals(ev)) loadVisuals()
       if (roomSessionController && (roomControls?.loading || roomControls?.state?.paused !== false)) roomSessionController.load()
     }
@@ -1958,7 +1968,7 @@
             <Runs {room} list={runs} error={runsError} onopen={showRun} onstart={() => (starting = true)} />
           {/if}
         {:else}
-          <Feed {goals} {profiles} onnewprofile={() => openSettings('profiles')} bind:this={feedView} bind:stuck={feedAtBottom} label={viewLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} onreviewrequest={runTerminalRequest} ondeclinerequest={declineTerminalRequest} ondecideapproval={decideApproval} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
+          <Feed {goals} {profiles} onnewprofile={() => openSettings('profiles')} bind:this={feedView} bind:stuck={feedAtBottom} label={viewLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} onreviewrequest={runTerminalRequest} ondeclinerequest={declineTerminalRequest} {approvals} ondecideapproval={decideApproval} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
           <!-- Keyed: staged files belong to one room and never follow a switch. -->
           {#key room.id + view}
             <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={viewLabel} prepareText={(text: string) => prepareFeedText(text, viewLead ?? null, feedViews, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} onpending={(pending) => noteComposerWork('feed:' + room.id + ':' + view, pending)} />

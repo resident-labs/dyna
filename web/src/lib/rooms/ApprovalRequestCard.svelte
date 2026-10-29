@@ -5,31 +5,31 @@
   // "Deny…" (a denial needs a reason). Afterwards, or when another session
   // holds it, it is a quiet row. It reads the typed payload, never the text.
   import type { EventNotice } from '../api/room.ts'
-  import type { ApprovalDecision } from '../api/approvals.ts'
+  import type { ApprovalDecision, ApprovalOpen } from '../api/approvals.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { approvalRequestedEvent } from './eventPayloads.ts'
-  import type { ApprovalProgress } from './eventPayloads.ts'
   import { errorText } from '../errorText.ts'
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
 
-  let { post, notice = post.notice, surface = 'feed', approval = undefined, ondecideapproval = undefined }: {
+  let { post, notice = post.notice, surface = 'feed', approval = undefined, latest = true, ondecideapproval = undefined }: {
     post: EventPost
     notice?: EventNotice
     surface?: EventSurface
-    approval?: ApprovalProgress
+    approval?: ApprovalOpen
+    latest?: boolean
     ondecideapproval?: (id: string, action: ApprovalDecision, reason: string) => Promise<unknown>
   } = $props()
 
   let asked = $derived(approvalRequestedEvent(post))
-  let waiting = $derived(!!asked && asked.at === 'owner' && approval?.holder === 'owner' && !approval.decided && !approval.state)
+  let waiting = $derived(!!asked && approval?.at === 'owner' && latest)
   let denying = $state(false)
   let reason = $state('')
   let busy = $state(false)
   let error = $state('')
   let what = $derived(asked?.command ?? asked?.tool ?? 'a write')
   let where = $derived(asked?.repository ?? asked?.server ?? '')
-  let chips = $derived(approval?.state === 'expired' ? [{ label: 'expired', failure: true }] : approval?.decided ? [{ label: approval.decided === 'deny' ? 'denied' : 'approved', failure: approval.decided === 'deny' }] : asked && !waiting ? [{ label: `waits on ${asked.at}` }] : [])
+  let chips = $derived(approval && !waiting && approval.at !== 'owner' ? [{ label: `waits on ${approval.at}` }] : [])
 
   async function decide(action: ApprovalDecision) {
     if (busy || !asked) return
