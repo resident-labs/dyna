@@ -41,6 +41,7 @@ It never deletes the branch. It runs `git worktree prune` after cleanup.
 Ignored generated files, such as `node_modules`, do not make a worktree dirty.
 Their modification times still count as activity for an unknown owner.
 Dyna infers hand-created tree owners from session working directories and recorded workflow paths.
+A run folder with no stored run and no live workflow coordinator does not count as an owner.
 Every session or workflow reference must be closed before cleanup removes that tree.
 The report identifies the inferred session owner.
 Dyna also keeps every tree whose recorded workflow is still running.
