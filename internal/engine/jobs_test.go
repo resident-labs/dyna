@@ -61,6 +61,10 @@ func (s jobMachineSource) GetLocal(context.Context) (machines.Machine, error) {
 	return s.local, nil
 }
 
+func (s jobMachineSource) List(context.Context) ([]machines.Machine, error) {
+	return []machines.Machine{s.local}, nil
+}
+
 // The RPC boundary validates names, removes repeat requests, and stores the
 // typed result without starting an engine or a node process.
 func TestRunJobValidatesAndStoresResources(t *testing.T) {

@@ -89,6 +89,10 @@ Each item in `checks` supports these fields:
 - `name` is the provider and display name. It defaults to `id`.
 - `command` is required unless `job` is set. Dyna runs it with Bash from
   `/workspace` in a container, or from the check worktree for a host check.
+- `labels` is an optional list of machine labels. A run that selects this check
+  needs one machine with every listed label, in addition to the `ci` label.
+  Names use lowercase letters, digits, `-`, `_`, and `.`. A label can also
+  be `key=value`, such as `arch=x86_64`.
 - `image` is the container image. It is required unless `host: true` or `job`
   is set.
 - `job` names a GitHub Actions job instead of a command, so one definition runs
@@ -124,6 +128,22 @@ Each item in `checks` supports these fields:
   container build or a linker with many object files. A node runs only a few
   heavy checks at once, beside any light ones; `io: light`, the default, needs
   no such room. See [Resource limits](#resource-limits).
+
+For example, this check needs a probed Linux GPU machine:
+
+```yaml
+  - id: gpu-test
+    command: go test ./internal/gpu
+    image: golang:1.26
+    labels: [os=linux, gpu]
+```
+
+The scheduler combines the labels of every check in a run because one machine
+runs that run's checks. Automatic CI and `dyna git ci run` use the same filter.
+Owner labels and probed labels both match. A machine probe supplies
+`os=<name>`, `arch=<name>`, `gpu` when it finds a GPU, and `docker` or
+`containerd` when it finds that runtime. `dyna machine show N` and the machine
+page show owner and probed labels separately.
 
 Dyna supplies isolated home and temporary directories, report paths, a safe Git
 directory setting, and `JUNIT_REPORT_PATH`. The runner always writes
@@ -391,7 +411,8 @@ dyna git ci show HEAD --json
 
 A manual run uses the only enabled CI machine in the registry and prints its
 name. When several machines are enabled, the run asks for `--node <name>`.
-The `localci.remote` setting no longer selects the machine.
+The `localci.remote` setting no longer selects the machine. The selected suites
+determine the run's check labels, and the machine must have all of them.
 
 ## Host checks
 

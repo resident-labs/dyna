@@ -375,8 +375,9 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 			// and that trial reports the failure on its own read. The tick keeps
 			// taking the work the fleet can hold.
 			var blocked localci.SuiteBlockedError
-			if errors.As(err, &blocked) {
-				log.Printf("local CI: %v", blocked)
+			var labelsBlocked localci.LabelsBlockedError
+			if errors.As(err, &blocked) || errors.As(err, &labelsBlocked) {
+				log.Printf("local CI: %v", err)
 				continue
 			}
 			return err
@@ -546,15 +547,20 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 			return false, nil
 		}
 	}
-	// Only a machine that allows the run's room and every suite of it takes the
-	// run. A suite that no machine of that room allows never arrives, so the
-	// caller gets a typed error that names it; a fleet that is only busy or
-	// whose disks are full keeps waiting, in the node queue.
+	// Only a machine that allows the run's room and suites and carries every
+	// label of its checks takes the run. A requirement no machine of that room
+	// satisfies fails at once; a fleet that is only busy keeps waiting.
+	labels := plan.execution.LabelsForSuites(plan.suites)
 	suited := localci.NodesForSuites(enabled, plan.suites)
-	chosen, retryResumed = s.chooseCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom, nodeFloor)
+	eligible := localci.NodesForLabels(suited, labels)
+	chosen, retryResumed = s.chooseCINode(ctx, registry, repo, job.head, eligible, job.record.RoomID, retriedFrom, nodeFloor)
 	resumed = resumed || retryResumed
 	if chosen == nil {
-		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
+		roomNodes := localci.NodesForRoom(enabled, job.record.RoomID)
+		if err := localci.BlockedSuite(roomNodes, plan.suites); err != nil {
+			return false, err
+		}
+		return false, localci.BlockedLabels(localci.NodesForSuites(roomNodes, plan.suites), labels)
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	run := &registeredCIRun{

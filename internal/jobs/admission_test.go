@@ -86,6 +86,9 @@ func (g *gatedMachines) Get(_ context.Context, _ string) (machines.Machine, erro
 func (g *gatedMachines) GetLocal(context.Context) (machines.Machine, error) {
 	return g.machine, nil
 }
+func (g *gatedMachines) List(context.Context) ([]machines.Machine, error) {
+	return []machines.Machine{g.machine}, nil
+}
 
 // A concurrent check that reserves the last CPUs before the job's decision
 // must be counted by the job's pass, even if both started together.

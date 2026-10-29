@@ -33,8 +33,12 @@ func trialStartEnv(t *testing.T, nodeSuites []string) (s *Service, r Record, bra
 	changeGit(t, repoDir, "remote", "add", "origin", "https://github.com/owner/repo.git")
 	registry := localci.Store{DataDir: dataDir}
 	// The engine host row carries no ci label, so the worker is the one CI
-	// machine; nodeSuites limits what it takes.
-	if _, err := (machines.Store{DataDir: dataDir}).Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}, Suites: nodeSuites}); err != nil {
+	// machine; suite labels limit what it takes.
+	labels := []string{machines.LabelCI}
+	for _, suite := range nodeSuites {
+		labels = append(labels, "suite="+suite)
+	}
+	if _, err := (machines.Store{DataDir: dataDir}).Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: labels}); err != nil {
 		t.Fatal(err)
 	}
 	rooms := &room.Store{Root: t.TempDir()}
