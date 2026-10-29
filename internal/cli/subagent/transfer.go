@@ -48,8 +48,10 @@ replacement. Naming the profile and model the session already runs starts
 another conversation in the same session instead.
 Use --fresh to drop the runtime pin and start a new conversation with a handoff.
 Without --profile, --fresh uses the session’s current profile.
-Use --retry after a failed or cancelled attempt. Replacement startup has a
-60-second output deadline. Startup failure restores the prior profile and
+Use --retry after a failed or cancelled attempt. Replacement startup waits
+for the new model's first output up to the harness startup limit (5 minutes,
+and longer while compaction runs); transfer status shows that window.
+Startup failure restores the prior profile and
 native resume ID; it keeps the failed turn readable. Cancel is available
 while waiting, before the old turn stops.`, Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		if opts.Profile == "" && !opts.Fresh {
@@ -88,7 +90,27 @@ while waiting, before the old turn stops.`, Args: cobra.ExactArgs(1), RunE: func
 			fmt.Fprintln(c.OutOrStdout(), "No transfer.")
 			return nil
 		}
-		fmt.Fprintf(c.OutOrStdout(), "Transfer %s: %s\n%s → %s / %s\nDeadline: %s\nSource: %s\nReason: %s\n", t.ID, t.Phase, t.PreviousProfile, t.Profile, t.Model, t.Deadline.Format(time.RFC3339), t.Source, t.Reason)
+		// The window that applies now: the handoff deadline while the old model
+		// can still answer, the startup deadline while the replacement must
+		// produce its first output, and the end time once it is over.
+		window := fmt.Sprintf("Deadline: %s", t.Deadline.Format(time.RFC3339))
+		switch t.Phase {
+		case "starting":
+			startup := t.StartupDeadline
+			if startup.IsZero() {
+				startup = t.Deadline
+			}
+			note := ""
+			if t.CompactionExtended {
+				note = "; extended once for compaction"
+			}
+			window = fmt.Sprintf("Startup deadline: %s (waits for the new model's first output%s)", startup.Format(time.RFC3339), note)
+		case "completed", "failed", "cancelled":
+			if !t.Ended.IsZero() {
+				window = fmt.Sprintf("Ended: %s", t.Ended.Format(time.RFC3339))
+			}
+		}
+		fmt.Fprintf(c.OutOrStdout(), "Transfer %s: %s\n%s → %s / %s\n%s\nSource: %s\nReason: %s\n", t.ID, t.Phase, t.PreviousProfile, t.Profile, t.Model, window, t.Source, t.Reason)
 		if t.Error != "" {
 			fmt.Fprintf(c.OutOrStdout(), "Error: %s\nThe prior profile and native resume ID are available. Fix startup and repeat the transfer command with --retry.\n", t.Error)
 		}
