@@ -301,7 +301,7 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 }
 
 func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, snap Snapshot, policy ChangePolicy) error {
-	if snap.Pull.State == "closed" {
+	if snap.Pull.State == "closed" || upstreamPR(r, s.roomUpstreams()) {
 		return nil
 	}
 	max, allowed, err := policy.TestBudget()
