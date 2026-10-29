@@ -2,7 +2,6 @@ package ghclient
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/shellquote"
 )
 
 // installFakeGH isolates executable lookup from the live session environment.
@@ -35,38 +35,13 @@ func gitConfigValue(env map[string]string, key string) string {
 	return ""
 }
 
-// TestSetBranchUpstreamRecordsTracking covers the success path of a
-// push.autoSetupRemote engine push: the guard records the tracking
-// configuration in the worker repository, as git would.
-func TestSetBranchUpstreamRecordsTracking(t *testing.T) {
-	dir := t.TempDir()
-	if out, err := exec.Command("/usr/bin/git", "init", "-q", dir).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, out)
-	}
-	t.Setenv(GitBinaryEnv, "/usr/bin/git")
-	t.Chdir(dir)
-	ref := &UpstreamRef{Branch: "topic", Remote: "origin", Merge: "refs/heads/topic"}
-	if err := setBranchUpstream(context.Background(), os.Environ(), ref); err != nil {
-		t.Fatalf("setBranchUpstream: %v", err)
-	}
-	for key, want := range map[string]string{
-		"branch.topic.remote": "origin",
-		"branch.topic.merge":  "refs/heads/topic",
-	} {
-		got, err := exec.Command("/usr/bin/git", "config", "--get", key).Output()
-		if err != nil || strings.TrimSpace(string(got)) != want {
-			t.Fatalf("%s = %q (%v), want %q", key, got, err, want)
-		}
-	}
-}
-
 func TestSessionUsesTheRoomAccount(t *testing.T) {
 	records := setupRooms(t, "resident-labs/personal", "work/private")
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_REPO", "unscoped/other")
-	installFakeGH(t, `#!/bin/sh
+	bin := installFakeGH(t, `#!/bin/sh
 case "$1 $2" in
 "auth status") echo '{"hosts":{"github.com":[{"login":"personal"},{"login":"work"}]}}';;
 "auth token") case "$*" in *personal*) echo personal-secret;; *work*) echo work-secret;; esac;;
@@ -80,8 +55,9 @@ esac
 			t.Fatal(err)
 		}
 		env := session.Env
-		if env["GH_TOKEN"] != "" || env["GH_HOST"] != "github.com" || env["GH_REPO"] != "" {
-			t.Fatal("session did not hide the token and retain internal account access")
+		want := []string{"personal-secret", "work-secret"}[i]
+		if env["GH_TOKEN"] != want || env["GH_HOST"] != "github.com" || env["GH_REPO"] != "" {
+			t.Fatal("session has the wrong repository credentials")
 		}
 		target, err := os.Readlink(filepath.Join(scratch, "github-bin", "gh"))
 		if err != nil {
@@ -93,12 +69,13 @@ esac
 		if i == 1 && (target != "/real/dyna" || env[ReadOnlyEnv] != "1") {
 			t.Fatal("read-only room did not receive the gh guard")
 		}
-		// No room hands a credential helper to the worker: pushes carry their
-		// credentials behind the engine, so nothing here can answer git.
-		for key, value := range env {
-			if strings.HasPrefix(key, "GIT_CONFIG_KEY_") && strings.HasPrefix(value, "credential.") {
-				t.Fatalf("session git config installs a credential helper: %s=%s", value, gitConfigValue(env, value))
-			}
+		helperKey := "credential.https://github.com/" + []string{"resident-labs/personal", "work/private"}[i] + ".helper"
+		helper := gitConfigValue(env, helperKey)
+		if i == 0 && helper != "!"+shellquote.Quote(filepath.Join(bin, "gh"))+" auth git-credential" {
+			t.Fatalf("write room git has no gh credential helper: %q", helper)
+		}
+		if i == 1 && helper != "" {
+			t.Fatal("read-only room git received a push credential helper")
 		}
 		inherited := append([]string{}, os.Environ()...)
 		for k, v := range env {
@@ -111,7 +88,7 @@ esac
 		if err != nil {
 			t.Fatal(err)
 		}
-		if child.Env["GH_TOKEN"] != "" || child.Env["GIT_CONFIG_COUNT"] != env["GIT_CONFIG_COUNT"] {
+		if child.Env["GH_TOKEN"] != want || child.Env["GIT_CONFIG_COUNT"] != env["GIT_CONFIG_COUNT"] {
 			t.Fatal("child changed account or accumulated duplicate Git guards")
 		}
 	}
@@ -141,16 +118,6 @@ esac
 		t.Setenv(key, value)
 	}
 	t.Setenv("DYNA_ROOM_ID", records[0].ID)
-	previousOperation := sessionOperationCall
-	var commands []string
-	sessionOperationCall = func(_ context.Context, method string, request CommandRequest) (CommandResult, error) {
-		if method != "GitHubCommand" {
-			return CommandResult{}, fmt.Errorf("unexpected operation %q", method)
-		}
-		commands = append(commands, strings.Join(request.Args, " "))
-		return CommandResult{}, nil
-	}
-	t.Cleanup(func() { sessionOperationCall = previousOperation })
 	t.Chdir(records[0].Repo)
 	for _, args := range [][]string{
 		{"pr", "comment", "1", "--body", "not allowed"},
@@ -187,9 +154,12 @@ esac
 	if target != "/real/dyna" || session.Env[ReadOnlyEnv] != "worker" {
 		t.Fatalf("write room guard target=%q mode=%q", target, session.Env[ReadOnlyEnv])
 	}
-	commandLog := strings.Join(commands, "\n")
-	if strings.Contains(commandLog, "pr comment") || strings.Contains(commandLog, "api repos/work/service/issues -X POST") {
-		t.Fatalf("refused command reached the engine: %s", commandLog)
+	raw, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "pr comment") || strings.Contains(string(raw), "api repos/work/service/issues -X POST") {
+		t.Fatalf("refused command reached gh: %s", raw)
 	}
 }
 
@@ -228,7 +198,7 @@ func TestSessionRunsWithoutTheGitHubCLI(t *testing.T) {
 	}
 }
 
-func TestSessionHidesEnterpriseTokenEnvironment(t *testing.T) {
+func TestSessionPreservesEnterpriseTokenEnvironment(t *testing.T) {
 	for _, variable := range []string{"GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 		t.Run(variable, func(t *testing.T) {
 			records := setupRooms(t, "team/private")
@@ -242,8 +212,8 @@ func TestSessionHidesEnterpriseTokenEnvironment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if env.Env["GH_ENTERPRISE_TOKEN"] != "" || env.Env["GH_HOST"] != "work.example" {
-				t.Fatal("enterprise worker authentication was not kept inside Dyna")
+			if env.Env["GH_ENTERPRISE_TOKEN"] != "enterprise-token" || env.Env["GH_HOST"] != "work.example" {
+				t.Fatal("enterprise owner authentication was lost")
 			}
 		})
 	}
