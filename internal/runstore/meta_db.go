@@ -642,7 +642,7 @@ func endRunTx(ctx context.Context, conn *sql.Conn, id, status, errMsg string, en
 	if err != nil {
 		return Meta{}, false, err
 	}
-	result, err := conn.ExecContext(ctx, `UPDATE runs SET body=json_remove(json_set(body,'$.status',?,'$.endedAt',json(?),'$.error',?),'$.paused'), rev=?
+	result, err := conn.ExecContext(ctx, `UPDATE runs SET body=json_remove(json_set(body,'$.status',?,'$.endedAt',json(?),'$.error',?),'$.paused','$.starting'), rev=?
 WHERE id=? AND status='running'`, status, string(at), errMsg, rev, id)
 	if err != nil {
 		return Meta{}, false, err
