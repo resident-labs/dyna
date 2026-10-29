@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -19,6 +21,8 @@ const (
 	walSizeLimit = 64 << 20
 	// CheckpointEvery is how often the engine checkpoints dyna.db.
 	CheckpointEvery = 10 * time.Second
+	// slowCheckpoint is the scheduled checkpoint time that is logged.
+	slowCheckpoint = 100 * time.Millisecond
 )
 
 // Checkpointed reports one WAL checkpoint.
@@ -52,12 +56,41 @@ func KeepCheckpointed(ctx context.Context, dataDir string, ticks <-chan time.Tim
 		case <-ctx.Done():
 			return
 		case <-ticks:
-			start := time.Now()
-			c, err := Checkpoint(ctx, db)
-			recordCheckpoint(time.Since(start), c, err)
-			if err != nil && ctx.Err() == nil {
-				logf("database: checkpoint: %v", err)
-			}
+			checkpointTick(ctx, db, dataDir)
 		}
 	}
+}
+
+// checkpointTick runs one scheduled checkpoint, records it and logs it when slow.
+func checkpointTick(ctx context.Context, db *sql.DB, dataDir string) {
+	start := now()
+	c, err := Checkpoint(ctx, db)
+	d := now().Sub(start)
+	recordCheckpoint(d, c, err)
+	if err != nil {
+		if ctx.Err() == nil {
+			logf("database: checkpoint: %v", err)
+		}
+		return
+	}
+	logSlowCheckpoint(d, c, dataDir)
+}
+
+// logSlowCheckpoint logs a checkpoint that took slowCheckpoint or longer, or
+// left the WAL busy. It names the WAL size, so a long WAL can be matched to a slow run.
+func logSlowCheckpoint(d time.Duration, c Checkpointed, dataDir string) {
+	if d < slowCheckpoint && !c.Busy {
+		return
+	}
+	logf("database: slow checkpoint took %s (busy %t, frames %d, moved %d, WAL %d bytes)",
+		d.Round(time.Millisecond), c.Busy, c.Frames, c.Moved, walBytes(dataDir))
+}
+
+// walBytes is the size of dyna.db-wal, or 0 when the file does not exist.
+func walBytes(dataDir string) int64 {
+	info, err := os.Stat(filepath.Join(dataDir, "dyna.db-wal"))
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
