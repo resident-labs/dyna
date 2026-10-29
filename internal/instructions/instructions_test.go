@@ -35,6 +35,18 @@ func TestNoteListsSectionChanges(t *testing.T) {
 	}
 }
 
+// A reordered section has the same lines in a new order. The note still shows
+// the new lines, so the agent sees what it now has.
+func TestNoteShowsItemsForReorderedSection(t *testing.T) {
+	frozen := Build(Section{Name: "Subagent profiles", Text: "[DYNA PROFILES]", Items: []string{"- alpha", "- beta"}})
+	desired := Build(Section{Name: "Subagent profiles", Text: "[DYNA PROFILES]", Items: []string{"- beta", "- alpha"}})
+	note := Note(frozen, desired)
+	want := "- Subagent profiles: now:\n[DYNA PROFILES]\n- beta\n- alpha"
+	if !strings.Contains(note, want) {
+		t.Errorf("note lacks %q:\n%s", want, note)
+	}
+}
+
 // A section that appears or disappears still names its rules, and a changed
 // text section names its changed paragraphs, so a person can read what
 // changed without the whole section.
