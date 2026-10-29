@@ -79,7 +79,7 @@ an engine restart.
 
 ## Read and control
 
-- `dyna job show ID` — the job's state, exit code and command.
+- `dyna job show ID` — the job's state, exit code, command and requested resources.
 - `dyna job logs ID` — the last of the job's output.
 - `dyna job list [--all]` — open jobs, or every recent one.
 - `dyna job cancel ID` — stop a queued or running job.
@@ -92,7 +92,7 @@ States: `queued`, `running`, then one of `passed`, `failed`, `cancelled`, `lost`
 
 Each job posts typed events to the session that submitted it: `job.queued`
 (quiet, with the wait reason), `job.started` (quiet) and `job.finished` (with
-state and exit code), which wake that session. Agents never poll for a job's
+its outcome), which wake that session. Agents never poll for a job's
 end; the finished event is the wake.
 
 The jobs and workspaces tables live in `dyna.db`; the logs live under `<data>/jobs/<id>/log` and kept artifacts under `<data>/jobs/<id>/artifacts`.

@@ -342,6 +342,7 @@ const fixtures: Record<string, EventPayload> = {
     label: 'make test',
     state: 'failed',
     exitCode: 2,
+    outcome: 'failed with exit code 2',
     durationMs: 41_200,
     parent: 'dyna:jobs-step1',
     detail: 'log: dyna job logs job_0123456789ab',
@@ -439,6 +440,28 @@ test('every registered event has a renderer and renders on feed and DM', () => {
     // unknown event row instead of an empty gap.
     assert.equal(web.rendererFor({ ...post, notice: { ...post.notice, kind: 'unregistered' } }), undefined)
   }
+})
+
+test('a stopped job card states its cause without an exit code', () => {
+  const payload: EventPayload = {
+    jobId: 'job_0123456789ab',
+    node: 'pve',
+    label: 'make test',
+    state: 'timed_out',
+    outcome: 'timed out: no output for 30s',
+    durationMs: 30_000,
+    detail: 'log: dyna job logs job_0123456789ab',
+  }
+  const post = postFor('job', 'finished', payload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.JobCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  const text = (target.textContent ?? '').trim()
+  assert.match(text, /timed out: no output for 30s/)
+  assert.doesNotMatch(text, /exit(?: code)? -1/)
+  web.unmount(mounted)
+  target.remove()
 })
 
 // fixtureTip is a value every payload fixture shows, so a card that renders

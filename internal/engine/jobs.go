@@ -70,11 +70,22 @@ func (r jobsReporter) sessionName(id string) string {
 
 func (r jobsReporter) event(job jobs.Job) room.JobEvent {
 	state := room.JobState(job.State)
-	exit := 0
-	if job.ExitCode != nil {
-		exit = *job.ExitCode
-	} else if state != room.JobRunning && state != room.JobQueued {
-		exit = -1
+	outcome := ""
+	if job.State.Finished() {
+		outcome = job.State.Label()
+		if job.ExitCode != nil {
+			outcome = fmt.Sprintf("%s with exit code %d", outcome, *job.ExitCode)
+		} else {
+			switch state {
+			case room.JobCancelled:
+				outcome = "was cancelled"
+			case room.JobLost:
+				outcome = "was lost"
+			}
+			if job.Note != "" && !(state == room.JobCancelled && job.Note == "cancelled") {
+				outcome += ": " + job.Note
+			}
+		}
 	}
 	duration := time.Duration(0)
 	if !job.Started.IsZero() && !job.Ended.IsZero() {
@@ -88,7 +99,8 @@ func (r jobsReporter) event(job jobs.Job) room.JobEvent {
 		JobID: job.ID, Node: job.Node,
 		Label:      strings.Join(job.Command, " "),
 		State:      state,
-		ExitCode:   exit,
+		ExitCode:   job.ExitCode,
+		Outcome:    outcome,
 		DurationMS: int(duration / time.Millisecond),
 		Parent:     r.sessionName(job.Session),
 		WaitReason: job.WaitReason,

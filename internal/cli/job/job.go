@@ -30,13 +30,14 @@ type jobView struct {
 	Idle       string   `json:"idle,omitempty"`
 	Log        string   `json:"log,omitempty"`
 	// Artifacts names the kept outputs and how to fetch them.
-	Artifacts []string `json:"artifacts,omitempty"`
-	Fetch     string   `json:"fetch,omitempty"`
-	Workspace string   `json:"workspace,omitempty"`
+	Artifacts []string                `json:"artifacts,omitempty"`
+	Fetch     string                  `json:"fetch,omitempty"`
+	Workspace string                  `json:"workspace,omitempty"`
+	Resources []machines.ResourceName `json:"resources,omitempty"`
 }
 
 func view(job jobs.Job) jobView {
-	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID, Workspace: job.Workspace}
+	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID, Workspace: job.Workspace, Resources: job.Resources}
 	if job.Idle > 0 {
 		v.Idle = job.Idle.String()
 	}
