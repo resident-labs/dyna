@@ -1,11 +1,7 @@
-// The machines registry: this engine's host and the machines that run CI or
-// agents. Sources: internal/machines (the rows) and internal/websvc/machines.go
-// (the views below). A figure the engine does not know yet is absent, so a
-// reader can tell "none" from "not measured".
-
-// MachineRole is machines.Role. "computers" is not a role: a computer runs
-// on a machine that has the agents role.
-export type MachineRole = 'engine' | 'agents' | 'ci'
+// The machines registry: this engine's host and every other machine Dyna
+// reaches over SSH. Sources: internal/machines (the rows) and
+// internal/websvc/machines.go (the views below). A figure the engine does not
+// know yet is absent, so a reader can tell "none" from "not measured".
 
 // MachineStatus is what the engine knows about a machine right now.
 // "disabled" means switched off in the registry, "offline" means the probe
@@ -44,14 +40,11 @@ export interface MachineCIRun {
 export interface MachineSummary {
   id: string
   name: string
-  roles: MachineRole[]
   // local marks the machine that runs this engine.
   local: boolean
   enabled: boolean
   status: MachineStatus
-  // ciSlots is the machine's legacy slot setting; ci is the work its node
-  // queue holds now.
-  ciSlots: number
+  // ci is the work the machine's node queue holds now.
   // maxIOHeavy and maxDiskPercent are the node queue's stored limits; zero or
   // absent keeps each default.
   maxIOHeavy?: number
@@ -63,6 +56,9 @@ export interface MachineSummary {
   // means every room. suites limits the CI suites the same way.
   rooms?: string[]
   suites?: string[]
+  // labels mark what the machine takes; the ci label says it runs local CI
+  // checks. An unlabeled machine still takes jobs when enabled.
+  labels?: string[]
   // cpu is the machine's share of its cores in percent: live for this engine's
   // machine, and the last probe reading for a remote one.
   cpu?: number
@@ -150,11 +146,10 @@ export interface MachineLoad {
 export interface MachinePatch {
   name?: string
   enabled?: boolean
-  roles?: MachineRole[]
-  ciSlots?: number
   allowHostChecks?: boolean
   rooms?: string[]
   suites?: string[]
+  labels?: string[]
   ssh?: string
   // sshConnectTimeoutSeconds sets the ssh connect wait; 0 restores the default.
   sshConnectTimeoutSeconds?: number

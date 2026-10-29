@@ -18,8 +18,8 @@
   import { ago, roomLabel } from '../ui/format.ts'
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
-  import type { MachineAgent, MachineDetail, MachinePatch, MachineRole, MachineWork } from '../api/machine.ts'
-  import { ciRunDetail, ciRunText, computersText, diskText, loadText, memoryPct, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
+  import type { MachineAgent, MachineDetail, MachinePatch, MachineWork } from '../api/machine.ts'
+  import { ciRunDetail, ciRunText, computersText, diskText, loadText, memoryPct, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, rooms = [], owner = true, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
@@ -66,14 +66,7 @@
   let remote = $derived(machine && !machine.local ? machine.load ?? null : null)
   let memory = $derived(remote ? memoryPct(remote) : null)
 
-  const ROLES: MachineRole[] = ['engine', 'agents', 'ci']
   let roomOptions = $derived(rooms.map((r) => ({ value: r.id, label: roomLabel(r) })).sort((a, b) => a.label.localeCompare(b.label)))
-
-  function toggleRole(role: MachineRole) {
-    if (!machine) return
-    const roles = machine.roles.includes(role) ? machine.roles.filter((r) => r !== role) : [...machine.roles, role]
-    onsave({ roles })
-  }
 
   function setLimit(field: 'maxIOHeavy' | 'maxDiskPercent', max: number) {
     return (e: Event & { currentTarget: HTMLInputElement }) => {
@@ -112,9 +105,6 @@
       <Card title="Overview">
         <Row dense text="Status">
           {#snippet trail()}<span class="value">{statusText(machine.status)}</span>{/snippet}
-        </Row>
-        <Row dense text="Roles">
-          {#snippet trail()}<span class="chips">{#each machine.roles as role (role)}<Chip>{roleLabel(role)}</Chip>{/each}</span>{/snippet}
         </Row>
         <Row dense text="Route">
           {#snippet trail()}<span class="value mono">{routeText(machine)}</span>{/snippet}
@@ -236,22 +226,6 @@
           {#snippet meta()}<span class="note">A disabled machine takes no new work.</span>{/snippet}
           {#snippet trail()}<Switch on={machine.enabled} label="Enabled" disabled={busy} onchange={(on: boolean) => onsave({ enabled: on })} />{/snippet}
         </Row>
-        <Row dense text="Roles">
-          {#snippet detail()}
-            <span class="chips roles">
-              {#each ROLES as role (role)}
-                <button
-                  class="role"
-                  class:on={machine.roles.includes(role)}
-                  aria-pressed={machine.roles.includes(role)}
-                  disabled={busy || role === 'engine'}
-                  title={role === 'engine' ? (machine.local ? 'This machine always runs the engine' : 'Only this engine\u2019s machine runs the engine') : undefined}
-                  onclick={() => toggleRole(role)}
-                >{roleLabel(role)}</button>
-              {/each}
-            </span>
-          {/snippet}
-        </Row>
         <Row dense text="IO-heavy limit">
           {#snippet meta()}<span class="note">0 keeps the default: one per 16 CPUs, at least 1.</span>{/snippet}
           {#snippet trail()}<input class="num" type="number" min="0" step="1" aria-label="IO-heavy limit" value={machine.maxIOHeavy ?? 0} disabled={busy} onchange={setIOHeavy} />{/snippet}
@@ -260,29 +234,33 @@
           {#snippet meta()}<span class="note">0 keeps the default: at least 20 GiB and 5% of the disk stay free, but never more than 10% of it. A set percent is the used share above which the node admits no new work.</span>{/snippet}
           {#snippet trail()}<input class="num" type="number" min="0" max="100" step="1" aria-label="Disk limit percent" value={machine.maxDiskPercent ?? 0} disabled={busy} onchange={setDiskPercent} />{/snippet}
         </Row>
-        {#if machine.roles.includes('ci')}
-          <Row dense text="Rooms">
-            {#snippet meta()}
-              <span class="note">Local CI runs only for these rooms. None chosen means every room.</span>
-              {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
-            {/snippet}
-            {#snippet detail()}<ScopeList label="Rooms" values={machine.rooms ?? []} options={roomOptions} everyText="Every room" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ rooms: list })} />{/snippet}
-          </Row>
-          <Row dense text="Suites">
-            {#snippet meta()}
-              <span class="note">Local CI takes only these suites. None chosen means every suite.</span>
-              {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
-            {/snippet}
-            {#snippet detail()}<ScopeList label="Suites" values={machine.suites ?? []} everyText="Every suite" placeholder="Suite name" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ suites: list })} />{/snippet}
-          </Row>
-          <Row dense text="Host checks">
-            {#snippet meta()}
-              <span class="note">Off by default. Allow only repositories you trust to run outside containers.</span>
-              {#if machine.allowHostChecks && machine.hostChecksAllowedBy?.length}<span class="note">Allowed by {machine.hostChecksAllowedBy.join(' and ')}.</span>{/if}
-            {/snippet}
-            {#snippet trail()}<Switch on={machine.allowHostChecks} label="Allow host checks" disabled={busy} onchange={(on: boolean) => onsave({ allowHostChecks: on })} />{/snippet}
-          </Row>
-        {/if}
+        <Row dense text="Rooms">
+          {#snippet meta()}
+            <span class="note">Local CI runs only for these rooms. None chosen means every room.</span>
+            {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
+          {/snippet}
+          {#snippet detail()}<ScopeList label="Rooms" values={machine.rooms ?? []} options={roomOptions} everyText="Every room" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ rooms: list })} />{/snippet}
+        </Row>
+        <Row dense text="Suites">
+          {#snippet meta()}
+            <span class="note">Local CI takes only these suites. None chosen means every suite.</span>
+            {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
+          {/snippet}
+          {#snippet detail()}<ScopeList label="Suites" values={machine.suites ?? []} everyText="Every suite" placeholder="Suite name" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ suites: list })} />{/snippet}
+        </Row>
+        <Row dense text="Labels">
+          {#snippet meta()}
+            <span class="note">The ci label makes this machine run local CI checks. dyna machine edit {machine.name} --label ci sets it.</span>
+          {/snippet}
+          {#snippet detail()}<span class="note">{machine.labels?.length ? machine.labels.join(', ') : 'none'}</span>{/snippet}
+        </Row>
+        <Row dense text="Host checks">
+          {#snippet meta()}
+            <span class="note">Off by default. Allow only repositories you trust to run outside containers.</span>
+            {#if machine.allowHostChecks && machine.hostChecksAllowedBy?.length}<span class="note">Allowed by {machine.hostChecksAllowedBy.join(' and ')}.</span>{/if}
+          {/snippet}
+          {#snippet trail()}<Switch on={machine.allowHostChecks} label="Allow host checks" disabled={busy} onchange={(on: boolean) => onsave({ allowHostChecks: on })} />{/snippet}
+        </Row>
         <Row dense text="SSH route">
           {#snippet trail()}
             {#if machine.local}
@@ -325,8 +303,6 @@
   .body { padding: var(--s2) var(--s4) var(--s4); display: grid; gap: var(--s3); align-content: start; max-width: 900px; }
   .usage { display: grid; gap: var(--s3); }
   .value { color: var(--ink-2); }
-  .chips { display: inline-flex; flex-wrap: wrap; gap: var(--s1); justify-content: flex-end; }
-  .chips.roles { display: flex; justify-content: flex-start; margin-top: var(--s2); }
   .note { color: var(--faint); }
   .open { color: var(--iris); text-decoration: none; }
   @media (hover: hover) { .open:hover { text-decoration: underline; } }
@@ -342,9 +318,6 @@
   }
   .probe:active { background: var(--select); }
   .probe:disabled { opacity: 0.6; }
-  .role { flex: none; padding: 2px 9px; border-radius: 9px; background: var(--raise); color: var(--muted); font-size: var(--t-cap); font-weight: 600; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
-  .role.on { background: var(--iris-wash); color: var(--iris); box-shadow: inset 0 0 0 1px var(--iris-edge); }
-  .role:disabled { opacity: 0.6; }
   .num { width: 72px; background: var(--field); border: 0; border-radius: var(--r-xs); padding: 4px 8px; color: var(--ink); font: inherit; font-size: var(--t-sm); }
   .ssh { width: 200px; max-width: 100%; background: var(--field); border: 0; border-radius: var(--r-xs); padding: 4px 8px; color: var(--ink); font-size: var(--t-sm); }
   .err { margin: 0; padding: var(--s2) var(--s4) 0; color: var(--coral); font-size: var(--t-sm); }
@@ -352,7 +325,6 @@
     .top { padding: var(--s2) var(--s3) 0; }
     .body { padding: var(--s2) var(--s3) var(--s3); }
     .back { min-height: 44px; }
-    .role { min-height: 32px; }
     .probe { min-height: 32px; }
     .num, .ssh { min-height: 36px; }
   }

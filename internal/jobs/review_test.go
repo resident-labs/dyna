@@ -55,7 +55,7 @@ func TestContainerJobMountsItsCheckout(t *testing.T) {
 // end-of-job folder removal must reach the job's node, not this machine.
 func TestCleanupRunsOnTheNode(t *testing.T) {
 	dir := t.TempDir()
-	machine := machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true, CISlots: 2, HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
+	machine := machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true, HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
 	reporter := newChanReporter()
 	svc := &Service{
 		Store:    Store{DataDir: dir},

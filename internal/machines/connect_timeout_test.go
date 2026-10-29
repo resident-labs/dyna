@@ -13,7 +13,7 @@ import (
 func TestProbeUsesMachineConnectTimeout(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	pve, err := s.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true, SSHConnectTimeout: 60 * time.Second})
+	pve, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true, SSHConnectTimeout: 60 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestConnectTimeoutDefaultsAndLimits(t *testing.T) {
 	if got := SSHConnectTimeoutOption(1500 * time.Millisecond); got != "ConnectTimeout=2" {
 		t.Fatalf("rounded option = %q", got)
 	}
-	m := Machine{Name: "pve", Roles: []Role{RoleAgents}, SSH: "pip@pve", SSHConnectTimeout: -time.Second}
+	m := Machine{Name: "pve", SSH: "pip@pve", SSHConnectTimeout: -time.Second}
 	if err := m.Validate(); err == nil {
 		t.Fatal("a negative connect timeout was accepted")
 	}
@@ -67,7 +67,7 @@ func TestConnectTimeoutDefaultsAndLimits(t *testing.T) {
 func TestMachineStoresCheckTmp(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	if _, err := s.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true, CheckTmp: "/dev/shm"}); err != nil {
+	if _, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true, CheckTmp: "/dev/shm"}); err != nil {
 		t.Fatal(err)
 	}
 	read, err := s.Get(ctx, "pve")
@@ -75,7 +75,7 @@ func TestMachineStoresCheckTmp(t *testing.T) {
 		t.Fatalf("stored check tmp = %q, %v; want /dev/shm", read.CheckTmp, err)
 	}
 	for _, bad := range []string{"relative/dir", "/", "/a/../b", "/a//b"} {
-		m := Machine{Name: "pve", Roles: []Role{RoleAgents}, SSH: "pip@pve", CheckTmp: bad}
+		m := Machine{Name: "pve", SSH: "pip@pve", CheckTmp: bad}
 		if err := m.Validate(); err == nil {
 			t.Fatalf("check tmp %q was accepted", bad)
 		}

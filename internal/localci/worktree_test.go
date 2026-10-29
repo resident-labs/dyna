@@ -94,7 +94,7 @@ esac
 	}
 	newCommand := func(id Suite, index int) *exec.Cmd {
 		check := nodeCheck{id: id, name: CheckName(id), inner: "true", image: "image"}
-		script := nodeCheckScript(Node{Name: "local", Slots: 2}, base, cache, runDir, "run", strings.Repeat("a", 40), "", check, time.Minute, index, false, DefaultActImage, "", "")
+		script := nodeCheckScript(Node{Name: "local"}, base, cache, runDir, "run", strings.Repeat("a", 40), "", check, time.Minute, index, false, DefaultActImage, "", "")
 		cmd := exec.Command("bash", "-c", script)
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 		return cmd

@@ -290,7 +290,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	}
 	var enabled []localci.Node
 	for _, node := range nodes {
-		if node.Enabled {
+		if node.TakesCI() {
 			enabled = append(enabled, node)
 		}
 	}
@@ -420,7 +420,7 @@ func (s *Service) registeredCINodes(ctx context.Context) ([]localci.Node, error)
 	}
 	var enabled []localci.Node
 	for _, node := range nodes {
-		if node.Enabled {
+		if node.TakesCI() {
 			enabled = append(enabled, node)
 		}
 	}

@@ -32,7 +32,7 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 	}
 	registry := localci.Store{DataDir: dataDir}
 	ciMachine := machines.Store{DataDir: dataDir}
-	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
@@ -160,7 +160,7 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 	repoDir, base, head, prHead := trialRepoWithDefinition(t)
 	registry := localci.Store{DataDir: dataDir}
 	ciMachine := machines.Store{DataDir: dataDir}
-	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
@@ -238,8 +238,9 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 		t.Fatal(err)
 	}
 	if withNode {
-		ciMachine := machines.Store{DataDir: dataDir}
-		if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
+		// The engine host row carries no ci label, so the worker is the one CI
+		// machine.
+		if _, err := (machines.Store{DataDir: dataDir}).Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -438,7 +439,7 @@ func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
 	}
 	registry := localci.Store{DataDir: dataDir}
 	ciMachine := machines.Store{DataDir: dataDir}
-	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {

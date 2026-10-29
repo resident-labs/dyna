@@ -30,7 +30,7 @@ func legacyRemoteNode(remote string, nodes []Node) (Node, error) {
 	// Only the SSH host carries over. The registered runner owns its cache paths.
 	var selected Node
 	for _, node := range nodes {
-		if !node.Enabled || node.SSH != host {
+		if !node.TakesCI() || node.SSH != host {
 			continue
 		}
 		if selected.Name != "" {

@@ -1,7 +1,7 @@
 // Package machines keeps the one registry of machines that Dyna can use: the
-// engine host, machines that run agents over SSH, and machines that run local
-// CI. The engine host is one row, marked local, with the engine and agents
-// roles, so the host and the CI nodes are no longer two lists.
+// engine host, marked local, and every other machine it reaches over SSH. A
+// machine that is enabled and whose room list allows a room takes that room's
+// local CI work and jobs; the node's admission queue bounds how much runs.
 package machines
 
 import (
@@ -29,30 +29,6 @@ import (
 // Topic is the hub topic of a committed machine change. The engine wakes the
 // CI workers on it, and clients see it.
 const Topic = "machines"
-
-// Role is one duty of a machine and the unit the engine schedules on.
-type Role string
-
-const (
-	// RoleEngine runs this data folder's engine. Only the local row has it.
-	RoleEngine Role = "engine"
-	// RoleAgents runs agents for sessions and workflows.
-	RoleAgents Role = "agents"
-	// RoleCI runs local CI checks and merge trials.
-	RoleCI Role = "ci"
-)
-
-// Roles is every role, in the order the CLI shows them.
-var Roles = []Role{RoleEngine, RoleAgents, RoleCI}
-
-// ParseRole reads a role name from user input.
-func ParseRole(name string) (Role, error) {
-	role := Role(strings.TrimSpace(name))
-	if !slices.Contains(Roles, role) {
-		return "", fmt.Errorf("role must be engine, agents or ci, not %q", name)
-	}
-	return role, nil
-}
 
 // ResourceName identifies one counted resource or one-unit lock on a node.
 type ResourceName string
@@ -87,11 +63,9 @@ func ParseResourceNames(names []string) ([]ResourceName, error) {
 
 // Machine is one row of the registry.
 type Machine struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Roles   []Role `json:"roles"`
-	SSH     string `json:"ssh"`
-	CISlots int    `json:"ciSlots"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	SSH  string `json:"ssh"`
 	// MaxIOHeavy caps how many IO-heavy jobs and checks the node runs at once.
 	// Zero reads the default of one per sixteen probed CPUs, at least one.
 	MaxIOHeavy int `json:"maxIOHeavy"`
@@ -114,6 +88,10 @@ type Machine struct {
 	// empty list allows every suite, which is what every machine allowed before
 	// it could name suites.
 	Suites []string `json:"suites,omitempty"`
+	// Labels mark what this machine takes. The ci label says it runs local CI
+	// checks; an unlabeled machine still takes jobs when enabled. Label names
+	// follow the resource name rule.
+	Labels []string `json:"labels,omitempty"`
 	// ContainerSocket is the container runtime socket a workflow job uses on
 	// this machine, as a DOCKER_HOST value. It is empty for Docker's socket, so
 	// a rootless Podman machine can name its own without changing anything else.
@@ -337,28 +315,25 @@ func uniqueGrants(grants []HostChecksGrant) []HostChecksGrant {
 	return out
 }
 
-// HasRole reports whether the machine has the role.
-func (m Machine) HasRole(role Role) bool { return slices.Contains(m.Roles, role) }
-
 // AllowsRoom reports whether the machine takes CI work for the room. A machine
 // that names no room takes work from every room.
 func (m Machine) AllowsRoom(roomID string) bool {
 	return len(m.Rooms) == 0 || slices.Contains(m.Rooms, roomID)
 }
 
+// LabelCI marks a machine that takes local CI work. Jobs use any enabled
+// machine, so only local CI checks read this label.
+const LabelCI = "ci"
+
+// HasLabel reports whether the machine carries a label.
+func (m Machine) HasLabel(label string) bool {
+	return slices.Contains(m.Labels, label)
+}
+
 // AllowsSuite reports whether the machine takes CI work for the suite. A
 // machine that names no suite takes every suite.
 func (m Machine) AllowsSuite(suite string) bool {
 	return len(m.Suites) == 0 || slices.Contains(m.Suites, suite)
-}
-
-// RoleNames joins the roles for a table cell.
-func (m Machine) RoleNames() string {
-	names := make([]string, 0, len(m.Roles))
-	for _, role := range m.Roles {
-		names = append(names, string(role))
-	}
-	return strings.Join(names, ",")
 }
 
 // ErrLocal marks a change that would remove or unmake the engine host.
@@ -390,20 +365,6 @@ func (m Machine) Validate() error {
 	if err := ValidateName(m.Name); err != nil {
 		return err
 	}
-	if len(m.Roles) == 0 {
-		return errors.New("a machine needs at least one role: engine, agents or ci")
-	}
-	for _, role := range m.Roles {
-		if !slices.Contains(Roles, role) {
-			return fmt.Errorf("role %q must be engine, agents or ci", role)
-		}
-	}
-	if m.HasRole(RoleEngine) && !m.Local {
-		return fmt.Errorf("only this machine has the engine role: %w", ErrLocal)
-	}
-	if m.Local && !m.HasRole(RoleEngine) {
-		return fmt.Errorf("this machine always has the engine role: %w", ErrLocal)
-	}
 	if m.Local && m.SSH != "" {
 		return errors.New("this machine needs no SSH destination")
 	}
@@ -420,9 +381,6 @@ func (m Machine) Validate() error {
 	}
 	if m.CheckTmp != "" && (!path.IsAbs(m.CheckTmp) || path.Clean(m.CheckTmp) != m.CheckTmp || m.CheckTmp == "/" || strings.ContainsRune(m.CheckTmp, 0)) {
 		return errors.New("the check temporary folder must be a clean absolute path other than /")
-	}
-	if m.HasRole(RoleCI) && m.CISlots < 1 {
-		return errors.New("a machine with the ci role needs at least one CI slot")
 	}
 	if m.MaxIOHeavy < 0 || m.MaxIOHeavy > 1024 {
 		return errors.New("the IO-heavy limit must be between 0, the default, and 1024")
@@ -444,7 +402,26 @@ func (m Machine) Validate() error {
 	if err := validateSuiteList(m.Suites); err != nil {
 		return err
 	}
+	if err := validateLabelList(m.Labels); err != nil {
+		return err
+	}
 	return validateGrants(m.HostChecksGrants)
+}
+
+// validateLabelList reports whether a label list is storable. Label names
+// follow the resource name rule, and each label appears once.
+func validateLabelList(labels []string) error {
+	seen := make(map[string]bool, len(labels))
+	for _, label := range labels {
+		if _, err := ParseResourceName(label); err != nil {
+			return fmt.Errorf("label %s: %w", label, err)
+		}
+		if seen[label] {
+			return fmt.Errorf("label %s appears twice", label)
+		}
+		seen[label] = true
+	}
+	return nil
 }
 
 // validateRoomList reports whether a room limit is storable.
@@ -492,14 +469,12 @@ func validateSuiteList(suites []string) error {
 	return nil
 }
 
-const schemaVersion = 13
+const schemaVersion = 14
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
 	name           TEXT    NOT NULL UNIQUE,
-	roles          TEXT    NOT NULL CHECK(json_valid(roles)),
 	ssh            TEXT    NOT NULL,
-	ci_slots       INTEGER NOT NULL CHECK(ci_slots >= 0),
 	enabled        INTEGER NOT NULL CHECK(enabled IN (0,1)),
 	local          INTEGER NOT NULL CHECK(local IN (0,1)),
 	created_ms     INTEGER NOT NULL,
@@ -513,6 +488,7 @@ const schema = `CREATE TABLE machines (
 	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
 	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
 	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
+	labels         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(labels)),
 	container_socket TEXT  NOT NULL DEFAULT '',
 	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
 	check_tmp TEXT NOT NULL DEFAULT '',
@@ -553,9 +529,9 @@ var degradedColumns = []string{
 
 // registryColumns are the columns a machine edit writes. The probe columns
 // change only through SaveProbe.
-const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
+const registryColumns = `id,name,ssh,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -692,6 +668,23 @@ func prepare(conn *sql.Conn, old int) error {
 			return err
 		}
 	}
+	if old < 14 {
+		// A node no longer has roles or CI slots. The one choice a role made
+		// survives as a label: a machine the owner gave the ci role keeps
+		// taking local CI, and every other machine stays out of it. The
+		// admission queue alone bounds how much runs.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN labels TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(labels))`); err != nil {
+			return fmt.Errorf("add machines.labels: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE machines SET labels='["ci"]' WHERE roles LIKE ?`, `%"ci"%`); err != nil {
+			return fmt.Errorf("carry the ci role into labels: %w", err)
+		}
+		for _, column := range []string{"roles", "ci_slots"} {
+			if _, err := conn.ExecContext(ctx, "ALTER TABLE machines DROP COLUMN "+column); err != nil {
+				return fmt.Errorf("drop machines.%s: %w", column, err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -757,8 +750,8 @@ func addLocal(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	now := time.Now().UnixMilli()
-	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`) VALUES(?,?,?,'',0,1,1,?,?)`,
-		newID(), name, marshalRoles([]Role{RoleEngine, RoleAgents}), now, now)
+	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,labels) VALUES(?,?,'',1,1,?,?,'[]')`,
+		newID(), name, now, now)
 	return err
 }
 
@@ -796,9 +789,9 @@ func freeName(ctx context.Context, conn *sql.Conn, base string) (string, error) 
 	}
 }
 
-// importLocalCINodes turns the old local CI node rows into machines with the
-// ci role and drops their table. A node with no SSH destination ran on this
-// machine, so it merges into the local row.
+// importLocalCINodes turns the old local CI node rows into machines and drops
+// their table. A node with no SSH destination ran on this machine, so it needs
+// no row: the engine host already takes that work.
 //
 // TODO: legacy/shim remove later — imports local_ci_nodes into machines
 func importLocalCINodes(ctx context.Context, conn *sql.Conn) error {
@@ -806,19 +799,18 @@ func importLocalCINodes(ctx context.Context, conn *sql.Conn) error {
 	if err != nil || !present {
 		return err
 	}
-	rows, err := conn.QueryContext(ctx, `SELECT name,ssh,slots,enabled FROM local_ci_nodes ORDER BY name`)
+	rows, err := conn.QueryContext(ctx, `SELECT name,ssh,enabled FROM local_ci_nodes ORDER BY name`)
 	if err != nil {
 		return err
 	}
 	type oldNode struct {
 		name, ssh string
-		slots     int
 		enabled   bool
 	}
 	var old []oldNode
 	for rows.Next() {
 		var n oldNode
-		if err := rows.Scan(&n.name, &n.ssh, &n.slots, &n.enabled); err != nil {
+		if err := rows.Scan(&n.name, &n.ssh, &n.enabled); err != nil {
 			rows.Close()
 			return err
 		}
@@ -831,7 +823,7 @@ func importLocalCINodes(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	for _, n := range old {
-		if err := importNode(ctx, conn, n.name, n.ssh, n.slots, n.enabled); err != nil {
+		if err := importNode(ctx, conn, n.name, n.ssh, n.enabled); err != nil {
 			return err
 		}
 	}
@@ -839,34 +831,28 @@ func importLocalCINodes(ctx context.Context, conn *sql.Conn) error {
 	return err
 }
 
-// importNode stores one old CI node row as a machine.
-func importNode(ctx context.Context, conn *sql.Conn, name, ssh string, slots int, enabled bool) error {
-	now := time.Now().UnixMilli()
+// importNode stores one old CI node row as a machine. The old node's switch
+// said whether its work ran, and it becomes the machine's switch.
+func importNode(ctx context.Context, conn *sql.Conn, name, ssh string, enabled bool) error {
 	if ssh == "" {
-		// A disabled local node stays off after the upgrade, so its CI work does
-		// not start on this machine unasked. Its slots come with the ci role.
+		// A local node ran its CI work on the engine host. An enabled node keeps
+		// that work, so the engine host row carries the ci label; a disabled one
+		// leaves the row opted out.
 		if !enabled {
 			return nil
 		}
-		m, err := getOn(ctx, conn, "", true)
-		if err != nil {
-			return err
-		}
-		m.Roles = append(m.Roles, RoleCI)
-		// The engine host stays enabled: the old node's switch covered its CI
-		// work only, and this row also runs the engine and its agents.
-		if _, err := conn.ExecContext(ctx, `UPDATE machines SET roles=?, ssh='', ci_slots=?, updated_ms=? WHERE id=?`,
-			marshalRoles(m.Roles), max(slots, 1), now, m.ID); err != nil {
-			return err
-		}
-		return nil
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET labels=json_insert(labels, '$[#]', 'ci')
+			WHERE local=1 AND NOT EXISTS (SELECT 1 FROM json_each(labels) WHERE value='ci')`)
+		return err
 	}
+	now := time.Now().UnixMilli()
 	name, err := freeName(ctx, conn, sanitizeName(name))
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`) VALUES(?,?,?,?,?,?,0,?,?)`,
-		newID(), name, marshalRoles([]Role{RoleCI}), ssh, slots, enabled, now, now)
+	// An old CI node keeps taking local CI, so its label says so.
+	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,labels) VALUES(?,?,?,?,0,?,?,'["ci"]')`,
+		newID(), name, ssh, enabled, now, now)
 	return err
 }
 
@@ -955,10 +941,10 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles, capabilities, health, load, probeError, grants, rooms, suites, resources string
+	var capabilities, health, load, probeError, grants, rooms, suites, labels, resources string
 	var created, updated, probed, seen, connectMs int64
-	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
+	if err := row.Scan(&m.ID, &m.Name, &m.SSH, &m.Enabled, &m.Local, &created, &updated,
+		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -973,9 +959,6 @@ func scan(row scanner) (Machine, error) {
 	}
 	if len(m.HostChecksGrants) == 0 {
 		m.HostChecksGrants = nil
-	}
-	if err := json.Unmarshal([]byte(roles), &m.Roles); err != nil {
-		return Machine{}, fmt.Errorf("machine %s roles: %w", m.Name, err)
 	}
 	if err := json.Unmarshal([]byte(rooms), &m.Rooms); err != nil {
 		return Machine{}, fmt.Errorf("machine %s rooms: %w", m.Name, err)
@@ -992,6 +975,14 @@ func scan(row scanner) (Machine, error) {
 	// rooms, so every stored row has one meaning of "every suite".
 	if len(m.Suites) == 0 {
 		m.Suites = nil
+	}
+	if err := json.Unmarshal([]byte(labels), &m.Labels); err != nil {
+		return Machine{}, fmt.Errorf("machine %s labels: %w", m.Name, err)
+	}
+	// A machine that names no label reads back with no list, as it does for
+	// rooms and suites.
+	if len(m.Labels) == 0 {
+		m.Labels = nil
 	}
 	if err := json.Unmarshal([]byte(capabilities), &m.Capabilities); err != nil {
 		return Machine{}, fmt.Errorf("machine %s capabilities: %w", m.Name, err)
@@ -1123,32 +1114,20 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	} else {
 		m.ID, m.Local, m.Created = newID(), false, now
 	}
-	m.Roles = uniqueRoles(m.Roles)
 	m.HostChecksGrants = uniqueGrants(m.HostChecksGrants)
-	if !m.HasRole(RoleCI) {
-		m.CISlots = 0
-		m.HostChecksGrants = nil
-		m.Rooms = nil
-		m.Suites = nil
-	}
 	m.Updated = now
 	if err := m.Validate(); err != nil {
 		return Machine{}, err
 	}
-	rooms, suites := marshalNames(m.Rooms), marshalNames(m.Suites)
+	rooms, suites, labels := marshalNames(m.Rooms), marshalNames(m.Suites), marshalNames(m.Labels)
 	resources := marshalResources(m.Resources)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
 			// An edit keeps who allows host checks: the engine changes grants
 			// through UpdateHostChecksGrants inside its own transaction, so a
-			// list read before that change cannot restore it. Removing the ci
-			// role clears the grants, which a machine without CI cannot hold.
-			grants := "host_checks_grants=host_checks_grants"
-			if !m.HasRole(RoleCI) {
-				grants = "host_checks_grants='[]'"
-			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
+			// list read before that change cannot restore it.
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, suites=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
+				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, suites, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1158,9 +1137,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
 		return err
 	})
 	if err != nil {
@@ -1197,9 +1176,6 @@ func (s Store) UpdateHostChecksGrants(ctx context.Context, id string, change fun
 		grants = uniqueGrants(grants)
 		if err := validateGrants(grants); err != nil {
 			return err
-		}
-		if !m.HasRole(RoleCI) && len(grants) > 0 {
-			return fmt.Errorf("machine %q needs the ci role for host checks", m.Name)
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE machines SET host_checks_grants=?, updated_ms=? WHERE id=?`,
 			marshalGrants(grants), time.Now().UnixMilli(), id); err != nil {
@@ -1246,47 +1222,6 @@ func (s Store) SetEnabled(ctx context.Context, name string, enabled bool) error 
 	})
 }
 
-// RemoveRole drops one role from a machine and removes the machine when that
-// was its last role. The engine host keeps its row because it always has the
-// engine role.
-func (s Store) RemoveRole(ctx context.Context, name string, role Role) error {
-	db, err := s.db()
-	if err != nil {
-		return err
-	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + name}, func(conn *sql.Conn) error {
-		m, err := getOn(ctx, conn, name, false)
-		if err != nil {
-			return err
-		}
-		if !m.HasRole(role) {
-			return fmt.Errorf("machine %q has no %s role: %w", name, role, os.ErrNotExist)
-		}
-		m.Roles = slices.DeleteFunc(m.Roles, func(r Role) bool { return r == role })
-		if len(m.Roles) == 0 {
-			if m.Local {
-				return fmt.Errorf("machine %q: %w", name, ErrLocal)
-			}
-			_, err := conn.ExecContext(ctx, `DELETE FROM machines WHERE id=?`, m.ID)
-			return err
-		}
-		if !m.HasRole(RoleCI) {
-			// A machine without the ci role keeps no setting that only that role
-			// uses, as Save also holds.
-			m.CISlots = 0
-			m.HostChecksGrants = nil
-			m.Rooms, m.Suites = nil, nil
-		}
-		if err := m.Validate(); err != nil {
-			return err
-		}
-		m.Updated = time.Now()
-		_, err = conn.ExecContext(ctx, `UPDATE machines SET roles=?, ci_slots=?, host_checks_grants=?, rooms=?, suites=?, updated_ms=? WHERE id=?`,
-			marshalRoles(m.Roles), m.CISlots, marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Suites), m.Updated.UnixMilli(), m.ID)
-		return err
-	})
-}
-
 // Remove deletes a machine. It refuses the engine host, whose row is this
 // data folder's own machine.
 func (s Store) Remove(ctx context.Context, name string) error {
@@ -1305,25 +1240,6 @@ func (s Store) Remove(ctx context.Context, name string) error {
 		_, err = conn.ExecContext(ctx, `DELETE FROM machines WHERE id=?`, m.ID)
 		return err
 	})
-}
-
-// uniqueRoles drops repeated roles, keeping the order the caller gave.
-func uniqueRoles(roles []Role) []Role {
-	out := make([]Role, 0, len(roles))
-	for _, role := range roles {
-		if !slices.Contains(out, role) {
-			out = append(out, role)
-		}
-	}
-	return out
-}
-
-func marshalRoles(roles []Role) string {
-	raw, err := json.Marshal(uniqueRoles(roles))
-	if err != nil {
-		return "[]"
-	}
-	return string(raw)
 }
 
 // marshalGrants stores a machine's host-check grants as the row's JSON.

@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 )
 
 func TestFindNodeSelectsMachines(t *testing.T) {
 	nodes := []localci.Node{
-		{Name: "this-box", Slots: 2, Enabled: true},
-		{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true},
+		{Name: "this-box", Enabled: true},
+		{Name: "hermes", SSH: "pip@hermeslab", Enabled: true},
 		{Name: "paused", SSH: "ari@paused", Enabled: false},
 	}
 	for _, tc := range []struct {
@@ -37,14 +38,14 @@ func TestFindNodeSelectsMachines(t *testing.T) {
 }
 
 func TestDefaultNodeUsesTheOnlyEnabledMachine(t *testing.T) {
-	one := []localci.Node{{Name: "this-box", Enabled: true}, {Name: "paused", SSH: "ari@paused"}}
+	one := []localci.Node{{Name: "this-box", Enabled: true, Labels: []string{machines.LabelCI}}, {Name: "paused", SSH: "ari@paused"}}
 	if node, err := defaultNode(one); err != nil || node.Name != "this-box" {
 		t.Fatalf("defaultNode(one) = %q, %v", node.Name, err)
 	}
 	if _, err := defaultNode([]localci.Node{{Name: "paused", SSH: "ari@paused"}}); err == nil {
 		t.Fatal("defaultNode accepted a registry with no enabled machine")
 	}
-	two := []localci.Node{{Name: "hermes", SSH: "pip@hermeslab", Enabled: true}, {Name: "builder", SSH: "ari@builder", Enabled: true}}
+	two := []localci.Node{{Name: "hermes", SSH: "pip@hermeslab", Enabled: true, Labels: []string{machines.LabelCI}}, {Name: "builder", SSH: "ari@builder", Enabled: true, Labels: []string{machines.LabelCI}}}
 	node, err := defaultNode(two)
 	if err == nil || node.Name != "" {
 		t.Fatalf("defaultNode(two) = %q, %v; want a request for --node", node.Name, err)
@@ -56,7 +57,7 @@ func TestDefaultNodeUsesTheOnlyEnabledMachine(t *testing.T) {
 
 func TestLocalCICommandsRegistered(t *testing.T) {
 	root := NewCommand()
-	for _, name := range []string{"run", "show", "tests", "node", "mode"} {
+	for _, name := range []string{"run", "show", "tests", "mode"} {
 		cmd, _, err := root.Find([]string{name})
 		if err != nil || cmd.Name() != name {
 			t.Fatalf("%s missing: %v", name, err)

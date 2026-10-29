@@ -79,14 +79,12 @@ type MachineAgent struct {
 // MachineSummary is one row of the Machines list. A figure the engine does not
 // measure stays nil, so the client shows no count instead of a zero.
 type MachineSummary struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Roles           []machines.Role `json:"roles"`
-	Local           bool            `json:"local"`
-	Enabled         bool            `json:"enabled"`
-	Status          MachineStatus   `json:"status"`
-	CISlots         int             `json:"ciSlots"`
-	AllowHostChecks bool            `json:"allowHostChecks"`
+	ID              string        `json:"id"`
+	Name            string        `json:"name"`
+	Local           bool          `json:"local"`
+	Enabled         bool          `json:"enabled"`
+	Status          MachineStatus `json:"status"`
+	AllowHostChecks bool          `json:"allowHostChecks"`
 	// MaxIOHeavy and MaxDiskPercent are the node queue's stored limits; zero
 	// keeps each default.
 	MaxIOHeavy     *int                          `json:"maxIOHeavy,omitempty"`
@@ -95,7 +93,10 @@ type MachineSummary struct {
 	Rooms          []string                      `json:"rooms,omitempty"`
 	// Suites limits the local CI work the machine takes to those suites; empty
 	// means every suite.
-	Suites    []string       `json:"suites,omitempty"`
+	Suites []string `json:"suites,omitempty"`
+	// Labels mark what the machine takes; the ci label says it runs local CI
+	// checks.
+	Labels    []string       `json:"labels,omitempty"`
 	CPU       *int           `json:"cpu,omitempty"`
 	Agents    *int           `json:"agents,omitempty"`
 	Computers *int           `json:"computers,omitempty"`
@@ -195,15 +196,14 @@ type MachineLoad struct {
 // store checks the result before it writes. Create adds the machine that the
 // reference names when the registry has none.
 type MachinePatch struct {
-	Name            *string          `json:"name,omitempty"`
-	Enabled         *bool            `json:"enabled"`
-	Roles           *[]machines.Role `json:"roles"`
-	CISlots         *int             `json:"ciSlots"`
-	AllowHostChecks *bool            `json:"allowHostChecks"`
-	Rooms           *[]string        `json:"rooms"`
-	Suites          *[]string        `json:"suites"`
-	SSH             *string          `json:"ssh"`
-	Create          bool             `json:"create,omitempty"`
+	Name            *string   `json:"name,omitempty"`
+	Enabled         *bool     `json:"enabled"`
+	AllowHostChecks *bool     `json:"allowHostChecks"`
+	Rooms           *[]string `json:"rooms"`
+	Suites          *[]string `json:"suites"`
+	Labels          *[]string `json:"labels"`
+	SSH             *string   `json:"ssh"`
+	Create          bool      `json:"create,omitempty"`
 	// Remove deletes the machine that the reference names.
 	Remove bool `json:"remove,omitempty"`
 	// ContainerSocket is the container runtime socket a workflow job uses on
@@ -324,8 +324,8 @@ func (a MachineAPI) MachineWork(ctx context.Context, id string) (MachineWork, er
 
 // SaveMachine applies one change to the machine that ref names, by ID or by
 // name, and answers with the page the machine has after it. It is the one
-// machine mutation path for the web, the CLI and the CI-node alias: it
-// normalizes the result and the store validates it before it writes.
+// machine mutation path for the web and the CLI: it normalizes the result and
+// the store validates it before it writes.
 func (a MachineAPI) SaveMachine(ctx context.Context, ref string, patch MachinePatch) (MachineDetail, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -377,9 +377,7 @@ func (a MachineAPI) SaveMachine(ctx context.Context, ref string, patch MachinePa
 	return a.machine(ctx, stored, a.ciRuns()), nil
 }
 
-// applyMachinePatch writes the fields the patch names and keeps the rules the
-// fields imply: the ci role needs a slot, and rooms, suites and host checks
-// belong to a machine that holds CI work.
+// applyMachinePatch writes the fields the patch names.
 func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Name != nil {
 		name := strings.TrimSpace(*patch.Name)
@@ -391,17 +389,14 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Enabled != nil {
 		m.Enabled = *patch.Enabled
 	}
-	if patch.Roles != nil {
-		m.Roles = *patch.Roles
-	}
-	if patch.CISlots != nil {
-		m.CISlots = *patch.CISlots
-	}
 	if patch.Rooms != nil {
 		m.Rooms = *patch.Rooms
 	}
 	if patch.Suites != nil {
 		m.Suites = *patch.Suites
+	}
+	if patch.Labels != nil {
+		m.Labels = *patch.Labels
 	}
 	if patch.SSH != nil {
 		m.SSH = strings.TrimSpace(*patch.SSH)
@@ -423,18 +418,6 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	}
 	if patch.Resources != nil {
 		m.Resources = *patch.Resources
-	}
-	if m.HasRole(machines.RoleCI) && m.CISlots < 1 && patch.CISlots == nil {
-		m.CISlots = 1
-	}
-	if patch.Rooms != nil && len(*patch.Rooms) > 0 && !m.HasRole(machines.RoleCI) {
-		return errors.New("a room list requires the ci role")
-	}
-	if patch.Suites != nil && len(*patch.Suites) > 0 && !m.HasRole(machines.RoleCI) {
-		return errors.New("a suite list requires the ci role")
-	}
-	if patch.AllowHostChecks != nil && *patch.AllowHostChecks && !m.HasRole(machines.RoleCI) {
-		return errors.New("host checks require the ci role")
 	}
 	return nil
 }
@@ -541,9 +524,9 @@ func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[stri
 	if a.CIQueue != nil {
 		running, waiting = a.CIQueue(m.Name)
 	}
-	// A CI machine always shows its queue; any other machine shows it while
-	// jobs run or wait on it.
-	if m.HasRole(machines.RoleCI) || running+waiting > 0 {
+	// A machine carries the ci label when local CI runs on it, so only that
+	// row reports a queue and its runs.
+	if m.Enabled && m.HasLabel(machines.LabelCI) {
 		out.CI = &MachineCIWork{Running: running, Waiting: waiting}
 		out.CIRuns = runs
 	}
@@ -608,14 +591,13 @@ func machineSummary(m machines.Machine) MachineSummary {
 	out := MachineSummary{
 		ID:              m.ID,
 		Name:            m.Name,
-		Roles:           m.Roles,
 		Local:           m.Local,
 		Enabled:         m.Enabled,
 		Status:          machineStatus(m),
-		CISlots:         m.CISlots,
 		AllowHostChecks: m.HasHostChecksGrants(),
 		Rooms:           m.Rooms,
 		Suites:          m.Suites,
+		Labels:          m.Labels,
 		MaxIOHeavy:      &m.MaxIOHeavy,
 		MaxDiskPercent:  &m.MaxDiskPercent,
 		Resources:       m.Resources,

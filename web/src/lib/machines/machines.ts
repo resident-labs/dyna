@@ -1,9 +1,4 @@
-import type { MachineCIRun, MachineCapabilities, MachineCapacity, MachineLoad, MachineRole, MachineStatus, MachineSummary, MachineWorkItem } from '../api/machine.ts'
-
-// roleLabel is the short name a role chip shows.
-export function roleLabel(role: MachineRole): string {
-  return role === 'ci' ? 'CI' : role
-}
+import type { MachineCIRun, MachineCapabilities, MachineCapacity, MachineLoad, MachineStatus, MachineSummary, MachineWorkItem } from '../api/machine.ts'
 
 // statusText words a machine's status for a title or a row.
 export function statusText(status: MachineStatus): string {
@@ -26,17 +21,20 @@ export function count(n: number, noun: string): string {
 
 // summaryParts lists the counts a machine row shows. A machine reports only
 // what it has: a remote machine reports no live figure until the probe reads
-// it. A CI machine always shows its queue, and any machine shows its queue
-// while it holds work: "3 running", then "2 waiting" when work waits.
+// it. It shows its queue when the engine runs one: "3 running", then
+// "2 waiting" when work waits.
 export function summaryParts(machine: MachineSummary): string[] {
   const parts: string[] = []
   if (machine.agents !== undefined) parts.push(count(machine.agents, 'agent'))
-  // A disabled machine takes no CI work, so it reports no queue figure.
-  if (machine.roles.includes('ci') && !machine.enabled) parts.push('CI off')
-  else if (machine.ci) {
-    parts.push(`${machine.ci.running} running`)
-    if (machine.ci.waiting > 0) parts.push(`${machine.ci.waiting} waiting`)
-  } else if (machine.roles.includes('ci')) parts.push('CI')
+  // A machine takes local CI only when enabled and carrying the ci label, so
+  // only that row reports a queue figure.
+  if (!machine.enabled) parts.push('CI off')
+  else if (machine.labels?.includes('ci')) {
+    if (machine.ci) {
+      parts.push(`${machine.ci.running} running`)
+      if (machine.ci.waiting > 0) parts.push(`${machine.ci.waiting} waiting`)
+    }
+  } else parts.push('no CI label')
   if (machine.computers !== undefined) parts.push(count(machine.computers, 'computer'))
   return parts
 }

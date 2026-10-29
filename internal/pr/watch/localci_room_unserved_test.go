@@ -19,6 +19,7 @@ func TestGateFailsTrialWhenFleetHasNoEnabledCIMachine(t *testing.T) {
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
 		t.Fatal(err)
 	}
+	// The engine host row carries no ci label, so the fleet has no CI machine.
 	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Base: base, Branch: "dyna/merge-trial/1", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true}
 	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
 	if err := s.Store.update(func(st *State) error {
@@ -45,7 +46,7 @@ func TestGateFailsTrialWhenFleetHasNoEnabledCIMachine(t *testing.T) {
 func TestTrialFailsWhenNoCIMachineServesTheRoom(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	if _, err := (machines.Store{DataDir: dataDir}).Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true, Rooms: []string{"other-room"}}); err != nil {
+	if _, err := (machines.Store{DataDir: dataDir}).Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}, Rooms: []string{"other-room"}}); err != nil {
 		t.Fatal(err)
 	}
 	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: localci.Store{DataDir: dataDir}}
