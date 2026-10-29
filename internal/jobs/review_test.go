@@ -654,10 +654,20 @@ func TestACancelledRequestSurvivesAnOwnerRestart(t *testing.T) {
 		return ctx.Err()
 	}
 	owner, fake, _, _ := newIdleService(t, legacy)
-	// The owner's own claim tick never fires: a nil channel parks its loop,
-	// so no scheduling luck - a slow runner whose five seconds pass before
-	// the next engine starts - can let the owner end the job itself. Only
-	// the restarted engine carries the request to the end.
+	// The owner exits whole, not half: its run parks the moment the node
+	// accepted the unit, and its claim tick never fires. A run left alive
+	// would see the stop's exit frame, record the cancelled end first and
+	// post it to the owner's own report - taking the room's one end event
+	// from the engine that reattached the job. Only the restarted engine
+	// carries the request to the end.
+	ownerGone := make(chan struct{})
+	defer close(ownerGone)
+	dead := owner.poller(Conn{Name: "here"})
+	recorded := dead.Launched
+	dead.Launched = func(spec RunSpec) { recorded(spec); <-ownerGone }
+	// A nil channel parks the owner's claim loop, so no scheduling luck - a
+	// slow runner whose five seconds pass before the next engine starts -
+	// lets the owner end the job itself.
 	owner.after = func(time.Duration) <-chan time.Time { return nil }
 	owner.Start(t.Context())
 	// The owner never stops: it dies with the job still running on the node.
