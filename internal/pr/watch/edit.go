@@ -3,6 +3,8 @@ package watch
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 // PREdit names the pull request fields to replace. A nil field stays unchanged.
@@ -11,7 +13,9 @@ type PREdit struct {
 	Body  *string `json:"body,omitempty"`
 }
 
-// Edit changes a tracked pull request through the room's GitHub credential.
+// Edit changes a tracked pull request through the room's GitHub credential. It
+// runs gh pr edit, which policy admits for a fork's parent repository, so a
+// fork-head upstream PR can be edited without a raw API write.
 func (s *Service) Edit(ctx context.Context, key string, edit PREdit) error {
 	if edit.Title == nil && edit.Body == nil {
 		return fmt.Errorf("a PR edit needs a title or body")
@@ -21,12 +25,9 @@ func (s *Service) Edit(ctx context.Context, key string, edit PREdit) error {
 		return err
 	}
 	ref := refRecord(r)
-	args := []string{"api", "--hostname", ref.Host, ref.path(""), "--method", "PATCH"}
+	args := []string{"pr", "edit", ref.URL()}
 	if edit.Title != nil {
-		args = append(args, "--raw-field", "title="+publicationBody(*edit.Title))
-	}
-	if edit.Body != nil {
-		args = append(args, "--raw-field", "body="+Sanitize(*edit.Body))
+		args = append(args, "--title", publicationBody(*edit.Title))
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.GH.requestTimeout())
 	defer cancel()
@@ -35,6 +36,18 @@ func (s *Service) Edit(ctx context.Context, key string, edit PREdit) error {
 		return err
 	}
 	defer unlock()
+	if edit.Body != nil {
+		dir, err := os.MkdirTemp(s.Store.Root, "edit-body-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(dir)
+		file := filepath.Join(dir, "body.md")
+		if err := os.WriteFile(file, []byte(Sanitize(*edit.Body)), 0600); err != nil {
+			return err
+		}
+		args = append(args, "--body-file", file)
+	}
 	_, err = s.githubFor(ref).command(ctx, "", false, args...)
 	return err
 }
