@@ -121,16 +121,21 @@ func classifyFailure(err error, capacityRetries int) error {
 	return err
 }
 
-var resetAt = regexp.MustCompile(`(?i)resets? at ([0-9T:.+Z-]+)`)
+var resetAt = regexp.MustCompile(`(?i)resets? at ([0-9T:.+Z-]+(?: [0-9:]+)?)`)
 
 var resetIn = regexp.MustCompile(`(?i)resets? in ([0-9][0-9hms]*)`)
 
 // UsageResetAt returns the provider's stated reset time, or zero when unknown.
 // It reads both the absolute form, "resets at 2030-01-02T22:19:00Z", and the
-// relative form, "resets in 152h54m19s".
+// relative form, "resets in 152h54m19s". Z.ai's zone-less form uses Beijing
+// time, as its API documentation and observed reset responses confirm.
 func UsageResetAt(text string, at time.Time) time.Time {
 	if m := resetAt.FindStringSubmatch(text); m != nil {
-		if reset, err := time.Parse(time.RFC3339Nano, m[1]); err == nil && reset.After(at) {
+		reset, err := time.Parse(time.RFC3339Nano, m[1])
+		if err != nil {
+			reset, err = time.ParseInLocation("2006-01-02 15:04:05", m[1], time.FixedZone("UTC+8", 8*60*60))
+		}
+		if err == nil && reset.After(at) {
 			return reset
 		}
 	}
