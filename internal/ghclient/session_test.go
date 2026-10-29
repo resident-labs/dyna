@@ -120,7 +120,7 @@ esac
 	t.Setenv("DYNA_ROOM_ID", records[0].ID)
 	t.Chdir(records[0].Repo)
 	for _, args := range [][]string{
-		{"pr", "comment", "1", "--body", "not allowed"},
+		{"pr", "review", "1", "--approve"},
 		{"api", "repos/work/service/issues", "-X", "POST"},
 		{"codespace", "ports", "visibility", "8000:public"},
 		{"codespace", "ports", "--codespace", "NAME", "visibility", "8000:public"},
@@ -133,6 +133,7 @@ esac
 		{"pr", "create", "--title", "test", "--body", "test"},
 		{"pr", "edit", "1", "--title", "test"},
 		{"pr", "ready", "1"},
+		{"pr", "comment", "1", "--body", "routine"},
 		{"pr", "view", "1"},
 		{"search", "issues", "--repo", "work/service", "duplicate"},
 		{"release", "view", "v1.0.0"},
@@ -158,7 +159,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "pr comment") || strings.Contains(string(raw), "api repos/work/service/issues -X POST") {
+	if strings.Contains(string(raw), "pr review") || strings.Contains(string(raw), "api repos/work/service/issues -X POST") {
 		t.Fatalf("refused command reached gh: %s", raw)
 	}
 }
