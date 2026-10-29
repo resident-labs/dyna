@@ -84,15 +84,17 @@ func TestChatGPTGrantRenewsADueSignIn(t *testing.T) {
 	}
 }
 
-// Pi reads its own login file through its auth commands, so a missing Pi copy
-// is a typed failure, never a stale token or a plain file error.
+// A grant read is a plain read of the login file, so it works wherever Pi is
+// not installed. Only a due grant's renewal runs Pi, so a missing Pi copy is
+// a typed renewal failure, never a stale token.
 func TestChatGPTGrantWithoutPiIsTyped(t *testing.T) {
 	accounts := testAccounts(t)
-	seedPiLogin(t, accounts, "openai-codex", futureGrant("access-token", "workspace"), store.KindOAuth)
+	seedPiLogin(t, accounts, "openai-codex", `{"type":"oauth","access":"old-token","refresh":"refresh-token","expires":1,"accountId":"workspace"}`, store.KindOAuth)
 	// Set after the seed, whose fake auth runner names its own Pi copy.
 	accounts.PiExecutable = func() (string, error) { return "", ErrPiMissing }
-	if _, err := accounts.ChatGPTGrant(t.Context(), "", ""); !errors.Is(err, ErrPiMissing) {
-		t.Fatalf("err = %v, want the missing Pi copy reported as typed", err)
+	_, err := accounts.ChatGPTGrant(t.Context(), "", "")
+	if !errors.Is(err, ErrGrantExpired) || !errors.Is(err, ErrPiMissing) {
+		t.Fatalf("err = %v, want the due grant expired because its renewal could not run", err)
 	}
 }
 
