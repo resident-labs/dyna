@@ -31,6 +31,12 @@ type localCIRegistry interface {
 	SaveHostedRuns(context.Context, string, string, localci.HostedRuns) error
 }
 
+// orphanedCIRuns is the registry seam for runs a stopped engine left behind.
+type orphanedCIRuns interface {
+	OrphanedAttachments(context.Context) ([]localci.OrphanedAttachment, error)
+	AbandonOrphanedRun(context.Context, localci.OrphanedAttachment) error
+}
+
 func (s *Service) ciRegistry() localCIRegistry {
 	if s.LocalCIRegistry != nil {
 		return s.LocalCIRegistry
@@ -348,8 +354,19 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	runs := s.nodeRuns()
 	runs.Lock()
 	started := false
+	var orphanRegistry orphanedCIRuns
+	var abandon []localci.OrphanedAttachment
 	defer func() {
 		runs.Unlock()
+		for _, orphan := range abandon {
+			go func(orphan localci.OrphanedAttachment) {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
+				defer cancel()
+				if err := orphanRegistry.AbandonOrphanedRun(ctx, orphan); err != nil {
+					log.Printf("local CI: abandon orphaned run %s on %s: %v", orphan.RunID, orphan.Node, err)
+				}
+			}(orphan)
+		}
 		if started {
 			s.runningCIChanged()
 		}
@@ -403,6 +420,22 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		}
 	}
 	runs.cancelUnwanted(desired, enabled)
+	if registry, ok := registry.(orphanedCIRuns); ok {
+		orphans, err := registry.OrphanedAttachments(ctx)
+		if err != nil {
+			return err
+		}
+		orphanRegistry = registry
+		for _, orphan := range orphans {
+			wanted := false
+			for _, job := range jobs {
+				wanted = wanted || job.head == orphan.SHA
+			}
+			if !wanted {
+				abandon = append(abandon, orphan)
+			}
+		}
+	}
 	for _, job := range jobs {
 		// A stopping engine admits no new run: the runs it has are being torn
 		// down, and a keeper would outlive the process.
