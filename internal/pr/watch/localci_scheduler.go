@@ -337,19 +337,41 @@ func (s *Service) localOnlyPRHeadJobs(ctx context.Context, st State) ([]register
 	return jobs, nil
 }
 
+// tickJobs decides which registered CI jobs this tick wants and admits. The
+// caller gathers every input first; this function does no IO and keeps trial
+// jobs ahead of local-only pull request heads.
+func tickJobs(wanted, headJobs []registeredCIJob, modes map[string]string, paused map[string]bool, haveNodes bool) ([]registeredCIJob, map[string]registeredCIJob) {
+	desired := map[string]registeredCIJob{}
+	var admitJobs []registeredCIJob
+	for _, job := range append(wanted, headJobs...) {
+		if job.hosted() {
+			// The room's hosted CI mode decides hosted work only: admission
+			// applies the local trial hold to a local head, so a room in GitHub
+			// mode does not starve the local merges that share these machines.
+			mode := modes[job.record.RoomID]
+			if mode != localci.ModeLocal && mode != localci.ModeBoth || paused[job.record.RoomID] {
+				continue
+			}
+		}
+		if !haveNodes || job.record.RepoPath == "" {
+			continue
+		}
+		key := registeredJobKey(job)
+		if _, exists := desired[key]; !exists {
+			desired[key] = job
+			admitJobs = append(admitJobs, job)
+		}
+	}
+	return admitJobs, desired
+}
+
 // scheduleRegisteredCI owns only live cancellation handles. Nodes, modes,
 // completed results and hosted cancellations live in SQLite.
 func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	registry := s.ciRegistry()
-	nodes, err := registry.Nodes(ctx)
+	enabled, err := s.registeredCINodes(ctx)
 	if err != nil {
 		return err
-	}
-	var enabled []localci.Node
-	for _, node := range nodes {
-		if node.TakesCI() {
-			enabled = append(enabled, node)
-		}
 	}
 	runs := s.nodeRuns()
 	runs.Lock()
@@ -374,54 +396,34 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 			s.runningCIChanged()
 		}
 	}()
-	desired := map[string]registeredCIJob{}
-	var admitJobs []registeredCIJob
 	modes := map[string]string{}
+	paused := map[string]bool{}
 	wanted := registeredCIJobs(st)
-	// Trials come first: they hold merges that the heads wait behind.
 	headJobs, err := s.localOnlyPRHeadJobs(ctx, st)
 	if err != nil {
 		return err
 	}
-	for _, job := range append(wanted, headJobs...) {
+	gathered := append(wanted, headJobs...)
+	for i := range gathered {
+		job := &gathered[i]
 		if job.hosted() {
-			// The room's hosted CI mode decides hosted work only: admission
-			// applies the local trial hold to a local head, so a room in GitHub
-			// mode does not starve the local merges that share these machines.
-			mode, ok := modes[job.record.RoomID]
-			if !ok {
-				mode, err = registry.Mode(ctx, job.record.RoomID)
+			roomID := job.record.RoomID
+			if _, ok := modes[roomID]; !ok {
+				mode, err := registry.Mode(ctx, roomID)
 				if err != nil {
 					return err
 				}
-				modes[job.record.RoomID] = mode
+				modes[roomID] = mode
 			}
-			if mode != localci.ModeLocal && mode != localci.ModeBoth {
-				continue
-			}
-			paused, err := s.RoomPaused(job.record.RoomID)
-			if err != nil {
+			if _, err := s.roomPausedCached(roomID, paused); err != nil {
 				return err
 			}
-			if paused {
-				continue
-			}
-		}
-		if len(enabled) == 0 {
-			continue
 		}
 		if job.record.RepoPath == "" {
 			s.resolveCheckout(ctx, st, &job.record)
 		}
-		if job.record.RepoPath == "" {
-			continue
-		}
-		key := registeredJobKey(job)
-		if _, exists := desired[key]; !exists {
-			desired[key] = job
-			admitJobs = append(admitJobs, job)
-		}
 	}
+	admitJobs, desired := tickJobs(gathered[:len(wanted)], gathered[len(wanted):], modes, paused, len(enabled) > 0)
 	runs.cancelUnwanted(desired, enabled)
 	if registry, ok := registry.(orphanedCIRuns); ok {
 		orphans, err := registry.OrphanedAttachments(ctx)
