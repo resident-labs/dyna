@@ -44,11 +44,14 @@ type Runtime struct {
 	privateRecommendations func(context.Context) []RecommendedVersion
 	privateLoginMu         sync.Mutex
 	privateLogins          map[string]*privateRuntimeLogin
-	lifetime               context.Context
-	Bundles                *BundleManager
-	Accounts               *Accounts
-	Config                 *harnessmgr.ConfigManager
-	Generations            string
+	// settlingScratch holds the scratch folders of replaced sign-in flows
+	// whose settlement has not finished, so a concurrent sweep spares them.
+	settlingScratch map[string]bool
+	lifetime        context.Context
+	Bundles         *BundleManager
+	Accounts        *Accounts
+	Config          *harnessmgr.ConfigManager
+	Generations     string
 }
 
 func New() *Runtime {
