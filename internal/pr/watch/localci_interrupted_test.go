@@ -109,8 +109,9 @@ func TestTrialWithoutAHostedFallbackFailsWithItsCause(t *testing.T) {
 }
 
 // A trial whose saved run Dyna stopped is admitted again, but only once: the
-// replacement carries the marker, and a busy fleet never spends that retry.
-func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
+// replacement carries the marker, and it joins a full node queue instead of
+// waiting for a machine nothing else holds.
+func TestStoppedTrialRetryHappensOnceAndJoinsAFullQueue(t *testing.T) {
 	e, record, dir, ci := localCIEnv(t)
 	repo, err := localci.CanonicalRepo(t.Context(), dir)
 	if err != nil {
@@ -122,29 +123,6 @@ func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
 	ci.results[head] = stopped
 	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, CPUs: 2}}
 	job := registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true}
-
-	// The only machine's node queue is full, so the retry cannot start and must
-	// not be spent.
-	queue := jobs.Admission{DataDir: filepath.Dir(e.s.Store.Root)}
-	if _, err := queue.Hold(t.Context(), jobs.Demand{Node: "hermes", ID: "busy", CPUs: 2}); err != nil {
-		t.Fatal(err)
-	}
-	started, err := e.s.startRegisteredCI(t.Context(), job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if started {
-		t.Fatal("a busy machine started the retry")
-	}
-	if ci.results[head].Resumed {
-		t.Fatal("a retry that never started was spent")
-	}
-
-	// Free the queue: the retry starts, and the replacement is what carries the
-	// marker.
-	if err := queue.Release(t.Context(), "hermes", "busy"); err != nil {
-		t.Fatal(err)
-	}
 	ci.started = make(chan struct{}, 1)
 	ci.release = make(chan struct{})
 	ci.saved = make(chan struct{}, 1)
@@ -155,14 +133,25 @@ func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
 		}
 		e.s.CancelLocalCI()
 	})
-	started, err = e.s.startRegisteredCI(t.Context(), job)
+
+	// The only machine's node queue is full, but the retry joins the queue: the
+	// replacement starts there and waits for room. While it waits, the saved
+	// evidence is still the stop it replaces.
+	queue := jobs.Admission{DataDir: filepath.Dir(e.s.Store.Root)}
+	if _, err := queue.Hold(t.Context(), jobs.Demand{Node: "hermes", ID: "busy", CPUs: 2}); err != nil {
+		t.Fatal(err)
+	}
+	started, err := e.s.startRegisteredCI(t.Context(), job)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !started {
-		t.Fatal("the freed machine did not start the retry")
+		t.Fatal("a full queue kept the retry from joining")
 	}
 	<-ci.started
+	if ci.results[head].Resumed {
+		t.Fatal("a replacement that had not finished spent the retry")
+	}
 	close(ci.release)
 	released = true
 	<-ci.saved

@@ -282,10 +282,11 @@ func hostedJob(t *testing.T, e *testEnv, local Record) *Record {
 	return &r
 }
 
-// A full node queue keeps a pull request head from preparing, and the local
-// trial still runs once the node frees: a pull request head never queues for a
-// machine, so a backlog of pull requests cannot starve a local merge.
-func TestLocalTrialRunsWhilePullRequestHeadsWaitForAFullNode(t *testing.T) {
+// A full node queue keeps a pull request head from preparing, but a local
+// trial joins the queue: its run starts on the room's only allowed node even
+// while that node is full, so its checks wait in the node queue instead of the
+// trial starving until a tick finds a machine no pull request holds.
+func TestTrialRunJoinsAFullNodeQueueWhilePullRequestHeadsWait(t *testing.T) {
 	e, record, dir, ci := localCIEnv(t)
 	e.s.LocalCIRegistry = &oneSlotRegistry{}
 	hostedJob(t, e, record)
@@ -308,26 +309,25 @@ func TestLocalTrialRunsWhilePullRequestHeadsWaitForAFullNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(record): {Phase: state.MergeTrialPhaseRunning, Branch: "dyna/merge-trial/7", Base: record.Base, Head: trialHead,
+	// The batch's bisect prefix head, the trial a merge queue waits on first,
+	// has no result yet.
+	st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(record): {Phase: state.MergeTrialPhaseRunning, Branch: "dyna/merge-trial/7", Base: record.Base,
+		Stacks:  []state.MergeTrialStack{{Branch: "dyna/merge-trial/8", Head: trialHead, Phase: state.MergeTrialPhaseRunning}},
 		Changes: []state.MergeTrialChange{{Key: record.Key, Head: record.Head}}, Created: e.clock}}
 	if err := e.s.scheduleRegisteredCI(context.Background(), st); err != nil {
 		t.Fatal(err)
 	}
-	// The pull request head prepared nothing on the full node: no run, and no
-	// contact with GitHub.
-	if runs := e.s.RunningCI(); len(runs) != 0 {
-		t.Fatalf("a full node started %+v", runs)
-	}
-	// The node frees, and the trial takes it through its own reader.
-	if err := queue.Release(t.Context(), "hermes", "occupied"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.s.localTrialCI(context.Background(), record, trialHead); err != nil {
-		t.Fatal(err)
+	// The trial run is in flight on the full node and waits for the queue to
+	// admit its checks, so the merge queue it holds keeps moving as soon as the
+	// node frees.
+	select {
+	case <-ci.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the trial never started on the full node")
 	}
 	runs := e.s.RunningCI()
-	if len(runs) != 1 || runs[0].Head != trialHead[:7] || runs[0].Kind != RunningCILocalChange {
-		t.Fatalf("machine runs = %+v, want the local trial head %s", runs, trialHead[:7])
+	if len(runs) != 1 || runs[0].Head != trialHead[:7] || runs[0].Machine != "hermes" || !runs[0].Trial {
+		t.Fatalf("machine runs = %+v, want the trial queued on hermes", runs)
 	}
 }
 
