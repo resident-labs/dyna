@@ -137,11 +137,16 @@ func isMissingAttachmentTable(err error) bool {
 
 // attachmentRows lists the records of a commit, newest first.
 func (s Store) attachmentRows(ctx context.Context, repo, sha string) ([]attachmentRow, error) {
+	return s.queryAttachments(ctx, "repo=? AND sha=?", repo, sha)
+}
+
+// queryAttachments lists the records that match where, newest first.
+func (s Store) queryAttachments(ctx context.Context, where string, args ...any) ([]attachmentRow, error) {
 	db, err := s.open()
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT node, payload, owner_pid, owner_start, saved_at FROM local_ci_attachments WHERE repo=? AND sha=? ORDER BY saved_at DESC", repo, sha)
+	rows, err := db.QueryContext(ctx, "SELECT repo, sha, node, payload, owner_pid, owner_start, saved_at FROM local_ci_attachments WHERE "+where+" ORDER BY saved_at DESC", args...)
 	if isMissingAttachmentTable(err) {
 		return nil, nil
 	}
@@ -150,10 +155,10 @@ func (s Store) attachmentRows(ctx context.Context, repo, sha string) ([]attachme
 	}
 	var out []attachmentRow
 	for rows.Next() {
-		row := attachmentRow{Repo: repo, SHA: sha}
+		var row attachmentRow
 		var raw []byte
 		var saved int64
-		if err := rows.Scan(&row.Node, &raw, &row.ownerPID, &row.ownerStart, &saved); err != nil {
+		if err := rows.Scan(&row.Repo, &row.SHA, &row.Node, &raw, &row.ownerPID, &row.ownerStart, &saved); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -203,16 +208,25 @@ func (s Store) OrphanedAttachments(ctx context.Context) ([]OrphanedAttachment, e
 
 // AbandonOrphanedRun finds the registered machine and tears down one kept run.
 func (s Store) AbandonOrphanedRun(ctx context.Context, orphan OrphanedAttachment) error {
+	r, err := s.runnerFor(ctx, orphan.Node)
+	if err != nil {
+		return fmt.Errorf("abandon local CI run %s: %w", orphan.RunID, err)
+	}
+	return r.AbandonOrphanedRun(ctx, s, orphan)
+}
+
+// runnerFor returns the engine runner of a registered machine.
+func (s Store) runnerFor(ctx context.Context, node string) (Runner, error) {
 	nodes, err := s.Nodes(ctx)
 	if err != nil {
-		return err
+		return Runner{}, err
 	}
 	for i := range nodes {
-		if nodes[i].Name == orphan.Node {
-			return (Runner{DataDir: s.DataDir, Node: &nodes[i], Engine: true}).AbandonOrphanedRun(ctx, s, orphan)
+		if nodes[i].Name == node {
+			return Runner{DataDir: s.DataDir, Node: &nodes[i], Engine: true}, nil
 		}
 	}
-	return fmt.Errorf("abandon local CI run %s: node %s: %w", orphan.RunID, orphan.Node, os.ErrNotExist)
+	return Runner{}, fmt.Errorf("node %s: %w", node, os.ErrNotExist)
 }
 
 // claimAttachment takes over the newest record of a commit on a machine whose run

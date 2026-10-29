@@ -15,13 +15,14 @@ import (
 // The engine's caller policies, one per binding that a mutation acts for.
 // callerPolicies says what each value does.
 const (
-	policyGoal    websvc.Policy = iota + 1 // changing goals or rules; records the goal author on ctx
-	policySession                          // changing a session
-	policyCLI                              // using CLI commands
-	policyPR                               // changing PR state
-	policyMachine                          // changing a node
-	policyOwner                            // using owner controls
-	policyIssue                            // triaging room issues
+	policyGoal        websvc.Policy = iota + 1 // changing goals or rules; records the goal author on ctx
+	policySession                              // changing a session
+	policyCLI                                  // using CLI commands
+	policyPR                                   // changing PR state
+	policyMachine                              // changing a node
+	policyOwner                                // using owner controls
+	policyIssue                                // triaging room issues
+	policyOwnerOrRoot                          // owner or root controls that act on a room's work
 )
 
 // callerPolicy is what one policy value does. doing names the action in
@@ -37,13 +38,14 @@ type callerPolicy struct {
 
 // callerPolicies is the engine's policy table, built once.
 var callerPolicies = map[websvc.Policy]callerPolicy{
-	policyGoal:    {doing: "changing goals or rules", with: roomsvc.WithGoalAuthor},
-	policySession: {doing: "changing a session"},
-	policyCLI:     {doing: "using CLI commands"},
-	policyPR:      {doing: "changing PR state"},
-	policyMachine: {doing: "changing a node", check: checkMachineWrite},
-	policyOwner:   {doing: "using owner controls", check: ownerOnly},
-	policyIssue:   {doing: "triaging room issues"},
+	policyGoal:        {doing: "changing goals or rules", with: roomsvc.WithGoalAuthor},
+	policySession:     {doing: "changing a session"},
+	policyCLI:         {doing: "using CLI commands"},
+	policyPR:          {doing: "changing PR state"},
+	policyMachine:     {doing: "changing a node", check: checkMachineWrite},
+	policyOwner:       {doing: "using owner controls", check: ownerOnly},
+	policyIssue:       {doing: "triaging room issues"},
+	policyOwnerOrRoot: {doing: "using owner or root controls", check: ownerOrRoot},
 }
 
 // applyCallerPolicies makes each call that declares a caller policy act for
