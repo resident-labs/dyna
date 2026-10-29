@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -32,15 +33,58 @@ func TestStatedHoldAccountIsTheStatedHoldThatEndsFirst(t *testing.T) {
 	if err := s.MarkReset(later.ID, now.Add(5*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now)
+	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", "", now)
 	if err != nil || !ok || got.ID != held.ID {
 		t.Fatalf("StatedHoldAccount = %s, %v, %v; want %s", got.ID, ok, err, held.ID)
 	}
-	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now.Add(4*time.Hour)); err != nil || !ok {
+	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", "", now.Add(4*time.Hour)); err != nil || !ok {
 		t.Fatalf("after the first end, the later stated hold should remain: %v, %v", ok, err)
 	}
-	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now.Add(6*time.Hour)); err != nil || ok {
+	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", "", now.Add(6*time.Hour)); err != nil || ok {
 		t.Fatalf("after every end, no account should be held: %v, %v", ok, err)
+	}
+}
+
+// A stated hold for one model never selects an account for another model, because
+// the provider's limit may cover only the model it named.
+func TestStatedHoldAccountMatchesOnlyTheHeldModel(t *testing.T) {
+	a := testAccounts(t)
+	held := signedClaude(t, a, "work", "aaaaaaaa-bbbb-cccc-dddd-000000000002")
+	s, err := reposcope.Open(filepath.Dir(a.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := s.Hold(held.ID, reposcope.Hold{Until: now.Add(3 * time.Hour), Stated: true, Model: "model-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "model-b", "", now); err != nil || ok {
+		t.Fatalf("a model-a hold selected an account for model-b: %v, %v", ok, err)
+	}
+	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "model-a", "", now)
+	if err != nil || !ok || got.ID != held.ID {
+		t.Fatalf("StatedHoldAccount for model-a = %s, %v, %v; want %s", got.ID, ok, err, held.ID)
+	}
+}
+
+// A guarded switch refuses to replace an account that is no longer the one it
+// expects, and it changes no login state.
+func TestGuardedSwitchRefusesAConcurrentSwitch(t *testing.T) {
+	a := testAccounts(t)
+	expected := signedClaude(t, a, "personal", "aaaaaaaa-bbbb-cccc-dddd-000000000001")
+	moved := signedClaude(t, a, "other", "aaaaaaaa-bbbb-cccc-dddd-000000000003")
+	target := signedClaude(t, a, "work", "aaaaaaaa-bbbb-cccc-dddd-000000000002")
+	if err := a.Switch(context.Background(), moved.ID, "/fake/native"); err != nil {
+		t.Fatal(err)
+	}
+	err := a.switchTo(context.Background(), target.ID, "/fake/native", nil, func(active string) bool {
+		return active == expected.ID
+	})
+	if !errors.Is(err, errSwitchKept) {
+		t.Fatalf("guarded switch error = %v; want errSwitchKept", err)
+	}
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != moved.ID {
+		t.Fatalf("refused switch moved the active account to %s; want %s", active.ID, moved.ID)
 	}
 }
 
@@ -56,10 +100,10 @@ func TestStatedHoldAccountSkipsAnAccountTheRepoRefuses(t *testing.T) {
 	if err := s.MarkReset(work.ID, now.Add(3*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now); err != nil || ok {
+	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", "", now); err != nil || ok {
 		t.Fatalf("the work account may not run in no repo, so it must not be probed: %v, %v", ok, err)
 	}
-	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, workRepo, now)
+	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", workRepo, now)
 	if err != nil || !ok || got.ID != work.ID {
 		t.Fatalf("StatedHoldAccount in %s = %s, %v, %v; want %s", workRepo, got.ID, ok, err, work.ID)
 	}
