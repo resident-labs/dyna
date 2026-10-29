@@ -534,9 +534,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					runErr = fmt.Errorf("record check before admission: %w", runErr)
 				} else if spec.Attach {
 					held, holdErr := queue.Reattach(checkCtx, demand)
-					if holdErr != nil {
+					// A released reservation can be swept before the run resumes.
+					// Attach without a port: the detached poll reads the check's result.
+					if holdErr != nil && !errors.Is(holdErr, jobs.ErrNoReservation) {
 						runErr = fmt.Errorf("record the running check %s in the queue: %w", check.id, holdErr)
-					} else {
+					} else if holdErr == nil {
 						port = held
 					}
 				} else {
