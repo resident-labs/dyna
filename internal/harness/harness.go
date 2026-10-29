@@ -51,6 +51,9 @@ type Result struct {
 	// harnesses that report usage per call. The next turn passes it back in
 	// SessionOptions so Dyna can run the compact command when it is due.
 	ContextTokens int64
+	// FirstCall is the prompt accounting of the turn's first model call, for
+	// harnesses that report usage per call. Nil means unknown, never zero.
+	FirstCall *workeroutput.CallUsage `json:"firstCall,omitempty"`
 	// CompactError says why Dyna's compact command failed before this turn.
 	// The turn still ran on the uncompacted session.
 	CompactError string
@@ -585,6 +588,7 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 	result.UsageNormalization = state.normalizer.Normalization()
 	result.UsageBaseline = state.normalizer.Baseline()
 	result.ContextTokens, result.CompactError = state.compactValues()
+	result.FirstCall = state.firstCallUsage()
 	if err != nil {
 		result.UsageNormalization.MarkPartial("invocation did not complete")
 		// A failed turn cannot prove what the provider billed, so the saved
@@ -1248,6 +1252,9 @@ type runState struct {
 	// pre-turn compact command.
 	contextTokens int64
 	compactErr    string
+	// firstCall is the first model call's usage, nil until a dialect reports one
+	// per call.
+	firstCall *workeroutput.CallUsage
 }
 
 func (r *runState) setCompactError(err error) {
@@ -1260,6 +1267,12 @@ func (r *runState) compactValues() (int64, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.contextTokens, r.compactErr
+}
+
+func (r *runState) firstCallUsage() *workeroutput.CallUsage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.firstCall
 }
 
 // beginProcess marks the start of a new harness process.
@@ -1296,6 +1309,9 @@ func (r *runState) observeRecord(record workeroutput.Record) {
 	r.health.StdoutSeen = true
 	if record.ContextTokens > 0 {
 		r.contextTokens = record.ContextTokens
+	}
+	if record.Call != nil && r.firstCall == nil {
+		r.firstCall = record.Call
 	}
 	if record.Recognized() {
 		r.health.RecognizedRecords++
