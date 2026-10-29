@@ -364,37 +364,65 @@ func isRead(args []string) bool {
 	if args[0] != "api" {
 		return false
 	}
-	method := ""
-	graphql := false
-	fields := false
-	query := ""
+	call := parseAPICall(args)
+	if call.graphql {
+		return (call.method == "" || call.method == "GET" || call.method == "POST") && (strings.HasPrefix(call.query, "query") || strings.HasPrefix(call.query, "{")) && !mutation.MatchString(call.query)
+	}
+	return call.method == "GET" || call.method == "HEAD" || (call.method == "" && !call.fields)
+}
+
+// apiCall holds what a `gh api` command says about its method and body.
+type apiCall struct {
+	method  string
+	graphql bool
+	// fields is true when the command sends a body: a field flag or --input.
+	fields bool
+	// input is true when --input supplies the body, so its keys are unknown.
+	input bool
+	query string
+	// keys are the names of the -f, -F, --field and --raw-field fields.
+	keys []string
+}
+
+func parseAPICall(args []string) apiCall {
+	var call apiCall
 	for i, arg := range args {
 		if arg == "graphql" {
-			graphql = true
+			call.graphql = true
 		}
 		if strings.HasPrefix(arg, "--method=") {
-			method = strings.ToUpper(strings.TrimPrefix(arg, "--method="))
+			call.method = strings.ToUpper(strings.TrimPrefix(arg, "--method="))
 		}
 		if strings.HasPrefix(arg, "-X") && len(arg) > 2 {
-			method = strings.ToUpper(arg[2:])
+			call.method = strings.ToUpper(arg[2:])
 		}
 		if (arg == "--method" || arg == "-X") && i+1 < len(args) {
-			method = strings.ToUpper(args[i+1])
+			call.method = strings.ToUpper(args[i+1])
 		}
 		if arg == "--input" || strings.HasPrefix(arg, "--input=") {
-			fields = true
+			call.fields, call.input = true, true
 		}
 		if strings.HasPrefix(arg, "--field=") || strings.HasPrefix(arg, "--raw-field=") || strings.HasPrefix(arg, "-f") || strings.HasPrefix(arg, "-F") || arg == "--field" || arg == "--raw-field" {
-			fields = true
+			call.fields = true
+			field := ""
+			switch {
+			case arg == "--field" || arg == "--raw-field" || arg == "-f" || arg == "-F":
+				if i+1 < len(args) {
+					field = args[i+1]
+				}
+			case strings.HasPrefix(arg, "--"):
+				_, field, _ = strings.Cut(arg, "=")
+			default:
+				field = arg[2:]
+			}
+			key, _, _ := strings.Cut(field, "=")
+			call.keys = append(call.keys, key)
 		}
 		if strings.HasPrefix(arg, "query=") {
-			query = strings.TrimSpace(strings.TrimPrefix(arg, "query="))
+			call.query = strings.TrimSpace(strings.TrimPrefix(arg, "query="))
 		}
 	}
-	if graphql {
-		return (method == "" || method == "GET" || method == "POST") && (strings.HasPrefix(query, "query") || strings.HasPrefix(query, "{")) && !mutation.MatchString(query)
-	}
-	return method == "GET" || method == "HEAD" || (method == "" && !fields)
+	return call
 }
 
 // publicRepo reports whether a repository is public. Tests replace it.
@@ -575,38 +603,12 @@ func fetchParentRepo(ctx context.Context, cmd *exec.Cmd, r repository) (string, 
 
 func checkWorkerPolicy(args []string) error {
 	args = commandArgs(args)
-	if isRead(args) {
+	if isReadCommand(args) {
 		return nil
-	}
-	if len(args) == 1 && args[0] == "status" {
-		return nil
-	}
-	if len(args) >= 2 && args[0] == "codespace" && args[1] == "ports" && codespacePortsListFlags(args[2:]) {
-		return nil
-	}
-	if len(args) >= 3 {
-		switch args[0] + " " + args[1] + " " + args[2] {
-		case "issue artifact download", "issue artifact list", "issue artifact view",
-			"repo autolink list", "repo autolink view", "repo deploy-key list",
-			"repo gitignore list", "repo gitignore view", "repo license list", "repo license view":
-			return nil
-		}
 	}
 	if len(args) >= 2 {
 		switch args[0] + " " + args[1] {
-		case "issue create", "pr create", "pr edit", "pr ready",
-			"agent-task list", "agent-task view",
-			"attestation download", "attestation trusted-root", "attestation verify",
-			"cache list", "codespace list", "codespace logs", "codespace view",
-			"discussion list", "discussion view", "extension browse", "extension list", "extension search",
-			"gist clone", "gist list", "gist view", "gpg-key list", "issue status", "label list", "org list",
-			"pr checkout", "pr status", "project field-list", "project item-list", "project list", "project view",
-			"release download", "release list", "release verify", "release verify-asset", "release view",
-			"repo clone", "repo list", "repo read-dir", "repo read-file",
-			"ruleset check", "ruleset list", "ruleset view", "run watch",
-			"search code", "search commits", "search issues", "search prs", "search repos",
-			"secret list", "skill list", "skill preview", "skill search", "ssh-key list",
-			"variable get", "variable list", "workflow list", "workflow view":
+		case "issue create", "pr create", "pr edit", "pr ready":
 			return nil
 		}
 	}
