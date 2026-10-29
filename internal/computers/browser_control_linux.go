@@ -5,7 +5,6 @@ package computers
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -25,7 +24,7 @@ func (s *supervisor) startBrowser(ctx context.Context) (Browser, error) {
 	var err error
 	if len(profileBrowserPIDs(s.meta.SessionID)) == 0 {
 		var env []string
-		env, err = buildEnvironment(s.meta, os.Environ(), gpuEnvValues(s.desktopGPU))
+		env, err = buildEnvironment(s.meta, engineEnvironment(), gpuEnvValues(s.desktopGPU))
 		if err == nil {
 			// A browser that starts its own systemd units joins the room's
 			// slice, so a room's systemd-run shim keeps it inside the room's

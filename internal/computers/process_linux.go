@@ -35,7 +35,7 @@ func startDaemon(ctx context.Context, exe string) error {
 		}
 	}
 	cmd := exec.Command(exe, "computers")
-	cmd.Env = mergeEnvironment(os.Environ(), map[string]string{daemonMarker: "1"})
+	cmd.Env = mergeEnvironment(engineEnvironment(), map[string]string{daemonMarker: "1"})
 	f, err := os.OpenFile(filepath.Join(Root(), "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return err
