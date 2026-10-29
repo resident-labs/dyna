@@ -37,30 +37,65 @@ type sessionHistory struct {
 	owners   []sessionOwner
 }
 
-// SessionProtected checks registered and inferred session ownership before pruning.
-// An incomplete ownership scan is an error, not permission to remove a tree.
-func SessionProtected(ctx context.Context, rec Record) (bool, error) {
-	owners, err := inferOwners(ctx, []string{rec.Path}, nil)
-	if err != nil {
-		return false, err
+// SessionOwnerChecker reuses one ownership snapshot and the session goal
+// checks for a read-only pass over many records. Mutations must still use a
+// fresh SessionProtected check immediately before they change a tree.
+type SessionOwnerChecker struct {
+	owners map[string]inferredOwners
+	closed map[string]sessionClosedResult
+}
+
+type sessionClosedResult struct {
+	closed bool
+	err    error
+}
+
+// NewSessionOwnerChecker infers every record's session owners in one pass.
+func NewSessionOwnerChecker(ctx context.Context, records []Record) (*SessionOwnerChecker, error) {
+	paths := make([]string, len(records))
+	for i, rec := range records {
+		paths[i] = rec.Path
 	}
+	owners, err := inferOwners(ctx, paths, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &SessionOwnerChecker{owners: owners, closed: map[string]sessionClosedResult{}}, nil
+}
+
+// Protected checks registered and inferred session ownership in the snapshot.
+func (c *SessionOwnerChecker) Protected(rec Record) (bool, error) {
 	ids := make(map[string]bool)
 	if rec.Session != "" {
 		ids[rec.Session] = true
 	}
-	for _, owner := range owners[rec.Path].Sessions {
+	for _, owner := range c.owners[rec.Path].Sessions {
 		ids[owner.ID] = true
 	}
 	for id := range ids {
-		closed, err := SessionClosed(id)
-		if err != nil {
-			return false, err
+		result, seen := c.closed[id]
+		if !seen {
+			result.closed, result.err = SessionClosed(id)
+			c.closed[id] = result
 		}
-		if !closed {
+		if result.err != nil {
+			return false, result.err
+		}
+		if !result.closed {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// SessionProtected checks registered and inferred session ownership before pruning.
+// An incomplete ownership scan is an error, not permission to remove a tree.
+func SessionProtected(ctx context.Context, rec Record) (bool, error) {
+	checker, err := NewSessionOwnerChecker(ctx, []Record{rec})
+	if err != nil {
+		return false, err
+	}
+	return checker.Protected(rec)
 }
 
 // inferOwners reads historical ownership without changing stores or worktrees.
