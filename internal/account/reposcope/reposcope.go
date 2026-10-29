@@ -233,13 +233,26 @@ func (s *Store) ClearLimit(accountID string) error {
 	})
 }
 
-// ClearOpenEnded removes the account's hold only when it has no reset time, so
-// a successful probe or refresh ends a credits hold and leaves timed holds alone.
-func (s *Store) ClearOpenEnded(accountID string) error {
+// ClearOpenEnded removes the account's no-timer hold after a successful
+// refresh. A timed hold stays. A hold recorded at or after since stays too, so
+// a failure that lands while the check runs is not wiped.
+func (s *Store) ClearOpenEnded(accountID string, since time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
 	defer cancel()
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=? AND until=?", accountID, OpenEnded.Unix())
+		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=? AND until=? AND recorded_at<?", accountID, OpenEnded.Unix(), since.UnixNano())
+		return err
+	})
+}
+
+// ClearUnstated removes the account's unstated hold, timed or not, after a
+// successful usage probe. A stated reset stays until it passes. A hold recorded
+// at or after since stays too, so a failure during the probe is not wiped.
+func (s *Store) ClearUnstated(accountID string, since time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
+	defer cancel()
+	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=? AND stated=0 AND recorded_at<?", accountID, since.UnixNano())
 		return err
 	})
 }
