@@ -244,6 +244,15 @@ func observePortUseAfterRelease(ctx context.Context, db *sql.DB, releases []port
 		}
 		projected = append(projected, rec)
 	}
+	raw := 0
+	for _, rec := range projected {
+		if rec.Port != 0 {
+			raw++
+		}
+	}
+	if portCapacityBand(raw) == 0 {
+		return portUseObservation{}
+	}
 	return newPortUseObservation(ctx, projected)
 }
 

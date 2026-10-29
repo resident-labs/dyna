@@ -79,8 +79,10 @@ func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except 
 			continue
 		}
 		if provenMissingPath(rec.Path) {
-			// Only a proven absent path counts; any other error is uncertain.
-			missing = append(missing, portRelease{record: rec, remove: true})
+			// A missing tree does not prove that its sockets are free.
+			if blockFree(rec.Port, portFree) {
+				missing = append(missing, portRelease{record: rec, remove: true})
+			}
 			continue
 		}
 		held = append(held, rec)
@@ -94,11 +96,19 @@ func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except 
 		return cmp.Or(a.RetainedAt.Compare(b.RetainedAt), a.CreatedAt.Compare(b.CreatedAt), strings.Compare(a.Path, b.Path))
 	})
 	reclaimable := map[string]map[string]bool{}
+	base, err := beginPortGuard(ctx, db)
+	if err != nil {
+		return false
+	}
 	for _, rec := range held {
+		guard := *base
 		if !heldPortReclaimable(ctx, rec, reclaimable) {
 			continue
 		}
-		if ok, err := releaseRecord(ctx, db, rec, false); err == nil && ok {
+		if err := guard.infer(ctx, rec); err != nil {
+			continue
+		}
+		if ok, err := releaseRecords(ctx, db, []portRelease{{record: rec, guard: &guard}}); err == nil && ok {
 			return true
 		}
 	}
@@ -154,6 +164,7 @@ func heldPortReclaimable(ctx context.Context, rec Record, reclaimable map[string
 type portRelease struct {
 	record Record
 	remove bool
+	guard  *portGuard
 }
 
 // releaseRecord deletes orig, or clears its port, in one transaction. It does
@@ -192,6 +203,18 @@ func releaseRecords(ctx context.Context, db *sql.DB, releases []portRelease) (bo
 			}
 			if !bytes.Equal(have, wants[i]) {
 				continue
+			}
+			if rec.Port != 0 && !blockFree(rec.Port, portFree) {
+				continue
+			}
+			if release.guard != nil {
+				ok, err := release.guard.valid(ctx, conn, rec)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					continue
+				}
 			}
 			if release.remove {
 				if _, err = conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, rec.Path); err != nil {
