@@ -60,6 +60,9 @@ type Comment struct {
 	State        string `json:"state"`
 	Kind         string `json:"kind,omitempty"`
 }
+type Label struct {
+	Name string `json:"name"`
+}
 type Pull struct {
 	Draft   bool   `json:"draft"`
 	Updated string `json:"updated_at"`
@@ -69,8 +72,9 @@ type Pull struct {
 	State   string `json:"state"`
 	Merged  bool   `json:"merged"`
 	// MergeCommit is the merge commit of a merged PR; it names the fix in issue closes.
-	MergeCommit string `json:"merge_commit_sha"`
-	User        User   `json:"user"`
+	MergeCommit string  `json:"merge_commit_sha"`
+	User        User    `json:"user"`
+	Labels      []Label `json:"labels"`
 	Head        struct {
 		SHA  string `json:"sha"`
 		Ref  string `json:"ref"`
@@ -86,6 +90,16 @@ type Pull struct {
 		} `json:"repo"`
 	} `json:"base"`
 }
+
+// labelNames returns the PR's label names in GitHub's order.
+func (p Pull) labelNames() []string {
+	names := make([]string, 0, len(p.Labels))
+	for _, label := range p.Labels {
+		names = append(names, label.Name)
+	}
+	return names
+}
+
 type Check struct {
 	CheckSuite struct {
 		ID int64 `json:"id"`

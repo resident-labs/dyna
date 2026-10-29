@@ -109,8 +109,9 @@ func pullVersion(p Pull, policy ChangePolicy) string {
 	b, _ := json.Marshal(struct {
 		Updated, Head, State string
 		Draft, Merged        bool
+		Labels               []string
 		Policy               ChangePolicy
-	}{p.Updated, p.Head.SHA, p.State, p.Draft, p.Merged, policy})
+	}{p.Updated, p.Head.SHA, p.State, p.Draft, p.Merged, p.labelNames(), policy})
 	return digest(string(b))
 }
 
