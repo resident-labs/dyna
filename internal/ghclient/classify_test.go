@@ -42,6 +42,8 @@ func TestClassify(t *testing.T) {
 		{"api GET is a read", "api repos/o/r/issues", read},
 		{"api graphql query is a read", "api graphql -f query=query{viewer{login}}", read},
 		{"workflow list is a read", "workflow list", read},
+		{"auth status is a read", "auth status --hostname github.com", read},
+		{"auth status showing the token is not a read", "auth status --show-token", owner},
 		{"issue create", "issue create --title t --body b", agent},
 		{"issue edit", "issue edit 5 --add-label bug", agent},
 		{"issue comment", "issue comment 5 --body hi", agent},
