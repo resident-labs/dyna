@@ -306,25 +306,16 @@ func saveProfile(ctx context.Context, sessions *subagent.Manager, reg *profile.S
 	return saveProfiles(ctx, sessions, reg)
 }
 
-// afterReply runs a profile write's instruction fan-out after the reply. Tests
-// replace it to run the fan-out on their own schedule.
-var afterReply = func(fn func()) { go fn() }
-
 // saveProfiles notes the change on sessions, the engine's Manager, or on a
-// fresh one when it is nil. The engine's note runs after the reply, because
-// it can fan out to about 40 sessions and outlast the CLI's deadline. A nil
-// Manager belongs to a CLI process that exits on return, so its note stays
-// synchronous.
+// fresh one when it is nil.
 func saveProfiles(ctx context.Context, sessions *subagent.Manager, s *profile.Store) error {
 	if err := s.Save(); err != nil {
 		return err
 	}
 	if sessions == nil {
-		subagent.NewManager().NoteRoomInstructions(ctx, "")
-		return nil
+		sessions = subagent.NewManager()
 	}
-	detached := context.WithoutCancel(ctx)
-	afterReply(func() { sessions.NoteRoomInstructions(detached, "") })
+	sessions.NoteRoomInstructions(ctx, "")
 	return nil
 }
 
