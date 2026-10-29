@@ -1119,5 +1119,5 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 	// requires. The trial gate keeps waiting for that check, so this scheduler
 	// must start the local run instead of skipping it for ever. A hosted
 	// failure stays settled: it vetoes the head whatever local CI would add.
-	return ci != VerdictPassed || len(missingRequiredCIChecks(required, localci.Result{}, snap)) == 0, nil
+	return ci != VerdictPassed || len(missingRequiredCIChecks(baseRequiredCIChecks(required), localci.Result{}, snap)) == 0, nil
 }
