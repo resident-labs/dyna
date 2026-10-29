@@ -227,6 +227,10 @@ type Meta struct {
 	RoomID        string `json:"roomId,omitempty"`
 	Room          string `json:"room,omitempty"`
 	Detached      bool   `json:"detached,omitempty"`
+	// Starting marks the row a launcher wrote before the run's folder or
+	// worker existed, so cleanup sees an owner while the launch stages. The
+	// worker's own create replaces the row; a failure finishes it.
+	Starting bool `json:"starting,omitempty"`
 	// OwnerHandoff marks coordinators that resolve the current owner for each shell step.
 	OwnerHandoff bool `json:"ownerHandoff,omitempty"`
 	Pid          int  `json:"pid,omitempty"`

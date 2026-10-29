@@ -170,36 +170,50 @@ func NewRunWorkerCommand() *cobra.Command {
 	var output string
 	var quiet bool
 	cmd := &cobra.Command{Use: "run-worker <options.json>", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
-		switch output {
-		case "raw", "plain", "json":
-		default:
-			return fmt.Errorf("unknown workflow output mode %q", output)
+		err := runWorker(c, args, output, quiet)
+		// The launcher published this run before it staged. If the worker
+		// exits before the run creates itself, finish that starting row.
+		if id := os.Getenv("DYNA_RUN_ID"); id != "" && runstore.ValidateRunID(id) == nil {
+			reason := "worker exited before the run started"
+			if err != nil {
+				reason += ": " + err.Error()
+			}
+			err = errors.Join(err, runstore.FinishStartingRun(id, reason))
 		}
-		data, err := os.ReadFile(args[0])
-		if err != nil {
-			return err
-		}
-		var opts workflowsvc.Options
-		if err := json.Unmarshal(data, &opts); err != nil {
-			return err
-		}
-		ctx, cancel := signal.NotifyContext(c.Context(), syscall.SIGINT, syscall.SIGTERM)
-		defer cancel()
-		// A demo run gets its mock workers here, in memory, so it never reads or
-		// writes the owner's profile registry.
-		var demo *profile.Store
-		if opts.Demo {
-			demo = &profile.Store{Profiles: demoProfiles()}
-		}
-		result, err := workflowsvc.Execute(ctx, opts, demo, runObserver(c, quiet, opts.ResumeFrom))
-		if err != nil {
-			return err
-		}
-		return writeRunResult(c, result, output)
+		return err
 	}}
 	cmd.Flags().StringVar(&output, "output", "raw", "private result presentation: raw, plain, or json")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "suppress progress events")
 	return cmd
+}
+
+func runWorker(c *cobra.Command, args []string, output string, quiet bool) error {
+	switch output {
+	case "raw", "plain", "json":
+	default:
+		return fmt.Errorf("unknown workflow output mode %q", output)
+	}
+	data, err := os.ReadFile(args[0])
+	if err != nil {
+		return err
+	}
+	var opts workflowsvc.Options
+	if err := json.Unmarshal(data, &opts); err != nil {
+		return err
+	}
+	ctx, cancel := signal.NotifyContext(c.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	// A demo run gets its mock workers here, in memory, so it never reads or
+	// writes the owner's profile registry.
+	var demo *profile.Store
+	if opts.Demo {
+		demo = &profile.Store{Profiles: demoProfiles()}
+	}
+	result, err := workflowsvc.Execute(ctx, opts, demo, runObserver(c, quiet, opts.ResumeFrom))
+	if err != nil {
+		return err
+	}
+	return writeRunResult(c, result, output)
 }
 
 func writeRunResult(c *cobra.Command, result workflowsvc.Result, output string) error {
