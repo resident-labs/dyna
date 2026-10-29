@@ -118,6 +118,10 @@ esac
 	if string(installed) != string(releaseBody) {
 		t.Fatalf("installed body = %q, want %q", installed, releaseBody)
 	}
+	marker, err := os.ReadFile(filepath.Join(installDir, ".dyna-installed"))
+	if err != nil || string(marker) != target+"\n" {
+		t.Fatalf("install marker = %q, %v", marker, err)
+	}
 	stillOld, err := io.ReadAll(oldHandle)
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +267,7 @@ func TestInstallerDelegatesServiceInstallation(t *testing.T) {
 			}
 			log := filepath.Join(root, "commands")
 			fixture := filepath.Join(root, "fixture-dyna")
-			writeTestExecutable(t, fixture, []byte("#!/bin/sh\nprintf 'dyna %s\\n' \"$*\" >> \"$CHECK_LOG\"\nif [ \"$*\" = 'engine run --help' ] && [ \"$NO_ENGINE\" = 1 ]; then exit 1; fi\n"))
+			writeTestExecutable(t, fixture, []byte("#!/bin/sh\nprintf 'dyna %s\\n' \"$*\" >> \"$CHECK_LOG\"\nif [ \"$*\" = 'engine install-services' ]; then\n  if [ -f \"$INSTALL_MARKER\" ]; then printf 'install marker present\n' >> \"$CHECK_LOG\"; else printf 'install marker missing\n' >> \"$CHECK_LOG\"; fi\nfi\nif [ \"$*\" = 'engine run --help' ] && [ \"$NO_ENGINE\" = 1 ]; then exit 1; fi\n"))
 			writeTestExecutable(t, filepath.Join(tools, "npm"), []byte("#!/bin/sh\nexit 0\n"))
 			writeTestExecutable(t, filepath.Join(tools, "go"), []byte("#!/bin/sh\nfor arg; do target=$arg; done\n[ \"$target\" = \"$BUILD_TARGET\" ] || exit 1\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then cp \"$FIXTURE_BINARY\" \"$2\"; exit; fi; shift; done\nexit 1\n"))
 			writeTestExecutable(t, filepath.Join(tools, "systemctl"), []byte("#!/bin/sh\nprintf 'systemctl %s\\n' \"$*\" >> \"$CHECK_LOG\"\n"))
@@ -272,7 +276,7 @@ func TestInstallerDelegatesServiceInstallation(t *testing.T) {
 				noEngine = "1"
 			}
 			cmd := exec.Command("bash", script)
-			cmd.Env = installerTestEnv(t, tools, "PATH="+tools+":"+os.Getenv("PATH"), "HOME="+root, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "DYNA_INSTALL_DIR="+installDir, "CHECK_LOG="+log, "FIXTURE_BINARY="+fixture, "NO_ENGINE="+noEngine, "BUILD_TARGET=./cmd/dyna")
+			cmd.Env = installerTestEnv(t, tools, "PATH="+tools+":"+os.Getenv("PATH"), "HOME="+root, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "DYNA_INSTALL_DIR="+installDir, "INSTALL_MARKER="+filepath.Join(installDir, ".dyna-installed"), "CHECK_LOG="+log, "FIXTURE_BINARY="+fixture, "NO_ENGINE="+noEngine, "BUILD_TARGET=./cmd/dyna")
 			out, err := cmd.CombinedOutput()
 			commands, _ := os.ReadFile(log)
 			if tc.refused {
@@ -304,6 +308,9 @@ func TestInstallerDelegatesServiceInstallation(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("installer failed: %v\n%s", err, out)
+			}
+			if !strings.Contains(string(commands), "install marker present") {
+				t.Fatalf("engine service activated before the install marker was written:\n%s", commands)
 			}
 			previous := -1
 			for _, command := range []string{"dyna engine run --help", "dyna engine install-services"} {

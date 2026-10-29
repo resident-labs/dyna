@@ -28,7 +28,6 @@ const (
 	timerProbe               = "machine-probe"
 	timerRequests            = "requests"
 	timerMigrationRetry      = "migration-retry"
-	timerMigrationAlert      = "migration-alert"
 )
 
 // timers holds the engine's one-shot deadlines by key. Each fires at its real
