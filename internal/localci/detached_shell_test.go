@@ -129,6 +129,9 @@ func TestNodeLogIsBounded(t *testing.T) {
 	if len(log) > 300 || !strings.Contains(string(log), "discarded on the node") {
 		t.Fatalf("log = %d bytes, want a short log that names the discarded output: %q", len(log), log)
 	}
+	if _, err := os.Stat(filepath.Join(detached, "activity")); err != nil {
+		t.Fatalf("discarded output left no activity record: %v", err)
+	}
 	// The completion marker is the end of the log, whatever the output did.
 	if !strings.HasSuffix(string(log), "DYNA_CI_CHECK_EXIT=0\n") {
 		t.Fatalf("the log does not end with the completion marker: %q", log)

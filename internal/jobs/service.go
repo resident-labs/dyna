@@ -134,6 +134,8 @@ type Input struct {
 	CPUs    int
 	Memory  string
 	Timeout time.Duration
+	// Idle stops a running job after that long without output. Nil disables it.
+	Idle *time.Duration
 	// Artifacts are paths in the job's work folder to keep after it ends.
 	Artifacts []string
 	// Heavy marks an IO-heavy job, which a node runs only a few of.
@@ -192,6 +194,15 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	if job.Timeout <= 0 {
 		job.Timeout = DefaultTimeout
+	}
+	if in.Idle != nil {
+		if *in.Idle <= 0 {
+			return Job{}, errors.New("idle timeout must be positive")
+		}
+		if *in.Idle > job.Timeout {
+			return Job{}, fmt.Errorf("idle timeout %s exceeds job timeout %s", *in.Idle, job.Timeout)
+		}
+		job.Idle = *in.Idle
 	}
 	if in.Repo != "" || in.Ref != "" {
 		repo, sha, err := s.resolveCommit(ctx, in.Repo, in.Ref)
@@ -641,7 +652,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 			return
 		}
 	}
-	spec := RunSpec{ID: job.ID, Dir: path.Join(job.Dir, "detached"), Unit: job.Unit, Attach: !launch, Offset: job.LogBytes}
+	spec := RunSpec{ID: job.ID, Dir: path.Join(job.Dir, "detached"), Unit: job.Unit, Attach: !launch, Offset: job.LogBytes, Idle: job.Idle}
 	if !job.Host {
 		limits := resources.Scope(false)
 		spec.Limits = &limits
@@ -690,9 +701,11 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		_, _, _ = s.Store.SaveOpen(context.WithoutCancel(ctx), logWriter.snapshot())
 		return
 	}
-	if runErr != nil && !job.State.Finished() {
+	var idle *idleTimeoutError
+	if runErr != nil && !job.State.Finished() && !errors.As(runErr, &idle) {
 		s.stopUnit(x, spec)
 	}
+	// An idle run already stopped its unit and drained its log in Poller.Run.
 	s.finish(&job, runErr)
 }
 
@@ -726,6 +739,10 @@ func classify(err error) (State, *int) {
 	var lost *NodeLostError
 	if errors.As(err, &lost) {
 		return StateLost, nil
+	}
+	var idle *idleTimeoutError
+	if errors.As(err, &idle) {
+		return StateTimedOut, nil
 	}
 	return StateFailed, nil
 }

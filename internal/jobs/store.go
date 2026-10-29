@@ -83,7 +83,8 @@ type Job struct {
 	Host  bool
 	Image string
 	// CPUs and MemoryMiB are what the submitter asked for, before the node
-	// clamped them. Timeout bounds the job; zero uses the default. Heavy
+	// clamped them. Timeout bounds the job; zero uses the default. Idle stops
+	// a running job after that long without output; zero disables it. Heavy
 	// marks an IO-heavy job, which a node runs only a few of.
 	CPUs      int
 	MemoryMiB int64
@@ -91,6 +92,7 @@ type Job struct {
 	// Resources are named units the job holds for its whole run.
 	Resources []machines.ResourceName
 	Timeout   time.Duration
+	Idle      time.Duration
 	State     State
 	// ExitCode is the command's status; nil while the job has not ended.
 	ExitCode *int
@@ -132,7 +134,7 @@ type Job struct {
 // Topic is the hub topic a jobs-table write publishes under.
 const Topic = "jobs"
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 const schema = `CREATE TABLE jobs (
 	id TEXT PRIMARY KEY,
@@ -148,6 +150,7 @@ const schema = `CREATE TABLE jobs (
 	memory_mib INTEGER NOT NULL DEFAULT 0,
 	heavy INTEGER NOT NULL DEFAULT 0,
 	timeout_s INTEGER NOT NULL DEFAULT 0,
+	idle_s INTEGER NOT NULL DEFAULT 0,
 	state TEXT NOT NULL,
 	exit_code INTEGER,
 	log_path TEXT NOT NULL DEFAULT '',
@@ -215,6 +218,12 @@ func (s Store) db() (*sql.DB, error) {
 				return err
 			}
 			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN wait_reason TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+		}
+		if old > 0 && old < 5 {
+			// Jobs written before idle timeouts have none.
+			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN idle_s INTEGER NOT NULL DEFAULT 0"); err != nil {
 				return err
 			}
 		}
@@ -471,26 +480,27 @@ func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exi
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, wait_reason=excluded.wait_reason, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched, artifacts=excluded.artifacts, resources=excluded.resources`,
-		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, boolInt(job.Heavy), int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, job.WaitReason, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched), string(artifacts), string(resources))
+	_, err = conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,idle_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, timeout_s=excluded.timeout_s, idle_s=excluded.idle_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, wait_reason=excluded.wait_reason, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched, artifacts=excluded.artifacts, resources=excluded.resources`,
+		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, boolInt(job.Heavy), int64(job.Timeout/time.Second), int64(job.Idle/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, job.WaitReason, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched), string(artifacts), string(resources))
 	return err
 }
 
-const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources"
+const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,idle_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources"
 
 func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	var job Job
 	var command, artifacts, resources string
 	var exit sql.NullInt64
 	var requested, posted, launched, heavy int
-	var host, timeout int64
+	var host, timeout, idle int64
 	var created, started, ended int64
-	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &heavy, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &job.WaitReason, &requested, &posted, &launched, &artifacts, &resources); err != nil {
+	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &heavy, &timeout, &idle, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &job.WaitReason, &requested, &posted, &launched, &artifacts, &resources); err != nil {
 		return job, err
 	}
 	job.Timeout = time.Duration(timeout) * time.Second
+	job.Idle = time.Duration(idle) * time.Second
 	job.Host = host == 1
 	job.Heavy = heavy == 1
 	job.CancelRequested = requested == 1
