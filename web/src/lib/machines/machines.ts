@@ -1,4 +1,4 @@
-import type { MachineCIRun, MachineCapabilities, MachineCapacity, MachineLoad, MachineStatus, MachineSummary, MachineWorkItem } from '../api/machine.ts'
+import type { MachineCIRun, MachineCapabilities, MachineCapacity, MachineCheckSource, MachineLoad, MachineStatus, MachineSummary, MachineWorkItem } from '../api/machine.ts'
 
 // statusText words a machine's status for a title or a row.
 export function statusText(status: MachineStatus): string {
@@ -224,6 +224,26 @@ export function workHoldsText(item: Pick<MachineWorkItem, 'cpus' | 'memoryMiB'>)
 // workKindText words the kind of a unit of work.
 export function workKindText(kind: MachineWorkItem['kind']): string {
   return kind === 'job' ? 'Job' : 'Check'
+}
+
+// checkSourceText words what a check's run tests: the pull request it checks,
+// the merge trial it belongs to, or the run's own name when it has no number.
+export function checkSourceText(source: Pick<MachineCheckSource, 'kind' | 'number' | 'trial' | 'branch'>): string {
+  if (source.trial) return 'merge trial'
+  switch (source.kind) {
+    case 'sync':
+      return 'integration sync'
+    case 'local-change':
+      return source.branch || 'Local branch change'
+  }
+  return `PR #${source.number}`
+}
+
+// workLabelText words a unit of work for its row: a job's command, or a
+// check's name with what it tests.
+export function workLabelText(unit: Pick<MachineWorkItem, 'kind' | 'label' | 'source'>): string {
+  if (unit.kind === 'check' && unit.source) return `${unit.label} · ${checkSourceText(unit.source)}`
+  return unit.label
 }
 
 // workWhoText names the session and room a unit of work belongs to. It leaves

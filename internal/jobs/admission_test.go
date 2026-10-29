@@ -9,8 +9,65 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/machines"
 )
+
+// A database written before check names still opens, from either earlier
+// schema: the queue migrates its table, and a row it holds reads with its ID
+// and no source until it ages out.
+func TestAdmissionMigratesRowsWrittenBeforeCheckNames(t *testing.T) {
+	ctx := context.Background()
+	const v1 = `CREATE TABLE admissions (
+	id TEXT PRIMARY KEY, node TEXT NOT NULL, room TEXT NOT NULL DEFAULT '',
+	cpus INTEGER NOT NULL DEFAULT 0, memory_mib INTEGER NOT NULL DEFAULT 0,
+	heavy INTEGER NOT NULL DEFAULT 0, port INTEGER NOT NULL DEFAULT -1,
+	state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', engine INTEGER NOT NULL DEFAULT 0,
+	owner_pid INTEGER NOT NULL DEFAULT 0, owner_start INTEGER NOT NULL DEFAULT 0,
+	timeout_ms INTEGER NOT NULL DEFAULT 1800000, expires_ms INTEGER NOT NULL DEFAULT 0,
+	created_ms INTEGER NOT NULL);
+INSERT INTO meta(key,value) VALUES ('admissions.version','1');`
+	const v2 = `CREATE TABLE admissions (
+	id TEXT PRIMARY KEY, node TEXT NOT NULL, room TEXT NOT NULL DEFAULT '',
+	cpus INTEGER NOT NULL DEFAULT 0, memory_mib INTEGER NOT NULL DEFAULT 0,
+	heavy INTEGER NOT NULL DEFAULT 0, ahead INTEGER NOT NULL DEFAULT 0,
+	port INTEGER NOT NULL DEFAULT -1, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+	engine INTEGER NOT NULL DEFAULT 0, owner_pid INTEGER NOT NULL DEFAULT 0,
+	owner_start INTEGER NOT NULL DEFAULT 0, timeout_ms INTEGER NOT NULL DEFAULT 1800000,
+	expires_ms INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL);
+INSERT INTO meta(key,value) VALUES ('admissions.version','2');`
+	for name, schema := range map[string]string{"from v1": v1, "from v2": v2} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			db, err := database.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, schema+`
+INSERT INTO admissions(id,node,room,cpus,memory_mib,heavy,port,state,created_ms,expires_ms) VALUES ('old-check','node','r1',1,512,0,-1,'admitted',1,2000000000000)`); err != nil {
+				t.Fatal(err)
+			}
+			queue := Admission{DataDir: dir}
+			work, err := queue.Work(ctx, machines.Machine{Name: "node", Enabled: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(work.Running) != 1 || work.Running[0].ID != "old-check" || work.Running[0].Label != "old-check" || work.Running[0].Source != nil {
+				t.Fatalf("running = %+v, want the old row named by its ID with no source", work.Running)
+			}
+			if err := queue.upsert(ctx, Demand{ID: "new-check", Node: "node", Check: "lint", Source: CheckSource{Kind: CheckKindPullRequest, Number: 7}}, false); err != nil {
+				t.Fatal(err)
+			}
+			work, err = queue.Work(ctx, machines.Machine{Name: "node", Enabled: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(work.Waiting) != 1 || work.Waiting[0].Label != "lint" || work.Waiting[0].Source == nil || work.Waiting[0].Source.Number != 7 {
+				t.Fatalf("waiting = %+v, want the new row named lint with its source", work.Waiting)
+			}
+		})
+	}
+}
 
 type gatedMachines struct {
 	machine machines.Machine

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/cli/jsonout"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/repoid"
@@ -85,7 +86,7 @@ func localCommands() []*cobra.Command {
 		}
 		fmt.Fprintf(message, "CI machine: %s\n", node.Name)
 		runner.OnCacheRepair = svc.CacheRepairReporter(rec.ID)
-		result, runErr := runner.Run(c.Context(), localci.Request{Definition: definition, Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed, RoomID: rec.ID})
+		result, runErr := runner.Run(c.Context(), localci.Request{Definition: definition, Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed, RoomID: rec.ID, Source: jobs.CheckSource{Kind: jobs.CheckKindLocalChange}})
 		if result.SHA != "" {
 			// A manual result is the only local evidence a pull request head gets,
 			// so the watcher must read it at its next tick.
