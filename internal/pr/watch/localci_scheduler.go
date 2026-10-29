@@ -359,6 +359,9 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	defer func() {
 		runs.Unlock()
 		for _, orphan := range abandon {
+			if runs.closed.Load() {
+				break
+			}
 			go func(orphan localci.OrphanedAttachment) {
 				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
 				defer cancel()
@@ -372,7 +375,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		}
 	}()
 	desired := map[string]registeredCIJob{}
-	var jobs []registeredCIJob
+	var admitJobs []registeredCIJob
 	modes := map[string]string{}
 	wanted := registeredCIJobs(st)
 	// Trials come first: they hold merges that the heads wait behind.
@@ -416,7 +419,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		key := registeredJobKey(job)
 		if _, exists := desired[key]; !exists {
 			desired[key] = job
-			jobs = append(jobs, job)
+			admitJobs = append(admitJobs, job)
 		}
 	}
 	runs.cancelUnwanted(desired, enabled)
@@ -428,15 +431,32 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		orphanRegistry = registry
 		for _, orphan := range orphans {
 			wanted := false
-			for _, job := range jobs {
-				wanted = wanted || job.head == orphan.SHA
+			switch {
+			case orphan.Source.Kind == jobs.CheckKindPullRequest,
+				orphan.Source.Kind == jobs.CheckKindLocalChange && orphan.Source.Trial:
+				for _, job := range admitJobs {
+					wanted = wanted || job.head == orphan.SHA
+				}
+			case orphan.Source.Kind == jobs.CheckKindSync:
+				if s.SyncRunActive == nil {
+					continue
+				}
+				active, err := s.SyncRunActive(orphan.Repo, orphan.SHA)
+				if err != nil {
+					return err
+				}
+				wanted = active
+			default:
+				// Standalone commands and legacy rows may still have a caller that
+				// resumes them. Their keepers retain the existing three-hour bound.
+				continue
 			}
 			if !wanted {
 				abandon = append(abandon, orphan)
 			}
 		}
 	}
-	for _, job := range jobs {
+	for _, job := range admitJobs {
 		// A stopping engine admits no new run: the runs it has are being torn
 		// down, and a keeper would outlive the process.
 		if runs.closed.Load() {
