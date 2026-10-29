@@ -134,6 +134,66 @@ func TestLifecycleCleansOnlySafeOwnedWorktrees(t *testing.T) {
 	}
 }
 
+// A pool that nears exhaustion tells the root seat of every room once, as a
+// typed machine event. The persisted band keeps a second report quiet until
+// use drops below 90% and climbs again.
+func TestWorktreePortCapacityAlertsEveryRoomOnce(t *testing.T) {
+	e := newTestEnv(t)
+	other, err := e.m.rooms().Create(room.CreateInput{Name: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		e.m.reportPortCapacityAlert(&worktrees.PortCapacityAlert{Used: 900, Limit: 1000, Threshold: 90, Generation: 1})
+	}
+	alerts := func(roomID string) []room.Message {
+		t.Helper()
+		posts, err := e.m.rooms().Messages(roomID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []room.Message
+		for _, p := range posts {
+			if p.Kind == string(room.FamilyMachine) && p.Notice.Kind == string(room.TypeWorktreePorts) {
+				got = append(got, p)
+			}
+		}
+		return got
+	}
+	for _, rec := range []room.Record{e.room, other} {
+		got := alerts(rec.ID)
+		if len(got) != 1 {
+			t.Fatalf("room %s port alerts = %d, want one", rec.Name, len(got))
+		}
+		post := got[0]
+		if post.From != room.EngineSender || !post.Wake || len(post.To) != 1 || post.To[0] != rec.Name+":"+room.RootAgent {
+			t.Fatalf("port alert delivery = %+v", post)
+		}
+		alert, ok := post.WorktreePorts()
+		if !ok || alert.Used != 900 || alert.Limit != 1000 || alert.Threshold != 90 || alert.Generation != 1 {
+			t.Fatalf("port alert payload = %+v, %v", alert, ok)
+		}
+	}
+}
+
+// The reporter reads the real registry: a pool below the band posts nothing.
+func TestWorktreePortCapacityReporterReadsRegistry(t *testing.T) {
+	e := newTestEnv(t)
+	if err := worktrees.Track(worktrees.Record{Path: filepath.Join(os.TempDir(), "dyna-wt-cap-one")}); err != nil {
+		t.Fatal(err)
+	}
+	e.m.ReportWorktreePortCapacity()
+	posts, err := e.m.rooms().Messages(e.room.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range posts {
+		if p.Kind == string(room.FamilyMachine) && p.Notice.Kind == string(room.TypeWorktreePorts) {
+			t.Fatalf("unexpected port alert: %+v", p)
+		}
+	}
+}
+
 // A kept tree is reported once per tree and reason, to its owner session,
 // even when a later pass finds it again. The reviewer that closes is not the
 // sender, and the post never wakes anyone.

@@ -218,6 +218,7 @@ func (m *Manager) sessionWorktree(ctx context.Context, opts StartOptions, rec ro
 	if err != nil {
 		return "", nil, fmt.Errorf("could not create this session's worktree from %s: %w; pass --dir <path> to start in an existing tree", repo, err)
 	}
+	m.ReportWorktreePortCapacity()
 	// Match dyna git worktrees new: restore a matching node_modules when the
 	// repository has an npm package. A failure is not a reason to refuse the
 	// session; the worker can install what it needs.

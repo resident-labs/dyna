@@ -93,6 +93,12 @@ const fixtures: Record<string, EventPayload> = {
     detail: 'Biggest by memory:\npi (pid 4123): 6 GiB, 24 processes',
     atMs: 1792774800000,
   },
+  'machine/worktree-ports': {
+    used: 900,
+    limit: 1000,
+    threshold: 90,
+    generation: 1,
+  },
   'worktree/kept': {
     owner: 'session-1',
     path: '/home/a/.dyna-worktrees/dyna-4708ae0b/composer-tidy',
@@ -452,6 +458,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('caches' in payload) return payload.name
   if ('builds' in payload) return payload.name
   if ('topByMemory' in payload) return payload.room
+  if ('threshold' in payload) return `${payload.used.toLocaleString()} of ${payload.limit.toLocaleString()} blocks`
   if ('source' in payload) return payload.reportId ?? payload.remedy ?? payload.summary ?? payload.source
   if ('service' in payload && 'error' in payload) return payload.error
   if ('service' in payload) return payload.reason
