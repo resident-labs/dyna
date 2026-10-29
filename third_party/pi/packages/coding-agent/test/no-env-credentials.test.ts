@@ -57,7 +57,7 @@ describe("PI_NO_ENV_CREDENTIALS", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
 		const previousExitCode = process.exitCode;
-		let startupExitCode: number | undefined;
+		let startupExitCode: typeof process.exitCode;
 		try {
 			await main(["mcp", "list", "--json"]);
 			startupExitCode = process.exitCode;
