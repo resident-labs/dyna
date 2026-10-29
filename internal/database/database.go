@@ -377,7 +377,7 @@ func transact(ctx context.Context, db *sql.DB, update func(*sql.Conn) error) err
 			writeHold.record(held)
 		}
 		if callerDetail.Load() {
-			recordCaller(caller(), held)
+			recordCaller(writerCaller(), held)
 		}
 	}()
 	err = Retry(begin, func() error { return beginImmediate(begin, conn) })
