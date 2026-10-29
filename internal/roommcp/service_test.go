@@ -453,7 +453,7 @@ func TestRacingCallCannotReopenADetachedServer(t *testing.T) {
 	f.ready(t)
 	// An engine restart leaves no live connection. A call that read attached=1
 	// just before Detach commits then reaches connection after the detach.
-	f.svc.drop(serverKey{f.room.ID, "board"})
+	_ = f.svc.change(serverKey{f.room.ID, "board"}, func() error { return nil })
 	if err := f.svc.Detach(owner, f.room.ID, "board"); err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +472,7 @@ func TestRacingCallCannotReopenADetachedServer(t *testing.T) {
 func TestFailedHandshakeDoesNotStickToTheConnection(t *testing.T) {
 	f := newFixture(t)
 	f.ready(t)
-	f.svc.drop(serverKey{f.room.ID, "board"})
+	_ = f.svc.change(serverKey{f.room.ID, "board"}, func() error { return nil })
 	f.server.failInitialize = 1
 	session := f.as(authority.Session, "ses_a", f.room)
 	if _, err := f.svc.Call(session, "board", "list_issues", json.RawMessage(`{}`)); err == nil {
@@ -510,10 +510,10 @@ func TestNewURLResetsToolsAndGrants(t *testing.T) {
 	}
 }
 
-// A stale call registers a connection only while the server is attached, and
-// every operation that must end calls clears that state before it drops the
-// live connection. Otherwise a call could register in the gap and outlive it.
-func TestEndingOperationsClearStateBeforeDroppingConnections(t *testing.T) {
+// Every operation that ends calls writes its state while it holds the service
+// lock, which registration and attach also need. Otherwise a connection could
+// register between the write and the end of the old connection.
+func TestEndingOperationsWriteUnderTheServiceLock(t *testing.T) {
 	operations := map[string]func(f *fixture) error{
 		"remove token": func(f *fixture) error { return f.svc.RemoveToken(owner, f.room.ID, "board") },
 		"remove":       func(f *fixture) error { return f.svc.Remove(owner, f.room.ID, "board") },
@@ -526,16 +526,19 @@ func TestEndingOperationsClearStateBeforeDroppingConnections(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
 			f.ready(t)
-			var attachedAtDrop, found bool
-			f.svc.beforeDrop = func(key serverKey) {
-				err := f.svc.db.QueryRow("SELECT attached FROM room_mcp_servers WHERE room=? AND name=?", key.room, key.name).Scan(&attachedAtDrop)
-				found = err == nil
+			held := false
+			f.svc.inChange = func() {
+				if f.svc.mu.TryLock() {
+					f.svc.mu.Unlock()
+					return
+				}
+				held = true
 			}
 			if err := operation(f); err != nil {
 				t.Fatal(err)
 			}
-			if found && attachedAtDrop {
-				t.Fatal("the connection ended while the server was still attached")
+			if !held {
+				t.Fatal("the operation wrote without holding the service lock")
 			}
 		})
 	}
@@ -582,7 +585,7 @@ func TestAttachRacingTokenRemovalLeavesTheServerDetached(t *testing.T) {
 func TestStaleCallRacingTokenRemovalRegistersNothing(t *testing.T) {
 	f := newFixture(t)
 	f.ready(t)
-	f.svc.drop(serverKey{f.room.ID, "board"})
+	_ = f.svc.change(serverKey{f.room.ID, "board"}, func() error { return nil })
 	paused, release := pauseAfterDial(f)
 	result := make(chan error, 1)
 	go func() {
@@ -602,5 +605,30 @@ func TestStaleCallRacingTokenRemovalRegistersNothing(t *testing.T) {
 	f.svc.mu.Unlock()
 	if live != 0 {
 		t.Fatalf("%d connection(s) stayed live", live)
+	}
+}
+
+func TestAttachRacingDetachLeavesTheServerDetached(t *testing.T) {
+	f := newFixture(t)
+	if err := f.svc.SetToken(owner, f.room.ID, "board", f.server.URL, fixtureToken); err != nil {
+		t.Fatal(err)
+	}
+	paused, release := pauseAfterDial(f)
+	attached := make(chan error, 1)
+	go func() { attached <- f.svc.Attach(owner, f.room.ID, "board") }()
+	<-paused
+	if err := f.svc.Detach(owner, f.room.ID, "board"); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-attached; err == nil {
+		t.Fatal("attach succeeded after a detach that began during it")
+	}
+	servers, err := f.svc.List(owner, f.room.ID)
+	if err != nil || len(servers) != 1 || servers[0].Attached {
+		t.Fatalf("servers = %+v, %v; want one detached server", servers, err)
+	}
+	if _, err := f.svc.connection(context.Background(), f.room.ID, "board"); err == nil {
+		t.Fatal("a call can reconnect to the detached server")
 	}
 }
