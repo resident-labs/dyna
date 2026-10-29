@@ -260,6 +260,44 @@ func TestIdleTimeoutRetriesFailedStop(t *testing.T) {
 	}
 }
 
+// Cancelling an idle run does not end its row while every stop is failing.
+// The existing poll keeps retrying until the node confirms the unit stopped.
+func TestIdleStopSurvivesRunCancellation(t *testing.T) {
+	svc, fake, reporter, _ := newService(t, blockingJob("working"))
+	defer svc.Stop()
+	fake.FailStops(1_000_000)
+	idle := 5 * time.Second
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for fake.StopCount() == 0 {
+		runtime.Gosched()
+	}
+	calls := fake.StopCount()
+	if _, err := svc.Cancel(context.Background(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Two more calls prove that the cancelled run is still reconciling its
+	// idle stop. A finished event here is the bug: the unit may still run.
+	for fake.StopCount() < calls+2 {
+		select {
+		case finished := <-reporter.finished:
+			t.Fatalf("finished before the idle stop was confirmed: %+v", finished)
+		default:
+		}
+		runtime.Gosched()
+	}
+	target := calls + 2
+	fake.FailStops(0)
+	if finished := <-reporter.finished; finished.State != StateCancelled || finished.Note != "cancelled" {
+		t.Fatalf("finished = %+v, want cancellation after the confirmed stop", finished)
+	}
+	if fake.StopCount() <= target {
+		t.Fatalf("stop calls = %d, want a successful call after the failures", fake.StopCount())
+	}
+}
+
 // An idle stop drains every log chunk that the regular 256 KiB polls have
 // not copied yet before the finished event.
 func TestIdleTimeoutDrainsRemainingLog(t *testing.T) {
@@ -304,14 +342,14 @@ func TestOutputAfterLogCapPreventsIdleTimeout(t *testing.T) {
 		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
 			return nil
 		}
-		fake.CapLogs()
-		fake.OutputEveryPoll()
 		for fake.PollCount() < 4 && ctx.Err() == nil {
 			runtime.Gosched()
 		}
 		return ctx.Err()
 	})
 	defer svc.Stop()
+	fake.CapLogs()
+	fake.OutputEveryPoll()
 	idle := 5 * time.Second
 	_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"build"}, Idle: &idle, Timeout: time.Minute})
 	if err != nil {
@@ -404,8 +442,8 @@ func TestIdleDeadlineSurvivesEngineRestart(t *testing.T) {
 		return ctx.Err()
 	}
 	svc, fake, _, _ := newService(t, legacy)
-	idle := 5 * time.Second
-	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	idle := time.Hour
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: 3 * time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,7 +451,7 @@ func TestIdleDeadlineSurvivesEngineRestart(t *testing.T) {
 	SetEngineStoppingForTest(true)
 	svc.Stop()
 	SetEngineStoppingForTest(false)
-	if err := fake.WaitFunc()(t.Context(), 10*time.Second); err != nil {
+	if err := fake.WaitFunc()(t.Context(), 2*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	reporter := newChanReporter()
@@ -425,7 +463,7 @@ func TestIdleDeadlineSurvivesEngineRestart(t *testing.T) {
 	restarted.Start(t.Context())
 	defer restarted.Stop()
 	finished := <-reporter.finished
-	if finished.ID != job.ID || finished.State != StateTimedOut || finished.Note != "no output for 5s" {
+	if finished.ID != job.ID || finished.State != StateTimedOut || finished.Note != "no output for 1h0m0s" {
 		t.Fatalf("finished after restart = %+v, want the stored idle deadline", finished)
 	}
 }
