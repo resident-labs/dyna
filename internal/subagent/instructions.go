@@ -336,30 +336,24 @@ func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []str
 	if err != nil {
 		return nil
 	}
-	var ids []string
+	var reached []string
+	// One queued update has one deadline. Otherwise the engine wakes for the
+	// first session and an owner batch can lose the sessions that are due later.
+	changedAt := time.Now()
 	for _, meta := range sessions {
 		if !meta.Closed.IsZero() || (roomID != "" && meta.RoomID != roomID) || meta.Instructions == nil {
 			continue
 		}
-		ids = append(ids, meta.ID)
-	}
-	// One queued update has one deadline. Otherwise the engine wakes for the
-	// first session and an owner batch can lose the sessions that are due later.
-	changedAt := time.Now()
-	// Closed is checked again under each session lock, before the write.
-	changed, err := m.store().updateMetasContext(ids, func(mm *Meta) bool {
-		if !mm.Closed.IsZero() {
-			return false
+		queued := false
+		_, err := m.store().updateMetaContext(ctx, meta.ID, func(mm *Meta) {
+			if mm.Closed.IsZero() {
+				mm.InstructionsChangedAt = changedAt
+				queued = true
+			}
+		})
+		if err == nil && queued {
+			reached = append(reached, meta.Address())
 		}
-		mm.InstructionsChangedAt = changedAt
-		return true
-	})
-	if err != nil {
-		return nil
-	}
-	var reached []string
-	for _, meta := range changed {
-		reached = append(reached, meta.Address())
 	}
 	slices.Sort(reached)
 	return reached
