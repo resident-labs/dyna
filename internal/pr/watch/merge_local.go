@@ -300,13 +300,9 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 	// A suite that no machine allows never becomes available, so the trial fails
 	// now with an error that names it instead of waiting for a machine that
 	// cannot take the run.
-	var blocked localci.SuiteBlockedError
-	if errors.As(err, &blocked) {
-		return trialCI{Status: VerdictFailed, Logs: blocked.Error(), Reason: blocked.Error()}, nil
-	}
-	var labelsBlocked localci.LabelsBlockedError
-	if errors.As(err, &labelsBlocked) {
-		return trialCI{Status: VerdictFailed, Logs: labelsBlocked.Error(), Reason: labelsBlocked.Error()}, nil
+	if blocked := localci.NodeBlockedError(err); blocked != nil {
+		note := blocked.Error()
+		return trialCI{Status: VerdictFailed, Logs: note, Reason: note}, nil
 	}
 	if err != nil {
 		return trialCI{}, err

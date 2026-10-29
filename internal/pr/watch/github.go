@@ -207,6 +207,28 @@ func (s Snapshot) currentSuiteChecks() []Check {
 	return out
 }
 
+// currentGateChecks keeps Actions checks suite-distinct and retains only the
+// latest external result for each app and name across suites.
+func currentGateChecks(checks []Check) []Check {
+	latestExternal := map[string]Check{}
+	for _, c := range checks {
+		if c.App.Slug != "github-actions" {
+			key := fmt.Sprintf("%d/%s/%s", c.App.ID, c.App.Slug, c.Name)
+			if old, ok := latestExternal[key]; !ok || c.ID > old.ID {
+				latestExternal[key] = c
+			}
+		}
+	}
+	judged := make([]Check, 0, len(checks))
+	for _, c := range checks {
+		key := fmt.Sprintf("%d/%s/%s", c.App.ID, c.App.Slug, c.Name)
+		if c.App.Slug == "github-actions" || latestExternal[key].ID == c.ID {
+			judged = append(judged, c)
+		}
+	}
+	return judged
+}
+
 // currentChecks keeps the latest result for each app and job name across suites.
 func (s Snapshot) currentChecks() []Check {
 	latest := map[string]Check{}
@@ -671,25 +693,7 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 			parts = append(parts, fmt.Sprintf("suite:%d:%d:%s:%s", c.CheckSuite.ID, c.ID, c.Status, c.Conclusion))
 		}
 	}
-	// A required external check reruns in a new suite, so only its latest
-	// result per app and name may judge the head. Actions checks stay
-	// suite-distinct: a same-named job in another workflow is separate work.
-	latestExternal := map[string]Check{}
-	for _, c := range checks {
-		if c.App.Slug != "github-actions" {
-			key := fmt.Sprintf("%d/%s/%s", c.App.ID, c.App.Slug, c.Name)
-			if old, ok := latestExternal[key]; !ok || c.ID > old.ID {
-				latestExternal[key] = c
-			}
-		}
-	}
-	judged := make([]Check, 0, len(checks))
-	for _, c := range checks {
-		key := fmt.Sprintf("%d/%s/%s", c.App.ID, c.App.Slug, c.Name)
-		if c.App.Slug == "github-actions" || latestExternal[key].ID == c.ID {
-			judged = append(judged, c)
-		}
-	}
+	judged := currentGateChecks(checks)
 	for _, c := range judged {
 		if !ciCheck(c, required) {
 			continue
