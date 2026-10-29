@@ -32,6 +32,17 @@ import (
 
 const runTimeout = 2 * time.Minute
 
+// stepShare bounds each slow step, so a step that overruns still leaves time
+// for the steps after it. The pass deadline still bounds the whole run.
+const stepShare = 30 * time.Second
+
+// repoShare bounds the worktree cleanup of one repository within the worktrees
+// step, so one slow repository cannot starve the others.
+var repoShare = 15 * time.Second
+
+// gcWorktrees is worktrees.GC; tests replace it to simulate a slow repository.
+var gcWorktrees = worktrees.GC
+
 // pass holds one maintenance pass at a time. The hourly built-in hook and the
 // loop's disk-pressure pass both call Run, and two passes must not delete the
 // same trees at once. A pass that waits for the lock stops if its context ends.
@@ -148,8 +159,11 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 			result.add("shell job rows", Pruned{Items: n})
 		}
 		done = result.timer("local CI results")
-		if n, err := pruneLocalCIResults(ctx, store.DataDir(), now); done(err) != nil {
-			errs = append(errs, fmt.Errorf("local CI results: %w", err))
+		localCtx, stopLocal := context.WithTimeout(ctx, stepShare)
+		n, localErr := pruneLocalCIResults(localCtx, store.DataDir(), now)
+		stopLocal()
+		if done(localErr) != nil {
+			errs = append(errs, fmt.Errorf("local CI results: %w", localErr))
 		} else {
 			result.add("local CI results", Pruned{Items: n})
 		}
@@ -168,9 +182,13 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		errs = append(errs, done(discoveryErr))
 	}
 	done = result.timer("worktrees")
-	errs = append(errs, done(cleanWorktrees(ctx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})))
+	worktreesCtx, stopWorktrees := context.WithTimeout(ctx, stepShare)
+	errs = append(errs, done(cleanWorktrees(worktreesCtx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})))
+	stopWorktrees()
 	done = result.timer("scratch")
-	cleaned, scratchErr := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
+	scratchCtx, stopScratch := context.WithTimeout(ctx, stepShare)
+	cleaned, scratchErr := scratch.Sweep(scratchCtx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
+	stopScratch()
 	result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
 	for _, kept := range cleaned.Kept {
 		result.Kept["scratch: "+kept.Reason]++
@@ -220,12 +238,23 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 func cleanWorktrees(ctx context.Context, result *Result, repos []string, gc worktrees.GCOptions) error {
 	var errs []error
 	seen := map[string]bool{}
+	var timing worktrees.Timing
+	gc.Timing = &timing
+	defer func() {
+		result.Steps = append(result.Steps,
+			Step{Name: "worktrees fetch", Took: timing.Fetch},
+			Step{Name: "worktrees scan", Took: timing.Scan},
+			Step{Name: "worktrees remove", Took: timing.Remove},
+		)
+	}()
 	for _, repo := range repos {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
 			break
 		}
-		trees, err := worktrees.GC(ctx, repo, gc)
+		repoCtx, stopRepo := context.WithTimeout(ctx, repoShare)
+		trees, err := gcWorktrees(repoCtx, repo, gc)
+		stopRepo()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("worktree cleanup %s: %w", repo, err))
 		}
