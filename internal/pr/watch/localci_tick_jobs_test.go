@@ -68,11 +68,12 @@ func TestTickJobs(t *testing.T) {
 			},
 		},
 		{
-			name: "a job without a checkout is dropped",
+			name: "a job without a checkout is left for resolution",
 			wanted: []registeredCIJob{
 				{record: Record{Kind: "local", Repo: "owner/repo"}, head: "missing", trial: true},
 			},
 			haveNodes: true,
+			want:      []string{"missing"},
 		},
 	}
 	for _, test := range tests {

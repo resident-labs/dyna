@@ -353,7 +353,7 @@ func tickJobs(wanted, headJobs []registeredCIJob, modes map[string]string, pause
 				continue
 			}
 		}
-		if !haveNodes || job.record.RepoPath == "" {
+		if !haveNodes {
 			continue
 		}
 		key := registeredJobKey(job)
@@ -403,27 +403,39 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	if err != nil {
 		return err
 	}
-	gathered := append(wanted, headJobs...)
-	for i := range gathered {
-		job := &gathered[i]
-		if job.hosted() {
-			roomID := job.record.RoomID
-			if _, ok := modes[roomID]; !ok {
-				mode, err := registry.Mode(ctx, roomID)
-				if err != nil {
-					return err
-				}
-				modes[roomID] = mode
-			}
-			if _, err := s.roomPausedCached(roomID, paused); err != nil {
+	for _, job := range append(wanted, headJobs...) {
+		if !job.hosted() {
+			continue
+		}
+		roomID := job.record.RoomID
+		mode, ok := modes[roomID]
+		if !ok {
+			mode, err = registry.Mode(ctx, roomID)
+			if err != nil {
 				return err
 			}
+			modes[roomID] = mode
 		}
+		if mode != localci.ModeLocal && mode != localci.ModeBoth {
+			continue
+		}
+		if _, err := s.roomPausedCached(roomID, paused); err != nil {
+			return err
+		}
+	}
+	admitJobs, desired := tickJobs(wanted, headJobs, modes, paused, len(enabled) > 0)
+	resolved := admitJobs[:0]
+	for _, job := range admitJobs {
 		if job.record.RepoPath == "" {
 			s.resolveCheckout(ctx, st, &job.record)
 		}
+		if job.record.RepoPath == "" {
+			delete(desired, registeredJobKey(job))
+			continue
+		}
+		resolved = append(resolved, job)
 	}
-	admitJobs, desired := tickJobs(gathered[:len(wanted)], gathered[len(wanted):], modes, paused, len(enabled) > 0)
+	admitJobs = resolved
 	runs.cancelUnwanted(desired, enabled)
 	if registry, ok := registry.(orphanedCIRuns); ok {
 		orphans, err := registry.OrphanedAttachments(ctx)
