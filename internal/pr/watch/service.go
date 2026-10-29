@@ -498,7 +498,9 @@ func (s *Service) process(ctx context.Context, key string, snap Snapshot, ci, ci
 		if r.LabelsSeen {
 			added, removed := missingNames(labels, r.Labels), missingNames(r.Labels, labels)
 			if len(added)+len(removed) > 0 {
-				n.changes = append(n.changes, "labels:"+strings.Join(labels, ","))
+				// The PR's update time tells a later change apart from an earlier one
+				// that reached the same label set. A retry of this poll keeps it.
+				n.changes = append(n.changes, "labels:"+snap.Pull.Updated+":"+strings.Join(labels, ","))
 				n.informational[r.Author] = append(n.informational[r.Author], labelChangeText(*r, added, removed))
 			}
 		}
