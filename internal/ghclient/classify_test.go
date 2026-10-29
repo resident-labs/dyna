@@ -15,11 +15,13 @@ func TestClassify(t *testing.T) {
 		"issue:7": room, "issue:8": "someone-else", "pr:12": room, "pr:13": "someone-else",
 		"pr:": room, "run:99": room, "run:98": "someone-else",
 	}
-	var looked []ItemRef
+	endpointRepos := map[string]string{"other/repo": "someone-else"}
 	in := ClassifyInput{
 		Host: "github.com", Repo: "me/fork", Upstream: "github.com/org/project", Login: room,
 		AuthorOf: func(_ context.Context, ref ItemRef) (string, error) {
-			looked = append(looked, ref)
+			if author, ok := endpointRepos[ref.Repo]; ok {
+				return author, nil
+			}
 			author, ok := authors[string(ref.Kind)+":"+ref.Target]
 			if !ok {
 				return "", errors.New("lookup failed")
@@ -86,6 +88,7 @@ func TestClassify(t *testing.T) {
 		{"api PATCH pr close own", "api repos/o/r/pulls/12 --method=PATCH --raw-field state=closed", agent},
 		{"api PATCH pr close other author", "api repos/o/r/pulls/13 -X PATCH -fstate=closed", owner},
 		{"api PATCH with unreadable body by other author", "api repos/o/r/issues/8 -X PATCH --input body.json", owner},
+		{"api PATCH close in another repository", "api repos/other/repo/issues/7 -X PATCH -f state=closed", owner},
 		{"api PUT pr merge", "api repos/o/r/pulls/5/merge -X PUT", owner},
 		{"api POST pr merge", "api repos/o/r/pulls/5/merge -f merge_method=squash", owner},
 		{"api POST review", "api repos/o/r/pulls/5/reviews -f event=APPROVE", owner},
@@ -102,11 +105,6 @@ func TestClassify(t *testing.T) {
 				t.Fatalf("Classify(%q) = %q, want %q", tt.cmd, got, tt.want)
 			}
 		})
-	}
-	for _, ref := range looked {
-		if ref.Host != "github.com" || ref.Repo != "me/fork" {
-			t.Fatalf("lookup got %+v, want the target repository", ref)
-		}
 	}
 }
 
