@@ -1,6 +1,7 @@
 package localci
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -208,4 +209,18 @@ func BlockedLabels(nodes []Node, labels []string) error {
 		return nil
 	}
 	return LabelsBlockedError{Labels: labels}
+}
+
+// NodeBlockedError extracts a suite or label admission failure. It returns nil
+// when admission failed for another reason.
+func NodeBlockedError(err error) error {
+	var suite SuiteBlockedError
+	if errors.As(err, &suite) {
+		return suite
+	}
+	var labels LabelsBlockedError
+	if errors.As(err, &labels) {
+		return labels
+	}
+	return nil
 }
