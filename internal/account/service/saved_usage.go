@@ -147,14 +147,20 @@ func applyStatedFailoverLimits(accounts []Account, store *accountstore.Store, no
 		if a.Provider != accountstore.ProviderZAI || !ok || a.ObservedAt.After(recorded[a.ID]) {
 			continue
 		}
+		window := -1
 		for j := range a.Windows {
-			w := &a.Windows[j]
-			if w.ID != "five_hour" {
-				continue
+			if a.Windows[j].ID == "five_hour" {
+				window = j
+				break
 			}
-			w.UsedPercent, w.Used, w.Limit = &spent, nil, nil
-			w.Reason, w.Unit = "", "percent"
-			w.ResetsAt = reset.UTC().Format(time.RFC3339)
 		}
+		if window < 0 {
+			a.Windows = append(a.Windows, Window{ID: "five_hour", Label: "5-hour"})
+			window = len(a.Windows) - 1
+		}
+		w := &a.Windows[window]
+		w.UsedPercent, w.Used, w.Limit = &spent, nil, nil
+		w.Reason, w.Unit = "", "percent"
+		w.ResetsAt = reset.UTC().Format(time.RFC3339)
 	}
 }
