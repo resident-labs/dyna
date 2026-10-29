@@ -55,8 +55,11 @@ type TransferState struct {
 	WrittenHandoff     string              `json:"writtenHandoff,omitempty"`
 	Handoff            string              `json:"handoff,omitempty"`
 	Dir                string              `json:"dir,omitempty"`
-	Branch             string              `json:"branch,omitempty"`
-	Source             string              `json:"source,omitempty"` // cooperative, transcript, native (same Pi session) or converted
+	// RequestedDir is the root override from --dir. It outranks Dir, which a
+	// handoff may set, so no later handoff replaces it.
+	RequestedDir string `json:"requestedDir,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Source       string `json:"source,omitempty"` // cooperative, transcript, native (same Pi session) or converted
 	// ConvertedSession is the target session id of a cross-harness
 	// conversion. It is saved before the file is written, so a restarted
 	// coordinator writes the same session again instead of a second one.
@@ -276,9 +279,7 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		if previous := meta.Transfer; !plan.native && !plan.convert && !opts.rootSeat && !opts.Fresh && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
 			out.WrittenHandoff, out.Handoff, out.Dir, out.Branch, out.Source = previous.WrittenHandoff, previous.WrittenHandoff, previous.Dir, previous.Branch, "cooperative"
 		}
-		if opts.Dir != "" {
-			out.Dir = opts.Dir
-		}
+		out.RequestedDir = opts.Dir
 		// Freeze labels for records written before per-turn profile snapshots.
 		previousModel := currentModel
 		for n := 1; n <= meta.Turns; n++ {
