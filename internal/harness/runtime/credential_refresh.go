@@ -204,7 +204,7 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 				if err := writeAccountLogin(current.Home, next); err != nil {
 					return err
 				}
-				entry.NeedsLogin = false
+				entry.ClearSignInFailure()
 				entry.UpdatedAt = time.Now().UTC()
 				result.ExpiresAt = expiry(next)
 				result.Due = result.ExpiresAt.IsZero() || time.Until(result.ExpiresAt) <= 5*time.Minute

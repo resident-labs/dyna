@@ -166,6 +166,20 @@ type Entry struct {
 	Credential Credential `json:"credential"`
 }
 
+// ClearSignInFailure ends the expired and failed-usage state a saved sign-in
+// left behind. A successful sign-in, import or renewal calls it, so the account
+// stops showing the old failure until the next usage reading says otherwise.
+func (e *Entry) ClearSignInFailure() {
+	e.NeedsLogin = false
+	if o := e.Observation; o != nil {
+		o.UsageError = ""
+		o.Reason = ""
+		o.RateLimitedUntil = nil
+		o.Failures = 0
+		o.Unavailable = false
+	}
+}
+
 type State struct {
 	Entries []Entry `json:"entries"`
 }
