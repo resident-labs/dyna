@@ -342,3 +342,23 @@ func TestExtraRepoForkParentAllowsPRCreateOnItsParent(t *testing.T) {
 		t.Fatalf("pr create on an extra fork's parent: %v", err)
 	}
 }
+
+// A git fetch from a room's upstream runs without an acting room. It reads with
+// the room's account and gets no write access to the upstream.
+func TestRoomUpstreamReadsWithoutActingRoom(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	upstream := repository{"github.com", "upstream/project"}
+	rec, err := roomFor(context.Background(), "", upstream)
+	if !errors.Is(err, errNotInRoom) || rec.ID != records[0].ID {
+		t.Fatalf("roomFor upstream = %s, %v; want the room with errNotInRoom", rec.ID, err)
+	}
+	if err := checkPolicy(context.Background(), "", upstream, []string{"repo", "view"}); err != nil {
+		t.Fatalf("read of the upstream: %v", err)
+	}
+	if err := checkPolicy(context.Background(), "", upstream, []string{"pr", "merge", "1"}); err == nil {
+		t.Fatal("write to the upstream was admitted")
+	}
+}
