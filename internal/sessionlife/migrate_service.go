@@ -29,8 +29,8 @@ func migrateService(db *sql.DB) error {
 		var ids []string
 		for rows.Next() {
 			var id, raw string
-			var instructions instructionRead
-			if err := rows.Scan(&id, &raw, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+			instructions, err := scanInstructionRead(rows, &id, &raw)
+			if err != nil {
 				rows.Close()
 				return err
 			}
@@ -39,13 +39,12 @@ func migrateService(db *sql.DB) error {
 				rows.Close()
 				return err
 			}
-			raw = string(joined)
 			var r record
-			if err := json.Unmarshal([]byte(raw), &r); err != nil {
+			if err := json.Unmarshal(joined, &r); err != nil {
 				rows.Close()
 				return err
 			}
-			if err := json.Unmarshal([]byte(raw), &r.fields); err != nil || r.fields == nil {
+			if err := json.Unmarshal(joined, &r.fields); err != nil || r.fields == nil {
 				rows.Close()
 				return fmt.Errorf("%w: session %s service metadata is not an object", ErrRecord, id)
 			}
