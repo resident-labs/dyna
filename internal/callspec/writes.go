@@ -193,6 +193,7 @@ var WriteCalls = map[string]bool{
 	"SetRoomCheckIn":              true,
 	"SetRoomLimit":                true,
 	"SetRoomRootProfile":          true,
+	"SetRoomUpstream":             true,
 	"SetServiceProfile":           true,
 	"SetServiceProfileAll":        true,
 	"SetSetting":                  true,
