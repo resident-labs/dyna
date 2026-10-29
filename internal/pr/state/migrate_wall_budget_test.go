@@ -8,11 +8,7 @@ import (
 )
 
 func TestWallTimeVerdictMigrationPreservesStepFailures(t *testing.T) {
-	dir := t.TempDir()
-	root := Root(dir)
-	if err := os.MkdirAll(root, 0700); err != nil {
-		t.Fatal(err)
-	}
+	root := newRoot(t)
 	body := `{"version":1,"records":{"wall":{"key":"wall","head":"h","ci":"failed","ciReason":"over CI time budget (3m)","ciBudgetHead":"h","ciBudgetRuns":{"1":"over CI time budget (3m)"},"ciBudgetInputs":{"1":"cached"},"ciBudgetNotes":{"1":"old note"}},"step":{"key":"step","head":"h","ci":"failed","ciReason":"over CI time budget (3m)","ciBudgetHead":"h","ciBudgetRuns":{"2":"over CI time budget (3m)"},"ciBudgetSteps":{"2":true}}}}`
 	if err := os.WriteFile(filepath.Join(root, "state.json"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
