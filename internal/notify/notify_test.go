@@ -386,8 +386,46 @@ func TestSessionCrossRoomPostShowsInSenderRoom(t *testing.T) {
 	if err != nil || copied.Text != "hello other" || copied.From != f.a.Name+":decoder" || !reflect.DeepEqual(copied.To, []string{f.b.Name + ":other"}) || !reflect.DeepEqual(copied.Via, []string{"@" + f.b.Name + ":other"}) || copied.Wake {
 		t.Fatalf("copy in the sender's room = %#v, %v", copied, err)
 	}
+	if copied.AuthorSessionID() != f.decoder.ID {
+		t.Fatalf("copy binds session %q, want %q, so a reply reaches the session", copied.AuthorSessionID(), f.decoder.ID)
+	}
 	if len(sent.Deliveries) != 1 || sent.Deliveries[0].To != f.b.Name+":other" {
 		t.Fatalf("deliveries = %#v", sent.Deliveries)
+	}
+}
+
+// A session's cross-room post keeps its files and its forward in the sender's
+// copy. The files are stored in room a, so the copy never fails after room b
+// has the post.
+func TestSessionCrossRoomPostCopiesFilesAndForward(t *testing.T) {
+	f := newFixture(t)
+	sent, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, Text: "see the file", Files: []File{{Name: "note.txt", Data: []byte("hi")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied, err := f.svc.Rooms.Message(f.a.ID, sent.Message.ID)
+	if err != nil || len(copied.Attachments) != 1 {
+		t.Fatalf("copy attachments = %#v, %v", copied.Attachments, err)
+	}
+	path, err := f.svc.Rooms.AttachmentPath(f.a.ID, copied.Attachments[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "hi" {
+		t.Fatalf("copied file = %q, %v", data, err)
+	}
+
+	orig, err := f.svc.Rooms.Post(f.b.ID, room.PostInput{From: f.b.Name + ":other", To: []string{f.b.Name}, Text: "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwd, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, ForwardOf: orig.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copiedFwd, err := f.svc.Rooms.Message(f.a.ID, fwd.Message.ID)
+	if err != nil || copiedFwd.Forward == nil || copiedFwd.Forward.ID != orig.ID {
+		t.Fatalf("copy forward = %#v, %v", copiedFwd.Forward, err)
 	}
 }
 
