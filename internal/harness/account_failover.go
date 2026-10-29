@@ -64,7 +64,7 @@ func probeWindowFor(text string) string {
 	return ""
 }
 
-// clearAccountHold drops an unstated hold after a turn on the account succeeded.
+// clearAccountHold drops the account's hold after a turn on the account succeeded.
 // A hold recorded after the turn began stays, so a concurrent failure is kept.
 // A hold store error is logged, because the turn itself already succeeded.
 func clearAccountHold(accountID string, turnStart time.Time) {
@@ -79,7 +79,7 @@ func clearAccountHold(accountID string, turnStart time.Time) {
 		}
 		return
 	}
-	if err := rt.Accounts.ClearUnstated(accountID, turnStart); err != nil {
+	if err := rt.Accounts.ClearHold(accountID, turnStart); err != nil {
 		log.Printf("clear account hold %s: %v", accountID, err)
 	}
 }
