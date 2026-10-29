@@ -117,6 +117,22 @@ func ObservePortCapacity() ([]*PortCapacityAlert, error) {
 
 var errPortCapacityChanged = errors.New("worktree port capacity changed during observation")
 
+// AllocatedPortBlocks returns the raw count of registry records that hold a
+// port block. It runs one SELECT over the registry table. It counts no
+// reclaimable blocks, scans no owners and probes no sockets, so engine health
+// can call it. Effective use after reclaim needs those scans, so it is not here.
+func AllocatedPortBlocks(ctx context.Context) (int, error) {
+	db, err := registryDB()
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM worktree_records WHERE COALESCE(json_extract(body,'$.port'),0) <> 0").Scan(&count); err != nil {
+		return 0, fmt.Errorf("count worktree port blocks: %w", err)
+	}
+	return count, nil
+}
+
 // applyPortAlertState writes one state step: a new crossing is appended to
 // the pending list, superseding an undelivered crossing of the same
 // threshold, and use below the first band ends the current period.
