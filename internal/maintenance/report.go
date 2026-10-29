@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -214,6 +215,36 @@ func reportSteps(db *sql.DB, id int64) ([]Step, error) {
 // dryPassKey names a kind's first pass at one retention age.
 func dryPassKey(kind string, age time.Duration) string {
 	return "maintenance.dry." + kind + "." + age.String()
+}
+
+// worktreeTurnKey stores the pass count that picks the first repository for the
+// worktree cleanup. It lives in the report database so every hook process reads
+// the same turn.
+const worktreeTurnKey = "maintenance.worktree.turn"
+
+// nextWorktreeTurn returns this pass's worktree turn and stores the next one.
+func nextWorktreeTurn(ctx context.Context, dataDir string) (int, error) {
+	db, err := reportDB(dataDir)
+	if err != nil {
+		return 0, err
+	}
+	turn := 0
+	// Maintenance has no change-bus consumer, so this write emits no event.
+	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		var raw string
+		err := conn.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, worktreeTurnKey).Scan(&raw)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			if turn, err = strconv.Atoi(raw); err != nil {
+				return err
+			}
+		}
+		_, err = conn.ExecContext(ctx, `INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)`, worktreeTurnKey, strconv.Itoa(turn+1))
+		return err
+	})
+	return turn, err
 }
 
 // sweepWithDryPass runs a pruning kind. Its first pass at a new age only
