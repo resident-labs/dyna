@@ -109,44 +109,50 @@ describe("model catalog protocol with the current client", () => {
 
 	it("negotiates the catalog for its version and reaches the OpenRouter API", async () => {
 		allowNetwork();
-		const runtime = await ModelRuntime.create({
-			credentials: new InMemoryCredentialStore(),
-			modelsPath: null,
-			catalogBaseUrl,
-			refreshOnCreate: false,
-		});
-		await runtime.setRuntimeApiKey("openrouter", "test-key");
-		const refresh = await runtime.refresh({ allowNetwork: true, force: true, providers: ["openrouter"] });
-		expect([...refresh.errors]).toEqual([]);
-
-		const catalogUrl = "/api/models/providers/openrouter?types=chat%2Cimage%2Cclassifier";
-		expect(requests).toEqual([catalogUrl, `${catalogUrl}&pi-version=${VERSION}`]);
-
-		const expectedModel =
-			selectModelCatalog(index, VERSION)?.revision === legacyRevision ? legacyModel : mixedApiModel;
-		const model = runtime.getModel("openrouter", modelId);
-		expect(model).toMatchObject({ api: expectedModel.api, baseUrl: expectedModel.baseUrl });
-		if (!model) throw new Error(`Missing model: openrouter/${modelId}`);
-
+		// One fake covers the whole test. The refresh checks the key with OpenRouter, so the fake must be in place first.
+		// Only 127.0.0.1 may reach the real network stack; every other origin fails the test.
 		let providerUrl: URL | undefined;
 		const nativeFetch = globalThis.fetch;
 		vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
 			const request = new Request(input, init);
-			if (new URL(request.url).origin !== "https://openrouter.ai") return nativeFetch(request);
-			providerUrl = new URL(request.url);
+			const url = new URL(request.url);
+			if (url.hostname === "127.0.0.1") return nativeFetch(request);
+			if (url.origin !== "https://openrouter.ai") throw new Error(`Blocked outside request: ${request.url}`);
+			// A 401 keeps the catalog that the local server served unchanged.
+			if (url.pathname === "/api/v1/models/user") return new Response(null, { status: 401 });
+			providerUrl ??= url;
 			throw new Error("Provider request captured");
 		});
 		try {
+			const runtime = await ModelRuntime.create({
+				credentials: new InMemoryCredentialStore(),
+				modelsPath: null,
+				catalogBaseUrl,
+				refreshOnCreate: false,
+			});
+			await runtime.setRuntimeApiKey("openrouter", "test-key");
+			const refresh = await runtime.refresh({ allowNetwork: true, force: true, providers: ["openrouter"] });
+			expect([...refresh.errors]).toEqual([]);
+
+			const catalogUrl = "/api/models/providers/openrouter?types=chat%2Cimage%2Cclassifier";
+			expect(requests).toEqual([catalogUrl, `${catalogUrl}&pi-version=${VERSION}`]);
+
+			const expectedModel =
+				selectModelCatalog(index, VERSION)?.revision === legacyRevision ? legacyModel : mixedApiModel;
+			const model = runtime.getModel("openrouter", modelId);
+			expect(model).toMatchObject({ api: expectedModel.api, baseUrl: expectedModel.baseUrl });
+			if (!model) throw new Error(`Missing model: openrouter/${modelId}`);
+
 			await runtime.completeSimple(
 				model,
 				{ messages: [{ role: "user", content: "Hello", timestamp: 0 }] },
 				{ apiKey: "test-key", maxRetries: 0 },
 			);
+			expect(providerUrl?.pathname).toBe(
+				expectedModel.api === "anthropic-messages" ? "/api/v1/messages" : "/api/v1/chat/completions",
+			);
 		} finally {
 			vi.unstubAllGlobals();
 		}
-		expect(providerUrl?.pathname).toBe(
-			expectedModel.api === "anthropic-messages" ? "/api/v1/messages" : "/api/v1/chat/completions",
-		);
 	});
 });
