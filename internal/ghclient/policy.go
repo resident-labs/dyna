@@ -13,10 +13,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
 )
@@ -32,6 +36,15 @@ func WithRoom(ctx context.Context, ref string) context.Context {
 // WithRooms uses the caller's room store for access checks.
 func WithRooms(ctx context.Context, rooms *room.Store) context.Context {
 	return context.WithValue(ctx, roomsKey{}, rooms)
+}
+
+type holdReleaseKey struct{}
+
+// WithHoldRelease lets the engine's own gh pr ready on the PR at url pass the hold
+// guard, during dyna git pr release. Only engine code sets it. Agent commands run in
+// their own process and never carry it.
+func WithHoldRelease(ctx context.Context, url string) context.Context {
+	return context.WithValue(ctx, holdReleaseKey{}, url)
 }
 
 const ReadOnly = "read-only"
@@ -64,6 +77,113 @@ func Access(_ context.Context, rec room.Record) string {
 // errNotInRoom is the refusal for a repository that is not the acting room's.
 var errNotInRoom = errors.New("GitHub repository does not belong to the acting room")
 var errReadOnly = errors.New("GitHub writes are disabled: this room is read-only")
+
+// HeldError refuses gh pr ready on a PR that Dyna holds. Only dyna git pr release lifts the hold.
+type HeldError struct {
+	Ref    string
+	Reason string
+}
+
+func (e *HeldError) Error() string {
+	return fmt.Sprintf("PR %s is held in Dyna: %s. Run dyna git pr release %s to lift the hold.", e.Ref, e.Reason, e.Ref)
+}
+
+// engineHold asks the engine for the hold on a PR named by URL, or by branch in repo.
+// With no engine it returns ErrNotRunning at once, without the default wait for a
+// restart. Tests replace it.
+var engineHold = func(ctx context.Context, roomID, repo, ref string) (*state.Hold, error) {
+	var hold *state.Hold
+	client := engineclient.New("", engineclient.RestartWait(0), engineclient.Notices(nil))
+	err := client.Call(ctx, "PRHold", []any{roomID, repo, ref}, &hold)
+	return hold, err
+}
+
+// gitBranch names the branch checked out in dir. Tests replace it.
+var gitBranch = func(ctx context.Context, dir string) (string, error) {
+	out, err := childenv.Clean(exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// readyTarget returns the PR argument of gh pr ready and the repository its -R or
+// --repo flag names. gh takes those flags before or after the target, and a flag
+// value is not a target.
+func readyTarget(command []string) (target, repo string) {
+	for i := 2; i < len(command); i++ {
+		a := command[i]
+		switch {
+		case a == "-R" || a == "--repo":
+			if i+1 < len(command) {
+				repo = command[i+1]
+			}
+			i++
+		case strings.HasPrefix(a, "--repo="):
+			repo = strings.TrimPrefix(a, "--repo=")
+		case strings.HasPrefix(a, "-R"):
+			repo = strings.TrimPrefix(a, "-R")
+		case strings.HasPrefix(a, "-"):
+		case target == "":
+			target = a
+		}
+	}
+	return target, repo
+}
+
+// holdRef names the PR a gh pr ready target refers to, as a URL or a branch. A bare
+// command uses the checked-out branch, which gh also resolves to its PR.
+func holdRef(ctx context.Context, cmdDir string, r repository, target string) (string, error) {
+	if n, err := strconv.Atoi(target); err == nil {
+		return fmt.Sprintf("https://%s/%s/pull/%d", r.host, r.name, n), nil
+	}
+	if target == "" {
+		return gitBranch(ctx, cmdDir)
+	}
+	if strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "http://") {
+		return target, nil
+	}
+	if _, branch, ok := strings.Cut(target, ":"); ok {
+		return branch, nil
+	}
+	return target, nil
+}
+
+// refuseHeldReady refuses gh pr ready on a PR the engine reports as held. With no
+// engine running nothing can hold the PR, so the command runs, as engine status does.
+// A bare command in a checkout with no branch is left to gh, which reports it.
+func refuseHeldReady(ctx context.Context, rec room.Record, cmdDir string, r repository, args []string) error {
+	command := commandArgs(args)
+	if len(command) < 2 || command[0] != "pr" || command[1] != "ready" || slices.Contains(command, "--undo") {
+		return nil
+	}
+	target, repo := readyTarget(command)
+	if parts := strings.Split(repo, "/"); len(parts) == 3 {
+		// gh also takes HOST/OWNER/REPO and reads the host from it.
+		r.host, repo = parts[0], parts[1]+"/"+parts[2]
+	}
+	if repo != "" {
+		r.name = repo
+	}
+	ref, err := holdRef(ctx, cmdDir, r, target)
+	if err != nil || ref == "" {
+		return nil
+	}
+	if released, _ := ctx.Value(holdReleaseKey{}).(string); released == ref {
+		return nil
+	}
+	hold, err := engineHold(ctx, rec.ID, r.name, ref)
+	if errors.Is(err, engineclient.ErrNotRunning) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if hold == nil {
+		return nil
+	}
+	if target == "" {
+		target = ref
+	}
+	return &HeldError{Ref: target, Reason: hold.Reason}
+}
 
 // outsideReadError explains a refused read of a repository outside the room. Only
 // a REST read of a public repository outside every room is allowed (D-272), so
@@ -519,5 +639,5 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	if Access(ctx, rec) != ReadWrite && !isRead(args) {
 		return errReadOnly
 	}
-	return nil
+	return refuseHeldReady(ctx, rec, cmdDir, r, args)
 }
