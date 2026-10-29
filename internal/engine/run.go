@@ -664,7 +664,13 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	jobsSvc := newJobsService(rooms)
 	var mcpRooms *roommcp.Service
 	if !readOnly {
-		if mcpRooms, err = roommcp.NewService(dataDir, accountstore.DefaultStore(), rooms.Notify.Rooms, rooms.Notify.Sessions.Store); err != nil {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		accounts := accountstore.DefaultStore()
+		host := roommcp.Host{Accounts: accounts, Home: home}
+		if mcpRooms, err = roommcp.NewService(dataDir, accounts, rooms.Notify.Rooms, rooms.Notify.Sessions.Store, host.Identities); err != nil {
 			return err
 		}
 	}
