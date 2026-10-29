@@ -152,3 +152,93 @@ func refuseOwnerIdentity(ctx context.Context, cmd *exec.Cmd) error {
 	}
 	return nil
 }
+
+// withAttribution ends the body that an issue or pull request create or edit
+// publishes with the room's attribution line, once. A create without a body
+// gets the line as its body; an edit without one keeps the published body.
+// The returned function removes the temporary body file, if any.
+func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), error) {
+	none := func() {}
+	if !isAgentText(ctx) {
+		return none, nil
+	}
+	args := cmd.Args[1:]
+	command := commandArgs(args)
+	if len(command) < 2 || (command[0] != "issue" && command[0] != "pr") || (command[1] != "create" && command[1] != "edit") {
+		return none, nil
+	}
+	rec, err := roomFor(ctx, cmd.Dir, r)
+	if err != nil && !errors.Is(err, errNotInRoom) {
+		return none, nil
+	}
+	if rec.Attribution == "" {
+		return none, nil
+	}
+	start := len(args) - len(command) + 2
+	body, rest := "", append([]string(nil), args[:start]...)
+	found := false
+	for i := start; i < len(args); i++ {
+		name, value, attached := strings.Cut(args[i], "=")
+		if len(args[i]) > 2 && args[i][0] == '-' && args[i][1] != '-' {
+			name, value, attached = args[i][:2], strings.TrimPrefix(args[i][2:], "="), true
+		}
+		isFile, text := textFlags[name]
+		if !text || name == "--title" || name == "-t" {
+			rest = append(rest, args[i])
+			if createValueFlags[name] && !attached && i+1 < len(args) {
+				i++
+				rest = append(rest, args[i])
+			}
+			continue
+		}
+		if !attached && i+1 < len(args) {
+			i++
+			value = args[i]
+		}
+		found = true
+		switch {
+		case !isFile:
+			body = value
+		case value == "-":
+			if cmd.Stdin == nil {
+				continue
+			}
+			data, err := io.ReadAll(cmd.Stdin)
+			if err != nil {
+				return none, err
+			}
+			body = string(data)
+		default:
+			if !filepath.IsAbs(value) {
+				value = filepath.Join(cmd.Dir, value)
+			}
+			data, err := os.ReadFile(value)
+			if err != nil {
+				return none, err
+			}
+			body = string(data)
+		}
+	}
+	if !found && command[1] == "edit" {
+		return none, nil
+	}
+	body = strings.TrimRight(body, "\n")
+	if !strings.HasSuffix(body, rec.Attribution) {
+		if body != "" {
+			body += "\n\n"
+		}
+		body += rec.Attribution
+	}
+	file, err := os.CreateTemp("", "dyna-gh-body-")
+	if err != nil {
+		return none, err
+	}
+	cleanup := func() { os.Remove(file.Name()) }
+	_, werr := file.WriteString(body + "\n")
+	if cerr := file.Close(); werr != nil || cerr != nil {
+		cleanup()
+		return none, errors.Join(werr, cerr)
+	}
+	cmd.Args = append([]string{cmd.Args[0]}, append(rest, "--body-file="+file.Name())...)
+	return cleanup, nil
+}
