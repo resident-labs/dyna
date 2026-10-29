@@ -14,7 +14,7 @@ func TestAgentsUseSupportedStateSnapshots(t *testing.T) {
 		"leaf":   {Leaf: true},
 	} {
 		rules := rulesFor(meta) + workerContext(meta, "", 3)
-		for _, want := range []string{"Never open or copy the live dyna.db directly.", "dyna state snapshot <path>", "Snapshots contain private state"} {
+		for _, want := range []string{"Never open or copy the live dyna.db directly.", "use the latest daily backup first", "dyna state snapshot <path>", "only when you need newer state", "at most one snapshot at a time", "Snapshots contain private state"} {
 			if !strings.Contains(rules, want) {
 				t.Errorf("%s instructions missing %q", role, want)
 			}
