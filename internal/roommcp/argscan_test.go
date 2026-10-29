@@ -239,6 +239,17 @@ func TestHostIdentitiesFailOnLookupError(t *testing.T) {
 	if _, err := host.Identities(context.Background(), repo); err == nil {
 		t.Error("unreadable gh output returned identities")
 	}
+	// A status 1 from gh with no JSON answer is a failure, not a signed-out user.
+	host = Host{Accounts: accounts, Run: func(ctx context.Context, _, cmd string, _ ...string) (string, error) {
+		if cmd == "gh" {
+			out, err := exec.CommandContext(ctx, "sh", "-c", "echo broken config >&2; exit 1").Output()
+			return string(out), err
+		}
+		return "", nil
+	}}
+	if _, err := host.Identities(context.Background(), repo); err == nil {
+		t.Error("a gh status 1 failure returned identities")
+	}
 	// An unset git key (exit 1) and a missing gh are absent configuration.
 	host = Host{Accounts: accounts, Run: func(ctx context.Context, dir, cmd string, args ...string) (string, error) {
 		if cmd == "gh" {

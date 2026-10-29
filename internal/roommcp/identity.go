@@ -40,8 +40,8 @@ type Host struct {
 }
 
 // run runs a command and returns its standard output. A command that exits
-// with status 1 has nothing to report, such as an unset git key or a signed-out
-// GitHub CLI, so it gives empty output. Any other failure is an error: the
+// with status 1 has nothing to report only when it is an unset git key or a
+// GitHub CLI that answered with JSON. Any other failure is an error: the
 // scanner must not treat an unfinished lookup as an empty answer.
 func (h Host) run(ctx context.Context, dir, name string, args ...string) (string, error) {
 	var out string
@@ -65,8 +65,10 @@ func (h Host) run(ctx context.Context, dir, name string, args ...string) (string
 	switch {
 	case err == nil:
 		return out, nil
-	case errors.As(err, &exit) && exit.ExitCode() == 1:
-		return "", nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1 && (name == "git" || json.Valid([]byte(out))):
+		// git exits 1 for an unset key. The GitHub CLI exits 1 for many
+		// failures, so only a JSON answer confirms a signed-out state.
+		return out, nil
 	case name == "gh" && errors.Is(err, exec.ErrNotFound):
 		return "", nil
 	}
