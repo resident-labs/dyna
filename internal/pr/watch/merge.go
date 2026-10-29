@@ -178,6 +178,8 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 			item.State, item.Reason = "review", "needs review on the current head"
 		case changeKind(*r) == "local":
 			item.State, item.Reason = "waiting", "waiting for a verified local head"
+		case r.Hold != nil:
+			item.State, item.Reason = "held", "held in Dyna: "+r.Hold.Reason
 		case observation.IsDraft:
 			item.State, item.Reason = "held", "GitHub draft status holds this PR"
 		case observation.Mergeable != nil && !*observation.Mergeable:
