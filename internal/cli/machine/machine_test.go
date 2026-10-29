@@ -96,6 +96,39 @@ func TestMachineEditSetsSSHConnectTimeout(t *testing.T) {
 	}
 }
 
+// Named resource counts round-trip through edit and show. A zero count
+// removes one declaration without replacing the others.
+func TestMachineEditResources(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "hermes", "--resource", "ghidra=1", "--resource", "gpu-slot=2", "--resource", "display=1"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "show", "hermes")
+	if err != nil || !strings.Contains(out, "Resources: display=1, ghidra=1, gpu-slot=2") {
+		t.Fatalf("resource show = %q, %v", out, err)
+	}
+	if _, err := run(t, "edit", "hermes", "--resource", "display=0", "--resource", "ghidra=3"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := (machines.Store{}).Get(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[machines.ResourceName]int{"ghidra": 3, "gpu-slot": 2}
+	if !reflect.DeepEqual(stored.Resources, want) {
+		t.Fatalf("stored resources = %v, want %v", stored.Resources, want)
+	}
+	for _, bad := range []string{"Ghidra=1", "ghidra=-1", "ghidra", "bad/name=1"} {
+		if _, err := run(t, "edit", "hermes", "--resource", bad); err == nil {
+			t.Fatalf("resource edit %q was accepted", bad)
+		}
+	}
+}
+
 func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)

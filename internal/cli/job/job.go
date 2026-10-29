@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/jobs"
+	"dyna-agent/internal/machines"
 )
 
 // jobView is what every job command prints: the facts of the stored row.
@@ -58,7 +59,7 @@ func NewCommand() *cobra.Command {
 		Long: "A job is one command that runs on a machine, detached: it survives the\n" +
 			"end of this command, an SSH drop and an engine restart. With no --node it\n" +
 			"runs on this machine, so one machine needs no setup. The machine's node\n" +
-			"queue admits the job when its CPUs, memory and IO weight fit; a job that\n" +
+			"queue admits the job when its CPUs, memory, IO weight and named resources fit; a job that\n" +
 			"waits shows why in dyna job show. Its log and exit code are stored; the\n" +
 			"session that submitted it is woken when the job ends. --artifact keeps\n" +
 			"named outputs of its work folder after it ends; dyna job fetch copies\n" +
@@ -70,12 +71,12 @@ func NewCommand() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	var node, commit, image, memory, ioWeight string
-	var artifacts []string
+	var artifacts, resourceNames []string
 	var cpus int
 	var host bool
 	var timeout time.Duration
 	c := &cobra.Command{
-		Use:   "run [--node N] [--commit REF] [--cpus N] [--memory SIZE] [--timeout D] [--image IMG | --host] -- CMD",
+		Use:   "run [--node N] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--timeout D] [--image IMG | --host] -- CMD",
 		Short: "Submit a job and return",
 		Args: func(c *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -90,15 +91,20 @@ func runCmd() *cobra.Command {
 			if ioWeight != "" && ioWeight != "heavy" && ioWeight != "light" {
 				return fmt.Errorf("io must be heavy or light, not %q", ioWeight)
 			}
+			resources, err := machines.ParseResourceNames(resourceNames)
+			if err != nil {
+				return err
+			}
 			repo := ""
 			if commit != "" {
 				repo, _ = os.Getwd()
 			}
 			var job jobs.Job
-			err := engineclient.New("").Call(c.Context(), "RunJob", []any{map[string]any{
+			err = engineclient.New("").Call(c.Context(), "RunJob", []any{map[string]any{
 				"node": node, "command": args, "repo": repo, "ref": commit,
 				"host": host, "image": image, "cpus": cpus, "memory": memory,
 				"timeoutSec": int(timeout / time.Second), "io": ioWeight, "artifacts": artifacts,
+				"resources": resources,
 			}}, &job)
 			if err != nil {
 				return err
@@ -115,6 +121,7 @@ func runCmd() *cobra.Command {
 	c.Flags().BoolVar(&host, "host", false, "run the command on the machine itself (the default without --image)")
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
 	c.Flags().StringVar(&ioWeight, "io", "light", "the job's IO weight: a node runs only a few heavy jobs at once")
+	c.Flags().StringArrayVar(&resourceNames, "resource", nil, "hold one unit of this named resource for the job's whole run (repeatable)")
 	return c
 }
 
