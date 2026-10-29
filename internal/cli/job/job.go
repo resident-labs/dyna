@@ -59,12 +59,12 @@ func printJSON(w io.Writer, v any) error {
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "job",
-		Short: "Run one command on a machine, detached",
+		Short: "Run one command on a node, detached",
 		Args:  cobra.NoArgs,
 		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
-		Long: "A job is one command that runs on a machine, detached: it survives the\n" +
+		Long: "A job is one command that runs on a node, detached: it survives the\n" +
 			"end of this command, an SSH drop and an engine restart. With no --node or --label it\n" +
-			"runs on this machine, so one machine needs no setup. --label chooses the eligible machine with the most free queue capacity. The machine's node\n" +
+			"runs on this node, so one node needs no setup. --label chooses the eligible node with the most free queue capacity. The node's\n" +
 			"queue admits the job when its CPUs, memory, IO weight and named resources fit; a job that\n" +
 			"waits shows why in dyna job show. Its log and exit code are stored; the\n" +
 			"session that submitted it is woken when the job ends. --artifact keeps\n" +
@@ -125,15 +125,15 @@ func runCmd() *cobra.Command {
 			return printJSON(c.OutOrStdout(), view(job))
 		},
 	}
-	c.Flags().StringVar(&node, "node", "", "machine to run on (empty: this machine, or the roomiest machine with --label)")
-	c.Flags().StringArrayVar(&labels, "label", nil, "run on the roomiest machine with every label, such as arch=x86_64 (repeatable)")
+	c.Flags().StringVar(&node, "node", "", "node to run on (empty: this node, or the roomiest node with --label)")
+	c.Flags().StringArrayVar(&labels, "label", nil, "run on the roomiest node with every label, such as arch=x86_64 (repeatable)")
 	c.Flags().StringVar(&commit, "commit", "", "push this commit of the current repository and check it out (empty: no source)")
 	c.Flags().IntVar(&cpus, "cpus", 0, "CPUs the job may use")
 	c.Flags().StringVar(&memory, "memory", "", "memory the job may use, such as 16g or 512m")
 	c.Flags().DurationVar(&timeout, "timeout", 0, "deadline of the job (default 30m)")
 	c.Flags().DurationVar(&idle, "idle", 0, "stop a running job after this long without output (default: none)")
 	c.Flags().StringVar(&image, "image", "", "run the command in this container image")
-	c.Flags().BoolVar(&host, "host", false, "run the command on the machine itself (the default without --image)")
+	c.Flags().BoolVar(&host, "host", false, "run the command on the node itself (the default without --image)")
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
 	c.Flags().StringVar(&ioWeight, "io", "light", "the job's IO weight: a node runs only a few heavy jobs at once")
 	c.Flags().StringArrayVar(&resourceNames, "resource", nil, "hold one unit of this named resource for the job's whole run (repeatable)")

@@ -1,6 +1,6 @@
 # Repository-defined local CI
 
-Registered CI machines can run checks for any repository, language, or test
+Registered CI nodes can run checks for any repository, language, or test
 runner. A repository opts in with `.dyna/local-ci.yaml`. Dyna does not supply a
 fallback recipe.
 
@@ -28,7 +28,7 @@ own. The merge queue runs local CI on the merge trial instead: the head merged
 into the frozen default-branch commit. A batch of changes runs once, on its tip.
 The first conclusive local or hosted result on the trial releases the merge, and
 a failure from either provider vetoes it. A local pass must cover every required
-suite. When no CI machine is enabled, hosted trial CI decides, as in `github`
+suite. When no CI node is enabled, hosted trial CI decides, as in `github`
 mode. A pull request can therefore merge while `dyna git ci show <head>` has no
 result. To see what gated a landed change, run `dyna git ci show <merge commit>`.
 
@@ -70,9 +70,9 @@ unknown keys, duplicate identities, invalid references, and files over 1 MiB.
 ## Top-level fields
 
 - `trial` lists suites run for every merge trial. It also defines the suites
-  eligible for pull-request file selection and their order. A machine can limit
+  eligible for pull-request file selection and their order. A node can limit
   itself to some of these suites; see
-  [Registered CI machines](pr-tracking.md#registered-ci-machines).
+  [Registered CI nodes](pr-tracking.md#registered-ci-nodes).
 - `caches` declares managed caches that checks can reference.
 - `checks` declares executable commands.
 - `suites` groups checks for selection, manual runs, and aggregates.
@@ -89,8 +89,8 @@ Each item in `checks` supports these fields:
 - `name` is the provider and display name. It defaults to `id`.
 - `command` is required unless `job` is set. Dyna runs it with Bash from
   `/workspace` in a container, or from the check worktree for a host check.
-- `labels` is an optional list of machine labels. A run that selects this check
-  needs one machine with every listed label, in addition to the `ci` label.
+- `labels` is an optional list of node labels. A run that selects this check
+  needs one node with every listed label, in addition to the `ci` label.
   Names use lowercase letters, digits, `-`, `_`, and `.`. A label can also
   be `key=value`, such as `arch=x86_64`.
 - `image` is the container image. It is required unless `host: true` or `job`
@@ -99,7 +99,7 @@ Each item in `checks` supports these fields:
   the same work as the provider. Dyna runs the job with a pinned `act` inside
   the usual queue, deadline and report handling. See
   [Workflow job checks](#workflow-job-checks).
-- `host: true` runs outside a container. The machine owner must allow this;
+- `host: true` runs outside a container. The node owner must allow this;
   see [Host checks](#host-checks).
 - `hostUser: true` starts a container as root, creates the host UID and GID,
   and runs the command through `setpriv`. The image needs `getent`, `groupadd`,
@@ -124,12 +124,12 @@ Each item in `checks` supports these fields:
 - `cpus` is the CPU count the check asks for, and `memory` its memory, such as
   `memory: 16g`. Both keep a default when they are absent; see
   [Resource limits](#resource-limits).
-- `io: heavy` marks a check whose work saturates the machine's disk, such as a
+- `io: heavy` marks a check whose work saturates the node's disk, such as a
   container build or a linker with many object files. A node runs only a few
   heavy checks at once, beside any light ones; `io: light`, the default, needs
   no such room. See [Resource limits](#resource-limits).
 
-For example, this check needs a probed Linux GPU machine:
+For example, this check needs a probed Linux GPU node:
 
 ```yaml
   - id: gpu-test
@@ -138,11 +138,11 @@ For example, this check needs a probed Linux GPU machine:
     labels: [os=linux, gpu]
 ```
 
-The scheduler combines the labels of every check in a run because one machine
+The scheduler combines the labels of every check in a run because one node
 runs that run's checks. Automatic CI and `dyna git ci run` use the same filter.
-Owner labels and probed labels both match. A machine probe supplies
+Owner labels and probed labels both match. A node probe supplies
 `os=<name>`, `arch=<name>`, `gpu` when it finds a GPU, and `docker` or
-`containerd` when it finds that runtime. `dyna machine show N` and the machine
+`containerd` when it finds that runtime. `dyna node show N` and the node
 page show owner and probed labels separately.
 
 Dyna supplies isolated home and temporary directories, report paths, a safe Git
@@ -152,14 +152,14 @@ command writes its XML under the same report directory.
 
 ## Git LFS
 
-Dyna pushes the commit to the CI machine with `GIT_LFS_SKIP_PUSH=1` and
-without the repository's pre-push hooks. The checkout on the machine sets
+Dyna pushes the commit to the CI node with `GIT_LFS_SKIP_PUSH=1` and
+without the repository's pre-push hooks. The checkout on the node sets
 `GIT_LFS_SKIP_SMUDGE=1`. A check therefore sees Git LFS pointer files, not the
 file contents.
 
 A check that needs the real file contents must fetch them itself. Run
 `git lfs pull` in the check, with credentials the check provides. Dyna does
-not send LFS credentials to the CI machine.
+not send LFS credentials to the CI node.
 
 A failed push or checkout is a job in the result. That job keeps the git error
 text, so a trial names the error instead of an unknown job.
@@ -190,22 +190,22 @@ checks:
 The job runs as a `pull_request` event for the revision, with the pull
 request's base commit in the event payload. Dyna's own environment does not
 reach the job containers: `act` runs with a fixed `PATH`, its own home and an
-empty environment file, and jobs cannot use the machine's container socket.
+empty environment file, and jobs cannot use the node's container socket.
 Each job container runs as the node user's numeric UID and GID, so files it
 writes on mounted folders belong to that user on the node.
 
-A workflow job needs the machine's host-check grant, because the workflow
+A workflow job needs the node's host-check grant, because the workflow
 chooses the containers and their options. See [Host checks](#host-checks).
 
 Set `reports: junit` to read the JUnit the workflow uploaded as an artifact.
 An upload is stored as an archive, so Dyna unpacks it into the check's report
 directory before reading it.
 
-The machine's container runtime socket is a machine setting, for a host that
+The node's container runtime socket is a node setting, for a host that
 runs rootless Podman instead of Docker:
 
 ```sh
-dyna machine edit build-machine --container-socket unix:///run/user/1000/podman/podman.sock
+dyna node edit build-node --container-socket unix:///run/user/1000/podman/podman.sock
 ```
 
 ## Warming the act cache
@@ -220,10 +220,10 @@ warm:
 ```
 
 After the default branch moves, Dyna runs that job through act on each CI
-machine that serves the repository, into the same cache store the job checks
+node that serves the repository, into the same cache store the job checks
 read. The run takes queue room like every other check, so it never starves a
-pull request's checks, and each machine remembers the commit it last warmed, so
-a commit warms a machine once.
+pull request's checks, and each node remembers the commit it last warmed, so
+a commit warms a node once.
 
 ## Resource limits
 
@@ -240,15 +240,15 @@ A check runs with 2 CPUs and 4 GiB of memory in a container, and with 2 CPUs and
 
 `cpus` is a whole number. `memory` needs a unit, `m` or `g`.
 
-Dyna bounds a request by the machine, so a repository cannot take more than the
-machine has: the machine's last probe bounds both, and a request above the bound
+Dyna bounds a request by the node, so a repository cannot take more than the
+node has: the node's last probe bounds both, and a request above the bound
 is clamped. The check's result and its log say so:
 
 ```
 Dyna clamped cpus from 32 to 16 and memory from 64 GiB to 32 GiB
 ```
 
-A default is never clamped, so a small machine keeps the limits its checks
+A default is never clamped, so a small node keeps the limits its checks
 already had. A container check keeps 1 GiB above its own memory limit in the
 systemd scope, so the docker client fits in the scope. A host check's scope is
 its only memory bound, so it gets exactly the granted memory.
@@ -265,7 +265,7 @@ blocking removes Dyna's own caches and idle scratch builds first, so the node
 that frees its own space admits work again. Work that waits is oldest
 first and rooms take turns, and the check's log names the reason it waits, such
 as `local CI: 4 of 4 IO-heavy jobs running, position 3 of 7`. The owner or the
-room's root sets a node's limits with `dyna machine edit <name> --max-io-heavy
+room's root sets a node's limits with `dyna node edit <name> --max-io-heavy
 N --max-disk-percent P`.
 
 The scope also bounds the tasks a check may start: 768, or 256 for each CPU it
@@ -279,7 +279,7 @@ own sccache server, not a server another check still uses. A check that sets
 `SCCACHE_SERVER_PORT` itself keeps that value.
 
 A check holds in the node queue what it asks for. A wide check therefore shares
-the machine with fewer others, so keep the machine's capacity and the requests
+the node with fewer others, so keep the node's capacity and the requests
 in mind together.
 
 ## Caches
@@ -299,7 +299,7 @@ Cache directories remain owned and locked by Dyna under its separate `caches/`
 directory. The runner refuses unsafe symbolic links before mounting them. Every
 cache has age cleanup and a size cap. If a root-owned tree defeats the host
 cleanup, Dyna retries that tree through a throwaway container on the same
-runtime. A failed cleanup posts one machine notice with its path and reason.
+runtime. A failed cleanup posts one node notice with its path and reason.
 
 A cache folder is shared by every run on the node, including runs of other
 commits at the same time, so it must hold only what can be shared: a check that
@@ -356,7 +356,7 @@ checks:
     command: |
       set -u
       # Host checks get a temporary HOME, so name a persistent toolchain home.
-      # The machine owner creates /srv/ci/rustup and makes it writable.
+      # The node owner creates /srv/ci/rustup and makes it writable.
       export RUSTUP_HOME=/srv/ci/rustup
       toolchain=1.85.0
       # Install the pinned toolchain once per node. Later runs skip the install.
@@ -380,7 +380,7 @@ checks:
 The toolchain home and the lock file must live in folders that all runs on the
 node share. The per-run home and temporary directories would give each run its
 own toolchain and its own lock, so the example uses fixed paths. Host checks
-also need the machine owner's permission; see [Host checks](#host-checks). Enable JUnit output for the `ci` profile in
+also need the node owner's permission; see [Host checks](#host-checks). Enable JUnit output for the `ci` profile in
 `.config/nextest.toml`; the last step copies the file to `JUNIT_REPORT_PATH`. The
 same shape works for other languages: replace the toolchain step, the cache
 declarations, and the test command (for example `npm ci` with the npm cache, or
@@ -405,46 +405,46 @@ Examples:
 
 ```sh
 dyna git ci run HEAD --suite test
-dyna git ci run HEAD --suite lint --node build-machine
+dyna git ci run HEAD --suite lint --node build-node
 dyna git ci show HEAD --json
 ```
 
-A manual run uses the only enabled CI machine in the registry and prints its
-name. When several machines are enabled, the run asks for `--node <name>`.
-The `localci.remote` setting no longer selects the machine. The selected suites
-determine the run's check labels, and the machine must have all of them.
+A manual run uses the only enabled CI node in the registry and prints its
+name. When several nodes are enabled, the run asks for `--node <name>`.
+The `localci.remote` setting no longer selects the node. The selected suites
+determine the run's check labels, and the node must have all of them.
 
 ## Host checks
 
-Host execution is off by default on every machine. A one-time upgrade
+Host execution is off by default on every node. A one-time upgrade
 migration preserves permission only when saved `computer-smoke` evidence proves
 that the old command started. A passed result or a test failure provides that
-proof. A setup failure does not. Every other existing machine and every machine
+proof. A setup failure does not. Every other existing node and every node
 added later starts off. The repository cannot turn it on, and neither can a
 session or a workflow worker. The owner allows it for every room, and the root
 of a room allows it for its own room:
 
 ```sh
-dyna machine edit build-machine --allow-host-checks
+dyna node edit build-node --allow-host-checks
 ```
 
 A room root's permission covers that room's CI work only, so it never lets
-another room's repositories run outside a container. The machine record names
-who allows host checks, the owner or the roots of rooms, and the Machine page
+another room's repositories run outside a container. The node record names
+who allows host checks, the owner or the roots of rooms, and the Node page
 shows those names.
 
-Use this only for repositories you trust with the machine account. Host commands
+Use this only for repositories you trust with the node account. Host commands
 run outside container isolation, although Dyna still applies the check's
 systemd scope, timeout, temporary home, and cache guards.
 
-The machine page and `dyna machine show <name>` show the setting. Disable it
+The node page and `dyna node show <name>` show the setting. Disable it
 with:
 
 ```sh
-dyna machine edit build-machine --disallow-host-checks
+dyna node edit build-node --disallow-host-checks
 ```
 
-A host check on a machine without permission does not run. Its local result is
+A host check on a node without permission does not run. Its local result is
 an infrastructure error, so hosted CI can resume when available.
 
 ## Aggregates and hosted cancellation

@@ -1,25 +1,25 @@
 # Jobs
 
-A **job** is one command that runs on a machine, detached. It survives the end
+A **job** is one command that runs on a node, detached. It survives the end
 of the command that submitted it, an SSH drop, and an engine restart. Jobs use
 the detached node executor that local CI uses (`internal/jobs`), join the
-machine's node queue, and store their log and exit code.
+node's queue, and store their log and exit code.
 
 ## Run a job
 
 `dyna job run [--node N | --label L]... [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG | --host] [--artifact PATH]... -- CMD`
 
 - With no `--node` or `--label`, the job runs on the local node (the engine
-  host), so a one-machine owner needs no setup.
+  host), so a one-node owner needs no setup.
 - Repeat `--label L` to place the job without naming a node. Dyna chooses an
-  enabled machine that the job's room may use, has every requested label, and
+  enabled node that the job's room may use, has every requested label, and
   has the most free CPU capacity in the node queue. The choice accounts for
   running and queued jobs and CI checks. `--node` and `--label` are mutually
-  exclusive. If no machine has every label, submission fails with the missing
+  exclusive. If no node has every label, submission fails with the missing
   label instead of creating a job that can never start.
-- Owner labels come from `dyna machine edit N --label L`. Probed labels come
-  from the last successful machine probe: `os=linux` or `os=darwin`,
-  `arch=<machine architecture>`, `gpu` when a GPU is visible, and `docker`
+- Owner labels come from `dyna node edit N --label L`. Probed labels come
+  from the last successful node probe: `os=linux` or `os=darwin`,
+  `arch=<node architecture>`, `gpu` when a GPU is visible, and `docker`
   or `containerd` for a container runtime. Both kinds place jobs. For example:
   `dyna job run --label os=linux --label gpu -- nvidia-smi`.
 - `--commit REF` pushes that exact commit of the current repository to the
@@ -28,13 +28,13 @@ machine's node queue, and store their log and exit code.
   in an empty work folder of its own. Either way, the work folder is the
   command's working directory, and `/workspace` in a container.
 - A local host job gets the caller's `DYNA_SCRATCH`; a remote job leaves it unset. Use `--workspace` or `--artifact` to send files.
-- `--host` runs on the machine itself; `--image IMG` runs in a container. The
+- `--host` runs on the node itself; `--image IMG` runs in a container. The
   command's first word is the container's entrypoint and the rest are its
   arguments, so any image works, with or without a shell.
-  Host execution on a remote machine needs that machine's host-check grant
-  (`dyna machine edit N --allow-host-checks`); the local node needs none.
-- The job joins the machine's node queue, so jobs and local CI checks share one
-  admission bound per machine. `--io heavy` marks a job that saturates the
+  Host execution on a remote node needs that node's host-check grant
+  (`dyna node edit N --allow-host-checks`); the local node needs none.
+- The job joins the node's queue, so jobs and local CI checks share one
+  admission bound per node. `--io heavy` marks a job that saturates the
   disk; a node runs only a few heavy units at once. A job that waits shows why
   in `dyna job show`.
 
@@ -75,8 +75,8 @@ Repeat `--resource NAME` to hold one unit of each named resource for the
 job's whole run. Names use lowercase letters, digits, `-`, `_` and `.`,
 up to 64 characters. A name that the node does not declare is a one-unit lock,
 so it needs no setup. Declare a larger count with
-`dyna machine edit N --resource NAME=COUNT`; repeat the flag for more
-resources, and use `NAME=0` to remove a declaration. `dyna machine show N`
+`dyna node edit N --resource NAME=COUNT`; repeat the flag for more
+resources, and use `NAME=0` to remove a declaration. `dyna node show N`
 lists the declarations.
 
 For example, cozycraft can serialize access to its one shared test container:

@@ -78,7 +78,7 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
 // leaves out a status with no machine, and says so when there is none at all.
 export function machinesSub(machines: readonly MachineSummary[] | null): string {
   if (!machines) return ''
-  if (!machines.length) return 'No machines yet'
+  if (!machines.length) return 'No nodes yet'
   const words: Record<MachineStatus, string> = { online: 'online', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
   return statusCounts(machines)
     .filter((c) => c.n > 0)
@@ -94,7 +94,7 @@ export function loadPct(machine: MachineSummary): number | null {
 
 // routeText names how the engine reaches a machine.
 export function routeText(machine: Pick<MachineSummary, 'local'> & { ssh: string }): string {
-  if (machine.local) return 'This machine'
+  if (machine.local) return 'This node'
   return machine.ssh || 'No route yet'
 }
 

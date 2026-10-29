@@ -69,7 +69,7 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv(ghclient.BinaryEnv, fake)
-	body := "    Literal `dyna machine list`.\nCredential: ghp_1234567890abcdef\n"
+	body := "    Literal `dyna node list`.\nCredential: ghp_1234567890abcdef\n"
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
 	if err := os.WriteFile(bodyFile, []byte(body), 0600); err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ esac
 	}
 	for _, want := range []string{
 		"repos/owner/repo/pulls/17", "PATCH", "title=Edited title",
-		"body=    Literal `dyna machine list`.\nCredential: [redacted]\n\n",
+		"body=    Literal `dyna node list`.\nCredential: [redacted]\n\n",
 	} {
 		if !strings.Contains(string(written), want) {
 			t.Errorf("GitHub write misses %q:\n%s", want, written)

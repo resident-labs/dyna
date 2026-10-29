@@ -49,7 +49,7 @@ func TestMachinesListAndPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list, err := api.Machines(t.Context())
+	list, err := api.Nodes(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestMachinesListAndPatch(t *testing.T) {
 		t.Fatalf("ci = %+v, want an empty queue figure for the ci-labeled engine host", local.CI)
 	}
 
-	detail, err := api.Machine(t.Context(), local.ID)
+	detail, err := api.Node(t.Context(), local.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestMachinesListAndPatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := api.Machine(t.Context(), remote.ID)
+	got, err := api.Node(t.Context(), remote.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +98,14 @@ func TestMachinesListAndPatch(t *testing.T) {
 	// A patch takes the fields it names and the store refuses a machine that no
 	// longer validates.
 	off := false
-	disabled, err := api.SaveMachine(t.Context(), local.ID, MachinePatch{Enabled: &off})
+	disabled, err := api.SaveNode(t.Context(), local.ID, MachinePatch{Enabled: &off})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if disabled.Enabled || disabled.Status != MachineDisabled {
 		t.Fatalf("disabled = %+v, want the disabled status", disabled)
 	}
-	if _, err := api.Machine(t.Context(), "m_missing"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := api.Node(t.Context(), "m_missing"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unknown machine = %v, want os.ErrNotExist", err)
 	}
 }
@@ -126,7 +126,7 @@ func TestHostChecksGrantsNameTheirRoom(t *testing.T) {
 	}
 	dyna := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
 	allow, refuse := true, false
-	page, err := api.SaveMachine(dyna, node.ID, MachinePatch{AllowHostChecks: &allow})
+	page, err := api.SaveNode(dyna, node.ID, MachinePatch{AllowHostChecks: &allow})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,16 +142,16 @@ func TestHostChecksGrantsNameTheirRoom(t *testing.T) {
 	}
 	// The owner's answer covers every room, and a room root cannot refuse it.
 	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
-	if page, err = api.SaveMachine(owner, node.ID, MachinePatch{AllowHostChecks: &allow}); err != nil {
+	if page, err = api.SaveNode(owner, node.ID, MachinePatch{AllowHostChecks: &allow}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(page.HostChecksAllowedBy, []string{"the owner"}) {
 		t.Fatalf("allowed by = %v, want the owner alone", page.HostChecksAllowedBy)
 	}
-	if _, err := api.SaveMachine(dyna, node.ID, MachinePatch{AllowHostChecks: &refuse}); err == nil || !strings.Contains(err.Error(), "ask the owner") {
+	if _, err := api.SaveNode(dyna, node.ID, MachinePatch{AllowHostChecks: &refuse}); err == nil || !strings.Contains(err.Error(), "ask the owner") {
 		t.Fatalf("a room root refusing the owner's grant = %v, want a refusal naming the owner", err)
 	}
-	if page, err = api.SaveMachine(owner, node.ID, MachinePatch{AllowHostChecks: &refuse}); err != nil {
+	if page, err = api.SaveNode(owner, node.ID, MachinePatch{AllowHostChecks: &refuse}); err != nil {
 		t.Fatal(err)
 	}
 	if page.AllowHostChecks || len(page.HostChecksAllowedBy) != 0 {
@@ -178,7 +178,7 @@ dyna=dyna 0.4.3`
 
 // A probe from the page reads the machine, stores what it found and answers
 // with the page after it. A failed probe keeps what the last good one read.
-func TestProbeMachineStoresWhatItRead(t *testing.T) {
+func TestProbeNodeStoresWhatItRead(t *testing.T) {
 	api := machineAPI(t)
 	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", SSH: "pip@hermes", Enabled: true})
 	if err != nil {
@@ -190,7 +190,7 @@ func TestProbeMachineStoresWhatItRead(t *testing.T) {
 	}
 	api.Prober = &machines.Prober{Store: api.Store, Command: prints}
 
-	got, err := api.ProbeMachine(t.Context(), remote.ID)
+	got, err := api.ProbeNode(t.Context(), remote.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestProbeMachineStoresWhatItRead(t *testing.T) {
 	api.Prober.Command = func(context.Context, string, io.Reader, io.Writer, io.Writer, string, ...string) error {
 		return errors.New("ssh: connect to host pip@hermes port 22: Connection refused")
 	}
-	down, err := api.ProbeMachine(t.Context(), remote.ID)
+	down, err := api.ProbeNode(t.Context(), remote.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestProbeMachineStoresWhatItRead(t *testing.T) {
 	if down.Capabilities == nil || down.Capabilities.CPUs != 20 || down.SeenAt == nil {
 		t.Fatalf("failed probe lost the reading: %+v", down)
 	}
-	list, err := api.Machines(t.Context())
+	list, err := api.Nodes(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,14 +237,14 @@ func TestProbeMachineStoresWhatItRead(t *testing.T) {
 // The bound probe call must outlast the probe itself. With the 5 s default
 // deadline, a slow SSH connection was cancelled before the probe could store
 // that the machine is offline, so the page kept its old health.
-func TestProbeMachineCallHasRoomForSSH(t *testing.T) {
+func TestProbeNodeCallHasRoomForSSH(t *testing.T) {
 	probeCallLeft(t, 0, 19*time.Second)
 }
 
 // A machine with a 60 s connect timeout gets a probe budget longer than 60 s
 // through the bound call, so a healthy but slow connection is not cancelled
 // (D-195, D-197).
-func TestProbeMachineCallHonorsConnectTimeout(t *testing.T) {
+func TestProbeNodeCallHonorsConnectTimeout(t *testing.T) {
 	probeCallLeft(t, 60*time.Second, 69*time.Second)
 }
 
@@ -265,7 +265,7 @@ func probeCallLeft(t *testing.T, connect, min time.Duration) {
 		_, err := io.WriteString(out, probeOutput)
 		return err
 	}}
-	calls, err := Bind([]Binding{{Name: "ProbeMachine", Access: Write, Scope: ScopeAdmin, Method: api.ProbeMachine}})
+	calls, err := Bind([]Binding{{Name: "ProbeNode", Access: Write, Scope: ScopeAdmin, Method: api.ProbeNode}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func probeCallLeft(t *testing.T, connect, min time.Duration) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := calls["ProbeMachine"](t.Context(), []json.RawMessage{id}); err != nil {
+	if _, err := calls["ProbeNode"](t.Context(), []json.RawMessage{id}); err != nil {
 		t.Fatal(err)
 	}
 	// The probe takes its 20 s budget from the call's deadline, so a shorter
@@ -282,10 +282,10 @@ func probeCallLeft(t *testing.T, connect, min time.Duration) {
 	if left < min {
 		t.Fatalf("the probe ran with %v left, so the call deadline clamped its budget below %v", left, min)
 	}
-	if d := callspec.Deadline("ProbeMachine"); d < machines.MaxSSHConnectTimeout+30*time.Second {
-		t.Fatalf("ProbeMachine has a %v deadline, which cannot cover the longest probe and its store", d)
+	if d := callspec.Deadline("ProbeNode"); d < machines.MaxSSHConnectTimeout+30*time.Second {
+		t.Fatalf("ProbeNode has a %v deadline, which cannot cover the longest probe and its store", d)
 	}
-	page, err := api.Machine(t.Context(), remote.ID)
+	page, err := api.Node(t.Context(), remote.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

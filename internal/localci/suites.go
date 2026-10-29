@@ -86,13 +86,13 @@ type SuiteBlockedError struct {
 
 func (e SuiteBlockedError) Error() string {
 	if e.Suite != "" {
-		return fmt.Sprintf("no enabled CI machine allows the %s suite that this run needs; allow it with dyna machine edit <name> --label suite=%s", e.Suite, e.Suite)
+		return fmt.Sprintf("no enabled CI node allows the %s suite that this run needs; allow it with dyna node edit <name> --label suite=%s", e.Suite, e.Suite)
 	}
 	flags := make([]string, 0, len(e.Suites))
 	for _, suite := range e.Suites {
 		flags = append(flags, "--label suite="+string(suite))
 	}
-	return fmt.Sprintf("no enabled CI machine allows every suite that this run needs (%s); allow them on one machine with dyna machine edit <name> %s",
+	return fmt.Sprintf("no enabled CI node allows every suite that this run needs (%s); allow them on one node with dyna node edit <name> %s",
 		strings.Join(SuiteNames(e.Suites), ", "), strings.Join(flags, " "))
 }
 
@@ -104,7 +104,7 @@ type RoomNotServedError struct {
 }
 
 func (e RoomNotServedError) Error() string {
-	return fmt.Sprintf("no enabled CI machine serves room %s; an owner adds the room to a CI machine with dyna machine edit <name> --rooms %s, or in Settings > Machines; then run dyna git merge retry", e.RoomID, e.RoomID)
+	return fmt.Sprintf("no enabled CI node serves room %s; an owner adds the room to a CI node with dyna node edit <name> --rooms %s, or on the Nodes page; then run dyna git merge retry", e.RoomID, e.RoomID)
 }
 
 // NodesForRoom keeps the machines that take CI work for the room. A machine
@@ -198,7 +198,7 @@ func NodesForLabels(nodes []Node, labels []string) []Node {
 type LabelsBlockedError struct{ Labels []string }
 
 func (e LabelsBlockedError) Error() string {
-	return fmt.Sprintf("no enabled CI machine has every check label this run needs (%s); add the missing labels with dyna machine edit <name> --label <label>", strings.Join(e.Labels, ", "))
+	return fmt.Sprintf("no enabled CI node has every check label this run needs (%s); add the missing labels with dyna node edit <name> --label <label>", strings.Join(e.Labels, ", "))
 }
 
 // BlockedLabels reports a label set that no machine can satisfy. Busy machines

@@ -34,7 +34,7 @@ test('the header counts machines by status and leaves out what is zero', () => {
   ]
   assert.equal(machinesSub(list), '1 online · 1 disabled · 1 offline · 1 not probed')
   assert.equal(machinesSub([machine(), machine({ id: 'm_2' })]), '2 online')
-  assert.equal(machinesSub([]), 'No machines yet')
+  assert.equal(machinesSub([]), 'No nodes yet')
   assert.equal(machinesSub(null), '', 'a list that has not loaded yet has no subline')
 })
 
