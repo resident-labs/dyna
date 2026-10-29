@@ -113,6 +113,12 @@ func (s *Service) SetToken(ctx context.Context, roomRef, name, serverURL, token 
 	}
 	s.drop(serverKey{rec.ID, name})
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		// A new URL is a new server: its tools start off and nobody holds a grant.
+		for _, table := range []string{"room_mcp_tools", "room_mcp_grants"} {
+			if _, err := conn.ExecContext(ctx, "DELETE FROM "+table+" WHERE room=? AND server=? AND EXISTS (SELECT 1 FROM room_mcp_servers WHERE room=? AND name=? AND url<>?)", rec.ID, name, rec.ID, name, serverURL); err != nil {
+				return err
+			}
+		}
 		_, err := conn.ExecContext(ctx, `INSERT INTO room_mcp_servers(room,name,url,credential_id,attached) VALUES(?,?,?,?,0)
    ON CONFLICT(room,name) DO UPDATE SET url=excluded.url, credential_id=excluded.credential_id, attached=0`, rec.ID, name, serverURL, credential.ID)
 		return err
@@ -239,15 +245,39 @@ func (s *Service) open(ctx context.Context, roomID, name string) (serverRuntime,
 	return rt, nil
 }
 
+// forget ends rt and removes it from the live set, unless a newer connection
+// has replaced it.
+func (s *Service) forget(key serverKey, rt serverRuntime) {
+	rt.cancel()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if active, ok := s.active[key]; ok && active.lifetime == rt.lifetime {
+		delete(s.active, key)
+	}
+}
+
 // connection returns the live connection, opening one after an engine restart.
 func (s *Service) connection(ctx context.Context, roomID, name string) (serverRuntime, error) {
+	key := serverKey{roomID, name}
 	s.mu.Lock()
-	rt, ok := s.active[serverKey{roomID, name}]
+	rt, ok := s.active[key]
 	s.mu.Unlock()
 	if ok {
 		return rt, nil
 	}
-	return s.open(ctx, roomID, name)
+	rt, err := s.open(ctx, roomID, name)
+	if err != nil {
+		return serverRuntime{}, err
+	}
+	// Detach clears the attached flag before it drops the connection. Read the
+	// flag after the new connection is registered: either this read sees the
+	// detach, or the detach's drop cancels this connection.
+	var attached bool
+	if err := s.db.QueryRowContext(ctx, "SELECT attached FROM room_mcp_servers WHERE room=? AND name=?", roomID, name).Scan(&attached); err != nil || !attached {
+		s.forget(key, rt)
+		return serverRuntime{}, errors.New("MCP server is detached")
+	}
+	return rt, nil
 }
 
 // pin reads the server's tool list and stores it. A new tool starts off, and a
@@ -258,12 +288,12 @@ func (s *Service) pin(ctx context.Context, rec room.Record, name string, rt serv
 	defer stop()
 	defer context.AfterFunc(rt.lifetime, stop)()
 	if err := rt.initialize(); err != nil {
-		s.drop(serverKey{rec.ID, name})
+		s.forget(serverKey{rec.ID, name}, rt)
 		return err
 	}
 	tools, err := rt.client.ListTools(callCtx)
 	if err != nil {
-		s.drop(serverKey{rec.ID, name})
+		s.forget(serverKey{rec.ID, name}, rt)
 		return err
 	}
 	s.mu.Lock()
@@ -333,8 +363,12 @@ func (s *Service) Detach(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
+	// Clear the flag first: connection reads it after it registers a connection.
+	if err := s.setAttached(ctx, rec.ID, name, false); err != nil {
+		return err
+	}
 	s.drop(serverKey{rec.ID, name})
-	return s.setAttached(ctx, rec.ID, name, false)
+	return nil
 }
 
 // ToolView is one pinned tool. Allowed is the owner's allow list entry.
@@ -634,15 +668,22 @@ func (s *Service) Call(ctx context.Context, name, tool string, arguments json.Ra
 	defer context.AfterFunc(rt.lifetime, stop)()
 	var result Result
 	err = rt.initialize()
-	if err == nil {
+	handshakeFailed := err != nil
+	if !handshakeFailed {
 		result, err = rt.client.CallTool(callCtx, tool, arguments)
+	}
+	detached := rt.lifetime.Err() != nil
+	if handshakeFailed {
+		// The handshake result is cached for the connection's life. Forget the
+		// connection so the next call starts a new one.
+		s.forget(serverKey{actor.Room, name}, rt)
 	}
 	var serverErr *ServerError
 	switch {
 	case errors.As(err, &serverErr):
 		// The server's error text is untrusted like any other answer.
 		result = Result{Content: []Content{{Type: "text", Text: serverErr.Message}}, IsError: true}
-	case err != nil && rt.lifetime.Err() != nil:
+	case err != nil && detached:
 		finish(room.MCPDetached, 0, secrets)
 		return "", errors.New("MCP server is detached")
 	case err != nil:
