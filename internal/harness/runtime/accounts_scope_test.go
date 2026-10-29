@@ -112,7 +112,7 @@ func TestFailoverMovesToTheAllowedAccountAndNeverToARefusedOne(t *testing.T) {
 	if err := a.SelectForRepo(context.Background(), "claude-code", store.ProviderAnthropic, "", workRepo, "/fake/native"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := a.Failover(context.Background(), store.ProviderAnthropic, work.ID, workRepo, "/fake/native", until, true); err == nil || !strings.Contains(err.Error(), "resets") {
+	if _, _, err := a.Failover(context.Background(), store.ProviderAnthropic, work.ID, workRepo, "/fake/native", reposcope.Hold{Until: until, Stated: true}); err == nil || !strings.Contains(err.Error(), "resets") {
 		t.Fatalf("err = %v, want the reset time", err)
 	}
 	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != work.ID {
@@ -123,7 +123,7 @@ func TestFailoverMovesToTheAllowedAccountAndNeverToARefusedOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := signedClaude(t, a, "second", "aaaaaaaa-bbbb-cccc-dddd-000000000003")
-	from, to, err := a.Failover(context.Background(), store.ProviderAnthropic, personal.ID, personalRepo, "/fake/native", until, true)
+	from, to, err := a.Failover(context.Background(), store.ProviderAnthropic, personal.ID, personalRepo, "/fake/native", reposcope.Hold{Until: until, Stated: true})
 	if err != nil || from.ID != personal.ID || to.ID != second.ID {
 		t.Fatalf("from=%v to=%v err=%v", from.ID, to.ID, err)
 	}
@@ -141,7 +141,7 @@ func TestFailoverBlamesTheFailedTurnNotTheActiveAccount(t *testing.T) {
 	if err := a.transaction(func(*store.State) error { return a.setActive("claude-code", second.ID) }, true); err != nil {
 		t.Fatal(err)
 	}
-	from, to, err := a.Failover(context.Background(), store.ProviderAnthropic, first.ID, "", "/fake/native", time.Now().Add(time.Hour), true)
+	from, to, err := a.Failover(context.Background(), store.ProviderAnthropic, first.ID, "", "/fake/native", reposcope.Hold{Until: time.Now().Add(time.Hour), Stated: true})
 	if err != nil || from.ID != first.ID || to.ID != second.ID {
 		t.Fatalf("from=%v to=%v err=%v", from.ID, to.ID, err)
 	}
@@ -163,12 +163,12 @@ func TestFailoverKeepsTheStoredResetForARepeatLimit(t *testing.T) {
 	}
 	now := time.Now()
 	twoHours := now.Add(2 * time.Hour)
-	if _, _, err := a.Failover(context.Background(), store.ProviderAnthropic, first.ID, "", "/fake/native", twoHours, true); err != nil {
+	if _, _, err := a.Failover(context.Background(), store.ProviderAnthropic, first.ID, "", "/fake/native", reposcope.Hold{Until: twoHours, Stated: true}); err != nil {
 		t.Fatal(err)
 	}
 	// The second account is now limited too, so no account is left to take over.
-	_, _, _ = a.Failover(context.Background(), store.ProviderAnthropic, second.ID, "", "/fake/native", now.Add(3*time.Hour), true)
-	_, _, err := a.Failover(context.Background(), store.ProviderAnthropic, first.ID, "", "/fake/native", now.Add(time.Minute), true)
+	_, _, _ = a.Failover(context.Background(), store.ProviderAnthropic, second.ID, "", "/fake/native", reposcope.Hold{Until: now.Add(3 * time.Hour), Stated: true})
+	_, _, err := a.Failover(context.Background(), store.ProviderAnthropic, first.ID, "", "/fake/native", reposcope.Hold{Until: now.Add(time.Minute), Stated: true})
 	want := "resets " + twoHours.Local().Format("Mon 15:04")
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %v, want it to contain %q", err, want)
@@ -181,7 +181,7 @@ func TestFailoverNamesNoResetTimeWhenTheProviderStatedNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	guess := time.Now().Add(time.Hour)
-	_, _, err := a.Failover(context.Background(), store.ProviderAnthropic, work.ID, workRepo, "/fake/native", guess, false)
+	_, _, err := a.Failover(context.Background(), store.ProviderAnthropic, work.ID, workRepo, "/fake/native", reposcope.Hold{Until: guess, Stated: false})
 	if err == nil || strings.Contains(err.Error(), guess.Local().Format("Mon 15:04")) || !strings.Contains(err.Error(), "no reset time") {
 		t.Fatalf("err = %v, want no guessed reset time", err)
 	}

@@ -84,6 +84,7 @@ func (a *Accounts) CredentialStatus(ctx context.Context, id, executable string) 
 // home is different, because its renewal writes a file every turn of that
 // harness reads, so it takes the switch gate and waits for those turns to end.
 func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string) (result CredentialRefreshResult, err error) {
+	refreshStart := time.Now()
 	if err = ctx.Err(); err != nil {
 		return result, err
 	}
@@ -94,6 +95,11 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 	if !result.Supported {
 		return result, accountnative.ErrUnsupported
 	}
+	defer func() {
+		if err == nil && result.Refreshed {
+			a.clearRefreshedHold(id, refreshStart)
+		}
+	}()
 	if !result.Due {
 		return result, nil
 	}
