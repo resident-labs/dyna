@@ -32,15 +32,36 @@ func TestStatedHoldAccountIsTheStatedHoldThatEndsFirst(t *testing.T) {
 	if err := s.MarkReset(later.ID, now.Add(5*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, now)
+	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now)
 	if err != nil || !ok || got.ID != held.ID {
 		t.Fatalf("StatedHoldAccount = %s, %v, %v; want %s", got.ID, ok, err, held.ID)
 	}
-	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, now.Add(4*time.Hour)); err != nil || !ok {
+	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now.Add(4*time.Hour)); err != nil || !ok {
 		t.Fatalf("after the first end, the later stated hold should remain: %v, %v", ok, err)
 	}
-	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, now.Add(6*time.Hour)); err != nil || ok {
+	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now.Add(6*time.Hour)); err != nil || ok {
 		t.Fatalf("after every end, no account should be held: %v, %v", ok, err)
+	}
+}
+
+// A held account whose repo rules refuse the probe's repo is not probed there,
+// because the probe would fail the account check before it could run.
+func TestStatedHoldAccountSkipsAnAccountTheRepoRefuses(t *testing.T) {
+	a, _, work := scopedClaudeAccounts(t)
+	s, err := reposcope.Open(filepath.Dir(a.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := s.MarkReset(work.ID, now.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, "", now); err != nil || ok {
+		t.Fatalf("the work account may not run in no repo, so it must not be probed: %v, %v", ok, err)
+	}
+	got, ok, err := a.StatedHoldAccount("claude-code", store.ProviderAnthropic, workRepo, now)
+	if err != nil || !ok || got.ID != work.ID {
+		t.Fatalf("StatedHoldAccount in %s = %s, %v, %v; want %s", workRepo, got.ID, ok, err, work.ID)
 	}
 }
 
@@ -48,6 +69,10 @@ func TestStatedHoldAccountIsTheStatedHoldThatEndsFirst(t *testing.T) {
 // the probe becomes active again, so later turns keep their account.
 func TestProbeRestoresThePreviousActiveAccount(t *testing.T) {
 	a, personal, work := scopedClaudeAccounts(t)
+	// The work account's repo rules would refuse a probe with no repo, so clear them.
+	if err := a.SetRepos(work.ID, nil); err != nil {
+		t.Fatal(err)
+	}
 	s, err := reposcope.Open(filepath.Dir(a.Root))
 	if err != nil {
 		t.Fatal(err)
@@ -57,9 +82,12 @@ func TestProbeRestoresThePreviousActiveAccount(t *testing.T) {
 	}
 	r := &Runtime{Accounts: a, Bundles: manager(t)}
 	p := profile.Profile{Harness: "claude-code", RuntimeVersion: "1.2.3"}
-	_, restore, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
+	_, heldID, restore, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if heldID != work.ID {
+		t.Fatalf("held account = %s, want %s", heldID, work.ID)
 	}
 	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != work.ID {
 		t.Fatalf("probe ran on %s, want the held account %s", active.ID, work.ID)
@@ -67,5 +95,35 @@ func TestProbeRestoresThePreviousActiveAccount(t *testing.T) {
 	restore()
 	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != personal.ID {
 		t.Fatalf("after the probe, active = %s; want the previous account %s", active.ID, personal.ID)
+	}
+}
+
+// A switch made by another turn during the probe stays active after the restore,
+// so the restore never overwrites a choice it did not make.
+func TestProbeRestoreKeepsAConcurrentSwitch(t *testing.T) {
+	a, _, work := scopedClaudeAccounts(t)
+	if err := a.SetRepos(work.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, err := reposcope.Open(filepath.Dir(a.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkReset(work.ID, time.Now().Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runtime{Accounts: a, Bundles: manager(t)}
+	p := profile.Profile{Harness: "claude-code", RuntimeVersion: "1.2.3"}
+	_, _, restore, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := signedClaude(t, a, "other", "aaaaaaaa-bbbb-cccc-dddd-000000000003")
+	if err := a.Switch(context.Background(), other.ID, "/fake/native"); err != nil {
+		t.Fatal(err)
+	}
+	restore()
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != other.ID {
+		t.Fatalf("after the restore, active = %s; want the concurrent switch %s", active.ID, other.ID)
 	}
 }
