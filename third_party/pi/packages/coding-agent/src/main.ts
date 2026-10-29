@@ -133,7 +133,7 @@ function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 	return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
 }
 
-async function runAuthCommand(args: string[]): Promise<boolean> {
+async function runAuthCommand(args: string[], readStdin: () => Promise<string | undefined> = readPipedStdin): Promise<boolean> {
 	if (isAuthCommandHelp(args)) {
 		printAuthCommandHelp();
 		return true;
@@ -162,8 +162,8 @@ async function runAuthCommand(args: string[]): Promise<boolean> {
 		if (parsed.diagnostics.length > 0) {
 			throw new AuthCommandError(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 		}
-		if (command.kind === "list" || command.kind === "set" || command.kind === "remove") {
-			const stdin = command.kind === "set" ? await readPipedStdin() : undefined;
+		if (command.kind === "list" || command.kind === "set" || command.kind === "remove" || command.kind === "apply") {
+			const stdin = command.kind === "set" || command.kind === "apply" ? await readStdin() : undefined;
 			await runAuthStorageCommand(command, stdin);
 			return true;
 		}
@@ -606,6 +606,8 @@ async function promptForMissingSessionCwd(
 
 export interface MainOptions {
 	extensionFactories?: InlineExtension[];
+	/** Replaces piped stdin for the commands that read one, so an embedded caller can feed them. */
+	readStdin?: () => Promise<string | undefined>;
 }
 
 export async function main(args: string[], options?: MainOptions) {
@@ -622,7 +624,7 @@ export async function main(args: string[], options?: MainOptions) {
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
 
-	if (await runAuthCommand(args)) {
+	if (await runAuthCommand(args, options?.readStdin)) {
 		return;
 	}
 

@@ -74,19 +74,37 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 
 	private ensureFileExists(): void {
 		if (!existsSync(this.authPath)) {
-			// Creates the placeholder exclusively: another process may create
-			// the file or write a login between the check and the create, and
-			// a hard link never replaces an existing file, so a lost race
-			// cannot rename an empty login over a saved credential.
-			const tempPath = `${this.authPath}.${process.pid}.init`;
-			writeFileSync(tempPath, "{}", AUTH_FILE_WRITE_OPTIONS);
-			try {
-				linkSync(tempPath, this.authPath);
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			}
-			unlinkSync(tempPath);
+			this.createPlaceholderExclusively();
 		}
+	}
+
+	// withLockAsync awaits this step, so tests can pause it after the
+	// missing-file check and prove the create cannot replace a login that a
+	// concurrent writer commits in between.
+	private async ensureFileExistsAsync(): Promise<void> {
+		if (!existsSync(this.authPath)) {
+			await this.beforePlaceholderCreate();
+			this.createPlaceholderExclusively();
+		}
+	}
+
+	// Tests override this to hold the first-use initialization between the
+	// missing-file check and the placeholder creation.
+	protected async beforePlaceholderCreate(): Promise<void> {}
+
+	// Creates the placeholder exclusively: another process may create the
+	// file or write a login between the check and the create, and a hard
+	// link never replaces an existing file, so a lost race cannot rename an
+	// empty login over a saved credential.
+	private createPlaceholderExclusively(): void {
+		const tempPath = `${this.authPath}.${process.pid}.init`;
+		writeFileSync(tempPath, "{}", AUTH_FILE_WRITE_OPTIONS);
+		try {
+			linkSync(tempPath, this.authPath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		unlinkSync(tempPath);
 	}
 
 	// Replaces the auth file by rename, so a reader without the lock always
@@ -185,7 +203,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 	): Promise<T> {
 		options?.signal?.throwIfAborted();
 		this.ensureParentDir();
-		this.ensureFileExists();
+		await this.ensureFileExistsAsync();
 
 		let release: (() => Promise<void>) | undefined;
 		let lockCompromised = false;

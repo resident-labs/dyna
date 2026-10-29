@@ -3,7 +3,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthCommandError, parseAuthCommand, runAuthStorageCommand } from "../src/cli/auth-command.ts";
+import { ENV_AGENT_DIR } from "../src/config.ts";
 import { FileAuthStorageBackend } from "../src/core/auth-storage.ts";
+import { main } from "../src/main.ts";
 
 function storageCommand(args: string[]) {
 	const command = parseAuthCommand(args);
@@ -66,21 +68,62 @@ describe("auth storage commands", () => {
 		expect(JSON.parse(output[1])).toEqual({ beta: { type: "api_key", key: "b" } });
 	});
 
-	it("survives concurrent first use without losing a written login", async () => {
-		// Every backend here sees the same missing file at first. An
-		// exclusive create keeps any placeholder from replacing a login
-		// another backend wrote first, so every written provider survives.
-		const runs = [1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
-			runAuthStorageCommand(
-				storageCommand(["auth", "set", "--provider", `p${n}`]),
-				JSON.stringify({ type: "api_key", key: `key-${n}` }),
-				new FileAuthStorageBackend(join(dir, "auth.json")),
-			),
+	it("a first-use initialization paused after its missing-file check cannot replace a written login", async () => {
+		class PausedInitBackend extends FileAuthStorageBackend {
+			private openInit?: () => void;
+			private readonly initGate = new Promise<void>((resolve) => {
+				this.openInit = resolve;
+			});
+			releaseInit(): void {
+				this.openInit?.();
+			}
+			protected override async beforePlaceholderCreate(): Promise<void> {
+				await this.initGate;
+			}
+		}
+		const authPath = join(dir, "auth.json");
+		const paused = new PausedInitBackend(authPath);
+		const pausedFlow = paused.withLockAsync(async () => ({ result: undefined }));
+		// While the first backend holds between its missing-file check and
+		// its placeholder creation, another backend writes a whole login.
+		await runAuthStorageCommand(
+			storageCommand(["auth", "set", "--provider", "beta"]),
+			JSON.stringify({ type: "api_key", key: "beta-key" }),
+			new FileAuthStorageBackend(authPath),
 		);
-		await Promise.all(runs);
-		const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"));
-		for (let n = 1; n <= 8; n++) {
-			expect(stored[`p${n}`]).toEqual({ type: "api_key", key: `key-${n}` });
+		paused.releaseInit();
+		await pausedFlow;
+		const stored = JSON.parse(readFileSync(authPath, "utf-8"));
+		expect(stored).toEqual({ beta: { type: "api_key", key: "beta-key" } });
+	});
+
+	it("routes auth apply through the CLI entry point and reports the replaced entries", async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "pi-auth-entry-"));
+		const previousAgentDir = process.env[ENV_AGENT_DIR];
+		process.env[ENV_AGENT_DIR] = agentDir;
+		try {
+			await main(
+				["auth", "apply"],
+				{ readStdin: async () => JSON.stringify({ set: { alpha: { type: "api_key", key: "first-key" } } }) },
+			);
+			const created = JSON.parse(output[0]);
+			// The login file's placeholder exists by the time the apply locks,
+			// so a first apply reports an empty login, not a missing file.
+			expect(created.before).toEqual({});
+			expect(created.after).toEqual({ alpha: { type: "api_key", key: "first-key" } });
+			await main(
+				["auth", "apply"],
+				{ readStdin: async () => JSON.stringify({ set: { alpha: { type: "api_key", key: "second-key" } } }) },
+			);
+			const replaced = JSON.parse(output[1]);
+			expect(replaced.before).toEqual({ alpha: { type: "api_key", key: "first-key" } });
+			expect(replaced.after).toEqual({ alpha: { type: "api_key", key: "second-key" } });
+			const stored = JSON.parse(readFileSync(join(agentDir, "auth.json"), "utf-8"));
+			expect(stored).toEqual(replaced.after);
+		} finally {
+			if (previousAgentDir === undefined) delete process.env[ENV_AGENT_DIR];
+			else process.env[ENV_AGENT_DIR] = previousAgentDir;
+			rmSync(agentDir, { recursive: true, force: true });
 		}
 	});
 
