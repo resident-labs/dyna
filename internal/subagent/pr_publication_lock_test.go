@@ -31,7 +31,7 @@ func TestPRResponsibilitiesReusePublicationLock(t *testing.T) {
 	var got result
 	err := sessionlife.WithPublication(ctx, root, "state.lock", func() error {
 		go func() {
-			items, err := e.m.prOwned(map[string]Info{info.ID: info})
+			items, err := e.m.prOwned(map[string]Info{info.ID: info}, false)
 			done <- result{items, err}
 		}()
 		select {
