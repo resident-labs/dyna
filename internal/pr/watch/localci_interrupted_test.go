@@ -262,7 +262,7 @@ func TestMachineFailureRerunsOnTheSameMachineWhenNoOtherCanTakeIt(t *testing.T) 
 	}
 	ci.results[head] = dropped
 	// One machine only, and it is the one that failed.
-	ci.nodes = []localci.Node{{Name: "hermeslab", Slots: 4, Enabled: true}}
+	ci.nodes = []localci.Node{{Name: "hermeslab", Enabled: true}}
 	job := registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true}
 
 	ci.started = make(chan struct{}, 1)
@@ -330,7 +330,7 @@ func TestResumedReplacementThatLosesSSHFailsTheTrial(t *testing.T) {
 		saved.Checks[i].Cause = localci.CauseSSHDrop
 	}
 	ci.results[head] = saved
-	ci.nodes = []localci.Node{{Name: "hermeslab", Slots: 4, Enabled: true}}
+	ci.nodes = []localci.Node{{Name: "hermeslab", Enabled: true}}
 	ci.started = make(chan struct{}, 1)
 	started, err := e.s.startRegisteredCI(t.Context(), registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true})
 	if err != nil {

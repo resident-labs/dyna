@@ -71,7 +71,7 @@ func (r *chanReporter) JobFinished(_ context.Context, job Job) error {
 func newIdleService(t *testing.T, legacy jobstest.RunFunc) (*Service, *jobstest.Fake, *chanReporter, chan Job) {
 	t.Helper()
 	dir := t.TempDir()
-	machine := machines.Machine{Name: "here", Enabled: true, CISlots: 2}
+	machine := machines.Machine{Name: "here", Enabled: true}
 	reporter := newChanReporter()
 	runStarted := make(chan Job, 4)
 	svc := &Service{
@@ -561,12 +561,12 @@ func TestHostJobNeedsAGrantOnARemoteMachine(t *testing.T) {
 	defer svc.Stop()
 	svc.Machines = fakeMachines{
 		local:  machines.Machine{Name: "here", Enabled: true},
-		byName: map[string]machines.Machine{"here": {Name: "here", Enabled: true}, "pve": {Name: "pve", SSH: "pip@pve", Enabled: true, CISlots: 2}},
+		byName: map[string]machines.Machine{"here": {Name: "here", Enabled: true}, "pve": {Name: "pve", SSH: "pip@pve", Enabled: true}},
 	}
 	if _, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"make"}, Host: true, Node: "pve"}); err == nil {
 		t.Fatal("a host job on a remote machine without a grant was accepted")
 	}
-	granted := machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true, CISlots: 2, HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
+	granted := machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true, HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
 	svc.Machines = fakeMachines{local: machines.Machine{Name: "here", Enabled: true}, byName: map[string]machines.Machine{"here": {Name: "here", Enabled: true}, "pve": granted}}
 	if _, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"make"}, Host: true, Node: "pve"}); err != nil {
 		t.Fatalf("a granted host job was refused: %v", err)

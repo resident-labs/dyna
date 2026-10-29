@@ -1,11 +1,7 @@
-// The machines registry: this engine's host and the machines that run CI or
-// agents. Sources: internal/machines (the rows) and internal/websvc/machines.go
-// (the views below). A figure the engine does not know yet is absent, so a
-// reader can tell "none" from "not measured".
-
-// MachineRole is machines.Role. "computers" is not a role: a computer runs
-// on a machine that has the agents role.
-export type MachineRole = 'engine' | 'agents' | 'ci'
+// The machines registry: this engine's host and every other machine Dyna
+// reaches over SSH. Sources: internal/machines (the rows) and
+// internal/websvc/machines.go (the views below). A figure the engine does not
+// know yet is absent, so a reader can tell "none" from "not measured".
 
 // MachineStatus is what the engine knows about a machine right now.
 // "disabled" means switched off in the registry, "offline" means the probe
@@ -44,14 +40,11 @@ export interface MachineCIRun {
 export interface MachineSummary {
   id: string
   name: string
-  roles: MachineRole[]
   // local marks the machine that runs this engine.
   local: boolean
   enabled: boolean
   status: MachineStatus
-  // ciSlots is the machine's legacy slot setting; ci is the work its node
-  // queue holds now.
-  ciSlots: number
+  // ci is the work the machine's node queue holds now.
   // maxIOHeavy and maxDiskPercent are the node queue's stored limits; zero or
   // absent keeps each default.
   maxIOHeavy?: number
@@ -150,8 +143,6 @@ export interface MachineLoad {
 export interface MachinePatch {
   name?: string
   enabled?: boolean
-  roles?: MachineRole[]
-  ciSlots?: number
   allowHostChecks?: boolean
   rooms?: string[]
   suites?: string[]

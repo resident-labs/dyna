@@ -22,8 +22,8 @@ func (r attachedRegistry) AttachedNode(context.Context, string, string) (string,
 // checks then wait in its queue. Any other machine would start the checks again.
 func TestRunIsPinnedToTheMachineThatHoldsItsChecks(t *testing.T) {
 	nodes := []localci.Node{
-		{Name: "hermeslab", Slots: 8, Enabled: true},
-		{Name: "pve", Slots: 2, Enabled: true},
+		{Name: "hermeslab", Enabled: true},
+		{Name: "pve", Enabled: true},
 	}
 	pin := func(registry localCIRegistry, skip string, nodes []localci.Node) string {
 		node := pinnedCINode(t.Context(), registry, "/repo", "abc", nodes, "room", skip)

@@ -32,7 +32,15 @@ func trialStartEnv(t *testing.T, nodeSuites []string) (s *Service, r Record, bra
 	// a hosted pull request that the room's local CI checks.
 	changeGit(t, repoDir, "remote", "add", "origin", "https://github.com/owner/repo.git")
 	registry := localci.Store{DataDir: dataDir}
-	if _, err := (machines.Store{DataDir: dataDir}).Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true, Suites: nodeSuites}); err != nil {
+	nodeStore := machines.Store{DataDir: dataDir}
+	if _, err := nodeStore.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Suites: nodeSuites}); err != nil {
+		t.Fatal(err)
+	}
+	// The engine host's own row would take every suite, so switch it off and
+	// leave the one CI machine.
+	if local, err := nodeStore.GetLocal(ctx); err != nil {
+		t.Fatal(err)
+	} else if err := nodeStore.SetEnabled(ctx, local.Name, false); err != nil {
 		t.Fatal(err)
 	}
 	rooms := &room.Store{Root: t.TempDir()}

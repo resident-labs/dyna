@@ -94,47 +94,43 @@ func TestStoreRoomModes(t *testing.T) {
 	}
 }
 
-// Nodes reads the machines with the ci role, and the local machine runs on
-// this host, so it carries no SSH destination.
-func TestStoreNodesReadsCIMachines(t *testing.T) {
+// Nodes reads every machine, and the local machine runs on this host, so it
+// carries no SSH destination.
+func TestStoreNodesReadsMachines(t *testing.T) {
 	ctx := context.Background()
 	s := fixtureStore(t)
 	registry := machines.Store{DataDir: s.DataDir}
-	if _, err := registry.Save(ctx, machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true}); err != nil {
+	if _, err := registry.Save(ctx, machines.Machine{Name: "hermes", SSH: "pip@hermeslab", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	other, err := registry.Save(ctx, machines.Machine{Name: "build-only", Roles: []machines.Role{machines.RoleAgents}, CISlots: 0, Enabled: true, SSH: "ari@build"})
+	if _, err := registry.Save(ctx, machines.Machine{Name: "build-only", Enabled: true, SSH: "ari@build"}); err != nil {
+		t.Fatal(err)
+	}
+	remote, err := registry.Save(ctx, machines.Machine{Name: "off", Enabled: false, SSH: "ari@off"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if other.HasRole(machines.RoleCI) {
-		t.Fatalf("agents machine gained the ci role: %#v", other)
-	}
-	nodes, err := s.Nodes(ctx)
-	if err != nil || !reflect.DeepEqual(nodes, []Node{{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true, ContainerSocket: machines.DefaultContainerSocket}}) {
-		t.Fatalf("nodes = %#v, %v", nodes, err)
 	}
 	local, err := registry.GetLocal(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	local.Roles = append(local.Roles, machines.RoleCI)
-	local.CISlots = 4
-	if _, err := registry.Save(ctx, local); err != nil {
-		t.Fatal(err)
+	nodes, err := s.Nodes(ctx)
+	if err != nil || !reflect.DeepEqual(nodes, []Node{
+		{Name: local.Name, Enabled: true, ContainerSocket: machines.DefaultContainerSocket},
+		{Name: "build-only", SSH: "ari@build", Enabled: true, ContainerSocket: machines.DefaultContainerSocket},
+		{Name: "hermes", SSH: "pip@hermeslab", Enabled: true, ContainerSocket: machines.DefaultContainerSocket},
+		{Name: "off", SSH: remote.SSH, Enabled: false, ContainerSocket: machines.DefaultContainerSocket},
+	}) {
+		t.Fatalf("nodes = %#v, %v", nodes, err)
 	}
-	nodes, err = s.Nodes(ctx)
-	if err != nil || len(nodes) != 2 {
-		t.Fatalf("nodes with local CI = %#v, %v", nodes, err)
-	}
-	if got := nodes[0]; got.SSH != "" || got.Slots != 4 || !got.Enabled {
-		t.Fatalf("local CI node = %#v", got)
+	if got := nodes[0]; got.Name != local.Name || got.SSH != "" || !got.Enabled {
+		t.Fatalf("local node = %#v", got)
 	}
 }
 
 func TestStoreRejectsUnsafeNodeConfiguration(t *testing.T) {
 	for _, n := range []Node{
-		{Name: "-option", Slots: 1},
+		{Name: "-option"},
 		{Name: ""},
 		{Name: "node", SSH: "-oProxyCommand=exec"},
 		{Name: "node", SSH: "user@host; touch /tmp/injected"},

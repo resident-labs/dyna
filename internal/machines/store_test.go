@@ -31,8 +31,8 @@ func fixture(t *testing.T) Store {
 func TestMigrateImportsLocalCINodes(t *testing.T) {
 	ctx := context.Background()
 
-	// An enabled local node carries its CI slots into the local row, and every
-	// SSH node becomes its own machine.
+	// Every SSH node becomes its own machine; a local node ran on this
+	// machine, whose row already takes that work.
 	t.Run("enabled local node", func(t *testing.T) {
 		s := seed(t, `
 INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES
@@ -43,29 +43,26 @@ INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES
 			t.Fatalf("machines = %#v, %v", list, err)
 		}
 		local := list[0]
-		if !local.Local || !local.HasRole(RoleEngine) || !local.HasRole(RoleAgents) || !local.HasRole(RoleCI) {
+		if !local.Local || local.SSH != "" || !local.Enabled {
 			t.Fatalf("local machine = %#v", local)
 		}
-		if local.SSH != "" || local.CISlots != 3 || !local.Enabled {
-			t.Fatalf("local machine did not take the old local node: %#v", local)
-		}
-		want := Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true, Health: HealthUnknown}
+		want := Machine{Name: "hermes", SSH: "pip@hermeslab", Enabled: true, Health: HealthUnknown}
 		if got := list[1]; !sameMachine(got, want) {
 			t.Fatalf("imported machine = %#v, want %#v", got, want)
 		}
 	})
 
-	// A disabled local node stays off: it gives the local row no ci role and no
-	// slots, so the upgrade starts no CI the owner turned off.
+	// A disabled local node changes nothing on the engine host row, whose own
+	// switch says whether its work runs.
 	t.Run("disabled local node", func(t *testing.T) {
 		s := seed(t, `
 INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES ('local','',3,0);`)
-		local, err := s.GetLocal(ctx)
-		if err != nil {
-			t.Fatal(err)
+		list, err := s.List(ctx)
+		if err != nil || len(list) != 1 {
+			t.Fatalf("machines = %#v, %v", list, err)
 		}
-		if local.HasRole(RoleCI) || local.CISlots != 0 {
-			t.Fatalf("disabled local node became CI work: %#v", local)
+		if !list[0].Local {
+			t.Fatalf("local machine = %#v", list[0])
 		}
 	})
 }
@@ -116,19 +113,13 @@ func TestMachineValidateRules(t *testing.T) {
 		m    Machine
 		ok   bool
 	}{
-		{"remote ci", Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true}, true},
-		{"remote agents", Machine{Name: "build", Roles: []Role{RoleAgents}, SSH: "ari@build"}, true},
-		{"local engine", Machine{Name: "here", Roles: []Role{RoleEngine, RoleAgents, RoleCI}, CISlots: 1, Local: true}, true},
-		{"empty name", Machine{Name: "", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}, false},
-		{"option name", Machine{Name: "-option", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}, false},
-		{"no roles", Machine{Name: "hermes", SSH: "host"}, false},
-		{"unknown role", Machine{Name: "hermes", Roles: []Role{"computers"}, SSH: "host"}, false},
-		{"engine off this machine", Machine{Name: "hermes", Roles: []Role{RoleEngine}, SSH: "host"}, false},
-		{"local without engine", Machine{Name: "here", Roles: []Role{RoleAgents}, Local: true}, false},
-		{"local with ssh", Machine{Name: "here", Roles: []Role{RoleEngine}, SSH: "host", Local: true}, false},
-		{"ci without slots", Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "host"}, false},
-		{"remote without ssh", Machine{Name: "hermes", Roles: []Role{RoleAgents}}, false},
-		{"ssh shell syntax", Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "user@host; id", CISlots: 1}, false},
+		{"remote", Machine{Name: "hermes", SSH: "pip@hermeslab", Enabled: true}, true},
+		{"local", Machine{Name: "here", Local: true}, true},
+		{"empty name", Machine{Name: "", SSH: "host"}, false},
+		{"option name", Machine{Name: "-option", SSH: "host"}, false},
+		{"local with ssh", Machine{Name: "here", SSH: "host", Local: true}, false},
+		{"remote without ssh", Machine{Name: "hermes"}, false},
+		{"ssh shell syntax", Machine{Name: "hermes", SSH: "user@host; id"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.m.Validate(); (err == nil) != tc.ok {
@@ -141,7 +132,7 @@ func TestMachineValidateRules(t *testing.T) {
 func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	saved, err := s.Save(ctx, Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
+	saved, err := s.Save(ctx, Machine{Name: "hermes", SSH: "pip@hermeslab", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,17 +157,17 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 		t.Fatalf("old name remains: %v", err)
 	}
 	stored, err := s.Get(ctx, "buildhost")
-	if err != nil || stored.Enabled || stored.CISlots != 2 || !stored.HostChecksAllowed("") {
+	if err != nil || stored.Enabled || !stored.HostChecksAllowed("") {
 		t.Fatalf("stored machine = %#v, %v", stored, err)
 	}
-	if _, err := s.Save(ctx, Machine{Name: "buildhost", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}); !errors.Is(err, os.ErrExist) {
+	if _, err := s.Save(ctx, Machine{Name: "buildhost", SSH: "host"}); !errors.Is(err, os.ErrExist) {
 		t.Fatalf("a new machine took a stored name: %v", err)
 	}
-	if err := s.RemoveRole(ctx, "buildhost", RoleCI); err != nil {
+	if err := s.Remove(ctx, "buildhost"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Get(ctx, "buildhost"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("machine with no roles remains: %v", err)
+		t.Fatalf("removed machine remains: %v", err)
 	}
 	local, err := s.GetLocal(ctx)
 	if err != nil {
@@ -184,28 +175,6 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	}
 	if err := s.Remove(ctx, local.Name); !errors.Is(err, ErrLocal) {
 		t.Fatalf("removed this machine: %v", err)
-	}
-	local.Roles = append(local.Roles, RoleCI)
-	local.CISlots = 1
-	local.HostChecksGrants = []HostChecksGrant{{By: GrantorOwner}}
-	local.Rooms, local.Suites = []string{"room_dyna"}, []string{"go"}
-	if _, err := s.Save(ctx, local); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RemoveRole(ctx, local.Name, RoleCI); err != nil {
-		t.Fatal(err)
-	}
-	local, err = s.GetLocal(ctx)
-	if err != nil || local.HasHostChecksGrants() {
-		t.Fatalf("removing the CI role kept host permission: %#v, %v", local, err)
-	}
-	// The limits only the ci role uses go with it.
-	if len(local.Rooms) != 0 || len(local.Suites) != 0 {
-		t.Fatalf("removing the CI role kept rooms %v and suites %v", local.Rooms, local.Suites)
-	}
-	local.Roles = []Role{RoleAgents}
-	if _, err := s.Save(ctx, local); !errors.Is(err, ErrLocal) {
-		t.Fatalf("dropped the engine role from this machine: %v", err)
 	}
 }
 
@@ -215,7 +184,7 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 func TestHostChecksGrantReadsTheStoredList(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	pve, err := s.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true,
+	pve, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true,
 		HostChecksGrants: []HostChecksGrant{{By: GrantorOwner}}})
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +214,7 @@ func TestHostChecksGrantReadsTheStoredList(t *testing.T) {
 func TestRegistryEditKeepsHostChecksGrants(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	pve, err := s.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true,
+	pve, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true,
 		HostChecksGrants: []HostChecksGrant{{By: GrantorOwner}}})
 	if err != nil {
 		t.Fatal(err)
@@ -367,7 +336,7 @@ func TestMigrateAddsRoomListToVersionFour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !m.HostChecksAllowed("") || m.SSH != "pip@hermeslab" || m.CISlots != 2 {
+	if !m.HostChecksAllowed("") || m.SSH != "pip@hermeslab" {
 		t.Fatalf("migrated machine = %#v", m)
 	}
 	// The machine named no room before it could, so it takes every room.
@@ -446,7 +415,7 @@ func TestMigrateAddsProbeColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Health != HealthUnknown || m.SSH != "pip@hermeslab" || m.CISlots != 2 || !m.Enabled {
+	if m.Health != HealthUnknown || m.SSH != "pip@hermeslab" || !m.Enabled {
 		t.Fatalf("migrated machine = %#v", m)
 	}
 	if !m.LastProbe.IsZero() || !m.LastSeen.IsZero() || m.Capabilities.CPUs != 0 {
@@ -461,6 +430,67 @@ func TestMigrateAddsProbeColumns(t *testing.T) {
 	}
 	if stored.Status() != HealthOnline || stored.Capabilities.CPUs != 4 || stored.LastSeen.IsZero() {
 		t.Fatalf("stored probe = %#v", stored)
+	}
+}
+
+// machinesVersionThirteenSchema is the registry before a node lost its roles
+// and CI slots, so a data folder from that version still migrates.
+const machinesVersionThirteenSchema = `CREATE TABLE machines (
+	id             TEXT    PRIMARY KEY,
+	name           TEXT    NOT NULL UNIQUE,
+	roles          TEXT    NOT NULL CHECK(json_valid(roles)),
+	ssh            TEXT    NOT NULL,
+	ci_slots       INTEGER NOT NULL CHECK(ci_slots >= 0),
+	enabled        INTEGER NOT NULL CHECK(enabled IN (0,1)),
+	local          INTEGER NOT NULL CHECK(local IN (0,1)),
+	created_ms     INTEGER NOT NULL,
+	updated_ms     INTEGER NOT NULL,
+	capabilities   TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities)),
+	health         TEXT    NOT NULL DEFAULT 'unknown',
+	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
+	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
+	probe_error    TEXT    NOT NULL DEFAULT '',
+	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
+	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
+	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
+	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
+	container_socket TEXT  NOT NULL DEFAULT '',
+	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
+	check_tmp TEXT NOT NULL DEFAULT '',
+	max_io_heavy INTEGER NOT NULL DEFAULT 0 CHECK(max_io_heavy >= 0),
+	max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100),
+	resources TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resources))
+);
+CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;
+INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms,rooms) VALUES
+ ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,'["room_dyna"]');
+INSERT INTO meta(key,value) VALUES('machines.version','13');`
+
+// A version 13 registry drops its roles and CI slots and keeps every machine:
+// the row's switch and room list alone decide what it takes.
+func TestMigrateDropsRolesAndSlots(t *testing.T) {
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	if _, err := db.Exec(machinesVersionThirteenSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := Store{DataDir: dir}.Get(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.SSH != "pip@hermeslab" || !m.Enabled || !m.AllowsRoom("room_dyna") || m.AllowsRoom("room_other") {
+		t.Fatalf("migrated machine = %#v", m)
+	}
+	for _, column := range []string{"roles", "ci_slots"} {
+		var name string
+		if err := db.QueryRow("SELECT name FROM pragma_table_info('machines') WHERE name=?", column).Scan(&name); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("machines.%s remains: %v", column, err)
+		}
 	}
 }
 
@@ -498,7 +528,7 @@ INSERT INTO local_ci_results VALUES('repo','def','{"node":"setup","sha":"def","s
 	if err != nil || setup.HasHostChecksGrants() {
 		t.Fatalf("failed setup granted host permission: %#v, %v", setup, err)
 	}
-	added, err := s.Save(context.Background(), Machine{Name: "added", Roles: []Role{RoleCI}, SSH: "ari@added", CISlots: 1, Enabled: true})
+	added, err := s.Save(context.Background(), Machine{Name: "added", SSH: "ari@added", Enabled: true})
 	if err != nil || added.HasHostChecksGrants() {
 		t.Fatalf("new machine gained host permission: %#v, %v", added, err)
 	}
@@ -519,7 +549,7 @@ INSERT INTO local_ci_results VALUES('repo','def','{"node":"setup","sha":"def","s
 func TestMachineContainerSocketRoundTripsAndDefaultsToDocker(t *testing.T) {
 	ctx := context.Background()
 	store := fixture(t)
-	saved, err := store.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, CISlots: 4, Enabled: true, SSH: "build@pve", ContainerSocket: "unix:///run/user/1000/podman/podman.sock"})
+	saved, err := store.Save(ctx, Machine{Name: "pve", Enabled: true, SSH: "build@pve", ContainerSocket: "unix:///run/user/1000/podman/podman.sock"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +566,7 @@ func TestMachineContainerSocketRoundTripsAndDefaultsToDocker(t *testing.T) {
 	if read.ContainerSocket != "unix:///run/user/1000/podman/podman.sock" || read.DockerHost() != read.ContainerSocket {
 		t.Fatalf("socket = %q, DOCKER_HOST = %q", read.ContainerSocket, read.DockerHost())
 	}
-	plain, err := store.Save(ctx, Machine{Name: "plain", Roles: []Role{RoleCI}, CISlots: 2, Enabled: true, SSH: "build@plain"})
+	plain, err := store.Save(ctx, Machine{Name: "plain", Enabled: true, SSH: "build@plain"})
 	if err != nil {
 		t.Fatal(err)
 	}

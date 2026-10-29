@@ -37,7 +37,7 @@ func TestPushSkipsLFSUploadAndRepoHooks(t *testing.T) {
 	}
 
 	check := nodeCheck{id: "unit", name: "unit", host: true, inner: "true"}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, "/base", "/cache.git", "/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, "", "")
+	script := nodeCheckScript(Node{Name: "local"}, "/base", "/cache.git", "/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, "", "")
 	if !strings.Contains(script, "GIT_LFS_SKIP_SMUDGE=1") || !strings.Contains(script, "worktree add") {
 		t.Fatalf("checkout does not skip LFS smudge: %s", script)
 	}
@@ -47,7 +47,7 @@ func TestPushSkipsLFSUploadAndRepoHooks(t *testing.T) {
 // the job is unknown.
 func TestPushFailureIsJobEvidence(t *testing.T) {
 	const gitErr = "batch response: Post https://hermeslab/info/lfs connection refused"
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", SSH: "pip@hermeslab", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", SSH: "pip@hermeslab", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -83,7 +83,7 @@ func TestPushFailureIsJobEvidence(t *testing.T) {
 // Exit 69 alone would hide the text and call it a container failure.
 func TestCheckoutFailureKeepsGitError(t *testing.T) {
 	const gitErr = "smudge filter lfs failed"
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", SSH: "pip@hermeslab", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", SSH: "pip@hermeslab", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil

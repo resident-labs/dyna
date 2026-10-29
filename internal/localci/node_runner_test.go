@@ -48,7 +48,7 @@ func TestNodeSourceCarriesTheDiskRule(t *testing.T) {
 func TestNodeSourceReadsTheCurrentProbe(t *testing.T) {
 	dir := t.TempDir()
 	registry := machines.Store{DataDir: dir}
-	pve, err := registry.Save(t.Context(), machines.Machine{Name: "pve", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true})
+	pve, err := registry.Save(t.Context(), machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,12 +105,12 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 		cause  FailureCause
 		status Outcome
 	}{
-		{"early container failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Docker access is unavailable"}, 69, CauseContainerFailure, OutcomeError},
-		{"killed container", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Killed"}, 137, CauseContainerFailure, OutcomeError},
-		{"ssh timeout text on a local node", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Timeout, server 192.168.2.9 not responding."}, 1, CauseUnclassified, OutcomeError},
-		{"timeout", Node{Name: "local", Slots: 1, Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
-		{"test failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
-		{"reports unavailable", Node{Name: "local", Slots: 1, Enabled: true}, []string{"ok ./...", "DYNA_CI_CHECK_EXIT=0"}, 0, CauseReports, OutcomeError},
+		{"early container failure", Node{Name: "local", Enabled: true}, []string{"Docker access is unavailable"}, 69, CauseContainerFailure, OutcomeError},
+		{"killed container", Node{Name: "local", Enabled: true}, []string{"Killed"}, 137, CauseContainerFailure, OutcomeError},
+		{"ssh timeout text on a local node", Node{Name: "local", Enabled: true}, []string{"Timeout, server 192.168.2.9 not responding."}, 1, CauseUnclassified, OutcomeError},
+		{"timeout", Node{Name: "local", Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
+		{"test failure", Node{Name: "local", Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
+		{"reports unavailable", Node{Name: "local", Enabled: true}, []string{"ok ./...", "DYNA_CI_CHECK_EXIT=0"}, 0, CauseReports, OutcomeError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := Runner{DataDir: t.TempDir(), Node: &tc.node}
@@ -203,7 +203,7 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 // check whose command exited 0 stays an error that names the missing reports,
 // never an ssh-drop machine failure and never a pass.
 func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
-	node := Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}
+	node := Node{Name: "remote", SSH: "pip@host", Enabled: true}
 	runner := Runner{DataDir: t.TempDir(), Node: &node}
 	copies := 0
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
@@ -247,7 +247,7 @@ func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
 // and again through the report copy, proved no result, so the run keeps the
 // ssh-drop cause and moves to another machine.
 func TestNodeKeepsSSHDropWhenCheckAndCopyBothLoseSSH(t *testing.T) {
-	node := Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}
+	node := Node{Name: "remote", SSH: "pip@host", Enabled: true}
 	runner := Runner{DataDir: t.TempDir(), Node: &node}
 	legacy := func(ctx context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
@@ -343,7 +343,7 @@ func TestHostCheckScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 		{"unreadable", "systemd-run: no version here\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			runner := Runner{Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+			runner := Runner{Node: &Node{Name: "local", Enabled: true}}
 			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
 				_, err := io.WriteString(out, tc.version+"\n")
 				return err
@@ -430,7 +430,7 @@ func TestRunPushesACommitWhoseRefAPreviousRunLeft(t *testing.T) {
 	if err := os.WriteFile(ref, []byte(strings.Repeat("1", 40)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := Runner{Node: &Node{Name: "local", Slots: 2, Enabled: true}}
+	runner := Runner{Node: &Node{Name: "local", Enabled: true}}
 	if err := runner.exec().PushCommit(t.Context(), repo, cache, sha); err != nil {
 		t.Fatalf("a second run of the commit could not push: %v", err)
 	}
@@ -594,7 +594,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 	for _, entered := range []bool{false, true} {
 		t.Run(fmt.Sprint(entered), func(t *testing.T) {
 			var sawSSH, sawPush, sawCleanup, sawRemove, reportsCopied bool
-			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
+			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Enabled: true}}
 			legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
@@ -657,7 +657,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 
 func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		fakeNodeGit(dir, out, name, args)
 		return nil
@@ -725,7 +725,7 @@ func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
 	// The deadline has already passed, so the run ends at once and no clock runs.
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -773,13 +773,13 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, check := range checks {
-		script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+		script := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 		if output, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); err != nil {
 			t.Fatalf("%s syntax: %v: %s", check.name, err, output)
 		}
 	}
 	check := nodeCheck{id: SuiteFrontend, name: "frontend", inner: "true", image: "node:22"}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	script := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	output, err := cmd.CombinedOutput()
@@ -815,7 +815,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 	for _, fullAttempts := range []int32{1, 2} {
 		t.Run(fmt.Sprint(fullAttempts), func(t *testing.T) {
 			var attempts, cleans atomic.Int32
-			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
+			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}}
 			legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
@@ -876,7 +876,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 // its log stays available. The command cancels the run itself, so no clock runs.
 func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -940,7 +940,7 @@ func writeCheckReports(out io.Writer, files map[string]string) error {
 // execution timing, the structured test failures, the slow tests and the report
 // links. The command's own outcome stays the check's outcome and cause.
 func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -1036,7 +1036,7 @@ func TestHostCheckLeavesADetachedDaemonRunning(t *testing.T) {
 	ready := filepath.Join(dir, "daemon.ready")
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "mkfifo " + ready + "; setsid sh -c 'echo > " + ready + "; read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; read ready < " + ready + "; exit 0"}
-	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	inner := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", inner)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
@@ -1119,7 +1119,7 @@ esac
 	})
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "sccache --start-server", env: map[string]string{"SCCACHE_STATE": state}}
-	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	inner := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", inner)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
@@ -1201,7 +1201,7 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 	}
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "printf 'check-end\\n' >> " + events + "; exit 0"}
-	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	inner := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", inner)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -1231,7 +1231,7 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 // it carries its own cause, so the same commit runs again instead of being
 // counted as a failure of the change.
 func TestEngineStopCancellationHasItsOwnCause(t *testing.T) {
-	node := Node{Name: "local", Slots: 1, Enabled: true}
+	node := Node{Name: "local", Enabled: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if got := runCause(node, ctx, context.Canceled); got != CauseCancelled {
@@ -1266,17 +1266,17 @@ func TestCheckScopeTaskLimitFollowsTheCPUs(t *testing.T) {
 func TestEachCheckGetsItsOwnSccacheServerPort(t *testing.T) {
 	dir := t.TempDir()
 	check := nodeCheck{id: "build", name: "build", host: true, inner: "cargo build", resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
+	script := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
 	if !strings.Contains(script, "SCCACHE_SERVER_PORT=4226") {
 		t.Fatalf("a host check did not get its own sccache port: %s", script)
 	}
-	other := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 3, false, "catthehacker/ubuntu:act-22.04", "", "")
+	other := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 3, false, "catthehacker/ubuntu:act-22.04", "", "")
 	if !strings.Contains(other, "SCCACHE_SERVER_PORT=4229") {
 		t.Fatalf("two checks of one node shared one sccache port: %s", other)
 	}
 	own := check
 	own.env = map[string]string{"SCCACHE_SERVER_PORT": "5000"}
-	script = nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), own, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
+	script = nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), own, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
 	if strings.Contains(script, "4226") || !strings.Contains(script, "SCCACHE_SERVER_PORT=5000") {
 		t.Fatalf("a check that sets the port lost it: %s", script)
 	}
@@ -1289,7 +1289,7 @@ func TestEngineStopCoversEveryWayACheckEnds(t *testing.T) {
 	previous := EngineStopping()
 	MarkEngineStopping()
 	t.Cleanup(func() { jobs.SetEngineStoppingForTest(previous) })
-	node := Node{Name: "local", Slots: 1, Enabled: true}
+	node := Node{Name: "local", Enabled: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	marker := func(code string) [][]string { return [][]string{{"DYNA_CI_CHECK_EXIT", code}} }
@@ -1370,7 +1370,7 @@ func runHostCheck(t *testing.T, node Node, home string, env ...string) (seen str
 // is removed when the check ends.
 func TestHostCheckTempFolderFollowsTheMachineSetting(t *testing.T) {
 	parent := t.TempDir()
-	seen := runHostCheck(t, Node{Name: "local", Slots: 1, CheckTmp: parent}, t.TempDir())
+	seen := runHostCheck(t, Node{Name: "local", CheckTmp: parent}, t.TempDir())
 	if filepath.Dir(seen) != parent {
 		t.Fatalf("TMPDIR = %q, want a folder inside %q", seen, parent)
 	}
@@ -1384,7 +1384,7 @@ func TestHostCheckTempFolderFollowsTheMachineSetting(t *testing.T) {
 func TestHostCheckTempFolderDefaultsToTheNodeTempDirectory(t *testing.T) {
 	nodeTmp := t.TempDir()
 	home := t.TempDir()
-	seen := runHostCheck(t, Node{Name: "local", Slots: 1}, home, "TMPDIR="+nodeTmp)
+	seen := runHostCheck(t, Node{Name: "local"}, home, "TMPDIR="+nodeTmp)
 	if filepath.Dir(seen) != nodeTmp {
 		t.Fatalf("TMPDIR = %q, want a folder inside the node's %q", seen, nodeTmp)
 	}
@@ -1429,7 +1429,7 @@ func TestHostCheckRemovesStaleTempFoldersOfKilledChecks(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
 
-	runHostCheck(t, Node{Name: "local", Slots: 1, CheckTmp: parent}, t.TempDir())
+	runHostCheck(t, Node{Name: "local", CheckTmp: parent}, t.TempDir())
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("the old unused folder was kept: %v", err)
@@ -1453,7 +1453,7 @@ func TestHostCheckDoesNotStartWithoutItsTempFolder(t *testing.T) {
 	fakeNodeTools(t, dir)
 	ran := filepath.Join(dir, "ran")
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true, inner: "touch " + ran}
-	inner := nodeCheckScript(Node{Name: "local", Slots: 1, CheckTmp: filepath.Join(blocker, "sub")}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	inner := nodeCheckScript(Node{Name: "local", CheckTmp: filepath.Join(blocker, "sub")}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}

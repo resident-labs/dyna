@@ -181,7 +181,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	check := nodeCheck{id: "go-static", name: "go-static", reports: ReportJUnit,
 		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-shard", Matrix: []string{"shard:7"}},
 		resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock", workflowTagged)
+	script := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock", workflowTagged)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A host-only variable stands in for a session token or an account key.

@@ -184,9 +184,8 @@ machine is the local row that runs the engine:
 
 ```sh
 dyna machine list
-dyna machine add omarchy --ssh ari@omarchy --ci-slots 2
-dyna machine add hermeslab --ssh pip@hermeslab --ci-slots 2
-dyna machine edit this-machine --ci-slots 1
+dyna machine add omarchy --ssh ari@omarchy
+dyna machine add hermeslab --ssh pip@hermeslab
 dyna git ci mode local
 ```
 
@@ -222,7 +221,6 @@ When local work starts, Dyna removes only queued or waiting runs of
 `.github/workflows/ci.yml` for that exact head. Running jobs and other workflows
 finish. An infrastructure error reruns the removed runs. Main pushes are never cancelled.
 The PR Checks tab and `dyna git merge status` show the machine for each check.
-`dyna git ci node` still works and forwards to `dyna machine`.
 
 Manual CI can also run one commit over the configured SSH destination:
 

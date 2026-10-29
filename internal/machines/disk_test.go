@@ -75,7 +75,7 @@ func prints(out string) Command {
 func TestLowDiskAlertsWhenTheQueueStartsToBlock(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	hermes, err := s.Save(ctx, Machine{Name: "buildhost", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
+	hermes, err := s.Save(ctx, Machine{Name: "buildhost", SSH: "pip@hermeslab", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestLowDiskAlertsWhenTheQueueStartsToBlock(t *testing.T) {
 func TestLowDiskAlertsWithoutTheCIRole(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	agent, err := s.Save(ctx, Machine{Name: "agent-box", Roles: []Role{RoleAgents}, SSH: "aria@agent-box", Enabled: true})
+	agent, err := s.Save(ctx, Machine{Name: "agent-box", SSH: "aria@agent-box", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestLowDiskAlertsWithoutTheCIRole(t *testing.T) {
 func TestDisableDuringProbeWins(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	hermes, err := s.Save(ctx, Machine{Name: "buildhost", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
+	hermes, err := s.Save(ctx, Machine{Name: "buildhost", SSH: "pip@hermeslab", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
