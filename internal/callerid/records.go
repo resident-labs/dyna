@@ -108,6 +108,11 @@ func (s Store) ProcessLaunch(p Process) (Launched, bool, error) {
 // WorkflowDaemonAlive reports whether run still has its recorded coordinator.
 // The process start time prevents a reused PID from keeping a dead run alive.
 func (s Store) WorkflowDaemonAlive(ctx context.Context, run string) (bool, error) {
+	// Callers may pass an unbounded context, for example worktree garbage
+	// collection; bound the retries like retryRead does, without cutting the
+	// caller's own deadline short.
+	ctx, cancel := context.WithTimeout(ctx, launchReadWait)
+	defer cancel()
 	var processes []Process
 	err := database.Retry(ctx, func() error {
 		processes = nil
