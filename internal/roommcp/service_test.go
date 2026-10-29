@@ -632,3 +632,39 @@ func TestAttachRacingDetachLeavesTheServerDetached(t *testing.T) {
 		t.Fatal("a call can reconnect to the detached server")
 	}
 }
+
+// A server removed and saved again while RemoveToken waits for the lock keeps
+// no token: RemoveToken deletes the credential the server has now, not the one
+// it had when the call began.
+func TestRemoveTokenDeletesTheCurrentCredential(t *testing.T) {
+	for name, remove := range map[string]func(f *fixture) error{
+		"remove token": func(f *fixture) error { return f.svc.RemoveToken(owner, f.room.ID, "board") },
+		"remove":       func(f *fixture) error { return f.svc.Remove(owner, f.room.ID, "board") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.ready(t)
+			f.svc.beforeChange = func() {
+				f.svc.beforeChange = nil
+				if err := f.svc.Remove(owner, f.room.ID, "board"); err != nil {
+					t.Error(err)
+				}
+				if err := f.svc.SetToken(owner, f.room.ID, "board", f.server.URL, "replacement-token-value"); err != nil {
+					t.Error(err)
+				}
+			}
+			if err := remove(f); err != nil {
+				t.Fatal(err)
+			}
+			st, err := f.accounts.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range st.Entries {
+				if entry.Provider == accountstore.ProviderMCPBearer {
+					t.Fatalf("the replacement token stayed saved: %s", entry.ID)
+				}
+			}
+		})
+	}
+}
