@@ -39,11 +39,6 @@ const stepShare = 30 * time.Second
 // gcWorktrees is worktrees.GC; tests replace it to simulate a slow repository.
 var gcWorktrees = worktrees.GC
 
-// worktreeTurn counts passes. Each pass starts the worktree cleanup at the next
-// repository, so a slow repository cannot hold back the others on every pass.
-// Only Run reads and writes it, under the pass lock.
-var worktreeTurn int
-
 // pass holds one maintenance pass at a time. The hourly built-in hook and the
 // loop's disk-pressure pass both call Run, and two passes must not delete the
 // same trees at once. A pass that waits for the lock stops if its context ends.
@@ -201,10 +196,15 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 			return err
 		})
 	}
-	turnRepos := fromTurn(repos, worktreeTurn)
-	worktreeTurn++
+	// Each pass starts the worktree cleanup at the next repository, so a slow
+	// repository cannot hold back the others on every pass. The turn is stored,
+	// because each hook run is a new process.
 	step("worktrees", func(ctx context.Context) error {
-		return cleanWorktrees(ctx, &result, turnRepos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})
+		turn, err := nextWorktreeTurn(ctx, store.DataDir())
+		if err != nil {
+			return err
+		}
+		return cleanWorktrees(ctx, &result, fromTurn(repos, turn), worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})
 	})
 	step("scratch", func(ctx context.Context) error {
 		cleaned, err := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
