@@ -26,10 +26,12 @@ type memState struct {
 	st      State
 	loadErr error
 	saveErr error
+	saves   int
 }
 
 func (m *memState) Load(context.Context, Pool) (State, error) { return m.st, m.loadErr }
 func (m *memState) Save(_ context.Context, _ Pool, st State) error {
+	m.saves++
 	if m.saveErr == nil {
 		m.st = st
 	}
@@ -70,16 +72,41 @@ func TestSampleDoesNothingWhenOff(t *testing.T) {
 }
 
 // A state that cannot be loaded or saved skips the sample instead of resetting
-// the hysteresis, which would skew the numbers.
+// the hysteresis, which would skew the numbers. The save case starts overloaded
+// so the sample changes the state, and an unchanged state is not saved.
 func TestSampleSkipsWhenTheStateCannotBeKept(t *testing.T) {
 	for name, states := range map[string]*memState{
 		"load fails": {loadErr: errors.New("database is locked")},
-		"save fails": {saveErr: errors.New("database is locked")},
+		"save fails": {st: State{Overloaded: true}, saveErr: errors.New("database is locked")},
 	} {
 		o, seen := observerFor(fixedSource{r: busy}, 6, states)
 		if err := o.Sample(t.Context()); err == nil || len(*seen) != 0 {
 			t.Errorf("%s: recorded %+v, err %v", name, *seen, err)
 		}
+	}
+}
+
+// A steady machine writes nothing on a later tick, and a reading that changes
+// the state is saved at once. The clock is fixed, so only the readings move.
+func TestSampleSavesOnlyAChangedState(t *testing.T) {
+	states := &memState{}
+	o, _ := observerFor(fixedSource{r: busy}, 6, states)
+	if err := o.Sample(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first := states.saves
+	if err := o.Sample(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if states.saves != first {
+		t.Fatalf("saves = %d after the second tick, want %d: an unchanged state must not be saved", states.saves, first)
+	}
+	o.Source = fixedSource{r: Readings{Cores: 8, MemTotal: 32 * gib, MemAvail: 4 * gib, PressureMem: 50}}
+	if err := o.Sample(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if states.saves != first+1 || !states.st.Overloaded {
+		t.Fatalf("saves = %d, overloaded = %v; want one more save that records the overload", states.saves, states.st.Overloaded)
 	}
 }
 
