@@ -181,11 +181,6 @@ type Store struct {
 // DefaultStore is the host's account store under the Dyna data directory.
 func DefaultStore() *Store { return &Store{Root: filepath.Join(store.DataDir(), "accounts")} }
 
-// IsOpenCodeIntegration identifies OpenCode’s own account services.
-func IsOpenCodeIntegration(integration string) bool {
-	return integration == "opencode-go" || integration == "opencode"
-}
-
 // KnownHarness reports whether this release runs h. Every account write path
 // validates its harness here, so a row can never name a harness that no code
 // runs.
