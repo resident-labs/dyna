@@ -34,7 +34,7 @@ func newReattachFixture(t *testing.T) *reattachFixture {
 		t.Fatal(err)
 	}
 	f := &reattachFixture{started: make(chan struct{}, 4), release: make(chan struct{})}
-	f.runner = Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Slots: 1, Enabled: true}}
+	f.runner = Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Enabled: true}}
 	f.machine = newFakeMachine(t, func(ctx context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
 			return nil
@@ -218,7 +218,7 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 		t.Fatalf("checks = %d, %v", len(checks), err)
 	}
 	var scripts []string
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Slots: 2, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Enabled: true}}
 	machine := newFakeMachine(t, func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
 		if script, _, ok := jobstest.DecodeNodeScript(name, args); ok && (strings.Contains(script, "worktree prune") || strings.Contains(script, "rm -rf --one-file-system")) {
 			scripts = append(scripts, script)
@@ -331,7 +331,7 @@ func TestResumeRunKeepsTheRecordWhenTeardownFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	var removals int
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Enabled: true}}
 	machine := newFakeMachine(t, func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
 		script, _, _ := jobstest.DecodeNodeScript(name, args)
 		switch {

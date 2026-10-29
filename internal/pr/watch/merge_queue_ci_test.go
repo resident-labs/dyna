@@ -87,7 +87,7 @@ func (*localTrialCIRegistry) Mode(context.Context, string) (string, error) {
 }
 
 func (*localTrialCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "hermes", Slots: 8, Enabled: true}}, nil
+	return []localci.Node{{Name: "hermes", Enabled: true}}, nil
 }
 
 func (*localTrialCIRegistry) LoadResult(context.Context, string, string) (localci.Result, error) {

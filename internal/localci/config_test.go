@@ -191,7 +191,7 @@ suites:
 	}
 	// A machine of 20 CPUs and 32 GiB grants its own capacity, not the
 	// request; the node queue holds the rest until capacity frees.
-	node := Node{Name: "arch", Slots: 8, Enabled: true, CPUs: 20, MemoryBytes: 32 << 30}
+	node := Node{Name: "arch", Enabled: true, CPUs: 20, MemoryBytes: 32 << 30}
 	granted := clampCheckResources(checks[0], node)
 	if granted.CPUs != 20 || granted.MemoryMiB != 32*1024 {
 		t.Fatalf("granted %+v, want 20 cpus and 32 GiB", granted)
@@ -209,7 +209,7 @@ suites:
 		}
 	}
 	// A probe of the machine that fits the request changes nothing.
-	roomy := clampCheckResources(checks[0], Node{Name: "hermeslab", Slots: 16, Enabled: true, CPUs: 32, MemoryBytes: 64 << 30})
+	roomy := clampCheckResources(checks[0], Node{Name: "hermeslab", Enabled: true, CPUs: 32, MemoryBytes: 64 << 30})
 	if roomy != (checkResources{CPUs: 32, MemoryMiB: 64 * 1024}) {
 		t.Fatalf("roomy machine granted %+v, want the request unchanged", roomy)
 	}

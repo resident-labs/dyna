@@ -67,7 +67,7 @@ func TestParseProbe(t *testing.T) {
 func TestFailedProbeKeepsCapabilities(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	hermes, err := s.Save(ctx, Machine{Name: "buildhost", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
+	hermes, err := s.Save(ctx, Machine{Name: "buildhost", SSH: "pip@hermeslab", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}

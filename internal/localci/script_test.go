@@ -157,7 +157,7 @@ esac
 		}
 	}
 	check := nodeCheck{id: SuiteGoStatic, name: "go-static", inner: "bash scripts/ci.sh go vet", image: "golang:1.26.3", hostUser: true}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "repo.git"), runDir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	script := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "repo.git"), runDir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", "-c", script)

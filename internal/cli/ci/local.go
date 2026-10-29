@@ -150,24 +150,24 @@ func findNode(nodes []localci.Node, name string) (localci.Node, bool) {
 // defaultNode picks the machine a manual run uses when --node is absent. One
 // enabled machine needs no choice; with several, the owner names one.
 func defaultNode(nodes []localci.Node) (localci.Node, error) {
-	enabled := []localci.Node{}
+	var ready []localci.Node
 	for _, node := range nodes {
-		if node.Enabled {
-			enabled = append(enabled, node)
+		if node.TakesCI() {
+			ready = append(ready, node)
 		}
 	}
-	switch len(enabled) {
+	switch len(ready) {
 	case 0:
-		return localci.Node{}, fmt.Errorf("no enabled CI machine is registered; add one with dyna machine add")
+		return localci.Node{}, fmt.Errorf("no enabled machine carries the ci label; add one with dyna machine edit <name> --label ci")
 	case 1:
-		return enabled[0], nil
+		return ready[0], nil
 	}
-	names := make([]string, len(enabled))
-	for i, node := range enabled {
+	names := make([]string, len(ready))
+	for i, node := range ready {
 		names[i] = node.Name
 	}
 	sort.Strings(names)
-	return localci.Node{}, fmt.Errorf("several enabled CI machines are registered; choose one with --node (%s)", strings.Join(names, ", "))
+	return localci.Node{}, fmt.Errorf("several machines carry the ci label; choose one with --node (%s)", strings.Join(names, ", "))
 }
 func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 	if asJSON {

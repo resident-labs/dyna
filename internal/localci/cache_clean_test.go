@@ -919,8 +919,8 @@ func TestCacheCleanFreesCachesRightAfterARunEnds(t *testing.T) {
 }
 
 // TestCleanCachesTicksEveryEnabledMachineOnceAnHour checks the hourly worker:
-// an engine with no CI machine gets no deadline, a machine enabled later gets
-// one, and the next cleanup waits an hour.
+// only a machine with the ci label has caches to clean, a machine added later
+// gets its own deadline, and the next cleanup waits an hour.
 func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -934,13 +934,13 @@ func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 		t.Fatalf("empty startup: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}
 	if _, err := (machines.Store{DataDir: dir}).Save(t.Context(), machines.Machine{
-		Name: "node-a", SSH: "pip@node-a", Roles: []machines.Role{machines.RoleCI}, CISlots: 2, Enabled: true,
+		Name: "node-a", SSH: "pip@node-a", Enabled: true, Labels: []string{machines.LabelCI},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at }, clean, nil)
 	if err != nil || len(cleaned) != 1 || cleaned[0] != "node-a" || !next.Equal(at.Add(cacheCleanEvery)) {
-		t.Fatalf("enabled machine: next=%v err=%v cleaned=%v", next, err, cleaned)
+		t.Fatalf("labeled machine: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}
 	cleaned = nil
 	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at.Add(30 * time.Minute) }, clean, nil)
@@ -955,7 +955,7 @@ func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 func TestCacheCleanFailureGenerationChangesAfterDirectSuccess(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := (machines.Store{DataDir: dir}).Save(t.Context(), machines.Machine{
-		Name: "node-a", SSH: "pip@node-a", Roles: []machines.Role{machines.RoleCI}, CISlots: 1, Enabled: true,
+		Name: "node-a", SSH: "pip@node-a", Enabled: true, Labels: []string{machines.LabelCI},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -981,7 +981,7 @@ func TestCacheCleanFailureGenerationChangesAfterDirectSuccess(t *testing.T) {
 	pass(at.Add(time.Hour))
 
 	// Disk recovery calls CleanCaches directly, without the scheduled tick.
-	directNode := Node{Name: "node-a", Slots: 1, Enabled: true}
+	directNode := Node{Name: "node-a", Enabled: true}
 	runner := Runner{DataDir: dir, Node: &directNode}
 	legacy := func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
 		fmt.Fprintln(out, "DYNA_CI_CACHE_CLEAN_FREED_KB=0")

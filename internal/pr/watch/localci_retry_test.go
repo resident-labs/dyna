@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 )
 
 // A machine that could not run a check proves nothing about the head, so the run
@@ -54,7 +55,7 @@ func TestMachineFailureMovesTheRunToAnotherMachineOnce(t *testing.T) {
 
 	// The retry goes to a different machine, and a fleet with no other machine
 	// keeps the result instead of running it again in place.
-	nodes := []localci.Node{{Name: "arch", Enabled: true}, {Name: "hermeslab", Enabled: true}}
+	nodes := []localci.Node{{Name: "arch", Enabled: true, Labels: []string{machines.LabelCI}}, {Name: "hermeslab", Enabled: true, Labels: []string{machines.LabelCI}}}
 	free := func(node localci.Node) int {
 		if node.Name == "arch" {
 			return 12

@@ -325,28 +325,35 @@ cancels work for superseded trial heads and never runs fork PRs on these
 machines. `dyna git ci run <sha>` still checks one commit by hand, and the
 change it belongs to reads that result at its next tick.
 
-Slots limit concurrent checks across all runs on a machine. Each scheduled run
-reserves up to six slots, so other heads can start while capacity is free.
-Merge trials take free slots first; they do not interrupt active runs. On a
-machine with 16 or more slots, three heads at six slots each finish in about
-two minutes.
+The node's admission queue bounds how much runs at once on a machine, from its
+probed CPUs and memory. Merge trials take free capacity first; they do not
+interrupt active runs.
+
+A machine runs local CI checks only when it carries the `ci` label; jobs use
+any enabled machine. The migration from the old role model gives every
+machine that had the `ci` role the label, and every other machine starts
+without it:
+
+```sh
+dyna machine edit omarchy --label ci
+dyna machine edit omarchy --unlabel ci
+```
 
 The local machine is the machine that runs this engine. It is the only row
-marked `*` in the LOCAL column, and `--ci-slots` gives it the ci role:
+marked `*` in the LOCAL column:
 
 ```sh
 dyna machine list
-dyna machine add omarchy --ssh ari@omarchy --ci-slots 2
-dyna machine edit this-machine --ci-slots 1
+dyna machine add omarchy --ssh ari@omarchy
 dyna git ci mode local
 dyna machine edit omarchy --disable
 dyna machine rm omarchy
 ```
 
-`--disable` stops new CI work on a machine: its slots are not scheduled. The
-flag belongs to the whole machine, so on the local row it covers that machine's
-work, not the engine, which keeps running. `dyna machine add` needs a new name;
-use `dyna machine edit` to change a stored machine.
+`--disable` stops new CI work on a machine. The flag belongs to the whole
+machine, so on the local row it covers that machine's work, not the engine,
+which keeps running. `dyna machine add` needs a new name; use
+`dyna machine edit` to change a stored machine.
 
 ### Rooms of a machine
 
@@ -363,8 +370,7 @@ Dyna stores the room IDs, so a renamed room keeps its machine. An empty list is
 the default and lets every room use the machine. Local CI scheduling and merge
 trials skip a machine that does not allow their room, so that room's work waits
 for a machine that does instead of running next to another room's work.
-`dyna machine show <name>` prints the list, and taking the ci role away clears
-it.
+`dyna machine show <name>` prints the list.
 
 ### Suites of a machine
 
@@ -385,8 +391,8 @@ suite of that run, and an integration sync follows the same rule. When no
 enabled machine of the run's room allows a suite of it, the trial fails at once
 with an error that names the suite, so a trial never waits for a machine that
 cannot take it. A machine that is only busy or low on disk still counts, so its
-room's work waits for a slot rather than failing. `dyna machine show <name>`
-prints the list, and taking the ci role away clears it.
+room's work waits for capacity rather than failing. `dyna machine show <name>`
+prints the list.
 
 ## Probing machines
 
@@ -401,8 +407,8 @@ exists, whether docker or podman exists, whether the computer dependencies
 exist, and the remote `dyna --version`. The computer dependencies that
 registration checks are labwc and Xwayland; see
 [Agent computers](computers.md). A machine is shown with computers only when it
-has both. Computers are a capability, not a role. wayvnc only streams a desktop
-to the app, so the probe reports it as a separate `stream` capability.
+has both. Computers are a capability of the machine. wayvnc only streams a
+desktop to the app, so the probe reports it as a separate `stream` capability.
 
 ```sh
 dyna machine probe hermeslab

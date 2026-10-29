@@ -32,7 +32,6 @@ const (
 type Node struct {
 	Name    string `json:"name"`
 	SSH     string `json:"ssh,omitempty"`
-	Slots   int    `json:"slots"`
 	Enabled bool   `json:"enabled"`
 	// HostChecksGrants is who allows host checks on this machine: the owner for
 	// every room, or the root of one room for that room only. It is empty
@@ -40,8 +39,8 @@ type Node struct {
 	HostChecksGrants []machines.HostChecksGrant `json:"hostChecksGrants,omitempty"`
 	// CPUs and MemoryBytes are the machine's capacity from the last probe. A
 	// check's request is clamped to them, so a repository cannot ask for more
-	// than the machine has. Zero means no probe read the machine, and the slot
-	// count bounds the request instead.
+	// than the machine has. Zero means no probe read the machine, so the
+	// admission queue bounds the request instead.
 	CPUs        int    `json:"cpus,omitempty"`
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
 	// Disk and MaxDiskPercent carry the machine's one disk rule from its last
@@ -65,6 +64,15 @@ type Node struct {
 	// Suites limits the machine to those suites' CI work. An empty list takes
 	// every suite.
 	Suites []string `json:"suites,omitempty"`
+	// Labels mark what the machine takes. The ci label says it runs local CI
+	// checks; an unlabeled machine still takes jobs when enabled.
+	Labels []string `json:"labels,omitempty"`
+}
+
+// TakesCI reports whether the machine runs local CI checks: enabled and
+// carrying the ci label. Jobs use any enabled machine.
+func (n Node) TakesCI() bool {
+	return n.Enabled && slices.Contains(n.Labels, machines.LabelCI)
 }
 
 // AllowsRoom reports whether the machine takes CI work for the room. A machine
@@ -224,7 +232,8 @@ func (n Node) Validate() error {
 	return nil
 }
 
-// Nodes returns the machines with the ci role, as the scheduler reads them.
+// Nodes returns every machine, as the scheduler reads them. A machine that
+// is enabled and whose room list allows a room takes that room's CI work.
 // The engine host maps to an empty SSH destination, which runs on this machine.
 func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 	list, err := s.machines().List(ctx)
@@ -233,10 +242,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 	}
 	nodes := []Node{}
 	for _, m := range list {
-		if !m.HasRole(machines.RoleCI) {
-			continue
-		}
-		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Suites: m.Suites, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
+		node := Node{Name: m.Name, SSH: m.SSH, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Suites: m.Suites, Labels: m.Labels, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil

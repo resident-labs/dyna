@@ -18,7 +18,7 @@ func TestContainerThatNeverStartedIsAnInfrastructureFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "arch", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "arch", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
@@ -67,7 +67,7 @@ func TestContainerThatStartedKeepsItsTestFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
@@ -137,7 +137,7 @@ func runWithCleanup(t *testing.T, cleanup func(attempt int) error) Result {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
