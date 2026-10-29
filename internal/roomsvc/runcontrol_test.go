@@ -40,6 +40,20 @@ func TestRunEnvironmentKeepsTheCallerSession(t *testing.T) {
 	}
 }
 
+// A run started through the engine must not inherit the engine's GitHub tokens,
+// which would bypass the per-session account that D-414 chooses.
+func TestRunEnvironmentDropsGitHubTokens(t *testing.T) {
+	t.Setenv("GH_TOKEN", "must-not-reach-runs")
+	t.Setenv("GITHUB_TOKEN", "must-not-reach-runs")
+	rec := room.Record{ID: "room_1", Name: "dyna-agent"}
+	env := runEnv(authority.Actor{Role: authority.Owner}, rec)
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if got := envValue(env, key); got != "" {
+			t.Fatalf("%s reached the run", key)
+		}
+	}
+}
+
 func envValue(env []string, key string) string {
 	for _, item := range env {
 		if name, value, ok := strings.Cut(item, "="); ok && name == key {
