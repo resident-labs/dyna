@@ -265,6 +265,8 @@ type Turn struct {
 	Deliveries         []Delivery                      `json:"deliveries,omitempty"`
 	Usage              workeroutput.Usage              `json:"usage"`
 	UsageNormalization workeroutput.UsageNormalization `json:"usageNormalization,omitempty"`
+	// FirstCall is the first model call's prompt accounting. Nil means unreported.
+	FirstCall *workeroutput.CallUsage `json:"firstCall,omitempty"`
 	// Byte ranges of the session's append-only raw and normalized output
 	// that belong to this turn.
 	RawStart int64 `json:"rawStart"`
