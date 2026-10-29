@@ -256,6 +256,7 @@ func fakeHeadBatch(f fixture, args []string) any {
 				"headRepository": map[string]string{"nameWithOwner": f.Pull.Head.Repo.FullName},
 				"baseRefOid":     f.Pull.Base.SHA, "baseRefName": f.Pull.Base.Ref,
 				"author":  map[string]string{"login": f.Pull.User.Login, "__typename": f.Pull.User.Type},
+				"labels":  map[string]any{"nodes": f.Pull.Labels},
 				"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": map[string]any{"state": ci, "contexts": map[string]any{"nodes": contexts}}}}}},
 			}
 		}

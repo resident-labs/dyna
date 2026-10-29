@@ -154,7 +154,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					fmt.Fprintf(&query, "b%d:pullRequests(first:1,headRefName:%s,states:OPEN){nodes{number headRefName isCrossRepository headRefOid}}", j, strconv.Quote(r.Branch))
 					continue
 				}
-				fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt headRefOid headRefName headRepository{nameWithOwner} baseRefOid baseRefName author{login __typename} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
+				fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt headRefOid headRefName headRepository{nameWithOwner} baseRefOid baseRefName author{login __typename} labels(first:100){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
 			}
 			query.WriteString("}")
 		}
@@ -243,6 +243,9 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 						Login string `json:"login"`
 						Type  string `json:"__typename"`
 					} `json:"author"`
+					Labels struct {
+						Nodes []Label `json:"nodes"`
+					} `json:"labels"`
 					Commits struct {
 						Nodes []struct {
 							Commit struct {
@@ -268,7 +271,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					failures = append(failures, err)
 					continue
 				}
-				p := Pull{Number: node.Number, Title: node.Title, Draft: node.IsDraft, Updated: node.Updated, State: strings.ToLower(node.State), Merged: node.Merged, User: User{Login: node.Author.Login, Type: node.Author.Type}}
+				p := Pull{Number: node.Number, Title: node.Title, Draft: node.IsDraft, Updated: node.Updated, State: strings.ToLower(node.State), Merged: node.Merged, User: User{Login: node.Author.Login, Type: node.Author.Type}, Labels: node.Labels.Nodes}
 				if node.State == "MERGED" {
 					p.State = "closed"
 					p.Merged = true
