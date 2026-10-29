@@ -164,6 +164,60 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 	return p, r.Accounts.SelectForRepo(ctx, p.Harness, ProviderForModel(p.Harness, p.Model), p.Env[mode.EnvRoomID], p.RuntimeRepo, b.Executable)
 }
 
+// SelectProbeAccount runs before a health probe of p. When a ready account that
+// runs p's provider has a stated usage hold, it makes that account active, so the
+// probe runs p's own model on the account whose limit the provider named.
+// Otherwise it selects as SelectAccount does.
+func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, error) {
+	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, ProviderForModel(p.Harness, p.Model), time.Now())
+	if err != nil {
+		return p, err
+	}
+	if !ok {
+		return r.SelectAccount(ctx, p, dir)
+	}
+	b, _, err := (&FirstUse{Bundles: r.Bundles}).EnsureBundle(ctx, p.Harness, p.RuntimeVersion)
+	if err != nil {
+		return p, err
+	}
+	return p, r.Accounts.Switch(ctx, held.ID, b.Executable)
+}
+
+// StatedHoldAccount returns the ready account that runs provider for harness
+// whose stated usage hold is still in force at now and ends first. An unstated
+// hold is a guess, so it never selects an account.
+func (a *Accounts) StatedHoldAccount(harness string, provider store.Provider, now time.Time) (NativeAccount, bool, error) {
+	h, err := canonicalAccountHarness(harness)
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	all, err := a.List()
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	scopes, err := a.scopes()
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	stated, err := scopes.Stated(now)
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	var held NativeAccount
+	var heldEnd time.Time
+	found := false
+	for _, n := range all {
+		end, hit := stated[n.ID]
+		if !hit || n.Status != "ready" || !accountRuns(h, n, provider) {
+			continue
+		}
+		if !found || end.Before(heldEnd) {
+			held, heldEnd, found = n, end, true
+		}
+	}
+	return held, found, nil
+}
+
 // resetSentence says when label's account resets. A time that is only a stored
 // guess (in limits, not in stated) is never shown: the sentence says the
 // provider named no time. A credit hold has no end, so it says so.
