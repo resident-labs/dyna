@@ -458,8 +458,11 @@ func TestRacingCallCannotReopenADetachedServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(f.server.methods)
-	if _, err := f.svc.connection(context.Background(), f.room.ID, "board"); err == nil || !strings.Contains(err.Error(), "detached") {
-		t.Fatalf("connection after detach: %v", err)
+	// Two stale calls: the first must not leave a connection the second can use.
+	for i := 1; i <= 2; i++ {
+		if _, err := f.svc.connection(context.Background(), f.room.ID, "board"); err == nil || !strings.Contains(err.Error(), "detached") {
+			t.Fatalf("stale call %d after detach: %v", i, err)
+		}
 	}
 	if len(f.server.methods) != before {
 		t.Fatal("a request reached the server after detach")
