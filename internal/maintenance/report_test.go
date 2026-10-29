@@ -50,6 +50,27 @@ func TestReportsAreSavedNewestFirstAndBounded(t *testing.T) {
 	}
 }
 
+// A saved pass keeps each step's order and the error text of a failed step.
+func TestReportKeepsEachStepWithItsError(t *testing.T) {
+	dir := t.TempDir()
+	var r Result
+	done := r.timer("worktrees")
+	done(nil)
+	done = r.timer("scratch")
+	done(errors.New("context deadline exceeded"))
+	if err := SaveReport(dir, time.Unix(100, 0), time.Second, r, nil); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := RecentReports(dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reports[0].Steps
+	if len(got) != 2 || got[0].Name != "worktrees" || got[0].Error != "" || got[1].Name != "scratch" || got[1].Error != "context deadline exceeded" {
+		t.Fatalf("steps = %+v", got)
+	}
+}
+
 func TestReportUsesWriterWithoutUnusedEvents(t *testing.T) {
 	dir := t.TempDir()
 	db, err := reportDB(dir)
