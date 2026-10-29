@@ -88,10 +88,11 @@ type JournalEntry struct {
 	// Kind is "exec" for run(), "job" for job(), and empty for agent().
 	// Commands journal their shell and jobs journal their job ID when submitted,
 	// so a resumed run reattaches instead of starting the work again.
-	Kind  string `json:"kind,omitempty"`
-	State string `json:"state,omitempty"` // running|done|error
-	Shell string `json:"shell,omitempty"`
-	Job   string `json:"job,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	State       string `json:"state,omitempty"` // running|done|error
+	Shell       string `json:"shell,omitempty"`
+	Job         string `json:"job,omitempty"`
+	RequestHash string `json:"requestHash,omitempty"`
 	// Stderr is the file a run() command writes its standard error to, so a
 	// resumed run reads it from the run that started the command.
 	Stderr string `json:"stderr,omitempty"`

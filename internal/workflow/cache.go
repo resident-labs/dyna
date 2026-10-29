@@ -91,7 +91,8 @@ func (c *Cache) addExecs(entries []runstore.JournalEntry) {
 }
 
 // addJobs keeps one record per job() invocation. Its key includes the stable
-// resume namespace and invocation number, so identical commands stay distinct.
+// resume namespace, request hash and per-request occurrence, so identical calls
+// stay distinct and different requests cannot exchange jobs.
 // Any submitted job ID stays resumable after an interrupted wait.
 func (c *Cache) addJobs(entries []runstore.JournalEntry) {
 	last := map[int]runstore.JournalEntry{}
@@ -100,10 +101,10 @@ func (c *Cache) addJobs(entries []runstore.JournalEntry) {
 	}
 	for _, e := range last {
 		c.priorCalls++
-		if !strings.HasPrefix(e.Key, "j2:") || e.Job == "" {
+		if !strings.HasPrefix(e.Key, "j3:") || e.Job == "" {
 			continue
 		}
-		c.jobs[e.Key] = jobRecord{Job: e.Job, Done: e.State == "done", Result: e.Result}
+		c.jobs[e.Key] = jobRecord{Job: e.Job, RequestHash: e.RequestHash, Done: e.State == "done", Result: e.Result}
 	}
 }
 

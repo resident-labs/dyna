@@ -155,13 +155,16 @@ func (f *Engine) runJob(spec callspec.RunJobInput, result any) error {
 	if spec.IdempotencyKey != "" {
 		for _, existing := range f.jobRows {
 			if existing.IdempotencyKey == spec.IdempotencyKey {
+				if existing.RequestHash != spec.RequestHash {
+					return fmt.Errorf("enginefake: job key %s reused with a different request", spec.IdempotencyKey)
+				}
 				return writeJobResult(result, existing)
 			}
 		}
 	}
 	job := jobs.Job{
 		ID: fmt.Sprintf("job_%d", len(f.jobRows)+1), Node: spec.Node,
-		IdempotencyKey: spec.IdempotencyKey, Command: spec.Command, State: jobs.StateQueued,
+		IdempotencyKey: spec.IdempotencyKey, RequestHash: spec.RequestHash, Command: spec.Command, State: jobs.StateQueued,
 	}
 	if job.Node == "" {
 		job.Node = "local"
