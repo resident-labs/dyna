@@ -170,7 +170,7 @@ func (s *Service) prioritizedMergeQueue(ctx context.Context, st State) ([]MergeQ
 	if err != nil {
 		return nil, err
 	}
-	rows := mergeQueue(st, s.LocalTrialRooms(ctx))
+	rows := mergeQueue(st, s.LocalTrialRooms(ctx), s.roomUpstreams())
 	indices := map[string][]int{}
 	pauses := map[string]bool{}
 	for i := range rows {

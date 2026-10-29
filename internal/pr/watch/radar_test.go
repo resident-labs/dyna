@@ -86,7 +86,7 @@ func TestRadarConflictNotifiesOnlyTheAuthorBehindOnce(t *testing.T) {
 	if len(notices) != 1 || notices[0].Target != b.Author || !strings.Contains(notices[0].Text, "f.txt") || !strings.Contains(notices[0].Text, "rebase PR #2") {
 		t.Fatalf("behind notices = %+v", notices)
 	}
-	for _, item := range mergeQueue(st, nil) {
+	for _, item := range mergeQueue(st, nil, nil) {
 		if len(item.Overlaps) != 1 {
 			t.Fatalf("merge status omits the overlap: %+v", item)
 		}

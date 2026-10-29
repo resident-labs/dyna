@@ -111,7 +111,27 @@ type MainCI struct {
 // room without hosted push CI can still take a trial; a nil report keeps the
 // hosted requirement.
 func MergeQueueSnapshot(st State, where LocalTrialRooms) []MergeQueueItem {
-	return mergeQueue(st, where)
+	return mergeQueue(st, where, nil)
+}
+
+// RoomUpstreams lists the parent repositories a room records, as host/owner/repo.
+// A pull request into one of them is an upstream pull request: maintainers merge
+// it, so Dyna never queues, trials or merges it. A nil report excludes nothing.
+type RoomUpstreams func(roomID string) []string
+
+// roomUpstreams reports the parent repositories of each room, read from the room
+// record. A room that cannot be resolved has none.
+func (s *Service) roomUpstreams() RoomUpstreams {
+	return func(roomID string) []string {
+		if s.Notify == nil || s.Notify.Rooms == nil {
+			return nil
+		}
+		rec, err := s.Notify.Rooms.Resolve(roomID)
+		if err != nil {
+			return nil
+		}
+		return rec.Upstreams()
+	}
 }
 
 // trialCIReady reports whether a merge trial can be evaluated for this change. A
@@ -140,10 +160,27 @@ func schedulerTakesTrial(r Record) bool {
 	return false
 }
 
-func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
+// upstreamPR reports a pull request whose base is a parent repository of its
+// room. Dyna tracks it for CI, reviews, labels and comments only.
+func upstreamPR(r Record, upstreams RoomUpstreams) bool {
+	if upstreams == nil {
+		return false
+	}
+	for _, up := range upstreams(r.RoomID) {
+		if strings.EqualFold(up, defaultRepo(r)) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeQueue(st State, where LocalTrialRooms, upstreams RoomUpstreams) []MergeQueueItem {
 	var queue []MergeQueueItem
 	for _, r := range st.Records {
 		if !r.Watching || r.State != state.PROpen {
+			continue
+		}
+		if upstreamPR(*r, upstreams) {
 			continue
 		}
 		if changeKind(*r) == "local" && !st.RepositoryFacts[defaultRepo(*r)].MergeTrialCI {
