@@ -13,13 +13,16 @@ import (
 )
 
 // Cache matches successful calls by identity, never journal completion order.
-// Ambiguous identities are deliberately left uncached so they can re-execute.
+// Ambiguous agent and command identities stay uncached. Ambiguous jobs reject
+// during replay because submitting another job could duplicate side effects.
 type Cache struct {
-	mu         sync.Mutex
-	current    map[string]any
-	execs      map[string]execRecord
-	priorCalls int
-	hits       int
+	mu            sync.Mutex
+	current       map[string]any
+	execs         map[string]execRecord
+	jobs          map[string]jobRecord
+	ambiguousJobs map[string]bool
+	priorCalls    int
+	hits          int
 }
 
 // CacheStats summarizes replay use after a resumed run.
@@ -31,20 +34,25 @@ type CacheStats struct {
 // NewCache builds a resume cache. Counts include errors and isolated calls:
 // dropping holes before checking uniqueness could replay another job's result.
 func NewCache(entries []runstore.JournalEntry) *Cache {
-	c := &Cache{current: map[string]any{}, execs: map[string]execRecord{}}
+	c := &Cache{current: map[string]any{}, execs: map[string]execRecord{}, jobs: map[string]jobRecord{}, ambiguousJobs: map[string]bool{}}
 	keys := map[string]int{}
-	var execEntries []runstore.JournalEntry
+	var execEntries, jobEntries []runstore.JournalEntry
 	for _, e := range entries {
-		if e.Kind == "exec" {
+		switch e.Kind {
+		case "exec":
 			execEntries = append(execEntries, e)
+			continue
+		case "job":
+			jobEntries = append(jobEntries, e)
 			continue
 		}
 		c.priorCalls++
 		keys[e.Key]++
 	}
 	c.addExecs(execEntries)
+	c.addJobs(jobEntries)
 	for _, e := range entries {
-		if e.Kind == "exec" {
+		if e.Kind == "exec" || e.Kind == "job" {
 			continue
 		}
 		// Older keys cannot prove that the execution configuration matches.
@@ -82,6 +90,57 @@ func (c *Cache) addExecs(entries []runstore.JournalEntry) {
 			c.execs[e.Key] = execRecord{Shell: e.Shell, Stderr: e.Stderr}
 		}
 	}
+}
+
+// addJobs keeps one record per job() invocation. Its key includes the stable
+// resume namespace, request hash, source and branch position, and occurrence.
+// Identical parallel branches keep their own jobs.
+// Any submitted job ID stays resumable after an interrupted wait.
+func (c *Cache) addJobs(entries []runstore.JournalEntry) {
+	calls := map[string]map[int]bool{}
+	unsafe := map[string]bool{}
+	for _, e := range entries {
+		if e.RequestHash == "" || e.PositionHash == "" {
+			continue
+		}
+		identity := e.RequestHash + "\n" + e.PositionHash
+		if calls[identity] == nil {
+			calls[identity] = map[int]bool{}
+		}
+		calls[identity][e.ID] = true
+		unsafe[identity] = unsafe[identity] || e.JobReplayUnsafe
+	}
+	for identity, invocations := range calls {
+		c.ambiguousJobs[identity] = len(invocations) > 1 || unsafe[identity]
+	}
+	last := map[int]runstore.JournalEntry{}
+	for _, e := range entries {
+		last[e.ID] = e
+	}
+	for _, e := range last {
+		c.priorCalls++
+		if !strings.HasPrefix(e.Key, "j4:") || e.Job == "" {
+			continue
+		}
+		c.jobs[e.Key] = jobRecord{Job: e.Job, RequestHash: e.RequestHash, Done: e.State == "done", Result: e.Result}
+	}
+}
+
+func (c *Cache) ambiguousJob(identity string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ambiguousJobs[identity]
+}
+
+func (c *Cache) popJob(key string) (jobRecord, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	record, ok := c.jobs[key]
+	if ok {
+		delete(c.jobs, key)
+		c.hits++
+	}
+	return record, ok
 }
 
 func (c *Cache) popExec(key string) (execRecord, bool) {

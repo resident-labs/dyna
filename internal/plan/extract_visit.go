@@ -188,6 +188,7 @@ func (ex *extractor) visitLoop(node ast.Node, body ast.Statement, ctx walkCtx, s
 	inner := ctx
 	inner.parentID = id
 	inner.inLoop = true
+	inner.loopDepth++
 	inner.lastFlow = new(string)
 	inner.card = Cardinality{Kind: CardUnknown, Reason: "loop"}
 	ex.visitStmt(body, inner, sc.child())
@@ -273,6 +274,7 @@ func (ex *extractor) visitCall(call *ast.CallExpression, ctx walkCtx, sc *scope)
 		ex.visitExpr(recv, ctx, sc)
 		inner := ctx
 		inner.inLoop = true
+		inner.loopDepth++
 		if n, ok := closedArrayLen(recv); ok {
 			inner.card = Cardinality{Kind: CardExact, Min: intPtr(n), Max: intPtr(n), Reason: "literal map"}
 		} else {
@@ -298,6 +300,8 @@ func (ex *extractor) visitCall(call *ast.CallExpression, ctx walkCtx, sc *scope)
 	switch name {
 	case "agent":
 		ex.hookAgent(call, ctx, sc)
+	case "job":
+		ex.hookJob(call, ctx, sc)
 	case "workflow":
 		ex.hookWorkflow(call, ctx, sc)
 	case "phase":
@@ -533,6 +537,7 @@ func (ex *extractor) visitFunction(fn *ast.FunctionLiteral, ctx walkCtx, sc *sco
 	if fn == nil {
 		return
 	}
+	ctx.functionDepth++
 	nameScope := sc.child()
 	inner := nameScope
 	if fn.Name != nil {
@@ -580,6 +585,7 @@ func (ex *extractor) visitArrow(fn *ast.ArrowFunctionLiteral, ctx walkCtx, sc *s
 	if fn == nil {
 		return
 	}
+	ctx.functionDepth++
 	inner := sc.child()
 	for _, declaration := range fn.DeclarationList {
 		ex.bindVarDecl(declaration, inner)

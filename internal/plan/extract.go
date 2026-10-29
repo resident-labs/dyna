@@ -15,7 +15,7 @@ const asyncWrapPrefix = "(async () => {\n"
 var exportMetaRe = regexp.MustCompile(`(?m)^(\s*)export(\s+const\s+meta\s*=)`)
 
 var hookNames = map[string]bool{
-	"agent": true, "workflow": true, "phase": true, "log": true,
+	"agent": true, "job": true, "workflow": true, "phase": true, "log": true,
 	"parallel": true, "pipeline": true,
 }
 
@@ -42,14 +42,19 @@ type extractor struct {
 }
 
 type walkCtx struct {
-	parentID      string
-	groupID       string
-	conditional   bool
-	inLoop        bool
-	phase         *string
-	lastFlow      *string
-	card          Cardinality
-	stageCallback string
+	parentID       string
+	groupID        string
+	conditional    bool
+	inLoop         bool
+	phase          *string
+	lastFlow       *string
+	card           Cardinality
+	stageCallback  string
+	functionDepth  int
+	groupDepth     int
+	loopDepth      int
+	groupLoopDepth int
+	replayUnsafe   bool
 }
 
 type scope struct {
@@ -126,6 +131,10 @@ func Extract(src string, opts Options) *Plan {
 	last := ""
 	phase := ""
 	ctx := walkCtx{parentID: root, lastFlow: &last, phase: &phase, card: exactOne()}
+	if ex.wrapPrefix > 0 {
+		// The parser-added async wrapper is not a user function scope.
+		ctx.functionDepth = -1
+	}
 	sc := &scope{bound: map[string]bool{}}
 	ex.visitProgram(prog, ctx, sc)
 	p.Status = ex.status

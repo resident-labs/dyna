@@ -106,9 +106,27 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 			observer.OnResume(len(entries))
 		}
 	}
+	// Every resume in one lineage uses the original run as its job namespace.
+	// This keeps idempotency keys stable even when no journal entry survived.
+	jobNamespace := opts.ResumeFrom
+	seen := map[string]bool{}
+	for jobNamespace != "" && !seen[jobNamespace] {
+		seen[jobNamespace] = true
+		parent, err := runstore.ResumedFrom(jobNamespace)
+		if err != nil {
+			return Result{}, fmt.Errorf("resolve job resume identity: %w", err)
+		}
+		if parent == "" {
+			break
+		}
+		jobNamespace = parent
+	}
 	run, err := runstore.Create(opts.Name, opts.ScriptSrc, opts.Args)
 	if err != nil {
 		return Result{}, err
+	}
+	if jobNamespace == "" {
+		jobNamespace = run.Meta.ID
 	}
 	prefix := fmt.Sprintf("%s/%d/%d", run.Meta.ID, os.Getpid(), time.Now().UnixNano())
 	defer installRunWriters(ctx, run, factory(prefix))()
@@ -137,7 +155,7 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 		value, err = workflow.Execute(ctx, workflow.Options{
 			ScriptSrc: opts.ScriptSrc, ScriptPath: opts.ScriptPath, Args: opts.Args, Store: store, Run: run,
 			OnEvent: observer.OnEvent, OnWarning: warning, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir,
-			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, MaxCommands: opts.MaxCommands, Commands: commands, Cache: cache, ResumeFrom: opts.ResumeFrom, Engine: agents,
+			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, MaxCommands: opts.MaxCommands, Commands: commands, Cache: cache, ResumeFrom: opts.ResumeFrom, JobNamespace: jobNamespace, Engine: agents,
 			Paused: func() bool { return runstore.IsPaused(run.Meta.ID) }, Poster: ScriptPoster,
 		})
 	}

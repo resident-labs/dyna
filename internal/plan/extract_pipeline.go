@@ -32,6 +32,9 @@ func (ex *extractor) hookPipeline(call *ast.CallExpression, ctx walkCtx, sc *sco
 	inner := ctx
 	inner.parentID = id
 	inner.groupID = gid
+	inner.replayUnsafe = jobContextReplayUnsafe(ctx)
+	inner.groupDepth = ctx.functionDepth + 1
+	inner.groupLoopDepth = ctx.loopDepth
 	inner.inLoop = true
 	if card.Kind != CardExact {
 		inner.card = Cardinality{Kind: CardUnknown, Reason: "pipeline items"}
