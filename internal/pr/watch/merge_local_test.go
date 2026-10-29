@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -560,8 +561,9 @@ func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
 	if trial.Status != VerdictFailed || trial.Reason != trial.Logs {
 		t.Fatalf("trial = %s %q, want a failure whose reason is its evidence", trial.Status, trial.Reason)
 	}
-	if !strings.Contains(trial.Reason, string(localci.SuiteGo)) || !strings.Contains(trial.Reason, "--suites") {
-		t.Fatalf("trial reason = %q, want the blocked suite and the fix", trial.Reason)
+	blocked := regexp.MustCompile(`no enabled CI machine allows the (\S+) suite`).FindStringSubmatch(trial.Reason)
+	if len(blocked) != 2 || blocked[1] == string(localci.SuiteRelay) || !strings.Contains(trial.Reason, "--suites") {
+		t.Fatalf("trial reason = %q, want an unavailable suite and the fix", trial.Reason)
 	}
 	// The failure is a typed error, so no run was admitted and none waits.
 	if head := runningLocalCIHead(e.s); head != "" {
