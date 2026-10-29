@@ -1047,6 +1047,10 @@ func TestSessionSpeedAndResponseInstructions(t *testing.T) {
 	if m := r.next(t); m.Type != agentwire.OutResponseDone {
 		t.Fatalf("response done = %+v", m)
 	}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after response done = %+v", m)
+	}
 	if got := fmt.Sprint(conn.sentSoFar()); !strings.HasSuffix(got, "respond::short and warm]") {
 		t.Fatalf("queued reply sent %s, want the saved instructions", got)
 	}
