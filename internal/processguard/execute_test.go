@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,41 @@ func TestMetadataEnvDropsAllDynaVariables(t *testing.T) {
 		t.Error("child environment lost unrelated variable")
 	}
 
+}
+
+func TestMetadataEnvDropsEngineSecrets(t *testing.T) {
+	secrets := []string{"GH_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_HOST_CREDS_FILE", "XAI_API_KEY"}
+	for _, key := range secrets {
+		t.Setenv(key, "must-not-reach-children")
+	}
+	t.Setenv("GH_CONFIG_DIR", "configured")
+	t.Setenv("ANTHROPIC_BASE_URL", "configured")
+
+	kept := 0
+	for _, entry := range MetadataEnv() {
+		key, _, _ := strings.Cut(entry, "=")
+		if slices.Contains(secrets, key) {
+			t.Errorf("child environment contains %s", key)
+		}
+		if entry == "GH_CONFIG_DIR=configured" || entry == "ANTHROPIC_BASE_URL=configured" {
+			kept++
+		}
+	}
+	if kept != 2 {
+		t.Errorf("child environment lost configuration, kept %d of 2", kept)
+	}
+}
+
+func TestWithoutSecretsKeepsConfiguration(t *testing.T) {
+	env := []string{"GH_TOKEN=s", "NPM_TOKEN=s", "OPENAI_API_KEY=s", "OPENAI_BASE_URL=u", "GH_CONFIG_DIR=c", "HOME=h"}
+	got := WithoutSecrets(env)
+	want := []string{"OPENAI_BASE_URL=u", "GH_CONFIG_DIR=c", "HOME=h"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("WithoutSecrets = %q, want %q", got, want)
+	}
+	if len(env) != 6 {
+		t.Fatal("WithoutSecrets changed its input")
+	}
 }
 
 func TestMetadataEnvGoFlags(t *testing.T) {
