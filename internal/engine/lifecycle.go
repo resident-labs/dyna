@@ -55,6 +55,16 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 			defer ticker.Stop()
 			admissionObserver(rooms.Notify.Sessions, load, storepkg.DataDir()).Run(watch, ticker.C)
 		}()
+		approvalDone := make(chan struct{})
+		go func() {
+			defer close(approvalDone)
+			if !readOnly {
+				if err := rooms.Approvals.RunApproved(watch); err != nil && watch.Err() == nil {
+					log.Printf("approval recovery: %v", err)
+				}
+				expireApprovals(watch, rooms.Approvals, t)
+			}
+		}()
 		usageDone := make(chan struct{})
 		go func() {
 			defer close(usageDone)
@@ -104,6 +114,7 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		}
 		<-recoveryDone
 		<-refreshDone
+		<-approvalDone
 		<-usageDone
 		<-loadDone
 		<-admissionDone
