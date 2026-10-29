@@ -234,8 +234,14 @@ func roomFor(ctx context.Context, cmdDir string, r repository) (room.Record, err
 		if rec.Repo == "" {
 			continue
 		}
-		if sameCheckout(cmdDir, rec.Repo) && (r.name == "" || matchesRepository(ctx, rec, r)) {
-			return rec, nil
+		if sameCheckout(cmdDir, rec.Repo) {
+			if r.name == "" || matchesRepository(ctx, rec, r) {
+				return rec, nil
+			}
+			// The checkout's own room settles its upstream, even when other rooms share it.
+			if matchesUpstream(rec, r) {
+				return rec, errNotInRoom
+			}
 		}
 	}
 	var upstreams []room.Record
