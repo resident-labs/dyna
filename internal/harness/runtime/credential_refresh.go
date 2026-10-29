@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -170,6 +171,7 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 			if err != nil {
 				return err
 			}
+			before := c.Credential
 			valid := func(next accountnative.Captured) bool {
 				return next.Identity == entry.Identity && next.Integration == entry.Integration && next.Identity != ""
 			}
@@ -210,7 +212,11 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 				if err := writeAccountLogin(current.Home, next); err != nil {
 					return err
 				}
-				entry.NeedsLogin = false
+				// Only a new credential ends the expired state. A pass that
+				// finds the same saved login has renewed nothing.
+				if next.Credential.Schema != before.Schema || !bytes.Equal(next.Credential.Payload, before.Payload) {
+					entry.ClearSignInFailure()
+				}
 				entry.UpdatedAt = time.Now().UTC()
 				result.ExpiresAt = expiry(next)
 				result.Due = result.ExpiresAt.IsZero() || time.Until(result.ExpiresAt) <= 5*time.Minute
