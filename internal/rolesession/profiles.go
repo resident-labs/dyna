@@ -280,11 +280,22 @@ func RecordFailure(failures map[string]time.Time, info subagent.Info, turn subag
 // FailureCache scans at most once per minute. The latest successful or failed
 // turn for each profile controls availability, so a newer successful turn
 // clears an older failure. A stopped turn says nothing about the provider.
-// Snapshot and read are callbacks so tests need no provider or session files.
+// A scan reads a session's turn only when its turn count changed or the cached
+// turn had not ended, so a steady session costs no read. Snapshot and read are
+// callbacks so tests need no provider or session files.
 type FailureCache struct {
 	mu       sync.Mutex
 	checked  time.Time
 	failures map[string]time.Time
+	turns    map[string]*cachedTurn
+}
+
+// cachedTurn is the latest turn read for one session, and the turn count it
+// was read at. A newer turn count means the turn is new. A pointer keeps the
+// per-session map entry small, so a scan copies no turn it did not read.
+type cachedTurn struct {
+	turns int
+	turn  subagent.Turn
 }
 
 func (c *FailureCache) Recent(now time.Time, snapshot func() ([]subagent.Info, error), read func(string, int) (subagent.Turn, error)) (map[string]time.Time, error) {
@@ -297,11 +308,23 @@ func (c *FailureCache) Recent(now time.Time, snapshot func() ([]subagent.Info, e
 	if err != nil {
 		return nil, err
 	}
+	// Rebuilding turns from the snapshot forgets sessions that left it.
+	turns := make(map[string]*cachedTurn, len(infos))
 	latest := map[string]subagent.Turn{}
 	for _, info := range infos {
-		t, err := read(info.ID, info.Turns)
+		cached := c.turns[info.ID]
+		if cached == nil || cached.turns != info.Turns || !cached.turn.Done() {
+			t, err := read(info.ID, info.Turns)
+			if err != nil {
+				// Not kept, so the next scan reads this session again.
+				continue
+			}
+			cached = &cachedTurn{turns: info.Turns, turn: t}
+		}
+		turns[info.ID] = cached
+		t := cached.turn
 		failed := t.Status == subagent.TurnError && unavailable(t)
-		if err != nil || (t.Status != subagent.TurnOK && !failed) {
+		if t.Status != subagent.TurnOK && !failed {
 			continue
 		}
 		name := t.Profile
@@ -320,7 +343,7 @@ func (c *FailureCache) Recent(now time.Time, snapshot func() ([]subagent.Info, e
 			}
 		}
 	}
-	c.checked, c.failures = now, failures
+	c.checked, c.failures, c.turns = now, failures, turns
 	return MergeFailures(failures), nil
 }
 
