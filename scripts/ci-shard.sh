@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Prints the Go packages that one CI shard tests: scripts/ci-shard.sh INDEX COUNT.
+# Prints the Go packages that one CI shard tests: scripts/ci-shard.sh INDEX COUNT [whole|sliced].
+# "whole" (the default) prints packages that one shard runs in full. "sliced" prints
+# packages that several shards split with CI_SLICE (see scripts/ci-slice.sh).
 # The slowest packages (measured in CI) get fixed shards. Every other package
 # goes to a spread shard by its position in the sorted list, so a new package
 # is always tested by exactly one shard.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 index=${1:?usage: scripts/ci-shard.sh INDEX COUNT}
-count=${2:?usage: scripts/ci-shard.sh INDEX COUNT}
+count=${2:?usage: scripts/ci-shard.sh INDEX COUNT [whole|sliced]}
+mode=${3:-whole}
+case $mode in
+  whole|sliced) ;;
+  *) echo "usage: scripts/ci-shard.sh INDEX COUNT [whole|sliced]" >&2; exit 2 ;;
+esac
 mod=$(go list -m)
 # Package suffix, shard indexes (comma-separated). A sliced package runs its
 # assigned tests on each shard (see CI_SLICE in scripts/ci.sh). Use COUNT 10.
@@ -46,6 +53,8 @@ while read -r pkg; do
     want=${spread[$((n % ${#spread[@]}))]}
     n=$((n + 1))
   fi
+  if [[ $mode == sliced && $want != *,* ]]; then continue; fi
+  if [[ $mode == whole && $want == *,* ]]; then continue; fi
   for w in ${want//,/ }; do
     if ((w % count == index)); then echo "$pkg"; fi
   done
