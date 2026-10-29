@@ -51,6 +51,7 @@ const admissionSchema = `CREATE TABLE admissions (
 	cpus INTEGER NOT NULL DEFAULT 0,
 	memory_mib INTEGER NOT NULL DEFAULT 0,
 	heavy INTEGER NOT NULL DEFAULT 0,
+	ahead INTEGER NOT NULL DEFAULT 0,
 	port INTEGER NOT NULL DEFAULT -1,
 	state TEXT NOT NULL CHECK(state IN ('waiting','admitted','released')),
 	reason TEXT NOT NULL DEFAULT '',
@@ -79,6 +80,11 @@ type Demand struct {
 	MemoryMiB int64
 	// Timeout is the check deadline, starting when the check is admitted.
 	Timeout time.Duration
+	// Ahead moves this unit in front of its own room's other waiting work.
+	// Local CI sets it for merge-trial and integration-sync checks, so a
+	// merge queue never waits behind its room's pull-request checks. Other
+	// rooms keep their turns, and each list stays oldest first.
+	Ahead bool
 }
 
 // Admission is the engine-side queue of every node: the one place that
@@ -144,12 +150,13 @@ func (a Admission) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := database.Migrate(db, "admissions.version", 1, func(conn *sql.Conn, old int) error {
+	if err := database.Migrate(db, "admissions.version", 2, func(conn *sql.Conn, old int) error {
 		if old == 0 {
 			_, err := conn.ExecContext(context.Background(), admissionSchema)
 			return err
 		}
-		return nil
+		_, err := conn.ExecContext(context.Background(), "ALTER TABLE admissions ADD COLUMN ahead INTEGER NOT NULL DEFAULT 0")
+		return err
 	}); err != nil {
 		return nil, err
 	}
@@ -175,17 +182,17 @@ type admissionRow struct {
 	Created time.Time
 }
 
-const admissionColumns = "id,node,room,cpus,memory_mib,heavy,port,state,reason,engine,owner_pid,owner_start,timeout_ms,expires_ms,created_ms"
+const admissionColumns = "id,node,room,cpus,memory_mib,heavy,ahead,port,state,reason,engine,owner_pid,owner_start,timeout_ms,expires_ms,created_ms"
 
 func scanAdmission(row interface{ Scan(...any) error }) (admissionRow, error) {
 	var r admissionRow
-	var heavy, engine int
+	var heavy, ahead, engine int
 	var created, timeout, expires int64
-	if err := row.Scan(&r.ID, &r.Node, &r.Room, &r.CPUs, &r.MemoryMiB, &heavy, &r.Port, &r.State, &r.Reason, &engine, &r.PID, &r.Start, &timeout, &expires, &created); err != nil {
+	if err := row.Scan(&r.ID, &r.Node, &r.Room, &r.CPUs, &r.MemoryMiB, &heavy, &ahead, &r.Port, &r.State, &r.Reason, &engine, &r.PID, &r.Start, &timeout, &expires, &created); err != nil {
 		return admissionRow{}, err
 	}
 	r.Timeout = time.Duration(timeout) * time.Millisecond
-	r.Heavy, r.Engine = heavy == 1, engine == 1
+	r.Heavy, r.Engine, r.Ahead = heavy == 1, engine == 1, ahead == 1
 	r.Created = time.UnixMilli(created)
 	return r, nil
 }
@@ -275,8 +282,8 @@ func (a Admission) Hold(ctx context.Context, d Demand) (int, error) {
 		if a.Engine {
 			pid, start = 0, 0
 		}
-		_, err = conn.ExecContext(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, port=excluded.port, state='admitted', reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
-			d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), port, "admitted", "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
+		_, err = conn.ExecContext(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, ahead=excluded.ahead, port=excluded.port, state='admitted', reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
+			d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), boolInt(d.Ahead), port, "admitted", "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
 		return err
 	})
 	return port, err
@@ -376,8 +383,8 @@ func (a Admission) upsert(ctx context.Context, d Demand, admitted bool) error {
 	if admitted {
 		state = "admitted"
 	}
-	return a.write(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, state=excluded.state, reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
-		d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), -1, state, "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
+	return a.write(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, ahead=excluded.ahead, state=excluded.state, reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
+		d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), boolInt(d.Ahead), -1, state, "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
 }
 
 // nodeQueue is one node's queue in one shape: the checks and jobs that wait
@@ -892,6 +899,22 @@ func orderWaiters(waiters []waiter) []waiter {
 			rooms = append(rooms, unit.demand.Room)
 		}
 		byRoom[unit.demand.Room] = append(byRoom[unit.demand.Room], unit)
+	}
+	// A room's ahead work, a merge trial's checks, lines up in front of that
+	// room's other waiters, so the merge queue it holds never waits behind its
+	// own room's pull-request checks. Each list stays oldest first, rooms keep
+	// taking turns, and jobs keep their order.
+	for room, units := range byRoom {
+		ahead := make([]waiter, 0, len(units))
+		rest := make([]waiter, 0, len(units))
+		for _, unit := range units {
+			if unit.demand.Ahead {
+				ahead = append(ahead, unit)
+			} else {
+				rest = append(rest, unit)
+			}
+		}
+		byRoom[room] = append(ahead, rest...)
 	}
 	out := make([]waiter, 0, len(ordered))
 	for round := 0; len(out) < len(ordered); round++ {
