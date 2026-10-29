@@ -16,6 +16,8 @@ func TestUpstreamBaseStartsFromRemoteDefaultBranch(t *testing.T) {
 	git(t, upstream, "commit", "--allow-empty", "-m", "upstream ahead")
 	ahead := git(t, upstream, "rev-parse", "HEAD")
 	git(t, repo, "remote", "add", "parent", upstream)
+	// A local branch with the same short name must not win over the remote.
+	git(t, repo, "branch", "parent/main", "HEAD")
 	identity, err := repoid.RemoteIdentity(repo, upstream)
 	if err != nil {
 		t.Fatal(err)
@@ -24,8 +26,8 @@ func TestUpstreamBaseStartsFromRemoteDefaultBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base != "parent/main" {
-		t.Fatalf("base = %q, want parent/main", base)
+	if base != "refs/remotes/parent/main" {
+		t.Fatalf("base = %q, want refs/remotes/parent/main", base)
 	}
 	rec, err := NewFor(ctx, repo, "from-parent", base, "owner", "")
 	if err != nil {
