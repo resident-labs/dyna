@@ -22,7 +22,8 @@ func WithAgentText(ctx context.Context) context.Context {
 	return context.WithValue(ctx, agentTextKey{}, true)
 }
 
-func isAgentText(ctx context.Context) bool {
+// IsAgentText reports whether ctx was marked by WithAgentText.
+func IsAgentText(ctx context.Context) bool {
 	agent, _ := ctx.Value(agentTextKey{}).(bool)
 	return agent
 }
@@ -132,7 +133,7 @@ func publicText(cmd *exec.Cmd) (string, error) {
 // refuseOwnerIdentity refuses a title or body that contains a saved sign-in
 // identity of the owner (D-501). Issues and pull requests are often public.
 func refuseOwnerIdentity(ctx context.Context, cmd *exec.Cmd) error {
-	if !isAgentText(ctx) {
+	if !IsAgentText(ctx) {
 		return nil
 	}
 	text, err := publicText(cmd)
