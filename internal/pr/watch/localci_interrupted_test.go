@@ -1,9 +1,11 @@
 package watch
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
 )
 
@@ -118,14 +120,15 @@ func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
 	stopped := stoppedRun()
 	stopped.Repo, stopped.SHA = repo, head
 	ci.results[head] = stopped
-	ci.nodes = []localci.Node{{Name: "hermes", Slots: 1, Enabled: true}}
+	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, CPUs: 2}}
 	job := registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true}
 
-	// The only machine is busy, so the retry cannot start and must not be spent.
-	runs := e.s.nodeRuns()
-	runs.Lock()
-	runs.runs["another-head"] = &registeredCIRun{node: "hermes", slots: 1, head: "another", local: true, cancel: func() {}, stopped: make(chan struct{})}
-	runs.Unlock()
+	// The only machine's node queue is full, so the retry cannot start and must
+	// not be spent.
+	queue := jobs.Admission{DataDir: filepath.Dir(e.s.Store.Root)}
+	if _, err := queue.Hold(t.Context(), jobs.Demand{Node: "hermes", ID: "busy", CPUs: 2}); err != nil {
+		t.Fatal(err)
+	}
 	started, err := e.s.startRegisteredCI(t.Context(), job)
 	if err != nil {
 		t.Fatal(err)
@@ -137,11 +140,11 @@ func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
 		t.Fatal("a retry that never started was spent")
 	}
 
-	// Free the slot: the retry starts, and the replacement is what carries the
+	// Free the queue: the retry starts, and the replacement is what carries the
 	// marker.
-	runs.Lock()
-	delete(runs.runs, "another-head")
-	runs.Unlock()
+	if err := queue.Release(t.Context(), "hermes", "busy"); err != nil {
+		t.Fatal(err)
+	}
 	ci.started = make(chan struct{}, 1)
 	ci.release = make(chan struct{})
 	ci.saved = make(chan struct{}, 1)

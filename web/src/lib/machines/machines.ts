@@ -41,16 +41,15 @@ export function count(n: number, noun: string): string {
 
 // summaryParts lists the counts a machine row shows. A machine reports only
 // what it has: no CI role means no CI part, and a remote machine reports no
-// live figure until the probe reads it. A CI machine always shows its slots,
-// with the used count once the CI work reports one.
+// live figure until the probe reads it. A CI machine always shows its queue,
+// with the waiting count once the node queue reports one.
 export function summaryParts(machine: MachineSummary): string[] {
   const parts: string[] = []
   if (machine.agents !== undefined) parts.push(count(machine.agents, 'agent'))
-  // A disabled machine takes no CI work, so it reports no slots at all. The
-  // noun follows the total: "CI 1 slot", "CI 6/16 slots".
+  // A disabled machine takes no CI work, so it reports no queue figure.
   if (machine.roles.includes('ci')) {
-    const slots = machine.ci ? `CI ${machine.ci.used}/${count(machine.ci.slots, 'slot')}` : `CI ${count(machine.ciSlots, 'slot')}`
-    parts.push(machine.enabled ? slots : 'CI off')
+    const queue = machine.ci ? `CI ${count(machine.ci.running, 'run')}${machine.ci.waiting > 0 ? `, ${machine.ci.waiting} waiting` : ''}` : 'CI'
+    parts.push(machine.enabled ? queue : 'CI off')
   }
   if (machine.computers !== undefined) parts.push(count(machine.computers, 'computer'))
   return parts

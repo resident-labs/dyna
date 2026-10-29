@@ -42,10 +42,11 @@ const (
 	MachineLowDisk MachineStatusReason = "low-disk"
 )
 
-// MachineCISlots is the CI work a machine runs now, out of its slots.
-type MachineCISlots struct {
-	Used  int `json:"used"`
-	Slots int `json:"slots"`
+// MachineCIWork is the CI work a machine runs now and the work that waits
+// for room on it, checks and jobs both, from the node's shared queue.
+type MachineCIWork struct {
+	Running int `json:"running"`
+	Waiting int `json:"waiting"`
 }
 
 // MachineCIRun is one local CI run in flight on a machine. Title and URL name
@@ -71,7 +72,6 @@ type MachineCIRun struct {
 	Branch  string    `json:"branch,omitempty"`
 	Title   string    `json:"title"`
 	URL     string    `json:"url"`
-	Slots   int       `json:"slots"`
 	Trial   bool      `json:"trial"`
 	Suites  []string  `json:"suites,omitempty"`
 	Started time.Time `json:"started"`
@@ -98,14 +98,18 @@ type MachineSummary struct {
 	Status          MachineStatus   `json:"status"`
 	CISlots         int             `json:"ciSlots"`
 	AllowHostChecks bool            `json:"allowHostChecks"`
-	Rooms           []string        `json:"rooms,omitempty"`
+	// MaxIOHeavy and MaxDiskPercent are the node queue's stored limits; zero
+	// keeps each default.
+	MaxIOHeavy     *int     `json:"maxIOHeavy,omitempty"`
+	MaxDiskPercent *int     `json:"maxDiskPercent,omitempty"`
+	Rooms          []string `json:"rooms,omitempty"`
 	// Suites limits the local CI work the machine takes to those suites; empty
 	// means every suite.
-	Suites    []string        `json:"suites,omitempty"`
-	CPU       *int            `json:"cpu,omitempty"`
-	Agents    *int            `json:"agents,omitempty"`
-	Computers *int            `json:"computers,omitempty"`
-	CI        *MachineCISlots `json:"ci,omitempty"`
+	Suites    []string       `json:"suites,omitempty"`
+	CPU       *int           `json:"cpu,omitempty"`
+	Agents    *int           `json:"agents,omitempty"`
+	Computers *int           `json:"computers,omitempty"`
+	CI        *MachineCIWork `json:"ci,omitempty"`
 }
 
 // MachineHarness is one agent harness installed on a machine and its version.
@@ -203,6 +207,12 @@ type MachinePatch struct {
 	// CheckTmp is the folder that holds each host check's temporary folder on
 	// this machine; an empty value means the node's temporary directory.
 	CheckTmp *string `json:"checkTmp,omitempty"`
+	// MaxIOHeavy caps how many IO-heavy jobs and checks this node runs at
+	// once; zero keeps the default of one per sixteen probed CPUs.
+	MaxIOHeavy *int `json:"maxIOHeavy,omitempty"`
+	// MaxDiskPercent is the used-disk percent above which this node admits no
+	// new work; zero keeps the default of 90.
+	MaxDiskPercent *int `json:"maxDiskPercent,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -230,6 +240,9 @@ type MachineAPI struct {
 	// takes from its scheduler. nil means the engine runs no local CI, so a CI
 	// machine keeps showing its slots and no use.
 	CI func() []MachineCIRun
+	// CIQueue reads a node's shared queue: how much work it runs now and how
+	// much waits for room. Nil leaves the running count to the CI runs.
+	CIQueue func(node string) (running, waiting int)
 	// Prober reads a machine when the owner asks for a probe. A nil Prober
 	// reads it through this registry with no load sampler of this engine.
 	Prober *machines.Prober
@@ -360,6 +373,12 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.SSHConnectTimeoutSeconds != nil {
 		m.SSHConnectTimeout = time.Duration(*patch.SSHConnectTimeoutSeconds) * time.Second
 	}
+	if patch.MaxIOHeavy != nil {
+		m.MaxIOHeavy = *patch.MaxIOHeavy
+	}
+	if patch.MaxDiskPercent != nil {
+		m.MaxDiskPercent = *patch.MaxDiskPercent
+	}
 	if m.HasRole(machines.RoleCI) && m.CISlots < 1 && patch.CISlots == nil {
 		m.CISlots = 1
 	}
@@ -485,7 +504,11 @@ func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[stri
 	}
 	if m.HasRole(machines.RoleCI) {
 		runs := ci[m.Name]
-		out.CI = &MachineCISlots{Used: ciUsedSlots(runs), Slots: m.CISlots}
+		running, waiting := len(runs), 0
+		if a.CIQueue != nil {
+			running, waiting = a.CIQueue(m.Name)
+		}
+		out.CI = &MachineCIWork{Running: running, Waiting: waiting}
 		out.CIRuns = runs
 	}
 	// The reason explains a degraded health and nothing else, so a machine
@@ -521,15 +544,6 @@ func (a MachineAPI) ciRuns() map[string][]MachineCIRun {
 		byMachine[run.Machine] = append(byMachine[run.Machine], run)
 	}
 	return byMachine
-}
-
-// ciUsedSlots adds the slots the runs in flight reserved on one machine.
-func ciUsedSlots(runs []MachineCIRun) int {
-	used := 0
-	for _, run := range runs {
-		used += run.Slots
-	}
-	return used
 }
 
 // hostChecksAllowedBy words who allows host checks on m, so the page names the
@@ -571,6 +585,8 @@ func machineSummary(m machines.Machine) MachineSummary {
 		AllowHostChecks: m.HasHostChecksGrants(),
 		Rooms:           m.Rooms,
 		Suites:          m.Suites,
+		MaxIOHeavy:      &m.MaxIOHeavy,
+		MaxDiskPercent:  &m.MaxDiskPercent,
 	}
 	if !m.Local && m.Load.CPUPercent != nil {
 		cpu := int(math.Round(*m.Load.CPUPercent))

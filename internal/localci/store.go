@@ -216,9 +216,6 @@ func (n Node) Validate() error {
 	if err := machines.ValidateName(n.Name); err != nil {
 		return err
 	}
-	if n.Slots < 1 {
-		return errors.New("CI node slots must be positive")
-	}
 	if n.SSH != "" {
 		return machines.ValidateSSH(n.SSH)
 	}

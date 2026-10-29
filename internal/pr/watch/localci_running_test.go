@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/pr/state"
@@ -132,7 +133,7 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 		t.Fatalf("running CI = %+v", list)
 	}
 	got := list[0]
-	if got.Machine != "hermes" || got.Slots != registeredCIRunSlots || got.Repo != "owner/repo" || got.Number != 17 || got.Head != head[:7] || !got.Trial || !got.Started.Equal(started) {
+	if got.Machine != "hermes" || got.Repo != "owner/repo" || got.Number != 17 || got.Head != head[:7] || !got.Trial || !got.Started.Equal(started) {
 		t.Fatalf("running CI = %+v", got)
 	}
 	if got.Title != record.Title || got.URL != record.URL {
@@ -254,12 +255,12 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	}
 }
 
-// oneSlotRegistry offers one machine with a single slot, so the queue order
-// decides which head runs.
+// oneSlotRegistry offers one two-CPU machine, so the queue order decides
+// which head runs.
 type oneSlotRegistry struct{ runningCIRegistry }
 
 func (r *oneSlotRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "hermes", Slots: 1, Enabled: true}}, nil
+	return []localci.Node{{Name: "hermes", Enabled: true, CPUs: 2}}, nil
 }
 
 // hostedJob is a tracked pull request record that shares the local repository, so
@@ -281,10 +282,10 @@ func hostedJob(t *testing.T, e *testEnv, local Record) *Record {
 	return &r
 }
 
-// One slot is enough for the local trial: a tracked pull request head never
-// queues for a machine, so a backlog of pull requests cannot starve a local
-// merge.
-func TestLocalTrialTakesTheOnlySlotWithoutPullRequestHeads(t *testing.T) {
+// A full node queue keeps a pull request head from preparing, and the local
+// trial still runs once the node frees: a pull request head never queues for a
+// machine, so a backlog of pull requests cannot starve a local merge.
+func TestLocalTrialRunsWhilePullRequestHeadsWaitForAFullNode(t *testing.T) {
 	e, record, dir, ci := localCIEnv(t)
 	e.s.LocalCIRegistry = &oneSlotRegistry{}
 	hostedJob(t, e, record)
@@ -298,6 +299,11 @@ func TestLocalTrialTakesTheOnlySlotWithoutPullRequestHeads(t *testing.T) {
 		}
 		e.s.CancelLocalCI()
 	})
+	// Other work holds the node's whole queue.
+	queue := jobs.Admission{DataDir: filepath.Dir(e.s.Store.Root)}
+	if _, err := queue.Hold(t.Context(), jobs.Demand{Node: "hermes", ID: "occupied", CPUs: 2}); err != nil {
+		t.Fatal(err)
+	}
 	st, err := e.s.Store.Read()
 	if err != nil {
 		t.Fatal(err)
@@ -307,9 +313,17 @@ func TestLocalTrialTakesTheOnlySlotWithoutPullRequestHeads(t *testing.T) {
 	if err := e.s.scheduleRegisteredCI(context.Background(), st); err != nil {
 		t.Fatal(err)
 	}
-	// The queue holds the trial alone, and the pull request head is not in it.
-	if jobs := registeredCIJobs(st); len(jobs) != 1 || !jobs[0].trial {
-		t.Fatalf("queue holds %+v, want the local trial alone", jobs)
+	// The pull request head prepared nothing on the full node: no run, and no
+	// contact with GitHub.
+	if runs := e.s.RunningCI(); len(runs) != 0 {
+		t.Fatalf("a full node started %+v", runs)
+	}
+	// The node frees, and the trial takes it through its own reader.
+	if err := queue.Release(t.Context(), "hermes", "occupied"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.localTrialCI(context.Background(), record, trialHead); err != nil {
+		t.Fatal(err)
 	}
 	runs := e.s.RunningCI()
 	if len(runs) != 1 || runs[0].Head != trialHead[:7] || runs[0].Kind != RunningCILocalChange {
