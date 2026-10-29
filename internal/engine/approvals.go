@@ -15,29 +15,25 @@ import (
 
 func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput) (approvals.Request, error) {
 	actor := authority.Of(ctx)
-	rec, err := s.rooms.Notify.Rooms.Resolve(actor.Room)
-	if err != nil {
-		return approvals.Request{}, err
-	}
-	stored := ghclient.AttributeApproval(approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files}, rec.Attribution)
-	if err := ghclient.ValidateFileSnapshots(stored.Argv, stored.Files); err != nil {
+	if err := ghclient.ValidateFileSnapshots(in.Argv, in.Files); err != nil {
 		return approvals.Request{}, err
 	}
 	ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, actor.Room), s.rooms.Notify.Rooms)
-	class, err := ghclient.ClassifyForApproval(ctx, "", stored.Cwd, stored.Argv)
+	class, err := ghclient.ClassifyForApproval(ctx, "", in.Cwd, in.Argv)
 	if err != nil {
 		return approvals.Request{}, err
 	}
 	if class == approvals.ClassRead {
 		return approvals.Request{}, errors.New("read commands do not need approval")
 	}
+	stored := approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files}
 	payload, err := json.Marshal(stored)
 	if err != nil {
 		return approvals.Request{}, err
 	}
 	return s.rooms.Approvals.Create(ctx, actor, approvals.CreateInput{
-		Kind: approvals.KindGH, Class: class, Payload: payload, Repository: stored.Repo,
-		Command: "gh " + strings.Join(stored.Argv, " "), Title: approvalArgument(stored.Argv, "--title"), Body: ghclient.DisplayApprovalBody(stored),
+		Kind: approvals.KindGH, Class: class, Payload: payload, Repository: in.Repo,
+		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: ghclient.DisplayApprovalBody(stored),
 	})
 }
 

@@ -27,7 +27,7 @@ func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
 			return approvals.Result{}, err
 		}
 		defer cleanup()
-		ctx = ghclient.WithAgentText(ghclient.WithRooms(ghclient.WithRoom(ctx, r.Room), rooms))
+		ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, r.Room), rooms)
 		cmd := ghclient.Command(ctx, "", payload.Cwd, argv...)
 		stdout, stderr := boundedio.New(1024*1024), boundedio.New(64*1024)
 		cmd.Stdout, cmd.Stderr = stdout, stderr
@@ -42,9 +42,13 @@ func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
 		default:
 			code = 1
 		}
-		stdoutText := string(stdout.Bytes())
-		output := approvalOutput(stdoutText, string(stderr.Bytes()))
-		result := approvals.Result{ExitCode: &code, Output: output}
+		stdoutText, stderrText := string(stdout.Bytes()), string(stderr.Bytes())
+		result := approvals.Result{
+			ExitCode: &code,
+			Output:   approvalOutput(stdoutText, stderrText),
+			Stdout:   approvalOutput(stdoutText, ""),
+			Stderr:   approvalOutput("", stderrText),
+		}
 		for _, field := range strings.Fields(stdoutText) {
 			if strings.HasPrefix(field, "https://") || strings.HasPrefix(field, "http://") {
 				result.URL = field

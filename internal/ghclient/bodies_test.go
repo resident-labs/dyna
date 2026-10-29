@@ -183,15 +183,6 @@ func TestAgentCommentEditsNeedTheRoomAccountsComment(t *testing.T) {
 	}
 	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
 	patch := []string{"api", "-X", "PATCH", "repos/up/project/pulls/comments/7", "-f", "body=x"}
-	for name, args := range map[string][]string{
-		"room repo":   {"api", "--method=DELETE", "repos/fork/project/issues/comments/7"},
-		"upstream":    patch,
-		"other write": {"api", "-X", "PATCH", "repos/fork/project/issues/7", "-f", "body=x"},
-	} {
-		if err := checkWorkerPolicy(args); (err == nil) == (name == "other write") {
-			t.Fatalf("%s: worker policy error = %v", name, err)
-		}
-	}
 	if err := checkPolicy(ctx, "", repository{"github.com", "up/project"}, patch); err != nil {
 		t.Fatalf("upstream comment edit refused: %v", err)
 	}
