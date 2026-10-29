@@ -1,6 +1,10 @@
 package room
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 const (
 	ownerSession = "ses_20261023-120000-aaaaaaaa"
@@ -126,6 +130,69 @@ func TestHomeForDefaultsToTheRoom(t *testing.T) {
 	}
 	if got := (Conversation("")).Home(); got != ConversationRoom {
 		t.Fatalf("empty home = %q, want the room feed", got)
+	}
+}
+
+// OtherHomesOf reads the homes of the posts it names, not every non-feed home of
+// the room. A check of owner posts returns the homes of the named DM posts, skips
+// the room-feed post and the unknown post, and looks each post up by its key.
+func TestOtherHomesOfReadsOnlyTheNamedPosts(t *testing.T) {
+	s := recordsStore(t)
+	rec, err := s.Create(CreateInput{Name: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm := DMConversation(ownerSession)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"msg_dm00007", "msg_dm01999"} {
+		if _, err := tx.Exec(`INSERT INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, ?, 1, ?, '')`,
+			rec.ID, id, dm.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, 'msg_feed', 1, 'room', '')`, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.OtherHomesOf(rec.ID, []string{"msg_dm00007", "msg_dm01999", "msg_feed", "msg_missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]Conversation{"msg_dm00007": dm, "msg_dm01999": dm}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("homes = %v, want %v", got, want)
+	}
+	if empty, err := s.OtherHomesOf(rec.ID, nil); err != nil || len(empty) != 0 {
+		t.Fatalf("no IDs: homes = %v, err = %v", empty, err)
+	}
+
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+otherHomesOfQuery(2), rec.ID, ConversationRoom.String(), "msg_a", "msg_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(detail, "SCAN") {
+			t.Fatalf("query plan scans the room: %q", detail)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }
 
