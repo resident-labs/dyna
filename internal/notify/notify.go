@@ -499,15 +499,18 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	// lands in the chat the owner wrote in.
 	var origin room.Record
 	originReply := ""
-	crossRoom := in.Sender.Kind == SenderOwner && in.Sender.Human && in.Event == nil && in.Sender.Room != "" && in.Sender.Room != res.rec.Name
+	crossRoom := (in.Sender.Kind == SenderSession || in.Sender.Kind == SenderOwner && in.Sender.Human) && in.Event == nil && in.Sender.Room != "" && in.Sender.Room != res.rec.Name
 	if crossRoom {
 		if origin, err = s.Rooms.Resolve(in.Sender.Room); err != nil {
 			return Result{}, err
 		}
-		res.from, senderRoomID = origin.Name, origin.ID
-		// The writer's conversation and reply target live in the origin room.
+		senderRoomID = origin.ID
 		originReply = in.ReplyTo
-		in.Conversation, in.ReplyTo = "", ""
+		if in.Sender.Kind == SenderOwner {
+			// The writer's conversation and reply target live in the origin room.
+			res.from = origin.Name
+			in.Conversation, in.ReplyTo = "", ""
+		}
 	}
 	var msg room.Message
 	if in.Event != nil {
@@ -542,7 +545,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		// The sender's chat shows the post at once. The copy shares the post's
 		// ID, so a reply to the post answers it in the sender's room too. It
 		// wakes nobody: the recipients read the post in their own room.
-		if _, err := s.Rooms.Post(origin.ID, room.PostInput{ID: msg.ID, From: origin.Name, Human: true, To: res.addrs(), Via: res.via, ReplyTo: originReply,
+		if _, err := s.Rooms.Post(origin.ID, room.PostInput{ID: msg.ID, From: res.from, Human: in.Sender.Human, To: res.addrs(), Via: res.via, ReplyTo: originReply,
 			Text: text, Attachments: atts, References: in.References}); err != nil {
 			out.Deliveries = append(out.Deliveries, Delivery{To: origin.Name, Delivery: "failed", Error: "the post was sent, but its copy in " + origin.Name + " was not saved: " + err.Error()})
 		}

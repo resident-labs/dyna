@@ -355,8 +355,39 @@ func TestCrossRoomPostLivesInRecipientRoom(t *testing.T) {
 	if res.Message.RoomID != f.b.ID || res.Message.From != f.a.Name+":decoder" {
 		t.Fatalf("message = %#v", res.Message)
 	}
-	if msgs, _ := f.svc.Rooms.Messages(f.a.ID); len(msgs) != 0 {
-		t.Fatalf("sender room stored %#v", msgs)
+	if msgs, _ := f.svc.Rooms.Messages(f.a.ID); len(msgs) != 1 || msgs[0].ID != res.Message.ID {
+		t.Fatalf("sender room stored %#v, want one copy of %s", msgs, res.Message.ID)
+	}
+}
+
+// A session writes from room a to a whole room b. Room a keeps the same single
+// copy, and the copy delivers nothing.
+func TestSessionPostToWholeRoomShowsInSenderRoom(t *testing.T) {
+	f := newFixture(t)
+	sent, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name}, Text: "hello room"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := f.svc.Rooms.Messages(f.a.ID)
+	if len(msgs) != 1 || msgs[0].ID != sent.Message.ID || !reflect.DeepEqual(msgs[0].To, []string{f.b.Name}) || msgs[0].Wake {
+		t.Fatalf("sender room = %#v", msgs)
+	}
+}
+
+// A session writes from room a to a session of room b. The post lives in b.
+// Room a keeps a copy with the same ID, and the copy delivers nothing.
+func TestSessionCrossRoomPostShowsInSenderRoom(t *testing.T) {
+	f := newFixture(t)
+	sent, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, Text: "hello other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied, err := f.svc.Rooms.Message(f.a.ID, sent.Message.ID)
+	if err != nil || copied.Text != "hello other" || copied.From != f.a.Name+":decoder" || !reflect.DeepEqual(copied.To, []string{f.b.Name + ":other"}) || !reflect.DeepEqual(copied.Via, []string{"@" + f.b.Name + ":other"}) || copied.Wake {
+		t.Fatalf("copy in the sender's room = %#v, %v", copied, err)
+	}
+	if len(sent.Deliveries) != 1 || sent.Deliveries[0].To != f.b.Name+":other" {
+		t.Fatalf("deliveries = %#v", sent.Deliveries)
 	}
 }
 
