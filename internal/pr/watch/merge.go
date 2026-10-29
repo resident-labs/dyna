@@ -174,6 +174,19 @@ func upstreamPR(r Record, upstreams RoomUpstreams) bool {
 	return false
 }
 
+// readOnlyUpstreamPR reports an upstream pull request from a fork other than the
+// room's own repository. Dyna only reads it, so it sends no CI notes about it.
+func (s *Service) readOnlyUpstreamPR(r Record) bool {
+	if !upstreamPR(r, s.roomUpstreams()) {
+		return false
+	}
+	rec, err := s.Notify.Rooms.Resolve(r.RoomID)
+	if err != nil {
+		return false
+	}
+	return !strings.EqualFold(rec.Repo, r.HeadRepo)
+}
+
 func mergeQueue(st State, where LocalTrialRooms, upstreams RoomUpstreams) []MergeQueueItem {
 	var queue []MergeQueueItem
 	for _, r := range st.Records {
