@@ -149,6 +149,40 @@ func TestWorktreeCleanupFollowsSweepsOnOddTurns(t *testing.T) {
 	}
 }
 
+// Each pass starts the sweeps at the next sweep, so a slow sweep cannot take the
+// reserve first on every pass. Scratch starts on turn 0 and archived runs on turn 1.
+func TestSweepsStartAtANewStepEachPass(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	old := gcWorktrees
+	gcWorktrees = func(context.Context, string, worktrees.GCOptions) ([]worktrees.Tree, error) { return nil, nil }
+	t.Cleanup(func() { gcWorktrees = old })
+	stepAt := func(result Result, name string) int {
+		for i, step := range result.Steps {
+			if step.Name == name {
+				return i
+			}
+		}
+		return -1
+	}
+	first, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepAt(first, "scratch") > stepAt(first, "archived runs") {
+		t.Fatalf("turn 0 steps = %+v, want scratch first", first.Steps)
+	}
+	second, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepAt(second, "archived runs") > stepAt(second, "scratch") {
+		t.Fatalf("turn 1 steps = %+v, want archived runs first", second.Steps)
+	}
+}
+
 // A repository whose removal runs out of time must name itself in the pass
 // report, so repeated skips are visible.
 func TestDeferredWorktreesAreNamedInPassReport(t *testing.T) {
