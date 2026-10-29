@@ -164,58 +164,46 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 	return p, r.Accounts.SelectForRepo(ctx, p.Harness, ProviderForModel(p.Harness, p.Model), p.Env[mode.EnvRoomID], p.RuntimeRepo, b.Executable)
 }
 
-// probeBeforeHeldSwitch runs in SelectProbeAccount just before the held switch.
-// Tests set it to interleave a concurrent switch.
-var probeBeforeHeldSwitch func()
+// turnAccount returns the account a turn of p runs on. A held-account probe pins
+// its own account, so the global selection that other turns read does not change.
+func (a *Accounts) turnAccount(harness string, provider store.Provider, p profile.Profile) (NativeAccount, error) {
+	if p.RuntimeAccount == "" {
+		return a.activeFor(harness, provider, p.Env[mode.EnvRoomID], p.RuntimeRepo)
+	}
+	n, err := a.Find(p.RuntimeAccount)
+	if err != nil {
+		return n, err
+	}
+	rules, err := a.rules()
+	if err != nil {
+		return n, err
+	}
+	if !rules.Allows(n.ID, p.RuntimeRepo) {
+		return n, fmt.Errorf("%w: the held %s account %s may not run in %s.", errScopeRefused, n.Provider, n.Label, repoName(p.RuntimeRepo))
+	}
+	return n, nil
+}
 
 // SelectProbeAccount runs before a health probe of p in dir. When a ready account
 // that runs p's provider and may run in dir's repo has a stated usage hold for p's
-// model, it makes that account active, so the probe runs that model on the account
-// whose limit the provider named. It returns that account's ID as heldID. The
-// returned restore makes the previously active account active again, but only
-// while the held account is still active: the check and the switch run in one
-// store transaction, so another switch cannot slip between them. Otherwise it
-// selects as SelectAccount does and heldID is "".
-func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, string, func(), error) {
-	noRestore := func() {}
+// model, it returns that account's ID as heldID and pins it on the returned
+// profile, so the probe runs that model on the account whose limit the provider
+// named. The global selection does not change. Otherwise it selects as
+// SelectAccount does and heldID is "".
+func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, string, error) {
 	provider := ProviderForModel(p.Harness, p.Model)
 	repo := RepoIdentity(ctx, dir)
 	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, provider, p.Model, repo, time.Now())
 	if err != nil {
-		return p, "", noRestore, err
+		return p, "", err
 	}
 	if !ok {
 		selected, err := r.SelectAccount(ctx, p, dir)
-		return selected, "", noRestore, err
+		return selected, "", err
 	}
 	p.RuntimeRepo = repo
-	b, _, err := (&FirstUse{Bundles: r.Bundles}).EnsureBundle(ctx, p.Harness, p.RuntimeVersion)
-	if err != nil {
-		return p, "", noRestore, err
-	}
-	if probeBeforeHeldSwitch != nil {
-		probeBeforeHeldSwitch()
-	}
-	// The previous account is read under the same lock as the held switch, so a
-	// switch that lands before it is the one the restore returns to.
-	var previousID string
-	err = r.Accounts.switchTo(ctx, held.ID, b.Executable, nil, func(active string) bool {
-		previousID = active
-		return true
-	})
-	if err != nil {
-		return p, "", noRestore, err
-	}
-	restore := func() {
-		// The held account must still be active. Any other switch keeps its choice.
-		err := r.Accounts.switchTo(context.WithoutCancel(ctx), previousID, b.Executable, nil, func(active string) bool {
-			return active == held.ID
-		})
-		if err != nil && !errors.Is(err, errSwitchKept) {
-			log.Printf("restore active account %s after a health probe: %v", previousID, err)
-		}
-	}
-	return p, held.ID, restore, nil
+	p.RuntimeAccount = held.ID
+	return p, held.ID, nil
 }
 
 // StatedHoldAccount returns the ready account that runs provider for harness,

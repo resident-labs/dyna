@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -67,27 +66,6 @@ func TestStatedHoldAccountMatchesOnlyTheHeldModel(t *testing.T) {
 	}
 }
 
-// A guarded switch refuses to replace an account that is no longer the one it
-// expects, and it changes no login state.
-func TestGuardedSwitchRefusesAConcurrentSwitch(t *testing.T) {
-	a := testAccounts(t)
-	expected := signedClaude(t, a, "personal", "aaaaaaaa-bbbb-cccc-dddd-000000000001")
-	moved := signedClaude(t, a, "other", "aaaaaaaa-bbbb-cccc-dddd-000000000003")
-	target := signedClaude(t, a, "work", "aaaaaaaa-bbbb-cccc-dddd-000000000002")
-	if err := a.Switch(context.Background(), moved.ID, "/fake/native"); err != nil {
-		t.Fatal(err)
-	}
-	err := a.switchTo(context.Background(), target.ID, "/fake/native", nil, func(active string) bool {
-		return active == expected.ID
-	})
-	if !errors.Is(err, errSwitchKept) {
-		t.Fatalf("guarded switch error = %v; want errSwitchKept", err)
-	}
-	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != moved.ID {
-		t.Fatalf("refused switch moved the active account to %s; want %s", active.ID, moved.ID)
-	}
-}
-
 // A held account whose repo rules refuse the probe's repo is not probed there,
 // because the probe would fail the account check before it could run.
 func TestStatedHoldAccountSkipsAnAccountTheRepoRefuses(t *testing.T) {
@@ -109,11 +87,10 @@ func TestStatedHoldAccountSkipsAnAccountTheRepoRefuses(t *testing.T) {
 	}
 }
 
-// The probe runs on the held account, then the account that was active before
-// the probe becomes active again, so later turns keep their account.
-func TestProbeRestoresThePreviousActiveAccount(t *testing.T) {
+// A held-account probe runs its turn on the held account. The global selection
+// that other turns read does not change while the probe runs.
+func TestHeldProbePinsTheHeldAccountWithoutSwitching(t *testing.T) {
 	a, personal, work := scopedClaudeAccounts(t)
-	// The work account's repo rules would refuse a probe with no repo, so clear them.
 	if err := a.SetRepos(work.ID, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -126,82 +103,24 @@ func TestProbeRestoresThePreviousActiveAccount(t *testing.T) {
 	}
 	r := &Runtime{Accounts: a, Bundles: manager(t)}
 	p := profile.Profile{Harness: "claude-code", RuntimeVersion: "1.2.3"}
-	_, heldID, restore, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
+	selected, heldID, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if heldID != work.ID {
 		t.Fatalf("held account = %s, want %s", heldID, work.ID)
 	}
-	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != work.ID {
-		t.Fatalf("probe ran on %s, want the held account %s", active.ID, work.ID)
-	}
-	restore()
 	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != personal.ID {
-		t.Fatalf("after the probe, active = %s; want the previous account %s", active.ID, personal.ID)
+		t.Fatalf("probe moved the global selection to %s; want %s", active.ID, personal.ID)
 	}
-}
-
-// A switch that lands after the probe reads its previous account and before it
-// switches to the held account is the previous account for the restore. The
-// restore must not put back the account that was active before that switch.
-func TestProbeRestoreKeepsASwitchBeforeTheHeldSwitch(t *testing.T) {
-	a, _, work := scopedClaudeAccounts(t)
-	if err := a.SetRepos(work.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	s, err := reposcope.Open(filepath.Dir(a.Root))
+	turn, err := a.turnAccount("claude-code", store.ProviderAnthropic, selected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkReset(work.ID, time.Now().Add(3*time.Hour)); err != nil {
-		t.Fatal(err)
+	if turn.ID != work.ID {
+		t.Fatalf("probe turn runs on %s, want the held account %s", turn.ID, work.ID)
 	}
-	other := signedClaude(t, a, "other", "aaaaaaaa-bbbb-cccc-dddd-000000000003")
-	probeBeforeHeldSwitch = func() {
-		if err := a.Switch(context.Background(), other.ID, "/fake/native"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	defer func() { probeBeforeHeldSwitch = nil }()
-	r := &Runtime{Accounts: a, Bundles: manager(t)}
-	p := profile.Profile{Harness: "claude-code", RuntimeVersion: "1.2.3"}
-	_, _, restore, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	restore()
-	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != other.ID {
-		t.Fatalf("after the restore, active = %s; want the switch made before the probe, %s", active.ID, other.ID)
-	}
-}
-
-// A switch made by another turn during the probe stays active after the restore,
-// so the restore never overwrites a choice it did not make.
-func TestProbeRestoreKeepsAConcurrentSwitch(t *testing.T) {
-	a, _, work := scopedClaudeAccounts(t)
-	if err := a.SetRepos(work.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	s, err := reposcope.Open(filepath.Dir(a.Root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.MarkReset(work.ID, time.Now().Add(3*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	r := &Runtime{Accounts: a, Bundles: manager(t)}
-	p := profile.Profile{Harness: "claude-code", RuntimeVersion: "1.2.3"}
-	_, _, restore, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	other := signedClaude(t, a, "other", "aaaaaaaa-bbbb-cccc-dddd-000000000003")
-	if err := a.Switch(context.Background(), other.ID, "/fake/native"); err != nil {
-		t.Fatal(err)
-	}
-	restore()
-	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != other.ID {
-		t.Fatalf("after the restore, active = %s; want the concurrent switch %s", active.ID, other.ID)
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != personal.ID {
+		t.Fatalf("choosing the probe turn account moved the global selection to %s; want %s", active.ID, personal.ID)
 	}
 }
