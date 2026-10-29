@@ -17,8 +17,11 @@ func TestClassify(t *testing.T) {
 	}
 	endpointRepos := map[string]string{"other/repo": "someone-else"}
 	in := ClassifyInput{
-		Host: "github.com", Repo: "me/fork", Upstream: "github.com/org/project", Login: room,
+		Host: "github.com", APIHost: "github.com", Repo: "me/fork", Upstream: "github.com/org/project", Login: room,
 		AuthorOf: func(_ context.Context, ref ItemRef) (string, error) {
+			if ref.Host == "ghe.example.com" {
+				return "someone-else", nil
+			}
 			if author, ok := endpointRepos[ref.Repo]; ok {
 				return author, nil
 			}
@@ -89,6 +92,7 @@ func TestClassify(t *testing.T) {
 		{"api PATCH pr close other author", "api repos/o/r/pulls/13 -X PATCH -fstate=closed", owner},
 		{"api PATCH with unreadable body by other author", "api repos/o/r/issues/8 -X PATCH --input body.json", owner},
 		{"api PATCH close in another repository", "api repos/other/repo/issues/7 -X PATCH -f state=closed", owner},
+		{"api PATCH close on another host", "api repos/o/r/issues/7 -X PATCH -f state=closed --hostname ghe.example.com", owner},
 		{"api PUT pr merge", "api repos/o/r/pulls/5/merge -X PUT", owner},
 		{"api POST pr merge", "api repos/o/r/pulls/5/merge -f merge_method=squash", owner},
 		{"api POST review", "api repos/o/r/pulls/5/reviews -f event=APPROVE", owner},
@@ -117,5 +121,17 @@ func TestClassifyWithoutLogin(t *testing.T) {
 	in.AuthorOf = nil
 	if got := Classify(context.Background(), []string{"issue", "close", "7"}, in); got != approvals.ClassOwner {
 		t.Fatalf("no lookup gave %q, want owner", got)
+	}
+}
+
+func TestClassifyAPIWithoutKnownHost(t *testing.T) {
+	in := ClassifyInput{Host: "ghe.example.com", Repo: "o/r", Login: "x", AuthorOf: func(context.Context, ItemRef) (string, error) { return "x", nil }}
+	args := []string{"api", "repos/o/r/issues/7", "-X", "PATCH", "-f", "state=closed"}
+	if got := Classify(context.Background(), args, in); got != approvals.ClassOwner {
+		t.Fatalf("unknown API host gave %q, want owner", got)
+	}
+	in.APIHost = "ghe.example.com"
+	if got := Classify(context.Background(), args, in); got != approvals.ClassAgent {
+		t.Fatalf("known API host gave %q, want agent", got)
 	}
 }
