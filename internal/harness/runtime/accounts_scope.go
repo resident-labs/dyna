@@ -263,26 +263,14 @@ func (a *Accounts) LimitOf(id string) (reposcope.Hold, error) {
 	return scopes.LimitOf(id)
 }
 
-// ClearLimit removes the account's hold, because a turn on it succeeded.
-func (a *Accounts) ClearLimit(id string) error {
+// ClearUnstated removes the account's unstated hold after a successful turn or
+// probe that began at since. A stated reset and a hold recorded after since stay.
+func (a *Accounts) ClearUnstated(id string, since time.Time) error {
 	scopes, err := a.scopes()
 	if err != nil {
 		return err
 	}
-	return scopes.ClearLimit(id)
-}
-
-// clearProbedHold clears an account's unstated hold after a successful usage
-// probe that began at since. A failed clear only logs, because the probe itself
-// succeeded.
-func (a *Accounts) clearProbedHold(id string, since time.Time) {
-	scopes, err := a.scopes()
-	if err == nil {
-		err = scopes.ClearUnstated(id, since)
-	}
-	if err != nil {
-		log.Printf("clear quota hold for account %s: %v", id, err)
-	}
+	return scopes.ClearUnstated(id, since)
 }
 
 // clearRefreshedHold clears an account's no-timer hold after a successful
@@ -469,6 +457,8 @@ func (a *Accounts) refreshReading(ctx context.Context, n NativeAccount) *store.O
 	}, true); err != nil {
 		return nil
 	}
-	a.clearProbedHold(n.ID, probeStart)
+	if err = a.ClearUnstated(n.ID, probeStart); err != nil {
+		log.Printf("clear quota hold for account %s: %v", n.ID, err)
+	}
 	return &observation
 }

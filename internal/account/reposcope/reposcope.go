@@ -223,16 +223,6 @@ func (s *Store) LimitOf(accountID string) (Hold, error) {
 	return Hold{Until: time.Unix(until, 0), Stated: stated, Level: int(backoff)}, nil
 }
 
-// ClearLimit removes the account's hold, because a turn or probe on it succeeded.
-func (s *Store) ClearLimit(accountID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
-	defer cancel()
-	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=?", accountID)
-		return err
-	})
-}
-
 // ClearOpenEnded removes the account's no-timer hold after a successful
 // refresh. A timed hold stays. A hold recorded at or after since stays too, so
 // a failure that lands while the check runs is not wiped.
