@@ -44,6 +44,8 @@ func TestClassify(t *testing.T) {
 		{"workflow list is a read", "workflow list", read},
 		{"auth status is a read", "auth status --hostname github.com", read},
 		{"auth status showing the token is not a read", "auth status --show-token", owner},
+		{"auth status with attached token flag is not a read", "auth status --show-token=true", owner},
+		{"auth status with grouped short flags is not a read", "auth status -at", owner},
 		{"issue create", "issue create --title t --body b", agent},
 		{"issue edit", "issue edit 5 --add-label bug", agent},
 		{"issue comment", "issue comment 5 --body hi", agent},
