@@ -76,7 +76,7 @@ func LaunchChromium(ctx context.Context, id string, args []string) error {
 		return err
 	}
 	cmd := exec.Command(launch.Executable, launch.Args...)
-	cmd.Env = mergeEnvironment(mergeEnvironment(os.Environ(), privateBusEnvironment(id)), map[string]string{"DYNA_COMPUTER_PROCESS": id})
+	cmd.Env = mergeEnvironment(mergeEnvironment(engineEnvironment(), privateBusEnvironment(id)), map[string]string{"DYNA_COMPUTER_PROCESS": id})
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.ExtraFiles = pipes
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
