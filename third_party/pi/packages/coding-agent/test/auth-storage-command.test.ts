@@ -178,22 +178,44 @@ describe("auth storage commands", () => {
 	});
 
 	it("waits for a second writer holding the lock", async () => {
+		// The locked function runs only after the backend holds the lock, so
+		// its first statement proves the holder owns the lock; it then waits on
+		// a deferred promise the test resolves, not on a timer.
+		let releaseHolder: () => void = () => {};
+		const holderGate = new Promise<void>((resolve) => {
+			releaseHolder = resolve;
+		});
+		let lockAcquired: () => void = () => {};
+		const lockAcquiredPromise = new Promise<void>((resolve) => {
+			lockAcquired = resolve;
+		});
 		const holder = backend.withLockAsync(async () => {
-			await new Promise((resolve) => {
-				setTimeout(resolve, 150);
-			});
+			lockAcquired();
+			await holderGate;
 			return { result: undefined };
 		});
-		const started = Date.now();
-		await runAuthStorageCommand(
+		await lockAcquiredPromise;
+
+		let setFinished = false;
+		const set = runAuthStorageCommand(
 			storageCommand(["auth", "set", "--provider", "beta"]),
 			JSON.stringify({ type: "api_key", key: "beta-key" }),
 			backend,
-		);
-		const waited = Date.now() - started;
-		await holder;
+		).then(() => {
+			setFinished = true;
+		});
+		// Let pending work run so the second writer reaches its lock attempt.
+		for (let turn = 0; turn < 10; turn++) {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+		// The lock is held, so the second writer has neither finished nor written.
+		expect(setFinished).toBe(false);
+		expect(JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"))).toEqual({});
 
-		expect(waited).toBeGreaterThanOrEqual(100);
+		releaseHolder();
+		await holder;
+		await set;
+		expect(setFinished).toBe(true);
 		const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"));
 		expect(stored).toEqual({ beta: { type: "api_key", key: "beta-key" } });
 	});
