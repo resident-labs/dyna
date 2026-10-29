@@ -797,6 +797,55 @@ func TestGCRemovesTreeOfRunWithoutRowOrDaemon(t *testing.T) {
 	}
 }
 
+// A launch can write its starting row and create its folder after cleanup's
+// metadata snapshot. The folder scan must re-read that row instead of
+// treating the new folder as rowless before any coordinator exists.
+func TestGCKeepsTreeOfRunStagedAfterTheSnapshot(t *testing.T) {
+	repo := gcRepo(t)
+	path, _, _, err := CreateForRun(context.Background(), repo, settings.WorktreesRetentionNone, "wf_snapshot", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := runstore.NewID()
+	var stageErr error
+	var inferences int
+	previous := runsSnapshotted
+	runsSnapshotted = func() {
+		inferences++
+		// The third inference is the removal recheck taken under the
+		// deletion lock; the two earlier scans would only be saved by a
+		// later fresh snapshot. Stage the launch after that final snapshot.
+		if inferences < 3 {
+			return
+		}
+		if stageErr = runstore.RecordStartingRun(runstore.Meta{ID: id, Name: "staging"}); stageErr != nil {
+			return
+		}
+		stageErr = os.MkdirAll(filepath.Join(runstore.RunsDir(), id), 0o700)
+	}
+	t.Cleanup(func() { runsSnapshotted = previous })
+	old := time.Now().Add(-25 * time.Hour)
+	for _, p := range []string{path, git(t, path, "rev-parse", "--absolute-git-dir")} {
+		if err := filepath.Walk(p, func(p string, i os.FileInfo, e error) error {
+			if e != nil {
+				return e
+			}
+			return os.Chtimes(p, old, old)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := GC(context.Background(), repo, GCOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if stageErr != nil {
+		t.Fatal(stageErr)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("cleanup removed a worktree of a run staged after the snapshot: %v", err)
+	}
+}
+
 // A local-only repository has no remote main to fetch. Creation and cleanup
 // both use the local default branch, so a closed session's tree is removed.
 func TestGCRemovesClosedLocalOnlyTree(t *testing.T) {
