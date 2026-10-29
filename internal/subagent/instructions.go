@@ -198,6 +198,7 @@ func workerContext(meta Meta, creator string, maxDepth int) string {
 			"[DYNA WORKER IDENTITY]",
 			fmt.Sprintf("You are the internal root of room %s, a long-lived Dyna session (%s).", meta.Room, meta.ID),
 			"Room members: `dyna room members " + meta.Room + "`",
+			stateSnapshotPrompt,
 			"[/DYNA WORKER IDENTITY]",
 		}, "\n")
 	}
@@ -208,6 +209,7 @@ func workerContext(meta Meta, creator string, maxDepth int) string {
 		"Room: " + meta.Room + "   You: " + meta.Address(),
 		limit,
 		"Room members: `dyna room members " + meta.Room + "`",
+		stateSnapshotPrompt,
 		"[/DYNA WORKER IDENTITY]",
 	}, "\n")
 }
