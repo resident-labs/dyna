@@ -640,8 +640,10 @@ func treeUsage(ctx context.Context, path string) (int64, time.Time, error) {
 
 // remove rechecks ownership, file activity, status and ancestry, then removes
 // the tree or returns it kept with the reason. Session versions and running
-// workflows are read again; unchanged metadata comes from the first scan.
-func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error), beforeLock func()) (out Tree) {
+// workflows are read again; unchanged metadata comes from the first scan. A
+// removed tree is handed to collected; its registry record is committed with
+// every other removal after the workers finish, outside the removal lock.
+func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error), beforeLock func(), collected func(string)) (out Tree) {
 	// Whichever check stops it, a tree kept only because time ran out is
 	// retried by the scheduled cleanup.
 	defer func() {
@@ -700,9 +702,7 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 			return nil
 		}
 		t.Action = "removed"
-		if e := MarkRemoved(t.Path); e != nil && managedPath(t.Path) {
-			t.Reason += "; registry: " + e.Error()
-		}
+		collected(t.Path)
 		return nil
 	}); err != nil {
 		t.Action, t.Reason = "kept", "cannot serialize removal with run publication: "+err.Error()
@@ -719,6 +719,10 @@ var beforeWorktreeRemoval = func(path string) {}
 
 // pruneTimeout bounds git worktree prune on its own context.
 const pruneTimeout = 10 * time.Second
+
+// batchTimeout bounds the registry commit of one cleanup pass on its own
+// context, which survives an expired cleanup deadline.
+const batchTimeout = 30 * time.Second
 
 func refreshDefaultBranch(ctx context.Context, repo string) (string, error) {
 	resolved, err := defaultBranch(ctx, repo)
@@ -800,6 +804,15 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	// Each removal rereads ownership, status and process use right before it
 	// removes its own tree, so rechecks of different trees can overlap. Workers
 	// keep their own copy of the run history because it is not safe to share.
+	// Removed trees hand their paths to one batch: the registry commit runs
+	// after the workers finish, outside the removal lock.
+	var batchMu sync.Mutex
+	removedPaths := []string{}
+	collected := func(path string) {
+		batchMu.Lock()
+		removedPaths = append(removedPaths, path)
+		batchMu.Unlock()
+	}
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	for range min(scanParallelism, len(pending)) {
@@ -812,7 +825,7 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 				if opts.beforeLock != nil {
 					beforeLock = func() { opts.beforeLock(result[i].Path) }
 				}
-				result[i] = remove(ctx, repo, result[i], history, closed, beforeLock)
+				result[i] = remove(ctx, repo, result[i], history, closed, beforeLock, collected)
 			}
 		}()
 	}
@@ -821,6 +834,21 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	}
 	close(jobs)
 	wg.Wait()
+	if len(removedPaths) > 0 {
+		// The batch commits on its own context: a cleanup whose deadline
+		// expired keeps the progress its workers already made, and the next
+		// scheduled cleanup retries the trees that stayed.
+		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), batchTimeout)
+		err := markRemovedBatch(bctx, removedPaths)
+		cancel()
+		if err != nil {
+			for i := range result {
+				if result[i].Action == "removed" && managedPath(result[i].Path) {
+					result[i].Reason += "; registry: " + err.Error()
+				}
+			}
+		}
+	}
 	if !opts.DryRun {
 		// Prune only drops metadata of missing trees, takes milliseconds, and
 		// runs again on the next cleanup. A spent cleanup budget must not fail it.

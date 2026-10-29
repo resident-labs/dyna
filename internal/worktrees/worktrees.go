@@ -422,6 +422,30 @@ func MarkRemoved(path string) error {
 	return nil
 }
 
+// markRemovedBatch deletes the registry records of all paths in one
+// transaction, then rearms the port alert once for the whole release. Cleanup
+// collects the trees its workers removed and commits them together after the
+// removals, so one slow commit neither serializes behind every removal nor
+// times out with the cleanup deadline. Tests replace it.
+var markRemovedBatch = func(ctx context.Context, paths []string) error {
+	db, err := registryDB()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		for _, path := range paths {
+			key, err := recordKey(path)
+			if err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, key); err != nil {
+				return err
+			}
+		}
+		return rearmPortCapacity(ctx, conn)
+	})
+}
+
 // Inspect compares a retained worktree's current HEAD and porcelain status to
 // the engine-captured retention-time fingerprint.
 func Inspect(rec Record) (string, error) {
