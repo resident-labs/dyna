@@ -728,7 +728,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		}
 		retired[id] = true
 	}
-	if err = s.Store.update(func(current *State) error {
+	if err = s.Store.updateSelected(func(row state.RecordScope) bool { return row.RoomID == roomID || cleanupScope(row) }, func(current *State) error {
 		cfg := current.Reviewers[roomID]
 		cfg.FailedProfiles = failures
 		cfg.LastError = ""
