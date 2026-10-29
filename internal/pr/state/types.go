@@ -220,6 +220,33 @@ type Controller string
 // the owner started.
 const ControllerRoot Controller = "root"
 
+// PRState is the GitHub state a tracked change has, as Dyna records it.
+type PRState string
+
+// PR states.
+const (
+	PROpen   PRState = "open"
+	PRClosed PRState = "closed"
+	PRMerged PRState = "merged"
+)
+
+// CIState is the CI result a tracked change has at its head.
+type CIState string
+
+// CI states. The zero value means no CI result is recorded yet.
+const (
+	CIPending CIState = "pending"
+	CIPassed  CIState = "passed"
+	CIFailed  CIState = "failed"
+	CIAbsent  CIState = "absent"
+)
+
+// ReviewerMode is how a change's reviewer runs.
+type ReviewerMode string
+
+// Reviewer modes. The zero value means no reviewer mode is recorded.
+const ReviewerModeSession ReviewerMode = "session"
+
 type Record struct {
 	PendingVerdict *PendingVerdict `json:"pendingVerdict,omitempty"`
 	// ReleaseReviewersAfterReplay holds closed reviewers until their saved verdicts replay.
@@ -297,13 +324,13 @@ type Record struct {
 	HeadRepo         string                       `json:"headRepo,omitempty"`
 	HeadStale        bool                         `json:"headStale,omitempty"`
 	HeadVerifiedAt   time.Time                    `json:"headVerifiedAt,omitempty"`
-	State            string                       `json:"state"`
+	State            PRState                      `json:"state"`
 	ClosedAt         time.Time                    `json:"closedAt,omitempty"`
 	CICleanupDone    bool                         `json:"ciCleanupDone,omitempty"`
 	Watching         bool                         `json:"watching"`
 	Created          time.Time                    `json:"created"`
 	Checked          time.Time                    `json:"checked,omitempty"`
-	CI               string                       `json:"ci,omitempty"`
+	CI               CIState                      `json:"ci,omitempty"`
 	CIReason         string                       `json:"ciReason,omitempty"`
 	LocalCIConfig    LocalCIConfigState           `json:"localCIConfig,omitempty"`
 	BotReviews       []BotReview                  `json:"botReviews,omitempty"`
@@ -317,7 +344,7 @@ type Record struct {
 	RoundHead        string                       `json:"reviewHead,omitempty"`
 	RoundStarted     time.Time                    `json:"roundStarted,omitempty"`
 	ReviewPublishing string                       `json:"reviewPublishing,omitempty"`
-	ReviewerMode     string                       `json:"reviewerMode,omitempty"`
+	ReviewerMode     ReviewerMode                 `json:"reviewerMode,omitempty"`
 	ReviewerOverride string                       `json:"reviewerOverride,omitempty"`
 	Reviewer         string                       `json:"reviewerSession,omitempty"`
 	ReviewerName     string                       `json:"reviewerName,omitempty"`

@@ -129,7 +129,7 @@ func (s *Service) readProjection() (*projection, error) {
 	// History pages and reviewer occupancy have time boundaries even when
 	// no writer commits another revision.
 	for _, r := range st.Records {
-		if r.State == "open" || r.ClosedAt.IsZero() {
+		if r.State == state.PROpen || r.ClosedAt.IsZero() {
 			continue
 		}
 		for _, window := range []time.Duration{time.Hour, listpage.Recent} {

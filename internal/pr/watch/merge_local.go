@@ -44,7 +44,7 @@ var localCIInit sync.Mutex
 
 func localMergeReady(r Record, records map[string]*Record) bool {
 	_, dependencyWaiting := facts.UnmergedDependency(r, records)
-	return !dependencyWaiting && len(facts.MissingRequiredReviewers(r)) == 0 && !facts.OpenOwnerFinding(r) && r.Watching && r.State == "open" && facts.HeadVerified(r) && facts.ApprovedAtHead(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head)
+	return !dependencyWaiting && len(facts.MissingRequiredReviewers(r)) == 0 && !facts.OpenOwnerFinding(r) && r.Watching && r.State == state.PROpen && facts.HeadVerified(r) && facts.ApprovedAtHead(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head)
 }
 
 func (s *Service) refreshLocalMergeFacts(ctx context.Context) error {
@@ -54,7 +54,7 @@ func (s *Service) refreshLocalMergeFacts(ctx context.Context) error {
 	}
 	seen := map[string]bool{}
 	for _, r := range st.Records {
-		if changeKind(*r) != "local" || !r.Watching || r.State != "open" {
+		if changeKind(*r) != "local" || !r.Watching || r.State != state.PROpen {
 			continue
 		}
 		if paused, err := s.RoomPaused(r.RoomID); err != nil {

@@ -101,7 +101,7 @@ func retryRebuildFailure(queue []MergeQueueItem) string {
 func controlPR(st State, roomID, ref string) (Record, error) {
 	var found *Record
 	for _, r := range st.Records {
-		if r.RoomID != roomID || changeKind(*r) != "github" || !r.Watching || r.State != "open" {
+		if r.RoomID != roomID || changeKind(*r) != "github" || !r.Watching || r.State != state.PROpen {
 			continue
 		}
 		if ref == r.Key || ref == changeID(*r) || ref == r.URL || strings.TrimPrefix(ref, "#") == strconv.Itoa(r.Number) {

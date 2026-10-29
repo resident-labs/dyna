@@ -105,14 +105,14 @@ func storeUpdateResult(err error) error {
 // finishUpdate retires notices and cached responses that ended with the change.
 func finishUpdate(st *State) {
 	for key, r := range st.Records {
-		if !r.Watching || r.State != "open" {
+		if !r.Watching || r.State != state.PROpen {
 			retireReviewNotices(r, "change-ended")
 			// Runs on every save, so landing, closing, untracking and refreshes
 			// all retire CI notices, including ones added after the change ended.
 			retireCINotices(r, "change-ended")
 		}
 		// Closed records and previous heads are never polled again.
-		if r.State != "open" {
+		if r.State != state.PROpen {
 			delete(st.Responses, key)
 		} else {
 			for path := range st.Responses[key] {

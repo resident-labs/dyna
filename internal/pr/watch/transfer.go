@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"fmt"
 	"path/filepath"
 
@@ -82,7 +83,7 @@ func (s *Service) transfer(ctx context.Context, key, role string, to subagent.In
 	moved := false
 	err := s.Store.update(func(st *State) error {
 		r := st.Records[key]
-		if r == nil || !r.Watching || r.State != "open" {
+		if r == nil || !r.Watching || r.State != state.PROpen {
 			return fmt.Errorf("PR is not open and tracked")
 		}
 		if opts.expectAuthor != "" && r.Author != opts.expectAuthor {

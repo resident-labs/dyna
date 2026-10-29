@@ -64,9 +64,9 @@ func (s *Service) goalFacts(roomID string, g goals.Goal) (goals.Facts, error) {
 		}
 		for _, pr := range prs.AuthoredBy(roomID, holder, g.CreatedAt) {
 			switch pr.State {
-			case "open":
+			case state.PROpen:
 				f.OpenPR = true
-			case "merged":
+			case state.PRMerged:
 				f.MergedPR = true
 			}
 		}

@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"fmt"
 	"slices"
 
@@ -25,7 +26,7 @@ func (s *Service) RequireReviewers(key, author, roomID string, reviewers []strin
 	defer unlock()
 	return s.Store.updateRecords([]string{key}, func(st *State) error {
 		r := recordByID(st, key)
-		if r == nil || !r.Watching || r.State != "open" {
+		if r == nil || !r.Watching || r.State != state.PROpen {
 			return fmt.Errorf("required reviews need an open watched change")
 		}
 		if r.Author != author || r.RoomID != roomID {
@@ -73,7 +74,7 @@ func (s *Service) ReleaseReviewers(key, author, roomID string, reviewers []strin
 	defer unlock()
 	return s.Store.updateRecords([]string{key}, func(st *State) error {
 		r := recordByID(st, key)
-		if r == nil || !r.Watching || r.State != "open" {
+		if r == nil || !r.Watching || r.State != state.PROpen {
 			return fmt.Errorf("required reviews need an open watched change")
 		}
 		if r.Author != author || r.RoomID != roomID {

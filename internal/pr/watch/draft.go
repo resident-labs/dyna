@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"fmt"
 	"strings"
 )
@@ -16,7 +17,7 @@ func (s *Service) SetDraft(ctx context.Context, key string, draft bool, reason s
 	if err != nil {
 		return err
 	}
-	if !r.Watching || r.State != "open" || changeKind(r) != "github" {
+	if !r.Watching || r.State != state.PROpen || changeKind(r) != "github" {
 		return fmt.Errorf("PR is not open and tracked")
 	}
 	if s.Notify == nil || s.Notify.Rooms == nil {
