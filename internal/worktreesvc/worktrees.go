@@ -54,6 +54,7 @@ func caller(ctx context.Context) (authority.Actor, error) {
 }
 
 type NewResult struct {
+	Outcome
 	Record  worktrees.Record `json:"record"`
 	Notices []string         `json:"notices,omitempty"`
 }
@@ -67,8 +68,8 @@ func New(ctx context.Context, repo, branch, base string, noDeps bool, session st
 	if err != nil {
 		return NewResult{}, err
 	}
-	_ = hooks.Emit(ctx, hooks.Event{Event: hooks.WorktreeCreated, Repo: rec.Path, Worktree: rec.Path, Branch: branch, Session: session, Room: a.Room})
-	result := NewResult{Record: rec}
+	hookErr := hooks.New().RunWorktreeCreated(ctx, hooks.Event{Event: hooks.WorktreeCreated, Repo: rec.Path, Worktree: rec.Path, Branch: branch, Session: session, Room: a.Room})
+	result := NewResult{Outcome: failure(hookErr), Record: rec}
 	if !noDeps {
 		// Dependency restoration is best effort, as it was in the CLI.
 		summary, err := nodedeps.Prepare(ctx, rec.Path)
