@@ -15,6 +15,7 @@ func TestRewriteFileArgsCoversEveryFileBackedArgument(t *testing.T) {
 		{name: "body short", args: []string{"pr", "create", "-Fbody.md"}, path: "body.md"},
 		{name: "api field", args: []string{"api", "repos/o/r/issues", "-F", "body=@body.md"}, path: "body.md"},
 		{name: "api field attached", args: []string{"api", "repos/o/r/issues", "--field=body=@body.md"}, path: "body.md"},
+		{name: "api field at name", args: []string{"api", "repos/o/r/issues", "-F", "body=@@name"}, path: "@name"},
 		{name: "api input", args: []string{"api", "repos/o/r/issues", "--input=payload.json"}, path: "payload.json"},
 	}
 	for _, tt := range tests {

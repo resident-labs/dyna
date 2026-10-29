@@ -3,6 +3,7 @@ package approvals
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -76,14 +77,46 @@ func (p GHPayload) DisplayBody() string {
 	if body := argument(p.Argv, "--body"); body != "" {
 		return body
 	}
+	snapshot := func(path string) string {
+		for _, file := range p.Files {
+			if file.Path == path {
+				return string(file.Data)
+			}
+		}
+		return ""
+	}
 	path := argument(p.Argv, "--body-file")
 	if path == "" {
 		path = argument(p.Argv, "-F")
 	}
-	for _, file := range p.Files {
-		if file.Path == path {
-			return string(file.Data)
+	if body := snapshot(path); body != "" {
+		return body
+	}
+	if path := argument(p.Argv, "--input"); path != "" {
+		return snapshot(path)
+	}
+	for i := 0; i < len(p.Argv); i++ {
+		arg := p.Argv[i]
+		value := ""
+		switch {
+		case arg == "-F" || arg == "--field":
+			if i+1 < len(p.Argv) {
+				i++
+				value = p.Argv[i]
+			}
+		case strings.HasPrefix(arg, "--field="):
+			value = strings.TrimPrefix(arg, "--field=")
+		case strings.HasPrefix(arg, "-F"):
+			value = strings.TrimPrefix(arg[len("-F"):], "=")
 		}
+		key, body, ok := strings.Cut(value, "=")
+		if !ok || key != "body" {
+			continue
+		}
+		if strings.HasPrefix(body, "@") {
+			return snapshot(strings.TrimPrefix(body, "@"))
+		}
+		return body
 	}
 	return ""
 }
