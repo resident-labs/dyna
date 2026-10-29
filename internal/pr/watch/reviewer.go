@@ -309,6 +309,8 @@ type ReviewFacts struct {
 	Busy           map[string]reviewerTurn
 	Sessions       map[string]reviewerTurn
 	Paused         map[string]bool
+	// Upstreams lists each room's parent repositories; see UpstreamPR.
+	Upstreams RoomUpstreams
 }
 
 func needsReview(st State, r Record) bool {
@@ -345,7 +347,7 @@ func (s *Service) roomPausedCached(roomID string, cache map[string]bool) (bool, 
 }
 
 func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
-	facts := ReviewFacts{State: st, Busy: map[string]reviewerTurn{}, Sessions: map[string]reviewerTurn{}, Paused: map[string]bool{}}
+	facts := ReviewFacts{State: st, Busy: map[string]reviewerTurn{}, Sessions: map[string]reviewerTurn{}, Paused: map[string]bool{}, Upstreams: s.roomUpstreams()}
 	active, _, err := s.expeditedGoals()
 	if err != nil {
 		return facts, err
@@ -436,6 +438,12 @@ func (f ReviewFacts) Queue(roomID string) []*Record {
 		}
 	}
 	return append(reviewPriority(queue, f.ExpeditedGoals, f.Streaks[roomID]), blocked...)
+}
+
+// UpstreamPR reports a pull request into a parent repository of its room. Maintainers
+// merge it, so the view says so and Dyna never queues it.
+func (f ReviewFacts) UpstreamPR(r Record) bool {
+	return upstreamPR(r, f.Upstreams)
 }
 
 func (f ReviewFacts) ReviewState(r Record) (string, *int, string) {

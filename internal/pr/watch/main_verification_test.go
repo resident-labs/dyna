@@ -207,7 +207,7 @@ func TestMergeStatusReadsSavedDefaultFactsWithoutGitHub(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if rows := mergeQueue(st, nil); len(rows) != 1 || rows[0].State != tc.want {
+		if rows := mergeQueue(st, nil, nil); len(rows) != 1 || rows[0].State != tc.want {
 			t.Fatalf("saved queue=%+v", rows)
 		}
 	}
@@ -223,7 +223,7 @@ func TestMergeQueueWaitsForFirstRepositoryObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.RepositoryFacts = nil
-	if rows := mergeQueue(st, nil); len(rows) != 1 || rows[0].State != "waiting-repository" {
+	if rows := mergeQueue(st, nil, nil); len(rows) != 1 || rows[0].State != "waiting-repository" {
 		t.Fatalf("unconfirmed repository queue=%+v", rows)
 	}
 }
@@ -277,7 +277,7 @@ func TestOlderGreenObservationCannotReplaceFreshFailedMain(t *testing.T) {
 	if got := saved.RepositoryFacts["github.com/owner/repo"].Verdict; got != "failed" {
 		t.Fatalf("old green replaced fresh failed main: %s", got)
 	}
-	if rows := mergeQueue(saved, nil); len(rows) != 1 || rows[0].Main.State != "failed" {
+	if rows := mergeQueue(saved, nil, nil); len(rows) != 1 || rows[0].Main.State != "failed" {
 		t.Fatalf("stale observation reopened eligibility: %+v", rows)
 	}
 }

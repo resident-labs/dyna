@@ -456,7 +456,7 @@
                   {#snippet lead()}<PRGlyph it={row} />{/snippet}
                   <div class="row-title">{changeTitle(row)} {#if row.isDraft}<Chip>Draft</Chip>{/if} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
                   <div class="row-author">#{row.number}{#if authorName(row, names)}{` by ${authorName(row, names)}`}{/if}</div>
-                  <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip>{#if row.fixes?.length}<Chip outline title="Merging this PR closes these issues">Fixes {fixesLabel(row.fixes)}</Chip>{/if}<span>{mergePosition(row.changeId ?? '', merge ?? [])}</span></div>
+                  <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip>{#if row.fixes?.length}<Chip outline title="Merging this PR closes these issues">Fixes {fixesLabel(row.fixes)}</Chip>{/if}{#if row.upstreamPr}<Chip outline title="Dyna tracks CI, reviews, labels and comments. Maintainers merge this PR.">Maintainers merge</Chip>{:else}<span>{mergePosition(row.changeId ?? '', merge ?? [])}</span>{/if}</div>
                   {#if item && !item.trial && item.state !== 'ready'}<div class="row-author">{state.reason || state.label}</div>{/if}
                 </RowItem>
                 <RowActions name={rowName(row)} onmention={onmention ? () => mentionRow(row) : null} items={rowMenu(row)} />

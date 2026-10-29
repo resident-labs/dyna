@@ -30,7 +30,10 @@ type ChangeView struct {
 	Base                     string   `json:"base,omitempty"`
 	ReviewState              string   `json:"reviewState,omitempty"`
 	QueuePosition            *int     `json:"queuePosition"`
-	ReviewBlocked            string   `json:"reviewBlocked,omitempty"`
+	// UpstreamPR is true when maintainers merge this change: its base is a parent
+	// repository of the room, so Dyna tracks it but never queues or merges it.
+	UpstreamPR    bool   `json:"upstreamPr,omitempty"`
+	ReviewBlocked string `json:"reviewBlocked,omitempty"`
 
 	Key                 string               `json:"key,omitempty"`
 	Repo                string               `json:"repo,omitempty"`
