@@ -11,6 +11,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/nodedeps"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/worktrees"
 )
@@ -63,6 +64,26 @@ func New(ctx context.Context, repo, branch, base string, noDeps bool, session st
 	a, err := caller(ctx)
 	if err != nil {
 		return NewResult{}, err
+	}
+	// A room's upstream describes its fork checkout only. That checkout starts
+	// from the upstream's default branch when the caller names no base.
+	if base == "" && a.Room != "" {
+		rec, err := room.DefaultStore().Resolve(a.Room)
+		if err != nil {
+			return NewResult{}, err
+		}
+		if rec.Upstream != "" {
+			root, err := room.RepoRoot(repo)
+			if err != nil {
+				return NewResult{}, err
+			}
+			if root == rec.Repo {
+				base, err = worktrees.UpstreamBase(ctx, repo, rec.Upstream)
+				if err != nil {
+					return NewResult{}, err
+				}
+			}
+		}
 	}
 	rec, err := worktrees.NewFor(ctx, repo, branch, base, session, "")
 	if err != nil {

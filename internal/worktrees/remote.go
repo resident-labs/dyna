@@ -57,6 +57,42 @@ func baseRemote(ctx context.Context, dir, base string) string {
 	return name
 }
 
+// UpstreamBase names the default branch of the configured remote whose
+// repository is upstream, such as refs/remotes/parent/main. It reads the branch from the
+// remote and fetches nothing: pinBase fetches a remote-tracking base first.
+func UpstreamBase(ctx context.Context, repo, upstream string) (string, error) {
+	out, err := gitOutput(ctx, repo, "remote")
+	if err != nil {
+		return "", err
+	}
+	for _, remote := range strings.Fields(string(out)) {
+		url, err := gitOutput(ctx, repo, "remote", "get-url", remote)
+		if err != nil {
+			return "", err
+		}
+		identity, err := repoid.RemoteIdentity(repo, strings.TrimSpace(string(url)))
+		if err != nil {
+			return "", err
+		}
+		if !strings.EqualFold(identity, upstream) {
+			continue
+		}
+		head, err := gitRemoteOutput(ctx, repo, remote, "ls-remote", "--symref", remote, "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("read the default branch of %s: %w: %s", remote, err, head)
+		}
+		for _, line := range strings.Split(string(head), "\n") {
+			target, name, found := strings.Cut(line, "\t")
+			if found && name == "HEAD" && strings.HasPrefix(target, "ref: refs/heads/") {
+				// The qualified name keeps a local branch with the same short name from winning.
+				return "refs/remotes/" + remote + "/" + strings.TrimPrefix(target, "ref: refs/heads/"), nil
+			}
+		}
+		return "", fmt.Errorf("remote %s does not report a default branch", remote)
+	}
+	return "", fmt.Errorf("no remote of %s is configured in %s; add one with git remote add", upstream, repo)
+}
+
 // pinBase resolves base to a commit id in the caller's repo before the
 // worktree is created, and returns that id. A plain `git fetch` rewrites
 // FETCH_HEAD (D-164) and moves remote-tracking refs, so a base that already
