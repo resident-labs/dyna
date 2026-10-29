@@ -7,8 +7,10 @@ Run `eval "$(dyna git worktrees env)"` to set `DYNA_PORT`, `DYNA_PORTS` and `POR
 
 ## Pull requests and changes
 
+Always write the PR body to a file in `$DYNA_SCRATCH` and run `gh pr create --body-file FILE`. Never use an inline `--body`, and never put PR body text in backticks on a shell command line.
 After `gh pr create`, run `dyna git pr track <number|url>` from the matching checkout.
 Elsewhere, add `--repo <path>`. Fix CI failures and push. The engine merges automatically when approved and green; agents never run merge commands.
+Use `dyna git pr edit <number|url> [--title TEXT] [--body-file PATH]` to fix a PR title or body. At least one flag is required, and `--body-file -` reads stdin.
 
 Pass `--fixes D-5,#207` when the PR fixes issues. Merging the PR closes each
 linked issue: Dyna closes a room issue with the reason `Fixed by #N`, and the

@@ -241,6 +241,15 @@ func (s *Service) UntrackPR(ctx context.Context, roomRef, key string) error {
 	return p.Untrack(ctx, key)
 }
 
+// EditPR changes a PR title or body through the engine.
+func (s *Service) EditPR(ctx context.Context, roomRef, key string, edit watch.PREdit) error {
+	p, _, err := s.authorPRInRoom(ctx, "git pr edit", roomRef, key)
+	if err != nil {
+		return err
+	}
+	return p.Edit(ctx, key, edit)
+}
+
 // ClosePR closes a PR through the engine and records its outcome in Dyna.
 func (s *Service) ClosePR(ctx context.Context, roomRef, key, reason string) error {
 	p, _, err := s.authorPRInRoom(ctx, "git pr close", roomRef, key)
