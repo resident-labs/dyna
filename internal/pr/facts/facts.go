@@ -115,7 +115,7 @@ func ReadyWithoutHeadCI(r state.Record, g GitHub, records map[string]*state.Reco
 func ready(r state.Record, g GitHub, records map[string]*state.Record, ci state.CIState) bool {
 	_, dependencyWaiting := UnmergedDependency(r, records)
 	return !dependencyWaiting && len(MissingRequiredReviewers(r)) == 0 && !OpenOwnerFinding(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head) && r.Watching && r.State == state.PROpen && HeadCurrent(r, g.Head) && ApprovedAtHead(r) && r.CI == ci &&
-		g.CIHead == r.Head && g.CI == string(ci) && !g.IsDraft &&
+		g.CIHead == r.Head && g.CI == string(ci) && !g.IsDraft && r.Hold == nil &&
 		g.Mergeable != nil && *g.Mergeable && g.DefaultBranch != "" && g.Base == g.DefaultBranch && g.Base == r.BaseRef
 }
 func ReadyAt(r state.Record, g GitHub) time.Time {
