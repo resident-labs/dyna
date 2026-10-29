@@ -217,6 +217,52 @@ func TestCancelStopsTheJob(t *testing.T) {
 	}
 }
 
+// Output that lands only after the idle stop still reaches the stored log:
+// the drain must wait for the stopped unit to settle, not stop at its first
+// empty poll. The job holds its output until the poll after the stop, which
+// no scheduler order can move before the drain's first sample.
+func TestIdleStopDrainsOutputWrittenAfterTheStop(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 2<<20)
+	var fake *jobstest.Fake
+	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			return nil
+		}
+		for fake.StopCount() < 1 && ctx.Err() == nil {
+			runtime.Gosched()
+		}
+		atStop := fake.PollCount()
+		for fake.PollCount() <= atStop && ctx.Err() == nil {
+			runtime.Gosched()
+		}
+		if _, err := out.Write(payload); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	defer svc.Stop()
+	idle := 5 * time.Second
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished := <-reporter.finished; finished.State != StateTimedOut {
+		t.Fatalf("finished = %+v, want timed_out", finished)
+	}
+	stored, err := svc.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := os.ReadFile(stored.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != len(payload) {
+		t.Fatalf("log has %d bytes, want all %d written after the stop", len(log), len(payload))
+	}
+}
+
 // A job that never writes output still reaches its idle deadline: the node
 // creates the log at launch, so quiet time counts from launch, not from a
 // first write that may never come.
