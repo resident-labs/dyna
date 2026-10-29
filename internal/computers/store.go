@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
 )
@@ -236,7 +237,10 @@ func privateBusEnvironment(id string) map[string]string {
 	return map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=" + BusSocket(id)}
 }
 
+// mergeEnvironment builds a computer launch environment. Every computer process
+// starts from it, so base drops the engine's secrets here.
 func mergeEnvironment(base []string, values map[string]string) []string {
+	base = processguard.WithoutSecrets(base)
 	out := make([]string, 0, len(base)+len(values))
 	for _, s := range base {
 		k, _, _ := strings.Cut(s, "=")
