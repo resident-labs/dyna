@@ -137,8 +137,14 @@ func (c *cacheConn) release(entry *cacheEntry, cached, failed bool) error {
 	return nil
 }
 
+// Scripts and PRAGMAs may do work at prepare time and must not be reused.
+// Match conservatively, including PRAGMA in comments or quoted text.
+func bypassStatementCache(query string) bool {
+	return strings.Contains(query, ";") || strings.Contains(strings.ToUpper(query), "PRAGMA")
+}
+
 func (c *cacheConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	if strings.Contains(query, ";") {
+	if bypassStatementCache(query) {
 		return c.sqliteConn.(driver.ExecerContext).ExecContext(ctx, query, args)
 	}
 	entry, cached, err := c.acquire(ctx, query)
@@ -154,7 +160,7 @@ func (c *cacheConn) ExecContext(ctx context.Context, query string, args []driver
 }
 
 func (c *cacheConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if strings.Contains(query, ";") {
+	if bypassStatementCache(query) {
 		return c.sqliteConn.(driver.QueryerContext).QueryContext(ctx, query, args)
 	}
 	entry, cached, err := c.acquire(ctx, query)
