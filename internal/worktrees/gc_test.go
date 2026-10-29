@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -797,9 +798,10 @@ func TestGCRemovesTreeOfRunWithoutRowOrDaemon(t *testing.T) {
 	}
 }
 
-// A launch can write its starting row and create its folder after cleanup's
-// metadata snapshot. The folder scan must re-read that row instead of
-// treating the new folder as rowless before any coordinator exists.
+// A writer that does not hold the runs publication lock (an older binary
+// during an upgrade) can still write its starting row and create its folder
+// after cleanup's metadata snapshot. The folder scan must re-read that row
+// instead of treating the new folder as rowless before any coordinator exists.
 func TestGCKeepsTreeOfRunStagedAfterTheSnapshot(t *testing.T) {
 	repo := gcRepo(t)
 	path, _, _, err := CreateForRun(context.Background(), repo, settings.WorktreesRetentionNone, "wf_snapshot", "")
@@ -843,6 +845,55 @@ func TestGCKeepsTreeOfRunStagedAfterTheSnapshot(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("cleanup removed a worktree of a run staged after the snapshot: %v", err)
+	}
+}
+
+// The deletion of a worktree holds the runs publication lock, so a workflow
+// launch can never publish its starting run between cleanup's final ownership
+// read and the deletion.
+func TestRemovalHoldsTheRunPublicationLock(t *testing.T) {
+	repo := gcRepo(t)
+	path, _, _, err := CreateForRun(context.Background(), repo, settings.WorktreesRetentionNone, "wf_unlocked", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-25 * time.Hour)
+	for _, p := range []string{path, git(t, path, "rev-parse", "--absolute-git-dir")} {
+		if err := filepath.Walk(p, func(p string, i os.FileInfo, e error) error {
+			if e != nil {
+				return e
+			}
+			return os.Chtimes(p, old, old)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed := false
+	previous := beforeWorktreeRemoval
+	beforeWorktreeRemoval = func(string) {
+		removed = true
+		if err := os.MkdirAll(runstore.RunsDir(), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		lock, err := os.OpenFile(filepath.Join(runstore.RunsDir(), "publication.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Close()
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+			t.Error("worktree removal does not hold the runs publication lock")
+		}
+	}
+	t.Cleanup(func() { beforeWorktreeRemoval = previous })
+	if _, err := GC(context.Background(), repo, GCOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("cleanup never reached the removal")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("aged ownerless tree remains: %v", err)
 	}
 }
 
