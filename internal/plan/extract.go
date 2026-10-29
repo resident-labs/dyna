@@ -42,15 +42,18 @@ type extractor struct {
 }
 
 type walkCtx struct {
-	parentID      string
-	groupID       string
-	conditional   bool
-	inLoop        bool
-	phase         *string
-	lastFlow      *string
-	card          Cardinality
-	stageCallback string
-	functionDepth int
+	parentID       string
+	groupID        string
+	conditional    bool
+	inLoop         bool
+	phase          *string
+	lastFlow       *string
+	card           Cardinality
+	stageCallback  string
+	functionDepth  int
+	groupDepth     int
+	loopDepth      int
+	groupLoopDepth int
 }
 
 type scope struct {

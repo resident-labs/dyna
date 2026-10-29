@@ -78,7 +78,8 @@ func (ex *extractor) hookJob(call *ast.CallExpression, ctx walkCtx, sc *scope) {
 	node := Node{
 		Kind: KindJob, ParentID: ctx.parentID, GroupID: ctx.groupID,
 		Label: "job", Phase: phaseOf(ctx), StageCallback: ctx.stageCallback,
-		FunctionScope: ctx.functionDepth > 0,
+		ReplayUnsafe: ctx.groupID == "" && (ctx.functionDepth > 0 || ctx.loopDepth > 0) ||
+			ctx.groupID != "" && (ctx.functionDepth != ctx.groupDepth || ctx.loopDepth != ctx.groupLoopDepth),
 		CallArguments: len(call.ArgumentList), CallTrailingComma: ex.callTrailingComma(call),
 		Certainty: certOf(ctx), Cardinality: card,
 	}
@@ -263,6 +264,8 @@ func (ex *extractor) hookParallel(call *ast.CallExpression, ctx walkCtx, sc *sco
 	inner := ctx
 	inner.parentID = id
 	inner.groupID = gid
+	inner.groupDepth = ctx.functionDepth + 1
+	inner.groupLoopDepth = ctx.loopDepth
 	inner.lastFlow = new(string)
 	if len(call.ArgumentList) > 0 {
 		ex.visitParallelArg(call.ArgumentList[0], inner, sc)

@@ -25,7 +25,7 @@ import (
 
 // ExtractorVersion is hashed into planHash. Bump when graph or instrumentation
 // metadata extraction rules change.
-const ExtractorVersion = "9"
+const ExtractorVersion = "10"
 
 const (
 	StatusComplete    = "complete"
@@ -153,7 +153,7 @@ type Node struct {
 	PromptPreview     string      `json:"promptPreview,omitempty"`
 	AuthorID          string      `json:"authorId,omitempty"`
 	StageCallback     string      `json:"stageCallback,omitempty"`
-	FunctionScope     bool        `json:"functionScope,omitempty"`
+	ReplayUnsafe      bool        `json:"replayUnsafe,omitempty"`
 	CallArguments     int         `json:"callArguments,omitempty"`
 	CallTrailingComma bool        `json:"callTrailingComma,omitempty"`
 	CalleeStartByte   int         `json:"calleeStartByte,omitempty"`

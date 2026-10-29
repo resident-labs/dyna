@@ -100,11 +100,14 @@ and returns `{ id, node, state, exitCode, log }`, where `log` is the
 reject. It does not poll. Each invocation has a durable idempotency key based
 on its run, normalized spec hash, source call and async branch path, and an
 occurrence number for that combined identity. Different requests and identical
-parallel branches cannot exchange jobs when completion order changes. A
+direct calls in structured parallel branches cannot exchange jobs when
+completion order changes. A
 resumed workflow recovers the original job even if the submission response or
 journal write was lost. The engine verifies the request hash when recovering a
-key. Replay rejects identical invocations it cannot distinguish instead of
-submitting or returning the wrong job. Stopping the run cancels an unfinished
+key. Replay rejects calls in helper or nested functions and loops, because an
+enclosing branch path cannot distinguish repeated concurrent calls. It also
+rejects identical invocations it cannot distinguish instead of submitting or
+returning the wrong job. Stopping the run cancels an unfinished
 job.
 
 ```js

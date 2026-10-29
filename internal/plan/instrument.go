@@ -84,7 +84,7 @@ func InstrumentWorkflow(src string, p *Plan, wfID string) (string, error) {
 		}
 		idArg := fmt.Sprintf("%q, ", instrumentID(n))
 		if n.Kind == KindJob {
-			idArg = fmt.Sprintf("%q, %t, ", instrumentID(n), n.FunctionScope)
+			idArg = fmt.Sprintf("%q, %t, ", instrumentID(n), n.ReplayUnsafe)
 		}
 		edits = append(edits,
 			sourceEdit{start: paren + 1, end: paren + 1, text: idArg},
