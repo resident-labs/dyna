@@ -36,6 +36,10 @@ const runTimeout = 2 * time.Minute
 // so the steps after it still run. The pass deadline still bounds the whole run.
 const stepShare = 30 * time.Second
 
+// sweepReserve is the time kept for the sweeps. The steps before the sweeps stop
+// this long before the pass deadline, so their work cannot use up the sweeps' time.
+const sweepReserve = 20 * time.Second
+
 // gcWorktrees is worktrees.GC; tests replace it to simulate a slow repository.
 var gcWorktrees = worktrees.GC
 
@@ -105,10 +109,10 @@ func CleanBranch(ctx context.Context, repos []string, branch string) (Result, er
 
 // Run collects worktrees before cleaning scratch files. The total pass is bounded.
 // One pass runs at a time, so the schedule and a by-hand run never overlap.
-// Every step runs under its own share (stepShare), except the worktree cleanup,
-// which runs under worktreeShare. A step that overruns
-// stops at its share. Steps do not start after the pass deadline or the caller's context
-// ends, so a canceled pass removes nothing further.
+// Every step runs under its own share (stepShare). Steps before the sweeps stop at
+// sweepReserve before the pass deadline, so the sweeps keep that time. A step that
+// overruns stops at its share. Steps do not start after the pass deadline or the
+// caller's context ends, so a canceled pass removes nothing further.
 func Run(ctx context.Context, options ...Options) (Result, error) {
 	select {
 	case pass <- struct{}{}:
@@ -122,18 +126,27 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
+	passEnd, _ := ctx.Deadline()
+	workEnd := workDeadline(passEnd)
+	work, stopWork := context.WithDeadline(ctx, workEnd)
+	defer stopWork()
 	result := Result{Kept: map[string]int{}, Pruned: map[string]Pruned{}}
 	errs := []error{}
 	now := opts.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
+	// step runs a step before the sweeps, under the work deadline.
 	step := func(name string, fn func(context.Context) error) {
+		errs = append(errs, runStep(work, &result, name, stepShare, fn))
+	}
+	// sweep runs a step of the sweep group, under the pass deadline.
+	sweep := func(name string, fn func(context.Context) error) {
 		errs = append(errs, runStep(ctx, &result, name, stepShare, fn))
 	}
-	sweepStep := func(kind string, age time.Duration, sweep func(context.Context, bool) (Pruned, error)) {
-		step(kind, func(ctx context.Context) error {
-			return sweepWithDryPass(ctx, &result, kind, age, sweep)
+	sweepStep := func(kind string, age time.Duration, sweepFn func(context.Context, bool) (Pruned, error)) {
+		sweep(kind, func(ctx context.Context) error {
+			return sweepWithDryPass(ctx, &result, kind, age, sweepFn)
 		})
 	}
 	workspaceJobs := jobs.Service{Store: jobs.Store{DataDir: store.DataDir()}, Machines: machines.Store{DataDir: store.DataDir()}, DataDir: store.DataDir()}
@@ -205,9 +218,10 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	// shorter cap would stop every removal. Trees left unfinished at the deadline are
 	// kept and marked deferred, so the next pass retries them.
 	turn, turnErr := nextWorktreeTurn(ctx, store.DataDir())
-	cleanup := func() {
-		passEnd, _ := ctx.Deadline()
-		errs = append(errs, runStep(ctx, &result, "worktrees", worktreeShare(passEnd), func(ctx context.Context) error {
+	// cleanup runs the worktree step until end. Before the sweeps, end is the work
+	// deadline, so the cleanup cannot use the sweeps' reserve. After them, end is the pass deadline.
+	cleanup := func(parent context.Context, end time.Time) {
+		errs = append(errs, runStep(parent, &result, "worktrees", time.Until(end), func(ctx context.Context) error {
 			if turnErr != nil {
 				return turnErr
 			}
@@ -215,9 +229,9 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		}))
 	}
 	if turn%2 == 0 {
-		cleanup()
+		cleanup(work, workEnd)
 	}
-	step("scratch", func(ctx context.Context) error {
+	sweep("scratch", func(ctx context.Context) error {
 		cleaned, err := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
 		result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
 		for _, kept := range cleaned.Kept {
@@ -227,7 +241,7 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	})
 	// Session cleanup must not remove unrelated archived workflow runs.
 	if opts.Session == "" {
-		step("archived runs", func(ctx context.Context) error {
+		sweep("archived runs", func(ctx context.Context) error {
 			v, err := settings.Load("")
 			if err != nil {
 				return err
@@ -263,20 +277,20 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		}
 	}
 	if turn%2 == 1 {
-		cleanup()
+		cleanup(ctx, passEnd)
 	}
 	return result, errors.Join(errs...)
 }
 
-// worktreeShare is the time the worktree cleanup may use from now. It leaves
-// stepShare of the pass deadline for the later steps. A pass with less time than
-// that gives the cleanup whatever is left, so a short caller deadline still runs it.
-func worktreeShare(passEnd time.Time) time.Duration {
-	share := time.Until(passEnd.Add(-stepShare))
-	if share <= 0 {
-		return time.Until(passEnd)
+// workDeadline is when the steps before the sweeps must stop: sweepReserve before
+// the pass deadline. A pass with less time than that gives it all to those steps,
+// so a short caller deadline still runs them.
+func workDeadline(passEnd time.Time) time.Time {
+	end := passEnd.Add(-sweepReserve)
+	if time.Now().Before(end) {
+		return end
 	}
-	return share
+	return passEnd
 }
 
 // fromTurn returns repos in order, starting at the repository whose turn it is.
