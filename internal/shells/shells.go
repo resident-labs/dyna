@@ -29,6 +29,8 @@ import (
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/processguard"
+
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/harness/home"
@@ -419,7 +421,7 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	cmd := exec.Command(m.Cmd[0], m.Cmd[1:]...)
 	cmd.Dir = m.Cwd
 	// LaunchEnv was captured before awaitLaunch consumed the gate marker.
-	env, noDisplay := slices.DeleteFunc(home.LaunchEnv(), func(kv string) bool { return strings.HasPrefix(kv, launchGateEnv+"=") }), false
+	env, noDisplay := processguard.WithoutSecrets(slices.DeleteFunc(home.LaunchEnv(), func(kv string) bool { return strings.HasPrefix(kv, launchGateEnv+"=") })), false
 	if s.CommandEnv != nil {
 		env, noDisplay = s.CommandEnv(ctx, dir, m, env)
 	}
@@ -939,7 +941,7 @@ func (s *Store) Stop(id, by string) (Info, error) {
 // ends cannot reach an orphan. A launch error comes back as _spawn's error.
 func Spawn(exe, id string) error {
 	cmd := exec.Command(exe, "shell", "_spawn", id)
-	cmd.Env = home.LaunchEnv()
+	cmd.Env = processguard.WithoutSecrets(home.LaunchEnv())
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := childenv.Clean(cmd).Run(); err != nil {
@@ -983,7 +985,7 @@ func StartSupervisor(exe, id string) error {
 	cmd := exec.Command(exe, "shell", "_run", id)
 	// The supervisor restores the owner's roots for itself and starts the
 	// command with this launch environment.
-	cmd.Env = home.LaunchEnv()
+	cmd.Env = processguard.WithoutSecrets(home.LaunchEnv())
 	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return err

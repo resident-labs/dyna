@@ -33,9 +33,11 @@ func TestRestartAdmissionTracksAppLaunchInProgress(t *testing.T) {
 	}
 	s.inputGate <- struct{}{} // Hold the launch before it can create a process.
 	d := &daemon{computers: map[string]*supervisor{id: s}}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// The test cancels the held launch itself. The deadline only stops a hang
+	// when no launch event arrives, so it must not race a slow runner.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	ended := make(chan error, 1)
-	request := Request{Status: "Checking launch admission", Command: []string{"true"}, TimeoutMS: 1000}
+	request := Request{Status: "Checking launch admission", Command: []string{"true"}, TimeoutMS: 60000}
 	go func() {
 		_, err := d.openApp(ctx, s, request)
 		ended <- err
