@@ -25,11 +25,18 @@ type issueObject struct {
 	Updated string `json:"updated_at"`
 }
 
+// issueEvent is one entry of an issue's event log. Only closed and reopened
+// entries become facts; the log's IDs only ever grow, so they make the cursor.
+type issueEvent struct {
+	ID    int64  `json:"id"`
+	Event string `json:"event"`
+}
+
 // nextIssueEvents returns the facts new since the cursor w, and the cursor
 // after them. A comment is new when its ID passes the cursor, so an edit to an
-// older comment is not news. The cursor's CommentAt moves past every comment
-// the read saw, so the next read asks only for later changes.
-func nextIssueEvents(w issuewatch.Watch, issue issueObject, comments []Comment) ([]room.IssueWatchEvent, issuewatch.Watch) {
+// older comment is not news. A close or reopen is new when its event ID passes
+// the cursor, so a close and a reopen between two polls both reach the room.
+func nextIssueEvents(w issuewatch.Watch, issue issueObject, comments []Comment, log []issueEvent) ([]room.IssueWatchEvent, issuewatch.Watch) {
 	next := w
 	next.Title = issue.Title
 	slices.SortFunc(comments, func(a, b Comment) int { return cmp.Compare(a.ID, b.ID) })
@@ -47,17 +54,28 @@ func nextIssueEvents(w issuewatch.Watch, issue issueObject, comments []Comment) 
 		})
 		next.CommentID = c.ID
 	}
-	if issue.State != w.State {
-		typ, verb := room.IssueWatchReopened, "reopened"
-		if issue.State == "closed" {
+	slices.SortFunc(log, func(a, b issueEvent) int { return cmp.Compare(a.ID, b.ID) })
+	for _, e := range log {
+		if e.ID <= w.EventID {
+			continue
+		}
+		next.EventID = e.ID
+		var typ room.IssueWatchType
+		var verb string
+		switch e.Event {
+		case "closed":
 			typ, verb = room.IssueWatchClosed, "closed"
+		case "reopened":
+			typ, verb = room.IssueWatchReopened, "reopened"
+		default:
+			continue
 		}
 		events = append(events, room.IssueWatchEvent{
 			Type: typ, Repo: w.Repo, Number: w.Number, Title: issue.Title, URL: issueURL(w),
-			Key: issue.Updated, Summary: fmt.Sprintf("%s#%d was %s.", w.Repo, w.Number, verb),
+			Key: strconv.FormatInt(e.ID, 10), Summary: fmt.Sprintf("%s#%d was %s.", w.Repo, w.Number, verb),
 		})
-		next.State = issue.State
 	}
+	next.State = issue.State
 	next.Updated = issue.Updated
 	return events, next
 }
@@ -77,11 +95,21 @@ func issueComments(ctx context.Context, gh GitHub, ref Ref, since string) ([]Com
 	if since != "" {
 		path += "&since=" + url.QueryEscape(since)
 	}
-	var pages [][]Comment
+	return readPages[Comment](ctx, gh, ref, path)
+}
+
+// issueEvents reads the whole event log of an issue. GitHub has no since filter
+// for it, so the cursor filters the log.
+func issueEvents(ctx context.Context, gh GitHub, ref Ref) ([]issueEvent, error) {
+	return readPages[issueEvent](ctx, gh, ref, issuePath(ref)+"/events?per_page=100")
+}
+
+func readPages[T any](ctx context.Context, gh GitHub, ref Ref, path string) ([]T, error) {
+	var pages [][]T
 	if err := gh.pages(ctx, ref, path, &pages); err != nil {
 		return nil, err
 	}
-	var out []Comment
+	var out []T
 	for _, page := range pages {
 		out = append(out, page...)
 	}
@@ -162,11 +190,18 @@ func (s *Service) WatchIssue(ctx context.Context, rec room.Record, ref Ref) erro
 	if err != nil {
 		return err
 	}
+	log, err := issueEvents(ctx, gh, ref)
+	if err != nil {
+		return err
+	}
 	w := issuewatch.Watch{Room: rec.ID, Host: ref.Host, Repo: ref.Repo, Number: ref.Number,
 		Title: issue.Title, State: issue.State, Updated: issue.Updated, CommentAt: issue.Updated}
 	for _, c := range comments {
 		w.CommentAt = max(w.CommentAt, c.Updated)
 		w.CommentID = max(w.CommentID, c.ID)
+	}
+	for _, e := range log {
+		w.EventID = max(w.EventID, e.ID)
 	}
 	saved := cache.used[strings.ToLower(ref.Host)+"/"+issuePath(ref)]
 	w.ETag, w.Body = saved.ETag, string(saved.Body)
@@ -215,12 +250,16 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error 
 		return err
 	}
 	var comments []Comment
+	var log []issueEvent
 	if issue.Updated != w.Updated {
 		if comments, err = issueComments(ctx, gh, ref, w.CommentAt); err != nil {
 			return err
 		}
+		if log, err = issueEvents(ctx, gh, ref); err != nil {
+			return err
+		}
 	}
-	events, next := nextIssueEvents(w, issue, comments)
+	events, next := nextIssueEvents(w, issue, comments, log)
 	for _, ev := range events {
 		if _, err := s.roomsStore().PostEventInput(room.PostEventInput{
 			RoomID: rec.ID, Event: ev, To: []string{rec.Name}, NeedsRoot: true, RoomService: true,
@@ -230,7 +269,10 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error 
 	}
 	saved := cache.used[key]
 	next.ETag, next.Body = saved.ETag, string(saved.Body)
-	return s.issueStore().Save(ctx, next)
+	// A stale token means the watch was removed or re-watched during this poll.
+	// Its cursor then stays as the newer save left it.
+	_, err = s.issueStore().Advance(ctx, next)
+	return err
 }
 
 func (s *Service) issueStore() issuewatch.Store {
