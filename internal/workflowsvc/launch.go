@@ -19,6 +19,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/plan"
+	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
@@ -136,7 +137,7 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 			return nil, nil, err
 		}
 		cmd = exec.Command(launch.Executable, "run-worker", optionsPath)
-		cmd.Env = childEnv
+		cmd.Env = processguard.WithoutSecrets(childEnv)
 		detached := "1"
 		cmd.Stdout, cmd.Stderr = log, log
 		if foreground := launch.Foreground; foreground != nil {
