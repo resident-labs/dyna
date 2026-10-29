@@ -224,7 +224,13 @@ describe("auth storage commands", () => {
 		});
 
 		try {
-			await contentionPromise;
+			const firstOutcome = await Promise.race([
+				contentionPromise.then(() => "contention" as const),
+				set.then(() => "writer completion" as const),
+			]);
+			if (firstOutcome === "writer completion") {
+				throw new Error("The second writer finished before its lock attempt reported contention");
+			}
 			// The second writer reached the held lock and is blocked, so it has
 			// neither finished nor written.
 			expect(setFinished).toBe(false);
