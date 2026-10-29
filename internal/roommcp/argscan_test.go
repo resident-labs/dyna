@@ -2,14 +2,17 @@ package roommcp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 )
 
@@ -213,5 +216,62 @@ func TestHostIdentities(t *testing.T) {
 	}
 	if ids.Home != "/home/jane" {
 		t.Errorf("home = %q", ids.Home)
+	}
+}
+
+func TestHostIdentitiesFailOnLookupError(t *testing.T) {
+	accounts := &accountstore.Store{Root: filepath.Join(t.TempDir(), "accounts")}
+	repo := room.Record{Repo: t.TempDir()}
+	for name, fail := range map[string]string{"git": "git", "gh": "gh"} {
+		host := Host{Accounts: accounts, Run: func(_ context.Context, _, cmd string, _ ...string) (string, error) {
+			if cmd == fail {
+				return "", context.DeadlineExceeded
+			}
+			return "", nil
+		}}
+		if _, err := host.Identities(context.Background(), repo); err == nil {
+			t.Errorf("a failed %s lookup returned identities", name)
+		}
+	}
+	host := Host{Accounts: accounts, Run: func(_ context.Context, _, cmd string, _ ...string) (string, error) {
+		return `not json`, nil
+	}}
+	if _, err := host.Identities(context.Background(), repo); err == nil {
+		t.Error("unreadable gh output returned identities")
+	}
+	// An unset git key (exit 1) and a missing gh are absent configuration.
+	host = Host{Accounts: accounts, Run: func(ctx context.Context, dir, cmd string, args ...string) (string, error) {
+		if cmd == "gh" {
+			return "", exec.ErrNotFound
+		}
+		out, err := exec.CommandContext(ctx, "sh", "-c", "exit 1").Output()
+		return string(out), err
+	}}
+	if _, err := host.Identities(context.Background(), repo); err != nil {
+		t.Errorf("absent configuration failed: %v", err)
+	}
+}
+
+// A database already at version 1 gains the scanner tables.
+func TestMigrateUpgradesVersionOne(t *testing.T) {
+	dir := t.TempDir()
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(db, "room_mcp.schema", 1, func(conn *sql.Conn, old int) error {
+		_, err := conn.ExecContext(context.Background(), schema)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"room_mcp_block_terms", "room_mcp_logins"} {
+		var n int
+		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&n); err != nil {
+			t.Errorf("%s missing after upgrade: %v", table, err)
+		}
 	}
 }
