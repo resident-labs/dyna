@@ -87,6 +87,31 @@ func TestStatedHoldAccountSkipsAnAccountTheRepoRefuses(t *testing.T) {
 	}
 }
 
+// A harness with one shared sign-in cannot run a probe on a held account, because
+// its turn would read the shared login of the active account. Such a probe selects
+// as usual and pins nothing.
+func TestHeldProbeSkipsAHarnessWithASharedSignIn(t *testing.T) {
+	a := testAccounts(t)
+	held := signedSharedGrok(t, a, "work", "refresh-work")
+	s, err := reposcope.Open(filepath.Dir(a.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := s.MarkReset(held.ID, now.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runtime{Accounts: a, Bundles: manager(t)}
+	p := profile.Profile{Harness: "grok", RuntimeVersion: "1.2.3"}
+	selected, heldID, err := r.SelectProbeAccount(context.Background(), p, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if heldID != "" || selected.RuntimeAccount != "" {
+		t.Fatalf("a shared-sign-in probe pinned held account %q (%q); want none", heldID, selected.RuntimeAccount)
+	}
+}
+
 // A held-account probe runs its turn on the held account. The global selection
 // that other turns read does not change while the probe runs.
 func TestHeldProbePinsTheHeldAccountWithoutSwitching(t *testing.T) {
