@@ -19,6 +19,7 @@ type State string
 const (
 	StatePending   State = "pending"
 	StateApproved  State = "approved"
+	StateRunning   State = "running"
 	StateDenied    State = "denied"
 	StateExpired   State = "expired"
 	StateCancelled State = "cancelled"
@@ -59,7 +60,6 @@ type RequestInput struct {
 	Argv  []string       `json:"argv"`
 	Cwd   string         `json:"cwd"`
 	Repo  string         `json:"repo"`
-	Class Class          `json:"class"`
 	Files []FileSnapshot `json:"files,omitempty"`
 }
 
@@ -69,6 +69,20 @@ type GHPayload struct {
 	Cwd   string         `json:"cwd"`
 	Repo  string         `json:"repo"`
 	Files []FileSnapshot `json:"files,omitempty"`
+}
+
+// DisplayBody returns the exact inline or file-backed text shown for approval.
+func (p GHPayload) DisplayBody() string {
+	if body := argument(p.Argv, "--body"); body != "" {
+		return body
+	}
+	path := argument(p.Argv, "--body-file")
+	for _, file := range p.Files {
+		if file.Path == path {
+			return string(file.Data)
+		}
+	}
+	return ""
 }
 
 // CreateInput is the typed input to the kind-independent core.

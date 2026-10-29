@@ -531,7 +531,7 @@ func (s *Service) postRequested(r Request, in *CreateInput) error {
 		ev.Repository = payload.Repo
 		ev.Command = "gh " + strings.Join(payload.Argv, " ")
 		ev.Title = argument(payload.Argv, "--title")
-		ev.Body = argument(payload.Argv, "--body")
+		ev.Body = payload.DisplayBody()
 	}
 	_, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: r.Room, Event: ev, To: []string{at}, SessionIDs: sessionIDs, NoWake: r.atID == Owner})
 	return err
