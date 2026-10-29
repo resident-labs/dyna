@@ -112,6 +112,10 @@ type TransferOptions struct {
 	WaitSeconds int    `json:"waitSeconds"` // 0 means immediate transcript fallback; maximum 120
 	Retry       bool   `json:"retry,omitempty"`
 
+	// Dir is the root override for the task directory of a fresh conversation.
+	// It replaces the session's directory and any saved handoff hint.
+	Dir string `json:"dir,omitempty"`
+
 	// Fallback marks an automatic move after a usage limit. Only the engine's
 	// usage-limit fallback sets it: Notice is the one DM that explains the
 	// move, and LimitReason says what the previous profile could not do.
@@ -135,6 +139,9 @@ func (m *Manager) TransferContext(ctx context.Context, ref string, opts Transfer
 func (m *Manager) requestTransfer(ctx context.Context, ref string, opts TransferOptions) (TransferState, error) {
 	if opts.WaitSeconds < 0 || opts.WaitSeconds > 120 {
 		return TransferState{}, errors.New("handoff wait must be between 0 and 120 seconds")
+	}
+	if opts.Dir != "" && (!filepath.IsAbs(opts.Dir) || !validTaskDir(opts.Dir)) {
+		return TransferState{}, fmt.Errorf("task directory %q must be an existing absolute directory", opts.Dir)
 	}
 	ps, err := m.profiles()
 	if err != nil {
@@ -207,6 +214,9 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		// the transfer stops the old turn and resumes at once. Every other pair
 		// still starts a fresh native conversation.
 		plan := transferPlanFor(ps, meta, candidate, fresh, opts)
+		if opts.Dir != "" && (plan.native || plan.convert) {
+			return errors.New("--dir applies to a fresh conversation; a native or converted transfer keeps its worktree")
+		}
 		// A fallback chain continues from the profile the session is on. When the
 		// turn that this transfer moved it to hits its own limit, that move is
 		// over: the next move supersedes it here, in the same transaction. Its
@@ -265,6 +275,9 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		}
 		if previous := meta.Transfer; !plan.native && !plan.convert && !opts.rootSeat && !opts.Fresh && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
 			out.WrittenHandoff, out.Handoff, out.Dir, out.Branch, out.Source = previous.WrittenHandoff, previous.WrittenHandoff, previous.Dir, previous.Branch, "cooperative"
+		}
+		if opts.Dir != "" {
+			out.Dir = opts.Dir
 		}
 		// Freeze labels for records written before per-turn profile snapshots.
 		previousModel := currentModel

@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/workeroutput"
+	"dyna-agent/internal/worktrees"
 )
 
 // scanTail bounds both disk input and the size of a single decoded record.
@@ -280,6 +281,26 @@ func (m *Manager) transferCompactionSeen(id string, t Turn) bool {
 
 func validTaskDir(dir string) bool { st, err := os.Stat(dir); return err == nil && st.IsDir() }
 
+// newestRetainedTree returns the newest retained worktree that session owns and
+// that still exists. Removal drops the registry record, so a removed tree never
+// comes back. It returns "" when the session owns no such tree.
+func newestRetainedTree(session string) (string, error) {
+	records, err := worktrees.List()
+	if err != nil {
+		return "", err
+	}
+	var newest worktrees.Record
+	for _, rec := range records {
+		if rec.Session != session || !validTaskDir(rec.Path) {
+			continue
+		}
+		if newest.Path == "" || rec.CreatedAt.After(newest.CreatedAt) {
+			newest = rec
+		}
+	}
+	return newest.Path, nil
+}
+
 // sourceReview is the shared session summary and review pointer. Full evidence
 // stays in transfer state, turns and room records, rather than replacement input.
 func (m *Manager) sourceReview(meta Meta, turn int) string {
@@ -332,6 +353,15 @@ func (m *Manager) handoffPacket(meta Meta, t TransferState) (string, string, err
 	}
 	if t.Dir != "" {
 		dir = t.Dir
+	}
+	if t.Dir == "" && !validTaskDir(dir) {
+		tree, err := newestRetainedTree(meta.ID)
+		if err != nil {
+			return "", "", err
+		}
+		if tree != "" {
+			dir = tree
+		}
 	}
 	if !validTaskDir(dir) {
 		return "", "", fmt.Errorf("task directory %q is unavailable; submit a handoff with the actual worktree or restore that directory and retry", dir)
