@@ -34,19 +34,24 @@ func DisplayApprovalBody(payload approvals.GHPayload) string {
 	}
 	api := len(command) > 0 && command[0] == "api"
 	var parts []string
+	var body string
 	for _, ref := range refs {
 		content := ref.value
 		if ref.file {
 			content = snapshots[ref.path]
 		}
 		if !api && ref.name == "body" {
-			return content
+			body = content
+			continue
 		}
 		if ref.name == "" {
 			parts = append(parts, content)
 		} else {
 			parts = append(parts, ref.name+":\n"+content)
 		}
+	}
+	if !api {
+		return body
 	}
 	return strings.Join(parts, "\n\n")
 }
