@@ -443,11 +443,32 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	if len(atts)+len(in.Files) > room.MaxPostAttachments {
 		return Result{}, fmt.Errorf("a post can carry at most %d attachments", room.MaxPostAttachments)
 	}
+	// Check rich files before saving anything, so a refused card leaves no
+	// bytes behind. Post checks again from the saved bytes.
+	cards := 0
+	for _, f := range in.Files {
+		if f.Render == room.RenderHTML {
+			if cards++; cards > 1 {
+				return Result{}, errors.New("a post can carry at most one HTML card")
+			}
+			if _, err := room.ParseRich(f.Name, f.Data); err != nil {
+				return Result{}, fmt.Errorf("%s: %w", f.Name, err)
+			}
+			if text == "" {
+				return Result{}, errors.New("a post with an HTML card needs text that sums it up for readers outside the desktop")
+			}
+		}
+	}
+	saved, err := s.saveFiles(res.rec.ID, in.Files)
+	if err != nil {
+		return Result{}, err
+	}
+	atts = append(atts, saved...)
 	// The owner writing from one room to another speaks as the room they write
 	// from, so a reply to the post (ReplyAddress) names that room's owner and
 	// lands in the chat the owner wrote in. The sender's room also keeps a copy
-	// of the post. Its files are saved there first, so a copy cannot fail after
-	// the recipients have the post.
+	// of the post. Its files are saved there only after every file is valid, so
+	// a refused post leaves no bytes in either room.
 	var origin room.Record
 	originReply := ""
 	senderRoomID := ""
@@ -476,27 +497,6 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 			copyIDs = map[string]string{res.from: in.Sender.Session.ID}
 		}
 	}
-	// Check rich files before saving anything, so a refused card leaves no
-	// bytes behind. Post checks again from the saved bytes.
-	cards := 0
-	for _, f := range in.Files {
-		if f.Render == room.RenderHTML {
-			if cards++; cards > 1 {
-				return Result{}, errors.New("a post can carry at most one HTML card")
-			}
-			if _, err := room.ParseRich(f.Name, f.Data); err != nil {
-				return Result{}, fmt.Errorf("%s: %w", f.Name, err)
-			}
-			if text == "" {
-				return Result{}, errors.New("a post with an HTML card needs text that sums it up for readers outside the desktop")
-			}
-		}
-	}
-	saved, err := s.saveFiles(res.rec.ID, in.Files)
-	if err != nil {
-		return Result{}, err
-	}
-	atts = append(atts, saved...)
 	var sessionIDs map[string]string
 	for _, recipient := range res.recipients {
 		if recipient.kind == toSession {
