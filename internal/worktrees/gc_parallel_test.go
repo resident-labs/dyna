@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -153,6 +154,35 @@ func TestGCBatchCommitSurvivesExpiredDeadline(t *testing.T) {
 	}
 	if _, err := Get(path); err == nil {
 		t.Fatal("record of the removed tree was not committed")
+	}
+}
+
+// A registry read failure must keep the tree: removing it anyway would strand
+// its record and port forever, because later scans no longer see the tree.
+func TestGCKeepsTreeWhenRegistryReadFails(t *testing.T) {
+	repo := gcRepo(t)
+	path := gcTree(t, repo, "dyna/read-fail", "closed")
+	ageGCTree(t, path)
+	realRead := trackedRecord
+	trackedRecord = func(string) (Record, bool, error) {
+		return Record{}, false, fmt.Errorf("registry unreadable")
+	}
+	t.Cleanup(func() { trackedRecord = realRead })
+	trees, err := GC(context.Background(), repo, GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("tree removed despite a registry read failure: %v; decisions: %#v", err, trees)
+	}
+	kept := false
+	for _, tree := range trees {
+		if tree.Path == path {
+			kept = tree.Action == "kept" && strings.Contains(tree.Reason, "cannot read worktree registry")
+		}
+	}
+	if !kept {
+		t.Fatalf("decision for the unreadable tree = %#v", trees)
 	}
 }
 

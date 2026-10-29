@@ -421,6 +421,22 @@ func MarkRemoved(rec Record) error {
 	})
 }
 
+// trackedRecord reads the record of an exact path. found is false when no
+// record exists for the path; an error means the registry could not be read,
+// which callers must treat as unknown, never as absent. Tests replace it.
+var trackedRecord = func(path string) (rec Record, found bool, err error) {
+	records, _, err := ListWithWarnings()
+	if err != nil {
+		return Record{}, false, err
+	}
+	for _, r := range records {
+		if r.Path == path {
+			return r, true, nil
+		}
+	}
+	return Record{}, false, nil
+}
+
 // Inspect compares a retained worktree's current HEAD and porcelain status to
 // the engine-captured retention-time fingerprint.
 func Inspect(rec Record) (string, error) {

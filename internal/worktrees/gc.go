@@ -698,15 +698,22 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 		}
 		// The record version this removal observed, taken before the removal: a
 		// tree recreated at the same path tracks a different record afterwards,
-		// and the batch commit deletes only this version.
-		observed, obsErr := Get(t.Path)
+		// and the batch commit deletes only this version. A tree with no record
+		// is handmade and leaves nothing to delete. A registry that cannot be
+		// read keeps the tree: removing it would strand its record and port
+		// forever, because later scans no longer see the tree.
+		observed, found, readErr := trackedRecord(t.Path)
+		if readErr != nil {
+			t.Action, t.Reason = "kept", "cannot read worktree registry: "+readErr.Error()
+			return nil
+		}
 		beforeWorktreeRemoval(t.Path)
 		if out, e := gitOutput(ctx, repo, "worktree", "remove", t.Path); e != nil {
 			t.Action, t.Reason = "kept", fmt.Sprintf("git refused removal: %v: %s", e, strings.TrimSpace(string(out)))
 			return nil
 		}
 		t.Action = "removed"
-		if obsErr == nil {
+		if found {
 			collected(observed)
 		}
 		return nil
