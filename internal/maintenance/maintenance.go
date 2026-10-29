@@ -36,10 +36,6 @@ const runTimeout = 2 * time.Minute
 // so the steps after it still run. The pass deadline still bounds the whole run.
 const stepShare = 30 * time.Second
 
-// worktreeShare caps the worktree cleanup. The rest of the pass stays with the
-// later steps, so a slow repository cannot starve them.
-const worktreeShare = runTimeout - stepShare
-
 // gcWorktrees is worktrees.GC; tests replace it to simulate a slow repository.
 var gcWorktrees = worktrees.GC
 
@@ -204,11 +200,13 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	// Each pass starts the worktree cleanup at the next repository, so a slow
 	// repository cannot hold back the others on every pass. The turn is stored,
 	// because each hook run is a new process. The cleanup runs
-	// within worktreeShare, which leaves stepShare for the later steps. A removal
+	// within the pass time left after stepShare, so the later steps keep their
+	// share. A removal
 	// needs its repository fetched and scanned first, so a shorter cap would stop
 	// every removal. Trees left unfinished at that point are kept and marked
 	// deferred, so the next pass retries them.
-	errs = append(errs, runStep(ctx, &result, "worktrees", worktreeShare, func(ctx context.Context) error {
+	passEnd, _ := ctx.Deadline()
+	errs = append(errs, runStep(ctx, &result, "worktrees", worktreeShare(passEnd), func(ctx context.Context) error {
 		turn, err := nextWorktreeTurn(ctx, store.DataDir())
 		if err != nil {
 			return err
@@ -261,6 +259,17 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		}
 	}
 	return result, errors.Join(errs...)
+}
+
+// worktreeShare is the time the worktree cleanup may use from now. It leaves
+// stepShare of the pass deadline for the later steps. A pass with less time than
+// that gives the cleanup whatever is left, so a short caller deadline still runs it.
+func worktreeShare(passEnd time.Time) time.Duration {
+	share := time.Until(passEnd.Add(-stepShare))
+	if share <= 0 {
+		return time.Until(passEnd)
+	}
+	return share
 }
 
 // fromTurn returns repos in order, starting at the repository whose turn it is.
