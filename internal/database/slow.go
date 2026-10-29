@@ -95,6 +95,49 @@ func caller() string {
 	}
 }
 
+// writerCaller names the store that asked for a writer transaction. It runs
+// only when caller detail is on, so the stack walk costs nothing otherwise.
+func writerCaller() string {
+	pcs := make([]uintptr, 32)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
+	var stack []string
+	for {
+		frame, more := frames.Next()
+		stack = append(stack, frame.Function)
+		if !more {
+			return writerLabel(stack)
+		}
+	}
+}
+
+// writerLabel picks the label from a stack, innermost first. The first caller
+// outside this package and internal/state is the store. A goals store read
+// also names the first caller outside internal/goals, which asked for the
+// barrier: "goals.(*Store).list via worktrees.(*Store).SessionClosed".
+func writerLabel(stack []string) string {
+	first := ""
+	for _, fn := range stack {
+		if strings.HasPrefix(fn, "dyna-agent/internal/database.") || strings.HasPrefix(fn, "dyna-agent/internal/state.") {
+			continue
+		}
+		inGoals := strings.HasPrefix(fn, "dyna-agent/internal/goals.")
+		if first == "" {
+			first = fn
+			if !inGoals {
+				return fn
+			}
+			continue
+		}
+		if !inGoals {
+			return first + " via " + fn
+		}
+	}
+	if first == "" {
+		return "unknown"
+	}
+	return first
+}
+
 // process is the program and its subcommand, such as "dyna _turn".
 func process() string {
 	p := filepath.Base(os.Args[0])
