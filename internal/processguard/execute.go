@@ -93,7 +93,18 @@ func Command(ctx context.Context, executable string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// MetadataEnv removes session stamps and Git routing from child commands.
+// GitHubTokenName reports whether key names a GitHub token. A child command gets
+// its GitHub account from the session that starts it (D-414), never from an
+// inherited token.
+func GitHubTokenName(key string) bool {
+	switch key {
+	case "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
+		return true
+	}
+	return false
+}
+
+// MetadataEnv removes session stamps, Git routing and GitHub tokens from child commands.
 func MetadataEnv() []string {
 	var env []string
 	hasGoFlags := false
@@ -103,7 +114,7 @@ func MetadataEnv() []string {
 		case "CLAUDE_CODE_SESSION_ID":
 			continue
 		}
-		if strings.HasPrefix(key, "DYNA_") || strings.HasPrefix(key, "GIT_") {
+		if strings.HasPrefix(key, "DYNA_") || strings.HasPrefix(key, "GIT_") || GitHubTokenName(key) {
 			continue
 		}
 		if key == "GOFLAGS" {

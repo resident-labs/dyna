@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,26 @@ func TestMetadataEnvDropsAllDynaVariables(t *testing.T) {
 		t.Error("child environment lost unrelated variable")
 	}
 
+}
+
+func TestMetadataEnvDropsGitHubTokens(t *testing.T) {
+	tokens := []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
+	for _, key := range tokens {
+		t.Setenv(key, "must-not-reach-children")
+	}
+	t.Setenv("GH_CONFIG_DIR", "configured")
+
+	kept := false
+	for _, entry := range MetadataEnv() {
+		key, _, _ := strings.Cut(entry, "=")
+		if slices.Contains(tokens, key) {
+			t.Errorf("child environment contains %s", key)
+		}
+		kept = kept || entry == "GH_CONFIG_DIR=configured"
+	}
+	if !kept {
+		t.Error("child environment lost GH_CONFIG_DIR")
+	}
 }
 
 func TestMetadataEnvGoFlags(t *testing.T) {
