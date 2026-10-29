@@ -60,11 +60,16 @@
     onsave({ roles })
   }
 
-  function setSlots(e: Event & { currentTarget: HTMLInputElement }) {
-    const slots = Number(e.currentTarget.value)
-    if (!Number.isInteger(slots) || slots < 0 || slots === machine?.ciSlots) return
-    onsave({ ciSlots: slots })
+  function setLimit(field: 'maxIOHeavy' | 'maxDiskPercent', max: number) {
+    return (e: Event & { currentTarget: HTMLInputElement }) => {
+      const value = Number(e.currentTarget.value)
+      if (!Number.isInteger(value) || value < 0 || value > max) return
+      if (machine && value === machine[field]) return
+      onsave({ [field]: value })
+    }
   }
+  const setIOHeavy = $derived(setLimit('maxIOHeavy', 1024))
+  const setDiskPercent = $derived(setLimit('maxDiskPercent', 100))
 
   function setSSH(e: Event & { currentTarget: HTMLInputElement }) {
     const ssh = e.currentTarget.value.trim()
@@ -199,8 +204,8 @@
         {@const ci = machine.ci}
         {@const runs = machine.ciRuns ?? []}
         <Card title="CI" count={runs.length || null}>
-          <Row dense text="Slots now">
-            {#snippet trail()}<span class="value">{ci.used} of {ci.slots} used</span>{/snippet}
+          <Row dense text="Node queue">
+            {#snippet trail()}<span class="value">{count(ci.running, 'run')} · {count(ci.waiting, 'waiting unit')}</span>{/snippet}
           </Row>
           {#each runs as run (`${run.url}@${run.started}`)}
             <Row dense text={ciRunText(run)}>
@@ -210,7 +215,6 @@
                 {#if ciRunDetail(run)}<span>{ciRunDetail(run)}</span>{/if}
               {/snippet}
               {#snippet trail()}
-                <span class="value">{count(run.slots, 'slot')}</span>
                 {#if run.url}<a class="open" href={run.url} target="_blank" rel="noreferrer" title="Open this PR on GitHub">Open ↗</a>{/if}
               {/snippet}
             </Row>
@@ -241,8 +245,13 @@
             </span>
           {/snippet}
         </Row>
-        <Row dense text="CI slots">
-          {#snippet trail()}<input class="num" type="number" min="0" step="1" aria-label="CI slots" value={machine.ciSlots} disabled={busy} onchange={setSlots} />{/snippet}
+        <Row dense text="IO-heavy limit">
+          {#snippet meta()}<span class="note">0 keeps the default: one per 16 CPUs, at least 1.</span>{/snippet}
+          {#snippet trail()}<input class="num" type="number" min="0" step="1" aria-label="IO-heavy limit" value={machine.maxIOHeavy ?? 0} disabled={busy} onchange={setIOHeavy} />{/snippet}
+        </Row>
+        <Row dense text="Disk limit %">
+          {#snippet meta()}<span class="note">0 keeps the default, 90. Above this used percent the node admits no new work.</span>{/snippet}
+          {#snippet trail()}<input class="num" type="number" min="0" max="100" step="1" aria-label="Disk limit percent" value={machine.maxDiskPercent ?? 0} disabled={busy} onchange={setDiskPercent} />{/snippet}
         </Row>
         {#if machine.roles.includes('ci')}
           <Row dense text="Rooms">

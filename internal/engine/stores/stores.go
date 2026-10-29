@@ -89,6 +89,8 @@ var migrations = []func(dataDir string) error{
 	genstate.Migrate,
 	lanesync.Migrate,
 	jobs.Migrate,
+	// The jobs node queue lives next to the jobs table and migrates with it.
+	func(dir string) error { return jobs.Admission{DataDir: dir}.Migrate() },
 	librarianstate.Migrate,
 	library.Migrate,
 	localci.Migrate,

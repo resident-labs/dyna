@@ -98,13 +98,13 @@ func nodeCommand(s localci.Store) *cobra.Command {
 				return jsonout.Write(c.OutOrStdout(), nodes)
 			}
 			out := tabwriter.NewWriter(c.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(out, "NAME\tSSH\tSLOTS\tENABLED")
+			fmt.Fprintln(out, "NAME\tSSH\tCPUS\tENABLED")
 			for _, n := range nodes {
 				ssh := n.SSH
 				if ssh == "" {
 					ssh = "local"
 				}
-				fmt.Fprintf(out, "%s\t%s\t%d\t%t\n", n.Name, ssh, n.Slots, n.Enabled)
+				fmt.Fprintf(out, "%s\t%s\t%d\t%t\n", n.Name, ssh, n.CPUs, n.Enabled)
 			}
 			return out.Flush()
 		},

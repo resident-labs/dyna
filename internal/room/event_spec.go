@@ -816,9 +816,24 @@ var eventSpecs = []EventSpec{
 		Text:              "Shell job {label} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
 		Producers:         []EventProducer{ProducerShell},
 	},
-	// A job's life belongs to the session that submitted it: the start is
-	// quiet, the result wakes the session like a shell result does. Both stay
-	// out of the room watch; the session DM and the job card carry them.
+	// A job's life belongs to the session that submitted it: the queued wait
+	// and the start are quiet, the result wakes the session like a shell
+	// result does. All stay out of the room watch; the session DM and the job
+	// card carry them.
+	{
+		Family:    FamilyJob,
+		Type:      TypeJobQueued,
+		Renderer:  "JobCard",
+		Payload:   reflect.TypeOf(JobEvent{}),
+		Quiet:     true,
+		NoWatch:   true,
+		Wake:      WakeNever,
+		Once:      true,
+		Audience:  AudienceSession,
+		Blocks:    []string{"detail", "waitReason"},
+		Text:      "Job {label} waits on {node}: {waitReason}.",
+		Producers: []EventProducer{ProducerJobs},
+	},
 	{
 		Family:    FamilyJob,
 		Type:      TypeStarted,

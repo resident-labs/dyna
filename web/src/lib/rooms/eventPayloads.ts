@@ -71,10 +71,11 @@ export function shellEvent(post: EventPost): ShellEvent | undefined {
   return isShellEvent(post.payload) ? post.payload : undefined
 }
 
-// jobEvent returns the typed payload of a job post, started or finished.
+// jobEvent returns the typed payload of a job post, queued, started or
+// finished.
 export function jobEvent(post: EventPost): JobEvent | undefined {
   if (post.kind !== 'job') return undefined
-  if (post.notice?.kind !== 'started' && post.notice?.kind !== 'finished') return undefined
+  if (post.notice?.kind !== 'queued' && post.notice?.kind !== 'started' && post.notice?.kind !== 'finished') return undefined
   return isJobEvent(post.payload) ? post.payload : undefined
 }
 

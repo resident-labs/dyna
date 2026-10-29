@@ -102,7 +102,7 @@ func (s *Service) runWarm(ctx context.Context, node localci.Node, req localci.Wa
 	if s.WarmRun != nil {
 		return s.WarmRun(ctx, node, req)
 	}
-	result, err := (localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node}).Warm(ctx, req)
+	result, err := (localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node, Engine: true}).Warm(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,6 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 	if store == nil {
 		return
 	}
-	active := s.activeCISlots()
 	repos := make([]string, 0, len(st.RepositoryFacts))
 	for repo := range st.RepositoryFacts {
 		repos = append(repos, repo)
@@ -159,9 +158,9 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 		}
 		for i := range nodes {
 			node := nodes[i]
-			// A warm run takes a slot, so it waits for a machine with a free
-			// one: a pull request's checks come first.
-			if node.LowDisk || node.Slots-active[node.Name] < 1 {
+			// A warm run takes room on the node queue, so it waits for a
+			// machine with room: a pull request's checks come first.
+			if node.LowDisk || s.freeCINodeCPUs(ctx, node) < 1 {
 				continue
 			}
 			warmed, err := store.WarmedHead(ctx, repo, node.Name)
@@ -230,15 +229,6 @@ func (s *Service) warmJobAt(ctx context.Context, st State, repo, base string, by
 		return localci.JobRef{}, false
 	}
 	return localci.JobRef{}, false
-}
-
-// activeCISlots counts the slots the runs in flight hold, under the run set's
-// own lock: a run that finishes removes its entry while a tick reads them.
-func (s *Service) activeCISlots() map[string]int {
-	runs := s.nodeRuns()
-	runs.Lock()
-	defer runs.Unlock()
-	return activeRegisteredCISlots(runs)
 }
 
 // startWarm runs one warm run in the background and records the commit it

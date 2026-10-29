@@ -17,22 +17,23 @@ import (
 
 // jobView is what every job command prints: the facts of the stored row.
 type jobView struct {
-	ID       string   `json:"id"`
-	Node     string   `json:"node"`
-	State    string   `json:"state"`
-	Command  []string `json:"command"`
-	Repo     string   `json:"repo,omitempty"`
-	SHA      string   `json:"sha,omitempty"`
-	ExitCode *int     `json:"exitCode,omitempty"`
-	Note     string   `json:"note,omitempty"`
-	Log      string   `json:"log,omitempty"`
+	ID         string   `json:"id"`
+	Node       string   `json:"node"`
+	State      string   `json:"state"`
+	Command    []string `json:"command"`
+	Repo       string   `json:"repo,omitempty"`
+	SHA        string   `json:"sha,omitempty"`
+	ExitCode   *int     `json:"exitCode,omitempty"`
+	Note       string   `json:"note,omitempty"`
+	WaitReason string   `json:"waitReason,omitempty"`
+	Log        string   `json:"log,omitempty"`
 	// Artifacts names the kept outputs and how to fetch them.
 	Artifacts []string `json:"artifacts,omitempty"`
 	Fetch     string   `json:"fetch,omitempty"`
 }
 
 func view(job jobs.Job) jobView {
-	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, Log: "dyna job logs " + job.ID}
+	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID}
 	if len(job.Artifacts) > 0 {
 		v.Artifacts, v.Fetch = job.Artifacts, "dyna job fetch "+job.ID
 	}
@@ -56,17 +57,19 @@ func NewCommand() *cobra.Command {
 		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
 		Long: "A job is one command that runs on a machine, detached: it survives the\n" +
 			"end of this command, an SSH drop and an engine restart. With no --node it\n" +
-			"runs on this machine, so one machine needs no setup. The job takes one of\n" +
-			"the machine's CI slots. Its log and exit code are stored; the session that\n" +
-			"submitted it is woken when the job ends. --artifact keeps named outputs of\n" +
-			"its work folder after it ends; dyna job fetch copies them here.",
+			"runs on this machine, so one machine needs no setup. The machine's node\n" +
+			"queue admits the job when its CPUs, memory and IO weight fit; a job that\n" +
+			"waits shows why in dyna job show. Its log and exit code are stored; the\n" +
+			"session that submitted it is woken when the job ends. --artifact keeps\n" +
+			"named outputs of its work folder after it ends; dyna job fetch copies\n" +
+			"them here.",
 	}
 	cmd.AddCommand(runCmd(), showCmd(), logsCmd(), listCmd(), cancelCmd(), fetchCmd())
 	return cmd
 }
 
 func runCmd() *cobra.Command {
-	var node, commit, image, memory string
+	var node, commit, image, memory, ioWeight string
 	var artifacts []string
 	var cpus int
 	var host bool
@@ -84,6 +87,9 @@ func runCmd() *cobra.Command {
 			if host && image != "" {
 				return fmt.Errorf("a job runs either on the host or in an image, not both")
 			}
+			if ioWeight != "" && ioWeight != "heavy" && ioWeight != "light" {
+				return fmt.Errorf("io must be heavy or light, not %q", ioWeight)
+			}
 			repo := ""
 			if commit != "" {
 				repo, _ = os.Getwd()
@@ -92,7 +98,7 @@ func runCmd() *cobra.Command {
 			err := engineclient.New("").Call(c.Context(), "RunJob", []any{map[string]any{
 				"node": node, "command": args, "repo": repo, "ref": commit,
 				"host": host, "image": image, "cpus": cpus, "memory": memory,
-				"timeoutSec": int(timeout / time.Second), "artifacts": artifacts,
+				"timeoutSec": int(timeout / time.Second), "io": ioWeight, "artifacts": artifacts,
 			}}, &job)
 			if err != nil {
 				return err
@@ -108,6 +114,7 @@ func runCmd() *cobra.Command {
 	c.Flags().StringVar(&image, "image", "", "run the command in this container image")
 	c.Flags().BoolVar(&host, "host", false, "run the command on the machine itself (the default without --image)")
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
+	c.Flags().StringVar(&ioWeight, "io", "light", "the job's IO weight: a node runs only a few heavy jobs at once")
 	return c
 }
 

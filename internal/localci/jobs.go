@@ -2,11 +2,14 @@ package localci
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os"
 	"path"
 	"time"
 
 	"dyna-agent/internal/jobs"
+	"dyna-agent/internal/machines"
 )
 
 // The node executor moved to internal/jobs. This file keeps the names local CI
@@ -26,9 +29,9 @@ const (
 	defaultHostMemoryMiB      = jobs.DefaultHostMemoryMiB
 	hostTasksMax              = jobs.HostTasksMax
 	tasksPerCPU               = jobs.TasksPerCPU
-	// admissionWait matches the explicit queue bound passed to the shared host
-	// gate.
-	admissionWait = jobs.AdmissionWait
+	// admissionWait bounds how long one check may wait in the node queue
+	// before the run gives up on it, so a queued check never waits for ever.
+	admissionWait = 55 * time.Minute
 	// longCallTimeout bounds one attempt of a node call that can run long.
 	longCallTimeout = 15 * time.Minute
 )
@@ -40,8 +43,7 @@ var defaultScopeLimits = jobs.DefaultLimits
 // clampCheckResources bounds a check's request by the machine, as the jobs
 // executor's clamp does for every job.
 func clampCheckResources(check nodeCheck, node Node) checkResources {
-	facts := jobs.Facts{Slots: node.Slots, CPUs: node.CPUs, MemoryBytes: node.MemoryBytes}
-	return jobs.ClampResources(check.host, check.cpus, check.memoryMiB, facts)
+	return jobs.ClampResources(check.host, check.cpus, check.memoryMiB, jobs.Facts{CPUs: node.CPUs, MemoryBytes: node.MemoryBytes})
 }
 
 // checkUnit is the name of the systemd unit that holds a check's script. The
@@ -55,6 +57,41 @@ func checkUnit(runID string, id Suite) string {
 // run's removal takes them too.
 func detachedDir(runDir string, id Suite) string {
 	return path.Join(runDir, string(id), "detached")
+}
+
+// queue is the node admission queue this runner joins: the one queue that
+// jobs and checks of every room share on a node.
+func (r Runner) queue() jobs.Admission {
+	a := jobs.Admission{DataDir: r.root(), Engine: r.Engine}
+	if r.Node != nil {
+		a.Machines = nodeSource{node: r.Node}
+	}
+	return a
+}
+
+// nodeSource serves the runner's own node to the admission queue, so the
+// queue reads the node's probed capacity without the machine registry.
+type nodeSource struct{ node *Node }
+
+func (s nodeSource) Get(ctx context.Context, name string) (machines.Machine, error) {
+	if name != s.node.Name {
+		return machines.Machine{}, fmt.Errorf("machine %s: %w", name, os.ErrNotExist)
+	}
+	return s.machine(), nil
+}
+
+func (s nodeSource) GetLocal(ctx context.Context) (machines.Machine, error) {
+	return s.machine(), nil
+}
+
+// machine turns the node into a machine record: its probed CPUs and memory,
+// and a full disk when the last probe found the node under the disk floor.
+func (s nodeSource) machine() machines.Machine {
+	m := machines.Machine{Name: s.node.Name, Enabled: true, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes}}
+	if s.node.LowDisk {
+		m.Capabilities.Disk = machines.Disk{Total: 100, Free: 0}
+	}
+	return m
 }
 
 // exec builds the node executor of this runner.

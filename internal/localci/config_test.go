@@ -189,21 +189,21 @@ suites:
 	if checks[0].cpus != 32 || checks[0].memoryMiB != 64*1024 {
 		t.Fatalf("parsed request = %d cpus and %d MiB", checks[0].cpus, checks[0].memoryMiB)
 	}
-	// A machine of 8 slots, 20 CPUs and 32 GiB grants the slot pool's 16 CPUs
-	// and its own memory, not the request.
+	// A machine of 20 CPUs and 32 GiB grants its own capacity, not the
+	// request; the node queue holds the rest until capacity frees.
 	node := Node{Name: "arch", Slots: 8, Enabled: true, CPUs: 20, MemoryBytes: 32 << 30}
 	granted := clampCheckResources(checks[0], node)
-	if granted.CPUs != 16 || granted.MemoryMiB != 32*1024 {
-		t.Fatalf("granted %+v, want 16 cpus and 32 GiB", granted)
+	if granted.CPUs != 20 || granted.MemoryMiB != 32*1024 {
+		t.Fatalf("granted %+v, want 20 cpus and 32 GiB", granted)
 	}
-	if want := "Dyna clamped cpus from 32 to 16 and memory from 64 GiB to 32 GiB"; granted.Note != want {
+	if want := "Dyna clamped cpus from 32 to 20 and memory from 64 GiB to 32 GiB"; granted.Note != want {
 		t.Fatalf("note %q, want %q", granted.Note, want)
 	}
 	// The granted size is what the container command runs with, and the note
 	// reaches the check's own log.
 	checks[0].resources = granted
 	script := nodeCheckScript(node, "/base", "/cache", "/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), checks[0], time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	for _, want := range []string{"--cpus=16", "--memory=32g", "--memory-swap=32g", granted.Note} {
+	for _, want := range []string{"--cpus=20", "--memory=32g", "--memory-swap=32g", granted.Note} {
 		if !strings.Contains(script, want) {
 			t.Errorf("container check lacks %q", want)
 		}

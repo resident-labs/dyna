@@ -13,6 +13,7 @@
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   const stateWords: Record<JobState, string> = {
+    queued: 'waiting',
     running: 'running',
     passed: 'passed',
     failed: 'failed',
@@ -21,6 +22,7 @@
     timed_out: 'timed out',
   }
   const stateTone: Record<JobState, string> = {
+    queued: 'gold',
     running: 'sky',
     passed: 'sage',
     failed: 'coral',
@@ -43,9 +45,9 @@
     if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
     return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
   })
-  let exit = $derived(payload && payload.exitCode !== undefined && payload.state !== 'running' ? `exit ${payload.exitCode}` : '')
+  let exit = $derived(payload && payload.exitCode !== undefined && payload.state !== 'running' && payload.state !== 'queued' ? `exit ${payload.exitCode}` : '')
   let summary = $derived([node, exit, elapsed].filter(Boolean).join(' · '))
-  let hasBody = $derived(!!payload?.detail)
+  let hasBody = $derived(!!payload?.detail || !!payload?.waitReason)
 </script>
 
 {#snippet icon()}
@@ -53,6 +55,7 @@
 {/snippet}
 
 {#snippet body()}
+  {#if payload?.waitReason}<p class="text">{payload.waitReason}</p>{/if}
   {#if payload?.detail}<p class="text">{payload.detail}</p>{/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
 {/snippet}

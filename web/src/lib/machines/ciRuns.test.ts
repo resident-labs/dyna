@@ -9,7 +9,6 @@ const run = (over: Partial<MachineCIRun> = {}): MachineCIRun => ({
   kind: 'pull-request',
   title: 'Show running local CI per machine',
   url: 'https://github.com/resident-labs/dyna/pull/272',
-  slots: 6,
   trial: false,
   started: '2026-10-23T17:00:00Z',
   ...over,
