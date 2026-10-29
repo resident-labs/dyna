@@ -263,14 +263,24 @@ func (a *Accounts) LimitOf(id string) (reposcope.Hold, error) {
 	return scopes.LimitOf(id)
 }
 
-// ClearHold removes the account's hold after a successful turn or probe that
-// began at since. A hold recorded after since stays.
+// ClearHold removes the account's hold after a successful turn that began at
+// since. A hold recorded after since stays.
 func (a *Accounts) ClearHold(id string, since time.Time) error {
 	scopes, err := a.scopes()
 	if err != nil {
 		return err
 	}
 	return scopes.ClearHold(id, since)
+}
+
+// ClearUnstated removes the account's unstated hold after a successful usage
+// probe that began at since. A stated hold and a later hold stay.
+func (a *Accounts) ClearUnstated(id string, since time.Time) error {
+	scopes, err := a.scopes()
+	if err != nil {
+		return err
+	}
+	return scopes.ClearUnstated(id, since)
 }
 
 // clearRefreshedHold clears an account's no-timer hold after a successful
@@ -457,8 +467,17 @@ func (a *Accounts) refreshReading(ctx context.Context, n NativeAccount) *store.O
 	}, true); err != nil {
 		return nil
 	}
-	if err = a.ClearHold(n.ID, probeStart); err != nil {
-		log.Printf("clear quota hold for account %s: %v", n.ID, err)
+	// A stated hold ends only when the fresh reading shows the weekly window with
+	// quota left. Any other successful reading leaves it, so a spent or partial
+	// reading cannot end a limit the provider stated.
+	var clearErr error
+	if store.WeeklyWindow(&observation) != nil && store.DecideUsage(&observation, time.Now()).Eligible {
+		clearErr = a.ClearHold(n.ID, probeStart)
+	} else {
+		clearErr = a.ClearUnstated(n.ID, probeStart)
+	}
+	if clearErr != nil {
+		log.Printf("clear quota hold for account %s: %v", n.ID, clearErr)
 	}
 	return &observation
 }
