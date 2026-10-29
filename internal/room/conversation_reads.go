@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -116,6 +117,55 @@ func (s *Store) OtherHomes(roomID string) (map[string]Conversation, error) {
 		out[id] = Conversation(home)
 	}
 	return out, rows.Err()
+}
+
+// homeIDChunk is how many post IDs one OtherHomesOf query names.
+const homeIDChunk = 500
+
+// OtherHomesOf is OtherHomes for the posts named by postIDs only. Each ID is a
+// primary-key lookup in post_homes, so a caller that checks a few posts does not
+// read every non-feed home of a room with a long DM history.
+func (s *Store) OtherHomesOf(roomID string, postIDs []string) (map[string]Conversation, error) {
+	out := map[string]Conversation{}
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		return nil, err
+	}
+	for chunk := range slices.Chunk(postIDs, homeIDChunk) {
+		args := make([]any, 0, len(chunk)+2)
+		args = append(args, roomID, ConversationRoom.String())
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		rows, err := db.Query(otherHomesOfQuery(len(chunk)), args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id, home string
+			if err := rows.Scan(&id, &home); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[id] = Conversation(home)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
+// otherHomesOfQuery is the OtherHomesOf query for n post IDs. Its arguments are
+// the room ID, the room feed name, then the IDs.
+func otherHomesOfQuery(n int) string {
+	return "SELECT post_id, conversation FROM post_homes WHERE room_id=? AND conversation<>? AND post_id IN (?" +
+		strings.Repeat(",?", n-1) + ")"
 }
 
 // HomeOf is the stored home of one post: its index row, or the conversation the
