@@ -92,6 +92,8 @@ type Result struct {
 	ExitCode *int     `json:"exitCode,omitempty"`
 	URL      string   `json:"url,omitempty"`
 	Output   []string `json:"output,omitempty"`
+	Stdout   []string `json:"stdout,omitempty"`
+	Stderr   []string `json:"stderr,omitempty"`
 }
 
 // Request is one durable approval request. At is a display name in RPC results.

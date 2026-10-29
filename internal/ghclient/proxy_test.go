@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/approvals"
+	"dyna-agent/internal/room"
 )
 
 func TestWorkerWriteSnapshotsBodyAndDoesNotRunGH(t *testing.T) {
@@ -54,14 +55,51 @@ func TestWorkerWriteSnapshotsBodyAndDoesNotRunGH(t *testing.T) {
 }
 
 func TestApprovalResultOutputAndExitCodes(t *testing.T) {
-	code := 7
-	var stdout bytes.Buffer
-	err := approvalResult(approvals.Request{ID: "A-2", State: approvals.StateDone, Result: &approvals.Result{ExitCode: &code, Output: []string{"gh output"}}}, &stdout)
-	if SessionExitCode(err) != 7 || stdout.String() != "gh output\n" || err.Error() != "" {
-		t.Fatalf("result = %v, output %q", err, stdout.String())
+	for _, code := range []int{0, 7} {
+		var stdout, stderr bytes.Buffer
+		result := &approvals.Result{ExitCode: &code, Output: []string{"gh output", "gh warning"}, Stdout: []string{"gh output"}, Stderr: []string{"gh warning"}}
+		err := approvalResult(approvals.Request{ID: "A-2", State: approvals.StateDone, Result: result}, &stdout, &stderr)
+		if SessionExitCode(err) != code || stdout.String() != "gh output\n" || stderr.String() != "gh warning\n" {
+			t.Fatalf("code %d: result = %v, stdout %q, stderr %q", code, err, stdout.String(), stderr.String())
+		}
 	}
-	denied := approvalResult(approvals.Request{ID: "A-3", State: approvals.StateDenied, Result: &approvals.Result{Actor: "room:parent", Reason: "not safe"}}, &stdout)
+	denied := approvalResult(approvals.Request{ID: "A-3", State: approvals.StateDenied, Result: &approvals.Result{Actor: "room:parent", Reason: "not safe"}}, &bytes.Buffer{}, &bytes.Buffer{})
 	if SessionExitCode(denied) != 1 || !strings.Contains(denied.Error(), "not safe") {
 		t.Fatalf("denied = %v", denied)
+	}
+}
+
+func TestWorkerSnapshotUsesFinalAttributedBody(t *testing.T) {
+	records := setupRooms(t, "owner/project")
+	const line = "Opened by an agent."
+	if err := room.DefaultStore().SetAttribution(records[0].ID, line); err != nil {
+		t.Fatal(err)
+	}
+	body := filepath.Join(records[0].Repo, "body.md")
+	if err := os.WriteFile(body, []byte("original body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(records[0].Repo, "gh")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ReadOnlyEnv, string(GuardWorker))
+	t.Setenv(BinaryEnv, binary)
+	t.Setenv("DYNA_ROOM_ID", records[0].ID)
+	originalRequest, originalWait := requestApproval, waitApproval
+	t.Cleanup(func() { requestApproval, waitApproval = originalRequest, originalWait })
+	requestApproval = func(_ context.Context, in approvals.RequestInput) (approvals.Request, error) {
+		preview := DisplayApprovalBody(approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Files: in.Files})
+		if !strings.HasPrefix(preview, line+"\n\noriginal body") {
+			t.Fatalf("approval preview = %q", preview)
+		}
+		return approvals.Request{ID: "A-4"}, nil
+	}
+	waitApproval = func(_ context.Context, _ string, id string, _ time.Duration) (approvals.Request, error) {
+		return approvals.Request{ID: id, State: approvals.StatePending}, nil
+	}
+	err := SessionCommand(context.Background(), []string{"pr", "create", "--title", "title", "--body-file", body})
+	if SessionExitCode(err) != 75 {
+		t.Fatalf("error = %v", err)
 	}
 }
