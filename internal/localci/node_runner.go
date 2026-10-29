@@ -1420,7 +1420,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// process-group cleanup. Stop it through the check's own port while the
 		// server's temporary folder still exists. No running server, a missing
 		// sccache binary and a stop error must not change the check's status.
-		stopSccache := "if command -v sccache >/dev/null 2>&1; then " + commandEnv + " sccache --stop-server >/dev/null 2>&1 || true; fi; "
+		stopSccache := "if command -v sccache >/dev/null 2>&1; then timeout 5s " + commandEnv + " sccache --stop-server >/dev/null 2>&1 || true; fi; "
 		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; " + checkTmpFolder(node.CheckTmp) + "trap " + q(cleanup+"; "+stopSccache+`rm -rf "$isolated"`) + " EXIT; "
 		// --foreground keeps the check in the wrapper's process group, so what
 		// the check leaves behind is in the wrapper's group too: timeout still
