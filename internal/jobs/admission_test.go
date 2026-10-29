@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"context"
+	"errors"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -149,6 +151,70 @@ func TestAdmissionExpiresAbandonedCheck(t *testing.T) {
 	}
 	if _, err := queue.Reattach(ctx, old); err == nil {
 		t.Fatal("reattached an expired check after its port was reassigned")
+	}
+}
+
+// A manual runner can die while its detached check continues on the node.
+// Its admitted reservation must survive, but its abandoned waiter must not.
+func TestAdmissionRetainsDetachedManualCheck(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1000, 0)
+	node := machines.Machine{Name: "node", Enabled: true}
+	node.Capabilities.CPUs = 2
+	queue := Admission{DataDir: t.TempDir(), Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, clock: func() time.Time { return now }}
+	if _, err := queue.Hold(ctx, Demand{ID: "running", Node: "node", CPUs: 2, Timeout: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.upsert(ctx, Demand{ID: "abandoned", Node: "node", CPUs: 2}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.write(ctx, "UPDATE admissions SET owner_pid=0"); err != nil {
+		t.Fatal(err)
+	}
+	next := Demand{ID: "next", Node: "node", CPUs: 2}
+	if err := queue.upsert(ctx, next, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	row, err := queue.get(ctx, next.ID)
+	if err != nil || row.State != "waiting" {
+		t.Fatalf("check after runner death = %+v, %v; want waiting", row, err)
+	}
+	if _, err := queue.get(ctx, "abandoned"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("abandoned waiter error = %v, want not found", err)
+	}
+	now = now.Add(7 * time.Minute)
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	row, err = queue.get(ctx, next.ID)
+	if err != nil || row.State != "admitted" || row.Port != 0 {
+		t.Fatalf("check after expiry = %+v, %v; want admitted on port 0", row, err)
+	}
+}
+
+// A new manual runner must be able to release the reservation it reattaches.
+func TestAdmissionReattachedManualRunnerCanRelease(t *testing.T) {
+	ctx := context.Background()
+	queue := Admission{DataDir: t.TempDir()}
+	demand := Demand{ID: "running", Node: "node"}
+	if _, err := queue.Hold(ctx, demand); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.write(ctx, "UPDATE admissions SET owner_pid=0 WHERE id=?", demand.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.Reattach(ctx, demand); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.Release(ctx, demand.Node, demand.ID); err != nil {
+		t.Fatal(err)
+	}
+	row, err := queue.get(ctx, demand.ID)
+	if err != nil || row.State != "released" {
+		t.Fatalf("reservation after release = %+v, %v", row, err)
 	}
 }
 

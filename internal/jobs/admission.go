@@ -296,7 +296,11 @@ func (a Admission) Reattach(ctx context.Context, d Demand) (int, error) {
 			return err
 		}
 		port = row.Port
-		_, err = conn.ExecContext(ctx, "UPDATE admissions SET timeout_ms=?, expires_ms=? WHERE id=?", d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), d.ID)
+		pid, start := admissionOwner()
+		if a.Engine {
+			pid, start = 0, 0
+		}
+		_, err = conn.ExecContext(ctx, "UPDATE admissions SET timeout_ms=?, expires_ms=?, engine=?, owner_pid=?, owner_start=? WHERE id=?", d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), boolInt(a.Engine), pid, start, d.ID)
 		return err
 	})
 	return port, err
@@ -534,8 +538,9 @@ func rowsConn(ctx context.Context, conn *sql.Conn, status string) (map[string][]
 	return out, errors.Join(rows.Err(), rows.Close())
 }
 
-// sweep deletes released rows and the rows of outside holders that are gone.
-// Engine-held rows end through their job or check, never here.
+// sweep deletes released and expired rows, and waiting rows whose outside
+// holder is gone. A detached check can outlive its outside holder, so its
+// admitted row remains until release or expiry.
 func (a Admission) sweep(ctx context.Context) error {
 	db, err := a.db()
 	if err != nil {
@@ -546,7 +551,7 @@ func (a Admission) sweep(ctx context.Context) error {
 		if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", a.now().UnixMilli()); err != nil {
 			return err
 		}
-		rows, err := conn.QueryContext(ctx, "SELECT id,owner_pid,owner_start FROM admissions WHERE engine=0")
+		rows, err := conn.QueryContext(ctx, "SELECT id,owner_pid,owner_start FROM admissions WHERE engine=0 AND state='waiting'")
 		if err != nil {
 			return err
 		}
