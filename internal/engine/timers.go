@@ -20,6 +20,7 @@ const (
 	timerQuestions           = "questions"
 	timerHooks               = "hooks"
 	timerHookSchedule        = "hook-schedule"
+	timerLibrarianWake       = "librarian-wake"
 	timerRootFlush           = "root-flush"
 	timerPRs                 = "prs"
 	timerMerges              = "merges"

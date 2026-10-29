@@ -62,7 +62,7 @@ func TestLibrarianSharedHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks, err := s.hooks.List(ctx, repo)
-	if err != nil || len(hooks) != 3 {
+	if err != nil || len(hooks) != 1 || hooks[0].Name != "librarian-main" {
 		t.Fatalf("hooks = %+v, %v", hooks, err)
 	}
 	for _, hook := range hooks {
