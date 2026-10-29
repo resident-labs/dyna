@@ -67,8 +67,8 @@ func TestHoldKeepsTheLevelOfTheLaterEnd(t *testing.T) {
 	}
 }
 
-// A successful usage probe clears holds, timed, open or stated, but keeps any
-// hold recorded after the probe began.
+// A successful turn clears holds, timed, open or stated, but keeps any hold
+// recorded after the turn began.
 func TestClearHoldKeepsLaterHolds(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
@@ -101,7 +101,7 @@ func TestClearHoldKeepsLaterHolds(t *testing.T) {
 		}
 	}
 	if got, _ := s.LimitOf("stated"); !got.Until.IsZero() {
-		t.Fatalf("stated hold after ClearHold = %+v, want cleared by a passing probe", got)
+		t.Fatalf("stated hold after ClearHold = %+v, want cleared by a successful turn", got)
 	}
 
 	if err := s.Hold("late", Hold{Until: now.Add(time.Hour), Level: 1}); err != nil {
@@ -111,7 +111,37 @@ func TestClearHoldKeepsLaterHolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got, _ := s.LimitOf("late"); got.Until.IsZero() {
-		t.Fatalf("hold recorded after the probe began = %+v, want kept", got)
+		t.Fatalf("hold recorded after the turn began = %+v, want kept", got)
+	}
+}
+
+// A successful probe clears an unstated hold but keeps a provider-stated one,
+// because a usage reading alone does not show that the stated limit reset.
+func TestClearUnstatedKeepsStatedHolds(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	now := time.Unix(1_700_000_000, 0)
+	if err := s.Hold("timed", Hold{Until: now.Add(time.Hour), Level: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Hold("stated", Hold{Until: now.Add(2 * time.Hour), Stated: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearUnstated("timed", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearUnstated("stated", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.LimitOf("timed"); !got.Until.IsZero() {
+		t.Fatalf("unstated hold after ClearUnstated = %+v, want cleared", got)
+	}
+	if got, _ := s.LimitOf("stated"); got.Until.IsZero() {
+		t.Fatalf("stated hold after ClearUnstated = %+v, want kept", got)
 	}
 }
 
