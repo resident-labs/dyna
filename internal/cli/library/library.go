@@ -258,7 +258,7 @@ func Command(o Options) *cobra.Command {
 	}}
 
 	var roomRef string
-	enable := &cobra.Command{Use: "enable", Short: "Turn the librarian on for this repository (owner or root)", Long: "List the repository in library.enabled, keep its librarian in a room, and add the librarian-merged, librarian-main and librarian-batch hooks. Each hook runs dyna library wake.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	enable := &cobra.Command{Use: "enable", Short: "Turn the librarian on for this repository (owner or root)", Long: "List the repository in library.enabled, keep its librarian in a room, and add the librarian-main hook. The hook runs dyna library wake on each main update. The engine defers a wake that must wait for the librarian's interval.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		r, err := repoid.Resolve(c.Context(), repoDir)
 		if err != nil {
 			return err
@@ -271,7 +271,7 @@ func Command(o Options) *cobra.Command {
 		if err := engineclient.New("").Call(c.Context(), "EnableLibrarian", []any{r.Root, roomRef, cwd}, &enabled); err != nil {
 			return err
 		}
-		fmt.Fprintf(c.OutOrStdout(), "librarian on for %s in room %s; hooks librarian-merged, librarian-main and librarian-batch run dyna library wake\n", enabled.Repo.Main, enabled.Room)
+		fmt.Fprintf(c.OutOrStdout(), "librarian on for %s in room %s; hook librarian-main runs dyna library wake\n", enabled.Repo.Main, enabled.Room)
 		return nil
 	}}
 	enable.Flags().StringVar(&roomRef, "room", "", "room that holds the librarian session (default: the current room)")

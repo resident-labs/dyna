@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
@@ -45,6 +46,7 @@ func (s services) librarianService() librarian.Service {
 		Sessions: librarian.Live{Manager: n.Sessions, Rooms: n.Rooms}, Issues: n.Rooms,
 		Rooms:     n.Rooms,
 		ListHooks: s.hooks.List, AddHook: s.addHook, RemoveHook: s.hooks.Remove,
+		Defer: s.deferLibrarianWake,
 		Notice: func(ctx context.Context, roomID string, ev room.Event) error {
 			rec, err := n.Rooms.Resolve(roomID)
 			if err != nil {
@@ -57,6 +59,15 @@ func (s services) librarianService() librarian.Service {
 			return err
 		},
 	}
+}
+
+// deferLibrarianWake keeps one deadline per repository. A later deferral for the
+// same repository replaces the earlier one.
+func (s services) deferLibrarianWake(repo string, at time.Time, wake func()) {
+	if s.timers == nil {
+		return
+	}
+	s.timers.at(timerLibrarianWake+":"+repo, at, wake)
 }
 
 func librarianActor(ctx context.Context) (authority.Actor, string, error) {
