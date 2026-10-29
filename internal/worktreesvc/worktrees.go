@@ -178,20 +178,32 @@ func Prune(ctx context.Context, age time.Duration, force, dryRun bool) (PruneRes
 	}
 	now := time.Now()
 	var errs []error
+	candidates := make([]worktrees.Record, 0, len(records))
 	for _, rec := range records {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
-			break
+			result.Outcome = failure(errors.Join(errs...))
+			return result, nil
 		}
 		runMissing := false
 		if rec.RunID != "" {
 			_, statErr := os.Stat(runstore.RunDir(rec.RunID))
 			runMissing = os.IsNotExist(statErr)
 		}
-		if now.Sub(rec.RetainedAt) < age && !runMissing {
-			continue
+		if now.Sub(rec.RetainedAt) >= age || runMissing {
+			candidates = append(candidates, rec)
 		}
-		protected, protectErr := worktrees.SessionProtected(ctx, rec)
+	}
+	checker, ownerErr := worktrees.NewSessionOwnerChecker(ctx, candidates)
+	for _, rec := range candidates {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
+		protected, protectErr := false, ownerErr
+		if protectErr == nil {
+			protected, protectErr = checker.Protected(rec)
+		}
 		if protectErr != nil || protected {
 			if protectErr != nil {
 				errs = append(errs, fmt.Errorf("check ownership of %s: %w", rec.Path, protectErr))
