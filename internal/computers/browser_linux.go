@@ -79,9 +79,9 @@ func startedRecently(start string) bool {
 // empty. 40 reads at 5 ms each is about 200 ms on an idle host.
 const browserEnvReads = 40
 
-// browserEnvPause waits between empty-environment reads. A test replaces it
-// with a yield, so the reads do not depend on the wall clock.
-var browserEnvPause = func() { time.Sleep(5 * time.Millisecond) }
+// browserEnvTick returns the channel that releases the next empty-environment
+// read. A test replaces it with a closed channel, so its reads never wait.
+var browserEnvTick = func() <-chan time.Time { return time.After(5 * time.Millisecond) }
 
 // findBrowserDaemons adds a scan of every process to the pid files. A daemon
 // writes its pid file only after it starts, so a stop right after start would
@@ -97,7 +97,7 @@ func findBrowserDaemons(id string) map[int]string {
 		}
 	}
 	for attempt := 0; len(pending) > 0 && attempt < browserEnvReads; attempt++ {
-		browserEnvPause()
+		<-browserEnvTick()
 		for pid := range pending {
 			if !addBrowserDaemon(out, pid, root) {
 				delete(pending, pid)
