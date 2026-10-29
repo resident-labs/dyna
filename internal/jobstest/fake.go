@@ -52,6 +52,9 @@ type Fake struct {
 	// Down makes every call fail like a dropped connection while it returns
 	// true.
 	Down func() bool
+	// StopHook runs after a stop attempt, outside the fake lock. failed says
+	// whether the fake rejected the stop instead of stopping its unit.
+	StopHook func(call int, failed bool)
 }
 
 type fakeProc struct {
@@ -129,15 +132,22 @@ func (m *Fake) command(ctx context.Context, dir string, in io.Reader, out, stder
 	case m.proto.Stop:
 		m.mu.Lock()
 		m.stops++
+		calls := m.stops
 		fail := m.stopFailures > 0
 		if fail {
 			m.stopFailures--
 		}
 		m.mu.Unlock()
 		if fail {
+			if m.StopHook != nil {
+				m.StopHook(calls, true)
+			}
 			return errors.New("fake stop failure")
 		}
 		m.stop(positional[0])
+		if m.StopHook != nil {
+			m.StopHook(calls, false)
+		}
 		return nil
 	}
 	return m.legacy(ctx, dir, in, out, stderr, name, args...)
