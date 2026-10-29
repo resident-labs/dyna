@@ -224,7 +224,7 @@ func systemdRoomScope(ctx context.Context, id, room string) string {
 	script := "p=$(grep '^0::' /proc/self/cgroup) && printf '%s\\n' \"" + cgroupMount + "${p#0::}\" > " + shellquote.Quote(tmp) + " && mv " + shellquote.Quote(tmp) + " " + shellquote.Quote(record) + " && exec sleep infinity"
 	cmd := exec.Command("/bin/sh", "-c", script)
 	// systemd-run needs the daemon's XDG_RUNTIME_DIR to reach the user manager.
-	cmd.Env = mergeEnvironment(os.Environ(), map[string]string{"DYNA_COMPUTER_PROCESS": id})
+	cmd.Env = mergeEnvironment(engineEnvironment(), map[string]string{"DYNA_COMPUTER_PROCESS": id})
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	log, err := os.OpenFile(filepath.Join(Dir(id), "scope.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
