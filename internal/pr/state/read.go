@@ -391,37 +391,49 @@ func ReadForSessionsFresh(root, roomID string, sessions ...string) (State, error
 			args = append(args, session)
 		}
 	}
-	type stored struct {
-		key  string
-		body []byte
-	}
-	var found []stored
+	// One read transaction returns the matching hot rows with their cold parts,
+	// so each record is whole. Saved responses stay out, as in ReadRecord.
+	found := map[string]*storedRow{}
+	var keys []string
 	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
-		rows, err := r.QueryContext(context.Background(), `SELECT key, body FROM pr_rows WHERE room=? AND (
-json_extract(body,'$.record.authorSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerOverride') IN (`+marks+`))`, args...)
+		rows, err := r.QueryContext(context.Background(), `SELECT pr_rows.key, pr_rows.body, pr_record_parts.part, pr_record_parts.body
+FROM pr_rows LEFT JOIN pr_record_parts ON pr_record_parts.key=pr_rows.key AND pr_record_parts.part<>'responses'
+WHERE pr_rows.room=? AND (
+json_extract(pr_rows.body,'$.record.authorSession') IN (`+marks+`) OR json_extract(pr_rows.body,'$.record.reviewerSession') IN (`+marks+`) OR json_extract(pr_rows.body,'$.record.reviewerOverride') IN (`+marks+`))`, args...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var row stored
-			if err := rows.Scan(&row.key, &row.body); err != nil {
+			var key string
+			var body, partBody []byte
+			var part sql.NullString
+			if err := rows.Scan(&key, &body, &part, &partBody); err != nil {
 				return err
 			}
-			found = append(found, row)
+			row := found[key]
+			if row == nil {
+				row = &storedRow{key: key, body: body, parts: storedParts{}}
+				found[key] = row
+				keys = append(keys, key)
+			}
+			if part.Valid {
+				row.parts[partName(part.String)] = append([]byte{}, partBody...)
+			}
 		}
 		return rows.Err()
 	})
 	if err != nil {
 		return State{}, err
 	}
-	for _, row := range found {
-		var record diskRecord
-		if err := json.Unmarshal(row.body, &record); err != nil {
-			return State{}, fmt.Errorf("invalid PR record: %w", err)
+	for _, key := range keys {
+		row := found[key]
+		record, err := joinStored(row.body, row.parts)
+		if err != nil {
+			return State{}, fmt.Errorf("invalid PR record %s: %w", key, err)
 		}
 		if record.Record != nil {
-			st.Records[row.key] = record.Record
+			st.Records[key] = record.Record
 		}
 	}
 	return st, nil
