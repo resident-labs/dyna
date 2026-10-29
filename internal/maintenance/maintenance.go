@@ -66,6 +66,12 @@ type Step struct {
 	Error string
 }
 
+// passStep is one named step of a pass, run in turn with the others of its group.
+type passStep struct {
+	name string
+	fn   func(context.Context) error
+}
+
 // timer starts timing one step. Pass the step's error to the returned func
 // when the step ends; it records the step and returns the error unchanged.
 func (r *Result) timer(name string) func(error) error {
@@ -140,14 +146,11 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	step := func(name string, fn func(context.Context) error) {
 		errs = append(errs, runStep(work, &result, name, stepShare, fn))
 	}
-	// sweep runs a step of the sweep group, under the pass deadline.
-	sweep := func(name string, fn func(context.Context) error) {
-		errs = append(errs, runStep(ctx, &result, name, stepShare, fn))
-	}
-	sweepStep := func(kind string, age time.Duration, sweepFn func(context.Context, bool) (Pruned, error)) {
-		sweep(kind, func(ctx context.Context) error {
+	// sweepOf builds a sweep step of the sweep group.
+	sweepOf := func(kind string, age time.Duration, sweepFn func(context.Context, bool) (Pruned, error)) passStep {
+		return passStep{kind, func(ctx context.Context) error {
 			return sweepWithDryPass(ctx, &result, kind, age, sweepFn)
-		})
+		}}
 	}
 	workspaceJobs := jobs.Service{Store: jobs.Store{DataDir: store.DataDir()}, Machines: machines.Store{DataDir: store.DataDir()}, DataDir: store.DataDir()}
 	step("job workspaces", func(ctx context.Context) error {
@@ -231,17 +234,19 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	if turn%2 == 0 {
 		cleanup(work, workEnd)
 	}
-	sweep("scratch", func(ctx context.Context) error {
+	// The sweeps share one reserve. Each pass starts them at the next sweep, so one
+	// slow sweep cannot take the reserve on every pass.
+	sweeps := []passStep{{"scratch", func(ctx context.Context) error {
 		cleaned, err := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
 		result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
 		for _, kept := range cleaned.Kept {
 			result.Kept["scratch: "+kept.Reason]++
 		}
 		return err
-	})
+	}}}
 	// Session cleanup must not remove unrelated archived workflow runs.
 	if opts.Session == "" {
-		sweep("archived runs", func(ctx context.Context) error {
+		sweeps = append(sweeps, passStep{"archived runs", func(ctx context.Context) error {
 			v, err := settings.Load("")
 			if err != nil {
 				return err
@@ -249,32 +254,37 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 			freed, err := sweepArchivedRuns(ctx, now, v.RunsRetention, opts.Logf)
 			result.add("archived runs", freed)
 			return err
-		})
-		sweepStep("closed session stdout", sessionLogRetention, func(ctx context.Context, dry bool) (Pruned, error) {
+		}})
+		sweeps = append(sweeps, sweepOf("closed session stdout", sessionLogRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 			return sweepClosedSessionLogs(ctx, now, dry, opts.Logf)
-		})
+		}))
 		if opts.RetainClosedSession != nil {
-			sweepStep("closed sessions", closedSessionRetention, func(ctx context.Context, dry bool) (Pruned, error) {
+			sweeps = append(sweeps, sweepOf("closed sessions", closedSessionRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 				return sweepClosedSessions(ctx, now, dry, opts.RetainClosedSession, opts.Logf)
-			})
+			}))
 		}
-		sweepStep("rejected runner spool lines", rejectedSpoolRetention, func(ctx context.Context, dry bool) (Pruned, error) {
+		sweeps = append(sweeps, sweepOf("rejected runner spool lines", rejectedSpoolRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 			return sweepRejectedSpools(ctx, sessionlife.RunnerSpoolDir(store.DataDir()), now, dry)
-		})
-		sweepStep("review inputs", reviewInputRetention, func(ctx context.Context, dry bool) (Pruned, error) {
+		}))
+		sweeps = append(sweeps, sweepOf("review inputs", reviewInputRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 			return sweepReviewInputs(ctx, state.Root(store.DataDir()), now, dry)
-		})
+		}))
 		// These two sweeps take no context, so their share cannot stop them once
 		// started. They still do not start after the pass deadline.
-		sweepStep("stale test folders", testFolderRetention, func(_ context.Context, dry bool) (Pruned, error) {
+		sweeps = append(sweeps, sweepOf("stale test folders", testFolderRetention, func(_ context.Context, dry bool) (Pruned, error) {
 			return sweepTestFolders(now, os.TempDir(), processAlive, dry)
-		})
+		}))
 		if owner, ownerErr := user.Current(); ownerErr == nil && owner.HomeDir != "" {
 			root := filepath.Join(owner.HomeDir, ".cache", "dyna", scratch.SharedTempName)
-			sweepStep("stale disk temp folders", diskTempRetention, func(_ context.Context, dry bool) (Pruned, error) {
+			sweeps = append(sweeps, sweepOf("stale disk temp folders", diskTempRetention, func(_ context.Context, dry bool) (Pruned, error) {
 				return sweepDiskTemp(now, root, processAlive, dry)
-			})
+			}))
 		}
+	}
+	first := turn % len(sweeps)
+	for i := range sweeps {
+		sw := sweeps[(first+i)%len(sweeps)]
+		errs = append(errs, runStep(ctx, &result, sw.name, stepShare, sw.fn))
 	}
 	if turn%2 == 1 {
 		cleanup(ctx, passEnd)
