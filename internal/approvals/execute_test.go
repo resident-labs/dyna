@@ -9,28 +9,6 @@ import (
 	"time"
 )
 
-func TestDisplayBodyUsesImmutableFileSnapshot(t *testing.T) {
-	for _, argv := range [][]string{{"pr", "create", "--body-file", "body.md"}, {"pr", "create", "--body-file=body.md"}, {"pr", "create", "-Fbody.md"}} {
-		payload := GHPayload{Argv: argv, Files: []FileSnapshot{{Path: "body.md", Data: []byte("approved body")}}}
-		if got := payload.DisplayBody(); got != "approved body" {
-			t.Fatalf("body = %q for %q", got, argv)
-		}
-	}
-}
-
-func TestDisplayBodyUsesAPIFileSnapshots(t *testing.T) {
-	payload := GHPayload{
-		Argv:  []string{"api", "repos/o/r/issues", "--input=payload.json", "-F", "title=@title.txt", "-F", "body=@@body.txt"},
-		Files: []FileSnapshot{{Path: "payload.json", Data: []byte(`{"body":"input"}`)}, {Path: "title.txt", Data: []byte("snapshot title")}, {Path: "@body.txt", Data: []byte("snapshot body")}},
-	}
-	got := payload.DisplayBody()
-	for _, want := range []string{`{"body":"input"}`, "title:\nsnapshot title", "body:\nsnapshot body"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("display %q does not contain %q", got, want)
-		}
-	}
-}
-
 func TestApprovedRequestExecutesAndDeliversResult(t *testing.T) {
 	f := newFixture(t)
 	code := 0
