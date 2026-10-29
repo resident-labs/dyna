@@ -112,7 +112,13 @@ func (s *Service) nativeHomeAccounts(ctx context.Context, explicitRefresh bool) 
 		}
 		out = append(out, a)
 	}
-	return out, problems, saveErr
+	renewals, renewalErr := s.o.Store.LatestRenewals(ctx)
+	for i := range out {
+		if renewal, ok := renewals[out[i].ID]; ok {
+			out[i].LastRenewal = &renewal
+		}
+	}
+	return out, problems, errors.Join(saveErr, renewalErr)
 }
 
 // Credential checks wake at each login's refresh time instead of every

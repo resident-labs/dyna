@@ -19,6 +19,19 @@ export interface Plan {
 // The app chooses a designed message for each reason.
 export type UsageReason = 'not-readable' | 'expired' | 'secret' | 'provider-error' | 'rate-limited' | 'no-windows'
 
+// RenewalResult is store.RenewalResult, the outcome of an engine renewal.
+export type RenewalResult = 'renewed' | 'no_credential' | 'invalid_grant' | 'transient'
+
+// AccountRenewal is store.Renewal. The web app words the typed result itself.
+export interface AccountRenewal {
+  accountId: string
+  harness: string
+  provider?: Provider
+  attemptedAt: string
+  result: RenewalResult
+  reason?: string
+}
+
 // WindowReason is store.WindowReason, why a window carries no reading. The app
 // chooses a designed message for each reason, so reader prose never reaches it.
 export type WindowReason = 'not-reported' | 'probable-reset'
@@ -49,6 +62,7 @@ export interface Account {
   usageReason?: UsageReason
   expiresAt?: string
   refreshMessage?: string
+  lastRenewal?: AccountRenewal
   quotaBlocked: boolean
   quotaBlockedUntil?: string
   blockingQuotaWindows?: string[]
