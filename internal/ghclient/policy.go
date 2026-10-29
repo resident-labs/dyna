@@ -275,6 +275,13 @@ func matchesRepository(ctx context.Context, rec room.Record, r repository) bool 
 	return err == nil && strings.EqualFold(identity, r.host+"/"+r.name)
 }
 
+// matchesUpstream reports whether r is the room's upstream repository, the parent
+// that the room's fork checkout belongs to. Reads of it are allowed; writes stay
+// on the room's own repository.
+func matchesUpstream(rec room.Record, r repository) bool {
+	return rec.Upstream != "" && r.name != "" && strings.EqualFold(rec.Upstream, r.host+"/"+r.name)
+}
+
 // matchesForkParent asks GitHub for the parent of the room's origin repository.
 func matchesForkParent(ctx context.Context, rec room.Record, r repository) bool {
 	if rec.Repo == "" || r.name == "" {
@@ -617,6 +624,9 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 		return nil
 	}
 	rec, err := roomFor(ctx, cmdDir, r)
+	if errors.Is(err, errNotInRoom) && isRead(args) && matchesUpstream(rec, r) {
+		err = nil
+	}
 	if err != nil {
 		command := commandArgs(args)
 		allowed := false
