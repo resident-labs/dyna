@@ -330,7 +330,54 @@ func (s Store) SaveResult(ctx context.Context, result Result) error {
 		return err
 	}
 	result.Repo = repo
-	return s.savePayload(ctx, "local_ci_results", repo, result.SHA, result)
+	return s.savePayload(ctx, "local_ci_results", repo, result.SHA, trimForStorage(result))
+}
+
+// localCILogTailBound is the most log text a failed check keeps in a stored result.
+const localCILogTailBound = 4 << 10
+
+// trimForStorage returns the result with only the log text its readers use. A
+// passed check keeps no log. A failed check keeps the end of its log, and the
+// disk-full line when that line is earlier, so the readers still find it.
+func trimForStorage(result Result) Result {
+	result.Suites = trimSuiteLogs(result.Suites)
+	result.Checks = trimSuiteLogs(result.Checks)
+	return result
+}
+
+func trimSuiteLogs(suites []SuiteResult) []SuiteResult {
+	if suites == nil {
+		return nil
+	}
+	trimmed := make([]SuiteResult, len(suites))
+	for i, suite := range suites {
+		if suite.Status == OutcomePassed {
+			suite.LogTail = ""
+		} else {
+			suite.LogTail = logTailExcerpt(suite.LogTail)
+		}
+		trimmed[i] = suite
+	}
+	return trimmed
+}
+
+// logTailExcerpt keeps the last bytes of a log. It also keeps the text around the
+// first disk-full message, because the run treats a full disk as an infrastructure
+// error, not a failed test.
+func logTailExcerpt(log string) string {
+	if len(log) <= localCILogTailBound {
+		return log
+	}
+	excerpt := strings.ToValidUTF8(log[len(log)-localCILogTailBound:], "")
+	if diskFull(excerpt) {
+		return excerpt
+	}
+	match := diskFullNote.FindStringIndex(log)
+	if match == nil {
+		return excerpt
+	}
+	start, end := max(0, match[0]-256), min(len(log), match[1]+256)
+	return strings.ToValidUTF8(log[start:end], "") + "\n" + excerpt
 }
 
 func (s Store) LoadResult(ctx context.Context, repo, sha string) (Result, error) {
