@@ -4,20 +4,19 @@ import (
 	"strconv"
 )
 
-// MachineEvent tells a room's root that a machine stopped taking CI work. It
-// carries the sizes the probe read and the floor it missed, so the card says
-// what to free without reading the post text.
+// MachineEvent tells a room's root that a machine's disk stopped admitting
+// new work. It carries the free space the probe read and the queue's own words
+// for the block, so the card says what to free without reading the post text.
 type MachineEvent struct {
 	Name string `json:"name"`
-	// FreeBytes and FloorBytes are the free space of the machine's /var/tmp and
-	// the floor that free space missed.
-	FreeBytes  int `json:"freeBytes"`
-	FloorBytes int `json:"floorBytes"`
-	// Summary is the short facts line the agent text reads: the two sizes as a
-	// person reads them.
-	Summary string `json:"summary"`
+	// FreeBytes is the free space of the machine's /var/tmp as its probe read
+	// it.
+	FreeBytes int `json:"freeBytes"`
+	// Block is the queue's own words for why the node's disk admits no new
+	// work.
+	Block string `json:"block"`
 	// AtMS is when Dyna posted the alert, in milliseconds since the Unix epoch.
-	// Two low-disk periods of one machine are two alerts, because each has its
+	// Two blocked periods of one machine are two alerts, because each has its
 	// own time.
 	AtMS int `json:"atMs"`
 }

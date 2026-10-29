@@ -21,7 +21,7 @@ func (s services) machineAPI() websvc.MachineAPI {
 	if s.rooms != nil && s.rooms.Notify != nil {
 		alerter = machineDiskAlerter{notify: s.rooms.Notify}
 	}
-	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, CIQueue: s.machineCIQueue, Work: (jobs.Admission{}).Work, SessionName: s.machineSessionName, DiskFloor: ciDiskFloor, Alerter: alerter, RoomName: s.machineRoomName}
+	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, CIQueue: s.machineCIQueue, Work: (jobs.Admission{}).Work, SessionName: s.machineSessionName, Alerter: alerter, RoomName: s.machineRoomName}
 }
 
 // machineRoomName names the room whose root allowed host checks, so the Machine

@@ -67,13 +67,7 @@ async function probeToasts(detail: unknown): Promise<unknown> {
   return said
 }
 
-test('a degraded probe reports the disk hold, not an unreachable machine', async () => {
-  assert.deepEqual(await probeToasts({ name: 'hermeslab', status: 'degraded', statusReason: 'low-disk' }), [
-    { tone: 'error', subject: 'hermeslab is low on disk', text: 'Dyna starts no CI work here until space is freed.' },
-  ])
-  assert.deepEqual(await probeToasts({ name: 'hermeslab', status: 'degraded', statusReason: 'other' }), [
-    { tone: 'error', subject: 'hermeslab needs attention', text: 'Open the machine page to see why.' },
-  ])
+test('a probe toast words an unreachable machine and a reached one', async () => {
   assert.deepEqual(await probeToasts({ name: 'hermeslab', status: 'offline' }), [
     { tone: 'error', subject: 'hermeslab did not answer the probe', text: 'Check the SSH route, then probe again.' },
   ])
