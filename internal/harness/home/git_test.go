@@ -28,7 +28,7 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 	}
 	write(t, filepath.Join(config, "git/config"), "[user]\n name = XDG identity\n[include]\n path = ~/tilde-config\n", 0600)
 	write(t, filepath.Join(owner, "tilde-config"), "[test]\n tilde = owner\n", 0600)
-	write(t, filepath.Join(owner, ".gitconfig"), "[user]\n name = HOME identity\n signingKey = OWNERKEY\n[commit]\n gpgSign = true\n", 0600)
+	write(t, filepath.Join(owner, ".gitconfig"), "[user]\n name = HOME identity\n email = owner@example.invalid\n[commit]\n gpgSign = true\n", 0600)
 	write(t, filepath.Join(config, "git/ignore"), "ignored-file\n", 0600)
 	write(t, filepath.Join(config, "git/attributes"), "*.example custom=owner\n", 0600)
 	out, err := Prepare(scope, "", env)
@@ -43,8 +43,8 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--type=bool", "--get", "commit.gpgSign"); got != "true\n" {
 		t.Fatalf("the owner's signing policy was dropped: %q", got)
 	}
-	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.signingKey"); got != "OWNERKEY\n" {
-		t.Fatalf("the owner's signing key was dropped: %q", got)
+	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.signingKey"); got != "owner@example.invalid\n" {
+		t.Fatalf("the owner's default key selector was lost: %q", got)
 	}
 	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.email"); got != AgentGitEmail+"\n" {
 		t.Fatalf("agent email = %q", got)
