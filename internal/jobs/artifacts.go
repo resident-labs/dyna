@@ -66,7 +66,7 @@ func copyArtifacts(ctx context.Context, x Executor, job Job, dest string) (strin
 	defer cancel()
 	var missing bytes.Buffer
 	out := &cappedWriter{w: archive, left: maxArtifactBytes}
-	args := append([]string{path.Join(job.Dir, "work")}, job.Artifacts...)
+	args := append([]string{workDir(job)}, job.Artifacts...)
 	if err := x.NodeExec(ctx, nil, out, &missing, artifactScript, args...); err != nil {
 		if out.full {
 			return "", fmt.Errorf("artifacts exceed %d GiB", maxArtifactBytes>>30)

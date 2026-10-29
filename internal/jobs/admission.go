@@ -668,8 +668,9 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		resourceBlock := ""
 		for _, name := range unit.resources {
 			limit := limits.Resources[name]
-			if limit == 0 {
-				// An undeclared name is a lock with one unit.
+			if limit == 0 || isWorkspaceResource(name) {
+				// An undeclared name is a lock with one unit. A workspace's
+				// internal name always stays a one-unit lock.
 				limit = 1
 			}
 			holders := resourceHolders[name]
@@ -683,7 +684,11 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 					room = resolved
 				}
 			}
-			resourceBlock = fmt.Sprintf("resource %s held by %s", name, holder.id)
+			if isWorkspaceResource(name) {
+				resourceBlock = "workspace held by " + holder.id
+			} else {
+				resourceBlock = fmt.Sprintf("resource %s held by %s", name, holder.id)
+			}
 			if room != "" {
 				resourceBlock += fmt.Sprintf(" (room %s)", room)
 			}
