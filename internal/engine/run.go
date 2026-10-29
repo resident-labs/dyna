@@ -40,6 +40,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
@@ -313,6 +314,12 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 			// A new or enabled CI machine needs its hourly cache cleanup, even
 			// when the engine started with no CI machine at all.
 			wakeWorker(signals.channels["caches"])
+		case jobs.Topic, jobs.AdmissionTopic:
+			// Work starting, waiting or ending changes a machine's Work
+			// section, so the app reads the machine view again.
+			events.Publish(ev)
+			events.Publish(hub.Event{Topic: machines.Topic, Key: "work"})
+			return
 		case prstate.Topic:
 			rooms.PRsChanged()
 			return

@@ -21,7 +21,7 @@ func (s services) machineAPI() websvc.MachineAPI {
 	if s.rooms != nil && s.rooms.Notify != nil {
 		alerter = machineDiskAlerter{notify: s.rooms.Notify}
 	}
-	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, CIQueue: s.machineCIQueue, DiskFloor: ciDiskFloor, Alerter: alerter, RoomName: s.machineRoomName}
+	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, CIQueue: s.machineCIQueue, Work: (jobs.Admission{}).Work, SessionName: s.machineSessionName, DiskFloor: ciDiskFloor, Alerter: alerter, RoomName: s.machineRoomName}
 }
 
 // machineRoomName names the room whose root allowed host checks, so the Machine
@@ -35,6 +35,19 @@ func (s services) machineRoomName(roomID string) string {
 		return roomID
 	}
 	return rec.Name
+}
+
+// machineSessionName names the session of a job, so the page shows who
+// submitted it. A session the engine cannot load keeps no name.
+func (s services) machineSessionName(sessionID string) string {
+	if s.rooms == nil {
+		return ""
+	}
+	// LoadOwner answers an unknown ID with the ID itself, which is no name.
+	if name := s.rooms.LoadOwner(sessionID).Name; name != sessionID {
+		return name
+	}
+	return ""
 }
 
 // machineCI lists the local CI runs in flight on every machine. The runs live

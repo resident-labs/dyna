@@ -252,11 +252,19 @@ func (m Machine) DiskBlock() string {
 		}
 		return ""
 	}
-	floor := min(max(DiskFloorMin, disk.Total/100*DiskFloorShare), disk.Total/DiskFloorCapDivisor)
+	floor := m.DiskFloorBytes()
 	if disk.Free < floor {
 		return fmt.Sprintf("disk has %d GiB free, below the %d GiB floor", disk.Free>>30, floor>>30)
 	}
 	return ""
+}
+
+// DiskFloorBytes is the free space a node with no percent limit keeps: the
+// larger of DiskFloorMin and DiskFloorShare of its disk, never over a tenth of
+// it. It is zero for a node that was never probed.
+func (m Machine) DiskFloorBytes() uint64 {
+	total := m.Capabilities.Disk.Total
+	return min(max(DiskFloorMin, total/100*DiskFloorShare), total/DiskFloorCapDivisor)
 }
 
 // DiskFloorMin and DiskFloorShare are the free space a node with no percent

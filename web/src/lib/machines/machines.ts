@@ -1,4 +1,4 @@
-import type { MachineCIRun, MachineCapabilities, MachineDetail, MachineLoad, MachineRole, MachineStatus, MachineStatusReason, MachineSummary } from '../api/machine.ts'
+import type { MachineCIRun, MachineCapabilities, MachineCapacity, MachineLoad, MachineRole, MachineStatus, MachineStatusReason, MachineSummary, MachineWorkItem } from '../api/machine.ts'
 
 // roleLabel is the short name a role chip shows.
 export function roleLabel(role: MachineRole): string {
@@ -40,17 +40,18 @@ export function count(n: number, noun: string): string {
 }
 
 // summaryParts lists the counts a machine row shows. A machine reports only
-// what it has: no CI role means no CI part, and a remote machine reports no
-// live figure until the probe reads it. A CI machine always shows its queue,
-// with the waiting count once the node queue reports one.
+// what it has: a remote machine reports no live figure until the probe reads
+// it. A CI machine always shows its queue, and any machine shows its queue
+// while it holds work: "3 running", then "2 waiting" when work waits.
 export function summaryParts(machine: MachineSummary): string[] {
   const parts: string[] = []
   if (machine.agents !== undefined) parts.push(count(machine.agents, 'agent'))
   // A disabled machine takes no CI work, so it reports no queue figure.
-  if (machine.roles.includes('ci')) {
-    const queue = machine.ci ? `CI ${count(machine.ci.running, 'run')}${machine.ci.waiting > 0 ? `, ${machine.ci.waiting} waiting` : ''}` : 'CI'
-    parts.push(machine.enabled ? queue : 'CI off')
-  }
+  if (machine.roles.includes('ci') && !machine.enabled) parts.push('CI off')
+  else if (machine.ci) {
+    parts.push(`${machine.ci.running} running`)
+    if (machine.ci.waiting > 0) parts.push(`${machine.ci.waiting} waiting`)
+  } else if (machine.roles.includes('ci')) parts.push('CI')
   if (machine.computers !== undefined) parts.push(count(machine.computers, 'computer'))
   return parts
 }
@@ -210,4 +211,40 @@ export function editScope(list: readonly string[], edit: ScopeEdit): string[] | 
   }
   if (!list.includes(value)) return null
   return list.filter((v) => v !== value)
+}
+
+// cpuUseText words the CPUs running work holds against the node's total.
+export function cpuUseText(c: Pick<MachineCapacity, 'cpus' | 'cpusUsed'>): string {
+  return c.cpus > 0 ? `${c.cpusUsed} of ${count(c.cpus, 'CPU')}` : `${count(c.cpusUsed, 'CPU')} held`
+}
+
+// memoryUseText words the memory running work holds against the node's total.
+export function memoryUseText(c: Pick<MachineCapacity, 'memoryMiB' | 'memoryMiBUsed'>): string {
+  const held = sizeText(c.memoryMiBUsed * 2 ** 20)
+  return c.memoryMiB > 0 ? `${held} of ${sizeText(c.memoryMiB * 2 ** 20)}` : `${held} held`
+}
+
+// diskLimitText words a node's free disk against what admission keeps. A node
+// with a used-percent limit keeps under that percent; otherwise it keeps a
+// free floor. A block is a designed line of its own, so this stays a figure.
+export function diskLimitText(c: Pick<MachineCapacity, 'diskFree' | 'diskTotal' | 'diskFloor' | 'maxDiskPercent'>): string {
+  if (c.diskTotal === 0) return 'Not probed'
+  const free = `${sizeText(c.diskFree)} free`
+  return c.maxDiskPercent ? `${free} · limit ${c.maxDiskPercent}% used` : `${free} · keeps ${sizeText(c.diskFloor)}`
+}
+
+// workHoldsText words what one unit of work holds or asks of its node.
+export function workHoldsText(item: Pick<MachineWorkItem, 'cpus' | 'memoryMiB'>): string {
+  return `${count(item.cpus, 'CPU')} · ${sizeText(item.memoryMiB * 2 ** 20)}`
+}
+
+// workKindText words the kind of a unit of work.
+export function workKindText(kind: MachineWorkItem['kind']): string {
+  return kind === 'job' ? 'Job' : 'Check'
+}
+
+// workWhoText names the session and room a unit of work belongs to. It leaves
+// out a name the engine could not resolve, and never shows an ID in its place.
+export function workWhoText(item: Pick<MachineWorkItem, 'sessionName' | 'roomName'>): string {
+  return [item.sessionName, item.roomName].filter(Boolean).join(' · ')
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 )
 
@@ -111,6 +112,25 @@ type MachineSummary struct {
 	Agents    *int           `json:"agents,omitempty"`
 	Computers *int           `json:"computers,omitempty"`
 	CI        *MachineCIWork `json:"ci,omitempty"`
+}
+
+// MachineWorkItem is one unit of work on a machine, with the names the page
+// shows for its room and session. A name stays empty when the engine cannot
+// resolve it, and the page then leaves it out.
+type MachineWorkItem struct {
+	jobs.WorkItem
+	RoomName    string `json:"roomName,omitempty"`
+	SessionName string `json:"sessionName,omitempty"`
+}
+
+// MachineWork is the Work section of the Machine page: what the machine's
+// queue counts against, the work it runs and the work that waits, in
+// admission order. It comes from one read of the admission rows and the jobs
+// table.
+type MachineWork struct {
+	Capacity jobs.NodeCapacity `json:"capacity"`
+	Running  []MachineWorkItem `json:"running"`
+	Waiting  []MachineWorkItem `json:"waiting"`
 }
 
 // MachineHarness is one agent harness installed on a machine and its version.
@@ -246,6 +266,12 @@ type MachineAPI struct {
 	// CIQueue reads a node's shared queue: how much work it runs now and how
 	// much waits for room. Nil leaves the running count to the CI runs.
 	CIQueue func(node string) (running, waiting int)
+	// Work reads a machine's queue and running work. Nil means the engine runs
+	// no jobs, so the machine has no work to show.
+	Work func(ctx context.Context, m machines.Machine) (jobs.NodeWork, error)
+	// SessionName names a session from its ID. A nil SessionName leaves the
+	// name out.
+	SessionName func(sessionID string) string
 	// Prober reads a machine when the owner asks for a probe. A nil Prober
 	// reads it through this registry with no load sampler of this engine.
 	Prober *machines.Prober
@@ -281,6 +307,35 @@ func (a MachineAPI) Machine(ctx context.Context, id string) (MachineDetail, erro
 		return MachineDetail{}, err
 	}
 	return a.machine(ctx, m, a.ciRuns()), nil
+}
+
+// MachineWork reads the Work section of one machine's page by its ID.
+func (a MachineAPI) MachineWork(ctx context.Context, id string) (MachineWork, error) {
+	m, err := a.find(ctx, id)
+	if err != nil {
+		return MachineWork{}, err
+	}
+	var node jobs.NodeWork
+	if a.Work != nil {
+		if node, err = a.Work(ctx, m); err != nil {
+			return MachineWork{}, err
+		}
+	}
+	named := func(items []jobs.WorkItem) []MachineWorkItem {
+		out := make([]MachineWorkItem, 0, len(items))
+		for _, item := range items {
+			named := MachineWorkItem{WorkItem: item}
+			if a.RoomName != nil && item.Room != "" {
+				named.RoomName = a.RoomName(item.Room)
+			}
+			if a.SessionName != nil && item.Session != "" {
+				named.SessionName = a.SessionName(item.Session)
+			}
+			out = append(out, named)
+		}
+		return out
+	}
+	return MachineWork{Capacity: node.Capacity, Running: named(node.Running), Waiting: named(node.Waiting)}, nil
 }
 
 // SaveMachine applies one change to the machine that ref names, by ID or by
@@ -508,12 +563,14 @@ func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[stri
 		out.Capabilities = a.capabilitiesView(m)
 		out.Load = loadView(m.Load)
 	}
-	if m.HasRole(machines.RoleCI) {
-		runs := ci[m.Name]
-		running, waiting := len(runs), 0
-		if a.CIQueue != nil {
-			running, waiting = a.CIQueue(m.Name)
-		}
+	runs := ci[m.Name]
+	running, waiting := len(runs), 0
+	if a.CIQueue != nil {
+		running, waiting = a.CIQueue(m.Name)
+	}
+	// A CI machine always shows its queue; any other machine shows it while
+	// jobs run or wait on it.
+	if m.HasRole(machines.RoleCI) || running+waiting > 0 {
 		out.CI = &MachineCIWork{Running: running, Waiting: waiting}
 		out.CIRuns = runs
 	}
