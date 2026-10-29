@@ -682,7 +682,7 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 
 // createValueFlags are the gh pr create flags that consume the next argument.
 var createValueFlags = map[string]bool{
-	"-a": true, "--assignee": true, "-B": true, "--base": true, "-b": true, "--body": true,
+	"-a": true, "--assignee": true, "--attach": true, "-B": true, "--base": true, "-b": true, "--body": true,
 	"-F": true, "--body-file": true, "-H": true, "--head": true, "-l": true, "--label": true,
 	"-m": true, "--milestone": true, "-p": true, "--project": true, "--recover": true,
 	"-r": true, "--reviewer": true, "-T": true, "--template": true, "-t": true, "--title": true,
