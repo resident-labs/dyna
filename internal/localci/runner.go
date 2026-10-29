@@ -115,9 +115,12 @@ type SuiteResult struct {
 	Status    Outcome       `json:"status"`
 	Cause     FailureCause  `json:"cause,omitempty"`
 	LogTail   string        `json:"logTail,omitempty"`
-	Failures  []string      `json:"failures,omitempty"`
-	Reports   []string      `json:"reports,omitempty"`
-	Error     string        `json:"error,omitempty"`
+	// FailureExcerpt is the failing part of the check's whole log, cut when the
+	// check finished. It keeps a failing test block that LogTail no longer holds.
+	FailureExcerpt string   `json:"failureExcerpt,omitempty"`
+	Failures       []string `json:"failures,omitempty"`
+	Reports        []string `json:"reports,omitempty"`
+	Error          string   `json:"error,omitempty"`
 	// Note says what Dyna changed about the check's request, such as a CPU or
 	// memory request it clamped to the machine. It is empty when the check got
 	// what it asked for.
@@ -134,6 +137,15 @@ func (s SuiteResult) Name() CheckName {
 		return s.CheckName
 	}
 	return CheckName(s.Suite)
+}
+
+// FailureText is the text readers cut a failure from: the saved excerpt when the
+// check has one, else the stored log tail.
+func (s SuiteResult) FailureText() string {
+	if s.FailureExcerpt != "" {
+		return s.FailureExcerpt
+	}
+	return s.LogTail
 }
 
 type TestTiming struct {
