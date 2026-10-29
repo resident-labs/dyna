@@ -37,12 +37,28 @@ func remoteTrackingBase(ctx context.Context, dir, base string) bool {
 	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "refs/remotes/")
 }
 
+// baseRemote returns the configured remote that base names, such as upstream
+// for upstream/main. A base that names no configured remote belongs to origin.
+func baseRemote(ctx context.Context, dir, base string) string {
+	out, err := gitOutput(ctx, dir, "remote")
+	if err != nil {
+		return "origin"
+	}
+	name := "origin"
+	for _, candidate := range strings.Fields(string(out)) {
+		if strings.HasPrefix(base, candidate+"/") && len(candidate) > len(name) {
+			name = candidate
+		}
+	}
+	return name
+}
+
 // pinBase resolves base to a commit id in the caller's repo before the
-// worktree is created, and returns that id. A plain `git fetch origin`
-// rewrites FETCH_HEAD (D-164) and moves remote-tracking refs, so a base that
-// already names a commit is pinned as-is, a remote-tracking base is refreshed
-// first, and a base the repository still cannot resolve is refused instead of
-// being resolved differently by `git worktree add` later.
+// worktree is created, and returns that id. A plain `git fetch` rewrites
+// FETCH_HEAD (D-164) and moves remote-tracking refs, so a base that already
+// names a commit is pinned as-is, a remote-tracking base is refreshed first
+// from the remote it names, and a base the repository still cannot resolve is
+// refused instead of being resolved differently by `git worktree add` later.
 func pinBase(ctx context.Context, repo, main, base string) (string, error) {
 	commit, resolveErr := resolveCommit(ctx, repo, base)
 	if resolveErr == nil && !remoteTrackingBase(ctx, repo, base) {
@@ -50,12 +66,13 @@ func pinBase(ctx context.Context, repo, main, base string) (string, error) {
 	}
 	// The fetch refreshes remote-tracking refs, and can still bring a commit
 	// the caller named but the repository lacks.
-	if hasRemote(ctx, main, "origin") {
-		if out, err := gitOriginOutput(ctx, main, "fetch", "origin"); err != nil {
+	remote := baseRemote(ctx, repo, base)
+	if hasRemote(ctx, main, remote) {
+		if out, err := gitRemoteOutput(ctx, main, remote, "fetch", remote); err != nil {
 			if resolveErr != nil {
 				return "", fmt.Errorf("base %q does not name a commit in %s", base, repo)
 			}
-			return "", fmt.Errorf("fetch origin: %w: %s", err, out)
+			return "", fmt.Errorf("fetch %s: %w: %s", remote, err, out)
 		}
 		commit, resolveErr = resolveCommit(ctx, repo, base)
 	}
@@ -65,12 +82,13 @@ func pinBase(ctx context.Context, repo, main, base string) (string, error) {
 	return commit, nil
 }
 
-// gitOriginOutput gives GitHub HTTPS reads the same account and repository
-// checks as gh. Other hosts and transports keep their native credentials.
-func gitOriginOutput(ctx context.Context, dir string, args ...string) ([]byte, error) {
+// gitRemoteOutput gives GitHub HTTPS reads of the named remote the same account
+// and repository checks as gh. Other hosts and transports keep their native
+// credentials.
+func gitRemoteOutput(ctx context.Context, dir, remoteName string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	remote, err := repoid.Git(ctx, dir, "remote", "get-url", "origin")
+	remote, err := repoid.Git(ctx, dir, "remote", "get-url", remoteName)
 	if err != nil {
 		return nil, err
 	}

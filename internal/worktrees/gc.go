@@ -227,6 +227,12 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 		return Record{}, errors.New("branch is required and must not start with '-'")
 	}
 	if base == "" {
+		// git config exits 1 when the repository sets no worktrees.defaultBase.
+		if out, err := gitOutput(ctx, repo, "config", "--get", "worktrees.defaultBase"); err == nil {
+			base = strings.TrimSpace(string(out))
+		}
+	}
+	if base == "" {
 		enabled, err := locallane.Enabled(ctx, repo)
 		if err != nil {
 			return Record{}, err
@@ -748,7 +754,7 @@ func refreshDefaultBranch(ctx context.Context, repo string) (string, error) {
 		return "", nil
 	}
 	remoteRef := "refs/heads/" + resolved.Name
-	out, err := gitOriginOutput(ctx, repo, "fetch", "--no-tags", "origin", "+"+remoteRef+":refs/remotes/origin/"+resolved.Name)
+	out, err := gitRemoteOutput(ctx, repo, "origin", "fetch", "--no-tags", "origin", "+"+remoteRef+":refs/remotes/origin/"+resolved.Name)
 	if err == nil {
 		return "", nil
 	}
@@ -757,7 +763,7 @@ func refreshDefaultBranch(ctx context.Context, repo string) (string, error) {
 	// An outside clone can lack the selected branch. Keep its trees without
 	// reporting a cleanup failure; an unreachable remote remains an error.
 	var missing *exec.ExitError
-	if _, lsErr := gitOriginOutput(ctx, repo, "ls-remote", "--exit-code", "origin", remoteRef); errors.As(lsErr, &missing) && missing.ExitCode() == 2 {
+	if _, lsErr := gitRemoteOutput(ctx, repo, "origin", "ls-remote", "--exit-code", "origin", remoteRef); errors.As(lsErr, &missing) && missing.ExitCode() == 2 {
 		return "remote has no " + resolved.Name + " branch", nil
 	}
 	return reason, fetchErr
