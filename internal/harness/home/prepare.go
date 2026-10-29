@@ -681,9 +681,11 @@ func goDefaults(path string, env []string) map[string]string {
 }
 
 // ownerSigningKey returns the key selector that the owner's Git config picks
-// by default. When the owner signs commits and names no user.signingKey, Git
+// by default. When signing is on, by the owner's config, a repository's config or
+// git commit -S, and no user.signingKey is named, Git
 // selects the key by the committer address, which the agent identity replaces.
-// The owner's address then becomes the explicit selector; it is a key lookup
+// The owner's address then becomes the explicit selector, whether or not
+// the owner's own config turns signing on; it is a key lookup
 // in the owner's keyring and never appears in a commit. It returns "" when no
 // selector is needed or Git cannot read the owner's config.
 func ownerSigningKey(git, home, config, includes string) string {
@@ -707,7 +709,7 @@ func ownerSigningKey(git, home, config, includes string) string {
 		out, _ := cmd.Output()
 		return strings.TrimSpace(string(out))
 	}
-	if read("--type=bool", "--get", "commit.gpgsign") != "true" || read("--get", "user.signingkey") != "" {
+	if read("--get", "user.signingkey") != "" {
 		return ""
 	}
 	return read("--get", "user.email")
