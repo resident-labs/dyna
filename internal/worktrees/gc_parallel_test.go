@@ -77,6 +77,84 @@ func TestGCRemovesTreesConcurrently(t *testing.T) {
 	}
 }
 
+// The registry commit for removed trees must not run inside the removal lock.
+// One slow commit would serialize every remaining removal, which is what
+// blows the cleanup deadline on large registries. The hook blocks the batch
+// commit; both trees must already be gone, and their records disappear only
+// after the commit is released.
+func TestGCCommitsRemovalsOutsideTheRemovalLock(t *testing.T) {
+	repo := gcRepo(t)
+	var paths []string
+	for i := range 2 {
+		path := gcTree(t, repo, fmt.Sprintf("dyna/batch-%d", i), "closed")
+		ageGCTree(t, path)
+		paths = append(paths, path)
+	}
+	arrived := make(chan struct{}, 1)
+	release := make(chan struct{})
+	realBatch := markRemovedBatch
+	markRemovedBatch = func(ctx context.Context, batch []string) error {
+		arrived <- struct{}{}
+		<-release
+		return realBatch(ctx, batch)
+	}
+	t.Cleanup(func() { markRemovedBatch = realBatch })
+	done := make(chan error, 1)
+	go func() {
+		_, err := GC(context.Background(), repo, GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }})
+		done <- err
+	}()
+	<-arrived
+	for _, path := range paths {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("tree %s waits for the registry commit: %v", path, err)
+		}
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		if _, err := Get(path); err == nil {
+			t.Fatalf("record of %s survived the batch commit", path)
+		}
+	}
+}
+
+// The registry commit of one cleanup pass runs on its own context: a cleanup
+// whose deadline expires keeps the progress its workers already made, and the
+// next scheduled cleanup retries the trees that stayed.
+func TestGCBatchCommitSurvivesExpiredDeadline(t *testing.T) {
+	repo := gcRepo(t)
+	path := gcTree(t, repo, "dyna/deadline", "closed")
+	ageGCTree(t, path)
+	ctx, cancel := context.WithCancel(context.Background())
+	realBatch := markRemovedBatch
+	var batchErr error
+	markRemovedBatch = func(bctx context.Context, paths []string) error {
+		// The cleanup deadline expires while the commit runs.
+		cancel()
+		if err := bctx.Err(); err != nil {
+			t.Errorf("batch commit context died with the cleanup deadline: %v", err)
+		}
+		batchErr = realBatch(bctx, paths)
+		return batchErr
+	}
+	t.Cleanup(func() { markRemovedBatch = realBatch })
+	if _, err := GC(ctx, repo, GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if batchErr != nil {
+		t.Fatal(batchErr)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("tree remains: %v", err)
+	}
+	if _, err := Get(path); err == nil {
+		t.Fatal("record of the removed tree was not committed")
+	}
+}
+
 // An owner that becomes active while its worker waits for the removal lock
 // must keep the tree.
 func TestGCRechecksOwnerAfterQueueing(t *testing.T) {
