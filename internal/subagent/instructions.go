@@ -347,7 +347,7 @@ func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []str
 	// first session and an owner batch can lose the sessions that are due later.
 	changedAt := time.Now()
 	// Closed is checked again under each session lock, before the write.
-	changed, err := m.store().updateMetasContext(ctx, ids, func(mm *Meta) bool {
+	changed, err := m.store().updateMetasContext(ids, func(mm *Meta) bool {
 		if !mm.Closed.IsZero() {
 			return false
 		}
