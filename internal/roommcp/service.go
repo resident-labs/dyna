@@ -9,6 +9,7 @@ import (
 	"log"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -59,7 +60,9 @@ type Service struct {
 	accounts *accountstore.Store
 	rooms    *room.Store
 	sessions Sessions
-	now      func() time.Time
+	// identities reads what the argument scanner must keep out of a call.
+	identities IdentitySource
+	now        func() time.Time
 	// inChange lets a test look at the service while a change holds the lock.
 	inChange func()
 	// beforeChange lets a test run another operation just before a change takes the lock.
@@ -72,12 +75,12 @@ type Service struct {
 }
 
 // NewService opens the server registry. The engine migrates its tables first (Migrate). Tokens stay in the accounts store.
-func NewService(dataDir string, accounts *accountstore.Store, rooms *room.Store, sessions Sessions) (*Service, error) {
+func NewService(dataDir string, accounts *accountstore.Store, rooms *room.Store, sessions Sessions, identities IdentitySource) (*Service, error) {
 	db, err := database.Open(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{db: db, accounts: accounts, rooms: rooms, sessions: sessions, now: time.Now, active: make(map[serverKey]serverRuntime), gen: make(map[serverKey]uint64)}, nil
+	return &Service{db: db, accounts: accounts, rooms: rooms, sessions: sessions, identities: identities, now: time.Now, active: make(map[serverKey]serverRuntime), gen: make(map[serverKey]uint64)}, nil
 }
 
 // manage resolves the room and checks the caller. The owner may do anything;
@@ -542,6 +545,56 @@ func (s *Service) Grant(ctx context.Context, roomRef, name string, kind GrantKin
 	})
 }
 
+// BlockTerm adds or removes a term the argument scanner must block.
+func (s *Service) BlockTerm(ctx context.Context, roomRef, name, term string, remove bool) error {
+	rec, err := s.manage(ctx, roomRef, true)
+	if err != nil {
+		return err
+	}
+	hash, words := termHash(term)
+	if words == 0 {
+		return errors.New("a block term is required")
+	}
+	if _, err := s.credentialID(ctx, rec.ID, name); err != nil {
+		return err
+	}
+	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if remove {
+			_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_block_terms WHERE room=? AND server=? AND hash=?", rec.ID, name, hash)
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO room_mcp_block_terms(room,server,hash,words) VALUES(?,?,?,?)", rec.ID, name, hash, words); err != nil {
+			return errors.New("no such MCP server")
+		}
+		return nil
+	})
+}
+
+// AllowLogin adds or removes a GitHub login the argument scanner lets through.
+func (s *Service) AllowLogin(ctx context.Context, roomRef, name, login string, remove bool) error {
+	rec, err := s.manage(ctx, roomRef, true)
+	if err != nil {
+		return err
+	}
+	login = strings.ToLower(strings.TrimSpace(login))
+	if login == "" {
+		return errors.New("a login is required")
+	}
+	if _, err := s.credentialID(ctx, rec.ID, name); err != nil {
+		return err
+	}
+	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if remove {
+			_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_logins WHERE room=? AND server=? AND login=?", rec.ID, name, login)
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO room_mcp_logins(room,server,login) VALUES(?,?,?)", rec.ID, name, login); err != nil {
+			return errors.New("no such MCP server")
+		}
+		return nil
+	})
+}
+
 // ServerView is what any member of the room may see about a server. It holds no secret.
 type ServerView struct {
 	Name     string   `json:"name"`
@@ -643,7 +696,10 @@ func (s *Service) Call(ctx context.Context, name, tool string, arguments json.Ra
 		audit.Outcome = outcome
 		audit.ResultBytes = resultBytes
 		audit.DurationMs = s.now().Sub(started).Milliseconds()
-		audit.Arguments = capText(Scrub(string(arguments), secrets), argumentsLimit)
+		// A flagged call holds the data the scanner keeps out of the room feed too.
+		if outcome != room.MCPFlagged {
+			audit.Arguments = capText(Scrub(string(arguments), secrets), argumentsLimit)
+		}
 		if _, err := s.rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: audit, To: []string{rec.Name}, FreshID: true}); err != nil {
 			log.Printf("room MCP call audit was not written: %v", err)
 		}
@@ -664,6 +720,52 @@ func (s *Service) Call(ctx context.Context, name, tool string, arguments json.Ra
 	if err := s.db.QueryRowContext(ctx, "SELECT allowed FROM room_mcp_tools WHERE room=? AND server=? AND tool=?", actor.Room, name, tool).Scan(&allowed); err != nil || !allowed {
 		finish(room.MCPNotAllowed, 0, nil)
 		return "", errors.New("tool is not allowed")
+	}
+	// Nothing leaves the engine until the arguments pass. The scan runs before a
+	// connection is opened, so a blocked call sends no request.
+	in := scanInput{}
+	if in.Identities, err = s.identities(ctx, rec); err != nil {
+		finish(room.MCPFlagged, 0, nil)
+		return "", errors.New("the arguments could not be checked, so nothing was sent")
+	}
+	logins, err := s.db.QueryContext(ctx, "SELECT login FROM room_mcp_logins WHERE room=? AND server=?", rec.ID, name)
+	if err != nil {
+		return "", err
+	}
+	for logins.Next() {
+		var login string
+		if err := logins.Scan(&login); err != nil {
+			logins.Close()
+			return "", err
+		}
+		in.AllowedLogins = append(in.AllowedLogins, login)
+	}
+	if err := logins.Close(); err != nil {
+		return "", err
+	}
+	terms, err := s.db.QueryContext(ctx, "SELECT hash,words FROM room_mcp_block_terms WHERE room=? AND server=?", rec.ID, name)
+	if err != nil {
+		return "", err
+	}
+	for terms.Next() {
+		var term blockTerm
+		if err := terms.Scan(&term.Hash, &term.Words); err != nil {
+			terms.Close()
+			return "", err
+		}
+		in.BlockTerms = append(in.BlockTerms, term)
+	}
+	if err := terms.Close(); err != nil {
+		return "", err
+	}
+	rule, flagged, err := scanArguments(arguments, in)
+	if err != nil {
+		finish(room.MCPFlagged, 0, nil)
+		return "", errors.New("the arguments are not valid JSON, so nothing was sent")
+	}
+	if flagged {
+		finish(room.MCPFlagged, 0, nil)
+		return "", fmt.Errorf("nothing was sent: the arguments contain %s. Remove it and call again.", rule)
 	}
 	rt, err := s.connection(ctx, actor.Room, name)
 	if err != nil {
@@ -720,4 +822,117 @@ func capText(text string, n int) string {
 		n--
 	}
 	return text[:n]
+}
+
+// grantedServers lists the attached servers of the caller's room that the
+// calling session, or its profile, may use. The caller comes from the engine's
+// authenticated actor and nothing else.
+func (s *Service) grantedServers(ctx context.Context) (room.Record, []string, error) {
+	actor := authority.Of(ctx)
+	if actor.Room == "" || actor.Session == "" || (actor.Role != authority.Session && actor.Role != authority.Root) {
+		return room.Record{}, nil, errors.New("this action requires a room session")
+	}
+	rec, err := s.rooms.Resolve(actor.Room)
+	if err != nil {
+		return room.Record{}, nil, err
+	}
+	info, err := s.sessions.Resolve(actor.Session)
+	if err != nil {
+		return room.Record{}, nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM room_mcp_servers s WHERE room=? AND attached=1 AND EXISTS
+ (SELECT 1 FROM room_mcp_grants g WHERE g.room=s.room AND g.server=s.name AND ((g.kind='session' AND g.subject=?) OR (g.kind='profile' AND g.subject=?)))
+ ORDER BY name`, rec.ID, actor.Session, info.Profile)
+	if err != nil {
+		return room.Record{}, nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return room.Record{}, nil, err
+		}
+		names = append(names, name)
+	}
+	return rec, names, rows.Err()
+}
+
+// Access reports whether the calling session may use any server. The agent
+// tools are listed only when it does.
+func (s *Service) Access(ctx context.Context) (bool, error) {
+	_, names, err := s.grantedServers(ctx)
+	return len(names) > 0, err
+}
+
+// AgentTools lists the allowed tools of the servers the calling session may
+// use, with the server's own description and input schema. The server wrote
+// those, so the answer is wrapped as untrusted data like any other.
+func (s *Service) AgentTools(ctx context.Context) (string, error) {
+	rec, names, err := s.grantedServers(ctx)
+	if err != nil {
+		return "", err
+	}
+	var out []string
+	for _, name := range names {
+		allowed := make(map[string]bool)
+		rows, err := s.db.QueryContext(ctx, "SELECT tool FROM room_mcp_tools WHERE room=? AND server=? AND allowed=1", rec.ID, name)
+		if err != nil {
+			return "", err
+		}
+		for rows.Next() {
+			var tool string
+			if err := rows.Scan(&tool); err != nil {
+				rows.Close()
+				return "", err
+			}
+			allowed[tool] = true
+		}
+		if err := rows.Close(); err != nil {
+			return "", err
+		}
+		if len(allowed) == 0 {
+			continue
+		}
+		rt, err := s.connection(ctx, rec.ID, name)
+		if err != nil {
+			return "", err
+		}
+		secrets := []string{rt.client.token}
+		callCtx, stop := context.WithCancel(ctx)
+		defer stop()
+		defer context.AfterFunc(rt.lifetime, stop)()
+		if err := rt.initialize(); err != nil {
+			s.forget(serverKey{rec.ID, name}, rt)
+			return "", errors.New(Scrub(err.Error(), secrets))
+		}
+		live, err := rt.client.ListTools(callCtx)
+		if err != nil {
+			return "", errors.New(Scrub(err.Error(), secrets))
+		}
+		type listed struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description,omitempty"`
+			InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+		}
+		var tools []listed
+		for _, tool := range live {
+			if allowed[tool.Name] {
+				tools = append(tools, listed{tool.Name, tool.Description, tool.InputSchema})
+			}
+		}
+		encoded, err := json.Marshal(struct {
+			Server string   `json:"server"`
+			Tools  []listed `json:"tools"`
+		}{name, tools})
+		if err != nil {
+			return "", err
+		}
+		wrapped, err := WrapResult(name+"/tools", Result{Content: []Content{{Type: "text", Text: string(encoded)}}}, secrets)
+		if err != nil {
+			return "", err
+		}
+		out = append(out, wrapped)
+	}
+	return strings.Join(out, "\n"), nil
 }
