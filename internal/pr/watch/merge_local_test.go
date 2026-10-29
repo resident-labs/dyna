@@ -562,7 +562,7 @@ func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
 	if trial.Status != VerdictFailed || trial.Reason != trial.Logs {
 		t.Fatalf("trial = %s %q, want a failure whose reason is its evidence", trial.Status, trial.Reason)
 	}
-	blocked := regexp.MustCompile(`no enabled CI machine allows the (\S+) suite`).FindStringSubmatch(trial.Reason)
+	blocked := regexp.MustCompile(`no enabled CI node allows the (\S+) suite`).FindStringSubmatch(trial.Reason)
 	if len(blocked) != 2 || blocked[1] == string(localci.SuiteRelay) || !strings.Contains(trial.Reason, "--label suite=") {
 		t.Fatalf("trial reason = %q, want an unavailable suite and the fix", trial.Reason)
 	}

@@ -881,7 +881,7 @@ func localFailureNote(result localci.Result) string {
 	}
 	node := result.Node
 	if node == "" {
-		node = "the CI machine"
+		node = "the CI node"
 	}
 	note := "local CI could not run its checks on " + node
 	label := cause.Label()

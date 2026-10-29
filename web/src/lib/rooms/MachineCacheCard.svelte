@@ -11,7 +11,7 @@
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   let payload = $derived(machineCacheEvent(post))
-  let name = $derived(payload?.name ?? 'A machine')
+  let name = $derived(payload?.name ?? 'A node')
   let caches = $derived(payload ? payload.caches.join(' and ') : 'its caches')
   let chips = $derived(payload ? payload.caches.map((label) => ({ label })) : [])
 </script>

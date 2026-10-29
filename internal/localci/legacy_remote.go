@@ -17,7 +17,7 @@ func (s Store) LegacyRemoteNode(ctx context.Context) (Node, error) {
 	}
 	nodes, err := s.Nodes(ctx)
 	if err != nil {
-		return Node{}, fmt.Errorf("list CI machines for legacy localci.remote: %w", err)
+		return Node{}, fmt.Errorf("list CI nodes for legacy localci.remote: %w", err)
 	}
 	return legacyRemoteNode(configured.LocalCIRemote, nodes)
 }
@@ -34,12 +34,12 @@ func legacyRemoteNode(remote string, nodes []Node) (Node, error) {
 			continue
 		}
 		if selected.Name != "" {
-			return Node{}, fmt.Errorf("localci.remote host %q matches multiple enabled registered CI machines", host)
+			return Node{}, fmt.Errorf("localci.remote host %q matches multiple enabled registered CI nodes", host)
 		}
 		selected = node
 	}
 	if selected.Name == "" {
-		return Node{}, fmt.Errorf("localci.remote host %q has no enabled registered CI machine", host)
+		return Node{}, fmt.Errorf("localci.remote host %q has no enabled registered CI node", host)
 	}
 	return selected, nil
 }

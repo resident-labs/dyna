@@ -98,7 +98,7 @@
   </button>
   {/if}
   {#if !roomId}
-    <span class="title">{machineDetail ? machineDetail.name : 'Machines'}</span>
+    <span class="title">{machineDetail ? machineDetail.name : 'Nodes'}</span>
     {#if !machineId}<span class="meta">{machinesSub(machines)}</span>{/if}
   {:else if room}
     {#if drill}

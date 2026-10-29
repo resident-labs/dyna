@@ -83,7 +83,7 @@ var LongCalls = map[string]time.Duration{
 	// 11 minutes covers the longest probe and its store. With the 5 s default
 	// the request deadline cancels a slow probe before it can record that the
 	// machine is offline.
-	"ProbeMachine": 11 * time.Minute,
+	"ProbeNode": 11 * time.Minute,
 	// Merge recovery can delete trial branches, build a retry, or publish a
 	// passed trial through git and GitHub. Keep the existing synchronous CLI
 	// behavior until item 8 moves slow work into jobs.

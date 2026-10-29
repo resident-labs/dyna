@@ -608,7 +608,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	timed("Merge service", signals.channels["merges"], timerMerges, w.merges)
 	timed("CI cache cleanup", signals.channels["caches"], timerCaches, w.caches)
 	timed("Question delivery", signals.channels["questions"], timerQuestions, w.questions)
-	timed("Machine probe", signals.channels["probe"], timerProbe, w.probe)
+	timed("Node probe", signals.channels["probe"], timerProbe, w.probe)
 	start("Dormant session sweep", sweep, w.sweep)
 	timed("Hook spool", signals.channels["hooks"], timerHooks, w.hooks)
 	timed("Hook schedule", signals.channels["hook-schedule"], timerHookSchedule, w.hookSchedule)
@@ -742,7 +742,7 @@ func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSign
 			return
 		}
 		if left := workerSet.stopLocalCI(stopCtx); len(left) > 0 {
-			log.Print(watch.Sanitize(fmt.Sprintf("engine stop left %d local CI runs working on their machine: %v", len(left), left)))
+			log.Print(watch.Sanitize(fmt.Sprintf("engine stop left %d local CI runs working on their node: %v", len(left), left)))
 		}
 	}()
 	owned, err := runOwned(ctx, store.DataDir(), workerSet, signals, t, report)

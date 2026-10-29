@@ -164,7 +164,7 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 		// another machine. The trial waits for that retry. A spent retry falls
 		// through and fails with the saved git error.
 		if machineFailureRetryFrom(result) != "" {
-			return VerdictPending, "", "retrying local CI after a machine failure", nil
+			return VerdictPending, "", "retrying local CI after a node failure", nil
 		}
 		return VerdictFailed, logs, "local CI failed", nil
 	default:

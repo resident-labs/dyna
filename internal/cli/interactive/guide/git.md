@@ -180,51 +180,51 @@ Use `dyna git sync status --json` to inspect saved ahead and behind counts.
 `dyna git sync fetch` refreshes the configured local lane remotes.
 Use `dyna git pr export` to test integration against origin/main and open or update its export PR.
 
-Registered machines run CI for tracked PR heads and merge trials. They are not
-GitHub self-hosted runners. Every machine lives in one registry, and this
-machine is the local row that runs the engine:
+Registered nodes run CI for tracked PR heads and merge trials. They are not
+GitHub self-hosted runners. Every node lives in one registry, and this
+node is the local row that runs the engine:
 
 ```sh
-dyna machine list
-dyna machine add omarchy --ssh ari@omarchy
-dyna machine edit omarchy --label ci
-dyna machine add hermeslab --ssh pip@hermeslab
-dyna machine edit hermeslab --label ci
+dyna node list
+dyna node add omarchy --ssh ari@omarchy
+dyna node edit omarchy --label ci
+dyna node add hermeslab --ssh pip@hermeslab
+dyna node edit hermeslab --label ci
 dyna git ci mode local
 ```
 
 The mode applies to the current room. `github` is the default. `local` and
 `both` accept the first conclusive local or GitHub result; any observed failure
 blocks merging. Every configured required check must pass. With no enabled
-machines, GitHub remains the CI source.
+nodes, GitHub remains the CI source.
 A pull request head needs no local result of its own. The merge queue runs
 local CI on the merge trial, the head merged into the frozen default branch (a
 batch runs once, on its tip). The first conclusive local or hosted result on the
 trial releases the merge, and any failure from either vetoes it. With no enabled
-machine, the hosted trial CI decides. So `dyna git ci show <head>` can report no
+node, the hosted trial CI decides. So `dyna git ci show <head>` can report no
 result while the trial decides; check a landed change with
 `dyna git ci show <merge commit>`.
-Use `dyna machine edit <name> --unlabel ci`, `dyna machine edit <name>
---disable` or `dyna machine rm <name>` to stop assigning a machine CI work.
+Use `dyna node edit <name> --unlabel ci`, `dyna node edit <name>
+--disable` or `dyna node rm <name>` to stop assigning a node CI work.
 
-A machine can take work from chosen rooms only, so each room's CI uses the
-machines it owns:
+A node can take work from chosen rooms only, so each room's CI uses the
+nodes it owns:
 
 ```sh
-dyna machine edit hermeslab --rooms dyna
-dyna machine edit arch --rooms fl-rea,pve
-dyna machine edit hermeslab --rooms ""
+dyna node edit hermeslab --rooms dyna
+dyna node edit arch --rooms fl-rea,pve
+dyna node edit hermeslab --rooms ""
 ```
 
-An empty list lets every room use the machine, which is the default. Local CI
-and merge trials skip a machine that does not allow their room, so the work
+An empty list lets every room use the node, which is the default. Local CI
+and merge trials skip a node that does not allow their room, so the work
 waits instead of running in the wrong room.
 Merge trials run first. Superseded heads are cancelled. Forks stay on GitHub.
 Local checks use bounded systemd scopes and containers, with warm caches.
 When local work starts, Dyna removes only queued or waiting runs of
 `.github/workflows/ci.yml` for that exact head. Running jobs and other workflows
 finish. An infrastructure error reruns the removed runs. Main pushes are never cancelled.
-The PR Checks tab and `dyna git merge status` show the machine for each check.
+The PR Checks tab and `dyna git merge status` show the node for each check.
 
 Manual CI can also run one commit over the configured SSH destination:
 
@@ -235,8 +235,8 @@ dyna git ci run <sha> --node local
 dyna git ci show <sha> --json
 ```
 
-`--node local` selects this machine, so older scripts keep working. Any other
-name selects the machine with that name.
+`--node local` selects this node, so older scripts keep working. Any other
+name selects the node with that name.
 
 Use `--suite test` to select one or more suites from `.dyna/local-ci.yaml`,
 comma separated.
@@ -265,16 +265,16 @@ a merge trial runs and the suites a pull request can select.
   `files` pattern matches a changed repository path. A suite without `files`
   is not selected by a pull request.
 
-A `host: true` check runs on the machine without a container. It cannot set
+A `host: true` check runs on the node without a container. It cannot set
 `image`, `hostUser` or `setup`. Host checks stay off even when the file asks
 for them: only the owner, or the root of a room, can allow them, with
-`dyna machine edit <name> --allow-host-checks`. A room root's permission covers
-that room's work only. The machine record and the Machine page name who allows
+`dyna node edit <name> --allow-host-checks`. A room root's permission covers
+that room's work only. The node record and the Node page name who allows
 them.
 
 A check gets 2 CPUs and 4 GiB of memory in a container, and 5 GiB as a host
 check. `cpus` and `memory` raise that: `cpus: 8` and `memory: 16g`. A memory
-value needs `m` or `g`. Dyna bounds a request by the machine's last probe and by
+value needs `m` or `g`. Dyna bounds a request by the node's last probe and by
 the slot pool, which gives two CPUs and 4 GiB per slot. A check that Dyna
 clamped says so in its result and in its log. See `docs/local-ci.md` in the
 dyna repository for the full rules.
@@ -468,7 +468,7 @@ unsupplied fields; removal preserves logs. Commands accept `--repo`; see help.
 ## Global and built-in hooks
 
 A hook has a scope. A repository hook belongs to one repository. A global hook
-belongs to the machine, has no repository, and runs even when no checkout is
+belongs to the node, has no repository, and runs even when no checkout is
 open. Global hooks need an absolute `--cwd`, and `--global` selects them:
 
 ```sh
@@ -481,7 +481,7 @@ A built-in hook is a global hook that the engine seeds from its own table, such
 as the hourly maintenance pass. Its name, event and action are fixed, so it
 cannot be removed and its command cannot change. The owner may change its
 interval, timeout and switch, and can reset it to the defaults. Settings →
-Hooks shows the built-ins and the hooks you added for the machine.
+Hooks shows the built-ins and the hooks you added for the node.
 
 Merge hooks alert on failure. On failure, inspect `list` and the exact log from the notice,
 fix the cause, then test before retrying. Tell the owner about hook changes.

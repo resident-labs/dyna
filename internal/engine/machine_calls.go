@@ -10,14 +10,14 @@ import (
 	"dyna-agent/internal/websvc"
 )
 
-// machineCalls are the machine writes that act for their caller. SaveMachine is
+// machineCalls are the machine writes that act for their caller. SaveNode is
 // here rather than in ownerCalls because a room root decides a machine's
 // operating settings, as the owner does.
-var machineCalls = []string{"SaveMachine"}
+var machineCalls = []string{"SaveNode"}
 
 // hostChecksCommand is the command that allows host checks on a machine, which
 // a refusal names so the owner can run it.
-const hostChecksCommand = "dyna machine edit <name> --allow-host-checks"
+const hostChecksCommand = "dyna node edit <name> --allow-host-checks"
 
 // protectMachineCalls lets the owner change any machine field and a room root
 // change its operating settings: host checks, the SSH connect timeout and the
@@ -36,7 +36,7 @@ func protectMachineCalls(calls map[string]websvc.Call) {
 		}
 	}
 	// This wrapper must be outermost, so the check sees mutationActor.
-	protectCalls(calls, machineCalls, "changing a machine", nil)
+	protectCalls(calls, machineCalls, "changing a node", nil)
 }
 
 // checkMachineWrite refuses a machine change that the actor may not make. A
@@ -53,12 +53,12 @@ func checkMachineWrite(actor authority.Actor, args []json.RawMessage) error {
 		if rootMayPatch(patch) {
 			return nil
 		}
-		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, node queue limits and named resources (for example %s)", hostChecksCommand)
+		return fmt.Errorf("SaveNode is owner only for a node's creation, name, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, node queue limits and named resources (for example %s)", hostChecksCommand)
 	}
-	return fmt.Errorf("SaveMachine is owner only; the owner allows host checks with %s", hostChecksCommand)
+	return fmt.Errorf("SaveNode is owner only; the owner allows host checks with %s", hostChecksCommand)
 }
 
-// machinePatchOf reads the patch of a SaveMachine call. It reports false when
+// machinePatchOf reads the patch of a SaveNode call. It reports false when
 // the call carries no readable patch.
 func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 	if len(args) != 2 {

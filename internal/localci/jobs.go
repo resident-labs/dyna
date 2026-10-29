@@ -84,7 +84,7 @@ type nodeSource struct {
 
 func (s nodeSource) Get(ctx context.Context, name string) (machines.Machine, error) {
 	if name != s.node.Name {
-		return machines.Machine{}, fmt.Errorf("machine %s: %w", name, os.ErrNotExist)
+		return machines.Machine{}, fmt.Errorf("node %s: %w", name, os.ErrNotExist)
 	}
 	return s.current(ctx)
 }

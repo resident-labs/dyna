@@ -12,7 +12,7 @@
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   let payload = $derived(machineLimitsEvent(post))
-  let reason = $derived(payload?.reason ?? 'this machine lacks the delegated cgroup controllers')
+  let reason = $derived(payload?.reason ?? 'this node lacks the delegated cgroup controllers')
 </script>
 
 {#snippet icon()}
@@ -23,7 +23,7 @@
 {/snippet}
 
 {#snippet body()}
-  <p class="text">{reason}. Every room on this machine shares one agent slice, and nothing caps a room's process count. Linux with systemd and the memory and pids controllers delegated to the user turns room limits on.</p>
+  <p class="text">{reason}. Every room on this node shares one agent slice, and nothing caps a room's process count. Linux with systemd and the memory and pids controllers delegated to the user turns room limits on.</p>
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
 {/snippet}
 

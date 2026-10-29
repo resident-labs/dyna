@@ -817,7 +817,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "root-if-needed",
     once: true,
     audience: "room",
-    text: "Machine {name} is low on disk: {block}. Dyna starts no new work there until space is freed.",
+    text: "Node {name} is low on disk: {block}. Dyna starts no new work there until space is freed.",
   },
   {
     family: "machine",
@@ -827,7 +827,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "never",
     once: true,
     audience: "room",
-    text: "Machine {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
+    text: "Node {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
   },
   {
     family: "machine",
@@ -837,7 +837,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "root-if-needed",
     once: true,
     audience: "room",
-    text: "Machine {name} could not clean CI cache path {path}: {reason}.",
+    text: "Node {name} could not clean CI cache path {path}: {reason}.",
   },
   {
     family: "machine",
@@ -847,7 +847,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "never",
     once: true,
     audience: "room",
-    text: "Machine {name} freed scratch space: {summary}.",
+    text: "Node {name} freed scratch space: {summary}.",
   },
   {
     family: "machine",

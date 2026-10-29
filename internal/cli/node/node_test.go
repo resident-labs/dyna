@@ -1,4 +1,4 @@
-package machine
+package node
 
 import (
 	"bytes"
@@ -61,12 +61,12 @@ func TestMachineListShowsRooms(t *testing.T) {
 	}
 	for _, want := range []string{"ROOMS", "pip@hermeslab", "dyna"} {
 		if !strings.Contains(out.String(), want) {
-			t.Errorf("machine list misses %q:\n%s", want, out.String())
+			t.Errorf("node list misses %q:\n%s", want, out.String())
 		}
 	}
 }
 
-// The ci label says a machine runs local CI checks: edit adds and removes
+// The ci label says a node runs local CI checks: edit adds and removes
 // labels, show lists them, and an invalid name is rejected.
 func TestMachineEditSetsLabels(t *testing.T) {
 	storetest.DataDir(t)
@@ -79,7 +79,7 @@ func TestMachineEditSetsLabels(t *testing.T) {
 	}
 	m, err := (machines.Store{}).Get(context.Background(), "build")
 	if err != nil || !m.HasLabel(machines.LabelCI) {
-		t.Fatalf("labeled machine = %#v, %v", m, err)
+		t.Fatalf("labeled node = %#v, %v", m, err)
 	}
 	if out, err := run(t, "show", "build"); err != nil || !strings.Contains(out, "Owner labels:  ci") {
 		t.Fatalf("show labels = %q, %v", out, err)
@@ -88,14 +88,14 @@ func TestMachineEditSetsLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m, err := (machines.Store{}).Get(context.Background(), "build"); err != nil || m.HasLabel(machines.LabelCI) {
-		t.Fatalf("unlabeled machine = %#v, %v", m, err)
+		t.Fatalf("unlabeled node = %#v, %v", m, err)
 	}
 	if _, err := run(t, "edit", "build", "--label", "not a label!"); err == nil {
 		t.Fatal("an invalid label was accepted")
 	}
 }
 
-// The owner sets a machine's ssh connect timeout with edit and reads it back
+// The owner sets a node's ssh connect timeout with edit and reads it back
 // with show; zero restores the default, and a value ssh cannot read is refused.
 func TestMachineEditSetsSSHConnectTimeout(t *testing.T) {
 	storetest.DataDir(t)
@@ -166,7 +166,7 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err == nil || !strings.Contains(err.Error(), "machine hermes exists; use dyna machine edit") {
+	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err == nil || !strings.Contains(err.Error(), "node hermes exists; use dyna node edit") {
 		t.Fatalf("second add = %v", err)
 	}
 	if _, err := run(t, "add", "bad", "--ssh", "user@host; id"); err == nil {
@@ -199,7 +199,7 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	if out, err := run(t, "show", "hermes"); err != nil || !strings.Contains(out, "Host checks: true") {
 		t.Fatalf("host-check setting = %q, %v", out, err)
 	}
-	// A machine that cannot run Docker names its own runtime socket, and a
+	// A node that cannot run Docker names its own runtime socket, and a
 	// value that is not a unix socket is refused before anything is saved.
 	if _, err := run(t, "edit", "hermes", "--container-socket", "tcp://127.0.0.1:2375"); err == nil || !strings.Contains(err.Error(), "must be a unix:// path") {
 		t.Fatalf("a tcp socket = %v", err)
@@ -215,30 +215,30 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	}
 	list = listed(t)
 	if local, _ := find(list, localName); local.MaxIOHeavy != 4 {
-		t.Fatalf("local machine = %#v", local)
+		t.Fatalf("local node = %#v", local)
 	}
 	if build, _ := find(list, "build"); build.SSH != "ari@build" {
-		t.Fatalf("edited machine = %#v", build)
+		t.Fatalf("edited node = %#v", build)
 	}
 	renamed, ok := find(list, "buildhost")
 	if !ok || renamed.ID != hermes.ID || renamed.Enabled {
-		t.Fatalf("renamed machine = %#v", renamed)
+		t.Fatalf("renamed node = %#v", renamed)
 	}
 	if _, err := run(t, "rm", "build"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := run(t, "rm", localName); err == nil {
-		t.Fatal("removed this machine")
+		t.Fatal("removed this node")
 	}
 	if _, ok := find(listed(t), "build"); ok {
-		t.Fatal("removed machine remains")
+		t.Fatal("removed node remains")
 	}
 	if _, err := (machines.Store{}).Get(ctx, "hermes"); err == nil {
 		t.Fatal("old name remains")
 	}
 }
 
-// localMachineName returns the name of this machine's row.
+// localMachineName returns the name of this node's row.
 func localMachineName(t *testing.T) string {
 	t.Helper()
 	local, err := (machines.Store{}).GetLocal(context.Background())
@@ -248,16 +248,16 @@ func localMachineName(t *testing.T) string {
 	return local.Name
 }
 
-// stubEngine sends a change through the engine's machine service in process,
+// stubEngine sends a change through the engine's node service in process,
 // as the engine does, so a test sees the rules the owner sees.
 func stubEngine(t *testing.T) {
 	t.Helper()
-	stubSaveMachine(t, func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
-		return (websvc.MachineAPI{Store: machines.Store{}}).SaveMachine(ctx, ref, patch)
+	stubSaveNode(t, func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
+		return (websvc.MachineAPI{Store: machines.Store{}}).SaveNode(ctx, ref, patch)
 	})
 }
 
-func stubSaveMachine(t *testing.T, save func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error)) {
+func stubSaveNode(t *testing.T, save func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error)) {
 	t.Helper()
 	previous := saveMachine
 	saveMachine = save
@@ -271,9 +271,9 @@ func TestMachineEditHostChecksDeniedByEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
+	stubSaveNode(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
 		called = true
-		return websvc.MachineDetail{}, errors.New("SaveMachine is owner only")
+		return websvc.MachineDetail{}, errors.New("SaveNode is owner only")
 	})
 	if _, err := run(t, "edit", "hermes", "--allow-host-checks"); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("session host-check edit = %v, want owner denial", err)
@@ -291,11 +291,11 @@ func TestMachineEditHostChecksDeniedByEngine(t *testing.T) {
 }
 
 // The command sends every change to the engine, the one writer of the
-// registry: a refused write leaves no machine behind and no field committed.
+// registry: a refused write leaves no node behind and no field committed.
 func TestMachineWriteGoesThroughTheEngine(t *testing.T) {
 	storetest.DataDir(t)
-	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
-		return websvc.MachineDetail{}, errors.New("SaveMachine is owner only")
+	stubSaveNode(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
+		return websvc.MachineDetail{}, errors.New("SaveNode is owner only")
 	})
 	if _, err := run(t, "add", "build", "--ssh", "ari@build"); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("refused add = %v, want the engine's refusal", err)
@@ -305,8 +305,8 @@ func TestMachineWriteGoesThroughTheEngine(t *testing.T) {
 	}
 }
 
-// A machine name can equal another machine's ID. An edit names the machine it
-// read by ID, so a collision cannot retarget the change to the other machine.
+// A node name can equal another node's ID. An edit names the node it
+// read by ID, so a collision cannot retarget the change to the other node.
 func TestMachineEditNamesTheMachineByID(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)
@@ -326,11 +326,11 @@ func TestMachineEditNamesTheMachineByID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A machine may take a name that is another machine's ID.
+	// A node may take a name that is another node's ID.
 	if _, err := run(t, "edit", "beta", "--rename", alpha.ID, "--max-io-heavy", "2"); err != nil {
 		t.Fatal(err)
 	}
-	// Naming that machine by its new name now edits it, not alpha.
+	// Naming that node by its new name now edits it, not alpha.
 	if _, err := run(t, "edit", alpha.ID, "--max-io-heavy", "5"); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestMachineEditNamesTheMachineByID(t *testing.T) {
 		t.Fatal(err)
 	}
 	if after.MaxIOHeavy != 1 {
-		t.Fatalf("alpha limit = %d, want 1: the edit retargeted the machine that owns its ID", after.MaxIOHeavy)
+		t.Fatalf("alpha limit = %d, want 1: the edit retargeted the node that owns its ID", after.MaxIOHeavy)
 	}
 	list := listed(t)
 	var renamed machines.Machine
@@ -349,31 +349,31 @@ func TestMachineEditNamesTheMachineByID(t *testing.T) {
 		}
 	}
 	if renamed.MaxIOHeavy != 5 {
-		t.Fatalf("renamed machine limit = %d, want 5", renamed.MaxIOHeavy)
+		t.Fatalf("renamed node limit = %d, want 5", renamed.MaxIOHeavy)
 	}
 }
 
-// Removing a machine goes through the engine too: a refused write leaves the
-// machine stored, and the CI alias's remove shares that path.
+// Removing a node goes through the engine too: a refused write leaves the
+// node stored, and the CI alias's remove shares that path.
 func TestMachineRemoveGoesThroughTheEngine(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)
 	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err != nil {
 		t.Fatal(err)
 	}
-	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
-		return websvc.MachineDetail{}, errors.New("SaveMachine is owner only")
+	stubSaveNode(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
+		return websvc.MachineDetail{}, errors.New("SaveNode is owner only")
 	})
 	if _, err := run(t, "rm", "hermes"); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("refused remove = %v, want the engine's refusal", err)
 	}
 	if _, err := (machines.Store{}).Get(context.Background(), "hermes"); err != nil {
-		t.Fatalf("a refused remove deleted the machine: %v", err)
+		t.Fatalf("a refused remove deleted the node: %v", err)
 	}
 }
 
-// A remove names the machine it read by ID: a name that equals another
-// machine's ID must not delete that other machine.
+// A remove names the node it read by ID: a name that equals another
+// node's ID must not delete that other node.
 func TestMachineRemoveNamesTheMachineByID(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)
@@ -390,14 +390,14 @@ func TestMachineRemoveNamesTheMachineByID(t *testing.T) {
 	if _, err := run(t, "edit", "beta", "--rename", alpha.ID); err != nil {
 		t.Fatal(err)
 	}
-	// Removing the machine named for alpha's ID removes the renamed machine.
+	// Removing the node named for alpha's ID removes the renamed node.
 	if _, err := run(t, "rm", alpha.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (machines.Store{}).Get(context.Background(), "alpha"); err != nil {
-		t.Fatalf("the remove deleted the machine that owns the name as its ID: %v", err)
+		t.Fatalf("the remove deleted the node that owns the name as its ID: %v", err)
 	}
 	if _, err := (machines.Store{}).Get(context.Background(), alpha.ID); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the renamed machine remains: %v", err)
+		t.Fatalf("the renamed node remains: %v", err)
 	}
 }

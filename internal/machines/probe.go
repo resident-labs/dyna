@@ -128,7 +128,7 @@ type Load struct {
 }
 
 // ErrDisabled marks a probe of a machine that is turned off.
-var ErrDisabled = errors.New("machine is disabled")
+var ErrDisabled = errors.New("node is disabled")
 
 // Probe limits and defaults.
 const (
@@ -229,7 +229,7 @@ func (p Prober) ProbeAll(ctx context.Context) error {
 // row, which carries the new health.
 func (p Prober) ProbeAndSave(ctx context.Context, m Machine) (Machine, error) {
 	if !m.Enabled {
-		return m, fmt.Errorf("machine %s: %w", m.Name, ErrDisabled)
+		return m, fmt.Errorf("node %s: %w", m.Name, ErrDisabled)
 	}
 	result := ProbeResult{At: p.now(), Health: HealthOnline}
 	var err error

@@ -54,7 +54,7 @@ var ownerCalls = []string{
 	"DismissNotice",
 	// A probe reads a machine over SSH and stores what it found; the owner
 	// starts it from the Machine page.
-	"ProbeMachine",
+	"ProbeNode",
 }
 
 // protectOwnerCalls shares caller resolution with other mutations, then

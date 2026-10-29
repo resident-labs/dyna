@@ -190,9 +190,9 @@ func (w CleanupWarning) Label() string {
 	case CleanupLeftoverOutput:
 		return "a process left by the check held its output open; the runner killed it"
 	case TransportDiedAfterCompletion:
-		return "the connection to the CI machine died after the check completed; its exit came from the machine's own record"
+		return "the connection to the CI node died after the check completed; its exit came from the node's own record"
 	case NodeCleanupUnfinished:
-		return "the cleanup on the CI machine did not finish after the run; a container or process the run started may still be there and may need removing by hand"
+		return "the cleanup on the CI node did not finish after the run; a container or process the run started may still be there and may need removing by hand"
 	}
 	return ""
 }

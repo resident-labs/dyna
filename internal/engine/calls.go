@@ -130,12 +130,12 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ApplyRunWorktreeDisposition", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: worktreesvc.ApplyRunDisposition, Local: true},
 		{Name: "Health", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.health},
 		{Name: "SystemLoad", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.systemLoad},
-		{Name: "Machines", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Machines},
-		{Name: "Machine", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Machine},
-		{Name: "MachineWork", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.MachineWork},
+		{Name: "Nodes", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Nodes},
+		{Name: "Node", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Node},
+		{Name: "NodeWork", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.NodeWork},
 		// Changing a machine's roles or route retargets the engine's work, so
 		// the write needs the admin scope, like other settings.
-		{Name: "SaveMachine", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.SaveMachine},
+		{Name: "SaveNode", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.SaveNode},
 		// A job runs the caller's own work on a node, detached, so submitting
 		// and cancelling are operate calls; reading jobs and logs is a read.
 		{Name: "RunJob", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.runJob},
@@ -146,7 +146,7 @@ func bindings(s services) []websvc.Binding {
 		// A probe reads the machine now and stores what it found. It writes
 		// only the probe fields, and it spends one SSH connection, so it needs
 		// the admin scope too.
-		{Name: "ProbeMachine", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.ProbeMachine},
+		{Name: "ProbeNode", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.ProbeNode},
 		{Name: "Rooms", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Rooms},
 		{Name: "FeedTail", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.FeedTail},
 		{Name: "FeedAfter", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.FeedAfter},

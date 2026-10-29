@@ -32,7 +32,7 @@ func TestMachineCIWorkAndRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list, err := api.Machines(t.Context())
+	list, err := api.Nodes(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestMachineCIWorkAndRuns(t *testing.T) {
 		t.Fatalf("hermes CI = %+v; want 2 running and 5 waiting", listed.CI)
 	}
 
-	detail, err := api.Machine(t.Context(), hermes.ID)
+	detail, err := api.Node(t.Context(), hermes.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestMachineCIWorkAndRuns(t *testing.T) {
 	// An engine that runs no local CI reports no work for any machine.
 	api.CI = nil
 	api.CIQueue = nil
-	quiet, err := api.Machine(t.Context(), hermes.ID)
+	quiet, err := api.Node(t.Context(), hermes.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   let payload = $derived(machineScratchEvent(post))
-  let name = $derived(payload?.name ?? 'A machine')
+  let name = $derived(payload?.name ?? 'A node')
   let chips = $derived(
     payload
       ? [
@@ -30,7 +30,7 @@
 {/snippet}
 
 {#snippet body()}
-  <p class="text">{freed} freed from Dyna's scratch folder. Folders idle for 7 days went first, then idle build outputs while the machine was low on disk.</p>
+  <p class="text">{freed} freed from Dyna's scratch folder. Folders idle for 7 days went first, then idle build outputs while the node was low on disk.</p>
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
 {/snippet}
 

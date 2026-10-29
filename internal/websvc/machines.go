@@ -267,8 +267,8 @@ type MachineAPI struct {
 	Alerter machines.Alerter
 }
 
-// Machines lists every machine, the engine host first.
-func (a MachineAPI) Machines(ctx context.Context) ([]MachineSummary, error) {
+// Nodes lists every node, the engine host first.
+func (a MachineAPI) Nodes(ctx context.Context) ([]MachineSummary, error) {
 	list, err := a.Store.List(ctx)
 	if err != nil {
 		return nil, err
@@ -281,8 +281,8 @@ func (a MachineAPI) Machines(ctx context.Context) ([]MachineSummary, error) {
 	return out, nil
 }
 
-// Machine reads one machine's page by its ID.
-func (a MachineAPI) Machine(ctx context.Context, id string) (MachineDetail, error) {
+// Node reads one node's page by its ID.
+func (a MachineAPI) Node(ctx context.Context, id string) (MachineDetail, error) {
 	m, err := a.find(ctx, id)
 	if err != nil {
 		return MachineDetail{}, err
@@ -290,8 +290,8 @@ func (a MachineAPI) Machine(ctx context.Context, id string) (MachineDetail, erro
 	return a.machine(ctx, m, a.ciRuns()), nil
 }
 
-// MachineWork reads the Work section of one machine's page by its ID.
-func (a MachineAPI) MachineWork(ctx context.Context, id string) (MachineWork, error) {
+// NodeWork reads the Work section of one node's page by its ID.
+func (a MachineAPI) NodeWork(ctx context.Context, id string) (MachineWork, error) {
 	m, err := a.find(ctx, id)
 	if err != nil {
 		return MachineWork{}, err
@@ -319,14 +319,14 @@ func (a MachineAPI) MachineWork(ctx context.Context, id string) (MachineWork, er
 	return MachineWork{Capacity: node.Capacity, Running: named(node.Running), Waiting: named(node.Waiting)}, nil
 }
 
-// SaveMachine applies one change to the machine that ref names, by ID or by
+// SaveNode applies one change to the machine that ref names, by ID or by
 // name, and answers with the page the machine has after it. It is the one
 // machine mutation path for the web and the CLI: it normalizes the result and
 // the store validates it before it writes.
-func (a MachineAPI) SaveMachine(ctx context.Context, ref string, patch MachinePatch) (MachineDetail, error) {
+func (a MachineAPI) SaveNode(ctx context.Context, ref string, patch MachinePatch) (MachineDetail, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return MachineDetail{}, errors.New("a machine reference is required")
+		return MachineDetail{}, errors.New("a node reference is required")
 	}
 	m, found, err := a.resolve(ctx, ref)
 	if err != nil {
@@ -334,7 +334,7 @@ func (a MachineAPI) SaveMachine(ctx context.Context, ref string, patch MachinePa
 	}
 	if patch.Remove {
 		if !found {
-			return MachineDetail{}, fmt.Errorf("machine %q: %w", ref, os.ErrNotExist)
+			return MachineDetail{}, fmt.Errorf("node %q: %w", ref, os.ErrNotExist)
 		}
 		removed := a.machine(ctx, m, a.ciRuns())
 		if err := a.Store.Remove(ctx, m.Name); err != nil {
@@ -343,11 +343,11 @@ func (a MachineAPI) SaveMachine(ctx context.Context, ref string, patch MachinePa
 		return removed, nil
 	}
 	if found && patch.Create {
-		return MachineDetail{}, fmt.Errorf("machine %s exists; use dyna machine edit", m.Name)
+		return MachineDetail{}, fmt.Errorf("node %s exists; use dyna node edit", m.Name)
 	}
 	if !found {
 		if !patch.Create {
-			return MachineDetail{}, fmt.Errorf("machine %q: %w", ref, os.ErrNotExist)
+			return MachineDetail{}, fmt.Errorf("node %q: %w", ref, os.ErrNotExist)
 		}
 		m = machines.Machine{Name: ref, Enabled: true}
 	}
@@ -457,16 +457,16 @@ func hostChecksGrants(current []machines.HostChecksGrant, actor authority.Actor,
 			return append(slices.Clone(current), mine), nil
 		}
 		if slices.Contains(current, machines.HostChecksGrant{By: machines.GrantorOwner}) {
-			return nil, errors.New("the owner allows host checks on this machine for every room: ask the owner to refuse them")
+			return nil, errors.New("the owner allows host checks on this node for every room: ask the owner to refuse them")
 		}
 		return slices.DeleteFunc(slices.Clone(current), func(grant machines.HostChecksGrant) bool { return grant == mine }), nil
 	}
-	return nil, errors.New("SaveMachine is owner only: the owner, or a room root for its own room, allows host checks")
+	return nil, errors.New("SaveNode is owner only: the owner, or a room root for its own room, allows host checks")
 }
 
-// ProbeMachine reads one machine now and answers with its page after the
+// ProbeNode reads one machine now and answers with its page after the
 // probe, so the owner sees the new health without a second read.
-func (a MachineAPI) ProbeMachine(ctx context.Context, id string) (MachineDetail, error) {
+func (a MachineAPI) ProbeNode(ctx context.Context, id string) (MachineDetail, error) {
 	m, err := a.find(ctx, id)
 	if err != nil {
 		return MachineDetail{}, err
@@ -494,7 +494,7 @@ func (a MachineAPI) find(ctx context.Context, id string) (machines.Machine, erro
 			return m, nil
 		}
 	}
-	return machines.Machine{}, fmt.Errorf("machine %q: %w", id, os.ErrNotExist)
+	return machines.Machine{}, fmt.Errorf("node %q: %w", id, os.ErrNotExist)
 }
 
 // machine builds one machine's page. The live figures belong to this engine's

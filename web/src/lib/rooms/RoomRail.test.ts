@@ -52,7 +52,7 @@ test('phone rows expose full room names and actions while the desktop keeps its 
     const phone = ui.mount(ui.default, { target, props: { ...props, narrow: true } })
     try {
       ui.flushSync()
-      assert.deepEqual([...document.querySelectorAll('.room-name')].map((node) => node.textContent), ['Machines', 'Infrastructure planning'])
+      assert.deepEqual([...document.querySelectorAll('.room-name')].map((node) => node.textContent), ['Nodes', 'Infrastructure planning'])
       assert.equal(document.querySelector('.badge')?.textContent, '99+')
       const actions = document.querySelector<HTMLButtonElement>('button[aria-label="Actions for Infrastructure planning"]')
       assert.ok(actions)

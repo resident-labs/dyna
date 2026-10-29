@@ -93,15 +93,15 @@ export interface Engine {
   DataDir(): Promise<string>
   Health(): Promise<Health>
   SystemLoad(): Promise<SystemLoad>
-  // Machines lists the registry; Machine reads one page; SaveMachine writes
-  // the fields of MachinePatch and answers with the machine's next state.
-  // ProbeMachine reads one machine now and answers with its page after it.
-  Machines(): Promise<MachineSummary[]>
-  Machine(id: string): Promise<MachineDetail>
-  // MachineWork reads the Work section of one machine's page.
-  MachineWork(id: string): Promise<MachineWork>
-  SaveMachine(id: string, patch: MachinePatch): Promise<MachineDetail>
-  ProbeMachine(id: string): Promise<MachineDetail>
+  // Nodes lists the registry; Node reads one page; SaveNode writes
+  // the fields of MachinePatch and answers with the node's next state.
+  // ProbeNode reads one node now and answers with its page after it.
+  Nodes(): Promise<MachineSummary[]>
+  Node(id: string): Promise<MachineDetail>
+  // NodeWork reads the Work section of one node's page.
+  NodeWork(id: string): Promise<MachineWork>
+  SaveNode(id: string, patch: MachinePatch): Promise<MachineDetail>
+  ProbeNode(id: string): Promise<MachineDetail>
   SyncStatus(): Promise<SyncStatus>
   SyncRefresh(roomId: string, repo: string): Promise<SyncStarted>
   GitExport(roomId: string, repo: string): Promise<SyncStarted>

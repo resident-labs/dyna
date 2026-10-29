@@ -376,7 +376,7 @@ func (m Machine) HasLabel(label string) bool {
 }
 
 // ErrLocal marks a change that would remove or unmake the engine host.
-var ErrLocal = errors.New("this machine runs the engine")
+var ErrLocal = errors.New("this node runs the engine")
 
 var nodeName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 var sshTarget = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*(@[a-zA-Z0-9][a-zA-Z0-9_.-]*)?$`)
@@ -385,7 +385,7 @@ var invalidName = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
 // ValidateName reports whether name can name a machine.
 func ValidateName(name string) error {
 	if !nodeName.MatchString(name) {
-		return errors.New("machine name must contain only letters, numbers, dots, underscores or hyphens, and start with a letter or number")
+		return errors.New("node name must contain only letters, numbers, dots, underscores or hyphens, and start with a letter or number")
 	}
 	return nil
 }
@@ -405,10 +405,10 @@ func (m Machine) Validate() error {
 		return err
 	}
 	if m.Local && m.SSH != "" {
-		return errors.New("this machine needs no SSH destination")
+		return errors.New("this node needs no SSH destination")
 	}
 	if !m.Local && m.SSH == "" {
-		return errors.New("a machine other than this one needs an SSH destination")
+		return errors.New("a node other than this one needs an SSH destination")
 	}
 	if m.SSH != "" {
 		if err := ValidateSSH(m.SSH); err != nil {
@@ -709,7 +709,7 @@ func prepare(conn *sql.Conn, old int) error {
 		// with no suite= labels remains unrestricted, exactly as an empty suite
 		// list was; a machine with them takes only the suites they name.
 		if err := importSuiteLabels(ctx, conn); err != nil {
-			return fmt.Errorf("import machine suite labels: %w", err)
+			return fmt.Errorf("import node suite labels: %w", err)
 		}
 		if _, err := conn.ExecContext(ctx, "ALTER TABLE machines DROP COLUMN suites"); err != nil {
 			return fmt.Errorf("drop machines.suites: %w", err)
@@ -1001,9 +1001,9 @@ func getOn(ctx context.Context, q querier, name string, local bool) (Machine, er
 	m, err := scan(q.QueryRowContext(ctx, `SELECT `+columns+` FROM machines WHERE `+where+`=?`, arg))
 	if errors.Is(err, sql.ErrNoRows) {
 		if local {
-			return Machine{}, fmt.Errorf("this machine is not in the registry: %w", os.ErrNotExist)
+			return Machine{}, fmt.Errorf("this node is not in the registry: %w", os.ErrNotExist)
 		}
-		return Machine{}, fmt.Errorf("machine %q: %w", name, os.ErrNotExist)
+		return Machine{}, fmt.Errorf("node %q: %w", name, os.ErrNotExist)
 	}
 	return m, err
 }
@@ -1012,7 +1012,7 @@ func getOn(ctx context.Context, q querier, name string, local bool) (Machine, er
 func getByID(ctx context.Context, q querier, id string) (Machine, error) {
 	m, err := scan(q.QueryRowContext(ctx, `SELECT `+columns+` FROM machines WHERE id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return Machine{}, fmt.Errorf("machine %s: %w", id, os.ErrNotExist)
+		return Machine{}, fmt.Errorf("node %s: %w", id, os.ErrNotExist)
 	}
 	return m, err
 }
@@ -1030,19 +1030,19 @@ func scan(row scanner) (Machine, error) {
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
 	if err := json.Unmarshal([]byte(resources), &m.Resources); err != nil {
-		return Machine{}, fmt.Errorf("machine %s resources: %w", m.Name, err)
+		return Machine{}, fmt.Errorf("node %s resources: %w", m.Name, err)
 	}
 	if len(m.Resources) == 0 {
 		m.Resources = nil
 	}
 	if err := json.Unmarshal([]byte(grants), &m.HostChecksGrants); err != nil {
-		return Machine{}, fmt.Errorf("machine %s host-check grants: %w", m.Name, err)
+		return Machine{}, fmt.Errorf("node %s host-check grants: %w", m.Name, err)
 	}
 	if len(m.HostChecksGrants) == 0 {
 		m.HostChecksGrants = nil
 	}
 	if err := json.Unmarshal([]byte(rooms), &m.Rooms); err != nil {
-		return Machine{}, fmt.Errorf("machine %s rooms: %w", m.Name, err)
+		return Machine{}, fmt.Errorf("node %s rooms: %w", m.Name, err)
 	}
 	// A machine that names no room reads back with no list, so every stored row
 	// has one meaning of "every room".
@@ -1050,17 +1050,17 @@ func scan(row scanner) (Machine, error) {
 		m.Rooms = nil
 	}
 	if err := json.Unmarshal([]byte(labels), &m.Labels); err != nil {
-		return Machine{}, fmt.Errorf("machine %s labels: %w", m.Name, err)
+		return Machine{}, fmt.Errorf("node %s labels: %w", m.Name, err)
 	}
 	// A machine that names no label reads back with no list, as rooms do.
 	if len(m.Labels) == 0 {
 		m.Labels = nil
 	}
 	if err := json.Unmarshal([]byte(capabilities), &m.Capabilities); err != nil {
-		return Machine{}, fmt.Errorf("machine %s capabilities: %w", m.Name, err)
+		return Machine{}, fmt.Errorf("node %s capabilities: %w", m.Name, err)
 	}
 	if err := json.Unmarshal([]byte(load), &m.Load); err != nil {
-		return Machine{}, fmt.Errorf("machine %s load: %w", m.Name, err)
+		return Machine{}, fmt.Errorf("node %s load: %w", m.Name, err)
 	}
 	m.Health, m.ProbeError = parseHealth(health), probeError
 	m.Created = time.UnixMilli(created)
@@ -1204,7 +1204,7 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
 		if err == nil && extant.ID != m.ID {
-			return fmt.Errorf("machine %q exists: %w", m.Name, os.ErrExist)
+			return fmt.Errorf("node %q exists: %w", m.Name, os.ErrExist)
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -1307,7 +1307,7 @@ func (s Store) Remove(ctx context.Context, name string) error {
 			return err
 		}
 		if m.Local {
-			return fmt.Errorf("machine %q: %w", name, ErrLocal)
+			return fmt.Errorf("node %q: %w", name, ErrLocal)
 		}
 		_, err = conn.ExecContext(ctx, `DELETE FROM machines WHERE id=?`, m.ID)
 		return err

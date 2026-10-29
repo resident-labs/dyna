@@ -80,7 +80,7 @@
 <aside class="side">
   {#if machinesOpen}
     <header class="head">
-      <h1>Machines</h1>
+      <h1>Nodes</h1>
       <p class="sub">{machinesSub(machines)}</p>
     </header>
     <div class="scroll">
@@ -89,7 +89,7 @@
           <MachineRow machine={m} selected={machineId === m.id} onopen={() => onmachine?.(m.id)} />
         </div>
       {:else}
-        <p class="empty">{machines ? 'No machines yet.' : 'Loading machines…'}</p>
+        <p class="empty">{machines ? 'No nodes yet.' : 'Loading nodes…'}</p>
       {/each}
     </div>
   {:else if room}
