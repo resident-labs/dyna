@@ -524,6 +524,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	out := Result{Message: msg, Skipped: res.skipped}
 	if in.Sender.Kind == SenderSession && turn > 0 {
 		if _, err := s.sessionStore().UpdateTurn(in.Sender.Session.ID, turn, func(t *subagent.Turn) {
 			for _, addr := range res.addrs() {
@@ -532,10 +533,11 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 				}
 			}
 		}); err != nil {
-			return Result{Message: msg}, err
+			// The post is stored. A turn record that is not written is a
+			// failed step, so the recipients still get the post.
+			out.Deliveries = append(out.Deliveries, Delivery{To: res.from, Delivery: "failed", Error: "the post was sent, but this turn did not record it: " + err.Error()})
 		}
 	}
-	out := Result{Message: msg, Skipped: res.skipped}
 	if crossRoom {
 		// The sender's chat shows the post at once. The copy shares the post's
 		// ID, so a reply to the post answers it in the sender's room too. It
