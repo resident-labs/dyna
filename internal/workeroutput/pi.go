@@ -129,6 +129,7 @@ func decodePi(line []byte) Record {
 			r.Events = piEvents(p.Message.Content)
 			r.recordUsage.Usage = p.Message.Usage
 			r.ContextTokens = usageSum(p.Message.Usage, "input", "cacheRead", "cacheWrite")
+			r.Call = callUsage(p.Message.Usage)
 		}
 	case "message_update":
 		// Final message_end is authoritative. Do not duplicate its text or usage.

@@ -81,6 +81,7 @@ type Turn struct {
 	Started            time.Time                       `json:"started"`
 	Ended              time.Time                       `json:"ended"`
 	Usage              workeroutput.Usage              `json:"usage"`
+	FirstCall          *workeroutput.CallUsage         `json:"firstCall,omitempty"`
 	Items              []Item                          `json:"items"`
 	Omitted            bool                            `json:"omitted,omitempty"`
 	Wake               *wakeView                       `json:"wake,omitempty"`
@@ -324,7 +325,7 @@ func (s *Service) sessionView(sess transcript.Session) (Session, error) {
 				claimed[it.Tool.JobID] = true
 			}
 		}
-		turn := Turn{WrapUp: t.WrapUp, Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, Omitted: t.Omitted, Wake: wakeViewOf(t.Wake)}
+		turn := Turn{WrapUp: t.WrapUp, Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, FirstCall: t.FirstCall, Omitted: t.Omitted, Wake: wakeViewOf(t.Wake)}
 		for _, it := range items {
 			item := sessionItem(it)
 			if in, ok := byID[item.JobID]; ok && item.JobOp == "run" {
