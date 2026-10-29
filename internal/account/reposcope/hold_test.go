@@ -67,6 +67,39 @@ func TestHoldKeepsTheLevelOfTheLaterEnd(t *testing.T) {
 	}
 }
 
+// A successful probe or refresh clears a no-timer hold, but never a timed one.
+func TestClearOpenEndedKeepsTimedHolds(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	now := time.Unix(1_700_000_000, 0)
+	if err := s.Hold("timed", Hold{Until: now.Add(time.Hour), Level: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Hold("open", Hold{Until: OpenEnded}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Hold("stated", Hold{Until: now.Add(2 * time.Hour), Stated: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"timed", "open", "stated"} {
+		if err := s.ClearOpenEnded(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _ := s.LimitOf("open"); !got.Until.IsZero() {
+		t.Fatalf("open hold after ClearOpenEnded = %+v, want cleared", got)
+	}
+	for _, id := range []string{"timed", "stated"} {
+		if got, _ := s.LimitOf(id); got.Until.IsZero() {
+			t.Fatalf("%s hold after ClearOpenEnded = %+v, want kept", id, got)
+		}
+	}
+}
+
 // Two failures that both compute the same next hold leave one level step, not two.
 func TestHoldIsIdempotentForConcurrentFailures(t *testing.T) {
 	dir := t.TempDir()
