@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	accountstore "dyna-agent/internal/account/store"
 )
@@ -18,6 +20,10 @@ import (
 // of each provider it signs into, and every provider gets its own account with a
 // home that holds only its entry.
 const piProviderSignInID = "pi:provider"
+
+// signInScratchPrefix names a provider sign-in's scratch folder under the
+// Pi harness directory.
+const signInScratchPrefix = ".signin-"
 
 // beginPiProviderSignIn runs Pi's provider login in a scratch home, then adds
 // the signed-in providers as accounts. target names the saved account whose
@@ -66,6 +72,7 @@ func (a *Runtime) piProviderFlow(exe, target string, provider accountstore.Provi
 	if err != nil {
 		return nil, err
 	}
+	sweepStaleSignInScratch(dir)
 	id := make([]byte, 8)
 	if _, err = rand.Read(id); err != nil {
 		return nil, err
@@ -123,6 +130,30 @@ func (a *Runtime) piProviderFlow(exe, target string, provider accountstore.Provi
 			return nil
 		},
 	}, nil
+}
+
+// sweepStaleSignInScratch removes provider sign-in folders older than the
+// sign-in timeout. A flow outlives its login child, so only its owner's
+// settle or this sweep removes its folder; a live flow never runs past the
+// timeout, so the sweep takes only folders nothing can finish anymore.
+func sweepStaleSignInScratch(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-signInTimeout)
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, signInScratchPrefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.IsDir() || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(dir, name))
+		_ = os.RemoveAll(filepath.Join(dir, name) + ".home")
+	}
 }
 
 // addPiSignIn stores each provider a finished sign-in saved in scratch in that

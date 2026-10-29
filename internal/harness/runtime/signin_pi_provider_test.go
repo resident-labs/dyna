@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/account/store"
 )
@@ -111,6 +112,10 @@ func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 	if login == nil || login.flow == nil {
 		t.Fatal("the sign-in flow is not running")
 	}
+	// The fake helper exits at once, so the card settles before this test
+	// writes the sign-in it saved. Waiting makes that order certain: the flow
+	// must stay open, with its folder, until its owner finishes it.
+	<-login.signIn.done
 	body := `{"kimi-code":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
 	if err = os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
@@ -154,6 +159,10 @@ func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
 	if login == nil || login.flow == nil {
 		t.Fatal("the sign-in flow is not running")
 	}
+	// The fake helper exits at once, so the card settles before this test
+	// writes the sign-in it saved. Waiting makes that order certain: the flow
+	// must stay open, with its folder, until its owner finishes it.
+	<-login.signIn.done
 	body := `{"openai":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
 	if err := os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
@@ -192,6 +201,10 @@ func TestPiSignInAgainRefusesARemovedTarget(t *testing.T) {
 	if login == nil || login.flow == nil {
 		t.Fatal("the sign-in flow is not running")
 	}
+	// The fake helper exits at once, so the card settles before this test
+	// writes the sign-in it saved. Waiting makes that order certain: the flow
+	// must stay open, with its folder, until its owner finishes it.
+	<-login.signIn.done
 	body := `{"openai":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
 	if err := os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
@@ -205,6 +218,76 @@ func TestPiSignInAgainRefusesARemovedTarget(t *testing.T) {
 	got, err := r.Accounts.Find(other.ID)
 	if err != nil || !got.Active {
 		t.Fatalf("the other provider's selection moved: %+v %v", got, err)
+	}
+}
+
+// A sign-in flow outlives its login child, so a child that exits without
+// finishing leaves the flow open with its folder, and the next sign-in for
+// the same card settles the flow it replaces instead of abandoning it.
+func TestPiProviderFlowStaysOpenUntilSettled(t *testing.T) {
+	r := providerKeysRuntime(t)
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.9")
+	target := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep-a"}`)
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, target.ID, store.ProviderKimiCode); err != nil {
+		t.Fatal(err)
+	}
+	login := r.findPrivateLogin(piProviderSignInID)
+	if login == nil || login.flow == nil {
+		t.Fatal("the sign-in flow is not running")
+	}
+	<-login.signIn.done
+	cwd := login.flow.Cwd
+	if _, err := os.Stat(cwd); err != nil {
+		t.Fatalf("the flow lost its folder when its child exited: %v", err)
+	}
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, target.ID, store.ProviderKimiCode); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(cwd); !os.IsNotExist(err) {
+		t.Fatalf("the replaced flow kept its folder: %v", err)
+	}
+	if next := r.findPrivateLogin(piProviderSignInID); next == login {
+		t.Fatal("the second sign-in joined the dead flow")
+	}
+	if err := r.CancelPrivateRuntimeLogin(piProviderSignInID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A provider sign-in start sweeps scratch folders older than the sign-in
+// timeout, so a crashed engine cannot leak them, while a folder a live flow
+// could still own is never taken.
+func TestPiProviderFlowSweepsStaleScratchFolders(t *testing.T) {
+	r := providerKeysRuntime(t)
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.9")
+	dir, err := r.Accounts.harnessDirectory("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, signInScratchPrefix+"stale")
+	fresh := filepath.Join(dir, signInScratchPrefix+"fresh")
+	for _, path := range []string{stale, fresh} {
+		if err = os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-2 * signInTimeout)
+	if err = os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	flow, err := r.piProviderFlow(bundle.Executable, "", store.ProviderKimiCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = flow.Cancel() })
+	if _, err = os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("the stale scratch stayed: %v", err)
+	}
+	if _, err = os.Stat(fresh); err != nil {
+		t.Fatalf("a young scratch folder was swept: %v", err)
+	}
+	if _, err = os.Stat(flow.Cwd); err != nil {
+		t.Fatalf("the new flow lost its folder to its own sweep: %v", err)
 	}
 }
 
