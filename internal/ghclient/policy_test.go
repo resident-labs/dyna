@@ -281,3 +281,31 @@ func TestMatchesUpstreamAdmitsEveryRecordedParent(t *testing.T) {
 		t.Fatal("an unrecorded repository was admitted as an upstream")
 	}
 }
+
+func TestExtraRepoForkParentAllowsPRCreateOnItsParent(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	sidecar := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", sidecar}, {"-C", sidecar, "remote", "add", "origin", "https://github.com/fork/sidecar.git"}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git: %v: %s", err, out)
+		}
+	}
+	if err := room.DefaultStore().AddRepo(records[0].ID, sidecar, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	previous := parentRepo
+	parentRepo = func(ctx context.Context, cmd *exec.Cmd, r repository) (string, bool) {
+		if r == (repository{"github.com", "fork/sidecar"}) {
+			return "upstream/sidecar", true
+		}
+		return "", false
+	}
+	t.Cleanup(func() { parentRepo = previous })
+	ctx := WithRoom(context.Background(), records[0].ID)
+	if err := checkPolicy(ctx, sidecar, repository{"github.com", "upstream/sidecar"}, []string{"pr", "create", "--repo", "upstream/sidecar"}); err != nil {
+		t.Fatalf("pr create on an extra fork's parent: %v", err)
+	}
+}
