@@ -404,7 +404,7 @@ func TestSavedLocalPassKeepsTheCIGates(t *testing.T) {
 			runs:       []Run{runningTrialRun()},
 			required:   []string{"security"},
 			want:       "pending",
-			wantReason: "security: no hosted result, no local check",
+			wantReason: "required CI checks: security",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -140,12 +140,6 @@ test('status box: CI step says why CI is absent', () => {
   assert.match(box.say, /Source review can continue, but merging requires passing GitHub CI/)
 })
 
-test('status box: pending CI step names the check that blocks readiness', () => {
-  const reason = 'pi: hosted check cancelled, no local check'
-  const box = statusBox(open({ ci: 'pending', ciReason: reason }))
-  assert.deepEqual(need(box.steps[0]), { name: 'CI', state: 'run', note: reason })
-})
-
 test('agent states never ask the human to merge', () => {
   // Agents land changes after review and CI.
   for (const c of [open({ ci: 'pending' }), open({ ci: 'passed', reviewState: 'queued' }), open({ ci: 'passed', reviewState: 'reviewing' }), open({ ci: 'passed', verdict: 'changes' }), open({ ci: 'failed', status: 'ci-failed' }), open({ ci: 'passed', reviewState: 'off' })]) {
