@@ -217,6 +217,39 @@ func TestCancelStopsTheJob(t *testing.T) {
 	}
 }
 
+// A job that never writes output still reaches its idle deadline: the node
+// creates the log at launch, so quiet time counts from launch, not from a
+// first write that may never come.
+func TestIdleTimeoutStopsSilentJob(t *testing.T) {
+	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, _, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			return nil
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	defer svc.Stop()
+	idle := 5 * time.Second
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := <-reporter.finished
+	if finished.ID != job.ID || finished.State != StateTimedOut || finished.Note != "no output for 5s" {
+		t.Fatalf("finished = %+v, want the silent job's idle timeout", finished)
+	}
+	if fake.StopCount() != 1 {
+		t.Fatalf("stop calls = %d, want 1", fake.StopCount())
+	}
+	stored, err := svc.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if log, err := os.ReadFile(stored.LogPath); err != nil || len(log) != 0 {
+		t.Fatalf("log = %d bytes, %v; want empty", len(log), err)
+	}
+}
+
 // A running job whose log stays unchanged for its idle duration is stopped
 // and ends through the one usual finished event.
 func TestIdleTimeoutStopsTheJob(t *testing.T) {
