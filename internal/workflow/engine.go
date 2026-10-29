@@ -87,6 +87,9 @@ type Options struct {
 	// ResumeFrom is the prior run id when this execution is a --resume.
 	// Recorded on plan.json as resumedFrom; it does not change cache keys.
 	ResumeFrom string
+	// JobNamespace is the stable identity shared by every run in a resume
+	// chain. The workflow service sets it for durable job idempotency keys.
+	JobNamespace string
 }
 
 type outcome struct {
@@ -112,6 +115,7 @@ type sharedState struct {
 	scratchWarning    sync.Once
 	agentSeq          int
 	execSeq           int // run() and job() steps; counted apart from agents and their cap
+	jobNamespace      string
 	workflowSeq       int
 	profSems          map[string]chan struct{}
 	profCalls         map[string]int
@@ -139,16 +143,23 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 	}
 	var worktreeWarning string
 	if shared == nil {
+		jobNamespace := o.JobNamespace
+		if jobNamespace == "" {
+			jobNamespace = parentRunID(o.Run)
+		}
+		if jobNamespace == "" {
+			jobNamespace = runstore.NewID()
+		}
 		worktreeRetention, warning, err := resolveWorktreeRetention(o.WorktreeRetention)
 		if err != nil {
 			return "", err
 		}
 		worktreeWarning = warning
 		shared = &sharedState{
-			scratchID: runstore.NewID(),
-			sem:       make(chan struct{}, maxConc),
-			cmdSem:    newCommandLimit(o.MaxCommands),
-			profSems:  map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
+			scratchID: runstore.NewID(), jobNamespace: jobNamespace,
+			sem:      make(chan struct{}, maxConc),
+			cmdSem:   newCommandLimit(o.MaxCommands),
+			profSems: map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
 		}
 	}
 	if warning := resumeNondeterminismWarning(o.ScriptSrc); warning != "" && o.OnWarning != nil {
