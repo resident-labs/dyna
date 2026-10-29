@@ -3,6 +3,7 @@ package worktrees
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -18,8 +19,11 @@ func seedPortRecords(t *testing.T, db *sql.DB, first, count int) {
 	if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		for i := first; i < first+count; i++ {
 			path := fmt.Sprintf("/capacity/%04d", i)
-			body := fmt.Sprintf("{\"port\":%d}", portMin+i*blockSize)
-			if _, err := conn.ExecContext(ctx, "INSERT INTO worktree_records(path,run_id,body) VALUES(?,'',?)", path, body); err != nil {
+			body, err := json.Marshal(Record{Path: path, Port: portMin + i*blockSize})
+			if err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO worktree_records(path,run_id,body) VALUES(?,'',?)", path, string(body)); err != nil {
 				return err
 			}
 		}
@@ -85,7 +89,7 @@ func TestObservePortCapacityTracksEveryCrossing(t *testing.T) {
 	// ends without waiting for the next allocation, and the next crossing
 	// starts a new generation.
 	for i := portSlots*19/20 - 1; i >= portSlots*9/10-1; i-- {
-		if err := MarkRemoved(fmt.Sprintf("/capacity/%04d", i)); err != nil {
+		if err := MarkRemoved(Record{Path: fmt.Sprintf("/capacity/%04d", i), Port: portMin + i*blockSize}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,7 +115,7 @@ func TestObservePortCapacityKeepsUndeliveredCrossings(t *testing.T) {
 	seedPortRecords(t, db, 0, portSlots*9/10)
 	assertPending(t, observePortCapacity(t), wantAlert{90, 1})
 	for i := 0; i < portSlots/20; i++ {
-		if err := MarkRemoved(fmt.Sprintf("/capacity/%04d", i)); err != nil {
+		if err := MarkRemoved(Record{Path: fmt.Sprintf("/capacity/%04d", i), Port: portMin + i*blockSize}); err != nil {
 			t.Fatal(err)
 		}
 	}

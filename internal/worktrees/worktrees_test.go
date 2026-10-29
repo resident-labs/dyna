@@ -54,7 +54,7 @@ func TestRegistryRoundTripAndPathGate(t *testing.T) {
 	if err != nil || len(forRun) != 1 || forRun[0].Path != wt {
 		t.Fatalf("ForRun() = %#v, %v", forRun, err)
 	}
-	if err := MarkRemoved(wt); err != nil {
+	if err := MarkRemoved(rec); err != nil {
 		t.Fatal(err)
 	}
 	if list, err := List(); err != nil || len(list) != 0 {
