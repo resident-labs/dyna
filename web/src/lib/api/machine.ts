@@ -161,14 +161,35 @@ export interface MachinePatch {
 // dyna job run, or one local CI check.
 export type MachineWorkKind = 'job' | 'check'
 
+// MachineCheckKind is jobs.CheckKind: the work a check's run tests. A local
+// branch change and an integration sync have no pull request number, so the
+// source words the kind instead of a number.
+export type MachineCheckKind = 'pull-request' | 'local-change' | 'sync'
+
+// MachineCheckSource is jobs.CheckSource: what one check's run tests, so the
+// Work card words the check instead of reading its admission ID. kind says
+// what it tests, number names a pull request, trial marks a merge trial, and
+// branch names a local change's branch. head is the short commit.
+export interface MachineCheckSource {
+  kind: MachineCheckKind
+  number: number
+  trial: boolean
+  branch?: string
+  head?: string
+}
+
 // MachineWorkItem is one unit of work on a machine, running or waiting.
 // Source: WorkItem in internal/jobs/work.go and MachineWorkItem in
 // internal/websvc/machines.go.
 export interface MachineWorkItem {
   kind: MachineWorkKind
   id: string
-  // label is a job's command or a check's ID.
+  // label is a job's command or a check's name; a check whose row kept no
+  // name holds its ID.
   label: string
+  // source says what a check's run tests. Absent for jobs, and for check
+  // rows that carry no source.
+  source?: MachineCheckSource
   room?: string
   roomName?: string
   session?: string

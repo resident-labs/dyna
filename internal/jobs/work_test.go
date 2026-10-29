@@ -76,6 +76,49 @@ func TestWorkReadsCapacityRunningAndWaiting(t *testing.T) {
 	}
 }
 
+// A check row words its work: its check name and what its run tests, so a
+// queue view never reads an admission ID. A row that predates names keeps
+// its ID and no source.
+func TestWorkNamesChecksByCheckNameAndSource(t *testing.T) {
+	ctx := context.Background()
+	queue := Admission{DataDir: t.TempDir(), Engine: true}
+	node := machines.Machine{Name: "node", Enabled: true}
+	rows := []struct {
+		demand   Demand
+		admitted bool
+	}{
+		{demand: Demand{ID: "e95ecf25-run-1-frontend", Node: "node", Room: "r1", CPUs: 1, Check: "frontend-check", Source: CheckSource{Kind: CheckKindPullRequest, Number: 924, Head: "e95ecf2"}}, admitted: true},
+		{demand: Demand{ID: "d5c344a2-run-2-shard", Node: "node", Room: "r1", CPUs: 1, Check: "go-test-shard-1", Source: CheckSource{Kind: CheckKindPullRequest, Number: 924, Trial: true, Head: "d5c344a"}}, admitted: false},
+		{demand: Demand{ID: "run-3-legacy", Node: "node", Room: "r1", CPUs: 1}, admitted: false},
+	}
+	for _, row := range rows {
+		if err := queue.upsert(ctx, row.demand, row.admitted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	work, err := queue.Work(ctx, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(work.Running) != 1 {
+		t.Fatalf("running = %+v, want the admitted check", work.Running)
+	}
+	check := work.Running[0]
+	if check.Label != "frontend-check" || check.Source == nil || check.Source.Kind != CheckKindPullRequest || check.Source.Number != 924 || check.Source.Head != "e95ecf2" {
+		t.Fatalf("running check = %+v, want frontend-check of PR 924 at e95ecf2", check)
+	}
+	if len(work.Waiting) != 2 {
+		t.Fatalf("waiting = %+v, want the trial check then the legacy row", work.Waiting)
+	}
+	trial, legacy := work.Waiting[0], work.Waiting[1]
+	if trial.Label != "go-test-shard-1" || trial.Source == nil || !trial.Source.Trial {
+		t.Fatalf("first waiter = %+v, want go-test-shard-1 of a merge trial", trial)
+	}
+	if legacy.Label != "run-3-legacy" || legacy.Source != nil {
+		t.Fatalf("second waiter = %+v, want the bare ID and no source", legacy)
+	}
+}
+
 // A read must not publish. An open machine page rereads on every admission
 // event, so a read that wrote one would keep the page and the database busy.
 func TestWorkReadPublishesOnlyWhenItSweepsARow(t *testing.T) {

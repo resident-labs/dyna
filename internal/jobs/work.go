@@ -9,6 +9,36 @@ import (
 	"dyna-agent/internal/machines"
 )
 
+// CheckKind says what a local CI run tests. The values match the machine
+// view's run kinds, so one wording names a run and each of its checks.
+type CheckKind string
+
+// Check kinds.
+const (
+	// CheckKindPullRequest tests a pull request head.
+	CheckKindPullRequest CheckKind = "pull-request"
+	// CheckKindLocalChange tests a change on a local branch, which has no
+	// pull request number.
+	CheckKindLocalChange CheckKind = "local-change"
+	// CheckKindSync tests the integration branch after a merge.
+	CheckKindSync CheckKind = "sync"
+)
+
+// CheckSource says what one local CI check's run tests, so a queue view words
+// the check instead of reading its admission ID.
+type CheckSource struct {
+	// Kind is the work the run tests.
+	Kind CheckKind `json:"kind"`
+	// Number is the pull request the run checks; zero when it checks none.
+	Number int `json:"number"`
+	// Trial marks a merge trial, which checks a merge of several heads.
+	Trial bool `json:"trial"`
+	// Branch names the branch of a local change, which has no number.
+	Branch string `json:"branch,omitempty"`
+	// Head is the short commit the run checks.
+	Head string `json:"head,omitempty"`
+}
+
 // WorkKind says what holds or awaits a place on a node.
 type WorkKind string
 
@@ -24,8 +54,12 @@ const (
 type WorkItem struct {
 	Kind WorkKind `json:"kind"`
 	ID   string   `json:"id"`
-	// Label is a job's command or a check's ID.
+	// Label is a job's command or a check's name. A check whose row kept no
+	// name holds its ID, so a row that predates names still reads.
 	Label string `json:"label"`
+	// Source says what a check's run tests, with the short commit it checks.
+	// Nil for a job, and for a check row that carries no source.
+	Source *CheckSource `json:"source,omitempty"`
 	// Room is the room ID. Session is the submitting session of a job; a check
 	// has none.
 	Room    string `json:"room,omitempty"`
@@ -110,12 +144,23 @@ func (a Admission) Work(ctx context.Context, m machines.Machine) (NodeWork, erro
 	}}
 	reasons := map[string]string{}
 	units := map[string]WorkItem{}
+	checkItem := func(row admissionRow) WorkItem {
+		label := row.Check
+		if label == "" {
+			label = row.ID
+		}
+		item := WorkItem{Kind: WorkCheck, ID: row.ID, Label: label, Room: row.Room, CPUs: row.CPUs, MemoryMiB: row.MemoryMiB, Heavy: row.Heavy, Since: row.Created}
+		if row.Source.Kind != "" {
+			item.Source = &row.Source
+		}
+		return item
+	}
 	for _, row := range q.heldRows {
-		work.Running = append(work.Running, WorkItem{Kind: WorkCheck, ID: row.ID, Label: row.ID, Room: row.Room, CPUs: row.CPUs, MemoryMiB: row.MemoryMiB, Heavy: row.Heavy, Since: row.Created})
+		work.Running = append(work.Running, checkItem(row))
 	}
 	for _, row := range q.waitingRows {
 		reasons[row.ID] = row.Reason
-		units[row.ID] = WorkItem{Kind: WorkCheck, ID: row.ID, Label: row.ID, Room: row.Room, CPUs: row.CPUs, MemoryMiB: row.MemoryMiB, Heavy: row.Heavy, Since: row.Created}
+		units[row.ID] = checkItem(row)
 	}
 	for _, job := range q.running {
 		item := jobWorkItem(job, m)
