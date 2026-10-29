@@ -443,22 +443,36 @@ func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 	case p.kick <- struct{}{}:
 	default:
 	}
-	select {
-	case err := <-w.done:
-		var idle *idleTimeoutError
-		if errors.As(err, &idle) {
-			_ = p.x.StopDetached(ctx, spec)
-			p.drainIdle(ctx, w)
+	for {
+		select {
+		case err := <-w.done:
+			var idle *idleTimeoutError
+			if errors.As(err, &idle) {
+				if stopErr := p.x.StopDetached(ctx, spec); stopErr != nil {
+					// The unit may still run, so the job cannot end. Reactivate the
+					// watch and let the next existing node poll retry the stop.
+					p.mu.Lock()
+					w.closed = false
+					p.active[spec.Dir] = w
+					p.mu.Unlock()
+					select {
+					case p.kick <- struct{}{}:
+					default:
+					}
+					continue
+				}
+				p.drainIdle(ctx, w)
+			}
+			return err
+		case <-ctx.Done():
+			p.release(w)
+			// An engine stop leaves the check running for the restarted engine.
+			if !EngineStopping() {
+				p.drain(ctx, w)
+				_ = p.x.StopDetached(ctx, spec)
+			}
+			return ctx.Err()
 		}
-		return err
-	case <-ctx.Done():
-		p.release(w)
-		// An engine stop leaves the check running for the restarted engine.
-		if !EngineStopping() {
-			p.drain(ctx, w)
-			_ = p.x.StopDetached(ctx, spec)
-		}
-		return ctx.Err()
 	}
 }
 

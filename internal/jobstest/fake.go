@@ -39,13 +39,14 @@ type Fake struct {
 	legacy RunFunc
 	proto  Protocol
 
-	mu      sync.Mutex
-	procs   map[string]*fakeProc
-	folders map[string]bool
-	starts  []Start
-	polls   int
-	stops   int
-	now     time.Time
+	mu           sync.Mutex
+	procs        map[string]*fakeProc
+	folders      map[string]bool
+	starts       []Start
+	polls        int
+	stops        int
+	stopFailures int
+	now          time.Time
 	// Down makes every call fail like a dropped connection while it returns
 	// true.
 	Down func() bool
@@ -124,6 +125,16 @@ func (m *Fake) command(ctx context.Context, dir string, in io.Reader, out, stder
 	case m.proto.Poll:
 		return m.poll(out, positional)
 	case m.proto.Stop:
+		m.mu.Lock()
+		m.stops++
+		fail := m.stopFailures > 0
+		if fail {
+			m.stopFailures--
+		}
+		m.mu.Unlock()
+		if fail {
+			return errors.New("fake stop failure")
+		}
 		m.stop(positional[0])
 		return nil
 	}
@@ -217,6 +228,13 @@ func (m *Fake) Vanish(dir string) {
 	}
 }
 
+// FailStops makes the next count stop calls fail without stopping the unit.
+func (m *Fake) FailStops(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopFailures = count
+}
+
 // StopCount is how many stops the machine received.
 func (m *Fake) StopCount() int {
 	m.mu.Lock()
@@ -226,7 +244,6 @@ func (m *Fake) StopCount() int {
 
 func (m *Fake) stop(dir string) {
 	m.mu.Lock()
-	m.stops++
 	proc := m.procs[dir]
 	m.mu.Unlock()
 	if proc != nil {
