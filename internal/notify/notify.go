@@ -443,6 +443,39 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	if len(atts)+len(in.Files) > room.MaxPostAttachments {
 		return Result{}, fmt.Errorf("a post can carry at most %d attachments", room.MaxPostAttachments)
 	}
+	// The owner writing from one room to another speaks as the room they write
+	// from, so a reply to the post (ReplyAddress) names that room's owner and
+	// lands in the chat the owner wrote in. The sender's room also keeps a copy
+	// of the post. Its files are saved there first, so a copy cannot fail after
+	// the recipients have the post.
+	var origin room.Record
+	originReply := ""
+	senderRoomID := ""
+	var copyAtts []room.Attachment
+	var copyIDs map[string]string
+	crossRoom := (in.Sender.Kind == SenderSession || in.Sender.Kind == SenderOwner && in.Sender.Human) && in.Event == nil && in.Sender.Room != "" && in.Sender.Room != res.rec.Name
+	if crossRoom {
+		if origin, err = s.Rooms.Resolve(in.Sender.Room); err != nil {
+			return Result{}, err
+		}
+		originReply = in.ReplyTo
+		copyAtts = append([]room.Attachment(nil), in.Attachments...)
+		files, err := s.saveFiles(origin.ID, in.Files)
+		if err != nil {
+			return Result{}, err
+		}
+		copyAtts = append(copyAtts, files...)
+		switch in.Sender.Kind {
+		case SenderOwner:
+			senderRoomID = origin.ID
+			res.from = origin.Name
+			// The writer's conversation and reply target live in the origin room.
+			in.Conversation, in.ReplyTo = "", ""
+		case SenderSession:
+			// The copy binds the session, so a reply to it reaches the session.
+			copyIDs = map[string]string{res.from: in.Sender.Session.ID}
+		}
+	}
 	// Check rich files before saving anything, so a refused card leaves no
 	// bytes behind. Post checks again from the saved bytes.
 	cards := 0
@@ -459,22 +492,11 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 			}
 		}
 	}
-	for _, f := range in.Files {
-		a, err := s.Rooms.PutRenderedAttachment(res.rec.ID, f.Name, f.Data, f.Render)
-		if err != nil {
-			return Result{}, fmt.Errorf("%s: %w", f.Name, err)
-		}
-		a.Render, a.Visual, a.Net = f.Render, f.Visual, f.AllowNet
-		if f.Render == room.RenderHTML {
-			// The preview is optional: a preview that cannot be saved never
-			// blocks the post.
-			if err := s.savePreview(res.rec.ID, &a, f.Preview); err != nil {
-				a.Banner, a.Thumb, a.Shots = "", "", nil
-				a.Checks = visual.Skipped("preview not saved: " + err.Error())
-			}
-		}
-		atts = append(atts, a)
+	saved, err := s.saveFiles(res.rec.ID, in.Files)
+	if err != nil {
+		return Result{}, err
 	}
+	atts = append(atts, saved...)
 	var sessionIDs map[string]string
 	for _, recipient := range res.recipients {
 		if recipient.kind == toSession {
@@ -486,31 +508,12 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	}
 	// The sender's stored room travels with the post, so root's wake decision
 	// reads an identity rather than the room part of a display address.
-	senderRoomID := ""
 	if in.Sender.Kind == SenderSession {
 		if sessionIDs == nil {
 			sessionIDs = map[string]string{}
 		}
 		sessionIDs[res.from] = in.Sender.Session.ID
 		senderRoomID = in.Sender.Session.RoomID
-	}
-	// The owner writing from one room to another speaks as the room they write
-	// from, so a reply to the post (ReplyAddress) names that room's owner and
-	// lands in the chat the owner wrote in.
-	var origin room.Record
-	originReply := ""
-	crossRoom := (in.Sender.Kind == SenderSession || in.Sender.Kind == SenderOwner && in.Sender.Human) && in.Event == nil && in.Sender.Room != "" && in.Sender.Room != res.rec.Name
-	if crossRoom {
-		if origin, err = s.Rooms.Resolve(in.Sender.Room); err != nil {
-			return Result{}, err
-		}
-		senderRoomID = origin.ID
-		originReply = in.ReplyTo
-		if in.Sender.Kind == SenderOwner {
-			// The writer's conversation and reply target live in the origin room.
-			res.from = origin.Name
-			in.Conversation, in.ReplyTo = "", ""
-		}
 	}
 	var msg room.Message
 	if in.Event != nil {
@@ -545,8 +548,8 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		// The sender's chat shows the post at once. The copy shares the post's
 		// ID, so a reply to the post answers it in the sender's room too. It
 		// wakes nobody: the recipients read the post in their own room.
-		if _, err := s.Rooms.Post(origin.ID, room.PostInput{ID: msg.ID, From: res.from, Human: in.Sender.Human, To: res.addrs(), Via: res.via, ReplyTo: originReply,
-			Text: text, Attachments: atts, References: in.References}); err != nil {
+		if _, err := s.Rooms.Post(origin.ID, room.PostInput{ID: msg.ID, From: res.from, Human: in.Sender.Human, SessionIDs: copyIDs, To: res.addrs(), Via: res.via, ReplyTo: originReply,
+			Text: text, Attachments: copyAtts, References: in.References, Forward: fwd}); err != nil {
 			out.Deliveries = append(out.Deliveries, Delivery{To: origin.Name, Delivery: "failed", Error: "the post was sent, but its copy in " + origin.Name + " was not saved: " + err.Error()})
 		}
 	}
@@ -1652,6 +1655,28 @@ func FormatMessage(msg room.Message) string {
 
 // savePreview saves a card's preview images with the room and records them
 // and the checks on the card.
+// saveFiles stores a post's new files in roomID, each with its preview.
+func (s *Service) saveFiles(roomID string, files []File) ([]room.Attachment, error) {
+	var atts []room.Attachment
+	for _, f := range files {
+		a, err := s.Rooms.PutRenderedAttachment(roomID, f.Name, f.Data, f.Render)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f.Name, err)
+		}
+		a.Render, a.Visual, a.Net = f.Render, f.Visual, f.AllowNet
+		if f.Render == room.RenderHTML {
+			// The preview is optional: a preview that cannot be saved never
+			// blocks the post.
+			if err := s.savePreview(roomID, &a, f.Preview); err != nil {
+				a.Banner, a.Thumb, a.Shots = "", "", nil
+				a.Checks = visual.Skipped("preview not saved: " + err.Error())
+			}
+		}
+		atts = append(atts, a)
+	}
+	return atts, nil
+}
+
 func (s *Service) savePreview(roomID string, a *room.Attachment, p visual.Result) error {
 	put := func(name string, data []byte) (string, error) {
 		if len(data) == 0 {
