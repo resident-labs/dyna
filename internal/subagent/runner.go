@@ -105,6 +105,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	var (
 		usage         workeroutput.Usage
 		normalization workeroutput.UsageNormalization
+		firstCall     *workeroutput.CallUsage
 		baseline      = meta.UsageBaseline
 		contextTokens = meta.ContextTokens
 		sessionID     = meta.HarnessSession
@@ -122,6 +123,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		mu.Lock()
 		turnUsage, sid, model := usage, sessionID, actualModel
 		turnNormalization, turnBaseline, turnContext := normalization, baseline, contextTokens
+		turnFirstCall := firstCall
 		mu.Unlock()
 		msg := ""
 		if runErr != nil {
@@ -158,11 +160,8 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			FailureReason:      failureReason,
 			WorkerStderr:       harness.StderrDetail(runErr),
 			UsageNormalization: turnNormalization, HarnessSession: sid, RawEnd: fileSize(rawPath), NormEnd: fileSize(normPath),
-			InputCutoff: cutoff, CutoffPending: cutoff == nil, FallbackCutoff: &fallback}
+			InputCutoff: cutoff, CutoffPending: cutoff == nil, FallbackCutoff: &fallback, FirstCall: turnFirstCall}
 		if result != nil {
-			if r, ok := result.(harness.Result); ok {
-				end.FirstCall = r.FirstCall
-			}
 			if b, err := json.Marshal(result); err == nil {
 				end.Result = b
 			}
@@ -446,6 +445,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		}
 		usage.Add(r.Usage)
 		normalization.Merge(r.UsageNormalization)
+		if firstCall == nil {
+			firstCall = r.FirstCall
+		}
 		baseline = r.UsageBaseline
 		if r.SessionID != "" {
 			sessionID = r.SessionID
