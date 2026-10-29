@@ -782,7 +782,7 @@ func tsField(typ reflect.Type, expr string) (string, string, error) {
 	case reflect.Pointer:
 		elem := typ.Elem()
 		if elem.Kind() != reflect.Struct {
-			return "", "", fmt.Errorf("pointer type %s is not supported", typ)
+			return tsField(elem, expr)
 		}
 		if hasObject(elem) {
 			return elem.Name(), fmt.Sprintf("is%s(%s)", elem.Name(), expr), nil

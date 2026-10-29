@@ -121,6 +121,10 @@ func TestWorkspaceJobsShareOneFolderAndSerialize(t *testing.T) {
 	if first.Workspace == "" || second.Workspace != first.Workspace {
 		t.Fatalf("workspaces = %q and %q, want one kept folder", first.Workspace, second.Workspace)
 	}
+	wantPath := path.Join(NodeBase(first.Node), "workspaces", RepoKey(first.Session+"\x00"+first.Repo))
+	if first.Workspace != wantPath {
+		t.Fatalf("workspace = %q, want the stable session path %q", first.Workspace, wantPath)
+	}
 	admitted, reasons, err := svc.admission().Pass(t.Context(), []Job{first, second})
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +142,7 @@ func TestWorkspaceJobsShareOneFolderAndSerialize(t *testing.T) {
 func TestWorkspaceCleanupProtectsLiveJobs(t *testing.T) {
 	now := time.Unix(2_000_000, 0)
 	node := machines.Machine{Name: "here", Enabled: true}
-	svc, store, removed := newWorkspaceCleanupService(t, node)
+	svc, store, removed, _ := newWorkspaceCleanupService(t, node)
 	store.clock = func() time.Time { return now }
 	closedFree := putWorkspaceTestRow(t, store, Job{ID: "job_closed_free", Session: "ses_closed", State: StatePassed})
 	closedLive := putWorkspaceTestRow(t, store, Job{ID: "job_closed_live", Session: "ses_closed", State: StateRunning})
@@ -151,11 +155,11 @@ func TestWorkspaceCleanupProtectsLiveJobs(t *testing.T) {
 	if n, err := svc.CleanupWorkspaces(t.Context(), WorkspaceCleanup{Session: "ses_closed", Now: now}); err != nil || n != 1 {
 		t.Fatalf("session cleanup removed %d, %v; want one", n, err)
 	}
-	assertWorkspaceRemovals(t, removed, closedFree.Workspace)
+	assertWorkspaceRemovals(t, removed, closedFree.Workspace+".trash")
 	if n, err := svc.CleanupWorkspaces(t.Context(), WorkspaceCleanup{Now: now}); err != nil || n != 1 {
 		t.Fatalf("idle cleanup removed %d, %v; want one", n, err)
 	}
-	assertWorkspaceRemovals(t, removed, idleFree.Workspace)
+	assertWorkspaceRemovals(t, removed, idleFree.Workspace+".trash")
 
 	closedLive.State = StatePassed
 	if _, won, err := store.SaveOpen(t.Context(), closedLive); err != nil || !won {
@@ -164,7 +168,7 @@ func TestWorkspaceCleanupProtectsLiveJobs(t *testing.T) {
 	if n, err := svc.CleanupWorkspaces(t.Context(), WorkspaceCleanup{Now: now}); err != nil || n != 1 {
 		t.Fatalf("deferred session cleanup removed %d, %v; want one", n, err)
 	}
-	assertWorkspaceRemovals(t, removed, closedLive.Workspace)
+	assertWorkspaceRemovals(t, removed, closedLive.Workspace+".trash")
 	rows, err := store.listWorkspaces(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -178,12 +182,53 @@ func TestWorkspaceCleanupProtectsLiveJobs(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCleanupRenamesBeforeRemoval(t *testing.T) {
+	now := time.Unix(2_000_000, 0)
+	node := machines.Machine{Name: "here", Enabled: true}
+	svc, store, removed, moved := newWorkspaceCleanupService(t, node)
+	store.clock = func() time.Time { return now }
+	now = now.Add(-25 * time.Hour)
+	kept := putWorkspaceTestRow(t, store, Job{ID: "job_idle", State: StatePassed})
+	now = now.Add(25 * time.Hour)
+	rows, err := store.listWorkspaces(t.Context())
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("workspaces = %+v, %v; want one", rows, err)
+	}
+	claimed, err := store.claimWorkspace(t.Context(), rows[0])
+	if err != nil || !claimed {
+		t.Fatalf("claim = %v, %v; want the idle workspace", claimed, err)
+	}
+	next := kept
+	next.ID, next.State = "job_next", StateQueued
+	if _, err := store.saveSubmitted(t.Context(), next); err == nil || !strings.Contains(err.Error(), "being cleaned") {
+		t.Fatalf("submission during cleanup = %v, want a retryable cleaning error", err)
+	}
+
+	if n, err := svc.CleanupWorkspaces(t.Context(), WorkspaceCleanup{Now: now}); err != nil || n != 1 {
+		t.Fatalf("cleanup removed %d, %v; want one", n, err)
+	}
+	select {
+	case got := <-moved:
+		want := kept.Workspace + " -> " + kept.Workspace + ".trash"
+		if got != want {
+			t.Fatalf("workspace move = %q, want %q", got, want)
+		}
+	default:
+		t.Fatal("cleanup removed the workspace without an atomic rename")
+	}
+	assertWorkspaceRemovals(t, removed, kept.Workspace+".trash")
+	reused, err := store.saveSubmitted(t.Context(), next)
+	if err != nil || reused.Workspace != kept.Workspace {
+		t.Fatalf("workspace after cleanup = %q, %v; want %q", reused.Workspace, err, kept.Workspace)
+	}
+}
+
 // Disk-pressure cleanup stops as soon as a fresh probe meets the node's floor.
 func TestWorkspaceCleanupStopsWhenDiskFloorIsMet(t *testing.T) {
 	now := time.Unix(2_000_000, 0)
 	node := machines.Machine{Name: "full", Enabled: true, MaxDiskPercent: 90}
 	node.Capabilities.Disk = machines.Disk{Total: 100 << 30, Free: 1 << 30}
-	svc, store, removed := newWorkspaceCleanupService(t, node)
+	svc, store, removed, _ := newWorkspaceCleanupService(t, node)
 	store.clock = func() time.Time { return now }
 	now = now.Add(-2 * time.Hour)
 	oldest := putWorkspaceTestRow(t, store, Job{ID: "job_disk_oldest", Node: "full", State: StatePassed})
@@ -194,7 +239,7 @@ func TestWorkspaceCleanupStopsWhenDiskFloorIsMet(t *testing.T) {
 	if n, err := svc.CleanupWorkspaces(t.Context(), WorkspaceCleanup{Now: now}); err != nil || n != 1 {
 		t.Fatalf("disk cleanup removed %d, %v; want one", n, err)
 	}
-	assertWorkspaceRemovals(t, removed, oldest.Workspace)
+	assertWorkspaceRemovals(t, removed, oldest.Workspace+".trash")
 	rows, err := store.listWorkspaces(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +249,7 @@ func TestWorkspaceCleanupStopsWhenDiskFloorIsMet(t *testing.T) {
 	}
 }
 
-func newWorkspaceCleanupService(t *testing.T, nodes ...machines.Machine) (*Service, Store, chan string) {
+func newWorkspaceCleanupService(t *testing.T, nodes ...machines.Machine) (*Service, Store, chan string, chan string) {
 	t.Helper()
 	dir := t.TempDir()
 	byName := map[string]machines.Machine{}
@@ -212,11 +257,15 @@ func newWorkspaceCleanupService(t *testing.T, nodes ...machines.Machine) (*Servi
 		byName[node.Name] = node
 	}
 	removed := make(chan string, 16)
+	moved := make(chan string, 16)
 	fake := jobstest.NewFake(t, jobstest.Protocol{Start: StartScript, Poll: PollScript, Stop: StopScript}, func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		script, _, ok := jobstest.DecodeNodeScript(name, args)
 		words := jobstest.UnquoteWords(script)
 		if ok && len(words) == 4 && words[0] == "rm" && words[1] == "-rf" && words[2] == "--" {
 			removed <- words[3]
+		}
+		if ok && len(words) == 9 && words[0] == "test" && words[1] == "!" && words[2] == "-e" && words[4] == "||" && words[5] == "mv" && words[6] == "--" {
+			moved <- words[3] + " -> " + words[8]
 		}
 		if ok && len(words) == 3 && words[0] == "df" && words[1] == "-Pk" {
 			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
@@ -231,7 +280,7 @@ func newWorkspaceCleanupService(t *testing.T, nodes ...machines.Machine) (*Servi
 		x.Command, x.Wait, x.Clock = Command(fake.CommandFunc()), fake.WaitFunc(), fake.ClockFunc()
 		return x
 	}
-	return svc, store, removed
+	return svc, store, removed, moved
 }
 
 func putWorkspaceTestRow(t *testing.T, store Store, job Job) Job {
