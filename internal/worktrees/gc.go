@@ -349,10 +349,12 @@ func workflowClosed(id string) (bool, error) {
 	}
 	meta, err := runstore.ReadMeta(id)
 	if os.IsNotExist(err) {
-		// A run folder with no row (a broken or starting run) still owns
-		// its trees: it counts as open, never as unknown.
 		if info, statErr := os.Stat(runstore.RunDir(id)); statErr == nil && info.IsDir() {
-			return false, nil
+			alive, aliveErr := rowlessWorkflowAlive(context.Background(), id)
+			if aliveErr != nil {
+				return false, aliveErr
+			}
+			return !alive, nil
 		}
 	}
 	if err != nil {
