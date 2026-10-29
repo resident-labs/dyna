@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestAgentsUseSupportedStateSnapshots(t *testing.T) {
+	for role, meta := range map[string]Meta{
+		"worker": {},
+		"root":   {Role: RoleRoot},
+		"leaf":   {Leaf: true},
+	} {
+		rules := rulesFor(meta) + workerContext(meta, "", 3)
+		for _, want := range []string{"Never open or copy the live dyna.db directly.", "use the latest daily backup first", "dyna state snapshot <path>", "only when you need newer state", "at most one snapshot at a time", "Snapshots contain private state"} {
+			if !strings.Contains(rules, want) {
+				t.Errorf("%s instructions missing %q", role, want)
+			}
+		}
+	}
+}
+
 func TestInstructionsTeachDynaOnlyDelegation(t *testing.T) {
 	meta := Meta{
 		ID: "ses_20260101-120000-abcdef12", Name: "decoder",
