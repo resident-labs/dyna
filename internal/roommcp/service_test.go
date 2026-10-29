@@ -509,3 +509,34 @@ func TestNewURLResetsToolsAndGrants(t *testing.T) {
 		t.Fatal("unexpected traffic")
 	}
 }
+
+// A stale call registers a connection only while the server is attached, and
+// every operation that must end calls clears that state before it drops the
+// live connection. Otherwise a call could register in the gap and outlive it.
+func TestEndingOperationsClearStateBeforeDroppingConnections(t *testing.T) {
+	operations := map[string]func(f *fixture) error{
+		"remove token": func(f *fixture) error { return f.svc.RemoveToken(owner, f.room.ID, "board") },
+		"remove":       func(f *fixture) error { return f.svc.Remove(owner, f.room.ID, "board") },
+		"set token": func(f *fixture) error {
+			return f.svc.SetToken(owner, f.room.ID, "board", f.server.URL, "rotated-token-value")
+		},
+		"detach": func(f *fixture) error { return f.svc.Detach(owner, f.room.ID, "board") },
+	}
+	for name, operation := range operations {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.ready(t)
+			var attachedAtDrop, found bool
+			f.svc.beforeDrop = func(key serverKey) {
+				err := f.svc.db.QueryRow("SELECT attached FROM room_mcp_servers WHERE room=? AND name=?", key.room, key.name).Scan(&attachedAtDrop)
+				found = err == nil
+			}
+			if err := operation(f); err != nil {
+				t.Fatal(err)
+			}
+			if found && attachedAtDrop {
+				t.Fatal("the connection ended while the server was still attached")
+			}
+		})
+	}
+}
