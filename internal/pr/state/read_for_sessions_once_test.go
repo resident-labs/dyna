@@ -64,3 +64,30 @@ func TestReadForSessionsColdProcessDoesNotLoadSnapshot(t *testing.T) {
 		t.Fatalf("PR row reads in a cold process = %d; want 0", reads)
 	}
 }
+
+// The cold read must return the cold parts of a record too, the same as a
+// read from a warm snapshot.
+func TestReadForSessionsColdRecordKeepsItsParts(t *testing.T) {
+	root := newRoot(t)
+	const key = "github.com/acme/widgets#1"
+	st := State{Version: 1, Records: map[string]*Record{}}
+	st.Records[key] = &Record{Key: key, Repo: "acme/widgets", Number: 1, RoomID: "room", State: "open", Author: "ann", Summary: "lint failed", Notices: []Notice{{}}}
+	if err := Write(root, st); err != nil {
+		t.Fatal(err)
+	}
+	forgetSnapshot()
+	cold, err := ReadForSessions(root, "room", "ann")
+	if err != nil || cold.Records[key] == nil {
+		t.Fatalf("cold ReadForSessions = %d records, %v; want ann's PR", len(cold.Records), err)
+	}
+	if _, err := Read(root); err != nil {
+		t.Fatal(err)
+	}
+	warm, err := ReadForSessions(root, "room", "ann")
+	if err != nil || warm.Records[key] == nil {
+		t.Fatalf("warm ReadForSessions = %d records, %v; want ann's PR", len(warm.Records), err)
+	}
+	if cold.Records[key].Summary != warm.Records[key].Summary || len(cold.Records[key].Notices) != len(warm.Records[key].Notices) {
+		t.Fatalf("cold record %q with %d notices; warm record %q with %d notices", cold.Records[key].Summary, len(cold.Records[key].Notices), warm.Records[key].Summary, len(warm.Records[key].Notices))
+	}
+}
