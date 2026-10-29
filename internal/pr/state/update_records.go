@@ -11,11 +11,38 @@ import (
 // the writer's derived quota display and normal closed-record pruning.
 // An undeclared record or response key aborts the update without publishing.
 func UpdateRecords(ctx context.Context, root string, keys []string, fn func(*State) error) error {
-	declared := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		declared[key] = true
-	}
+	return updateSelectedRecords(ctx, root, func(Snapshot) []string { return keys }, fn)
+}
+
+// RecordScope contains only scalar fields for selecting mutable update rows.
+type RecordScope struct {
+	Key, RoomID  string
+	Watching     bool
+	State        PRState
+	HasResponses bool
+}
+
+// UpdateSelectedRecords selects rows inside the writer lock, then isolates them.
+// As with UpdateRecords, fn must not retain the mutable state after it returns.
+func UpdateSelectedRecords(ctx context.Context, root string, selectRow func(RecordScope) bool, fn func(*State) error) error {
+	return updateSelectedRecords(ctx, root, func(snapshot Snapshot) []string {
+		var keys []string
+		for key, record := range snapshot.state.Records {
+			if selectRow(RecordScope{Key: key, RoomID: record.RoomID, Watching: record.Watching, State: record.State, HasResponses: len(snapshot.state.Responses[key]) > 0}) {
+				keys = append(keys, key)
+			}
+		}
+		return keys
+	}, fn)
+}
+
+func updateSelectedRecords(ctx context.Context, root string, selectKeys func(Snapshot) []string, fn func(*State) error) error {
 	return update(ctx, root, func(snapshot Snapshot) (State, error) {
+		keys := selectKeys(snapshot)
+		declared := make(map[string]bool, len(keys))
+		for _, key := range keys {
+			declared[key] = true
+		}
 		scoped := snapshot.Metadata()
 		scoped.Records = make(map[string]*Record, len(declared))
 		scoped.Responses = make(map[string]map[string]CachedResponse, len(declared))
