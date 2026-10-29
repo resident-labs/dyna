@@ -14,8 +14,30 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/database/databasetest"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/processguard"
 )
+
+// A stop signal cancels the signal context at once, before any deferred
+// shutdown runs, so the run context must not be done before the stop mark is
+// set: a job or local CI check that sees a cancel without the mark tears its
+// unit down on the node as a user cancel, instead of leaving it for the
+// restarted engine (D-433).
+func TestRunContextSetsStopMarkBeforeCancel(t *testing.T) {
+	localci.ClearEngineStopping()
+	t.Cleanup(localci.ClearEngineStopping)
+	signalCtx, stopSignal := context.WithCancel(context.Background())
+	defer stopSignal()
+	ctx, cancelRun, stopHook := runContext(signalCtx)
+	defer stopHook()
+	defer cancelRun()
+
+	stopSignal() // SIGTERM, as cmd/dyna wires it
+	<-ctx.Done() // the moment engine work sees the cancel
+	if !localci.EngineStopping() {
+		t.Fatal("the run context was cancelled before the engine stop mark was set")
+	}
+}
 
 // The engine stops in under 1 s with work in flight (requirement 30): a
 // worker inside its tick, a state write waiting for the writer lock, a
