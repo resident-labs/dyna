@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,11 +16,12 @@ import (
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 // workspaceSchema keeps one active workspace per session, node and repository.
-// A cleaning row is a deleted workspace whose node folder still needs removal;
-// its unique path lets a new job start a fresh active workspace without waiting.
+// A cleaning row is a deleted workspace whose node folder still needs removal.
+// It blocks submission until the old path is empty and the row is gone.
 const workspaceSchema = `
 CREATE TABLE IF NOT EXISTS workspaces (
 	node TEXT NOT NULL,
@@ -68,13 +71,13 @@ func isWorkspaceResource(name machines.ResourceName) bool {
 	return strings.HasPrefix(string(name), "dyna.workspace.")
 }
 
-// newWorkspacePath makes a generation-unique path. Cleanup can mark an old
-// generation for removal while a later submission creates a fresh one safely.
-func newWorkspacePath(node, session, repo, jobID string) string {
-	return path.Join(NodeBase(node), "workspaces", RepoKey(session+"\x00"+repo), jobID)
+// newWorkspacePath makes the one stable folder of a session and repository
+// on a node. A cleaning row at that path blocks submission until removal ends.
+func newWorkspacePath(node, session, repo string) string {
+	return path.Join(NodeBase(node), "workspaces", RepoKey(session+"\x00"+repo))
 }
 
-// ensureWorkspace reuses the active generation or inserts the job's candidate.
+// ensureWorkspace reuses the active folder or inserts the job's candidate.
 // The caller holds the SQLite writer transaction that also inserts the job.
 func ensureWorkspace(ctx context.Context, conn *sql.Conn, job Job, now time.Time) (string, error) {
 	var kept string
@@ -82,6 +85,13 @@ func ensureWorkspace(ctx context.Context, conn *sql.Conn, job Job, now time.Time
 	if err == nil {
 		_, err = conn.ExecContext(ctx, "UPDATE workspaces SET last_used_ms=?, closed=0 WHERE node=? AND path=? AND cleaning=0", now.UnixMilli(), job.Node, kept)
 		return kept, err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	err = conn.QueryRowContext(ctx, "SELECT path FROM workspaces WHERE node=? AND path=? AND cleaning=1", job.Node, job.Workspace).Scan(&kept)
+	if err == nil {
+		return "", fmt.Errorf("workspace %s is being cleaned; retry after cleanup", kept)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
@@ -145,9 +155,8 @@ func (s Store) listWorkspaces(ctx context.Context) ([]workspace, error) {
 	return out, errors.Join(rows.Err(), rows.Close())
 }
 
-// claimWorkspace excludes a live job and changes the generation to cleaning in
-// one write. A later submission cannot reuse this path. The last-used check
-// rejects a stale cleanup decision after another submission touched the row.
+// claimWorkspace revalidates the snapshot under the cleanup lock. It excludes
+// a live job and rejects a row that another pass removed or a submission reused.
 func (s Store) claimWorkspace(ctx context.Context, w workspace) (bool, error) {
 	db, err := s.db()
 	if err != nil {
@@ -155,7 +164,16 @@ func (s Store) claimWorkspace(ctx context.Context, w workspace) (bool, error) {
 	}
 	claimed := false
 	err = state.For(db).Write(ctx, hub.Event{Topic: WorkspaceTopic}, func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(ctx, "UPDATE workspaces SET cleaning=1\nWHERE node=? AND path=? AND last_used_ms=?\nAND NOT EXISTS (SELECT 1 FROM jobs WHERE workspace=? AND state IN ('queued','running'))", w.Node, w.Path, w.LastUsed.UnixMilli(), w.Path)
+		if w.Cleaning {
+			var present int
+			err := conn.QueryRowContext(ctx, "SELECT 1 FROM workspaces WHERE node=? AND path=? AND last_used_ms=? AND cleaning=1", w.Node, w.Path, w.LastUsed.UnixMilli()).Scan(&present)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			claimed = err == nil
+			return err
+		}
+		result, err := conn.ExecContext(ctx, "UPDATE workspaces SET cleaning=1\nWHERE node=? AND path=? AND last_used_ms=? AND cleaning=0\nAND NOT EXISTS (SELECT 1 FROM jobs WHERE workspace=? AND state IN ('queued','running'))", w.Node, w.Path, w.LastUsed.UnixMilli(), w.Path)
 		if err != nil {
 			return err
 		}
@@ -166,8 +184,8 @@ func (s Store) claimWorkspace(ctx context.Context, w workspace) (bool, error) {
 	return claimed, err
 }
 
-// removeWorkspace forgets a cleaning row after its node folder is gone. If the
-// row write fails, the next pass repeats a harmless rm and retries the row.
+// removeWorkspace forgets a cleaning row after its node trash is gone. If the
+// row write fails, the next pass repeats the harmless removal and retries.
 func (s Store) removeWorkspace(ctx context.Context, w workspace) error {
 	db, err := s.db()
 	if err != nil {
@@ -185,6 +203,47 @@ func (s Store) removeWorkspace(ctx context.Context, w workspace) error {
 type WorkspaceCleanup struct {
 	Session string
 	Now     time.Time
+}
+
+// cleanupWorkspace removes one expired workspace while holding its local
+// cross-process lock. A contending maintenance process skips it. The lock
+// covers the claim, node removal and row deletion, so a stale pass cannot
+// touch a path that a finished pass has already released for reuse.
+func (s *Service) cleanupWorkspace(ctx context.Context, w workspace, x Executor) (bool, error) {
+	dir := s.Store.DataDir
+	if dir == "" {
+		dir = defaultDataDir()
+	}
+	lockDir := filepath.Join(dir, "jobs", "workspace-locks")
+	if err := os.MkdirAll(lockDir, 0o700); err != nil {
+		return false, err
+	}
+	lockPath := filepath.Join(lockDir, RepoKey(w.Node+"\x00"+w.Path)+".lock")
+	unlock, owned, err := store.TryLockAndRemove(lockPath)
+	if err != nil || !owned {
+		return false, err
+	}
+	defer unlock()
+	claimed, err := s.Store.claimWorkspace(ctx, w)
+	if err != nil {
+		return false, fmt.Errorf("claim workspace %s: %w", w.Path, err)
+	}
+	if !claimed {
+		return false, nil
+	}
+	var out TailBuffer
+	trash := w.Path + ".trash"
+	quotedPath, quotedTrash := shellquote.Quote(w.Path), shellquote.Quote(trash)
+	if err := x.NodeCommand(ctx, &out, &out, "test ! -e "+quotedPath+" || mv -- "+quotedPath+" "+quotedTrash); err != nil {
+		return false, fmt.Errorf("move workspace %s aside on %s: %w: %s", w.Path, w.Node, err, out.String())
+	}
+	if err := x.NodeCommand(ctx, &out, &out, "rm -rf -- "+quotedTrash); err != nil {
+		return false, fmt.Errorf("remove workspace trash %s on %s: %w: %s", trash, w.Node, err, out.String())
+	}
+	if err := s.Store.removeWorkspace(ctx, w); err != nil {
+		return false, fmt.Errorf("forget workspace %s: %w", w.Path, err)
+	}
+	return true, nil
 }
 
 // nodeDiskFree measures the filesystem that holds one node's workspaces.
@@ -263,14 +322,6 @@ func (s *Service) CleanupWorkspaces(ctx context.Context, options WorkspaceCleanu
 		if !expired {
 			continue
 		}
-		claimed, err := s.Store.claimWorkspace(ctx, w)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("claim workspace %s: %w", w.Path, err))
-			continue
-		}
-		if !claimed {
-			continue
-		}
 		if answer.machine.Name == "" && answer.err == nil {
 			answer = machineFor(w.Node)
 		}
@@ -280,13 +331,12 @@ func (s *Service) CleanupWorkspaces(ctx context.Context, options WorkspaceCleanu
 		}
 		conn := Conn{Name: answer.machine.Name, SSH: answer.machine.SSH, SSHConnectTimeout: answer.machine.SSHConnectTimeout}
 		x := s.executor(conn)
-		var out TailBuffer
-		if err := x.NodeCommand(ctx, &out, &out, "rm -rf -- "+shellquote.Quote(w.Path)); err != nil {
-			errs = append(errs, fmt.Errorf("remove workspace %s on %s: %w: %s", w.Path, w.Node, err, out.String()))
+		cleaned, err := s.cleanupWorkspace(ctx, w, x)
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		if err := s.Store.removeWorkspace(ctx, w); err != nil {
-			errs = append(errs, fmt.Errorf("forget workspace %s: %w", w.Path, err))
+		if !cleaned {
 			continue
 		}
 		removed++

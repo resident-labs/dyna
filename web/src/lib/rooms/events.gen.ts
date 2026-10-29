@@ -495,6 +495,7 @@ export interface JobEvent {
   label: string
   state: JobState
   exitCode?: number
+  outcome?: string
   waitReason?: string
   durationMs?: number
   parent?: string
@@ -1337,7 +1338,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "target",
     once: true,
     audience: "session",
-    text: "Job {label} on {node} {state} with exit code {exitCode}.",
+    text: "Job {label} on {node} {outcome}.",
   },
   {
     family: "run",
@@ -1841,6 +1842,7 @@ export function isJobEvent(v: unknown): v is JobEvent {
     typeof v.label === "string" &&
     JOB_STATE.has(v.state) &&
     (v.exitCode === undefined || Number.isInteger(v.exitCode)) &&
+    (v.outcome === undefined || typeof v.outcome === "string") &&
     (v.waitReason === undefined || typeof v.waitReason === "string") &&
     (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
     (v.parent === undefined || typeof v.parent === "string") &&
