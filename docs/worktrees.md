@@ -62,7 +62,7 @@ A file system that lives in memory, such as a RAM-backed `/tmp`, is judged
 against its own size instead: it is low under 15 percent free.
 The alert names the path that is low.
 One owner alert reports space freed and the reasons other directories were kept.
-The port pool holds 1,000 blocks. Dyna posts a typed capacity alert to every room at 90% and 95% use. A high-capacity period posts each alert once. Use below 90% rearms those alerts for a later period.
+The port pool holds 1,000 blocks. Dyna posts a typed capacity alert to every room at 90% and 95% use. A high-capacity period posts each alert once, and retries a delivery that failed. Use below 90%, observed at allocation or cleanup, rearms those alerts for a later period.
 
 The default threshold is 10 GiB. Change it with:
 
