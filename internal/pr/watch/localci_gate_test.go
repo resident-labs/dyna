@@ -120,8 +120,13 @@ suites:
 	return record, plan, passedResult([]localci.CheckName{"unit"})
 }
 
+// A cancelled hosted job is not a selection signal, so it holds a local pass
+// back only while a base-required name keeps asking for it. The engine's own
+// cancellation removed the hosted row, so the wait reason reports that no
+// hosted result exists for the required name.
 func TestCancelledHostedOnlyCheckBlocksLocalPass(t *testing.T) {
 	record, plan, result := localPassGateFixture(t)
+	policy := ChangePolicy{RequiredChecks: []string{"pi"}}
 	snap := Snapshot{
 		Checks: []Check{actionsCheck(Check{ID: 1, Name: "pi", Status: "completed", Conclusion: "cancelled"})},
 		Runs:   []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
@@ -130,11 +135,11 @@ func TestCancelledHostedOnlyCheckBlocksLocalPass(t *testing.T) {
 	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
 	snap.Pull.Head.SHA = record.Head
 	service := &Service{}
-	observation := service.registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	observation := service.registeredLocalObservation(record, snap, policy, plan, result, false, true)
 	if observation.Status != VerdictPending || !slices.Contains(observation.Jobs, "pi") {
-		t.Fatalf("cancelled hosted-only check did not block the local pass: %+v", observation)
+		t.Fatalf("a base-required name stopped holding the local pass: %+v", observation)
 	}
-	wantReason := "pi: hosted check cancelled, no local check"
+	wantReason := "pi: no hosted result, no local check"
 	if observation.Reason != wantReason {
 		t.Fatalf("reason = %q, want %q", observation.Reason, wantReason)
 	}
@@ -182,6 +187,61 @@ func TestLocalPassSatisfiesCancelledHostedDuplicate(t *testing.T) {
 	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
 	if observation.Status != VerdictPassed {
 		t.Fatalf("a cancelled duplicate blocked the matching local pass: %+v", observation)
+	}
+}
+
+// In local mode the engine cancels hosted runs on purpose. A cancelled hosted
+// job never tested the head, so it is not a selection signal: a hosted-only
+// helper such as "changes" must not become a need that no path can satisfy.
+func TestCancelledHostedOnlyJobDoesNotBlockLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	snap := Snapshot{
+		Checks: []Check{actionsCheck(Check{ID: 1, Name: "changes", Status: "completed", Conclusion: "cancelled"})},
+		Runs:   []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
+	}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPassed {
+		t.Fatalf("a cancelled hosted-only job blocked the local pass: %+v", observation)
+	}
+}
+
+// A matrix job that never expanded keeps GitHub's template name, and the
+// engine's cancellation ends it before any shard starts. Local CI reports the
+// real shard names, so the template row must not become a need that never
+// resolves.
+func TestCancelledMatrixJobTemplateWithLocalShardsIsReady(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	result.Checks = append(result.Checks,
+		localci.SuiteResult{CheckName: "go-test-shard (0)", Status: localci.OutcomePassed},
+		localci.SuiteResult{CheckName: "go-test-shard (1)", Status: localci.OutcomePassed},
+	)
+	snap := Snapshot{
+		Checks: []Check{actionsCheck(Check{ID: 1, Name: "go-test-shard (${{ matrix.shard }})", Status: "completed", Conclusion: "cancelled"})},
+		Runs:   []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
+	}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPassed {
+		t.Fatalf("a cancelled matrix template job blocked passing local shards: %+v", observation)
+	}
+}
+
+// A hosted job that reached failure is real evidence and still blocks the
+// local pass: dropping cancelled jobs from selection must never hide a failed
+// one.
+func TestFailedHostedJobStillBlocksLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	snap := Snapshot{Checks: []Check{actionsCheck(Check{ID: 1, Name: "changes", Status: "completed", Conclusion: "failure"})}}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status == VerdictPassed || !slices.Contains(observation.Jobs, "changes") {
+		t.Fatalf("a failed hosted job stopped blocking the local pass: %+v", observation)
 	}
 }
 
