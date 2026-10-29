@@ -477,7 +477,7 @@ func (a Admission) readQueue(ctx context.Context, node string) (nodeQueue, error
 func (q nodeQueue) waiters(limits machines.Machine) []waiter {
 	out := make([]waiter, 0, len(q.waitingRows)+len(q.queued))
 	for _, row := range q.waitingRows {
-		out = append(out, waiter{demand: row.Demand, created: row.Created, id: row.ID})
+		out = append(out, waiter{demand: row.Demand, created: row.Created, id: row.ID, reason: row.Reason})
 	}
 	for _, job := range q.queued {
 		out = append(out, waiter{demand: jobDemand(job, limits), resources: job.Resources, created: job.Created, id: job.ID, isJob: true})
@@ -591,16 +591,14 @@ type waiter struct {
 	resources []machines.ResourceName
 	created   time.Time
 	id        string
+	reason    string
 	isJob     bool
 }
 
-// Pass serializes capacity reads and admission writes in one SQLite writer
-// transaction. A job is reserved by changing its row to running before the
-// transaction commits. This closes the gap before its launch goroutine starts.
+// Pass decides from a read snapshot, then repeats any needed decision under
+// the writer lock. A job becomes running before that transaction commits, so
+// its capacity is reserved before its launch goroutine starts.
 func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool, map[string]string, error) {
-	if err := a.sweep(ctx); err != nil {
-		return nil, nil, err
-	}
 	// Resolve machine facts before taking the writer lock. A newly queued node
 	// not in this snapshot is considered on the next pass.
 	waiting, err := a.waitingNodes(ctx)
@@ -627,30 +625,38 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 		return nil, nil, err
 	}
 	admitted, reasons := map[string]bool{}, map[string]string{}
-	err = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+	decide := func(conn state.Reader, writer *sql.Conn) (bool, error) {
+		needsSweep, err := sweepOn(ctx, conn, writer, a.now())
+		if err != nil {
+			return false, err
+		}
+		if needsSweep && writer == nil {
+			return true, nil
+		}
+		needsWrite := false
 		waiting, err := rowsConn(ctx, conn, "waiting")
 		if err != nil {
-			return err
+			return false, err
 		}
 		held, err := rowsConn(ctx, conn, "admitted")
 		if err != nil {
-			return err
+			return false, err
 		}
 		rows, err := conn.QueryContext(ctx, "SELECT "+columns+" FROM jobs WHERE state='running'")
 		if err != nil {
-			return err
+			return false, err
 		}
 		running := map[string][]Job{}
 		for rows.Next() {
 			job, err := scanJob(rows)
 			if err != nil {
 				rows.Close()
-				return err
+				return false, err
 			}
 			running[job.Node] = append(running[job.Node], job)
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
+			return false, err
 		}
 		for node := range nodes {
 			var queued []Job
@@ -663,25 +669,41 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 					continue
 				}
 				if err != nil {
-					return err
+					return false, err
 				}
 				queued = append(queued, job)
 			}
 			q := nodeQueue{waitingRows: waiting[node], heldRows: held[node], running: running[node], queued: queued}
-			if err := passNode(ctx, conn, a.now(), node, facts[node], factErrors[node], q, a.RoomName, admitted, reasons); err != nil {
-				return err
+			if err := passNode(ctx, writer, a.now(), node, facts[node], factErrors[node], q, a.RoomName, admitted, reasons, &needsWrite); err != nil {
+				return false, err
 			}
 		}
-		return nil
+		return needsWrite, nil
+	}
+	var needsWrite bool
+	err = state.For(db).Read(ctx, func(reader state.Reader) error {
+		var err error
+		needsWrite, err = decide(reader, nil)
+		return err
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	if needsWrite {
+		admitted, reasons = map[string]bool{}, map[string]string{}
+		err = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+			_, err := decide(conn, conn)
+			return err
+		})
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	return admitted, reasons, nil
 }
 
 // rowsConn reads queue rows on the same transaction as the admission decision.
-func rowsConn(ctx context.Context, conn *sql.Conn, status string) (map[string][]admissionRow, error) {
+func rowsConn(ctx context.Context, conn state.Reader, status string) (map[string][]admissionRow, error) {
 	rows, err := conn.QueryContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE state=? ORDER BY created_ms, id", status)
 	if err != nil {
 		return nil, err
@@ -698,24 +720,16 @@ func rowsConn(ctx context.Context, conn *sql.Conn, status string) (map[string][]
 	return out, errors.Join(rows.Err(), rows.Close())
 }
 
-// sweep deletes released and expired rows, and waiting rows whose outside
-// holder is gone. A detached check can outlive its outside holder, so its
-// admitted row remains until release or expiry.
-func (a Admission) sweep(ctx context.Context) error {
-	db, err := a.db()
-	if err != nil {
-		return err
-	}
-	// Readers sweep too, and a write publishes an event that makes an open
-	// machine page read again. Look first, and write only when a row goes.
-	now := a.now().UnixMilli()
+// sweepOn checks expiry and dead owners in the decision snapshot. When writer
+// is present it rechecks and removes those rows under the writer lock.
+func sweepOn(ctx context.Context, reader state.Reader, writer *sql.Conn, now time.Time) (bool, error) {
 	var stale int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", now).Scan(&stale); err != nil {
-		return err
+	if err := reader.QueryRowContext(ctx, "SELECT COUNT(*) FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", now.UnixMilli()).Scan(&stale); err != nil {
+		return false, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT id,owner_pid,owner_start FROM admissions WHERE engine=0 AND state='waiting'")
+	rows, err := reader.QueryContext(ctx, "SELECT id,owner_pid,owner_start FROM admissions WHERE engine=0 AND state='waiting'")
 	if err != nil {
-		return err
+		return false, err
 	}
 	type deadRow struct {
 		id    string
@@ -727,38 +741,57 @@ func (a Admission) sweep(ctx context.Context) error {
 		var row deadRow
 		if err := rows.Scan(&row.id, &row.pid, &row.start); err != nil {
 			rows.Close()
-			return err
+			return false, err
 		}
 		if !ownerAlive(row.pid, row.start) {
 			dead = append(dead, row)
 		}
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return false, err
+	}
+	needed := stale != 0 || len(dead) != 0
+	if !needed || writer == nil {
+		return needed, nil
+	}
+	if _, err := writer.ExecContext(ctx, "DELETE FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", now.UnixMilli()); err != nil {
+		return false, err
+	}
+	for _, row := range dead {
+		if _, err := writer.ExecContext(ctx, "DELETE FROM admissions WHERE id=? AND state='waiting' AND engine=0 AND owner_pid=? AND owner_start=?", row.id, row.pid, row.start); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// sweep deletes released and expired rows, and waiting rows whose outside
+// holder is gone. A detached check can outlive its outside holder, so its
+// admitted row remains until release or expiry.
+func (a Admission) sweep(ctx context.Context) error {
+	db, err := a.db()
+	if err != nil {
 		return err
 	}
-	if stale == 0 && len(dead) == 0 {
-		return nil
+	var needed bool
+	err = state.For(db).Read(ctx, func(reader state.Reader) error {
+		var err error
+		needed, err = sweepOn(ctx, reader, nil, a.now())
+		return err
+	})
+	if err != nil || !needed {
+		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", now); err != nil {
-			return err
-		}
-		// A holder may have admitted its row since the read above, so delete
-		// only a row still waiting for the owner that was seen dead.
-		for _, row := range dead {
-			if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE id=? AND state='waiting' AND engine=0 AND owner_pid=? AND owner_start=?", row.id, row.pid, row.start); err != nil {
-				return err
-			}
-		}
-		return nil
+		_, err := sweepOn(ctx, conn, conn, a.now())
+		return err
 	})
 }
 
-// passNode admits the waiting work of one node. Held work is the running
-// jobs plus the admitted rows; capacity, limits and disk use come from the
-// machine's last probe and its stored limits. Reads and writes of admission
-// state share the caller's transaction.
-func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, q nodeQueue, roomName func(string) string, admitted map[string]bool, reasons map[string]string) error {
+// passNode decides the waiting work of one node. A nil conn checks for changes
+// without writing. Held work is the running jobs plus admitted rows; capacity,
+// limits and disk use come from the machine's last probe and stored limits.
+func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, q nodeQueue, roomName func(string) string, admitted map[string]bool, reasons map[string]string, needsWrite *bool) error {
 	capacityCPUs, capacityMemMiB := 0, int64(0)
 	limits := machines.Machine{}
 	if machineErr == nil {
@@ -844,7 +877,15 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			if d.Heavy {
 				held.heavy++
 			}
+			*needsWrite = true
 			if unit.isJob {
+				if conn == nil {
+					admitted[unit.id] = true
+					for _, name := range unit.resources {
+						held.resources[name] = append(held.resources[name], holder{id: unit.id, room: d.Room})
+					}
+					continue
+				}
 				result, err := conn.ExecContext(ctx, "UPDATE jobs SET state='running', started_ms=? WHERE id=? AND state='queued' AND cancel_requested=0", time.Now().UnixMilli(), unit.id)
 				if err != nil {
 					return err
@@ -868,9 +909,13 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		reason := waitingText(why, index+1, len(ordered))
 		if unit.isJob {
 			reasons[unit.id] = reason
-		} else {
+		} else if unit.reason != reason {
+			*needsWrite = true
 			writes = append(writes, rowWrite{id: unit.id, reason: reason})
 		}
+	}
+	if conn == nil {
+		return nil
 	}
 	for _, write := range writes {
 		if write.reason == "" {
