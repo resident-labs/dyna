@@ -126,6 +126,19 @@ func WithoutSecrets(env []string) []string {
 	})
 }
 
+// githubTokenNames are the GitHub variables that a session's own launch sets.
+var githubTokenNames = []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
+
+// WithoutEngineSecrets is WithoutSecrets for a session's shell. The session's
+// launch already holds its own GitHub account (or an empty value), and the git
+// credential helper needs it, so the GitHub token variables stay.
+func WithoutEngineSecrets(env []string) []string {
+	return slices.DeleteFunc(slices.Clone(env), func(entry string) bool {
+		key, _, _ := strings.Cut(entry, "=")
+		return SecretName(key) && !slices.Contains(githubTokenNames, key)
+	})
+}
+
 // MetadataEnv removes session stamps, Git routing and engine secrets from child commands.
 func MetadataEnv() []string {
 	var env []string

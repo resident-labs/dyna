@@ -92,6 +92,15 @@ func TestWithoutSecretsKeepsConfiguration(t *testing.T) {
 	}
 }
 
+func TestWithoutEngineSecretsKeepsSessionGitHubToken(t *testing.T) {
+	env := []string{"GH_TOKEN=s", "GH_ENTERPRISE_TOKEN=e", "NPM_TOKEN=s", "OPENAI_API_KEY=s", "HOME=h"}
+	got := WithoutEngineSecrets(env)
+	want := []string{"GH_TOKEN=s", "GH_ENTERPRISE_TOKEN=e", "HOME=h"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("WithoutEngineSecrets = %q, want %q", got, want)
+	}
+}
+
 func TestMetadataEnvGoFlags(t *testing.T) {
 	for _, tc := range []struct{ name, flags, want string }{
 		{"unset", "", "-trimpath"},
