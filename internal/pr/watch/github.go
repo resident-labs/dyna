@@ -126,14 +126,30 @@ type Status struct {
 	Updated     string `json:"updated_at"`
 	URL         string `json:"target_url"`
 }
+type hostedCheckID struct {
+	Name     string
+	Suite    int64
+	Workflow int64
+	Run      bool
+	Selected bool
+}
+
+type selectedHostedCheck struct {
+	hostedCheckID
+	State string
+}
+
 type Snapshot struct {
-	OwnerLogin    string
-	localCI       *registeredCIObservation
-	localCIConfig state.LocalCIConfigState
-	localCIDef    *localci.Definition
-	ciReused      bool // A discussion refresh does not advance the full CI safety clock.
-	headConfirmed bool
-	ciProbe       string
+	OwnerLogin string
+	localCI    *registeredCIObservation
+	// hostedCISelection retains selected check identities and states when
+	// cancellation filtering removes their results before the combined gate.
+	hostedCISelection []selectedHostedCheck
+	localCIConfig     state.LocalCIConfigState
+	localCIDef        *localci.Definition
+	ciReused          bool // A discussion refresh does not advance the full CI safety clock.
+	headConfirmed     bool
+	ciProbe           string
 	// NoPRWorkflows is true only after a successful workflow inspection.
 	NoPRWorkflows bool
 	Pull          Pull
@@ -209,7 +225,7 @@ func (s Snapshot) currentChecks() []Check {
 
 func (s Snapshot) CheckSummaries(ref Ref) []CheckSummary {
 	out := []CheckSummary{}
-	for _, c := range s.currentChecks() {
+	for _, c := range s.currentSuiteChecks() {
 		out = append(out, CheckSummary{ID: c.ID, Completed: c.Completed, Name: Sanitize(c.Name), State: checkState(c.Status, c.Conclusion), Status: c.Status, Conclusion: c.Conclusion, URL: c.URL, CommentURL: s.checkCommentURL(c.URL, c.Name, c.App.Slug, c.App.Name)})
 	}
 	statuses := map[string]Status{}
@@ -647,14 +663,34 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 	pending, failed, count := false, false, 0
 	passed := false
 	executedChecksBySuite := map[int64]bool{}
+	checks := s.currentSuiteChecks()
 	var parts []string
-	for _, c := range s.currentSuiteChecks() {
+	for _, c := range checks {
 		if c.App.Slug == "github-actions" {
 			executedChecksBySuite[c.CheckSuite.ID] = executedChecksBySuite[c.CheckSuite.ID] || c.Conclusion != "skipped"
 			parts = append(parts, fmt.Sprintf("suite:%d:%d:%s:%s", c.CheckSuite.ID, c.ID, c.Status, c.Conclusion))
 		}
 	}
-	for _, c := range s.currentChecks() {
+	// A required external check reruns in a new suite, so only its latest
+	// result per app and name may judge the head. Actions checks stay
+	// suite-distinct: a same-named job in another workflow is separate work.
+	latestExternal := map[string]Check{}
+	for _, c := range checks {
+		if c.App.Slug != "github-actions" {
+			key := fmt.Sprintf("%d/%s/%s", c.App.ID, c.App.Slug, c.Name)
+			if old, ok := latestExternal[key]; !ok || c.ID > old.ID {
+				latestExternal[key] = c
+			}
+		}
+	}
+	judged := make([]Check, 0, len(checks))
+	for _, c := range checks {
+		key := fmt.Sprintf("%d/%s/%s", c.App.ID, c.App.Slug, c.Name)
+		if c.App.Slug == "github-actions" || latestExternal[key].ID == c.ID {
+			judged = append(judged, c)
+		}
+	}
+	for _, c := range judged {
 		if !ciCheck(c, required) {
 			continue
 		}

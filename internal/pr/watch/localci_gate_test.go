@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,5 +97,194 @@ func TestLostManualRunOnPullRequestHeadIsAbsent(t *testing.T) {
 	s := &Service{}
 	if obs := s.registeredLocalObservation(r, snap, ChangePolicy{}, localCIPlan{}, lost, false, false); obs.Status != VerdictAbsent {
 		t.Fatalf("pull request head = %s (%s), want absent", obs.Status, obs.Reason)
+	}
+}
+
+func localPassGateFixture(t *testing.T) (Record, localCIPlan, localci.Result) {
+	t.Helper()
+	definition, err := localci.ParseDefinition([]byte(`version: 1
+trial: [test]
+checks:
+  - id: unit
+    image: python:3.13-slim
+    command: python -m unittest
+suites:
+  - id: test
+    checks: [unit]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := Record{Head: "head"}
+	plan := localCIPlan{execution: definition, required: definition, suites: definition.WorkflowSuites()}
+	return record, plan, passedResult([]localci.CheckName{"unit"})
+}
+
+// A cancelled hosted job is not a selection signal, so it holds a local pass
+// back only while a base-required name keeps asking for it. The engine's own
+// cancellation removed the hosted row, so the wait reason reports that no
+// hosted result exists for the required name.
+func TestCancelledHostedOnlyCheckBlocksLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	policy := ChangePolicy{RequiredChecks: []string{"pi"}}
+	snap := Snapshot{
+		Checks: []Check{actionsCheck(Check{ID: 1, Name: "pi", Status: "completed", Conclusion: "cancelled"})},
+		Runs:   []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
+	}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
+	snap.Pull.Head.SHA = record.Head
+	service := &Service{}
+	observation := service.registeredLocalObservation(record, snap, policy, plan, result, false, true)
+	if observation.Status != VerdictPending || !slices.Contains(observation.Jobs, "pi") {
+		t.Fatalf("a base-required name stopped holding the local pass: %+v", observation)
+	}
+	wantReason := "pi: no hosted result, no local check"
+	if observation.Reason != wantReason {
+		t.Fatalf("reason = %q, want %q", observation.Reason, wantReason)
+	}
+	snap.localCI = observation
+	stored := record
+	service.applyCI(&State{}, &stored, snap, string(observation.Status), observation.Key, observation.Jobs, nil, false, newPollNotices(&stored))
+	if stored.CIReason != wantReason {
+		t.Fatalf("stored PR reason = %q, want %q", stored.CIReason, wantReason)
+	}
+}
+
+func TestPendingNeededChecksBlockLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	snap := Snapshot{Checks: []Check{
+		actionsCheck(Check{ID: 1, Name: "pi", Status: "in_progress"}),
+		actionsCheck(Check{ID: 2, Name: "computer-smoke", Status: "queued"}),
+		actionsCheck(Check{ID: 3, Name: "go-test-shard (9)", Status: "in_progress"}),
+	}}
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPending {
+		t.Fatalf("pending needed checks did not block the local pass: %+v", observation)
+	}
+	want := []string{"computer-smoke", "go-test-shard (9)", "pi"}
+	if !slices.Equal(observation.Jobs, want) {
+		t.Fatalf("missing checks = %v, want %v", observation.Jobs, want)
+	}
+	for _, name := range want {
+		if !strings.Contains(observation.Reason, name+": hosted check pending, no local check") {
+			t.Fatalf("reason %q does not explain %s", observation.Reason, name)
+		}
+	}
+}
+
+func TestLocalPassSatisfiesCancelledHostedDuplicate(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	result.Checks = append(result.Checks, localci.SuiteResult{CheckName: "pi", Status: localci.OutcomePassed})
+	snap := Snapshot{
+		Checks: []Check{actionsCheck(Check{ID: 1, Name: "pi", Status: "completed", Conclusion: "cancelled"})},
+		Runs:   []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
+	}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPassed {
+		t.Fatalf("a cancelled duplicate blocked the matching local pass: %+v", observation)
+	}
+}
+
+// In local mode the engine cancels hosted runs on purpose. A cancelled hosted
+// job never tested the head, so it is not a selection signal: a hosted-only
+// helper such as "changes" must not become a need that no path can satisfy.
+func TestCancelledHostedOnlyJobDoesNotBlockLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	snap := Snapshot{
+		Checks: []Check{actionsCheck(Check{ID: 1, Name: "changes", Status: "completed", Conclusion: "cancelled"})},
+		Runs:   []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
+	}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPassed {
+		t.Fatalf("a cancelled hosted-only job blocked the local pass: %+v", observation)
+	}
+}
+
+// A matrix job that never expanded keeps GitHub's template name, and the
+// engine's cancellation ends it before any shard starts. Local CI reports the
+// real shard names, so the template row must not become a need that never
+// resolves.
+func TestCancelledMatrixJobTemplateWithLocalShardsIsReady(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	result.Checks = append(result.Checks,
+		localci.SuiteResult{CheckName: "go-test-shard (0)", Status: localci.OutcomePassed},
+		localci.SuiteResult{CheckName: "go-test-shard (1)", Status: localci.OutcomePassed},
+	)
+	snap := Snapshot{
+		Checks: []Check{actionsCheck(Check{ID: 1, Name: "go-test-shard (${{ matrix.shard }})", Status: "completed", Conclusion: "cancelled"})},
+		Runs:   []Run{{ID: 1, CheckSuiteID: 1, Status: "completed", Conclusion: "cancelled"}},
+	}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap = withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{1: 1}}, plan.execution)
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPassed {
+		t.Fatalf("a cancelled matrix template job blocked passing local shards: %+v", observation)
+	}
+}
+
+// A required external check can pass in an old suite and then start a rerun in
+// a new one. The rerun is the live evidence, so a local pass must wait for it:
+// an older suite's success cannot answer the required name.
+func TestPendingExternalRerunHoldsLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	policy := ChangePolicy{RequiredChecks: []string{"security"}}
+	passed := Check{ID: 1, Name: "security", Status: "completed", Conclusion: "success"}
+	passed.App.Slug = "scanner"
+	passed.CheckSuite.ID = 1
+	rerun := passed
+	rerun.ID, rerun.Status, rerun.Conclusion, rerun.CheckSuite.ID = 2, "in_progress", "", 2
+	snap := Snapshot{Checks: []Check{passed, rerun}}
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, policy, plan, result, false, true)
+	if observation.Status != VerdictPending || !slices.Contains(observation.Jobs, "security") {
+		t.Fatalf("an old success released the head before the required rerun finished: %+v", observation)
+	}
+}
+
+// A hosted job that reached failure is real evidence and still blocks the
+// local pass: dropping cancelled jobs from selection must never hide a failed
+// one.
+func TestFailedHostedJobStillBlocksLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	snap := Snapshot{Checks: []Check{actionsCheck(Check{ID: 1, Name: "changes", Status: "completed", Conclusion: "failure"})}}
+	snap.Checks[0].CheckSuite.ID = 1
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status == VerdictPassed || !slices.Contains(observation.Jobs, "changes") {
+		t.Fatalf("a failed hosted job stopped blocking the local pass: %+v", observation)
+	}
+}
+
+func TestSameNamedChecksInDifferentWorkflowsNeedSeparatePasses(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	pending := actionsCheck(Check{ID: 1, Name: "build", Status: "in_progress"})
+	pending.CheckSuite.ID = 1
+	passed := actionsCheck(Check{ID: 2, Name: "build", Status: "completed", Conclusion: "success"})
+	passed.CheckSuite.ID = 2
+	snap := Snapshot{
+		Checks: []Check{pending, passed},
+		Runs: []Run{
+			{ID: 1, WorkflowID: 1, CheckSuiteID: 1, Status: "in_progress"},
+			{ID: 2, WorkflowID: 2, CheckSuiteID: 2, Status: "completed", Conclusion: "success"},
+		},
+	}
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPending || !slices.Contains(observation.Jobs, "build") {
+		t.Fatalf("one workflow's pass replaced another workflow's pending check: %+v", observation)
+	}
+	result.Checks = append(result.Checks, localci.SuiteResult{CheckName: "build", Status: localci.OutcomePassed})
+	observation = (&Service{}).registeredLocalObservation(record, snap, ChangePolicy{}, plan, result, false, true)
+	if observation.Status != VerdictPassed {
+		t.Fatalf("a matching local pass did not satisfy both selected identities: %+v", observation)
 	}
 }
