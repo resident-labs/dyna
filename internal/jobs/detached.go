@@ -144,7 +144,10 @@ const PollScript = `chunk=262144
 now=$(date +%s)
 while [ "$#" -ge 3 ]; do
   d=$1; unit=$2; off=$3; shift 3
-  alive() { systemctl --user is-active --quiet "$unit" 2>/dev/null || { [ -s "$d/pid" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; }; }
+  alive() { systemctl --user is-active --quiet "$unit" 2>/dev/null || { [ -s "$d/pid" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; } || { [ -s "$d/writer.pid" ] && kill -0 "$(cat "$d/writer.pid")" 2>/dev/null; }; }
+  # A live writer keeps the state running even without its unit: the writer
+  # drains what the unit buffered, so a gone answer would call a log final
+  # that can still grow. Consumers settle only once the writer ended.
   if [ ! -d "$d" ]; then state=missing
   elif [ -s "$d/exit.json" ]; then state=exited
   elif alive; then state=running
@@ -199,7 +202,11 @@ fi
 # no probe, so the wait ends at once on the paths that killed it.
 if [ -s "$d/writer.pid" ]; then
   w=$(cat "$d/writer.pid")
-  for i in $(seq 1 50); do kill -0 "$w" 2>/dev/null || break; sleep 0.1; done
+  for i in $(seq 1 "${DYNA_CI_WRITER_WAIT_TENTHS:-50}"); do kill -0 "$w" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$w" 2>/dev/null; then
+    echo "log writer $w is still running" >&2
+    exit 1
+  fi
 fi
 `
 
