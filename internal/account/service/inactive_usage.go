@@ -42,6 +42,10 @@ func usageProbeAt(o *store.Observation, active bool) time.Time {
 	if active {
 		ttl = activeUsageTTL
 	}
+	if o.Unavailable {
+		// A failed read is retried soon, so a transient failure does not hold the account for a full interval.
+		ttl = credentialRetry
+	}
 	next := attempted.Add(ttl)
 	if !active {
 		for _, w := range o.Windows {

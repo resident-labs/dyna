@@ -34,6 +34,7 @@ func TestInactiveUsageProbeDeadlines(t *testing.T) {
 		{"fresh after reset", &store.Observation{ObservedAt: reset, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, reset.Add(inactiveUsageWindow)},
 		{"provider backoff", &store.Observation{ObservedAt: now, RateLimitedUntil: &backoff, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, backoff},
 		{"invalid reset", &store.Observation{ObservedAt: now, Windows: []Window{{ResetsAt: "invalid"}}}, now.Add(inactiveUsageWindow)},
+		{"failed read retries soon", &store.Observation{ObservedAt: now, LastAttemptAt: now, Unavailable: true, Reason: store.UsageReasonProviderError}, now.Add(credentialRetry)},
 		{"reading saved before typed reasons", &store.Observation{ObservedAt: now, LastAttemptAt: now, UsageError: "old generic result"}, time.Time{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
