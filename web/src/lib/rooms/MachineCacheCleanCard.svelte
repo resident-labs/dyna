@@ -10,7 +10,7 @@
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   let payload = $derived(machineCacheCleanFailedEvent(post))
-  let name = $derived(payload?.name ?? 'A machine')
+  let name = $derived(payload?.name ?? 'A node')
   let path = $derived(payload?.path ?? 'its CI cache')
   let reason = $derived(payload?.reason ?? 'the cleanup did not finish')
 </script>

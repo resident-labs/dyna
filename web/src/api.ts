@@ -127,12 +127,12 @@ export const api = {
   dataDir: () => app.DataDir(),
   health: () => app.Health(),
   systemLoad: () => app.SystemLoad(),
-  // machines is the registry behind the Machines list and the Machine page.
-  machines: () => app.Machines(),
-  machine: (id: string) => app.Machine(id),
-  machineWork: (id: string) => app.MachineWork(id),
-  saveMachine: (id: string, patch: MachinePatch) => app.SaveMachine(id, patch),
-  probeMachine: (id: string) => app.ProbeMachine(id),
+  // machines is the registry behind the Nodes list and the Node page.
+  machines: () => app.Nodes(),
+  machine: (id: string) => app.Node(id),
+  machineWork: (id: string) => app.NodeWork(id),
+  saveMachine: (id: string, patch: MachinePatch) => app.SaveNode(id, patch),
+  probeMachine: (id: string) => app.ProbeNode(id),
   rooms: () => app.Rooms(),
   feedTail: (roomId: string, before = '', keep = 0) => app.FeedTail(roomId, before, keep),
   feedAfter: (roomId: string, after = '', keep = 50) => app.FeedAfter(roomId, after, keep),

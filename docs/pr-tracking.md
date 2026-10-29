@@ -312,93 +312,93 @@ Noise-only polls do not wake anyone. Their counts carry forward to the next
 wake, so quiet filtering remains visible. Counts and kept comments appear
 before the collapsible log tail.
 
-## Registered CI machines
+## Registered CI nodes
 
 See [Repository-defined local CI](local-ci.md) for the suite file, trust rules,
 cache declarations, and host-check permission.
 
-Dyna can run CI on this machine or on registered SSH machines. These machines
-are separate from GitHub runners and come from the shared machine registry
-(`dyna machine list`). Local machines run merge trials only: GitHub's hosted CI
+Dyna can run CI on this node or on registered SSH nodes. These nodes
+are separate from GitHub runners and come from the shared node registry
+(`dyna node list`). Local nodes run merge trials only: GitHub's hosted CI
 checks a pull request head, so a PR head push starts no local run. The engine
 cancels work for superseded trial heads and never runs fork PRs on these
-machines. `dyna git ci run <sha>` still checks one commit by hand, and the
+nodes. `dyna git ci run <sha>` still checks one commit by hand, and the
 change it belongs to reads that result at its next tick.
 
-The node's admission queue bounds how much runs at once on a machine, from its
+The node's admission queue bounds how much runs at once on a node, from its
 probed CPUs and memory. Merge trials take free capacity first; they do not
 interrupt active runs.
 
-A machine runs local CI checks only when it carries the `ci` label; jobs use
-any enabled machine. The migration from the old role model gives every
-machine that had the `ci` role the label, and every other machine starts
+A node runs local CI checks only when it carries the `ci` label; jobs use
+any enabled node. The migration from the old role model gives every
+node that had the `ci` role the label, and every other node starts
 without it:
 
 ```sh
-dyna machine edit omarchy --label ci
-dyna machine edit omarchy --unlabel ci
+dyna node edit omarchy --label ci
+dyna node edit omarchy --unlabel ci
 ```
 
-The local machine is the machine that runs this engine. It is the only row
+The local node is the node that runs this engine. It is the only row
 marked `*` in the LOCAL column:
 
 ```sh
-dyna machine list
-dyna machine add omarchy --ssh ari@omarchy
+dyna node list
+dyna node add omarchy --ssh ari@omarchy
 dyna git ci mode local
-dyna machine edit omarchy --disable
-dyna machine rm omarchy
+dyna node edit omarchy --disable
+dyna node rm omarchy
 ```
 
-`--disable` stops new CI work on a machine. The flag belongs to the whole
-machine, so on the local row it covers that machine's work, not the engine,
-which keeps running. `dyna machine add` needs a new name; use
-`dyna machine edit` to change a stored machine.
+`--disable` stops new CI work on a node. The flag belongs to the whole
+node, so on the local row it covers that node's work, not the engine,
+which keeps running. `dyna node add` needs a new name; use
+`dyna node edit` to change a stored node.
 
-### Rooms of a machine
+### Rooms of a node
 
-The registry is shared by every room, so a machine can name the rooms that may
-use it, and each room's CI then stays on the machines it owns:
+The registry is shared by every room, so a node can name the rooms that may
+use it, and each room's CI then stays on the nodes it owns:
 
 ```sh
-dyna machine edit hermeslab --rooms dyna
-dyna machine edit arch --rooms fl-rea,pve
-dyna machine edit hermeslab --rooms ""
+dyna node edit hermeslab --rooms dyna
+dyna node edit arch --rooms fl-rea,pve
+dyna node edit hermeslab --rooms ""
 ```
 
-Dyna stores the room IDs, so a renamed room keeps its machine. An empty list is
-the default and lets every room use the machine. Local CI scheduling and merge
-trials skip a machine that does not allow their room, so that room's work waits
-for a machine that does instead of running next to another room's work.
-`dyna machine show <name>` prints the list.
+Dyna stores the room IDs, so a renamed room keeps its node. An empty list is
+the default and lets every room use the node. Local CI scheduling and merge
+trials skip a node that does not allow their room, so that room's work waits
+for a node that does instead of running next to another room's work.
+`dyna node show <name>` prints the list.
 
-### Suites and labels of a machine
+### Suites and labels of a node
 
-Old per-machine suite lists are imported once as owner labels named
-`suite=<suite>`. A machine with one or more of these labels takes only those
+Old per-node suite lists are imported once as owner labels named
+`suite=<suite>`. A node with one or more of these labels takes only those
 suites:
 
 ```sh
-dyna machine edit hermeslab --label suite=go
-dyna machine edit arch --label suite=go --label suite=frontend
-dyna machine edit hermeslab --unlabel suite=go
+dyna node edit hermeslab --label suite=go
+dyna node edit arch --label suite=go --label suite=frontend
+dyna node edit hermeslab --unlabel suite=go
 ```
 
 The suite IDs come from the `trial` list in
 [the repository definition](local-ci.md), such as `go`, `cross-build` or
-`computer-smoke`. A machine without `suite=` labels takes every suite, as
-before. Merge trial scheduling sends a run only to a machine that allows every
+`computer-smoke`. A node without `suite=` labels takes every suite, as
+before. Merge trial scheduling sends a run only to a node that allows every
 suite of that run, and an integration sync follows the same rule. Checks can
 also name owner or probed labels; see [Checks](local-ci.md#checks). When no
-enabled machine of the run's room allows a suite of it, the trial fails at once
-with an error that names the suite, so a trial never waits for a machine that
-cannot take it. A machine that is only busy or low on disk still counts, so its
-room's work waits for capacity rather than failing. `dyna machine show <name>`
+enabled node of the run's room allows a suite of it, the trial fails at once
+with an error that names the suite, so a trial never waits for a node that
+cannot take it. A node that is only busy or low on disk still counts, so its
+room's work waits for capacity rather than failing. `dyna node show <name>`
 prints the list.
 
-## Probing machines
+## Probing nodes
 
-Dyna reads what a machine has, and whether it is reachable, with one bounded
+Dyna reads what a node has, and whether it is reachable, with one bounded
 probe. A remote probe runs a fixed POSIX shell script over SSH with
 `BatchMode=yes`, and the whole probe has a 20-second limit. The local row runs
 the same script without SSH. No credential, token or setting goes with it.
@@ -408,23 +408,23 @@ and MemAvailable, the load averages, CPU use over one second, whether `/dev/dri`
 exists, whether docker or podman exists, whether the computer dependencies
 exist, and the remote `dyna --version`. The computer dependencies that
 registration checks are labwc and Xwayland; see
-[Agent computers](computers.md). A machine is shown with computers only when it
-has both. Computers are a capability of the machine. wayvnc only streams a
+[Agent computers](computers.md). A node is shown with computers only when it
+has both. Computers are a capability of the node. wayvnc only streams a
 desktop to the app, so the probe reports it as a separate `stream` capability.
 
 ```sh
-dyna machine probe hermeslab
-dyna machine probe --all
+dyna node probe hermeslab
+dyna node probe --all
 ```
 
-`dyna machine list` has a STATUS column: `online`, `offline`, `disabled` or
-`unknown`. `dyna machine show` prints the capabilities, the load, the time the
-probe last reached the machine, and the error of the last failed probe.
+`dyna node list` has a STATUS column: `online`, `offline`, `disabled` or
+`unknown`. `dyna node show` prints the capabilities, the load, the time the
+probe last reached the node, and the error of the last failed probe.
 
-The engine probes every enabled machine when it starts, when a machine row
+The engine probes every enabled node when it starts, when a node row
 changes, and every five minutes. It runs at most four probes at once. A failed
-probe keeps what the last good probe read, and marks the machine offline with
-the error. A disabled machine is not probed, and shows `disabled`.
+probe keeps what the last good probe read, and marks the node offline with
+the error. A disabled node is not probed, and shows `disabled`.
 
 The mode applies to the current room. A pull request head is always checked by
 GitHub's hosted CI: no mode starts a local run for it. The default, `github`,
@@ -432,29 +432,29 @@ reads only hosted evidence. `local` and `both` use a saved local result for the
 head when one exists, such as the result of `dyna git ci run`, and fall back to
 hosted CI otherwise. A conclusive pass permits progress when every required
 check has passed. An observed failure from either source blocks it. Review
-approval remains required. A merge trial runs on the local machines that can
+approval remains required. A merge trial runs on the local nodes that can
 take its suites, whatever the mode.
 
-When a machine starts a merge trial, Dyna cancels that trial head's queued or
+When a node starts a merge trial, Dyna cancels that trial head's queued or
 waiting runs of `.github/workflows/ci.yml`. Running jobs and other workflows
 finish. An infrastructure error makes Dyna rerun those cancelled runs. A test
 failure remains a failure. Dyna never cancels a pull request head, a main push
 or a fork PR run. The GitHub workflow stays unchanged and always checks landed
 code on main.
 
-Each machine limits concurrent checks with its slot count. Local work runs with
+Each node limits concurrent checks with its slot count. Local work runs with
 systemd CPU and memory limits and a lower process priority. Containers also
-limit CPU, memory, and process counts. Machines reuse repository-declared
+limit CPU, memory, and process counts. Nodes reuse repository-declared
 caches under the runner's separate `caches/` directory. Every cache has a size
 cap and age cleanup. A run that finds a linked
 go-build or go-mod path keeps the link beside the cache as `.before-d48`,
 creates a real directory under the exclusive cache lock, and posts a typed
-machine notice. Any other unsafe cache link stops the run, so it never mounts
+node notice. Any other unsafe cache link stops the run, so it never mounts
 or trims another account's cache.
-Results and machine settings live in SQLite; report files remain on disk.
+Results and node settings live in SQLite; report files remain on disk.
 Dyna keeps a local run's result to itself: it posts no commit status to GitHub,
-so no machine name leaves the engine. The merge gate, the PR Checks tab and
-`dyna git merge status` read the saved result, which names the machine that ran
+so no node name leaves the engine. The merge gate, the PR Checks tab and
+`dyna git merge status` read the saved result, which names the node that ran
 each check. Use `dyna git ci show <sha> --json` for saved results and durations.
 A status Dyna posted for an older run stays on that commit; the watcher ignores
 it, so it never counts as hosted evidence for a merge.

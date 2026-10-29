@@ -61,13 +61,13 @@
 <nav class="rail" class:phone={narrow} aria-label="Rooms">
   <div class="slot" class:sel={selected === ''}>
     <span class="pill"></span>
-    <button class="tile home" aria-label="Machines" title="Machines" onclick={() => onselect('')}>
+    <button class="tile home" aria-label="Nodes" title="Nodes" onclick={() => onselect('')}>
       <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
         <rect x="4" y="4.5" width="16" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.8" />
         <rect x="4" y="13.5" width="16" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.8" />
         <path d="M7.5 7.5h.01M7.5 16.5h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
       </svg>
-      {#if narrow}<span class="room-name">Machines</span>{/if}
+      {#if narrow}<span class="room-name">Nodes</span>{/if}
     </button>
   </div>
   <div class="sep"></div>

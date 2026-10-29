@@ -1,6 +1,6 @@
-// Package machine exposes the machines registry as `dyna machine`: the engine
-// host, marked local, and every other machine Dyna reaches over SSH.
-package machine
+// Package node exposes the nodes registry as `dyna node`: the engine
+// host, marked local, and every other node Dyna reaches over SSH.
+package node
 
 import (
 	"context"
@@ -23,17 +23,18 @@ import (
 	"dyna-agent/internal/websvc"
 )
 
-// NewCommand builds the `dyna machine` group.
+// NewCommand builds the `dyna node` group.
 func NewCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "machine",
-		Short: "List and change the machines that run CI and jobs",
-		Long: "The registry holds this machine, marked local, and each machine that Dyna\n" +
-			"can use. A machine that is enabled and whose room list allows a room takes\n" +
+		Use:        "node",
+		Short:      "List and change the nodes that run CI and jobs",
+		SuggestFor: []string{"machine"},
+		Long: "The registry holds this node, marked local, and each node that Dyna\n" +
+			"can use. A node that is enabled and whose room list allows a room takes\n" +
 			"that room's local CI work and jobs; the admission queue bounds how much\n" +
-			"runs. A machine other than this one needs an SSH destination.\n\n" +
-			"`dyna machine probe` reads a machine's capabilities and load over SSH. The\n" +
-			"engine also probes every enabled machine when it starts, when a machine\n" +
+			"runs. A node other than this one needs an SSH destination.\n\n" +
+			"`dyna node probe` reads a node's capabilities and load over SSH. The\n" +
+			"engine also probes every enabled node when it starts, when a node\n" +
 			"changes, and every five minutes.",
 		Args: cobra.NoArgs,
 	}
@@ -45,7 +46,7 @@ func store() machines.Store { return machines.Store{} }
 
 var saveMachine = func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
 	var detail websvc.MachineDetail
-	err := engineclient.New("").Call(ctx, "SaveMachine", []any{ref, patch}, &detail)
+	err := engineclient.New("").Call(ctx, "SaveNode", []any{ref, patch}, &detail)
 	return detail, err
 }
 
@@ -60,7 +61,7 @@ func listCommand() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List machines, this machine first",
+		Short: "List nodes, this node first",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			list, err := store().List(c.Context())
@@ -73,11 +74,11 @@ func listCommand() *cobra.Command {
 			return writeTable(c.OutOrStdout(), list)
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print machines as JSON")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print nodes as JSON")
 	return cmd
 }
 
-// writeTable prints one row per machine. The LOCAL column marks the machine
+// writeTable prints one row per node. The LOCAL column marks the node
 // that runs this engine.
 func writeTable(w io.Writer, list []machines.Machine) error {
 	out := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
@@ -95,7 +96,7 @@ func writeTable(w io.Writer, list []machines.Machine) error {
 	return out.Flush()
 }
 
-// hostChecksWho names who allows host checks, for `dyna machine show`. A room
+// hostChecksWho names who allows host checks, for `dyna node show`. A room
 // root's grant names its room, which this command reads by name where it can.
 func hostChecksWho(m machines.Machine) string {
 	if len(m.HostChecksGrants) == 0 {
@@ -126,7 +127,7 @@ func showCommand() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "show <name>",
-		Short: "Show one machine",
+		Short: "Show one node",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			m, err := store().Get(c.Context(), args[0])
@@ -170,12 +171,12 @@ func showCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print the machine as JSON")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the node as JSON")
 	return cmd
 }
 
 // writeCapabilities prints what the last probe read, or says that no probe
-// has reached the machine.
+// has reached the node.
 func writeCapabilities(out io.Writer, m machines.Machine) {
 	caps, load := m.Capabilities, m.Load
 	if m.LastSeen.IsZero() {
@@ -212,18 +213,18 @@ func probeCommand() *cobra.Command {
 	var asJSON, all bool
 	cmd := &cobra.Command{
 		Use:   "probe [<name>|--all]",
-		Short: "Read a machine's capabilities and load, and store them",
-		Long: "Probe one machine, or every enabled machine with --all, and store what\n" +
-			"the probe read. A remote machine is read over SSH with no credential. A\n" +
-			"failed probe keeps the last capabilities it read, and marks the machine\n" +
-			"offline. A disabled machine is not probed.",
+		Short: "Read a node's capabilities and load, and store them",
+		Long: "Probe one node, or every enabled node with --all, and store what\n" +
+			"the probe read. A remote node is read over SSH with no credential. A\n" +
+			"failed probe keeps the last capabilities it read, and marks the node\n" +
+			"offline. A disabled node is not probed.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			if all && len(args) > 0 {
-				return errors.New("probe: give a machine name or --all, not both")
+				return errors.New("probe: give a node name or --all, not both")
 			}
 			if !all && len(args) == 0 {
-				return errors.New("probe: give a machine name or --all")
+				return errors.New("probe: give a node name or --all")
 			}
 			targets := args
 			if all {
@@ -249,7 +250,7 @@ func probeCommand() *cobra.Command {
 				started := time.Now()
 				stored, err := p.ProbeAndSave(c.Context(), m)
 				if errors.Is(err, machines.ErrDisabled) {
-					failures = append(failures, fmt.Errorf("%s is disabled; enable it with dyna machine edit %s --enable", name, name))
+					failures = append(failures, fmt.Errorf("%s is disabled; enable it with dyna node edit %s --enable", name, name))
 					continue
 				}
 				if err != nil {
@@ -272,12 +273,12 @@ func probeCommand() *cobra.Command {
 			return errors.Join(failures...)
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "probe every enabled machine")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print the probed machines as JSON")
+	cmd.Flags().BoolVar(&all, "all", false, "probe every enabled node")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the probed nodes as JSON")
 	return cmd
 }
 
-// writeProbe prints one probe result. A machine that could not be reached
+// writeProbe prints one probe result. A node that could not be reached
 // prints as a result with its error, not as a command failure.
 func writeProbe(out io.Writer, m machines.Machine, took time.Duration) {
 	fmt.Fprintf(out, "%s: %s in %s\n", m.Name, m.Status(), took.Round(time.Millisecond))
@@ -292,9 +293,9 @@ func addCommand() *cobra.Command {
 	var ssh string
 	cmd := &cobra.Command{
 		Use:   "add <name>",
-		Short: "Add a machine, or update the machine with this name",
-		Long: "Add a machine. Its name must be new: use edit to change a stored machine.\n" +
-			"A machine other than this one needs an SSH destination.",
+		Short: "Add a node, or update the node with this name",
+		Long: "Add a node. Its name must be new: use edit to change a stored node.\n" +
+			"A node other than this one needs an SSH destination.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			enabled := true
@@ -303,7 +304,7 @@ func addCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s.\n", saved.Name)
+			fmt.Fprintf(c.OutOrStdout(), "Saved node %s.\n", saved.Name)
 			return nil
 		},
 	}
@@ -323,9 +324,9 @@ func editCommand() *cobra.Command {
 	var checkTmp string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
-		Short: "Change a machine",
-		Long: "Change a machine's route, switch, room list, labels or limits.\n" +
-			"A machine that is enabled and whose room list allows a room takes that\n" +
+		Short: "Change a node",
+		Long: "Change a node's route, switch, room list, labels or limits.\n" +
+			"A node that is enabled and whose room list allows a room takes that\n" +
 			"room's local CI work and jobs.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -410,30 +411,30 @@ func editCommand() *cobra.Command {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
 			if !changed {
-				return fmt.Errorf("edit %s: give a machine, host-check, room, label or limit setting to change", args[0])
+				return fmt.Errorf("edit %s: give a node, host-check, room, label or limit setting to change", args[0])
 			}
 			saved, err := saveMachine(c.Context(), current.ID, patch)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s.\n", saved.Name)
+			fmt.Fprintf(c.OutOrStdout(), "Saved node %s.\n", saved.Name)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&rename, "rename", "", "new name for the machine")
+	cmd.Flags().StringVar(&rename, "rename", "", "new name for the node")
 	cmd.Flags().StringVar(&ssh, "ssh", "", "SSH destination as host or user@host")
-	cmd.Flags().BoolVar(&enable, "enable", false, "allow work on the machine")
-	cmd.Flags().BoolVar(&disable, "disable", false, "stop new work on the machine")
+	cmd.Flags().BoolVar(&enable, "enable", false, "allow work on the node")
+	cmd.Flags().BoolVar(&disable, "disable", false, "stop new work on the node")
 	cmd.Flags().BoolVar(&allowHostChecks, "allow-host-checks", false, "allow repository checks to run outside containers")
 	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
 	cmd.Flags().StringArrayVar(&labels, "label", nil, "add a label, such as ci to run local CI checks (repeatable)")
 	cmd.Flags().StringArrayVar(&unlabels, "unlabel", nil, "remove a label (repeatable)")
 	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
-	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the machine, such as 60s (0 restores the default of 10s)")
-	cmd.Flags().StringVar(&checkTmp, "check-tmp", "", "folder that holds each host check's temporary folder, such as /dev/shm (empty uses the machine's TMPDIR, else /tmp)")
-	cmd.Flags().IntVar(&maxIOHeavy, "max-io-heavy", 0, "IO-heavy jobs and checks this machine runs at once (0: one per 16 CPUs, at least 1)")
-	cmd.Flags().IntVar(&maxDiskPercent, "max-disk-percent", 0, "used-disk percent above which the machine admits no new work (0: keep at least 20 GiB and 5% of the disk free, capped at 10% of the disk)")
+	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the node, such as 60s (0 restores the default of 10s)")
+	cmd.Flags().StringVar(&checkTmp, "check-tmp", "", "folder that holds each host check's temporary folder, such as /dev/shm (empty uses the node's TMPDIR, else /tmp)")
+	cmd.Flags().IntVar(&maxIOHeavy, "max-io-heavy", 0, "IO-heavy jobs and checks this node runs at once (0: one per 16 CPUs, at least 1)")
+	cmd.Flags().IntVar(&maxDiskPercent, "max-disk-percent", 0, "used-disk percent above which the node admits no new work (0: keep at least 20 GiB and 5% of the disk free, capped at 10% of the disk)")
 	cmd.Flags().StringArrayVar(&resourceEdits, "resource", nil, "set a named resource count, such as ghidra=1 (repeatable; NAME=0 removes it)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
@@ -452,12 +453,12 @@ func connectTimeoutSeconds(timeout time.Duration) (int, error) {
 func removeCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rm <name>",
-		Short: "Remove a machine; this machine cannot be removed",
+		Short: "Remove a node; this node cannot be removed",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			// The engine removes the machine, as it owns every other change to one.
-			// The command names the machine it read by ID, because a name can equal
-			// another machine's ID and the engine resolves IDs first.
+			// The engine removes the node, as it owns every other change to one.
+			// The command names the node it read by ID, because a name can equal
+			// another node's ID and the engine resolves IDs first.
 			m, err := store().Get(c.Context(), args[0])
 			if err != nil {
 				return err
@@ -465,7 +466,7 @@ func removeCommand() *cobra.Command {
 			if _, err := saveMachine(c.Context(), m.ID, websvc.MachinePatch{Remove: true}); err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Removed machine %s.\n", m.Name)
+			fmt.Fprintf(c.OutOrStdout(), "Removed node %s.\n", m.Name)
 			return nil
 		},
 	}
@@ -502,8 +503,8 @@ func joinOr(names []string, fallback string) string {
 }
 
 // resolveRooms reads the room names or IDs a command line names and stores their
-// IDs, so a renamed room keeps taking the machine's work and a typo cannot limit
-// a machine to a room that does not exist.
+// IDs, so a renamed room keeps taking the node's work and a typo cannot limit
+// a node to a room that does not exist.
 func resolveRooms(names []string) ([]string, error) {
 	rooms := room.DefaultStore()
 	ids := make([]string, 0, len(names))
@@ -524,7 +525,7 @@ func resolveRooms(names []string) ([]string, error) {
 	return ids, nil
 }
 
-// roomList words a machine's room limit: the names of the rooms it takes work
+// roomList words a node's room limit: the names of the rooms it takes work
 // from, or every room when it names none.
 func roomList(ids []string) string {
 	if len(ids) == 0 {
@@ -543,7 +544,7 @@ func roomList(ids []string) string {
 	return strings.Join(names, ", ")
 }
 
-// labelList words a label list for show: labels a machine carries, or none.
+// labelList words a label list for show: labels a node carries, or none.
 func labelList(labels []string) string {
 	if len(labels) == 0 {
 		return "none (local CI needs the ci label)"

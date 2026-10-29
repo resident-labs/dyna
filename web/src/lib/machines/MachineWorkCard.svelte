@@ -35,7 +35,7 @@
 
 <Card title="Work" count={work ? work.running.length + work.waiting.length || null : null}>
   {#if !work}
-    <p class="note">{failed ? 'Could not read this machine\'s queue. It will try again on the next change.' : 'Reading the queue…'}</p>
+    <p class="note">{failed ? 'Could not read this node\'s queue. It will try again on the next change.' : 'Reading the queue…'}</p>
   {:else}
     {@const c = work.capacity}
     <Row dense text="CPUs held">

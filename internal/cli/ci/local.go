@@ -84,7 +84,7 @@ func localCommands() []*cobra.Command {
 			}
 			node = found
 			if len(localci.NodesForLabels(localci.NodesForSuites([]localci.Node{node}, runSuites), labels)) == 0 {
-				return fmt.Errorf("CI machine %s does not allow every suite and check label of this run", node.Name)
+				return fmt.Errorf("CI node %s does not allow every suite and check label of this run", node.Name)
 			}
 		}
 		runner.Node = &node
@@ -93,7 +93,7 @@ func localCommands() []*cobra.Command {
 		if asJSON {
 			message = c.ErrOrStderr()
 		}
-		fmt.Fprintf(message, "CI machine: %s\n", node.Name)
+		fmt.Fprintf(message, "CI node: %s\n", node.Name)
 		runner.OnCacheRepair = svc.CacheRepairReporter(rec.ID)
 		result, runErr := runner.Run(c.Context(), localci.Request{Definition: definition, Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed, RoomID: rec.ID, Source: jobs.CheckSource{Kind: jobs.CheckKindLocalChange}})
 		if result.SHA != "" {
@@ -116,7 +116,7 @@ func localCommands() []*cobra.Command {
 	}}
 	run.Flags().StringSliceVar(&suites, "suite", nil, "suite from .dyna/local-ci.yaml (repeatable; default: full workflow)")
 	run.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "timeout for each check")
-	run.Flags().StringVar(&nodeName, "node", "", "registered CI machine to use (default: the only enabled machine)")
+	run.Flags().StringVar(&nodeName, "node", "", "registered node to use (default: the only enabled node)")
 	run.Flags().BoolVar(&asJSON, "json", false, "print the saved result as JSON")
 	var showJSON bool
 	show := &cobra.Command{Use: "show <sha>", Short: "Show saved local CI results for a commit", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
@@ -168,7 +168,7 @@ func defaultNode(nodes []localci.Node) (localci.Node, error) {
 	}
 	switch len(ready) {
 	case 0:
-		return localci.Node{}, fmt.Errorf("no enabled machine carries the ci label; add one with dyna machine edit <name> --label ci")
+		return localci.Node{}, fmt.Errorf("no enabled node carries the ci label; add one with dyna node edit <name> --label ci")
 	case 1:
 		return ready[0], nil
 	}
@@ -177,7 +177,7 @@ func defaultNode(nodes []localci.Node) (localci.Node, error) {
 		names[i] = node.Name
 	}
 	sort.Strings(names)
-	return localci.Node{}, fmt.Errorf("several machines carry the ci label; choose one with --node (%s)", strings.Join(names, ", "))
+	return localci.Node{}, fmt.Errorf("several nodes carry the ci label; choose one with --node (%s)", strings.Join(names, ", "))
 }
 func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 	if asJSON {

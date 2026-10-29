@@ -94,12 +94,12 @@
 
 <section class="machine">
   <header class="top">
-    <button class="back" onclick={onback} title="Back to the machine list"><span aria-hidden="true">‹</span> Machines</button>
+    <button class="back" onclick={onback} title="Back to the node list"><span aria-hidden="true">‹</span> Nodes</button>
     {#if machine}<span class="status {machine.status}">{statusText(machine.status)}</span>{/if}
   </header>
   {#if error}<p class="err" role="alert">{error}</p>{/if}
   {#if !machine}
-    <Skeleton label="Loading machine" />
+    <Skeleton label="Loading node" />
   {:else}
     <div class="body">
       <Card title="Overview">
@@ -112,7 +112,7 @@
         {#if machine.status === 'offline'}
           <!-- r8: a designed line, never the engine's probe error text. -->
           <Row dense text="Last probe">
-            {#snippet trail()}<span class="value warn">Did not reach the machine. Check the SSH route, then probe again.</span>{/snippet}
+            {#snippet trail()}<span class="value warn">Did not reach the node. Check the SSH route, then probe again.</span>{/snippet}
           </Row>
         {/if}
         {#if machine.seenAt}
@@ -158,7 +158,7 @@
           {#if load}
             <SystemLoadCard title="Usage" {load} rows={false} />
           {:else}
-            <Card title="Usage"><p class="note">Reading this machine…</p></Card>
+            <Card title="Usage"><p class="note">Reading this node…</p></Card>
           {/if}
           <Card title="Running now" count={machine.running?.length || null}>
             {#each machine.running ?? [] as agent (agent.id)}
@@ -223,7 +223,7 @@
 
       <Card title="Configuration">
         <Row dense text="Enabled">
-          {#snippet meta()}<span class="note">A disabled machine takes no new work.</span>{/snippet}
+          {#snippet meta()}<span class="note">A disabled node takes no new work.</span>{/snippet}
           {#snippet trail()}<Switch on={machine.enabled} label="Enabled" disabled={busy} onchange={(on: boolean) => onsave({ enabled: on })} />{/snippet}
         </Row>
         <Row dense text="IO-heavy limit">
@@ -243,7 +243,7 @@
         </Row>
         <Row dense text="Owner labels">
           {#snippet meta()}
-            <span class="note">The ci label makes this machine run local CI checks. dyna machine edit {machine.name} --label ci sets it.</span>
+            <span class="note">The ci label makes this node run local CI checks. dyna node edit {machine.name} --label ci sets it.</span>
           {/snippet}
           {#snippet detail()}<span class="note">{machine.labels?.length ? machine.labels.join(', ') : 'none'}</span>{/snippet}
         </Row>
@@ -269,12 +269,12 @@
         </Row>
         {#if !machine.local}
           <Row dense text="SSH connect timeout">
-            {#snippet meta()}<span class="note">Seconds to wait for the connection. Raise it for a machine behind a slow jump host.</span>{/snippet}
+            {#snippet meta()}<span class="note">Seconds to wait for the connection. Raise it for a node behind a slow jump host.</span>{/snippet}
             {#snippet trail()}<input class="num" type="number" min="1" step="1" aria-label="SSH connect timeout in seconds" value={machine.sshConnectTimeoutSeconds ?? 10} disabled={busy} onchange={setConnectTimeout} />{/snippet}
           </Row>
         {/if}
         <Row dense text="Probe now">
-          {#snippet meta()}<span class="note">Reads what the machine has and how it is loaded.</span>{/snippet}
+          {#snippet meta()}<span class="note">Reads what the node has and how it is loaded.</span>{/snippet}
           {#snippet trail()}
             <button class="probe" disabled={busy || probing || !machine.enabled} onclick={onprobe}>{probing ? 'Probing…' : 'Probe'}</button>
           {/snippet}

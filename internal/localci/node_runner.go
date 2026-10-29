@@ -598,7 +598,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				// infrastructure error, so the run cleans up and retries, and hosted
 				// CI resumes when it stays broken.
 				if sr.Status == OutcomeFailed && diskFull(sr.LogTail+"\n"+sr.Error) {
-					sr.Status, sr.Error, sr.Cause = OutcomeError, "check ran out of disk space on the CI machine", CauseDiskFull
+					sr.Status, sr.Error, sr.Cause = OutcomeError, "check ran out of disk space on the CI node", CauseDiskFull
 				}
 				// A checkout that failed before the check ran keeps the git error as
 				// this job's evidence. The exit status alone would hide that text.

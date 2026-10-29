@@ -261,9 +261,9 @@ type NodeLostError struct {
 
 func (e *NodeLostError) Error() string {
 	if e.Gone {
-		return fmt.Sprintf("the check on CI machine %s ended without an exit record", e.Node)
+		return fmt.Sprintf("the check on CI node %s ended without an exit record", e.Node)
 	}
-	return fmt.Sprintf("CI machine %s was unreachable for %s: %v", e.Node, e.After.Round(time.Second), e.Cause)
+	return fmt.Sprintf("CI node %s was unreachable for %s: %v", e.Node, e.After.Round(time.Second), e.Cause)
 }
 
 func (e *NodeLostError) Unwrap() error { return e.Cause }

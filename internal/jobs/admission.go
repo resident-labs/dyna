@@ -824,7 +824,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		var why string
 		switch {
 		case machineErr != nil:
-			why = "machine " + node + " is not registered"
+			why = "node " + node + " is not registered"
 		case diskBlock != "":
 			why = diskBlock
 		case resourceBlock != "":

@@ -74,8 +74,22 @@ func TestSubmitPlacesLabelsOnTheRoomiestEligibleMachine(t *testing.T) {
 	if job.Node != "idle" {
 		t.Fatalf("label placement chose %q, want the eligible node with the most free CPUs", job.Node)
 	}
-	if _, err := service.Submit(t.Context(), Input{Command: []string{"true"}, Image: "alpine", Labels: []string{"missing"}}); err == nil || !strings.Contains(err.Error(), "no machine has label \"missing\"") {
+	if _, err := service.Submit(t.Context(), Input{Command: []string{"true"}, Image: "alpine", Labels: []string{"missing"}}); err == nil || !strings.Contains(err.Error(), "no node has label \"missing\"") {
 		t.Fatalf("unknown label error = %v", err)
+	}
+}
+
+func TestSubmitLabelErrorNamesRoom(t *testing.T) {
+	service := &Service{
+		Machines: fakeMachines{byName: map[string]machines.Machine{
+			"other": {Name: "other", Enabled: true, Rooms: []string{"room_other"}, Labels: []string{"podman"}},
+		}},
+		RoomName: func(string) string { return "release" },
+	}
+	_, err := service.Submit(t.Context(), Input{RoomID: "room_2026", Labels: []string{"podman"}, Command: []string{"true"}, Image: "alpine"})
+	want := "no enabled node serving room release has every label (podman)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("label placement error = %v, want %q", err, want)
 	}
 }
 

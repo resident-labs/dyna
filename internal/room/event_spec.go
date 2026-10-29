@@ -319,7 +319,7 @@ var eventSpecs = []EventSpec{
 		Payload:  reflect.TypeOf(MachineEvent{}),
 		Wake:     WakeRootIfNeeded,
 		Once:     true,
-		Text:     "Machine {name} is low on disk: {block}. Dyna starts no new work there until space is freed.",
+		Text:     "Node {name} is low on disk: {block}. Dyna starts no new work there until space is freed.",
 	},
 	// A run that repaired a linked cache posts one quiet machine fact, so the
 	// owner sees that Dyna switched it back without waking a session.
@@ -331,7 +331,7 @@ var eventSpecs = []EventSpec{
 		Quiet:    true,
 		Wake:     WakeNever,
 		Once:     true,
-		Text:     "Machine {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
+		Text:     "Node {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
 	},
 	// A failed cache cleanup names one path and one bounded reason. An hourly
 	// retry of the same failure reuses this post instead of adding another.
@@ -342,7 +342,7 @@ var eventSpecs = []EventSpec{
 		Payload:  reflect.TypeOf(MachineCacheCleanFailedEvent{}),
 		Wake:     WakeRootIfNeeded,
 		Once:     true,
-		Text:     "Machine {name} could not clean CI cache path {path}: {reason}.",
+		Text:     "Node {name} could not clean CI cache path {path}: {reason}.",
 	},
 	// A sweep of a machine's scratch folders that freed space posts one quiet
 	// machine fact, so rooms that use the machine see what went and why.
@@ -354,7 +354,7 @@ var eventSpecs = []EventSpec{
 		Quiet:    true,
 		Wake:     WakeNever,
 		Once:     true,
-		Text:     "Machine {name} freed scratch space: {summary}.",
+		Text:     "Node {name} freed scratch space: {summary}.",
 	},
 	// A machine that cannot run one slice per room tells each room once per
 	// cause: the room's work then shares the agent slice with no process cap.

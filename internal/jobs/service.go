@@ -62,7 +62,7 @@ func RepoKey(repo string) string {
 type Service struct {
 	Store    Store
 	Machines MachineSource
-	// RoomName resolves a resource holder's room for its wait reason.
+	// RoomName resolves a room ID for readable placement errors and wait reasons.
 	RoomName func(string) string
 	Reporter Reporter
 	// DataDir is the engine's data folder, where job logs live.
@@ -225,7 +225,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 		return Job{}, err
 	}
 	if !machine.Enabled {
-		return Job{}, fmt.Errorf("machine %s is disabled", machine.Name)
+		return Job{}, fmt.Errorf("node %s is disabled", machine.Name)
 	}
 	// A job runs on the host unless it names an image.
 	host := in.Host || in.Image == ""
@@ -342,7 +342,7 @@ func (s *Service) machine(ctx context.Context, in Input) (machines.Machine, erro
 		}
 		machine, err := s.Machines.Get(ctx, in.Node)
 		if errors.Is(err, os.ErrNotExist) {
-			return machine, fmt.Errorf("no machine named %s is registered", in.Node)
+			return machine, fmt.Errorf("no node named %s is registered", in.Node)
 		}
 		return machine, err
 	}
@@ -355,7 +355,7 @@ func (s *Service) machine(ctx context.Context, in Input) (machines.Machine, erro
 	}
 	for _, label := range in.Labels {
 		if !slices.ContainsFunc(list, func(machine machines.Machine) bool { return machine.HasLabel(label) }) {
-			return machines.Machine{}, fmt.Errorf("no machine has label %q", label)
+			return machines.Machine{}, fmt.Errorf("no node has label %q", label)
 		}
 	}
 	chosen := -1
@@ -388,15 +388,19 @@ func (s *Service) machine(ctx context.Context, in Input) (machines.Machine, erro
 			return machines.Machine{}, hostGrantError(list[grantBlocked])
 		}
 		if in.RoomID != "" {
-			return machines.Machine{}, fmt.Errorf("no enabled machine serving room %s has every label (%s)", in.RoomID, strings.Join(in.Labels, ", "))
+			room := in.RoomID
+			if s.RoomName != nil {
+				room = s.RoomName(room)
+			}
+			return machines.Machine{}, fmt.Errorf("no enabled node serving room %s has every label (%s)", room, strings.Join(in.Labels, ", "))
 		}
-		return machines.Machine{}, fmt.Errorf("no enabled machine has every label (%s)", strings.Join(in.Labels, ", "))
+		return machines.Machine{}, fmt.Errorf("no enabled node has every label (%s)", strings.Join(in.Labels, ", "))
 	}
 	return list[chosen], nil
 }
 
 func hostGrantError(machine machines.Machine) error {
-	return fmt.Errorf("machine %s allows host jobs only with a host-check grant; the owner or the room root allows them with: dyna machine edit %s --allow-host-checks", machine.Name, machine.Name)
+	return fmt.Errorf("node %s allows host jobs only with a host-check grant; the owner or the room root allows them with: dyna node edit %s --allow-host-checks", machine.Name, machine.Name)
 }
 
 // resolveCommit reads the exact commit the job checks out. It returns the
@@ -960,7 +964,7 @@ func (s *Service) finish(job *Job, err error) {
 	if job.Dir != "" && !EngineStopping() {
 		machine, err := s.Machines.Get(ctx, job.Node)
 		if err != nil {
-			s.logger()("jobs: remove the folder of job %s: resolve machine %s: %v", job.ID, job.Node, err)
+			s.logger()("jobs: remove the folder of job %s: resolve node %s: %v", job.ID, job.Node, err)
 			return
 		}
 		conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}

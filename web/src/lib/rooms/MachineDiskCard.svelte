@@ -12,7 +12,7 @@
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   let payload = $derived(machineEvent(post))
-  let name = $derived(payload?.name ?? 'A machine')
+  let name = $derived(payload?.name ?? 'A node')
   let free = $derived(payload ? formatBytes(payload.freeBytes) : '')
   let chips = $derived(payload ? [{ label: `${free} free`, tone: 'gold' }, { label: payload.block }] : [])
 </script>

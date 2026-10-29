@@ -139,7 +139,7 @@ func (s *Service) alertTrialLocalCIUnstarted(ctx context.Context, b *state.Merge
 	ev := mergeTrialEvent(st, *b, room.MergeChecks)
 	ev.ReasonKind, ev.Reason, ev.Key = room.MergeReasonOther, "local CI has not started", "local-ci-unstarted"
 	ev.Summary = fmt.Sprintf("required local checks never started: %s", strings.Join(names, ", "))
-	text := fmt.Sprintf("Merge trial %s (head %s) has waited more than %s for local CI that no machine started, after one retry. Required local checks: %s. Start them with 'dyna git ci run %s', or inspect the CI machines with 'dyna machine list'.",
+	text := fmt.Sprintf("Merge trial %s (head %s) has waited more than %s for local CI that no node started, after one retry. Required local checks: %s. Start them with 'dyna git ci run %s', or inspect the CI nodes with 'dyna node list'.",
 		b.Branch, b.Head, 2*trialLocalCIStartWait, strings.Join(names, ", "), b.Head)
 	return s.postMergeNotice(ctx, anchor, "merge-trial-local-ci-unstarted/"+trialIdentity(*b), Notice{NeedsRoot: true, Kind: "ci", Merge: &ev, Text: text})
 }
