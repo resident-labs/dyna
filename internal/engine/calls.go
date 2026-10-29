@@ -10,6 +10,7 @@ import (
 
 	"dyna-agent/internal/account/service"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/computerweb"
 	"dyna-agent/internal/configsvc"
 	"dyna-agent/internal/devicesvc"
@@ -494,11 +495,17 @@ func bindings(s services) []websvc.Binding {
 		{Name: "RoomMCPRemove", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Remove},
 		{Name: "RoomMCPAttach", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Attach},
 		{Name: "RoomMCPAllow", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Allow},
+		{Name: "RoomMCPBlockTerm", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.BlockTerm},
+		{Name: "RoomMCPAllowLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.AllowLogin},
 		// Root may detach, list tools and grant read. The service checks the caller's room and role.
 		{Name: "RoomMCPDetach", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Detach},
 		{Name: "RoomMCPTools", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Tools},
 		{Name: "RoomMCPGrant", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Grant},
 		{Name: "RoomMCPList", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.roomMCPList},
+		// The agent path. Only a local process asks, and the engine reads the caller from its socket.
+		{Name: "RoomMCPAccess", Access: websvc.Read, Scope: websvc.ScopeOperate, Local: true, Method: s.roomMCPAccess},
+		{Name: "RoomMCPAgentTools", Access: websvc.Read, Scope: websvc.ScopeOperate, Local: true, Method: s.roomMCPAgentTools},
+		{Name: "RoomMCPCall", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: s.roomMCPCall},
 		{Name: "UsageRollup", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.UsageRollup},
 		{Name: "ProfileUsage", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ProfileUsage},
 		{Name: "Computers", Access: websvc.Read, Scope: websvc.ScopeComputers, Method: s.computers.Computers},
@@ -510,6 +517,29 @@ func bindings(s services) []websvc.Binding {
 		{Name: "VoiceSay", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voiceSay},
 		{Name: "VoiceStop", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.voice.Stop},
 	}...)
+}
+
+// roomMCPAccess, roomMCPAgentTools and roomMCPCall answer an engine that runs
+// read-only, which has no MCP service, as a room with no servers.
+func (s services) roomMCPAccess(ctx context.Context) (bool, error) {
+	if s.roommcp == nil {
+		return false, nil
+	}
+	return s.roommcp.Access(ctx)
+}
+
+func (s services) roomMCPAgentTools(ctx context.Context) (string, error) {
+	if s.roommcp == nil {
+		return "", errors.New("room MCP servers are not available")
+	}
+	return s.roommcp.AgentTools(ctx)
+}
+
+func (s services) roomMCPCall(ctx context.Context, in callspec.RoomMCPCallRequest) (string, error) {
+	if s.roommcp == nil {
+		return "", errors.New("room MCP servers are not available")
+	}
+	return s.roommcp.Call(ctx, in.Server, in.Tool, in.Arguments)
 }
 
 // roomMCPList answers an engine that runs read-only, which has no MCP service.
