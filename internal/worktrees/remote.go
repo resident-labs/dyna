@@ -44,11 +44,15 @@ func baseRemote(ctx context.Context, dir, base string) string {
 	if err != nil {
 		return "origin"
 	}
-	name := "origin"
+	short := strings.TrimPrefix(base, "refs/remotes/")
+	name := ""
 	for _, candidate := range strings.Fields(string(out)) {
-		if strings.HasPrefix(base, candidate+"/") && len(candidate) > len(name) {
+		if strings.HasPrefix(short, candidate+"/") && len(candidate) > len(name) {
 			name = candidate
 		}
+	}
+	if name == "" {
+		return "origin"
 	}
 	return name
 }
