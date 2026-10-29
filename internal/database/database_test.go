@@ -15,7 +15,7 @@ import (
 func TestSQLiteInitializationDoesNotRetryOtherErrors(t *testing.T) {
 	calls := 0
 	want := fmt.Errorf("invalid database")
-	err := retryBusy(context.Background(), func() error { calls++; return want })
+	err := Retry(context.Background(), func() error { calls++; return want })
 	if err != want || calls != 1 {
 		t.Fatalf("unexpected retry: %d calls, %v", calls, err)
 	}
