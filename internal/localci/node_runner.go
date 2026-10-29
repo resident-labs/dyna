@@ -869,6 +869,13 @@ func endCause(node Node, ctx context.Context, err error, markers [][]string, con
 	if unreachable(node, err) {
 		return CauseSSHDrop
 	}
+	// A cancellation the error itself carries proves a cancelled run even when
+	// this context has not seen the cancel yet: one cancel reaches the poller's
+	// context and the check's in one wave, and a poller that reports the run's
+	// end can carry it first, so the error's identity decides as well.
+	if errors.Is(err, context.Canceled) {
+		return CauseCancelled
+	}
 	code, hasExit := jobs.CommandExitStatus(err)
 	if len(markers) == 0 {
 		if hasExit {

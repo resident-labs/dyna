@@ -1250,6 +1250,24 @@ func TestEngineStopCancellationHasItsOwnCause(t *testing.T) {
 	}
 }
 
+// A check whose error is the cancellation keeps the cancellation's cause even
+// when its own context has not seen the cancel yet. One cancel reaches the
+// poller's context and the check's in one wave, and a poller that reports the
+// run's end can carry it first, so the error's identity decides too. This
+// failed once in CI as an unclassified check whose error was "context
+// canceled", because the poller's context observed the cancel first.
+func TestACancelledErrorProvesAChecksCauseBeforeItsContextSeesIt(t *testing.T) {
+	node := Node{Name: "local", Enabled: true}
+	alive, stop := context.WithCancel(context.Background())
+	defer stop() // The context stays live: only the error proves the cancel.
+	// The check printed its success marker before the run ended, so the marker
+	// alone would say nothing.
+	marker := [][]string{{"DYNA_CI_CHECK_EXIT", "0"}}
+	if got := checkCause(node, alive, context.Canceled, marker, true); got != CauseCancelled {
+		t.Fatalf("cause = %s, want %s", got, CauseCancelled)
+	}
+}
+
 // A check's task bound follows the CPUs it was given: a fixed bound stopped a
 // large Rust build from starting its linker threads, while a small check keeps
 // exactly the bound it always had.
