@@ -554,7 +554,7 @@ func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
 	r := records[0]
 	// This machine runs only the relay suite, and a trial runs every workflow
 	// suite of its base definition.
-	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, Labels: []string{machines.LabelCI}, Suites: []string{string(localci.SuiteRelay)}}}
+	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, Labels: []string{machines.LabelCI, "suite=" + string(localci.SuiteRelay)}}}
 	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
 	if err != nil {
 		t.Fatal(err)
@@ -563,7 +563,7 @@ func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
 		t.Fatalf("trial = %s %q, want a failure whose reason is its evidence", trial.Status, trial.Reason)
 	}
 	blocked := regexp.MustCompile(`no enabled CI machine allows the (\S+) suite`).FindStringSubmatch(trial.Reason)
-	if len(blocked) != 2 || blocked[1] == string(localci.SuiteRelay) || !strings.Contains(trial.Reason, "--suites") {
+	if len(blocked) != 2 || blocked[1] == string(localci.SuiteRelay) || !strings.Contains(trial.Reason, "--label suite=") {
 		t.Fatalf("trial reason = %q, want an unavailable suite and the fix", trial.Reason)
 	}
 	// The failure is a typed error, so no run was admitted and none waits.
@@ -590,6 +590,38 @@ func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
 	}
 }
 
+// A check label is a scheduling requirement, not only definition metadata. A
+// trial whose only CI machine lacks it fails before a run starts.
+func TestLocalTrialFailsWhenNoMachineHasCheckLabels(t *testing.T) {
+	e, dir, records, ci := localMergeEnvFor(t, false, "good")
+	r := records[0]
+	writeTrialDefinition(t, dir, `version: 1
+trial: [go]
+checks:
+  - id: gpu-test
+    image: golang:1.26
+    command: go test ./internal/gpu
+    labels: [gpu]
+suites:
+  - id: go
+    checks: [gpu-test]
+`)
+	changeGit(t, dir, "add", ".")
+	changeGit(t, dir, "commit", "--quiet", "-m", "GPU check")
+	r.Head = changeGit(t, dir, "rev-parse", "HEAD")
+	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, Labels: []string{machines.LabelCI}}}
+	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trial.Status != VerdictFailed || !strings.Contains(trial.Reason, "every check label") || !strings.Contains(trial.Reason, "gpu") {
+		t.Fatalf("trial = %s %q, want the missing check label", trial.Status, trial.Reason)
+	}
+	if head := runningLocalCIHead(e.s); head != "" {
+		t.Fatalf("a trial without its check label started a run for %s", head)
+	}
+}
+
 // A machine of another room cannot take the run, so its suites do not count.
 // Without that rule a room whose own machines lack a suite would wait for ever
 // on a machine it may never use.
@@ -599,7 +631,7 @@ func TestLocalTrialFailsWhenAnotherRoomOwnsTheSuite(t *testing.T) {
 	// This room's machine runs only the go suite. The machine that takes every
 	// suite belongs to another room, so it is not a candidate.
 	ci.nodes = []localci.Node{
-		{Name: "room-ci", Enabled: true, Labels: []string{machines.LabelCI}, Suites: []string{string(localci.SuiteGo)}, Rooms: []string{r.RoomID}},
+		{Name: "room-ci", Enabled: true, Labels: []string{machines.LabelCI, "suite=" + string(localci.SuiteGo)}, Rooms: []string{r.RoomID}},
 		{Name: "other-room-ci", Enabled: true, Labels: []string{machines.LabelCI}, Rooms: []string{"room_other"}},
 	}
 	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)

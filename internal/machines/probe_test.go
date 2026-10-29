@@ -64,6 +64,23 @@ func TestParseProbe(t *testing.T) {
 	}
 }
 
+func TestProbedLabelsComeFromTheLastProbe(t *testing.T) {
+	machine := Machine{
+		Labels: []string{"xcode"},
+		Capabilities: Capabilities{
+			OS: "Linux", Arch: "x86_64", GPU: true,
+			Containers: Containers{Docker: true, Podman: true},
+		},
+	}
+	want := []string{"os=linux", "arch=x86_64", "gpu", "docker", "podman"}
+	if got := machine.ProbedLabels(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("probed labels = %v, want %v", got, want)
+	}
+	if !machine.HasLabel("gpu") || !machine.HasLabel("xcode") {
+		t.Fatal("label matching must include probed and owner labels")
+	}
+}
+
 func TestFailedProbeKeepsCapabilities(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)

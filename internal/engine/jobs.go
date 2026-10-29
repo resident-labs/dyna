@@ -132,6 +132,7 @@ func (r jobsReporter) JobFinished(ctx context.Context, job jobs.Job) error { ret
 // runJobInput is the RunJob call's argument.
 type runJobInput struct {
 	Node    string   `json:"node"`
+	Labels  []string `json:"labels"`
 	Command []string `json:"command"`
 	Repo    string   `json:"repo"`
 	Ref     string   `json:"ref"`
@@ -160,13 +161,17 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 	if err != nil {
 		return jobs.Job{}, err
 	}
+	labels, err := machines.ParseLabels(in.Labels)
+	if err != nil {
+		return jobs.Job{}, err
+	}
 	var idle *time.Duration
 	if in.Idle != nil {
 		duration := time.Duration(*in.Idle) * time.Second
 		idle = &duration
 	}
 	input := jobs.Input{
-		Node: in.Node, Command: in.Command,
+		Node: in.Node, Labels: labels, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second, Idle: idle,
 		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources, Workspace: in.Workspace,

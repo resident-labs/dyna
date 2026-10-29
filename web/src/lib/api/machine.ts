@@ -53,12 +53,12 @@ export interface MachineSummary {
   // room for that room, to repository commands outside containers.
   allowHostChecks: boolean
   // rooms are the IDs of the rooms whose local CI this machine takes; absent
-  // means every room. suites limits the CI suites the same way.
+  // means every room.
   rooms?: string[]
-  suites?: string[]
-  // labels mark what the machine takes; the ci label says it runs local CI
-  // checks. An unlabeled machine still takes jobs when enabled.
+  // labels are the owner's placement labels. probedLabels come from the last
+  // good probe. The ci label says the machine runs local CI checks.
   labels?: string[]
+  probedLabels?: string[]
   // cpu is the machine's share of its cores in percent: live for this engine's
   // machine, and the last probe reading for a remote one.
   cpu?: number
@@ -148,7 +148,6 @@ export interface MachinePatch {
   enabled?: boolean
   allowHostChecks?: boolean
   rooms?: string[]
-  suites?: string[]
   labels?: string[]
   ssh?: string
   // sshConnectTimeoutSeconds sets the ssh connect wait; 0 restores the default.
