@@ -461,6 +461,32 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeTarget,
 		Text:     "{location}\nHead: {head}\n\nReviewer result for {label}: {kind}.",
 	},
+	// An upstream issue fact goes to the room root only. Its body is GitHub
+	// data, which the watcher has already wrapped as external data.
+	{
+		Family:   FamilyIssueWatch,
+		Type:     EventType(IssueWatchComment),
+		Renderer: "IssueWatchCard",
+		Payload:  reflect.TypeOf(IssueWatchEvent{}),
+		Wake:     WakeRoot,
+		Text:     "{summary}\n{url}\n\n{body}",
+	},
+	{
+		Family:   FamilyIssueWatch,
+		Type:     EventType(IssueWatchClosed),
+		Renderer: "IssueWatchCard",
+		Payload:  reflect.TypeOf(IssueWatchEvent{}),
+		Wake:     WakeRoot,
+		Text:     "{summary}\n{url}",
+	},
+	{
+		Family:   FamilyIssueWatch,
+		Type:     EventType(IssueWatchReopened),
+		Renderer: "IssueWatchCard",
+		Payload:  reflect.TypeOf(IssueWatchEvent{}),
+		Wake:     WakeRoot,
+		Text:     "{summary}\n{url}",
+	},
 	// PR events reach the change's author, but they do not all wake it: the
 	// watcher marks an informational notice NoWake, and a notice that falls
 	// back to the owner is quiet unless root must act. Every other PR post
@@ -981,6 +1007,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(MergeStep("")), Values: enumValues(mergeSteps)},
 	{Type: reflect.TypeOf(IssueChange("")), Values: enumValues(issueChanges)},
 	{Type: reflect.TypeOf(IssueState("")), Values: enumValues(issueStates)},
+	{Type: reflect.TypeOf(IssueWatchType("")), Values: enumValues(issueWatchTypes)},
 	{Type: reflect.TypeOf(GoalChange("")), Values: enumValues(goalChanges)},
 	{Type: reflect.TypeOf(GoalState("")), Values: enumValues(goalStates)},
 	{Type: reflect.TypeOf(CheckinState("")), Values: enumValues(checkinStates)},
