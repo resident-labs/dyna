@@ -25,15 +25,21 @@ func (s services) setSetting(ctx context.Context, key, value string) (configsvc.
 // RunParentCheckIns runs one parent check-in pass with the interval the parent
 // check-ins hook owns, and reports how many it posted. A turn end can make a
 // check-in due at once, and the hook only runs on its schedule, so the engine
-// runs one pass then. A switched-off hook runs no pass: the hook owns
-// check-ins, so its switch stops them everywhere.
-func RunParentCheckIns(ctx context.Context, rooms *roomsvc.Service) (int, time.Time, error) {
+// runs one pass then. ended names the sessions that just ended a turn: a child
+// with open work and nothing in flight makes its parent due now. A switched-off
+// hook runs no pass: the hook owns check-ins, so its switch stops them everywhere.
+func RunParentCheckIns(ctx context.Context, rooms *roomsvc.Service, ended []string) (int, time.Time, error) {
 	every, err := checkInInterval(ctx)
 	if err != nil || every == 0 {
 		return 0, time.Time{}, err
 	}
+	expedite, err := parentcheckin.TurnEndParents(ctx, rooms.Notify, ended)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
 	s := parentcheckin.New(rooms.Notify)
 	s.Interval = func() (time.Duration, error) { return every, nil }
+	s.Expedite = expedite
 	return s.Pass(ctx)
 }
 
