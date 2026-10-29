@@ -243,15 +243,13 @@ func (s Service) clearNotices(id string, h Hook) {
 	})
 }
 
-// LibrarianHooks wake the repository's librarian after a merge, after
-// the repository default branch moves, and on a schedule that runs merges batched inside the
-// librarian's interval. dyna library enable adds them; disable removes them.
+// LibrarianHooks wake the repository's librarian when its default branch moves.
+// A merge always moves that branch. A wake that waits for the librarian's
+// interval is deferred by the engine, so no schedule hook is needed.
+// dyna library enable adds it; disable removes it.
 func LibrarianHooks(exe, main string) []Hook {
 	command := shellquote.Quote(exe) + " library wake --repo " + shellquote.Quote(main)
-	hook := func(name, event string, every int) Hook {
-		return Hook{Name: name, Label: "Librarian", Event: event, Command: command, Cwd: "main", Timeout: "2m", OnFail: "alert", EveryMinutes: every}
-	}
-	return []Hook{hook("librarian-merged", PRMerged, 0), hook("librarian-main", MainUpdated, 0), hook("librarian-batch", Schedule, 10)}
+	return []Hook{{Name: "librarian-main", Label: "Librarian", Event: MainUpdated, Command: command, Cwd: "main", Timeout: "2m", OnFail: "alert"}}
 }
 
 // SettleInterrupted finishes the hook runs that an earlier engine left running.

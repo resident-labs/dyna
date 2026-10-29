@@ -50,6 +50,7 @@ type services struct {
 	voice     *voice.Calls
 	say       *voice.Sayer
 	hooks     hooks.Service
+	timers    *timers
 	sync      *lanesync.Service
 	health    func() Health
 	load      *sysload.Sampler
