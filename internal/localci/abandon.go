@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 )
 
 // RunID names one local CI run: the run folder name, the first twelve hex
@@ -37,8 +38,9 @@ type AbandonedRun struct {
 
 // AbandonRun tears down one stale local CI run by its ID and releases its node
 // reservations. A run whose owner process still runs is refused: its trial or
-// pull request must be cancelled instead.
-func (s Store) AbandonRun(ctx context.Context, id RunID) (AbandonedRun, error) {
+// pull request must be cancelled instead. inFlight lists the short heads of the
+// runs this engine has in flight.
+func (s Store) AbandonRun(ctx context.Context, id RunID, inFlight []string) (AbandonedRun, error) {
 	rows, err := s.queryAttachments(ctx, "run_id=?", string(id))
 	if err != nil {
 		return AbandonedRun{}, err
@@ -49,14 +51,22 @@ func (s Store) AbandonRun(ctx context.Context, id RunID) (AbandonedRun, error) {
 			return AbandonedRun{RunID: id}, err
 		}
 	}
-	return r.AbandonRun(ctx, s, id)
+	return r.AbandonRun(ctx, s, id, inFlight)
 }
 
 // AbandonRun tears down the run's kept folder on the runner's node, when a record
 // exists, and then releases the run's admitted reservations. The reservations
 // are listed before the teardown, so the count covers the checks it releases too.
-func (r Runner) AbandonRun(ctx context.Context, store Store, id RunID) (AbandonedRun, error) {
+// A run in flight on this engine is refused before anything is released. An
+// admitted row of such a run stores no owner process, so the owner check
+// cannot see it.
+func (r Runner) AbandonRun(ctx context.Context, store Store, id RunID, inFlight []string) (AbandonedRun, error) {
 	out := AbandonedRun{RunID: id}
+	for _, head := range inFlight {
+		if strings.HasPrefix(string(id), head) {
+			return out, fmt.Errorf("%w: run %s is in flight on this engine, so cancel its trial or pull request instead", ErrRunLive, id)
+		}
+	}
 	rows, err := store.queryAttachments(ctx, "run_id=?", string(id))
 	if err != nil {
 		return out, err
