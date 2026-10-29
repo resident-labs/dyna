@@ -77,23 +77,26 @@ func (p GHPayload) DisplayBody() string {
 	if body := argument(p.Argv, "--body"); body != "" {
 		return body
 	}
-	snapshot := func(path string) string {
+	snapshot := func(path string) (string, bool) {
 		for _, file := range p.Files {
 			if file.Path == path {
-				return string(file.Data)
+				return string(file.Data), true
 			}
 		}
-		return ""
+		return "", false
 	}
 	path := argument(p.Argv, "--body-file")
 	if path == "" {
 		path = argument(p.Argv, "-F")
 	}
-	if body := snapshot(path); body != "" {
+	if body, ok := snapshot(path); ok {
 		return body
 	}
+	var parts []string
 	if path := argument(p.Argv, "--input"); path != "" {
-		return snapshot(path)
+		if body, ok := snapshot(path); ok {
+			parts = append(parts, body)
+		}
 	}
 	for i := 0; i < len(p.Argv); i++ {
 		arg := p.Argv[i]
@@ -110,15 +113,15 @@ func (p GHPayload) DisplayBody() string {
 			value = strings.TrimPrefix(arg[len("-F"):], "=")
 		}
 		key, body, ok := strings.Cut(value, "=")
-		if !ok || key != "body" {
+		if !ok {
 			continue
 		}
 		if strings.HasPrefix(body, "@") {
-			return snapshot(strings.TrimPrefix(body, "@"))
+			body, _ = snapshot(strings.TrimPrefix(body, "@"))
 		}
-		return body
+		parts = append(parts, key+":\n"+body)
 	}
-	return ""
+	return strings.Join(parts, "\n\n")
 }
 
 // CreateInput is the typed input to the kind-independent core.

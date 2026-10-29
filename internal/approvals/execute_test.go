@@ -19,18 +19,14 @@ func TestDisplayBodyUsesImmutableFileSnapshot(t *testing.T) {
 }
 
 func TestDisplayBodyUsesAPIFileSnapshots(t *testing.T) {
-	tests := []struct {
-		argv []string
-		path string
-	}{
-		{argv: []string{"api", "repos/o/r/issues", "--input=payload.json"}, path: "payload.json"},
-		{argv: []string{"api", "repos/o/r/issues", "-F", "title=title", "-F", "body=@body.md"}, path: "body.md"},
-		{argv: []string{"api", "repos/o/r/issues", "-Fbody=@@name"}, path: "@name"},
+	payload := GHPayload{
+		Argv:  []string{"api", "repos/o/r/issues", "--input=payload.json", "-F", "title=@title.txt", "-F", "body=@@body.txt"},
+		Files: []FileSnapshot{{Path: "payload.json", Data: []byte(`{"body":"input"}`)}, {Path: "title.txt", Data: []byte("snapshot title")}, {Path: "@body.txt", Data: []byte("snapshot body")}},
 	}
-	for _, tt := range tests {
-		payload := GHPayload{Argv: tt.argv, Files: []FileSnapshot{{Path: tt.path, Data: []byte("approved API body")}}}
-		if got := payload.DisplayBody(); got != "approved API body" {
-			t.Fatalf("body = %q for %q", got, tt.argv)
+	got := payload.DisplayBody()
+	for _, want := range []string{`{"body":"input"}`, "title:\nsnapshot title", "body:\nsnapshot body"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("display %q does not contain %q", got, want)
 		}
 	}
 }
