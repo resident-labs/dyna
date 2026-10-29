@@ -20,7 +20,9 @@ type shellJobWatch struct {
 	watched map[string]bool            // jobs whose row can change with no event
 	heads   map[string]map[string]bool // room ID → IDs on its first page
 	expires map[string]time.Time       // room ID → when a first-page item leaves it by age
-	sigs    map[string]string          // listchange snapshot
+	// room ID → IDs of open jobs and closed jobs within listpage.Recent; only these can reach a first page
+	candidates map[string]map[string]bool
+	sigs       map[string]string // listchange snapshot
 }
 
 type shellJobRow struct {
@@ -30,7 +32,7 @@ type shellJobRow struct {
 
 func newShellJobWatch() *shellJobWatch {
 	return &shellJobWatch{jobs: map[string]shellJobRow{}, watched: map[string]bool{},
-		heads: map[string]map[string]bool{}, expires: map[string]time.Time{}, sigs: map[string]string{}}
+		heads: map[string]map[string]bool{}, expires: map[string]time.Time{}, candidates: map[string]map[string]bool{}, sigs: map[string]string{}}
 }
 
 func (w *shellJobWatch) close() {
@@ -94,14 +96,18 @@ func (s *Service) scanShellJobs(w *shellJobWatch, first bool, emit func(Event)) 
 		clear(w.watched)
 		clear(w.heads)
 		clear(w.expires)
+		clear(w.candidates)
 	}
 	touched, rooms := map[string]bool{}, map[string]bool{}
+	now := terminalsvc.Clock()
+	cutoff := now.Add(-listpage.Recent)
 	for _, in := range changed {
 		job := shellJobRow{info: in, row: buildShellJobRow(store, in)}
 		old, seen := w.jobs[in.ID]
 		if seen && old.info.RoomID != in.RoomID {
 			// Rare: only a full Sync reports the row gone from its old room.
 			full = true
+			delete(w.candidates[old.info.RoomID], in.ID)
 		}
 		if a, b := terminalsvc.ShellJobMeta(old.row), terminalsvc.ShellJobMeta(job.row); !seen || a.Open != b.Open || !a.At.Equal(b.At) {
 			rooms[in.RoomID] = true
@@ -113,26 +119,41 @@ func (s *Service) scanShellJobs(w *shellJobWatch, first bool, emit func(Event)) 
 		} else {
 			delete(w.watched, in.ID)
 		}
+		if m := terminalsvc.ShellJobMeta(job.row); in.RoomID != "" && (m.Open || !m.At.Before(cutoff)) {
+			if w.candidates[in.RoomID] == nil {
+				w.candidates[in.RoomID] = map[string]bool{}
+			}
+			w.candidates[in.RoomID][in.ID] = true
+		} else {
+			delete(w.candidates[in.RoomID], in.ID)
+		}
 	}
 	// A finished job also leaves a first page by age alone, with no write.
-	now := terminalsvc.Clock()
 	for room, at := range w.expires {
 		if !now.Before(at) {
 			rooms[room] = true
 		}
 	}
 	delete(rooms, "")
-	// A room's first page changes only when one of its jobs starts, ends or
-	// ages out; rows that enter or leave it are reported with the touched ones.
-	byRoom := map[string][]listpage.Meta{}
-	if full || len(rooms) > 0 {
-		for _, job := range w.jobs {
-			if room := job.info.RoomID; room != "" && (full || rooms[room]) {
-				byRoom[room] = append(byRoom[room], terminalsvc.ShellJobMeta(job.row))
-			}
+	if full {
+		for room := range w.candidates {
+			rooms[room] = true
 		}
 	}
-	for room, items := range byRoom {
+	// A room's first page changes only when one of its jobs starts, ends or
+	// ages out; rows that enter or leave it are reported with the touched ones.
+	for room := range rooms {
+		cands := w.candidates[room]
+		items := make([]listpage.Meta, 0, len(cands))
+		for id := range cands {
+			m := terminalsvc.ShellJobMeta(w.jobs[id].row)
+			if !m.Open && m.At.Before(cutoff) {
+				// Closed before the window: it never shows on a first page again.
+				delete(cands, id)
+				continue
+			}
+			items = append(items, m)
+		}
 		page, err := pageShellJobs(items)
 		if err != nil {
 			w.close()
