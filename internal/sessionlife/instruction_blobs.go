@@ -42,10 +42,10 @@ type instructionRead struct {
 }
 
 // scanInstructionRead keeps the projection column order beside its destinations.
-func scanInstructionRead(row interface{ Scan(...any) error }, dest ...any) (instructionRead, error) {
-	var read instructionRead
+func scanInstructionRead(row interface{ Scan(...any) error }, dest ...any) (read instructionRead, err error) {
 	dest = append(dest, &read.hashes[0], &read.hashes[1], &read.bodies[0], &read.bodies[1])
-	return read, row.Scan(dest...)
+	err = row.Scan(dest...)
+	return
 }
 
 func instructionHash(body []byte) string {
