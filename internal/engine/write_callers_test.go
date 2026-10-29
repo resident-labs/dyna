@@ -81,6 +81,7 @@ var handlerCallerChecks = map[string]string{
 	"TestHook":                    "actor(ctx) applies recordedCaller before running the hook.",
 	"UpdateLibraryEntry":          "libraryStore passes mutationActor to library authority checks.",
 	"VoiceSay":                    "voiceSay requires a recognized authority.Of(ctx) role.",
+	"RoomMCPCall":                 "roommcp.Service.Call reads the caller from authority.Of(ctx) and checks the room and the grant.",
 	"WakeLibrarian":               "librarianActor applies the recorded-caller policy.",
 	"WakeLibrarianSmellsNow":      "librarianActor and the library wake now rule.",
 	"WithdrawCall":                "callSender resolves the caller; notify checks the stored root.",

@@ -96,8 +96,8 @@ type RoomMCP struct {
 	Access func(ctx context.Context) (bool, error)
 	// Tools lists the allowed tools of the granted servers.
 	Tools func(ctx context.Context) (string, error)
-	// Call runs one tool of one server.
-	Call func(ctx context.Context, in callspec.RoomMCPCallRequest) (string, error)
+	// Invoke runs one tool of one server.
+	Invoke func(ctx context.Context, in callspec.RoomMCPCallRequest) (string, error)
 }
 
 // Caller is the Dyna session behind one call.
@@ -672,7 +672,7 @@ func (t *Tools) roomMCPCall(ctx context.Context, in callspec.RoomMCPCallRequest)
 	if in.Server == "" || in.Tool == "" {
 		return "", errors.New("server and tool are required")
 	}
-	return t.RoomMCP.Call(ctx, in)
+	return t.RoomMCP.Invoke(ctx, in)
 }
 
 // own returns a job that belongs to this session.
