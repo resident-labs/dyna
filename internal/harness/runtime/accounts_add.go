@@ -7,17 +7,6 @@ import (
 	"dyna-agent/internal/account/store"
 )
 
-// openCodeKeyIDs maps a provider to the OpenCode integration that keeps its API
-// key. Source: store.ProviderFor.
-var openCodeKeyIDs = map[store.Provider]string{
-	store.ProviderOpenCodeGo: "opencode-go",
-	store.ProviderAnthropic:  "anthropic",
-	store.ProviderChatGPT:    "openai",
-	store.ProviderXAI:        "xai",
-	store.ProviderDeepSeek:   "deepseek",
-	store.ProviderZAI:        "zai",
-}
-
 // AddProviderKey adds an API key as a new account of one provider and makes it
 // the active account of that provider. Each account keeps its own home, so the
 // label the caller gives is what the account is called.
