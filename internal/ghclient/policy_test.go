@@ -553,3 +553,19 @@ func TestWorkerAllowsRoutineCollaborationWrites(t *testing.T) {
 		})
 	}
 }
+
+// The head repository is named without a host, so a same-named repository on
+// another host must not pass for the room's fork.
+func TestEditsForkPullRequiresTheOriginHost(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	previous := pullHeadRepo
+	pullHeadRepo = func(context.Context, *exec.Cmd, repository, string) (string, bool) { return "fork/project", true }
+	t.Cleanup(func() { pullHeadRepo = previous })
+	command := []string{"pr", "edit", "7"}
+	for host, want := range map[string]bool{"github.com": true, "ghe.example": false} {
+		got := editsForkPull(context.Background(), records[0], records[0].Repo, repository{host, "upstream/project"}, command)
+		if got != want {
+			t.Errorf("host %s: editsForkPull = %v, want %v", host, got, want)
+		}
+	}
+}
