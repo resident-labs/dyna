@@ -128,6 +128,7 @@ func NewCommand() *cobra.Command {
 	cmd.AddCommand(tests)
 	cmd.AddCommand(localCommands()...)
 	cmd.AddCommand(registryCommands()...)
+	cmd.AddCommand(abandonCommand())
 	return cmd
 }
 

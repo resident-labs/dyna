@@ -381,6 +381,46 @@ func (a Admission) Release(ctx context.Context, node, id string) error {
 	return a.write(ctx, "UPDATE admissions SET state='released' WHERE id=? AND node=? AND owner_pid=? AND owner_start=?", id, node, pid, start)
 }
 
+// RunReservations lists the IDs of the admitted reservations of one local CI
+// run. Every check of a run has a row ID that starts with the run ID. A row
+// that a process outside this engine still holds is live work, so it is left
+// out.
+func (a Admission) RunReservations(ctx context.Context, runID string) ([]string, error) {
+	db, err := a.db()
+	if err != nil {
+		return nil, err
+	}
+	prefix := runID + "-"
+	rows, err := db.QueryContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE state='admitted' AND substr(id,1,?)=?", len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		row, err := scanAdmission(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if !row.Engine && ownerAlive(row.PID, row.Start) {
+			continue
+		}
+		ids = append(ids, row.ID)
+	}
+	return ids, errors.Join(rows.Err(), rows.Close())
+}
+
+// ReleaseReservations ends the given admitted reservations. Their capacity and
+// ports return at the next pass.
+func (a Admission) ReleaseReservations(ctx context.Context, ids []string) error {
+	for _, id := range ids {
+		if err := a.write(ctx, "UPDATE admissions SET state='released' WHERE id=? AND state='admitted'", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ResetEngine removes abandoned waiters, but keeps detached check reservations.
 // Those checks retain their capacity and ports until they finish or are stopped.
 func (a Admission) ResetEngine(ctx context.Context) error {

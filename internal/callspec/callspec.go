@@ -94,6 +94,10 @@ var LongCalls = map[string]time.Duration{
 	// the request deadline cancels a slow probe before it can record that the
 	// machine is offline.
 	"ProbeNode": 11 * time.Minute,
+	// Abandoning a run stops its checks over SSH and removes its folder, as the
+	// run's own teardown does, so it gets the same long call deadline as the
+	// node runner's calls.
+	"AbandonLocalCIRun": 15 * time.Minute,
 	// Merge recovery can delete trial branches, build a retry, or publish a
 	// passed trial through git and GitHub. Keep the existing synchronous CLI
 	// behavior until item 8 moves slow work into jobs.
