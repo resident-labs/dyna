@@ -16,6 +16,7 @@ var computerCodePaths = []string{
 	"internal/childenv",
 	"internal/childreaper",
 	"internal/cibudget",
+	"internal/ciexcerpt",
 	"internal/cli/computer",
 	"internal/computers",
 	"internal/database",
