@@ -54,12 +54,18 @@ func TestMachineFailureMovesTheRunToAnotherMachineOnce(t *testing.T) {
 
 	// The retry goes to a different machine, and a fleet with no other machine
 	// keeps the result instead of running it again in place.
-	nodes := []localci.Node{{Name: "arch", Slots: 12, Enabled: true}, {Name: "hermeslab", Slots: 16, Enabled: true}}
-	chosen := availableCINodeExcept(nodes, map[string]int{}, "", machineFailureRetryFrom(machineFailure))
+	nodes := []localci.Node{{Name: "arch", Enabled: true}, {Name: "hermeslab", Enabled: true}}
+	free := func(node localci.Node) int {
+		if node.Name == "arch" {
+			return 12
+		}
+		return 16
+	}
+	chosen := availableCINode(nodes, "", machineFailureRetryFrom(machineFailure), free)
 	if chosen == nil || chosen.Name != "hermeslab" {
 		t.Fatalf("retry chose %+v, want hermeslab", chosen)
 	}
-	if chosen := availableCINodeExcept(nodes[:1], map[string]int{}, "", "arch"); chosen != nil {
+	if chosen := availableCINode(nodes[:1], "", "arch", free); chosen != nil {
 		t.Fatalf("a fleet of one machine retried on itself: %+v", chosen)
 	}
 }

@@ -135,9 +135,9 @@ func TestStoreNodesReadsCIMachines(t *testing.T) {
 func TestStoreRejectsUnsafeNodeConfiguration(t *testing.T) {
 	for _, n := range []Node{
 		{Name: "-option", Slots: 1},
-		{Name: "node", Slots: 0},
-		{Name: "node", Slots: 1, SSH: "-oProxyCommand=exec"},
-		{Name: "node", Slots: 1, SSH: "user@host; touch /tmp/injected"},
+		{Name: ""},
+		{Name: "node", SSH: "-oProxyCommand=exec"},
+		{Name: "node", SSH: "user@host; touch /tmp/injected"},
 	} {
 		if err := n.Validate(); err == nil {
 			t.Errorf("accepted unsafe node %#v", n)

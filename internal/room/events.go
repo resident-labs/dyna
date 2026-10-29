@@ -122,6 +122,9 @@ const (
 	TypeRequest     EventType   = "request"
 	TypeRequestDone EventType   = "request.done"
 
+	// TypeJobQueued is a detached job that waits for its node, with the
+	// reason it waits.
+	TypeJobQueued EventType = "queued"
 	// TypeJobFinished is the end of a detached job.
 	TypeJobFinished EventType = "finished"
 	// TypeSummary tells a check-in apart from any other event of its family.
@@ -446,12 +449,12 @@ func (m Message) Shell() (ShellEvent, bool) {
 	return ev, true
 }
 
-// Job returns the payload of a job event, started or finished.
+// Job returns the payload of a job event, queued, started or finished.
 func (m Message) Job() (JobEvent, bool) {
 	if m.Kind != string(FamilyJob) || len(m.Payload.raw) == 0 {
 		return JobEvent{}, false
 	}
-	if m.Notice.Kind != string(TypeStarted) && m.Notice.Kind != string(TypeJobFinished) {
+	if m.Notice.Kind != string(TypeJobQueued) && m.Notice.Kind != string(TypeStarted) && m.Notice.Kind != string(TypeJobFinished) {
 		return JobEvent{}, false
 	}
 	var ev JobEvent

@@ -534,8 +534,8 @@ func TestLocalTrialUsesTheRoomTestBudgetAndMachine(t *testing.T) {
 	if req.MaxTest != time.Second || !req.Allowed["pkg/slow"] {
 		t.Fatalf("run used max test %s and allowlist %v, want the room budget", req.MaxTest, req.Allowed)
 	}
-	if req.Parallelism != registeredCIRunSlots || !req.DeferSave {
-		t.Fatalf("run asked for %d parallel slots and defer=%t", req.Parallelism, req.DeferSave)
+	if req.Parallelism != registeredCIRunParallelism || !req.DeferSave {
+		t.Fatalf("run asked for %d parallel checks and defer=%t", req.Parallelism, req.DeferSave)
 	}
 	close(ci.release)
 	released = true

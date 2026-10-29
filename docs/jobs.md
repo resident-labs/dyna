@@ -2,12 +2,12 @@
 
 A **job** is one command that runs on a machine, detached. It survives the end
 of the command that submitted it, an SSH drop, and an engine restart. Jobs use
-the detached node executor that local CI uses (`internal/jobs`), take one of the
-machine's existing CI slots, and store their log and exit code.
+the detached node executor that local CI uses (`internal/jobs`), join the
+machine's node queue, and store their log and exit code.
 
 ## Run a job
 
-`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--timeout 2h] [--image IMG | --host] [--artifact PATH]... -- CMD`
+`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--timeout 2h] [--image IMG | --host] [--artifact PATH]... -- CMD`
 
 - With no `--node`, the job runs on the local node (the engine host), so a
   one-machine owner needs no setup.
@@ -21,8 +21,10 @@ machine's existing CI slots, and store their log and exit code.
   arguments, so any image works, with or without a shell.
   Host execution on a remote machine needs that machine's host-check grant
   (`dyna machine edit N --allow-host-checks`); the local node needs none.
-- The job takes one of the machine's CI slots, so jobs and local CI checks
-  share one admission bound per machine.
+- The job joins the machine's node queue, so jobs and local CI checks share one
+  admission bound per machine. `--io heavy` marks a job that saturates the
+  disk; a node runs only a few heavy units at once. A job that waits shows why
+  in `dyna job show`.
 
 - `--artifact PATH` keeps a file or folder of the work folder after the job
   ends, such as `--artifact target/release/app`. Repeat it for more paths. The
@@ -48,8 +50,9 @@ States: `queued`, `running`, then one of `passed`, `failed`, `cancelled`, `lost`
 
 ## Events
 
-Each job posts typed events to the session that submitted it: `job.started`
-(quiet) and `job.finished` (with state and exit code), which wake that session.
-Agents never poll for a job's end; the finished event is the wake.
+Each job posts typed events to the session that submitted it: `job.queued`
+(quiet, with the wait reason), `job.started` (quiet) and `job.finished` (with
+state and exit code), which wake that session. Agents never poll for a job's
+end; the finished event is the wake.
 
 The jobs table lives in `dyna.db`; the logs live under `<data>/jobs/<id>/log` and kept artifacts under `<data>/jobs/<id>/artifacts`.

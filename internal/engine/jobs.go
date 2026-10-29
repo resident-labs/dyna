@@ -62,12 +62,16 @@ func (r jobsReporter) event(job jobs.Job) room.JobEvent {
 	exit := 0
 	if job.ExitCode != nil {
 		exit = *job.ExitCode
-	} else if state != room.JobRunning {
+	} else if state != room.JobRunning && state != room.JobQueued {
 		exit = -1
 	}
 	duration := time.Duration(0)
 	if !job.Started.IsZero() && !job.Ended.IsZero() {
 		duration = job.Ended.Sub(job.Started)
+	}
+	detail := "log: dyna job logs " + job.ID
+	if state == room.JobQueued {
+		detail = ""
 	}
 	return room.JobEvent{
 		JobID: job.ID, Node: job.Node,
@@ -76,7 +80,8 @@ func (r jobsReporter) event(job jobs.Job) room.JobEvent {
 		ExitCode:   exit,
 		DurationMS: int(duration / time.Millisecond),
 		Parent:     r.sessionName(job.Session),
-		Detail:     "log: dyna job logs " + job.ID,
+		WaitReason: job.WaitReason,
+		Detail:     detail,
 	}
 }
 
@@ -97,6 +102,7 @@ func (r jobsReporter) post(job jobs.Job) error {
 	return err
 }
 
+func (r jobsReporter) JobQueued(ctx context.Context, job jobs.Job) error   { return r.post(job) }
 func (r jobsReporter) JobStarted(ctx context.Context, job jobs.Job) error  { return r.post(job) }
 func (r jobsReporter) JobFinished(ctx context.Context, job jobs.Job) error { return r.post(job) }
 
@@ -113,6 +119,9 @@ type runJobInput struct {
 	Timeout int      `json:"timeoutSec"`
 	// Artifacts are paths of the job's work folder to keep after it ends.
 	Artifacts []string `json:"artifacts"`
+	// IO is heavy or light: an IO-heavy job shares a node with only a few
+	// other IO-heavy ones.
+	IO string `json:"io"`
 }
 
 func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) {
@@ -124,7 +133,10 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 		Node: in.Node, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second,
-		Artifacts: in.Artifacts,
+		Artifacts: in.Artifacts, Heavy: in.IO == "heavy",
+	}
+	if in.IO != "" && in.IO != "heavy" && in.IO != "light" {
+		return jobs.Job{}, fmt.Errorf("io must be heavy or light, not %q", in.IO)
 	}
 	if actor.Room != "" {
 		input.RoomID = actor.Room

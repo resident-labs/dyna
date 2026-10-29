@@ -75,6 +75,8 @@ type ExecutableCheck struct {
 	// keeps the default. The node bounds them before the check runs.
 	CPUs      int
 	MemoryMiB int64
+	// Heavy marks an IO-heavy check, which a node runs only a few of.
+	Heavy bool
 }
 
 // Definition is the validated local CI graph at one repository revision.
@@ -163,6 +165,7 @@ type checkFile struct {
 	Priority        int    `yaml:"priority"`
 	CPUs            int    `yaml:"cpus"`
 	Memory          string `yaml:"memory"`
+	IO              string `yaml:"io"`
 }
 
 type suiteFile struct {
@@ -375,6 +378,14 @@ func ParseDefinition(body []byte) (*Definition, error) {
 			}
 			memoryMiB = parsed
 		}
+		var heavy bool
+		switch input.IO {
+		case "", "light":
+		case "heavy":
+			heavy = true
+		default:
+			return nil, fmt.Errorf("check %q io must be heavy or light", input.ID)
+		}
 		for name, value := range input.Env {
 			if !definitionEnv.MatchString(name) || strings.ContainsRune(value, '\x00') {
 				return nil, fmt.Errorf("check %q has invalid environment entry %q", input.ID, name)
@@ -398,6 +409,7 @@ func ParseDefinition(body []byte) (*Definition, error) {
 			Priority:  input.Priority,
 			CPUs:      input.CPUs,
 			MemoryMiB: memoryMiB,
+			Heavy:     heavy,
 		}
 		if input.Job != nil {
 			ref, _ := validateJobRef(*input.Job)

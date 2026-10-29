@@ -131,7 +131,6 @@ func TestGoContainerPreparesIdentityBeforeDroppingPrivileges(t *testing.T) {
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	keepActive(t, runDir)
 	marker := filepath.Join(dir, "identity")
 	stubs := map[string]string{
 		"docker": `#!/bin/sh

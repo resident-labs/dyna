@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 )
@@ -152,25 +154,26 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 	}
 }
 
-// A machine with no free slot takes no warm run, and a repository that names no
-// cache-warming job warms nothing.
-func TestWarmWaitsForAFreeSlotAndNeedsAJob(t *testing.T) {
+// A machine with no room in its node queue takes no warm run, and a repository
+// that names no cache-warming job warms nothing.
+func TestWarmWaitsForRoomAndNeedsAJob(t *testing.T) {
 	store := newFakeWarmStore()
 	runs := 0
-	s := warmService(t, []localci.Node{{Name: "busy", Slots: 1, Enabled: true}}, store, func(context.Context, localci.Node, localci.WarmRequest) error {
+	s := warmService(t, []localci.Node{{Name: "busy", Enabled: true, CPUs: 2}}, store, func(context.Context, localci.Node, localci.WarmRequest) error {
 		runs++
 		return nil
 	})
-	// The one slot is taken by a pull request's check.
-	s.nodeRuns().Lock()
-	s.nodeRuns().runs = map[string]*registeredCIRun{"pr": {node: "busy", slots: 1}}
-	s.nodeRuns().Unlock()
+	// The machine's whole queue is held by other work.
+	queue := jobs.Admission{DataDir: filepath.Dir(s.Store.Root)}
+	if _, err := queue.Hold(t.Context(), jobs.Demand{Node: "busy", ID: "held", CPUs: 2}); err != nil {
+		t.Fatal(err)
+	}
 	s.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	if got := s.warmRuns().count(); got != 0 || runs != 0 {
 		t.Fatalf("%d warm runs started on a busy machine, want none", got)
 	}
 	// A repository without a warm job has nothing to run.
-	plain := warmService(t, []localci.Node{{Name: "free", Slots: 4, Enabled: true}}, store, func(context.Context, localci.Node, localci.WarmRequest) error {
+	plain := warmService(t, []localci.Node{{Name: "free", Enabled: true}}, store, func(context.Context, localci.Node, localci.WarmRequest) error {
 		runs++
 		return nil
 	})
