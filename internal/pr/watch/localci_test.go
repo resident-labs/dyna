@@ -286,7 +286,7 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 type occupiedCIRegistry struct{ hostedCIRegistry }
 
 func (r *occupiedCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "node", Enabled: true, CPUs: 2}}, nil
+	return []localci.Node{{Name: "node", Enabled: true, CPUs: 2, Labels: []string{machines.LabelCI}}}, nil
 }
 func (r *occupiedCIRegistry) Mode(context.Context, string) (string, error) {
 	return localci.ModeLocal, nil
@@ -388,7 +388,7 @@ func (r *requiredCIRegistry) Mode(context.Context, string) (string, error) {
 	return localci.ModeLocal, nil
 }
 func (r *requiredCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "node", Slots: 1, Enabled: true}}, nil
+	return []localci.Node{{Name: "node", Enabled: true, Labels: []string{machines.LabelCI}}}, nil
 }
 func (r *requiredCIRegistry) LoadResult(context.Context, string, string) (localci.Result, error) {
 	return r.result, nil
