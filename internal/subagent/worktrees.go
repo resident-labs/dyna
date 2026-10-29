@@ -13,41 +13,57 @@ import (
 	"dyna-agent/internal/worktrees"
 )
 
-// ReportWorktreePortCapacity observes the pool and posts any new
-// capacity-band crossing to every room. Allocation stays best effort: an
-// alert failure never rolls back a worktree that Git already created.
+// observePortCapacity reads a new or undelivered pool crossing. Tests replace it.
+var observePortCapacity = worktrees.ObservePortCapacity
+
+// postPortAlert stores one capacity alert in one room. Tests replace it.
+var postPortAlert = func(m *Manager, rec room.Record, alert *worktrees.PortCapacityAlert) error {
+	_, err := m.rooms().PostEventInput(room.PostEventInput{
+		RoomID: rec.ID,
+		Event: room.WorktreePortsEvent{
+			Used: alert.Used, Limit: alert.Limit, Threshold: alert.Threshold, Generation: alert.Generation,
+		},
+		To: []string{rec.Name + ":" + room.RootAgent},
+	})
+	return err
+}
+
+// ReportWorktreePortCapacity observes the pool and posts any new or
+// undelivered capacity-band crossing to every room. Delivery is acknowledged
+// only after a full sweep succeeds, so a transient failure is retried on the
+// next observation. Allocation stays best effort: an alert failure never
+// rolls back a worktree that Git already created.
 func (m *Manager) ReportWorktreePortCapacity() {
-	alert, err := worktrees.ObservePortCapacity()
+	alert, err := observePortCapacity()
 	if err != nil {
 		log.Printf("worktree port capacity: %v", err)
 		return
 	}
-	if alert == nil {
+	if alert == nil || !m.deliverPortCapacityAlert(alert) {
 		return
 	}
-	m.reportPortCapacityAlert(alert)
+	if err := worktrees.AckPortAlertDelivery(alert.Generation, alert.Threshold); err != nil {
+		log.Printf("worktree port capacity delivery: %v", err)
+	}
 }
 
-// reportPortCapacityAlert posts one band crossing to the root seat of every
-// room: the pool is host-wide, so every room's root can act on it.
-func (m *Manager) reportPortCapacityAlert(alert *worktrees.PortCapacityAlert) {
+// deliverPortCapacityAlert posts one band crossing to the root seat of every
+// room: the pool is host-wide, so every room's root can act on it. It reports
+// whether every room received the alert.
+func (m *Manager) deliverPortCapacityAlert(alert *worktrees.PortCapacityAlert) bool {
 	rooms, err := m.rooms().List(false)
 	if err != nil {
 		log.Printf("worktree port capacity rooms: %v", err)
-		return
+		return false
 	}
+	delivered := true
 	for _, rec := range rooms {
-		_, err := m.rooms().PostEventInput(room.PostEventInput{
-			RoomID: rec.ID,
-			Event: room.WorktreePortsEvent{
-				Used: alert.Used, Limit: alert.Limit, Threshold: alert.Threshold, Generation: alert.Generation,
-			},
-			To: []string{rec.Name + ":" + room.RootAgent},
-		})
-		if err != nil {
+		if err := postPortAlert(m, rec, alert); err != nil {
 			log.Printf("worktree port capacity alert for %s: %v", rec.Name, err)
+			delivered = false
 		}
 	}
+	return delivered
 }
 
 // keptWorktreeReason is the lock reason cleanup and the owner see on a tree

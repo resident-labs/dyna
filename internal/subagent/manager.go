@@ -216,6 +216,8 @@ func (m *Manager) sessionWorktree(ctx context.Context, opts StartOptions, rec ro
 	}
 	tree, err := worktrees.NewFor(ctx, repo, "dyna/"+id, "", id, "")
 	if err != nil {
+		// A full pool still leaves a capacity alert to deliver or retry.
+		m.ReportWorktreePortCapacity()
 		return "", nil, fmt.Errorf("could not create this session's worktree from %s: %w; pass --dir <path> to start in an existing tree", repo, err)
 	}
 	m.ReportWorktreePortCapacity()

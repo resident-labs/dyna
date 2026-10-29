@@ -18,8 +18,9 @@ func (s services) newWorktree(ctx context.Context, repo, branch, base string, no
 	// A manually created worktree does not belong to its caller's workflow.
 	// Run deletion must only remove worktrees created by workflow isolation.
 	result, err := worktreesvc.New(ctx, repo, branch, base, noDeps, creator)
-	if err == nil && s.rooms != nil && s.rooms.Notify != nil && s.rooms.Notify.Sessions != nil {
-		// The pool is host-wide, so every room learns before it fills.
+	if s.rooms != nil && s.rooms.Notify != nil && s.rooms.Notify.Sessions != nil {
+		// The pool is host-wide, so every room learns before it fills. Report
+		// on failure too: a full pool still leaves an alert to deliver or retry.
 		s.rooms.Notify.Sessions.ReportWorktreePortCapacity()
 	}
 	return result, err
