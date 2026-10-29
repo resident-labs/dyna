@@ -4,8 +4,10 @@ import (
 	"context"
 	"math"
 	"sort"
+	"time"
 
 	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/subagent"
@@ -19,7 +21,7 @@ func (s services) machineAPI() websvc.MachineAPI {
 	if s.rooms != nil && s.rooms.Notify != nil {
 		alerter = machineDiskAlerter{notify: s.rooms.Notify}
 	}
-	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, DiskFloor: ciDiskFloor, Alerter: alerter, RoomName: s.machineRoomName}
+	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, CIQueue: s.machineCIQueue, DiskFloor: ciDiskFloor, Alerter: alerter, RoomName: s.machineRoomName}
 }
 
 // machineRoomName names the room whose root allowed host checks, so the Machine
@@ -47,10 +49,22 @@ func (s services) machineCI() []websvc.MachineCIRun {
 	for _, run := range runs {
 		out = append(out, websvc.MachineCIRun{
 			Machine: run.Machine, Number: run.Number, Kind: machineCIRunKind(run.Kind), Branch: run.Branch,
-			Title: run.Title, URL: run.URL, Slots: run.Slots, Trial: run.Trial, Suites: run.Suites, Started: run.Started,
+			Title: run.Title, URL: run.URL, Trial: run.Trial, Suites: run.Suites, Started: run.Started,
 		})
 	}
 	return out
+}
+
+// machineCIQueue reads one node's shared queue: the checks and jobs it runs
+// now and the work that waits for room on it.
+func (s services) machineCIQueue(name string) (int, int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	running, waiting, err := (jobs.Admission{}).Snapshot(ctx, name)
+	if err != nil {
+		return 0, 0
+	}
+	return running, waiting
 }
 
 // machineCIRunKind names the page's kind for a run. An unknown kind reads as a

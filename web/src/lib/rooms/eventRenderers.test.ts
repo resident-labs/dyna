@@ -315,6 +315,14 @@ const fixtures: Record<string, EventPayload> = {
   'terminal/request.done': { requestId: 'q3', verdict: 'done', exit: { code: 0 }, note: 'logged in', detail: 'Exit code 0.' },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
   'shell/output-silence': { shellId: 'sh_20261023-120000-0000000a', label: 'build', minutes: 30 },
+  'job/queued': {
+    jobId: 'job_0123456789ab',
+    node: 'pve',
+    label: 'make test',
+    state: 'queued',
+    parent: 'dyna:jobs-step1',
+    waitReason: 'waiting: 4 of 4 IO-heavy jobs running, position 3 of 7',
+  },
   'job/started': {
     jobId: 'job_0123456789ab',
     node: 'pve',

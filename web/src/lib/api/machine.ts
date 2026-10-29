@@ -17,10 +17,11 @@ export type MachineStatus = 'online' | 'degraded' | 'disabled' | 'offline' | 'un
 // probe message never reaches the screen.
 export type MachineStatusReason = 'low-disk'
 
-// MachineCISlots is the CI work this machine runs now, out of its slots.
-export interface MachineCISlots {
-  used: number
-  slots: number
+// MachineCIWork is the CI work this machine's node queue holds now: the runs
+// it admitted and the units still waiting for room.
+export interface MachineCIWork {
+  running: number
+  waiting: number
 }
 
 // MachineCIRunKind is watch.RunningCIKind: the work a run checks. A local branch
@@ -38,7 +39,6 @@ export interface MachineCIRun {
   branch?: string
   title: string
   url: string
-  slots: number
   trial: boolean
   suites?: string[]
   // started is when the run took its slots, as the engine's clock reads it.
@@ -54,9 +54,13 @@ export interface MachineSummary {
   local: boolean
   enabled: boolean
   status: MachineStatus
-  // ciSlots is the machine's setting; ci is its use now, which the CI work
-  // reports in a later version.
+  // ciSlots is the machine's legacy slot setting; ci is the work its node
+  // queue holds now.
   ciSlots: number
+  // maxIOHeavy and maxDiskPercent are the node queue's stored limits; zero or
+  // absent keeps each default.
+  maxIOHeavy?: number
+  maxDiskPercent?: number
   // allowHostChecks is an explicit opt-in by the owner, or by the root of a
   // room for that room, to repository commands outside containers.
   allowHostChecks: boolean
@@ -69,7 +73,7 @@ export interface MachineSummary {
   cpu?: number
   agents?: number
   computers?: number
-  ci?: MachineCISlots
+  ci?: MachineCIWork
 }
 
 // MachineAgent is a session that runs on this engine's machine now.

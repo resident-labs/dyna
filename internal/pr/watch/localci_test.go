@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 )
@@ -284,7 +285,7 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 type occupiedCIRegistry struct{ hostedCIRegistry }
 
 func (r *occupiedCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "node", Slots: 1, Enabled: true}}, nil
+	return []localci.Node{{Name: "node", Enabled: true, CPUs: 2}}, nil
 }
 func (r *occupiedCIRegistry) Mode(context.Context, string) (string, error) {
 	return localci.ModeLocal, nil
@@ -292,7 +293,7 @@ func (r *occupiedCIRegistry) Mode(context.Context, string) (string, error) {
 func (r *occupiedCIRegistry) LoadResult(context.Context, string, string) (localci.Result, error) {
 	return localci.Result{}, os.ErrNotExist
 }
-func TestRegisteredCICancellationKeepsSlotUntilExecutionStops(t *testing.T) {
+func TestRegisteredCICancellationKeepsItsQueuePlaceUntilExecutionStops(t *testing.T) {
 	repo := t.TempDir()
 	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
 		t.Fatalf("init repository: %v: %s", err, raw)
@@ -300,12 +301,18 @@ func TestRegisteredCICancellationKeepsSlotUntilExecutionStops(t *testing.T) {
 	r := &Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: strings.Repeat("a", 40), Branch: "feature", RepoPath: repo, Watching: true, State: "open"}
 	cancelled := 0
 	old := &registeredCIRun{node: "node", cancel: func() { cancelled++ }}
-	s := &Service{LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{"old-head": old}}}
+	dataDir := t.TempDir()
+	// The run a newer head cancelled still executes, so its work still holds
+	// the node's whole queue.
+	if _, err := (jobs.Admission{DataDir: dataDir}).Hold(context.Background(), jobs.Demand{Node: "node", ID: "old", CPUs: 2}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{Store: &Store{Root: filepath.Join(dataDir, "state.db")}, LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{"old-head": old}}}
 	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{r.Key: r}}); err != nil {
 		t.Fatal(err)
 	}
 	if cancelled != 1 || len(s.registeredRuns.runs) != 1 || s.registeredRuns.runs["old-head"] != old {
-		t.Fatalf("cancellation freed a live slot: cancelled=%d runs=%v", cancelled, s.registeredRuns.runs)
+		t.Fatalf("cancellation freed a live place: cancelled=%d runs=%v", cancelled, s.registeredRuns.runs)
 	}
 }
 
@@ -480,7 +487,12 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 			key := registeredJobKey(registeredCIJob{record: *r, head: head})
 			cancelled := false
 			run := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
-			s := &Service{LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{key: run}}}
+			// The active run's work still holds the node's whole queue.
+			dataDir := t.TempDir()
+			if _, err := (jobs.Admission{DataDir: dataDir}).Hold(context.Background(), jobs.Demand{Node: "node", ID: "active", CPUs: 2}); err != nil {
+				t.Fatal(err)
+			}
+			s := &Service{Store: &Store{Root: filepath.Join(dataDir, "state.db")}, LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{key: run}}}
 			s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
 				t.Fatalf("a local CI result reached GitHub: %v", cmd.Args)
 				return nil
@@ -567,27 +579,26 @@ func savedRecord(t *testing.T, s *Service, key string) Record {
 
 func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 	nodes := []localci.Node{
-		{Name: "local", Slots: 1, Enabled: true},
-		{Name: "hermeslab", Slots: 8, Enabled: true},
-		{Name: "disabled", Slots: 20},
+		{Name: "local", Enabled: true},
+		{Name: "hermeslab", Enabled: true},
+		{Name: "disabled"},
 	}
 	for _, tc := range []struct {
-		active map[string]int
-		want   string
+		free map[string]int
+		want string
 	}{
-		{map[string]int{}, "hermeslab"},
-		{map[string]int{"local": 1}, "hermeslab"},
-		{map[string]int{"hermeslab": 4}, "hermeslab"},
-		{map[string]int{"hermeslab": 8}, "local"},
-		{map[string]int{"hermeslab": 8, "local": 1}, ""},
+		{map[string]int{"local": 1, "hermeslab": 8}, "hermeslab"},
+		{map[string]int{"local": 1, "hermeslab": 7}, "hermeslab"},
+		{map[string]int{"local": 1, "hermeslab": 1}, "local"},
+		{map[string]int{"local": 0, "hermeslab": 0}, ""},
 	} {
-		node := availableCINode(nodes, tc.active, "")
+		node := availableCINode(nodes, "", "", func(n localci.Node) int { return tc.free[n.Name] })
 		got := ""
 		if node != nil {
 			got = node.Name
 		}
 		if got != tc.want {
-			t.Fatalf("active=%v: chose %q, want %q", tc.active, got, tc.want)
+			t.Fatalf("free=%v: chose %q, want %q", tc.free, got, tc.want)
 		}
 	}
 }
@@ -596,35 +607,41 @@ func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 // the merge trials that share it leave it to the room that owns it.
 func TestRegisteredCISkipsMachinesLimitedToOtherRooms(t *testing.T) {
 	nodes := []localci.Node{
-		{Name: "hermeslab", Slots: 8, Enabled: true, Rooms: []string{"room_dyna"}},
-		{Name: "pve", Slots: 4, Enabled: true, Rooms: []string{"room_fl-rea"}},
-		{Name: "arch", Slots: 2, Enabled: true},
+		{Name: "hermeslab", Enabled: true, Rooms: []string{"room_dyna"}},
+		{Name: "pve", Enabled: true, Rooms: []string{"room_fl-rea"}},
+		{Name: "arch", Enabled: true},
 	}
+	free := func(localci.Node) int { return 4 }
 	for _, tc := range []struct {
-		room   string
-		active map[string]int
-		want   string
+		room string
+		full string
+		want string
 	}{
-		{"room_dyna", nil, "hermeslab"},
-		{"room_fl-rea", nil, "pve"},
+		{"room_dyna", "", "hermeslab"},
+		{"room_fl-rea", "", "pve"},
 		// A full machine of the room hands work to a machine with no limit
 		// before another room's machine.
-		{"room_dyna", map[string]int{"hermeslab": 8}, "arch"},
+		{"room_dyna", "hermeslab", "arch"},
 		// A machine with no room list takes every room's work.
-		{"room_other", nil, "arch"},
+		{"room_other", "", "arch"},
 	} {
-		node := availableCINode(nodes, tc.active, tc.room)
+		node := availableCINode(nodes, tc.room, "", func(n localci.Node) int {
+			if n.Name == tc.full {
+				return 0
+			}
+			return free(n)
+		})
 		got := ""
 		if node != nil {
 			got = node.Name
 		}
 		if got != tc.want {
-			t.Fatalf("room=%s active=%v: chose %q, want %q", tc.room, tc.active, got, tc.want)
+			t.Fatalf("room=%s full=%q: chose %q, want %q", tc.room, tc.full, got, tc.want)
 		}
 	}
 	// A room that no machine allows waits for one, and takes no other room's
 	// machine.
-	if node := availableCINode(nodes[:2], nil, "room_other"); node != nil {
+	if node := availableCINode(nodes[:2], "room_other", "", free); node != nil {
 		t.Fatalf("room with no machine chose %q", node.Name)
 	}
 }

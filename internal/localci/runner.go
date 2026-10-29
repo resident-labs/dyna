@@ -33,6 +33,12 @@ type Runner struct {
 	// Node is the registered CI machine that runs the checks. A run needs one:
 	// there is no other execution pipeline.
 	Node *Node
+	// Engine marks a runner the engine itself runs, such as the PR watcher's:
+	// its queue rows end through the run's normal end path, never through a
+	// process check. A runner outside the engine, such as the manual CI
+	// command, leaves it off, so the queue reaps its rows once its process is
+	// gone.
+	Engine bool
 	// wait pauses between polls and between retries of a node call. clock reads
 	// the time a retry measures an unreachable node by. Tests replace both, so a
 	// drop proves itself without a real sleep.

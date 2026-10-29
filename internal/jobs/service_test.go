@@ -35,12 +35,18 @@ func (f fakeMachines) GetLocal(context.Context) (machines.Machine, error) { retu
 // chanReporter hands each event to a test through a channel, so a test waits
 // for the service by receiving, with no clock of its own.
 type chanReporter struct {
+	queued   chan Job
 	started  chan Job
 	finished chan Job
 }
 
 func newChanReporter() *chanReporter {
-	return &chanReporter{started: make(chan Job, 4), finished: make(chan Job, 4)}
+	return &chanReporter{queued: make(chan Job, 4), started: make(chan Job, 4), finished: make(chan Job, 4)}
+}
+
+func (r *chanReporter) JobQueued(_ context.Context, job Job) error {
+	r.queued <- job
+	return nil
 }
 
 func (r *chanReporter) JobStarted(_ context.Context, job Job) error {

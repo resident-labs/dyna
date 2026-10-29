@@ -59,9 +59,11 @@ type nodeCheck struct {
 	reports  ReportMode
 	priority int
 	// cpus and memoryMiB are what the repository asked for, and resources is
-	// what the node granted.
+	// what the node granted. Heavy marks an IO-heavy check, which a node runs
+	// only a few of.
 	cpus      int
 	memoryMiB int64
+	heavy     bool
 	resources checkResources
 	// event is the GitHub event a job check runs, and branch the ref a push
 	// event names. A cache-warming job is scoped to the default branch.
@@ -116,7 +118,7 @@ func nodeChecks(definition *Definition, suites []Suite, allowHost bool) ([]nodeC
 				host: command.Host, hostUser: command.HostUser, setup: command.Setup,
 				env: cloneStrings(command.Env), caches: append([]CacheDefinition(nil), command.Caches...),
 				reports: command.Reports, priority: command.Priority,
-				cpus: command.CPUs, memoryMiB: command.MemoryMiB,
+				cpus: command.CPUs, memoryMiB: command.MemoryMiB, heavy: command.Heavy,
 			})
 		}
 	}
@@ -395,6 +397,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			failure = r.nodeCommand(cleanup, &tail, &tail, script)
 			stop()
 			if failure == nil {
+				// Teardown confirmed that every check stopped. Any reservation
+				// retained after an uncertain poll can now be released.
+				for _, check := range checks {
+					if err := r.queue().Release(context.Background(), node.Name, runID+"-"+string(check.id)); err != nil {
+						log.Printf("local CI %s: release check reservation: %v", node.Name, err)
+					}
+				}
 				return
 			}
 			lastOutput = tail.String()
@@ -435,14 +444,30 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// One poller follows every check of this run with one call at a time.
 	poller, stopPoller := r.exec().NewPoller(control)
 	defer stopPoller()
+	// Renew a live check at most once per minute. The expiry is much longer
+	// than this interval, including when a poll takes time to return.
+	renewed := map[string]time.Time{}
+	poller.Polled = func(spec jobs.RunSpec) {
+		if time.Since(renewed[spec.ID]) < time.Minute {
+			return
+		}
+		if err := r.queue().Renew(control, node.Name, runID+"-"+spec.ID); err != nil {
+			log.Printf("local CI %s: renew check reservation: %v", node.Name, err)
+			return
+		}
+		renewed[spec.ID] = time.Now()
+	}
 	var attachedMu sync.Mutex
-	poller.Started = func(spec jobs.RunSpec) {
+	// Record each check before admission. If the engine stops between
+	// admission and launch, recovery can inspect the node and release its
+	// reservation when no detached check was started.
+	recordCheck := func(id Suite) error {
 		attachedMu.Lock()
 		defer attachedMu.Unlock()
-		attached.Checks = append(attached.Checks, Suite(spec.ID))
-		if e := localStore.saveAttachment(control, attachKey, sha, node.Name, attached); e != nil {
-			log.Printf("local CI %s: record started check: %v", node.Name, e)
+		if !slices.Contains(attached.Checks, id) {
+			attached.Checks = append(attached.Checks, id)
 		}
+		return localStore.saveAttachment(control, attachKey, sha, node.Name, attached)
 	}
 	resumed := func(id Suite) bool { return resume != nil && resume.has(id) }
 	noExpand := r.systemdNeedsNoExpandFlag(control)
@@ -451,9 +476,8 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	for i := range checks {
 		order[i] = i
 	}
-	// Checks that are already running come first, and they hold no slot to wait
-	// for. Higher-priority checks start first; equal priorities keep definition
-	// order.
+	// Checks that are already running come first. Higher-priority checks start
+	// first; equal priorities keep definition order.
 	sort.SliceStable(order, func(i, j int) bool {
 		if a, b := resumed(checks[order[i]].id), resumed(checks[order[j]].id); a != b {
 			return a
@@ -465,7 +489,10 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	close(queue)
 	var wg sync.WaitGroup
-	workers := min(node.Slots, len(checks))
+	// The node's admission queue bounds what runs at once, so every check of
+	// the run gets its own worker and holds its own place in the queue. A
+	// repository's parallelism limit still bounds its own run.
+	workers := len(checks)
 	if req.Parallelism > 0 {
 		workers = min(workers, req.Parallelism)
 	}
@@ -494,8 +521,31 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					Unit:   checkUnit(runID, check.id),
 					Attach: resumed(check.id),
 				}
-				if !spec.Attach {
-					spec.Script = nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, noExpand, req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)])
+				// Every check joins the node's admission queue: the one queue jobs
+				// and checks of every room share. A fresh check waits for room, and
+				// each wait reason the queue records lands in its log, so the wait
+				// is visible. A resumed check already runs on the node, so it only
+				// takes its place back.
+				queue := r.queue()
+				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB, Timeout: req.Timeout}
+				runErr := recordCheck(check.id)
+				port := 0
+				if runErr != nil {
+					runErr = fmt.Errorf("record check before admission: %w", runErr)
+				} else if spec.Attach {
+					held, holdErr := queue.Reattach(checkCtx, demand)
+					if holdErr != nil {
+						runErr = fmt.Errorf("record the running check %s in the queue: %w", check.id, holdErr)
+					} else {
+						port = held
+					}
+				} else {
+					port, runErr = queue.Acquire(checkCtx, demand, r.wait, func(reason string) {
+						fmt.Fprintf(writer, "local CI: %s\n", reason)
+					})
+				}
+				if runErr == nil && !spec.Attach {
+					spec.Script = nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, port, noExpand, req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)])
 				}
 				if !check.host {
 					// A host check runs its command in its own scope from inside the
@@ -503,7 +553,18 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					limits := check.resources.Scope(false)
 					spec.Limits = &limits
 				}
-				runErr := poller.Run(checkCtx, spec, writer)
+				if runErr == nil {
+					runErr = poller.Run(checkCtx, spec, writer)
+				}
+				// An exit record proves the check ended. A transport failure or
+				// failed stop does not; retain its reservation until teardown
+				// confirms the stop or the reservation expires.
+				var exited *jobs.DetachedExit
+				if (!r.Engine || !EngineStopping()) && (runErr == nil || errors.As(runErr, &exited)) {
+					releaseCtx, releaseStop := context.WithTimeout(context.WithoutCancel(checkCtx), 10*time.Second)
+					_ = queue.Release(releaseCtx, node.Name, demand.ID)
+					releaseStop()
+				}
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				if runErr != nil || len(markers) == 0 {
@@ -1051,7 +1112,7 @@ func nodeWorktreeCommand(cache, arguments string) string {
 }
 
 // teardownScript stops what a run's checks left on the machine, without removing
-// the run folder: the containers first, so a scope keeps its slot until its
+// the run folder: the containers first, so a scope keeps its place until its
 // container has stopped, then each check's scope and detached unit, then the
 // worktrees. It fails when a container is still running afterwards. The run
 // folder is left to the removal that stops the run's keeper first: deleting it
@@ -1127,7 +1188,7 @@ func nodeSetupScript(base, reports, active string, cacheNames []string) string {
 // writes the check's exit record after the check returns, and it shares the
 // group. A check that leaves a child behind, such as a compiler daemon or a
 // shell that outlived its deadline, must not hold the check's output pipe or
-// the next check's slot.
+// the next check's room on the node.
 const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || [ "$p" = "$PPID" ] || kill -KILL "$p" 2>/dev/null || true; done`
 
 // survivorSweep removes what a failed teardown left on the node: containers
@@ -1202,7 +1263,7 @@ func checkTmpFolder(setting string) string {
 	return "tmpparent=" + parent + "; " + sweep + make
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, port int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
 	work := nodeCheckWorkPath(runDir, runID, check)
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1250,7 +1311,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	}
 	if check.job != nil {
 		// act starts the job in containers of its own; the wrapper is a host
-		// process, so the slot lock, the deadline and the cleanup stay exactly
+		// process, so the queue admission, the deadline and the cleanup stay exactly
 		// what they are for every other check.
 		artifacts := path.Join(reportDir, "artifacts")
 		cachePath := path.Join(base, "actcache")
@@ -1299,9 +1360,9 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			" --env-file " + q(allowList) +
 			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
-			// The slot this check holds names its artifact port, so checks in other
-			// slots of this node, whatever run they belong to, bind another one.
-			" --artifact-server-port $(( " + fmt.Sprint(actArtifactPortBase) + " + slot ))" +
+			// The queue's port index names this check's artifact port, so checks
+			// of this node, whatever run they belong to, bind another one.
+			" --artifact-server-port " + strconv.Itoa(actArtifactPortBase+port) +
 			// act mounts the host's container socket into job containers by default.
 			// A repository's workflow must not reach the host's runtime through it.
 			" --container-daemon-socket -" +
@@ -1334,7 +1395,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			`done < <(find ` + q(artifacts) + ` -name '*.zip' -type f 2>/dev/null); ` +
 			"rm -rf " + unpacked + "; "
 		setup += "( exit $check_status )"
-		return jobs.SlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
+		return setup
 	}
 	if check.host {
 		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; " + checkTmpFolder(node.CheckTmp) + "trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
@@ -1357,9 +1418,6 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// wrapper kills every other member of the group. A child that held the
 		// output pipe open is gone before the caller waits on the pipe, so the
 		// ErrWaitDelay path is a fallback rather than the way out.
-		// The check and everything it starts also gets no slot lock: the wrapper
-		// holds fd 9, and a daemon that leaves even the group (sccache does)
-		// would otherwise keep the slot for good.
 		// The wrapper stays outside the check's scope: it starts the command
 		// inside it, and once the command returns it kills what is left in the
 		// scope, so a descendant that started its own session cannot hold the
@@ -1379,7 +1437,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			scope += " " + q(arg)
 		}
 		// A SIGKILL to the scope comes first: a detached child that ignores
-		// SIGTERM must not hold the slot or the transport for the manager's stop
+		// SIGTERM must not hold the check's transport for the manager's stop
 		// timeout. `systemctl kill` without --kill-who/--kill-whom works on every
 		// systemd that runs a check (the option differs between 249 and 250, and
 		// the default is every process in the unit). The stop is bounded, and a
@@ -1394,10 +1452,10 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" TMPDIR=\"$isolated\" TMP=\"$isolated\" TEMP=\"$isolated\" GOTMPDIR=\"$isolated\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
 		serverPort := ""
 		if _, set := environment["SCCACHE_SERVER_PORT"]; !set {
-			serverPort = " SCCACHE_SERVER_PORT=$(( " + strconv.Itoa(sccachePortBase) + " + slot ))"
+			serverPort = " SCCACHE_SERVER_PORT=" + strconv.Itoa(sccachePortBase+port)
 		}
-		setup += hostEnvironment(environment) + serverPort + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
-		return jobs.SlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
+		setup += hostEnvironment(environment) + serverPort + " bash -o pipefail -c " + q(check.inner) + " || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
+		return setup
 	}
 	if node.SSH == "" {
 		setup += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); if ! \"${docker[@]}\" info >/dev/null 2>&1; then echo 'Docker access is unavailable' >&2; exit 69; fi; fi; "
@@ -1434,16 +1492,15 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		environment[key] = value
 	}
 	// A check that starts sccache must not lose it to another check's cleanup:
-	// the port follows the slot this check holds, and the cache directory stays
-	// where the repository put it.
+	// the port follows the queue index this check holds, and the cache directory
+	// stays where the repository put it.
 	if _, set := environment["SCCACHE_SERVER_PORT"]; !set {
-		args += " -e SCCACHE_SERVER_PORT=$(( " + strconv.Itoa(sccachePortBase) + " + slot ))"
+		args += " -e SCCACHE_SERVER_PORT=" + strconv.Itoa(sccachePortBase+port)
 	}
 	args += dockerEnvironment(environment) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) " + q(check.image)
 	// Both host and container deadlines survive a disconnected SSH client.
-	// The container's command gets no slot lock either, for the same reason.
-	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner) + " 9>&-"
-	return jobs.SlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
+	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner)
+	return setup
 }
 
 func dockerEnvironment(environment map[string]string) string {
