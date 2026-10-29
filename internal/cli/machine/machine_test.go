@@ -66,6 +66,35 @@ func TestMachineListShowsRooms(t *testing.T) {
 	}
 }
 
+// The ci label says a machine runs local CI checks: edit adds and removes
+// labels, show lists them, and a name the resource rule refuses is rejected.
+func TestMachineEditSetsLabels(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	if _, err := run(t, "add", "build", "--ssh", "pip@build"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "build", "--label", "ci"); err != nil {
+		t.Fatal(err)
+	}
+	m, err := (machines.Store{}).Get(context.Background(), "build")
+	if err != nil || !m.HasLabel(machines.LabelCI) {
+		t.Fatalf("labeled machine = %#v, %v", m, err)
+	}
+	if out, err := run(t, "show", "build"); err != nil || !strings.Contains(out, "Labels:   ci") {
+		t.Fatalf("show labels = %q, %v", out, err)
+	}
+	if _, err := run(t, "edit", "build", "--unlabel", "ci"); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := (machines.Store{}).Get(context.Background(), "build"); err != nil || m.HasLabel(machines.LabelCI) {
+		t.Fatalf("unlabeled machine = %#v, %v", m, err)
+	}
+	if _, err := run(t, "edit", "build", "--label", "not a label!"); err == nil {
+		t.Fatal("a label the resource rule refuses was accepted")
+	}
+}
+
 // The owner sets a machine's ssh connect timeout with edit and reads it back
 // with show; zero restores the default, and a value ssh cannot read is refused.
 func TestMachineEditSetsSSHConnectTimeout(t *testing.T) {

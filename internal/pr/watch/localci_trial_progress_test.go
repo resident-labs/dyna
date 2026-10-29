@@ -32,7 +32,7 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 	}
 	registry := localci.Store{DataDir: dataDir}
 	ciMachine := machines.Store{DataDir: dataDir}
-	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true}); err != nil {
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
@@ -160,7 +160,7 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 	repoDir, base, head, prHead := trialRepoWithDefinition(t)
 	registry := localci.Store{DataDir: dataDir}
 	ciMachine := machines.Store{DataDir: dataDir}
-	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true}); err != nil {
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
@@ -237,17 +237,12 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
 		t.Fatal(err)
 	}
-	nodeStore := machines.Store{DataDir: dataDir}
 	if withNode {
-		if _, err := nodeStore.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true}); err != nil {
+		// The engine host row carries no ci label, so the worker is the one CI
+		// machine.
+		if _, err := (machines.Store{DataDir: dataDir}).Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 			t.Fatal(err)
 		}
-	} else if local, err := nodeStore.GetLocal(ctx); err != nil {
-		// The engine host's own row would take the work, so with no node the
-		// fleet is switched off entirely.
-		t.Fatal(err)
-	} else if err := nodeStore.SetEnabled(ctx, local.Name, false); err != nil {
-		t.Fatal(err)
 	}
 	branch := "dyna/merge-trial/1"
 	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Base: base, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
@@ -444,7 +439,7 @@ func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
 	}
 	registry := localci.Store{DataDir: dataDir}
 	ciMachine := machines.Store{DataDir: dataDir}
-	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true}); err != nil {
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", SSH: "ari@worker", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {

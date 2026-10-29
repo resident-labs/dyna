@@ -93,7 +93,10 @@ type MachineSummary struct {
 	Rooms          []string                      `json:"rooms,omitempty"`
 	// Suites limits the local CI work the machine takes to those suites; empty
 	// means every suite.
-	Suites    []string       `json:"suites,omitempty"`
+	Suites []string `json:"suites,omitempty"`
+	// Labels mark what the machine takes; the ci label says it runs local CI
+	// checks.
+	Labels    []string       `json:"labels,omitempty"`
 	CPU       *int           `json:"cpu,omitempty"`
 	Agents    *int           `json:"agents,omitempty"`
 	Computers *int           `json:"computers,omitempty"`
@@ -198,6 +201,7 @@ type MachinePatch struct {
 	AllowHostChecks *bool     `json:"allowHostChecks"`
 	Rooms           *[]string `json:"rooms"`
 	Suites          *[]string `json:"suites"`
+	Labels          *[]string `json:"labels"`
 	SSH             *string   `json:"ssh"`
 	Create          bool      `json:"create,omitempty"`
 	// Remove deletes the machine that the reference names.
@@ -391,6 +395,9 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Suites != nil {
 		m.Suites = *patch.Suites
 	}
+	if patch.Labels != nil {
+		m.Labels = *patch.Labels
+	}
 	if patch.SSH != nil {
 		m.SSH = strings.TrimSpace(*patch.SSH)
 	}
@@ -517,8 +524,12 @@ func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[stri
 	if a.CIQueue != nil {
 		running, waiting = a.CIQueue(m.Name)
 	}
-	out.CI = &MachineCIWork{Running: running, Waiting: waiting}
-	out.CIRuns = runs
+	// A machine carries the ci label when local CI runs on it, so only that
+	// row reports a queue and its runs.
+	if m.Enabled && m.HasLabel(machines.LabelCI) {
+		out.CI = &MachineCIWork{Running: running, Waiting: waiting}
+		out.CIRuns = runs
+	}
 	if !m.Local {
 		// The probe reads the version installed on the machine itself.
 		out.DynaVersion = m.Capabilities.DynaVersion
@@ -586,6 +597,7 @@ func machineSummary(m machines.Machine) MachineSummary {
 		AllowHostChecks: m.HasHostChecksGrants(),
 		Rooms:           m.Rooms,
 		Suites:          m.Suites,
+		Labels:          m.Labels,
 		MaxIOHeavy:      &m.MaxIOHeavy,
 		MaxDiskPercent:  &m.MaxDiskPercent,
 		Resources:       m.Resources,

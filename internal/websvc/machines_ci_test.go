@@ -27,7 +27,7 @@ func TestMachineCIWorkAndRuns(t *testing.T) {
 		}
 		return 0, 0
 	}}
-	hermes, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", SSH: "pip@hermes", Enabled: true})
+	hermes, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", SSH: "pip@hermes", Enabled: true, Labels: []string{machines.LabelCI}})
 	if err != nil {
 		t.Fatal(err)
 	}

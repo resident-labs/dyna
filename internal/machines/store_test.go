@@ -46,7 +46,8 @@ INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES
 		if !local.Local || local.SSH != "" || !local.Enabled {
 			t.Fatalf("local machine = %#v", local)
 		}
-		want := Machine{Name: "hermes", SSH: "pip@hermeslab", Enabled: true, Health: HealthUnknown}
+		// An old CI node keeps taking local CI, so its label says so.
+		want := Machine{Name: "hermes", SSH: "pip@hermeslab", Enabled: true, Labels: []string{LabelCI}, Health: HealthUnknown}
 		if got := list[1]; !sameMachine(got, want) {
 			t.Fatalf("imported machine = %#v, want %#v", got, want)
 		}
@@ -463,7 +464,8 @@ const machinesVersionThirteenSchema = `CREATE TABLE machines (
 );
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;
 INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms,rooms) VALUES
- ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,'["room_dyna"]');
+ ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,'["room_dyna"]'),
+ ('m_desktop','desktop','["engine","agents"]','',0,1,1,1000,1000,'[]');
 INSERT INTO meta(key,value) VALUES('machines.version','13');`
 
 // A version 13 registry drops its roles and CI slots and keeps every machine:
@@ -491,6 +493,19 @@ func TestMigrateDropsRolesAndSlots(t *testing.T) {
 		if err := db.QueryRow("SELECT name FROM pragma_table_info('machines') WHERE name=?", column).Scan(&name); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("machines.%s remains: %v", column, err)
 		}
+	}
+	// The ci role becomes the ci label, so the engine host that never had the
+	// role stays out of local CI after the migration, and the machine that had
+	// it keeps taking local CI.
+	if !m.HasLabel(LabelCI) {
+		t.Fatalf("former ci machine lost its ci label: %#v", m)
+	}
+	desktop, err := Store{DataDir: dir}.Get(context.Background(), "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desktop.HasLabel(LabelCI) {
+		t.Fatalf("engine host without the old ci role carries the ci label: %#v", desktop)
 	}
 }
 

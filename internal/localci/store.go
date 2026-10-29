@@ -64,6 +64,15 @@ type Node struct {
 	// Suites limits the machine to those suites' CI work. An empty list takes
 	// every suite.
 	Suites []string `json:"suites,omitempty"`
+	// Labels mark what the machine takes. The ci label says it runs local CI
+	// checks; an unlabeled machine still takes jobs when enabled.
+	Labels []string `json:"labels,omitempty"`
+}
+
+// TakesCI reports whether the machine runs local CI checks: enabled and
+// carrying the ci label. Jobs use any enabled machine.
+func (n Node) TakesCI() bool {
+	return n.Enabled && slices.Contains(n.Labels, machines.LabelCI)
 }
 
 // AllowsRoom reports whether the machine takes CI work for the room. A machine
@@ -233,7 +242,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 	}
 	nodes := []Node{}
 	for _, m := range list {
-		node := Node{Name: m.Name, SSH: m.SSH, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Suites: m.Suites, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
+		node := Node{Name: m.Name, SSH: m.SSH, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Suites: m.Suites, Labels: m.Labels, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil

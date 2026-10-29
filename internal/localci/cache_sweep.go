@@ -57,7 +57,7 @@ func cleanCachesTick(ctx context.Context, dataDir string, now func() time.Time, 
 	}
 	var errs []error
 	for _, node := range nodes {
-		if !node.Enabled {
+		if !node.TakesCI() {
 			continue
 		}
 		last, err := store.LastCacheClean(ctx, node.Name)

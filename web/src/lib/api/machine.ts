@@ -56,6 +56,9 @@ export interface MachineSummary {
   // means every room. suites limits the CI suites the same way.
   rooms?: string[]
   suites?: string[]
+  // labels mark what the machine takes; the ci label says it runs local CI
+  // checks. An unlabeled machine still takes jobs when enabled.
+  labels?: string[]
   // cpu is the machine's share of its cores in percent: live for this engine's
   // machine, and the last probe reading for a remote one.
   cpu?: number
@@ -146,6 +149,7 @@ export interface MachinePatch {
   allowHostChecks?: boolean
   rooms?: string[]
   suites?: string[]
+  labels?: string[]
   ssh?: string
   // sshConnectTimeoutSeconds sets the ssh connect wait; 0 restores the default.
   sshConnectTimeoutSeconds?: number

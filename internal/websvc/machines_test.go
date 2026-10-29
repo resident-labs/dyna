@@ -39,6 +39,15 @@ func machineAPI(t *testing.T) MachineAPI {
 
 func TestMachinesListAndPatch(t *testing.T) {
 	api := machineAPI(t)
+	// The engine host carries the ci label, so it reports its queue.
+	engineHost, err := api.Store.GetLocal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineHost.Labels = []string{machines.LabelCI}
+	if _, err := api.Store.Save(t.Context(), engineHost); err != nil {
+		t.Fatal(err)
+	}
 
 	list, err := api.Machines(t.Context())
 	if err != nil {
@@ -55,7 +64,7 @@ func TestMachinesListAndPatch(t *testing.T) {
 		t.Fatalf("live figures = %+v, want 42 percent and 3 agents and 1 computer", local)
 	}
 	if local.CI == nil || local.CI.Running != 0 || local.CI.Waiting != 0 {
-		t.Fatalf("ci = %+v, want an empty queue figure", local.CI)
+		t.Fatalf("ci = %+v, want an empty queue figure for the ci-labeled engine host", local.CI)
 	}
 
 	detail, err := api.Machine(t.Context(), local.ID)
