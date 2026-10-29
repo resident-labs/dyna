@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,6 +206,51 @@ func TestWaitWakesOnFinalDecision(t *testing.T) {
 	got := <-done
 	if got.err != nil || got.request.State != StateDenied || got.request.Result.Reason != "not safe" {
 		t.Fatalf("wait = %+v, %v", got.request, got.err)
+	}
+}
+
+func TestApprovalEventsWakeOnlyTheirTarget(t *testing.T) {
+	f := newFixture(t)
+	r := f.create(t, ClassAgent)
+	if _, err := f.service.Decide(context.Background(), f.actor(f.parent), DecisionInput{Room: f.rec.ID, RequestID: r.ID, Action: ActionPass}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(context.Background(), f.actor(f.root), DecisionInput{Room: f.rec.ID, RequestID: r.ID, Action: ActionDeny, Reason: "not safe"}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := f.rooms.Messages(f.rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("events = %+v", messages)
+	}
+	if got := messages[0]; got.Notice.Kind != string(room.TypeApprovalRequested) || !reflect.DeepEqual(got.To, []string{f.parent.Address()}) || !got.Wake {
+		t.Errorf("requested = %+v", got)
+	}
+	if got := messages[1]; got.Notice.Kind != string(room.TypeApprovalDecided) || !reflect.DeepEqual(got.To, []string{f.root.Address()}) || !got.Wake {
+		t.Errorf("pass = %+v", got)
+	}
+	if got := messages[2]; got.Notice.Kind != string(room.TypeApprovalDecided) || got.Wake {
+		t.Errorf("denial decision = %+v", got)
+	}
+	if got := messages[3]; got.Notice.Kind != string(room.TypeApprovalResult) || !reflect.DeepEqual(got.To, []string{f.child.Address()}) || !got.Wake {
+		t.Errorf("result = %+v", got)
+	}
+}
+
+func TestSettingsAreOwnerOnlyAndPersist(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.service.Settings(f.actor(f.root), SettingsInput{Room: f.rec.ID, Wait: 90 * time.Second, Expiry: 2 * time.Hour, Set: true}); err == nil || !strings.Contains(err.Error(), "owner") {
+		t.Fatalf("root settings error = %v", err)
+	}
+	settings, err := f.service.Settings(f.owner(), SettingsInput{Room: f.rec.ID, Wait: 90 * time.Second, Expiry: 2 * time.Hour, Set: true})
+	if err != nil || settings.Wait != 90*time.Second || settings.Expiry != 2*time.Hour {
+		t.Fatalf("settings = %+v, %v", settings, err)
+	}
+	rec, err := f.rooms.Resolve(f.rec.ID)
+	if err != nil || rec.ApprovalWait != 90*time.Second || rec.ApprovalExpiry != 2*time.Hour {
+		t.Fatalf("stored room = %+v, %v", rec, err)
 	}
 }
 

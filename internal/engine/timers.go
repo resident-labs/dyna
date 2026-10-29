@@ -27,6 +27,7 @@ const (
 	timerSync                = "sync"
 	timerProbe               = "machine-probe"
 	timerRequests            = "requests"
+	timerApprovals           = "approvals"
 	timerMigrationRetry      = "migration-retry"
 )
 
