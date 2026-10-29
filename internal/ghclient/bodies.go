@@ -48,7 +48,7 @@ var textFlags = map[string]bool{"--title": false, "-t": false, "--body": false, 
 // or an editor, so the text cannot be read before gh publishes it.
 var generatedTextFlags = map[string]bool{
 	"--fill": true, "-f": true, "--fill-first": true, "--fill-verbose": true,
-	"--template": true, "-T": true, "--web": true, "-w": true, "--editor": true, "-e": true,
+	"--template": true, "-T": true, "--recover": true, "--attach": true, "--web": true, "-w": true, "--editor": true, "-e": true,
 }
 
 var errUninspectableText = errors.New("this command builds its title or body from commits, a template, an editor or the browser, so Dyna cannot check it; pass --title and --body-file instead")
