@@ -104,10 +104,12 @@ func (s Service) importRuntime(conn *sql.Conn) error {
 	return nil
 }
 
-// Migrate validates pending records and prepares the runtime table.
+// Migrate prepares the runtime and queue tables. The queue imports legacy
+// file-spool events on every drain, until no previous-release emitter
+// remains.
 func Migrate(dataDir string) error {
 	s := Service{DataDir: dataDir}
-	if err := s.validateStartupSpool(); err != nil {
+	if _, err := s.queueDB(); err != nil {
 		return err
 	}
 	_, err := s.runtimeDB()

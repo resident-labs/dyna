@@ -2,33 +2,24 @@ package hooks
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"syscall"
 	"time"
 
-	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/repoid"
+	statewrite "dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
 
-func (s Service) spoolDir() string {
-	root := s.DataDir
-	if root == "" {
-		root = store.DataDir()
-	}
-	return filepath.Join(root, "hook-spool")
-}
-
-// Enqueue persists an event without running hooks. A writer lock and sequence
-// names preserve append order, including concurrent writers in other processes.
+// Enqueue persists an event without running hooks. The queue row's
+// autoincrement id preserves append order, including concurrent writers in
+// other processes.
 func (s Service) Enqueue(e Event) error {
 
 	source := e.Worktree
@@ -61,199 +52,120 @@ func (s Service) Enqueue(e Event) error {
 			e.Branch, _ = repoid.Git(context.Background(), e.Worktree, "symbolic-ref", "--short", "-q", "HEAD")
 		}
 	}
-	dir := s.spoolDir()
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	unlock, err := store.Lock(filepath.Join(dir, "write.lock"))
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	entries, err := spoolFiles(dir)
-	if err != nil {
-		return err
-	}
-	var next uint64 = 1
-	for _, entry := range entries {
-		if entry.sequence >= next {
-			next = entry.sequence + 1
-		}
-	}
-	data, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
-	if err = fsutil.WriteFile(filepath.Join(dir, fmt.Sprintf("%020d.json", next)), data, 0600, true); err != nil {
-		return err
-	}
-	if err := fsutil.SyncDir(dir); err != nil {
-		return err
-	}
-	return fsutil.SyncDir(filepath.Dir(dir))
-}
-
-type spoolFile struct {
-	name     string
-	sequence uint64
-}
-
-// spoolFiles validates names while the caller holds write.lock. Drain releases
-// that short lock before running hooks, so emitters never wait for a command.
-func spoolFiles(dir string) ([]spoolFile, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	var files []spoolFile
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		sequence, err := strconv.ParseUint(strings.TrimSuffix(entry.Name(), ".json"), 10, 64)
-		if err != nil {
-			if err := quarantineSpoolFile(dir, entry.Name(), err); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		files = append(files, spoolFile{name: entry.Name(), sequence: sequence})
-	}
-	return files, nil
-}
-
-func quarantineSpoolFile(dir, name string, cause error) error {
-	if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, name+".bad")); err != nil {
-		return err
-	}
-	if err := fsutil.SyncDir(dir); err != nil {
-		return err
-	}
-	log.Printf("hook spool: quarantined %q: %v", name, cause)
-	return nil
-}
-
-// maxSpoolEvent bounds one queued event file. A real event is a few hundred
-// bytes, so a larger file is not an event.
-const maxSpoolEvent = 1 << 20
-
-// errSpoolRefused marks a spool entry that is not a plain, bounded event file.
-var errSpoolRefused = errors.New("not a plain event file")
-
-// readSpoolEvent reads one queued event through the pinned spool directory. It
-// accepts only a physical regular file within maxSpoolEvent bytes: a link, a
-// pipe or a device is refused without being followed or opened for reading, so
-// a planted entry can neither read another file as an event nor block the
-// drain. A refusal wraps errSpoolRefused; any other error may pass on a retry.
-func readSpoolEvent(root *os.Root, name string) ([]byte, error) {
-	physical, err := root.Lstat(name)
-	if err != nil {
-		return nil, err
-	}
-	if !physical.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %s", errSpoolRefused, physical.Mode().Type())
-	}
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, syscall.ELOOP) {
-		return nil, fmt.Errorf("%w: replaced by a link", errSpoolRefused)
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	opened, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !opened.Mode().IsRegular() || !os.SameFile(physical, opened) {
-		return nil, fmt.Errorf("%w: changed while opening", errSpoolRefused)
-	}
-	if opened.Size() > maxSpoolEvent {
-		return nil, fmt.Errorf("%w: %d bytes exceeds %d", errSpoolRefused, opened.Size(), maxSpoolEvent)
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxSpoolEvent+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxSpoolEvent {
-		return nil, fmt.Errorf("%w: exceeds %d bytes", errSpoolRefused, maxSpoolEvent)
-	}
-	return data, nil
+	return s.appendQueued(context.Background(), e)
 }
 
 // drainRetry is how soon a drain that could not finish runs again.
 const drainRetry = time.Minute
 
-// Drain runs each queued event through Dispatch, then removes it, and returns
-// the spool files it ran. Hook failures are reported and consumed. A drain
-// that cannot finish (another process drains, or a file error stops it)
-// returns when to try again, counted from now; otherwise retry is zero.
-// Cancellation leaves the event for the next engine. A crash after Dispatch
-// but before removal can run the event again.
+// drainLock is the flock that keeps one drain running at a time, in any
+// process. An flock releases on crash, and a drain of any length keeps it.
+func (s Service) drainLock() (unlock func(), owned bool, err error) {
+	dir := filepath.Join(s.dataDir(), "hooks")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, false, err
+	}
+	return store.TryLock(filepath.Join(dir, "queue-drain.lock"))
+}
+
+// Drain runs each queued event through Dispatch, then removes its row, and
+// returns the ids of the rows it ran. Hook failures are reported and consumed.
+// A drain that cannot finish (another process drains, or a database error
+// stops it) returns when to try again, counted from now; otherwise retry is
+// zero. Cancellation leaves the event for the next engine. A crash after
+// Dispatch but before removal can run the event again.
 func (s Service) Drain(ctx context.Context, now time.Time) (ran []string, retry time.Time, err error) {
 	retry = now.Add(drainRetry)
-	dir := s.spoolDir()
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, retry, err
-	}
-	unlock, owned, err := store.TryLock(filepath.Join(dir, "drain.lock"))
+	unlock, owned, err := s.drainLock()
 	if err != nil || !owned {
 		return nil, retry, err
 	}
 	defer unlock()
-	unlockWrites, err := store.Lock(filepath.Join(dir, "write.lock"))
+	// Events a previous-release emitter still appends as files join the queue
+	// here, until no old emitter remains.
+	if err := s.importSpoolFiles(ctx); err != nil {
+		return nil, retry, err
+	}
+	pending, err := s.queued(ctx)
 	if err != nil {
 		return nil, retry, err
 	}
-	entries, err := spoolFiles(dir)
-	unlockWrites()
-	if err != nil {
-		return nil, retry, err
-	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, retry, err
-	}
-	defer root.Close()
 	var errs []error
-	for _, entry := range entries {
+	for _, row := range pending {
 		if err := ctx.Err(); err != nil {
 			return ran, time.Time{}, errors.Join(append(errs, err)...)
 		}
-		path := filepath.Join(dir, entry.name)
-		data, err := readSpoolEvent(root, entry.name)
-		if errors.Is(err, errSpoolRefused) {
-			if err := quarantineSpoolFile(dir, entry.name, err); err != nil {
-				return ran, retry, errors.Join(append(errs, err)...)
-			}
-			continue
-		}
-		if err != nil {
-			return ran, retry, errors.Join(append(errs, err)...)
-		}
-		var e Event
-		if err := json.Unmarshal(data, &e); err != nil {
-			if err := quarantineSpoolFile(dir, entry.name, err); err != nil {
-				return ran, retry, errors.Join(append(errs, err)...)
-			}
-			continue
-		}
-		errs = append(errs, s.dispatchQueued(ctx, e))
+		errs = append(errs, s.dispatchQueued(ctx, row.event))
 		if err := ctx.Err(); err != nil {
 			return ran, time.Time{}, errors.Join(append(errs, err)...)
 		}
-		if err := os.Remove(path); err != nil {
+		if err := s.removeQueued(ctx, row.id); err != nil {
 			return ran, retry, errors.Join(append(errs, err)...)
 		}
-		if err := fsutil.SyncDir(dir); err != nil {
-			return ran, retry, errors.Join(append(errs, err)...)
-		}
-		ran = append(ran, entry.name)
-		if e.Snapshot {
-			cleanupSnapshot(e)
+		ran = append(ran, strconv.FormatInt(row.id, 10))
+		if row.event.Snapshot {
+			cleanupSnapshot(row.event)
 		}
 	}
 	return ran, time.Time{}, errors.Join(errs...)
+}
+
+// queuedRow is one pending row: its id, for removal, and its event.
+type queuedRow struct {
+	id    int64
+	event Event
+}
+
+// queued reads the pending rows, oldest first. It is the snapshot one drain
+// works through; rows appended later wait for the next drain.
+func (s Service) queued(ctx context.Context) ([]queuedRow, error) {
+	db, err := s.queueDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT id,body FROM hook_queue ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pending := []queuedRow{}
+	for rows.Next() {
+		var row queuedRow
+		var body []byte
+		if err := rows.Scan(&row.id, &body); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &row.event); err != nil {
+			return nil, fmt.Errorf("hook queue row %d: %w", row.id, err)
+		}
+		pending = append(pending, row)
+	}
+	return pending, rows.Err()
+}
+
+// QueuedEvents returns the pending events, oldest first.
+func (s Service) QueuedEvents(ctx context.Context) ([]Event, error) {
+	pending, err := s.queued(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]Event, len(pending))
+	for i, row := range pending {
+		events[i] = row.event
+	}
+	return events, nil
+}
+
+// removeQueued deletes one row whose event has run.
+func (s Service) removeQueued(ctx context.Context, id int64) error {
+	db, err := s.queueDB()
+	if err != nil {
+		return err
+	}
+	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "DELETE FROM hook_queue WHERE id=?", id)
+		return err
+	})
 }
 
 // needsSnapshot uses the permanent main checkout that Enqueue stores in Repo.
@@ -282,12 +194,23 @@ func (s Service) dispatchQueued(ctx context.Context, e Event) error {
 	return s.dispatch(ctx, prepared, err)
 }
 
-// SpoolVersion changes when files enter or leave the spool. The store watcher
-// uses this cheap directory stat to wake the engine without scanning each event.
+// SpoolVersion changes when rows enter or leave the queue, and when the
+// legacy hook-spool directory changes, so a file a previous-release emitter
+// appends also wakes the worker that imports it. The store watcher uses this
+// cheap signal to wake the engine without reading each event.
 func (s Service) SpoolVersion() string {
-	info, err := os.Stat(s.spoolDir())
+	db, err := s.queueDB()
 	if err != nil {
 		return ""
 	}
-	return info.ModTime().String()
+	var version string
+	if err := db.QueryRow("SELECT count(*)||':'||coalesce(max(id),0) FROM hook_queue").Scan(&version); err != nil {
+		return ""
+	}
+	if info, err := os.Stat(filepath.Join(s.dataDir(), "hook-spool")); err == nil && info.IsDir() {
+		// Creating, renaming or removing a directory entry changes the
+		// directory's own mtime, which is all the wake signal needs.
+		version += ":" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
+	}
+	return version
 }

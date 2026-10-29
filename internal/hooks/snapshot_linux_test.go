@@ -14,7 +14,6 @@ import (
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/shellquote"
-	"dyna-agent/internal/store"
 )
 
 func TestEmitDoesNotWaitForQueuedSnapshot(t *testing.T) {
@@ -131,9 +130,7 @@ func TestDrainRecordsUnavailableSnapshot(t *testing.T) {
 			if missing {
 				event := queuedEvents(t, s)[0]
 				event.SHA = ""
-				if err := store.WriteJSON(filepath.Join(s.spoolDir(), "00000000000000000001.json"), event, 0600); err != nil {
-					t.Fatal(err)
-				}
+				setQueued(t, s, event)
 				want = "commit SHA"
 			}
 			called := false

@@ -1,8 +1,7 @@
 package engine
 
 import (
-	"encoding/json"
-	"os"
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,7 +53,7 @@ func TestTurnEndFiresSessionTurnEndedHookEvent(t *testing.T) {
 	if err := fireTurnEnds(t.Context(), sessions, hooksService, signals.takeTurnEnds()); err != nil {
 		t.Fatal(err)
 	}
-	events := queuedHookEvents(t, filepath.Join(hooksService.DataDir, "hook-spool"))
+	events := queuedHookEvents(t, hooksService)
 	if len(events) != 1 {
 		t.Fatalf("queued %d hook events, want 1: %+v", len(events), events)
 	}
@@ -64,27 +63,12 @@ func TestTurnEndFiresSessionTurnEndedHookEvent(t *testing.T) {
 	}
 }
 
-// queuedHookEvents reads the events that a hook spool holds.
-func queuedHookEvents(t *testing.T, dir string) []hooks.Event {
+// queuedHookEvents reads the events that the hook queue holds.
+func queuedHookEvents(t *testing.T, s hooks.Service) []hooks.Event {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
+	events, err := s.QueuedEvents(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	}
-	var events []hooks.Event
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var e hooks.Event
-		if err := json.Unmarshal(raw, &e); err != nil {
-			t.Fatal(err)
-		}
-		events = append(events, e)
 	}
 	return events
 }
