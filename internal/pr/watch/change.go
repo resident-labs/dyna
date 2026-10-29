@@ -282,6 +282,7 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 	})
 	return record, created, err
 }
+
 // resetReview owns the head-change reset: it retires the current review
 // round, clears the whole reviewer assignment and re-asks required reviewers.
 // A call with an unchanged head (a base retarget) resets the round only.
