@@ -211,7 +211,7 @@ func TestLiveMigrationRequiresInstalledExecutable(t *testing.T) {
 		savedExecutable := installedExecutable
 		installedExecutable = func() (string, error) { return customExecutable, nil }
 		t.Cleanup(func() { installedExecutable = savedExecutable })
-		if err := os.WriteFile(filepath.Join(installDir, installMarker), []byte(installMarkerContent), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(installDir, installMarker), []byte(customExecutable+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv("DYNA_INSTALL_DIR", "")
@@ -219,6 +219,33 @@ func TestLiveMigrationRequiresInstalledExecutable(t *testing.T) {
 		t.Cleanup(func() { database.Close(ownerData) })
 		if readOnly || cause != nil {
 			t.Fatalf("custom installed live migration: readOnly=%v status=%q cause=%v", readOnly, status, cause)
+		}
+	})
+
+	t.Run("refuses a sibling development binary", func(t *testing.T) {
+		keepSchemaOwner(t)
+		ownerData, _ := newPaths(t)
+		installDir := t.TempDir()
+		installed := filepath.Join(installDir, "dyna")
+		development := filepath.Join(installDir, "dyna-dev")
+		for _, path := range []string{installed, development} {
+			if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(installDir, installMarker), []byte(installed+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		savedExecutable := installedExecutable
+		installedExecutable = func() (string, error) { return development, nil }
+		t.Cleanup(func() { installedExecutable = savedExecutable })
+		readOnly, status, _, cause := startMode(ownerData, false, "", ownerData)
+		t.Cleanup(func() { database.Close(ownerData) })
+		if _, err := os.Stat(filepath.Join(ownerData, "dyna.db")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("sibling development executable created dyna.db: %v", err)
+		}
+		if !readOnly || cause == nil || !strings.Contains(status, "only the installed engine") {
+			t.Fatalf("sibling development migration: readOnly=%v status=%q cause=%v; want a refusal", readOnly, status, cause)
 		}
 	})
 

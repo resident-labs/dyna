@@ -75,7 +75,7 @@ check_install_dir() {
 bold "dyna installer"
 check_install_dir "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
+INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
 BIN="$INSTALL_DIR/dyna"
 check_install_dir "$INSTALL_DIR"
 
@@ -138,6 +138,10 @@ fi
 "$BIN" --help >/dev/null 2>&1 || fail "installed binary failed to run"
 ok "$("$BIN" --help 2>/dev/null | head -1)"
 
+# Bind a custom installation to its canonical executable before a service can
+# start it. Direct launches need no DYNA_INSTALL_DIR from the installer's shell.
+printf '%s\n' "$BIN" > "$INSTALL_DIR/.dyna-installed"
+
 # PATH check
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ok "$INSTALL_DIR is on your PATH" ;;
@@ -161,11 +165,6 @@ if [ "$os" = linux ] && command -v systemctl >/dev/null 2>&1; then
     info "install the user services when your service manager is available: dyna engine install-services"
   fi
 fi
-
-# A custom install remains recognizable when its binary starts from a fresh
-# shell without DYNA_INSTALL_DIR. The engine checks this marker before it
-# migrates the owner's default data directory.
-printf 'installed by install.sh\n' > "$INSTALL_DIR/.dyna-installed"
 
 bold "next steps"
 info "dyna profiles add --name my-builder --harness codex --model <model-id>  # add one profile per model you use"
