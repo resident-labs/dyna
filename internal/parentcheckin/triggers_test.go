@@ -64,7 +64,7 @@ func TestAlternatingCheckInTriggersDoNotPostponeDueCheckIn(t *testing.T) {
 	}
 	runTurnEnd := func() {
 		t.Helper()
-		if _, _, err := engine.RunParentCheckIns(ctx, &roomsvc.Service{Notify: n}); err != nil {
+		if _, _, err := engine.RunParentCheckIns(ctx, &roomsvc.Service{Notify: n}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
