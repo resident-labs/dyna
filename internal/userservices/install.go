@@ -188,7 +188,8 @@ Wants=network-online.target dyna-computers.service
 
 [Service]
 ExecStart=` + quote(binary) + run + `
-` + pathLine(path) + `Environment="GOMEMLIMIT=4GiB"
+` + pathLine(path) + `Environment=` + quote("DYNA_INSTALL_DIR="+filepath.Dir(binary)) + `
+Environment="GOMEMLIMIT=4GiB"
 MemoryHigh=8589934592
 Restart=always
 RestartSec=3

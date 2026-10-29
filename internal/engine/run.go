@@ -335,9 +335,13 @@ var fullAPIReady = func() {}
 func Run(ctx context.Context, f Options) error {
 	noUpdate := os.Getenv("DYNA_NO_AUTO_UPDATE") == "1"
 	allowDevMigration := os.Getenv("DYNA_ALLOW_DEV_MIGRATION") == "1"
+	installDir := os.Getenv("DYNA_INSTALL_DIR")
 	for {
-		// run drops DYNA_* before workers start. Restore the owner's recovery
-		// choice only for a migration retry, never in a worker environment.
+		// run drops DYNA_* before workers start. Restore migration settings only
+		// for a migration retry, never in a worker environment.
+		if installDir != "" {
+			_ = os.Setenv("DYNA_INSTALL_DIR", installDir)
+		}
 		if allowDevMigration {
 			_ = os.Setenv("DYNA_ALLOW_DEV_MIGRATION", "1")
 		}

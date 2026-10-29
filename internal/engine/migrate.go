@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/callerid"
@@ -59,13 +60,16 @@ func checkLiveMigration(dataDir, ownerDataDir string) error {
 	// installer uses ~/.local/bin; the WSL and managed images use /usr/local/bin.
 	home := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Clean(ownerDataDir))))
 	installed := []string{filepath.Join(home, ".local", "bin", "dyna"), "/usr/local/bin/dyna"}
+	if dir := os.Getenv("DYNA_INSTALL_DIR"); dir != "" {
+		installed = append(installed, filepath.Join(dir, "dyna"))
+	}
 	for _, path := range installed {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err == nil && resolved == exe {
 			return nil
 		}
 	}
-	return fmt.Errorf("migrate dyna.db: only the installed engine may migrate the default data directory %s; running executable is %s, not %s or %s; for owner-directed hand recovery set DYNA_ALLOW_DEV_MIGRATION=1", ownerDataDir, exe, installed[0], installed[1])
+	return fmt.Errorf("migrate dyna.db: only the installed engine may migrate the default data directory %s; running executable is %s, not %s; for owner-directed hand recovery set DYNA_ALLOW_DEV_MIGRATION=1", ownerDataDir, exe, strings.Join(installed, " or "))
 }
 
 func sameFolder(a, b string) bool {
