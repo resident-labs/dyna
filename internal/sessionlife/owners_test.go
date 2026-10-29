@@ -1,6 +1,9 @@
 package sessionlife
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -76,6 +79,44 @@ func TestOwnersFailsWhenMetaDrifts(t *testing.T) {
 				t.Fatal("expected an error so ownership stays fail-closed")
 			}
 		})
+	}
+}
+
+// TestRemapSpawnGoalsKeepsOwnersConsistent is a regression test: a goal
+// fold once rewrote meta directly, so the record drifted from its digest and
+// every later ownership scan failed closed, blocking worktree cleanup.
+func TestRemapSpawnGoalsKeepsOwnersConsistent(t *testing.T) {
+	sessions := ownersStore(t)
+	if err := Save(sessions, "spawn", map[string]any{"id": "spawn", "dir": "/trees/a", "goal": "g1", "item": "i1"}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(filepath.Dir(sessions))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Immediate(context.Background(), db, func(conn *sql.Conn) error {
+		return RemapSpawnGoalsTx(conn, func(_, goal string) (string, string, bool) {
+			return "g2", "i2", goal == "g1"
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got []OwnerRow
+	if err := Owners(sessions, func(row OwnerRow) error {
+		got = append(got, row)
+		return nil
+	}); err != nil {
+		t.Fatalf("ownership scan after goal fold: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "spawn" || got[0].Dir != "/trees/a" {
+		t.Fatalf("rows after fold = %#v", got)
+	}
+	var meta map[string]json.RawMessage
+	if err := Load(sessions, "spawn", &meta); err != nil {
+		t.Fatal(err)
+	}
+	if string(meta["goal"]) != "\"g2\"" || string(meta["item"]) != "\"i2\"" {
+		t.Fatalf("remapped fields = %s %s", meta["goal"], meta["item"])
 	}
 }
 
