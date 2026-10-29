@@ -1,8 +1,12 @@
 package goals
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/settings"
 )
 
 func TestRuleLines(t *testing.T) {
@@ -21,6 +25,23 @@ func TestRuleLines(t *testing.T) {
 	}
 	if len(RuleLines(nil)) != 0 {
 		t.Fatal("empty rules added a line")
+	}
+}
+
+func TestInstructionsKeepRulesWhenSettingsAreBroken(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.AddRule("room", "owner", "owner", "Run tests."); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(settings.DefaultPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings.DefaultPath(), []byte(`{"rules":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.InstructionSections("room")[1].Items; len(got) != 1 || !strings.HasPrefix(got[0], "r1 Run tests.") {
+		t.Fatalf("broken settings hid accepted rules: %q", got)
 	}
 }
 
