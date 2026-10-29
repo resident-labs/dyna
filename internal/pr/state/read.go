@@ -439,6 +439,39 @@ json_extract(pr_rows.body,'$.record.authorSession') IN (`+marks+`) OR json_extra
 	return st, nil
 }
 
+// HeldCommentRef is one held comment with the PR fields that identify it.
+type HeldCommentRef struct {
+	Key    string
+	RoomID string
+	Number int
+	Held   HeldComment
+}
+
+// ReadHeldComments returns copies of the held comments of roomID's PRs, or of
+// every room when roomID is empty. It refreshes the shared snapshot under its
+// lock, as readSnapshot does, but copies only the held comments, not the records.
+func ReadHeldComments(root, roomID string) ([]HeldCommentRef, error) {
+	db, err := open(root)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.Lock()
+	defer snapshot.Unlock()
+	if err := refreshFrom(appstate.For(db), root); err != nil {
+		return nil, err
+	}
+	var out []HeldCommentRef
+	for _, r := range snapshot.state.Records {
+		if r == nil || (roomID != "" && r.RoomID != roomID) {
+			continue
+		}
+		for _, held := range r.HeldComments {
+			out = append(out, HeldCommentRef{Key: r.Key, RoomID: r.RoomID, Number: r.Number, Held: held})
+		}
+	}
+	return out, nil
+}
+
 // ReadLocked reads while the caller owns the store's exclusive lock, before
 // it writes. Every PR write commits under that lock, so a read transaction
 // sees each committed one without taking the writer.
