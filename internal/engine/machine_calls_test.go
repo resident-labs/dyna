@@ -45,10 +45,13 @@ func TestRoomRootGrantsHostChecks(t *testing.T) {
 	if len(*patches) != 1 || (*patches)[0].AllowHostChecks == nil || !*(*patches)[0].AllowHostChecks {
 		t.Fatalf("saved patches = %+v, want the host-check change", *patches)
 	}
-	// Route and switch decide where the engine sends work, so they stay the
-	// owner's.
+	// Route, switch and labels decide where the engine sends work, so they
+	// stay the owner's; the ci label routes local CI like the old role did.
 	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"enabled":false}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("a root switching a machine off = %v, want an owner-only refusal", err)
+	}
+	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"labels":["ci"]}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a root setting labels = %v, want an owner-only refusal", err)
 	}
 	// Creating a machine and naming it decide where work goes too.
 	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"create":true,"ssh":"pip@hermeslab"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
@@ -75,13 +78,13 @@ func TestRoomRootChangesOperatingSettings(t *testing.T) {
 	root := localCallerContext(t,
 		websvc.Caller{Kind: websvc.Session, Session: "root"},
 		authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
-	for _, patch := range []string{`{"sshConnectTimeoutSeconds":60}`, `{"containerSocket":"unix:///run/user/1000/podman/podman.sock"}`, `{"checkTmp":"/dev/shm"}`, `{"resources":{"ghidra":1}}`, `{"labels":["ci"]}`} {
+	for _, patch := range []string{`{"sshConnectTimeoutSeconds":60}`, `{"containerSocket":"unix:///run/user/1000/podman/podman.sock"}`, `{"checkTmp":"/dev/shm"}`, `{"resources":{"ghidra":1}}`} {
 		if _, err := calls["SaveMachine"](root, saveMachineArgs(patch)); err != nil {
 			t.Fatalf("a root sending %s = %v, want it allowed", patch, err)
 		}
 	}
-	if len(*patches) != 5 || (*patches)[2].CheckTmp == nil || *(*patches)[2].CheckTmp != "/dev/shm" || (*patches)[3].Resources == nil || (*(*patches)[3].Resources)["ghidra"] != 1 || (*patches)[4].Labels == nil || len(*(*patches)[4].Labels) != 1 || (*(*patches)[4].Labels)[0] != "ci" {
-		t.Fatalf("saved patches = %+v, want all five settings", *patches)
+	if len(*patches) != 4 || (*patches)[2].CheckTmp == nil || *(*patches)[2].CheckTmp != "/dev/shm" || (*patches)[3].Resources == nil || (*(*patches)[3].Resources)["ghidra"] != 1 {
+		t.Fatalf("saved patches = %+v, want all four settings", *patches)
 	}
 	// A remote container endpoint sends every room's workflow containers to
 	// another host, so it stays the owner's; restoring the default is allowed.
