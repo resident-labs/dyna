@@ -87,12 +87,8 @@ func (s *Service) watchTrialLocalCIStart(ctx context.Context, repo string, r Rec
 		// transient scheduling failure does not hold the trial until a human
 		// runs its checks by hand. A suite or label no machine allows is a wait,
 		// not an error: the alert names it when the wait outlives the retry.
-		if _, err := s.startRegisteredCI(ctx, job); err != nil {
-			var blocked localci.SuiteBlockedError
-			var labelsBlocked localci.LabelsBlockedError
-			if !errors.As(err, &blocked) && !errors.As(err, &labelsBlocked) {
-				return err
-			}
+		if _, err := s.startRegisteredCI(ctx, job); err != nil && localci.NodeBlockedError(err) == nil {
+			return err
 		}
 		return nil
 	case waited.Retried && !waited.Alerted && !now.Before(waited.Since.Add(trialLocalCIStartWait)):

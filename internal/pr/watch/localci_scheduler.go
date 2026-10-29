@@ -374,9 +374,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 			// A suite that no machine allows fails the trial that asked for it,
 			// and that trial reports the failure on its own read. The tick keeps
 			// taking the work the fleet can hold.
-			var blocked localci.SuiteBlockedError
-			var labelsBlocked localci.LabelsBlockedError
-			if errors.As(err, &blocked) || errors.As(err, &labelsBlocked) {
+			if localci.NodeBlockedError(err) != nil {
 				log.Printf("local CI: %v", err)
 				continue
 			}
