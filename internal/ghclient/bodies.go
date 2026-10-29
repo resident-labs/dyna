@@ -159,7 +159,7 @@ func refuseOwnerIdentity(ctx context.Context, cmd *exec.Cmd) error {
 // The returned function removes the temporary body file, if any.
 func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), error) {
 	none := func() {}
-	if !isAgentText(ctx) {
+	if !IsAgentText(ctx) {
 		return none, nil
 	}
 	args := cmd.Args[1:]
