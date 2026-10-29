@@ -2,9 +2,36 @@ package subagent
 
 import (
 	"dyna-agent/internal/profile"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestProfileListSortsByIntelligenceThenDiagnosticsAndCapsAtTen(t *testing.T) {
+	profs := []profile.Profile{
+		{Name: "low-b", Harness: profile.HarnessMock, Intelligence: 2, Diagnostics: 10},
+		{Name: "beta", Harness: profile.HarnessMock, Intelligence: 9, Diagnostics: 5},
+		{Name: "gamma", Harness: profile.HarnessMock, Intelligence: 9, Diagnostics: 8},
+		{Name: "alpha", Harness: profile.HarnessMock, Intelligence: 9, Diagnostics: 8},
+	}
+	for i := 1; i <= 8; i++ {
+		profs = append(profs, profile.Profile{Name: fmt.Sprintf("f%d", i), Harness: profile.HarnessMock, Intelligence: 5, Diagnostics: 1})
+	}
+	e := newTestEnv(t, profs...)
+	items := e.m.profileInstructions(Meta{ID: "ses_20261019-000002-bbbbbbbb", Name: "reader", Room: e.room.Name, RoomID: e.room.ID, Depth: 1}).Items
+	want := []string{"alpha", "gamma", "beta", "f1", "f2", "f3", "f4", "f5", "f6", "f7"}
+	if len(items) != len(want)+1 {
+		t.Fatalf("got %d items, want %d profiles and a remaining line", len(items), len(want))
+	}
+	for i, name := range want {
+		if !strings.HasPrefix(items[i], "- "+name+" |") {
+			t.Errorf("item %d = %q, want profile %s", i, items[i], name)
+		}
+	}
+	if got, want := items[len(want)], "- 2 more enabled profiles: run `dyna profiles list` for all."; got != want {
+		t.Errorf("remaining line = %q, want %q", got, want)
+	}
+}
 
 func TestProfilesAppearInRootAndWorkerInstructions(t *testing.T) {
 	enabled := profile.Profile{Name: "writer", Harness: profile.HarnessMock, Model: "model-2", Taste: 7, Diagnostics: 9, Intelligence: 8, Cost: 6, MaxConcurrent: 3, MaxCallsPerRun: 4, Description: "Writes\nclear code.", Uses: []string{profile.UseAgents}}
