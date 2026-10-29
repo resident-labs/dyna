@@ -13,8 +13,42 @@ import (
 
 type fileArgument struct {
 	index  int
+	name   string
+	value  string
 	path   string
 	prefix string
+	file   bool
+}
+
+// DisplayApprovalBody renders inline text and immutable snapshots through the
+// same argument parser that binds execution. API fields keep their field names.
+func DisplayApprovalBody(payload approvals.GHPayload) string {
+	command := commandArgs(payload.Argv)
+	refs, err := approvalFileArguments(command)
+	if err != nil {
+		return ""
+	}
+	snapshots := map[string]string{}
+	for _, file := range payload.Files {
+		snapshots[file.Path] = string(file.Data)
+	}
+	api := len(command) > 0 && command[0] == "api"
+	var parts []string
+	for _, ref := range refs {
+		content := ref.value
+		if ref.file {
+			content = snapshots[ref.path]
+		}
+		if !api && ref.name == "body" {
+			return content
+		}
+		if ref.name == "" {
+			parts = append(parts, content)
+		} else {
+			parts = append(parts, ref.name+":\n"+content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // SnapshotFiles reads every file-backed argument into the immutable payload.
@@ -27,7 +61,7 @@ func SnapshotFiles(args []string, cwd string) ([]approvals.FileSnapshot, error) 
 	seen := map[string]bool{}
 	var files []approvals.FileSnapshot
 	for _, ref := range refs {
-		if seen[ref.path] {
+		if !ref.file || seen[ref.path] {
 			continue
 		}
 		seen[ref.path] = true
@@ -51,11 +85,9 @@ func SnapshotFiles(args []string, cwd string) ([]approvals.FileSnapshot, error) 
 // immutable snapshot. Conflicting duplicate snapshots are also ambiguous.
 func ValidateFileSnapshots(args []string, files []approvals.FileSnapshot) error {
 	replacements := map[string]string{}
-	for _, file := range files {
-		replacements[file.Path] = file.Path
-	}
 	seen := map[string][]byte{}
 	for _, file := range files {
+		replacements[file.Path] = file.Path
 		if prior, ok := seen[file.Path]; ok && !bytes.Equal(prior, file.Data) {
 			return fmt.Errorf("conflicting snapshots for %q", file.Path)
 		}
@@ -74,6 +106,9 @@ func RewriteFileArgs(args []string, replacements map[string]string) ([]string, e
 		return nil, err
 	}
 	for _, ref := range refs {
+		if !ref.file {
+			continue
+		}
 		path, ok := replacements[ref.path]
 		if !ok {
 			return nil, fmt.Errorf("file argument %q has no immutable snapshot", ref.path)
@@ -106,12 +141,15 @@ func approvalFileArguments(args []string) ([]fileArgument, error) {
 				i++
 				value = args[i]
 			}
-			if flag == "--body-file" {
-				prefix := ""
-				if attached {
-					prefix = strings.TrimSuffix(arg, value)
-				}
-				refs = append(refs, fileArgument{index: i, path: value, prefix: prefix})
+			prefix := ""
+			if attached {
+				prefix = strings.TrimSuffix(arg, value)
+			}
+			switch flag {
+			case "--body":
+				refs = append(refs, fileArgument{index: i, name: "body", value: value})
+			case "--body-file":
+				refs = append(refs, fileArgument{index: i, name: "body", path: value, prefix: prefix, file: true})
 			}
 			continue
 		}
@@ -128,8 +166,11 @@ func approvalFileArguments(args []string) ([]fileArgument, error) {
 				i++
 				value, valueIndex, prefix = args[i], i, ""
 			}
-			if flag == "-F" {
-				refs = append(refs, fileArgument{index: valueIndex, path: value, prefix: prefix})
+			switch flag {
+			case "-b":
+				refs = append(refs, fileArgument{index: valueIndex, name: "body", value: value})
+			case "-F":
+				refs = append(refs, fileArgument{index: valueIndex, name: "body", path: value, prefix: prefix, file: true})
 			}
 			break
 		}
@@ -157,9 +198,13 @@ func apiFileArguments(args []string) ([]fileArgument, error) {
 			}
 			switch flag {
 			case "--input":
-				refs = append(refs, fileArgument{index: i, path: value, prefix: prefix})
+				refs = append(refs, fileArgument{index: i, path: value, prefix: prefix, file: true})
 			case "--field":
-				if ref, ok := apiFieldFile(i, value, prefix); ok {
+				if ref, ok := apiFieldArgument(i, value, prefix, true); ok {
+					refs = append(refs, ref)
+				}
+			case "--raw-field":
+				if ref, ok := apiFieldArgument(i, value, prefix, false); ok {
 					refs = append(refs, ref)
 				}
 			}
@@ -178,8 +223,8 @@ func apiFileArguments(args []string) ([]fileArgument, error) {
 				i++
 				value, valueIndex, prefix = args[i], i, ""
 			}
-			if flag == "-F" {
-				if ref, ok := apiFieldFile(valueIndex, value, prefix); ok {
+			if flag == "-F" || flag == "-f" {
+				if ref, ok := apiFieldArgument(valueIndex, value, prefix, flag == "-F"); ok {
 					refs = append(refs, ref)
 				}
 			}
@@ -189,18 +234,23 @@ func apiFileArguments(args []string) ([]fileArgument, error) {
 	return validateFileArguments(refs)
 }
 
-func apiFieldFile(index int, value, prefix string) (fileArgument, bool) {
-	_, raw, ok := strings.Cut(value, "=")
-	if !ok || !strings.HasPrefix(raw, "@") {
+func apiFieldArgument(index int, value, prefix string, allowFile bool) (fileArgument, bool) {
+	name, raw, ok := strings.Cut(value, "=")
+	if !ok {
 		return fileArgument{}, false
 	}
-	path := strings.TrimPrefix(raw, "@")
-	return fileArgument{index: index, path: path, prefix: strings.TrimSuffix(prefix+value, path)}, true
+	ref := fileArgument{index: index, name: name, value: raw}
+	if allowFile && strings.HasPrefix(raw, "@") {
+		ref.path = strings.TrimPrefix(raw, "@")
+		ref.prefix = strings.TrimSuffix(prefix+value, ref.path)
+		ref.file = true
+	}
+	return ref, true
 }
 
 func validateFileArguments(refs []fileArgument) ([]fileArgument, error) {
 	for _, ref := range refs {
-		if ref.path == "" {
+		if ref.file && ref.path == "" {
 			return nil, errors.New("file-backed approval argument has an empty path")
 		}
 	}
