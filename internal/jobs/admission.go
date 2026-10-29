@@ -564,17 +564,20 @@ func (a Admission) sweep(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var dead []string
+	type deadRow struct {
+		id    string
+		pid   int
+		start uint64
+	}
+	var dead []deadRow
 	for rows.Next() {
-		var id string
-		var pid int
-		var start uint64
-		if err := rows.Scan(&id, &pid, &start); err != nil {
+		var row deadRow
+		if err := rows.Scan(&row.id, &row.pid, &row.start); err != nil {
 			rows.Close()
 			return err
 		}
-		if !ownerAlive(pid, start) {
-			dead = append(dead, id)
+		if !ownerAlive(row.pid, row.start) {
+			dead = append(dead, row)
 		}
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
@@ -587,8 +590,10 @@ func (a Admission) sweep(ctx context.Context) error {
 		if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", now); err != nil {
 			return err
 		}
-		for _, id := range dead {
-			if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE id=?", id); err != nil {
+		// A holder may have admitted its row since the read above, so delete
+		// only a row still waiting for the owner that was seen dead.
+		for _, row := range dead {
+			if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE id=? AND state='waiting' AND engine=0 AND owner_pid=? AND owner_start=?", row.id, row.pid, row.start); err != nil {
 				return err
 			}
 		}
