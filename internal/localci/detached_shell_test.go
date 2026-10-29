@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/shellquote"
 )
 
 // nodeStubs writes the programs a node script needs, so the real scripts run in
@@ -82,6 +83,40 @@ func TestHostCheckKeepsItsExitRecordAndLog(t *testing.T) {
 		if !strings.Contains(string(log), want) {
 			t.Fatalf("log lacks %q: %q", want, log)
 		}
+	}
+}
+
+// A host check runs on the owner's machine, so it must not reach the owner's
+// desktop. The wrapper gets the owner's bus, runtime folder and display, and the
+// check reports what it can see of them.
+func TestHostCheckCannotReachTheOwnersDesktop(t *testing.T) {
+	dir := t.TempDir()
+	stubs := nodeStubs(t)
+	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seen := filepath.Join(dir, "seen")
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
+		inner: `printf '%s\n' "$DBUS_SESSION_BUS_ADDRESS" "$XDG_RUNTIME_DIR" "${DISPLAY-}" "${WAYLAND_DISPLAY-}" > ` + shellquote.Quote(seen)}
+	script := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	detached := detachedDir(dir, check.id)
+	if err := startOnShell(t, stubs, detached, script,
+		"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR=/run/user/1000", "DISPLAY=:0", "WAYLAND_DISPLAY=wayland-0"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(got) != 4 {
+		t.Fatalf("the check reported %q, want four values", data)
+	}
+	if strings.Contains(got[0], "/run/user") || strings.Contains(got[1], "/run/user") {
+		t.Fatalf("the check reaches the owner's bus or runtime folder: bus %q, runtime %q", got[0], got[1])
+	}
+	if got[2] != "" || got[3] != "" {
+		t.Fatalf("the check sees a display: DISPLAY %q, WAYLAND_DISPLAY %q", got[2], got[3])
 	}
 }
 

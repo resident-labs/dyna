@@ -1434,7 +1434,12 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		if _, set := environment["SCCACHE_SERVER_PORT"]; !set {
 			serverPort = " SCCACHE_SERVER_PORT=" + strconv.Itoa(sccachePortBase+port)
 		}
-		commandEnv := `env -i PATH="$PATH" HOME="$isolated/home" XDG_DATA_HOME="$isolated/data" XDG_CONFIG_HOME="$isolated/config" XDG_CACHE_HOME="$isolated/cache" TMPDIR="$isolated" TMP="$isolated" TEMP="$isolated" GOTMPDIR="$isolated" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"` + hostEnvironment(environment) + serverPort
+		// The check gets no owner bus, runtime folder or display. Its runtime
+		// folder is its own temporary folder, and its session bus address names a
+		// socket that nothing listens on, so a check that asks for a bus fails
+		// instead of reaching the owner's desktop. A repository opts back in
+		// through the check's env, which is applied after these values.
+		commandEnv := `env -i PATH="$PATH" HOME="$isolated/home" XDG_DATA_HOME="$isolated/data" XDG_CONFIG_HOME="$isolated/config" XDG_CACHE_HOME="$isolated/cache" TMPDIR="$isolated" TMP="$isolated" TEMP="$isolated" GOTMPDIR="$isolated" XDG_RUNTIME_DIR="$isolated" DBUS_SESSION_BUS_ADDRESS="unix:path=$isolated/no-session-bus"` + hostEnvironment(environment) + serverPort
 		// sccache starts its server in a new session, outside the scope and
 		// process-group cleanup. Stop it through the check's own port while the
 		// server's temporary folder still exists. No running server, a missing
