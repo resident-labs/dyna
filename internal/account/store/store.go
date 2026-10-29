@@ -166,15 +166,15 @@ type Entry struct {
 	Credential Credential `json:"credential"`
 }
 
-// ClearSignInFailure ends the expired and failed-usage state a saved sign-in
-// left behind. A successful sign-in, import or renewal calls it, so the account
-// stops showing the old failure until the next usage reading says otherwise.
+// ClearSignInFailure ends the expired state a saved sign-in left behind. A
+// successful sign-in, import or renewal calls it, so the account stops showing
+// the old expiry until the next usage reading says otherwise. A provider rate
+// limit is not a sign-in failure, so RateLimitedUntil stays.
 func (e *Entry) ClearSignInFailure() {
 	e.NeedsLogin = false
-	if o := e.Observation; o != nil {
+	if o := e.Observation; o != nil && o.Reason == UsageReasonExpired {
 		o.UsageError = ""
 		o.Reason = ""
-		o.RateLimitedUntil = nil
 		o.Failures = 0
 		o.Unavailable = false
 	}
