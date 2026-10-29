@@ -3,10 +3,13 @@ package service
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"dyna-agent/internal/account/reposcope"
 	accountstore "dyna-agent/internal/account/store"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/harness/runtime"
 )
 
@@ -58,6 +61,37 @@ func TestAccountUsageCachedShowsPrivateObservationsAndResets(t *testing.T) {
 	now = reset
 	if row := s.AccountUsageCached().Accounts[0]; row.Windows[0].UsedPercent != nil || row.Windows[0].Reason != accountstore.WindowReasonProbableReset || !row.Stale || row.QuotaBlocked {
 		t.Fatalf("past quota must show uncertainty without blocking: %+v", row)
+	}
+}
+
+func TestPublishShowsZAIStatedFailoverReset(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	dir := t.TempDir()
+	store := &accountstore.Store{Root: filepath.Join(dir, "accounts")}
+	scopes, err := reposcope.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	reset := now.Add(3 * time.Hour)
+	if err := scopes.MarkReset("zai-account", reset); err != nil {
+		t.Fatal(err)
+	}
+	used := 1.0
+	s := New(Options{Store: store, Now: func() time.Time { return now }})
+	got := s.publish([]Account{{
+		ID: "zai-account", Harness: "pi", Provider: accountstore.ProviderZAI,
+		ObservedAt: now.Add(-time.Minute),
+		Windows:    []Window{{ID: "five_hour", Label: "5-hour", UsedPercent: &used, Unit: "percent"}},
+	}}, nil, nil)
+
+	account := got.Accounts[0]
+	summary := windowsSummary(account, now)
+	if !strings.Contains(summary, "5-hour 100%") || !strings.Contains(summary, reset.Local().Format("Mon 15:04")) {
+		t.Fatalf("account summary = %q, want the spent limit and stated reset", summary)
+	}
+	if !account.QuotaBlocked || account.QuotaBlockedUntil == nil || !account.QuotaBlockedUntil.Equal(reset) {
+		t.Fatalf("blocking quota metadata = %+v, want the stated reset", account)
 	}
 }
 
