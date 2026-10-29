@@ -468,8 +468,12 @@ func Migrate(db *sql.DB, key string, version int, apply func(conn *sql.Conn, old
 // fit the old columns and land silently (D-468). The check runs inside the
 // caller's write transaction: a migration commits its schema change and its
 // version row together, and SQLite write transactions serialize, so none can
-// slip between this check and the write it guards. The engine never calls
-// it; it owns the schema, and its version rows never advance behind its back.
+// slip between this check and the write it guards. A check that cannot run
+// refuses the write too: the transaction context can expire after BEGIN,
+// while an update callback may keep its own context and COMMIT runs without
+// cancellation, so a failed check must never let the update proceed. The
+// engine never calls this; it owns the schema, and its version rows never
+// advance behind its back.
 func refuseAdvancedStore(ctx context.Context, conn *sql.Conn, db *sql.DB) error {
 	cached := map[string]int{}
 	migrations.Range(func(key, version any) bool {
@@ -494,23 +498,24 @@ func refuseAdvancedStore(ctx context.Context, conn *sql.Conn, db *sql.DB) error 
 	}
 	rows, err := conn.QueryContext(ctx, query+")", args...)
 	if err != nil {
-		// A store with no readable version rows is not newer; the write
-		// itself reports anything real.
-		return nil
+		return fmt.Errorf("check store versions before writing: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
-			return nil
+			return fmt.Errorf("check store versions before writing: %w", err)
 		}
 		have, err := strconv.Atoi(value)
 		if err != nil {
-			continue
+			return fmt.Errorf("check store versions before writing: %s: stored schema version %q is not a number", key, value)
 		}
 		if have > cached[key] {
 			return newerSchema(key, have, cached[key])
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("check store versions before writing: %w", err)
 	}
 	return nil
 }
