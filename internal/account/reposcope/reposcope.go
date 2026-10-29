@@ -235,14 +235,14 @@ func (s *Store) ClearOpenEnded(accountID string, since time.Time) error {
 	})
 }
 
-// ClearUnstated removes the account's unstated hold, timed or not, after a
-// successful usage probe. A stated reset stays until it passes. A hold recorded
-// at or after since stays too, so a failure during the probe is not wiped.
-func (s *Store) ClearUnstated(accountID string, since time.Time) error {
+// ClearHold removes the account's hold, timed, open or stated, after a
+// successful probe or turn. A hold recorded at or after since stays, so a
+// failure during that probe or turn is not wiped.
+func (s *Store) ClearHold(accountID string, since time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
 	defer cancel()
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=? AND stated=0 AND recorded_at<?", accountID, since.UnixNano())
+		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=? AND recorded_at<?", accountID, since.UnixNano())
 		return err
 	})
 }

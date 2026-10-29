@@ -99,8 +99,15 @@ func readingHasQuotaLeft(o *store.Observation, failedAt, now time.Time) bool {
 }
 
 // readingOutOfQuota applies the shared eligibility decision and returns the
-// earliest future reset named by an ineligible reading.
+// earliest future reset named by an ineligible reading. A failed read keeps the
+// windows of an older reading, so it names only its own rate-limit end.
 func readingOutOfQuota(o *store.Observation, now time.Time) (time.Time, bool) {
+	if o != nil && o.Unavailable {
+		if o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now) {
+			return *o.RateLimitedUntil, true
+		}
+		return time.Time{}, false
+	}
 	if store.DecideUsage(o, now).Eligible {
 		return time.Time{}, false
 	}
