@@ -101,6 +101,57 @@ func TestAdmissionReservesJobBeforeLaunch(t *testing.T) {
 	}
 }
 
+// An abandoned check stops holding capacity and its port after its deadline.
+func TestAdmissionExpiresAbandonedCheck(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1000, 0)
+	node := machines.Machine{Name: "node", Enabled: true}
+	node.Capabilities.CPUs = 2
+	queue := Admission{DataDir: t.TempDir(), Engine: true,
+		Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}},
+		clock:    func() time.Time { return now }}
+	old := Demand{ID: "old", Node: "node", CPUs: 2, Timeout: time.Minute}
+	if _, err := queue.Hold(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	next := Demand{ID: "next", Node: "node", CPUs: 2, Timeout: time.Minute}
+	if err := queue.upsert(ctx, next, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	row, err := queue.get(ctx, next.ID)
+	if err != nil || row.State != "waiting" {
+		t.Fatalf("before expiry: %+v, %v", row, err)
+	}
+	// A healthy check renews its place before the original expiry.
+	now = now.Add(5 * time.Minute)
+	if err := queue.Renew(ctx, old.Node, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute)
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	row, err = queue.get(ctx, next.ID)
+	if err != nil || row.State != "waiting" {
+		t.Fatalf("after renewal: %+v, %v", row, err)
+	}
+	// Once polling stops, the renewed reservation eventually expires.
+	now = now.Add(10 * time.Minute)
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	row, err = queue.get(ctx, next.ID)
+	if err != nil || row.State != "admitted" || row.Port != 0 {
+		t.Fatalf("after expiry: %+v, %v", row, err)
+	}
+	if _, err := queue.Reattach(ctx, old); err == nil {
+		t.Fatal("reattached an expired check after its port was reassigned")
+	}
+}
+
 // A restart must retain detached checks' existing port reservations, even if
 // another check starts before an old check reattaches.
 func TestAdmissionRestartPreservesCheckPorts(t *testing.T) {

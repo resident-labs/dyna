@@ -444,9 +444,6 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 			}
 		}
 		if current == slots {
-			if !crossStarted.Load() {
-				t.Error("cross-build did not start beside the other checks")
-			}
 			select {
 			case <-slotsStarted:
 			default:
@@ -478,8 +475,8 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	close(release)
 	got := <-done
-	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
-		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
+	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots || !crossStarted.Load() {
+		t.Fatalf("result=%+v err=%v peak=%d cross started=%t", got.result, got.err, peak.Load(), crossStarted.Load())
 	}
 	wanted := map[CheckName]bool{"frontend test (0)": true, "frontend test (1)": true, "frontend test (2)": true, "frontend test (3)": true, "frontend test (4)": true, "frontend test (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true,
 		"cross-build (linux/amd64)": true, "cross-build (linux/arm64)": true, "cross-build (darwin/amd64)": true, "cross-build (darwin/arm64)": true, "cross-build": true}
