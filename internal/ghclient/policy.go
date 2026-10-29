@@ -701,5 +701,64 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	if Access(ctx, rec) != ReadWrite && !isRead(args) {
 		return errReadOnly
 	}
+	if err := refuseImplicitForkPR(rec, cmdDir, r, args); err != nil {
+		return err
+	}
 	return refuseHeldReady(ctx, rec, cmdDir, r, args)
+}
+
+// createValueFlags are the gh pr create flags that consume the next argument.
+var createValueFlags = map[string]bool{
+	"-a": true, "--assignee": true, "--attach": true, "-B": true, "--base": true, "-b": true, "--body": true,
+	"-F": true, "--body-file": true, "-H": true, "--head": true, "-l": true, "--label": true,
+	"-m": true, "--milestone": true, "-p": true, "--project": true, "--recover": true,
+	"-r": true, "--reviewer": true, "-T": true, "--template": true, "-t": true, "--title": true,
+}
+
+// createNamesRepo reports whether the flags of gh pr create carry -R or --repo.
+// A flag value that looks like a flag, as in --title --repo=x, is not one.
+func createNamesRepo(flags []string) bool {
+	for i := 0; i < len(flags); i++ {
+		name, _, attached := strings.Cut(flags[i], "=")
+		switch {
+		case flags[i] == "--":
+			return false
+		case name == "--repo" || name == "-R" || (strings.HasPrefix(flags[i], "-R") && !strings.HasPrefix(flags[i], "--")):
+			return true
+		case createValueFlags[name] && !attached:
+			i++
+		}
+	}
+	return false
+}
+
+// refuseImplicitForkPR refuses gh pr create without --repo in a fork checkout.
+// gh then picks the fork's parent, which opens a PR on a repository the owner
+// never chose. The message names both choices so the agent picks one on purpose.
+func refuseImplicitForkPR(rec room.Record, cmdDir string, r repository, args []string) error {
+	command := commandArgs(args)
+	if len(command) < 2 || command[0] != "pr" || command[1] != "create" {
+		return nil
+	}
+	if len(command) != len(args) || createNamesRepo(command[2:]) {
+		return nil
+	}
+	if cmdDir == "" {
+		cmdDir, _ = os.Getwd()
+	}
+	checkout := rec.Repo
+	for _, path := range rec.ExtraRepos {
+		if sameCheckout(cmdDir, path) {
+			checkout = path
+		}
+	}
+	upstream := rec.UpstreamOf(checkout)
+	if upstream == "" {
+		return nil
+	}
+	own := r.name
+	if own == "" {
+		own = "this checkout's own repository"
+	}
+	return fmt.Errorf("gh pr create without --repo would open the PR on the upstream repository %s, not on %s. Run it again with --repo %s to keep the PR on the fork, or with --repo %s only if the owner asked for an upstream PR", upstream, own, own, strings.TrimPrefix(upstream, r.host+"/"))
 }
