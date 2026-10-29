@@ -655,7 +655,11 @@ func (s *Store) updateMetaContext(ctx context.Context, id string, fn func(*Meta)
 // lock, then saves every session fn changed in one dyna.db write. It returns
 // the saved sessions. The write publishes one session event with an empty
 // key, which tells clients that every session may have changed.
-func (s *Store) updateMetasContext(ctx context.Context, ids []string, fn func(*Meta) bool) ([]Meta, error) {
+//
+// The call ignores cancellation on purpose. The profile is already saved when
+// this runs, so a cancelled request must not leave some sessions unnoticed.
+// A cancelled lock wait would do exactly that, so the locks are not cancellable.
+func (s *Store) updateMetasContext(ids []string, fn func(*Meta) bool) ([]Meta, error) {
 	var locked []string
 	for _, id := range ids {
 		dir, err := s.Dir(id)
@@ -678,14 +682,14 @@ func (s *Store) updateMetasContext(ctx context.Context, ids []string, fn func(*M
 				metas = append(metas, normalizeMeta(m))
 			}
 		}
-		if err := ctx.Err(); err != nil || len(metas) == 0 {
-			return err
+		if len(metas) == 0 {
+			return nil
 		}
 		db, err := database.Open(filepath.Dir(s.root()))
 		if err != nil {
 			return err
 		}
-		err = state.For(db).Write(ctx, hub.Event{Topic: sessionlife.Topic}, func(conn *sql.Conn) error {
+		err = state.For(db).Write(context.Background(), hub.Event{Topic: sessionlife.Topic}, func(conn *sql.Conn) error {
 			for _, m := range metas {
 				if err := sessionlife.SaveTx(conn, m.ID, m); err != nil {
 					return err
