@@ -193,6 +193,24 @@ func TestLiveMigrationRequiresInstalledExecutable(t *testing.T) {
 		}
 	})
 
+	t.Run("accepts a configured custom install directory", func(t *testing.T) {
+		keepSchemaOwner(t)
+		ownerData, _ := newPaths(t)
+		installDir := filepath.Join(t.TempDir(), "opt", "dyna")
+		if err := os.MkdirAll(installDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(exe, filepath.Join(installDir, "dyna")); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("DYNA_INSTALL_DIR", installDir)
+		readOnly, status, _, cause := startMode(ownerData, false, "", ownerData)
+		t.Cleanup(func() { database.Close(ownerData) })
+		if readOnly || cause != nil {
+			t.Fatalf("custom installed live migration: readOnly=%v status=%q cause=%v", readOnly, status, cause)
+		}
+	})
+
 	t.Run("preserves custom folders and owner recovery", func(t *testing.T) {
 		for _, recovery := range []bool{false, true} {
 			keepSchemaOwner(t)
