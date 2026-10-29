@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,7 +75,9 @@ type spoolFile struct {
 // TODO: legacy/shim remove later — imports events a previous-release emitter
 // left as files under hook-spool, on every drain, until no old emitter
 // remains; each file is removed only after its row committed, so a crash
-// replays the import instead of losing the event.
+// replays the import instead of losing the event. The directory and its
+// write.lock stay until a coordinated cutover: unlinking the lock while an
+// old emitter holds or waits on it would split the lock.
 func (s Service) importSpoolFiles(ctx context.Context) error {
 	dir := filepath.Join(s.dataDir(), "hook-spool")
 	info, err := os.Stat(dir)
@@ -105,24 +106,22 @@ func (s Service) importSpoolFiles(ctx context.Context) error {
 			return err
 		}
 	}
-	// The lock file and the emptied directory go best-effort: quarantined or
-	// unrelated leftovers keep the directory, as they did before.
-	_ = os.Remove(filepath.Join(dir, "write.lock"))
-	_ = os.Remove(dir)
 	return nil
 }
 
-// importSpoolFile imports one legacy file: a file this release refuses is
-// quarantined beside the queue and blocks nothing, as the old drain did.
+// importSpoolFile imports one legacy file. A file this release refuses stays
+// exactly in place and its error stops the whole import: the approved
+// old-emitter drain must still find the file to clear it, as the old startup
+// validator refused startup until it was gone. Files behind it wait.
 func (s Service) importSpoolFile(ctx context.Context, dir string, f spoolFile) error {
 	path := filepath.Join(dir, f.name)
 	raw, err := readSpoolFile(path, f)
 	if err != nil {
-		return quarantineSpoolFile(dir, f.name, err)
+		return fmt.Errorf("hook spool file %s: %w", path, err)
 	}
 	e, err := decodeSpoolEvent(raw)
 	if err != nil {
-		return quarantineSpoolFile(dir, f.name, err)
+		return fmt.Errorf("hook spool file %s: %w", path, err)
 	}
 	if err := s.appendQueued(ctx, e); err != nil {
 		return err
@@ -193,15 +192,6 @@ func decodeSpoolEvent(raw []byte) (Event, error) {
 		return Event{}, err
 	}
 	return e, nil
-}
-
-// quarantineSpoolFile moves a file the importer refuses beside the queue.
-func quarantineSpoolFile(dir, name string, cause error) error {
-	if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, name+".bad")); err != nil {
-		return err
-	}
-	log.Printf("hook spool: quarantined %q: %v", name, cause)
-	return nil
 }
 
 // readSpoolFile reads one bounded legacy event file. The size check before

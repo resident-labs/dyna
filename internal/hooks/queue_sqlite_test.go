@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ func TestImportMovesLegacySpoolIntoTheQueueInOrder(t *testing.T) {
 			t.Fatalf("queue after enqueue: %+v, %v", events, err)
 		}
 	})
-	t.Run("emptied directory removed", func(t *testing.T) {
+	t.Run("directory and lock retained", func(t *testing.T) {
 		s, repo := setup(t)
 		t.Cleanup(func() { database.Close(s.DataDir) })
 		spool := filepath.Join(s.DataDir, "hook-spool")
@@ -77,8 +78,12 @@ func TestImportMovesLegacySpoolIntoTheQueueInOrder(t *testing.T) {
 		if err := s.importSpoolFiles(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(spool); !os.IsNotExist(err) {
-			t.Fatalf("emptied legacy spool directory remains: %v", err)
+		// The lock file is never unlinked while an old emitter may hold or
+		// wait on it; a coordinated cutover removes the directory later.
+		for _, kept := range []string{spool, filepath.Join(spool, "write.lock")} {
+			if _, err := os.Stat(kept); err != nil {
+				t.Fatalf("%s not retained: %v", kept, err)
+			}
 		}
 	})
 }
@@ -96,8 +101,8 @@ func TestImportPicksUpALateLegacyFile(t *testing.T) {
 	if err := s.importSpoolFiles(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// An old emitter recreates the directory and appends after the queue
-	// store already exists.
+	// An old emitter appends after the queue store already exists; the
+	// retained directory is still there.
 	if err := os.MkdirAll(spool, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -112,9 +117,10 @@ func TestImportPicksUpALateLegacyFile(t *testing.T) {
 }
 
 // A retained snapshot marker in any case, a marker that is not a boolean,
-// and a file that is not an event are quarantined beside the queue; the
-// events behind them still import.
-func TestImportQuarantinesRetainedSnapshotMarkers(t *testing.T) {
+// and a file that is not an event refuse the import: the refused file stays
+// in place, in full, for the approved old-emitter drain that clears it, and
+// the events behind it wait, as the old startup validator did.
+func TestImportRefusesWhatItCannotRun(t *testing.T) {
 	for name, source := range map[string]string{
 		"marker":       `{"event":"before-land","snapshot":true}`,
 		"first of two": `{"Snapshot":true,"snapshot":false}`,
@@ -132,17 +138,18 @@ func TestImportQuarantinesRetainedSnapshotMarkers(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeLegacySpool(t, spool, "2.json", Event{Repo: repo, Worktree: repo, Event: AfterLand})
-			if err := s.importSpoolFiles(context.Background()); err != nil {
-				t.Fatal(err)
+			path := filepath.Join(spool, "1.json")
+			if err := s.importSpoolFiles(context.Background()); err == nil || !strings.Contains(err.Error(), path) {
+				t.Fatalf("import must refuse %s: %v", path, err)
 			}
-			if got, err := os.ReadFile(filepath.Join(spool, "1.json.bad")); err != nil || string(got) != source {
-				t.Fatalf("quarantine: %q, %v", got, err)
+			if got, err := os.ReadFile(path); err != nil || string(got) != source {
+				t.Fatalf("refused source changed: %q, %v", got, err)
 			}
-			if _, err := os.Stat(filepath.Join(spool, "1.json")); !os.IsNotExist(err) {
-				t.Fatalf("refused source remains: %v", err)
+			if _, err := os.Stat(filepath.Join(spool, "2.json")); err != nil {
+				t.Fatalf("later file left behind: %v", err)
 			}
 			events, err := s.QueuedEvents(context.Background())
-			if err != nil || len(events) != 1 {
+			if err != nil || len(events) != 0 {
 				t.Fatalf("queue behind the refused file: %+v, %v", events, err)
 			}
 		})
@@ -150,7 +157,7 @@ func TestImportQuarantinesRetainedSnapshotMarkers(t *testing.T) {
 }
 
 // A drain imports the remaining legacy files before it dispatches, runs
-// them with the queued rows, and removes the emptied directory.
+// them with the queued rows, and keeps the directory and its lock file.
 func TestDrainImportsLegacySpoolFiles(t *testing.T) {
 	s, repo := setup(t)
 	add(t, s, repo, hook("queued", AfterLand))
@@ -168,7 +175,34 @@ func TestDrainImportsLegacySpoolFiles(t *testing.T) {
 	if events := queuedEvents(t, s); len(events) != 0 {
 		t.Fatalf("drain left imported events queued: %+v", events)
 	}
-	if _, err := os.Stat(spool); !os.IsNotExist(err) {
-		t.Fatalf("emptied legacy spool directory remains: %v", err)
+	if _, err := os.Stat(filepath.Join(spool, "00000000000000000001.json")); !os.IsNotExist(err) {
+		t.Fatalf("imported legacy file remains: %v", err)
+	}
+	if _, err := os.Stat(spool); err != nil {
+		t.Fatalf("legacy spool directory not retained: %v", err)
+	}
+}
+
+// The store watcher's version changes when a legacy spool file appears with
+// no queue change, so a late file from a previous-release emitter wakes the
+// drain that imports it, and again once the import has cleared the files.
+func TestSpoolVersionWakesForLegacyFiles(t *testing.T) {
+	s, repo := setup(t)
+	t.Cleanup(func() { database.Close(s.DataDir) })
+	before := s.SpoolVersion()
+	spool := filepath.Join(s.DataDir, "hook-spool")
+	if err := os.MkdirAll(spool, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeLegacySpool(t, spool, "00000000000000000001.json", Event{Repo: repo, Worktree: repo, Event: AfterLand})
+	appeared := s.SpoolVersion()
+	if appeared == "" || appeared == before {
+		t.Fatalf("legacy file did not change the wake version: %q then %q", before, appeared)
+	}
+	if err := s.importSpoolFiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if emptied := s.SpoolVersion(); emptied == "" || emptied == appeared {
+		t.Fatalf("emptied spool did not change the wake version: %q then %q", appeared, emptied)
 	}
 }

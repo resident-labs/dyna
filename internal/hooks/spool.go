@@ -194,8 +194,10 @@ func (s Service) dispatchQueued(ctx context.Context, e Event) error {
 	return s.dispatch(ctx, prepared, err)
 }
 
-// SpoolVersion changes when rows enter or leave the queue. The store watcher
-// uses this cheap query to wake the engine without reading each event.
+// SpoolVersion changes when rows enter or leave the queue, and when the
+// legacy hook-spool directory changes, so a file a previous-release emitter
+// appends also wakes the worker that imports it. The store watcher uses this
+// cheap signal to wake the engine without reading each event.
 func (s Service) SpoolVersion() string {
 	db, err := s.queueDB()
 	if err != nil {
@@ -204,6 +206,11 @@ func (s Service) SpoolVersion() string {
 	var version string
 	if err := db.QueryRow("SELECT count(*)||':'||coalesce(max(id),0) FROM hook_queue").Scan(&version); err != nil {
 		return ""
+	}
+	if info, err := os.Stat(filepath.Join(s.dataDir(), "hook-spool")); err == nil && info.IsDir() {
+		// Creating, renaming or removing a directory entry changes the
+		// directory's own mtime, which is all the wake signal needs.
+		version += ":" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
 	}
 	return version
 }
