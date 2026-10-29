@@ -12,7 +12,14 @@ func Goal(main string) string {
 
 // Task is one run's assignment. The session may have been compacted or moved
 // to another model, so the task repeats everything the run needs.
-func Task(main, tree, base, target, reason string, readmeMax int) string {
+//
+// repo is the room repository as host/owner/name. The docs pull request always
+// targets it, so a fork checkout never opens a pull request on its upstream.
+func Task(main, repo, tree, base, target, reason string, readmeMax int) string {
+	open := "Open the pull request with gh pr create --repo " + repo + " --body-file FILE, never an inline --body and never on another repository, and track it"
+	if repo == "" {
+		open = "This checkout has no origin remote, so do not open a pull request; say so in your summary. If a pull request exists, track it"
+	}
 	changes := "Run `dyna library changed --since " + base + "` to list changed files and their owners."
 	if base == "" {
 		changes = "This is the first run. Survey the repository top-down: top-level features first, then their children."
@@ -42,10 +49,10 @@ Do these tasks in order.
    When something needs a fix:
    - Create your own worktree: dyna git worktrees new librarian/docs-%s --repo %s. Edit and commit only there.
    - In that worktree, run dyna library check-readme. README.md must stay within library.readmeMaxLines (%d lines). If it is over, shorten README.md. If it is still over, do not open a pull request; say so in your summary.
-   - Write the PR body to a file in $DYNA_SCRATCH. Open the pull request with gh pr create --body-file FILE, never an inline --body, and track it with dyna git pr track <number>. Use dyna git pr edit to fix its title or body. The assigned reviewer and CI check it. Keep at most one open docs pull request; push to it instead of opening another.
+   - Write the PR body to a file in $DYNA_SCRATCH. %s with dyna git pr track <number>. Use dyna git pr edit to fix its title or body. The assigned reviewer and CI check it. Keep at most one open docs pull request; push to it instead of opening another.
 
 Rules: change the map only through dyna library. Never merge anything. Do not start subagents or workflows. Answer review findings on your docs pull request with dyna git change reply.
-End the turn with a short summary: entries added, updated and retired, the docs pull request if any, and the lint warning count before and after.`, short(target), main, reason, tree, short(target), changes, short(target), main, readmeMax)
+End the turn with a short summary: entries added, updated and retired, the docs pull request if any, and the lint warning count before and after.`, short(target), main, reason, tree, short(target), changes, short(target), main, readmeMax, open)
 }
 
 // SmellGoal is the standing goal of the independent code-reading pass.
