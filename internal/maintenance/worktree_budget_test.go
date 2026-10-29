@@ -102,3 +102,34 @@ func TestFromTurnStartsAtNextRepositoryAndWraps(t *testing.T) {
 		t.Fatalf("no repositories gave %v, want none", got)
 	}
 }
+
+// On odd turns the worktree cleanup runs after the sweeps, so a slow cleanup
+// cannot take the sweeps' share on every pass.
+func TestWorktreeCleanupFollowsSweepsOnOddTurns(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	old := gcWorktrees
+	gcWorktrees = func(context.Context, string, worktrees.GCOptions) ([]worktrees.Tree, error) { return nil, nil }
+	t.Cleanup(func() { gcWorktrees = old })
+	if _, err := nextWorktreeTurn(context.Background(), store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(context.Background(), Options{Repos: []string{"repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreeAt, scratchAt := -1, -1
+	for i, step := range result.Steps {
+		switch step.Name {
+		case "worktrees":
+			worktreeAt = i
+		case "scratch":
+			scratchAt = i
+		}
+	}
+	if worktreeAt < 0 || scratchAt < 0 || worktreeAt < scratchAt {
+		t.Fatalf("steps = %+v, want worktrees after scratch on an odd turn", result.Steps)
+	}
+}
