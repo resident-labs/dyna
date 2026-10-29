@@ -416,13 +416,14 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 			decision = Decision{Action: "keep", Reason: "owner_admitted"}
 		}
 
-		if saved, ok := r.CommentDecisions[commentKey(c)]; ok && decision.Action == "keep" && saved.Action == "drop" && (r.Seen[commentKey(c)] == "" || r.Seen[commentKey(c)] == commentVersion(c)) {
+		// A saved drop or owner dismissal keeps applying until the comment changes.
+		if saved, ok := r.CommentDecisions[commentKey(c)]; ok && decision.Action == "keep" && (saved.Action == "drop" || saved.Reason == "owner_dismissed") && (r.Seen[commentKey(c)] == "" || r.Seen[commentKey(c)] == commentVersion(c)) {
 			decision = saved
 		}
 		if reviewerHears(decision) {
 			c.Body = clip(Sanitize(c.Body), 4000)
 			if decision.Reason != "owner" {
-				c.Body = quotedComment(c.Body)
+				c.Body = externalComment(c.Body)
 			}
 			out = append(out, c)
 		}

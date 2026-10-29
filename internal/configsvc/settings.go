@@ -98,7 +98,8 @@ func Items() ([]Item, error) {
 		}
 	}
 	items := []Item{
-		{Key: settings.KeyPRTrustedBots, Value: v.PRTrustedBots, Source: v.Source(settings.KeyPRTrustedBots), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of trusted GitHub bot logins. Other outside comments are held for the owner."},
+		{Key: settings.KeyPRTrustedBots, Value: v.PRTrustedBots, Source: v.Source(settings.KeyPRTrustedBots), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of trusted GitHub bot logins. Other outside comments follow pr.outsideComments."},
+		{Key: settings.KeyPROutsideComments, Value: string(v.PROutsideComments), Source: v.Source(settings.KeyPROutsideComments), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: []string{string(settings.OutsideCommentsDeliver), string(settings.OutsideCommentsHold)}, Help: "deliver sends outside comments to the author as untrusted data. hold keeps them until the owner admits them."},
 		{Key: settings.KeyVoiceDucking, Value: v.VoiceDucking, Source: v.Source(settings.KeyVoiceDucking), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeyVoiceAgent, Value: v.VoiceAgent, Source: v.Source(settings.KeyVoiceAgent), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
