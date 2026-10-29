@@ -43,11 +43,13 @@ node's queue, and store their log and exit code.
   registration's access mode by default. It can ask for `:ro` to reduce a
   writable registration, but Dyna refuses `:rw` on a read-only registration.
   Dyna also refuses unknown names and registrations of another room. Named
-  mounts cannot replace the job's own `/workspace`.
+  mounts cannot replace the job's own `/workspace`. Revoke a registration with
+  `dyna node edit hermeslab --unmount horizon-vanilla --room horizon`.
 - A node's device allow list is room-scoped too. For example,
   `dyna node edit hermeslab --device /dev/dri --room horizon` lets that room's
   jobs request `--device /dev/dri`. Dyna refuses every device that is not
-  registered for the job's room on the selected node.
+  registered for the job's room on the selected node. Revoke permission with
+  `dyna node edit hermeslab --undevice /dev/dri --room horizon`.
 - The job joins the node's queue, so jobs and local CI checks share one
   admission bound per node. `--io heavy` marks a job that saturates the
   disk; a node runs only a few heavy units at once. A job that waits shows why
