@@ -32,6 +32,7 @@ func (s *Service) MergeTick(ctx context.Context) (time.Time, error) {
 		return s.now().Add(pollEvery), err
 	}
 	defer unlock()
+	ctx = context.WithValue(ctx, tickReadKey{}, tickReadScope{s, s.tickView()})
 	return s.mergeTickLocked(locallane.WithCommonDirs(ctx), "", nil)
 }
 
@@ -40,7 +41,7 @@ func (s *Service) MergeTick(ctx context.Context) (time.Time, error) {
 func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without map[string]bool) (time.Time, error) {
 	retry := func(err error) (time.Time, error) { return s.now().Add(pollEvery), err }
 	probes, refreshErr := s.refreshMergeFacts(ctx)
-	st, err := s.Store.Read()
+	st, err := s.readTickState(ctx)
 	if err != nil {
 		return retry(err)
 	}
@@ -51,7 +52,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	if _, err := s.refreshRepositoryFacts(ctx, st); err != nil {
 		failures = append(failures, err)
 	}
-	st, err = s.Store.Read()
+	st, err = s.readTickState(ctx)
 	if err != nil {
 		return retry(err)
 	}
@@ -77,7 +78,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				return retry(err)
 			}
 		}
-		st, err = s.Store.Read()
+		st, err = s.readTickState(ctx)
 		if err != nil {
 			return retry(err)
 		}
@@ -104,7 +105,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			failures = append(failures, err)
 		}
 	}
-	st, err = s.Store.Read()
+	st, err = s.readTickState(ctx)
 	if err != nil {
 		return retry(errors.Join(append(failures, err)...))
 	}
@@ -212,7 +213,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			batchRecord = changes[0]
 		}
 		var batch state.MergeTrial
-		if err := s.Store.update(func(st *State) error {
+		if err := s.Store.updateSelected(cleanupScope, func(st *State) error {
 			if st.MergeTrials == nil {
 				st.MergeTrials = map[string]*state.MergeTrial{}
 			}
@@ -381,7 +382,7 @@ func (s *Service) discardMergeTrial(ctx context.Context, repo string, r Record, 
 }
 
 func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.MergeTrial) error {
-	st, err := s.Store.Read()
+	st, err := s.readTickState(ctx)
 	if err != nil {
 		return err
 	}
