@@ -260,6 +260,61 @@ func TestIdleTimeoutRetriesFailedStop(t *testing.T) {
 	}
 }
 
+// A natural exit after a failed idle stop confirms that the unit ended.
+// Reconciliation must not mistake its successful status for another retry.
+func TestIdleStopAcceptsSuccessfulExit(t *testing.T) {
+	exit := make(chan struct{})
+	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			return nil
+		}
+		fmt.Fprintln(out, "working")
+		select {
+		case <-exit:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	defer svc.Stop()
+	fake.FailStops(1)
+	idle := 5 * time.Second
+	_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for fake.StopCount() == 0 {
+		runtime.Gosched()
+	}
+	close(exit)
+	if finished := <-reporter.finished; finished.State != StateTimedOut || finished.Note != "no output for 5s" {
+		t.Fatalf("finished = %+v, want the confirmed idle stop", finished)
+	}
+}
+
+// Output after a failed stop does not cancel the stop request. The next poll
+// retries it even though the new output resets the node-side quiet time.
+func TestIdleStopRetriesAfterOutputResumes(t *testing.T) {
+	svc, fake, reporter, _ := newService(t, blockingJob("working"))
+	defer svc.Stop()
+	fake.FailStops(1)
+	idle := 5 * time.Second
+	_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for fake.StopCount() == 0 {
+		runtime.Gosched()
+	}
+	fake.OutputEveryPoll()
+	for fake.StopCount() < 2 {
+		runtime.Gosched()
+	}
+	if finished := <-reporter.finished; finished.State != StateTimedOut || finished.Note != "no output for 5s" {
+		t.Fatalf("finished = %+v, want the confirmed idle stop", finished)
+	}
+}
+
 // Cancelling an idle run does not end its row while every stop is failing.
 // The existing poll keeps retrying until the node confirms the unit stopped.
 func TestIdleStopSurvivesRunCancellation(t *testing.T) {

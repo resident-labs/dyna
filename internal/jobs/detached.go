@@ -363,11 +363,12 @@ func (x Executor) StopDetached(ctx context.Context, spec RunSpec) error {
 
 // watch is one running check the poller follows.
 type watch struct {
-	spec   RunSpec
-	out    io.Writer
-	offset int64
-	done   chan error
-	closed bool
+	spec     RunSpec
+	out      io.Writer
+	offset   int64
+	done     chan error
+	closed   bool
+	idleStop bool
 }
 
 // Poller follows every running job of one node with a single poll call at a
@@ -465,7 +466,7 @@ func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 			if idleStopping {
 				var exit *DetachedExit
 				var lost *NodeLostError
-				if errors.As(err, &exit) || (errors.As(err, &lost) && lost.Gone) {
+				if err == nil || errors.As(err, &exit) || (errors.As(err, &lost) && lost.Gone) {
 					// An exit record, or a node that confirms the unit is gone,
 					// proves that no running unit remains. Keep the idle result.
 					return &idleTimeoutError{idle: spec.Idle}
@@ -637,7 +638,10 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 				p.applied(w.spec.Dir)
 			}
 		}
-		if frame.Unit == UnitRunning && w.spec.Idle > 0 && frame.QuietFor >= w.spec.Idle {
+		if frame.Unit == UnitRunning && w.spec.Idle > 0 && (w.idleStop || frame.QuietFor >= w.spec.Idle) {
+			// Once idle stopping starts, later output does not revive the job.
+			// Every running poll retries the stop until the unit confirms its end.
+			w.idleStop = true
 			p.finish(w, &idleTimeoutError{idle: w.spec.Idle})
 			continue
 		}
