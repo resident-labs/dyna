@@ -54,6 +54,46 @@ func TestCloseDropsInstructionNotesAndForwardsPosts(t *testing.T) {
 	assertForwards()
 }
 
+func TestCloseDropsShellResultsAndForwardsPosts(t *testing.T) {
+	e := newTestEnv(t)
+	source := completedFixtureSession(t, e)
+	heir := completedFixtureSession(t, e)
+	if _, err := e.m.Store.UpdateMeta(source.ID, func(m *Meta) { m.ParentSession = heir.ID; m.Depth = 2 }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.rooms().PostEventInput(room.PostEventInput{
+		RoomID: source.RoomID, Producer: room.ProducerShell, To: []string{source.Address()},
+		Event: room.ShellEvent{
+			ShellID: "sh_20261028-194809-6210485d", Label: "bash", State: room.ShellCompleted, ExitCode: 1,
+			Detail: "Full output: dyna shell tail sh_20261028-194809-6210485d",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	work, err := e.m.rooms().Post(source.RoomID, room.PostInput{
+		From: heir.Address(), To: []string{source.Address()}, Wake: true, Text: "pending work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Close(e.ctx, source.ID); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := e.m.rooms().Messages(source.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forwards []room.Message
+	for _, msg := range messages {
+		if msg.Forward != nil {
+			forwards = append(forwards, msg)
+		}
+	}
+	if len(forwards) != 1 || forwards[0].Forward.ID != work.ID {
+		t.Fatalf("heir forwards = %d posts; want only agent post %s", len(forwards), work.ID)
+	}
+}
+
 func TestCloseForwardsPendingPostsOnce(t *testing.T) {
 	for _, withParent := range []bool{true, false} {
 		t.Run(map[bool]string{true: "parent", false: "root seat"}[withParent], func(t *testing.T) {
