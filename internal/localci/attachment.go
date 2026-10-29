@@ -221,6 +221,12 @@ func (s Store) AbandonOrphanedRun(ctx context.Context, orphan OrphanedAttachment
 // taken. The take-over is one conditional write, so two processes never both
 // win.
 func (s Store) claimAttachment(ctx context.Context, repo, sha, node string) (attachment, error) {
+	return s.claimAttachmentRun(ctx, repo, sha, node, "")
+}
+
+// claimAttachmentRun claims only runID when it is nonempty. The conditional
+// write leaves every other attachment, including a newer run, untouched.
+func (s Store) claimAttachmentRun(ctx context.Context, repo, sha, node, runID string) (attachment, error) {
 	rows, err := s.attachmentRows(ctx, repo, sha)
 	if err != nil {
 		return attachment{}, err
@@ -231,7 +237,7 @@ func (s Store) claimAttachment(ctx context.Context, repo, sha, node string) (att
 	}
 	pid, start := attachmentOwner()
 	for _, row := range rows {
-		if row.Node != node || !row.orphaned() {
+		if row.Node != node || runID != "" && row.RunID != runID || !row.orphaned() {
 			continue
 		}
 		taken := false
@@ -275,7 +281,7 @@ func (s Store) AttachedNode(ctx context.Context, repo, sha string) (string, erro
 // AbandonOrphanedRun claims one kept run and tears it down. A failed machine
 // call hands the record back so the next scheduler tick can try again.
 func (r Runner) AbandonOrphanedRun(ctx context.Context, store Store, orphan OrphanedAttachment) error {
-	att, err := store.claimAttachment(ctx, orphan.Repo, orphan.SHA, orphan.Node)
+	att, err := store.claimAttachmentRun(ctx, orphan.Repo, orphan.SHA, orphan.Node, orphan.RunID)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
