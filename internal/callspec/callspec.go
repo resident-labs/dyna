@@ -18,6 +18,11 @@ import (
 // again to the engine that starts next (D-269).
 const CodeEngineStopping = "engine_stopping"
 
+// CodeEngineStarting is the reply code of a call that arrives while the engine
+// runs its startup migrations. The reply is a 503: the caller waits and sends
+// the same request again once the engine serves calls.
+const CodeEngineStarting = "engine_starting"
+
 // ErrRetryable marks a write the engine could not apply yet but may apply
 // later, so the caller keeps the request and sends it again with the same
 // request ID instead of dropping it.
