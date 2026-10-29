@@ -101,6 +101,10 @@ type Machine struct {
 	// Resources declares named counts available to jobs on this node. A name
 	// that is not declared acts as a one-unit lock when a job requests it.
 	Resources map[ResourceName]int `json:"resources,omitempty"`
+	// Mounts and Devices are the container resources registered for each room.
+	// Job submitters select them by name or path, never by a mount host source.
+	Mounts  []NamedMount  `json:"mounts,omitempty"`
+	Devices []DeviceGrant `json:"devices,omitempty"`
 	// HostChecksGrants lists who allows repository-defined CI commands to run
 	// on this machine outside a container: the owner for every room, or the
 	// root of one room for that room's CI work. It is empty unless someone
@@ -441,7 +445,10 @@ func (m Machine) Validate() error {
 	if err := validateLabelList(m.Labels); err != nil {
 		return err
 	}
-	return validateGrants(m.HostChecksGrants)
+	if err := validateGrants(m.HostChecksGrants); err != nil {
+		return err
+	}
+	return validateContainerRegistrations(m.Mounts, m.Devices)
 }
 
 // validateLabelList reports whether a label list is storable. Label names
@@ -489,7 +496,7 @@ func validateGrants(grants []HostChecksGrant) error {
 	return nil
 }
 
-const schemaVersion = 15
+const schemaVersion = 16
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -513,7 +520,9 @@ const schema = `CREATE TABLE machines (
 	check_tmp TEXT NOT NULL DEFAULT '',
 	max_io_heavy INTEGER NOT NULL DEFAULT 0 CHECK(max_io_heavy >= 0),
 	max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100),
-	resources TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resources))
+	resources TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resources)),
+	mounts TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(mounts)),
+	devices TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(devices))
 );
 
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
@@ -550,7 +559,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,ssh,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -701,6 +710,14 @@ func prepare(conn *sql.Conn, old int) error {
 		for _, column := range []string{"roles", "ci_slots"} {
 			if _, err := conn.ExecContext(ctx, "ALTER TABLE machines DROP COLUMN "+column); err != nil {
 				return fmt.Errorf("drop machines.%s: %w", column, err)
+			}
+		}
+	}
+	if old < 16 {
+		// Jobs could not use node-registered mounts or devices before this version.
+		for _, column := range []string{"mounts", "devices"} {
+			if _, err := conn.ExecContext(ctx, "ALTER TABLE machines ADD COLUMN "+column+" TEXT NOT NULL DEFAULT '[]' CHECK(json_valid("+column+"))"); err != nil {
+				return fmt.Errorf("add machines.%s: %w", column, err)
 			}
 		}
 	}
@@ -1022,10 +1039,10 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var capabilities, health, load, probeError, grants, rooms, labels, resources string
+	var capabilities, health, load, probeError, grants, rooms, labels, resources, mounts, devices string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &m.SSH, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
+		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources, &mounts, &devices); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -1034,6 +1051,18 @@ func scan(row scanner) (Machine, error) {
 	}
 	if len(m.Resources) == 0 {
 		m.Resources = nil
+	}
+	if err := json.Unmarshal([]byte(mounts), &m.Mounts); err != nil {
+		return Machine{}, fmt.Errorf("node %s mounts: %w", m.Name, err)
+	}
+	if len(m.Mounts) == 0 {
+		m.Mounts = nil
+	}
+	if err := json.Unmarshal([]byte(devices), &m.Devices); err != nil {
+		return Machine{}, fmt.Errorf("node %s devices: %w", m.Name, err)
+	}
+	if len(m.Devices) == 0 {
+		m.Devices = nil
 	}
 	if err := json.Unmarshal([]byte(grants), &m.HostChecksGrants); err != nil {
 		return Machine{}, fmt.Errorf("node %s host-check grants: %w", m.Name, err)
@@ -1193,13 +1222,14 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	}
 	rooms, labels := marshalNames(m.Rooms), marshalNames(m.Labels)
 	resources := marshalResources(m.Resources)
+	mounts, devices := marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
 			// An edit keeps who allows host checks: the engine changes grants
 			// through UpdateHostChecksGrants inside its own transaction, so a
 			// list read before that change cannot restore it.
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
-				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=?, devices=? WHERE id=?`,
+				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1209,9 +1239,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices)
 		return err
 	})
 	if err != nil {
@@ -1348,6 +1378,18 @@ func marshalResources(resources map[ResourceName]int) string {
 	raw, err := json.Marshal(resources)
 	if err != nil {
 		return "{}"
+	}
+	return string(raw)
+}
+
+// marshalContainerRegistrations stores a node's room-scoped container access as JSON.
+func marshalContainerRegistrations[T NamedMount | DeviceGrant](registrations []T) string {
+	if len(registrations) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(registrations)
+	if err != nil {
+		return "[]"
 	}
 	return string(raw)
 }

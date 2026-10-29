@@ -918,7 +918,7 @@ func TestStoreRoundTrip(t *testing.T) {
 }
 
 // Named resources used version 4. Their existing databases still need the
-// idle, workspace, workflow-run and idempotency columns at store version 9.
+// idle, workspace, workflow-run, idempotency and container columns at store version 10.
 func TestStoreMigrationUpdatesVersionFour(t *testing.T) {
 	dir := t.TempDir()
 	db, err := database.Open(dir)
@@ -936,17 +936,17 @@ func TestStoreMigrationUpdatesVersionFour(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name IN ('idle_s','workspace','run','idempotency_key','request_hash')`).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name IN ('idle_s','workspace','run','idempotency_key','request_hash','container')`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 5 {
+	if count != 6 {
 		t.Fatal("the version 4 database did not gain all later job columns")
 	}
 	var version string
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key='jobs.version'`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != "9" {
-		t.Fatalf("jobs.version = %s, want 9", version)
+	if version != "10" {
+		t.Fatalf("jobs.version = %s, want 10", version)
 	}
 }
