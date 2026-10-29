@@ -172,6 +172,18 @@ const fixtures: Record<string, EventPayload> = {
     ],
     detail: 'dyna-agent/internal/room/TestPostEvent · internal/room · rooms · 2.47 s at #1241, 1.2 s at #1238 · limit 1 s',
   },
+  'issue-watch/comment': {
+    type: 'comment', repo: 'owner/repo', number: 3, title: 'Crash on start', url: 'https://github.com/owner/repo/issues/3',
+    key: '6', commenter: 'alice', summary: 'alice commented on owner/repo#3.', body: 'new',
+  },
+  'issue-watch/closed': {
+    type: 'closed', repo: 'owner/repo', number: 3, title: 'Crash on start', url: 'https://github.com/owner/repo/issues/3',
+    key: '41', summary: 'owner/repo#3 was closed.',
+  },
+  'issue-watch/reopened': {
+    type: 'reopened', repo: 'owner/repo', number: 3, title: 'Crash on start', url: 'https://github.com/owner/repo/issues/3',
+    key: '42', summary: 'owner/repo#3 was reopened.',
+  },
   'rule/changed': {
     ruleId: 'r4',
     scope: 'room',
@@ -506,6 +518,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('jobId' in payload) return payload.label
   if ('runId' in payload) return payload.name
   if ('voice' in payload) return payload.session
+  if ('repo' in payload && 'key' in payload) return payload.summary
   if ('call' in payload) return payload.type === 'withdrawn' ? 'Call request' : 'the call'
   if ('sessions' in payload) return `reached ${payload.sessions.length} sessions`
   if ('session' in payload) {
