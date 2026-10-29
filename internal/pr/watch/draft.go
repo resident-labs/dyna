@@ -7,6 +7,7 @@ import (
 	"dyna-agent/internal/pr/state"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,25 @@ func (s *Service) setHold(key string, hold *state.Hold) error {
 		st.Records[key].Hold = hold
 		return nil
 	})
+}
+
+// draftLocks holds one lock per PR key. A package variable keeps Service copyable.
+var draftLocks = struct {
+	sync.Mutex
+	byKey map[string]*sync.Mutex
+}{byKey: map[string]*sync.Mutex{}}
+
+// lockDraft serializes the hold and release calls for one PR and returns its unlock.
+func lockDraft(key string) (unlock func()) {
+	draftLocks.Lock()
+	mu := draftLocks.byKey[key]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		draftLocks.byKey[key] = mu
+	}
+	draftLocks.Unlock()
+	mu.Lock()
+	return mu.Unlock
 }
 
 // clearHold removes the hold only while it is still held. A hold that a concurrent
@@ -35,6 +55,10 @@ func (s *Service) SetDraft(ctx context.Context, key string, draft bool, reason s
 	if draft && reason == "" {
 		return fmt.Errorf("a hold reason is required")
 	}
+	// The lock covers the read, the state write and the GitHub call, so a hold and a
+	// release for one PR run one at a time and their GitHub calls cannot cross.
+	unlock := lockDraft(key)
+	defer unlock()
 	r, err := s.Store.Get(key)
 	if err != nil {
 		return err
