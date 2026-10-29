@@ -374,7 +374,8 @@ type watch struct {
 // time, so many jobs never open many connections over a route that takes
 // seconds to dial.
 type Poller struct {
-	x Executor
+	x   Executor
+	ctx context.Context
 	// Started is told about each job once it is launched, so the caller can
 	// record it for a restarted engine. It fires before the launch, so a
 	// crash at any point inside it leaves the record saying not launched.
@@ -399,7 +400,7 @@ type Poller struct {
 // until its last poll has ended.
 func (x Executor) NewPoller(ctx context.Context) (*Poller, func()) {
 	ctx, cancel := context.WithCancel(ctx)
-	p := &Poller{x: x, active: map[string]*watch{}, kick: make(chan struct{}, 1), exited: make(chan struct{})}
+	p := &Poller{x: x, ctx: ctx, active: map[string]*watch{}, kick: make(chan struct{}, 1), exited: make(chan struct{})}
 	go func() {
 		defer close(p.exited)
 		p.loop(ctx)
@@ -443,28 +444,45 @@ func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 	case p.kick <- struct{}{}:
 	default:
 	}
+	runDone := ctx.Done()
+	idleStopping := false
 	for {
 		select {
 		case err := <-w.done:
 			var idle *idleTimeoutError
 			if errors.As(err, &idle) {
-				if stopErr := p.x.StopDetached(ctx, spec); stopErr != nil {
-					// The unit may still run, so the job cannot end. Reactivate the
-					// watch and let the next existing node poll retry the stop.
-					p.mu.Lock()
-					w.closed = false
-					p.active[spec.Dir] = w
-					p.mu.Unlock()
-					select {
-					case p.kick <- struct{}{}:
-					default:
-					}
-					continue
+				idleStopping = true
+				// A job deadline or cancellation must not cut off the idle stop.
+				// The poller lives until the engine stops, so its context bounds
+				// this call without making the cancelled run finish early.
+				if stopErr := p.x.StopDetached(p.ctx, spec); stopErr == nil {
+					p.drainIdle(p.ctx, w)
+					return err
 				}
-				p.drainIdle(ctx, w)
+				p.requeue(w)
+				continue
+			}
+			if idleStopping {
+				var exit *DetachedExit
+				var lost *NodeLostError
+				if errors.As(err, &exit) || (errors.As(err, &lost) && lost.Gone) {
+					// An exit record, or a node that confirms the unit is gone,
+					// proves that no running unit remains. Keep the idle result.
+					return &idleTimeoutError{idle: spec.Idle}
+				}
+				// A transport failure proves nothing about the unit. Keep the
+				// job open and reconcile it through the existing node poll.
+				p.requeue(w)
+				continue
 			}
 			return err
-		case <-ctx.Done():
+		case <-runDone:
+			if idleStopping && !EngineStopping() {
+				// The run is cancelled, but its unit may still be alive. The
+				// poller context below still observes an engine shutdown.
+				runDone = nil
+				continue
+			}
 			p.release(w)
 			// An engine stop leaves the check running for the restarted engine.
 			if !EngineStopping() {
@@ -472,7 +490,30 @@ func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 				_ = p.x.StopDetached(ctx, spec)
 			}
 			return ctx.Err()
+		case <-p.ctx.Done():
+			p.release(w)
+			if !EngineStopping() {
+				p.drain(ctx, w)
+				_ = p.x.StopDetached(ctx, spec)
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return p.ctx.Err()
 		}
+	}
+}
+
+// requeue returns a watch to the shared poll after an inconclusive stop.
+// Its next result retries the stop or confirms that the unit has ended.
+func (p *Poller) requeue(w *watch) {
+	p.mu.Lock()
+	w.closed = false
+	p.active[w.spec.Dir] = w
+	p.mu.Unlock()
+	select {
+	case p.kick <- struct{}{}:
+	default:
 	}
 }
 

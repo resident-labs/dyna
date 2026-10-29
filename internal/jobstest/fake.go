@@ -46,6 +46,7 @@ type Fake struct {
 	polls           int
 	stops           int
 	stopFailures    int
+	capLogs         bool
 	outputEveryPoll bool
 	now             time.Time
 	// Down makes every call fail like a dropped connection while it returns
@@ -155,7 +156,7 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(m.t.Context())
-	proc := &fakeProc{cancel: cancel, modified: m.now}
+	proc := &fakeProc{cancel: cancel, modified: m.now, capped: m.capLogs}
 	m.procs[dir] = proc
 	m.mu.Unlock()
 	callName, callArgs := "bash", []string{"-o", "pipefail", "-c", string(body)}
@@ -193,11 +194,12 @@ func (m *Fake) Mkdir(dir string) {
 	m.folders[dir] = true
 }
 
-// CapLogs makes every running fake job discard later output, as the node's
+// CapLogs makes every fake job discard later output, as the node's
 // retained-log cap does. The fake still runs and can end normally.
 func (m *Fake) CapLogs() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.capLogs = true
 	for _, proc := range m.procs {
 		proc.capped = true
 	}
