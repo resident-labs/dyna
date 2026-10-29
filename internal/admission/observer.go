@@ -89,6 +89,7 @@ func (o *Observer) Sample(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	before := st
 	now := o.Now()
 	if o.AgentMemory != nil && now.Sub(st.MeasuredAt) >= time.Minute {
 		if total, agents := o.AgentMemory(bound); agents >= 2 && total > 0 {
@@ -97,8 +98,12 @@ func (o *Observer) Sample(ctx context.Context) (err error) {
 		}
 	}
 	limit, st := Decide(readings, running, st)
-	if err := o.States.Save(bound, Watch, st); err != nil {
-		return err // without the saved state the next sample would forget the overload
+	// A steady machine leaves the stored state as it is, so a sample writes
+	// only when the state changed.
+	if st != before {
+		if err := o.States.Save(bound, Watch, st); err != nil {
+			return err // without the saved state the next sample would forget the overload
+		}
 	}
 	if o.Relieve != nil && MemoryShort(readings) {
 		if n := o.Relieve(bound); n > 0 {
