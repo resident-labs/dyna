@@ -1,12 +1,16 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/engineclient"
 )
 
@@ -51,9 +55,25 @@ func Status(ctx context.Context, call func(context.Context, string, []any, any) 
 	m := h.DatabaseMetrics
 	fmt.Fprintf(out, "database duration counts since start (<=1ms, <=10ms, <=100ms, <=1s, >1s): hold %v, commit %v, checkpoint %v\n", m.WriteHold, m.Commit, m.CheckpointDuration)
 	fmt.Fprintf(out, "scheduled checkpoints since start: total frames observed %d, copied %d, incomplete %d, errors %d\n", m.CheckpointFrames, m.CheckpointMoved, m.CheckpointIncomplete, m.CheckpointErrors)
+	if len(m.Callers) > 0 {
+		fmt.Fprintf(out, "top three writer callers by transactions: %s\n", topCallers(m.Callers, func(a, b database.CallerCount) int { return cmp.Compare(b.Transactions, a.Transactions) }))
+		fmt.Fprintf(out, "top three writer callers by lock hold: %s\n", topCallers(m.Callers, func(a, b database.CallerCount) int { return cmp.Compare(b.Hold, a.Hold) }))
+	}
 	fmt.Fprintf(out, "callers refused: %d\n", h.CallersRefused)
 	fmt.Fprintf(out, "safety sweep findings: %d\n", h.SweepFindings)
 	return nil
+}
+
+// topCallers names up to three callers in the order that order sorts them, each
+// with its transactions and lock hold time.
+func topCallers(callers []database.CallerCount, order func(a, b database.CallerCount) int) string {
+	sorted := slices.Clone(callers)
+	slices.SortFunc(sorted, order)
+	parts := make([]string, 0, 3)
+	for _, c := range sorted[:min(3, len(sorted))] {
+		parts = append(parts, fmt.Sprintf("%s %d transactions, held %s", c.Caller, c.Transactions, c.Hold.Round(time.Millisecond)))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // healthStarting marks an engine that serves Health while migrations run.
