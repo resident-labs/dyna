@@ -2,6 +2,7 @@ package localci
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -45,7 +46,19 @@ func TestAbandonRunReleasesAStaleRunsReservations(t *testing.T) {
 	runner := Runner{DataDir: dir, Node: &Node{Name: "pve", SSH: "pip@pve", Enabled: true}, Engine: true}
 	machine.attach(&runner)
 
-	got, err := runner.AbandonRun(t.Context(), store, run)
+	// The engine runs this run now, so its admitted rows store no owner process
+	// and the owner check cannot see it. The teardown refuses and releases nothing.
+	if _, err := runner.AbandonRun(t.Context(), store, run, []string{"e8cb258"}); !errors.Is(err, ErrRunLive) {
+		t.Fatalf("abandoning a run in flight returned %v, want ErrRunLive", err)
+	}
+	if removed.Load() != 0 {
+		t.Fatalf("refused teardown removed the run folder %d times", removed.Load())
+	}
+	if left, err := admission.RunReservations(t.Context(), string(run)); err != nil || len(left) != 2 {
+		t.Fatalf("refused teardown released reservations: %v, %v", left, err)
+	}
+
+	got, err := runner.AbandonRun(t.Context(), store, run, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
