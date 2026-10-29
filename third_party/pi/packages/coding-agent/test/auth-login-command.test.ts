@@ -164,6 +164,26 @@ describe("native auth refresh command", () => {
 		await expect(credentials.read("fake-oauth")).resolves.toEqual(renewed);
 	});
 
+	it("reports header-only ambient auth as no credential", async () => {
+		const runtime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: null,
+			allowModelNetwork: false,
+			refreshOnCreate: false,
+		});
+		runtime.registerNativeProvider({
+			...fakeProvider(oauth()),
+			auth: {
+				apiKey: {
+					name: "Ambient auth",
+					resolve: async () => ({ auth: { headers: { Authorization: "Bearer ambient" } } }),
+				},
+			},
+		});
+
+		await expect(runAuthRefresh(runtime, "fake-oauth")).resolves.toEqual({ status: "no_credential" });
+	});
+
 	it("reports no credential and a renewed grant", async () => {
 		await expect(runAuthRefresh(await fakeRuntime(oauth()), "fake-oauth")).resolves.toEqual({
 			status: "no_credential",
