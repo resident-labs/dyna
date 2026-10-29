@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -172,6 +173,7 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	rec.RepoPath = matchingCheckout(ctx, rec, lookupDir)
 	rec.BaseRef = snap.Pull.Base.Ref
 	rec.IsDraft = snap.Pull.Draft
+	rec.Labels, rec.LabelsSeen = snap.Pull.labelNames(), true
 	rec.Branch, rec.Base = snap.Pull.Head.Ref, snap.Pull.Base.SHA
 	rec.HeadRepo = snap.Pull.Head.Repo.FullName
 	if rec.Base == "" {
@@ -492,6 +494,15 @@ func (s *Service) process(ctx context.Context, key string, snap Snapshot, ci, ci
 		baseRetargeted, keepReview := s.observeBase(st, r, snap, pollTime)
 		previousPullHead := s.observePoll(st, r, snap, pollTime)
 		n := newPollNotices(r)
+		labels := snap.Pull.labelNames()
+		if r.LabelsSeen {
+			added, removed := missingNames(labels, r.Labels), missingNames(r.Labels, labels)
+			if len(added)+len(removed) > 0 {
+				n.changes = append(n.changes, "labels:"+strings.Join(labels, ","))
+				n.informational[r.Author] = append(n.informational[r.Author], labelChangeText(*r, added, removed))
+			}
+		}
+		r.Labels, r.LabelsSeen = labels, true
 		if baseRetargeted && !keepReview {
 			resetReview(r, r.Head)
 			n.changes = append(n.changes, "base:"+r.BaseRef)
@@ -566,6 +577,29 @@ func (n *pollNotices) raise(target string, facts noticeFacts) {
 }
 
 func (n *pollNotices) add(target, text string) { n.batches[target] = append(n.batches[target], text) }
+
+// missingNames returns the names in from that are not in to.
+func missingNames(from, to []string) []string {
+	var missing []string
+	for _, name := range from {
+		if !slices.Contains(to, name) {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+// labelChangeText tells the author which labels a poll added or removed.
+func labelChangeText(r Record, added, removed []string) string {
+	var changes []string
+	if len(added) > 0 {
+		changes = append(changes, "added "+Sanitize(strings.Join(added, ", ")))
+	}
+	if len(removed) > 0 {
+		changes = append(changes, "removed "+Sanitize(strings.Join(removed, ", ")))
+	}
+	return fmt.Sprintf("Labels changed on %s: %s.", changeLabel(r), strings.Join(changes, "; "))
+}
 
 func (n *pollNotices) addCI(target, text string) {
 	n.ciBatches[target] = append(n.ciBatches[target], text)
@@ -842,7 +876,18 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		}
 		text := commentNotice(e, decision, commentLink(snap, e.ID))
 		if decision.Action != "drop" {
-			n.raise(r.Author, noticeFacts{Type: room.PRComment, Commenter: e.Commenter, Summary: fmt.Sprintf("new %s from %s", e.Kind, e.Commenter)})
+			facts := noticeFacts{Type: room.PRComment, Commenter: e.Commenter, Summary: fmt.Sprintf("new %s from %s", e.Kind, e.Commenter)}
+			if reviewStateChange(e) {
+				// The review state is the fact. Its line leads the body, where the card reads it.
+				facts = noticeFacts{Type: room.PRApproved, Commenter: e.Commenter, Verdict: "approve"}
+				fact := e.Commenter + " approved this PR."
+				if e.ReviewState == "CHANGES_REQUESTED" {
+					facts = noticeFacts{Type: room.PRChanges, Commenter: e.Commenter, Verdict: "changes"}
+					fact = e.Commenter + " requested changes on this PR."
+				}
+				text = fact + "\n\n" + text
+			}
+			n.raise(r.Author, facts)
 			n.add(r.Author, text)
 		}
 		if toReviewer {
