@@ -4,7 +4,7 @@
  */
 
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { setTimeout as sleep } from "timers/promises";
@@ -74,8 +74,21 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 
 	private ensureFileExists(): void {
 		if (!existsSync(this.authPath)) {
-			writeFileSync(this.authPath, "{}", AUTH_FILE_WRITE_OPTIONS);
+			this.replaceAuthFileSync("{}");
 		}
+	}
+
+	// Replaces the auth file by rename, so a reader without the lock always
+	// sees the old or the new file, never a half-written one, and a crash
+	// mid-write leaves the previous login intact. The replacement keeps the
+	// existing file's mode, so administrator-managed modes remain intact.
+	private replaceAuthFileSync(next: string): void {
+		const tempPath = `${this.authPath}.${process.pid}.tmp`;
+		writeFileSync(tempPath, next, AUTH_FILE_WRITE_OPTIONS);
+		if (existsSync(this.authPath)) {
+			chmodSync(tempPath, statSync(this.authPath).mode & 0o777);
+		}
+		renameSync(tempPath, this.authPath);
 	}
 
 	private acquireLockSyncWithRetry(path: string): () => void {
@@ -104,7 +117,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			const current = existsSync(this.authPath) ? readFileSync(this.authPath, "utf-8") : undefined;
 			const { result, next } = fn(current);
 			if (next !== undefined) {
-				writeFileSync(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
+				this.replaceAuthFileSync(next);
 			}
 			return result;
 		} finally {
@@ -185,7 +198,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			throwIfCompromised();
 			options?.signal?.throwIfAborted();
 			if (next !== undefined) {
-				writeFileSync(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
+				this.replaceAuthFileSync(next);
 			}
 			throwIfCompromised();
 			return result;
