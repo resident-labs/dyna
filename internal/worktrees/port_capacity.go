@@ -3,6 +3,7 @@ package worktrees
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -13,15 +14,14 @@ import (
 const (
 	portAlertBandKey       = "worktrees.portAlertBand"
 	portAlertGenerationKey = "worktrees.portAlertGeneration"
-	portAlertAckGenKey     = "worktrees.portAlertAckGeneration"
-	portAlertAckBandKey    = "worktrees.portAlertAckThreshold"
+	portAlertPendingKey    = "worktrees.portAlertPending"
 )
 
 // PortCapacityAlert is one upward crossing of the worktree port pool's
 // capacity bands. Generation identifies one continuous high-capacity period,
-// and Threshold is the crossed percentage of the pool. ObservePortCapacity
-// returns the same crossing until AckPortAlertDelivery confirms delivery, so
-// a failed post never loses the alert.
+// and Threshold is the crossed percentage of the pool. A crossing stays
+// pending until AckPortAlertDelivery confirms its delivery, so a failed post,
+// a later escalation or a drop in use never loses it.
 type PortCapacityAlert struct {
 	Used       int
 	Limit      int
@@ -33,20 +33,20 @@ type portAlertState struct {
 	used       int
 	band       int
 	generation int
-	ackGen     int
-	ackBand    int
+	pending    []PortCapacityAlert
 }
 
 type portAlertReader interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// ObservePortCapacity reports a new 90% or 95% pool crossing, and keeps
-// reporting an undelivered crossing until it is acknowledged. It records a
-// high-water band in SQLite, so repeated allocations and engine restarts do
-// not repeat an alert. Use below 90%, observed at allocation or release,
-// rearms the next capacity period.
-func ObservePortCapacity() (*PortCapacityAlert, error) {
+// ObservePortCapacity returns every undelivered 90% or 95% pool crossing,
+// oldest first, and records a new crossing when use reaches one. Crossings
+// persist in SQLite until acknowledged, so repeated allocations and engine
+// restarts do not repeat a delivered alert and never lose an undelivered one.
+// Use below 90%, observed at allocation or release, ends the period: the next
+// crossing starts a new generation.
+func ObservePortCapacity() ([]*PortCapacityAlert, error) {
 	db, err := registryDB()
 	if err != nil {
 		return nil, err
@@ -56,72 +56,67 @@ func ObservePortCapacity() (*PortCapacityAlert, error) {
 	if err != nil {
 		return nil, err
 	}
-	alert, err := portAlertTransition(ctx, db, current)
-	if err != nil || alert == nil {
-		return nil, err
+	if portCapacityBand(current.used) <= current.band && len(current.pending) == 0 {
+		return nil, nil
 	}
-	return alert, nil
-}
-
-// portAlertTransition computes one step of the alert state machine inside a
-// write transaction, rereading the state there so concurrent observers agree.
-func portAlertTransition(ctx context.Context, db *sql.DB, snapshot portAlertState) (*PortCapacityAlert, error) {
-	var alert *PortCapacityAlert
-	err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+	var pending []*PortCapacityAlert
+	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		current, err := readPortAlertState(ctx, conn)
 		if err != nil {
 			return err
 		}
-		alert, err = applyPortAlertState(ctx, conn, current)
-		return err
+		if err := applyPortAlertState(ctx, conn, &current); err != nil {
+			return err
+		}
+		pending = alertsOf(current.pending)
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return alert, nil
+	return pending, nil
 }
 
-// applyPortAlertState writes one state step and returns the alert it produces,
-// or nil when there is nothing new to deliver. A crossing persists the band
-// and generation before any delivery, and keeps returning that crossing until
-// AckPortAlertDelivery records its delivery.
-func applyPortAlertState(ctx context.Context, conn *sql.Conn, current portAlertState) (*PortCapacityAlert, error) {
+// applyPortAlertState writes one state step: a new crossing is appended to
+// the pending list, superseding an undelivered crossing of the same
+// threshold, and use below the first band ends the current period.
+func applyPortAlertState(ctx context.Context, conn *sql.Conn, current *portAlertState) error {
 	band := portCapacityBand(current.used)
-	if band == 0 {
+	switch {
+	case band > current.band:
 		if current.band == 0 {
-			return nil, nil
+			current.generation++
 		}
-		// Use fell below the first band: the next high-capacity period alerts again.
-		return nil, writePortAlertMeta(ctx, conn, map[string]string{
-			portAlertBandKey:    "0",
-			portAlertAckGenKey:  "0",
-			portAlertAckBandKey: "0",
+		current.band = band
+		current.pending = supersedePortAlert(current.pending, PortCapacityAlert{Used: current.used, Limit: portSlots, Threshold: band, Generation: current.generation})
+		return writePortAlertMeta(ctx, conn, map[string]string{
+			portAlertBandKey:       strconv.Itoa(band),
+			portAlertGenerationKey: strconv.Itoa(current.generation),
+			portAlertPendingKey:    encodePortAlertPending(current.pending),
 		})
+	case band == 0 && current.band != 0:
+		current.band = 0
+		return writePortAlertMeta(ctx, conn, map[string]string{portAlertBandKey: "0"})
 	}
-	if current.ackGen == current.generation && band <= current.ackBand {
-		// This crossing, or a higher one, was already delivered.
-		return nil, nil
-	}
-	if band <= current.band {
-		// A crossing of the current band was not delivered yet: report it again.
-		return &PortCapacityAlert{Used: current.used, Limit: portSlots, Threshold: current.band, Generation: current.generation}, nil
-	}
-	if current.band == 0 {
-		current.generation++
-	}
-	alert := &PortCapacityAlert{Used: current.used, Limit: portSlots, Threshold: band, Generation: current.generation}
-	if err := writePortAlertMeta(ctx, conn, map[string]string{
-		portAlertBandKey:       strconv.Itoa(band),
-		portAlertGenerationKey: strconv.Itoa(current.generation),
-	}); err != nil {
-		return nil, err
-	}
-	return alert, nil
+	return nil
 }
 
-// AckPortAlertDelivery records that the alert of one generation and threshold
-// was delivered to every room. The reporter acknowledges only after a full
-// sweep succeeds, so a transient failure is retried on the next observation.
+// supersedePortAlert replaces an undelivered crossing of the same threshold:
+// a room learns the latest facts, and the pending list stays at one crossing
+// per threshold.
+func supersedePortAlert(pending []PortCapacityAlert, alert PortCapacityAlert) []PortCapacityAlert {
+	out := pending[:0]
+	for _, p := range pending {
+		if p.Threshold != alert.Threshold {
+			out = append(out, p)
+		}
+	}
+	return append(out, alert)
+}
+
+// AckPortAlertDelivery records that one crossing was delivered to every room.
+// The reporter acknowledges after a full sweep succeeds, so a transient
+// failure keeps the crossing pending for the next observation.
 func AckPortAlertDelivery(generation, threshold int) error {
 	db, err := registryDB()
 	if err != nil {
@@ -129,17 +124,27 @@ func AckPortAlertDelivery(generation, threshold int) error {
 	}
 	ctx := context.Background()
 	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		return writePortAlertMeta(ctx, conn, map[string]string{
-			portAlertAckGenKey:  strconv.Itoa(generation),
-			portAlertAckBandKey: strconv.Itoa(threshold),
-		})
+		current, err := readPortAlertState(ctx, conn)
+		if err != nil {
+			return err
+		}
+		out := current.pending[:0]
+		for _, p := range current.pending {
+			if p.Generation != generation || p.Threshold != threshold {
+				out = append(out, p)
+			}
+		}
+		if len(out) == len(current.pending) {
+			return nil
+		}
+		return writePortAlertMeta(ctx, conn, map[string]string{portAlertPendingKey: encodePortAlertPending(out)})
 	})
 }
 
 // rearmPortCapacity runs inside a transaction that releases a port block.
 // When the release drops pool use below the 90% band, the next high-capacity
 // period can alert again without waiting for the next allocation to observe
-// the recovery.
+// the recovery. Undelivered crossings stay pending.
 func rearmPortCapacity(ctx context.Context, conn *sql.Conn) error {
 	current, err := readPortAlertState(ctx, conn)
 	if err != nil {
@@ -148,11 +153,26 @@ func rearmPortCapacity(ctx context.Context, conn *sql.Conn) error {
 	if current.band == 0 || portCapacityBand(current.used) != 0 {
 		return nil
 	}
-	return writePortAlertMeta(ctx, conn, map[string]string{
-		portAlertBandKey:    "0",
-		portAlertAckGenKey:  "0",
-		portAlertAckBandKey: "0",
-	})
+	return writePortAlertMeta(ctx, conn, map[string]string{portAlertBandKey: "0"})
+}
+
+func encodePortAlertPending(pending []PortCapacityAlert) string {
+	if len(pending) == 0 {
+		return "[]"
+	}
+	body, err := json.Marshal(pending)
+	if err != nil {
+		return "[]"
+	}
+	return string(body)
+}
+
+func alertsOf(pending []PortCapacityAlert) []*PortCapacityAlert {
+	out := make([]*PortCapacityAlert, len(pending))
+	for i := range pending {
+		out[i] = &pending[i]
+	}
+	return out
 }
 
 func writePortAlertMeta(ctx context.Context, conn *sql.Conn, values map[string]string) error {
@@ -178,8 +198,8 @@ func portCapacityBand(used int) int {
 
 func readPortAlertState(ctx context.Context, q portAlertReader) (portAlertState, error) {
 	var state portAlertState
-	var band, generation, ackGen, ackBand string
-	err := q.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM worktree_records WHERE COALESCE(json_extract(body,'$.port'),0) <> 0), COALESCE((SELECT value FROM meta WHERE key=?),'0'), COALESCE((SELECT value FROM meta WHERE key=?),'0'), COALESCE((SELECT value FROM meta WHERE key=?),'0'), COALESCE((SELECT value FROM meta WHERE key=?),'0')", portAlertBandKey, portAlertGenerationKey, portAlertAckGenKey, portAlertAckBandKey).Scan(&state.used, &band, &generation, &ackGen, &ackBand)
+	var band, generation, pending string
+	err := q.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM worktree_records WHERE COALESCE(json_extract(body,'$.port'),0) <> 0), COALESCE((SELECT value FROM meta WHERE key=?),'0'), COALESCE((SELECT value FROM meta WHERE key=?),'0'), COALESCE((SELECT value FROM meta WHERE key=?),'[]')", portAlertBandKey, portAlertGenerationKey, portAlertPendingKey).Scan(&state.used, &band, &generation, &pending)
 	if err != nil {
 		return portAlertState{}, fmt.Errorf("read worktree port capacity: %w", err)
 	}
@@ -189,11 +209,8 @@ func readPortAlertState(ctx context.Context, q portAlertReader) (portAlertState,
 	if state.generation, err = strconv.Atoi(generation); err != nil {
 		return portAlertState{}, fmt.Errorf("read worktree port alert generation: %w", err)
 	}
-	if state.ackGen, err = strconv.Atoi(ackGen); err != nil {
-		return portAlertState{}, fmt.Errorf("read worktree port alert acknowledgement: %w", err)
-	}
-	if state.ackBand, err = strconv.Atoi(ackBand); err != nil {
-		return portAlertState{}, fmt.Errorf("read worktree port alert acknowledged threshold: %w", err)
+	if err := json.Unmarshal([]byte(pending), &state.pending); err != nil {
+		return portAlertState{}, fmt.Errorf("read worktree port alert pending: %w", err)
 	}
 	return state, nil
 }

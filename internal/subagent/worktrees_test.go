@@ -145,7 +145,7 @@ func TestWorktreePortCapacityAlertsEveryRoomOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		e.m.deliverPortCapacityAlert(&worktrees.PortCapacityAlert{Used: 900, Limit: 1000, Threshold: 90, Generation: 1})
+		e.m.deliverPortCapacityAlerts([]*worktrees.PortCapacityAlert{{Used: 900, Limit: 1000, Threshold: 90, Generation: 1}})
 	}
 	alerts := func(roomID string) []room.Message {
 		t.Helper()
@@ -199,8 +199,8 @@ func TestWorktreePortCapacityRetriesUndeliveredAlert(t *testing.T) {
 		return realPost(m, rec, alert)
 	}
 	realObserve := observePortCapacity
-	observePortCapacity = func() (*worktrees.PortCapacityAlert, error) {
-		return &worktrees.PortCapacityAlert{Used: 900, Limit: 1000, Threshold: 90, Generation: 1}, nil
+	observePortCapacity = func() ([]*worktrees.PortCapacityAlert, error) {
+		return []*worktrees.PortCapacityAlert{{Used: 900, Limit: 1000, Threshold: 90, Generation: 1}}, nil
 	}
 	t.Cleanup(func() {
 		postPortAlert = realPost

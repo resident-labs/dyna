@@ -13,7 +13,7 @@ import (
 	"dyna-agent/internal/worktrees"
 )
 
-// observePortCapacity reads a new or undelivered pool crossing. Tests replace it.
+// observePortCapacity reads new and undelivered pool crossings. Tests replace it.
 var observePortCapacity = worktrees.ObservePortCapacity
 
 // postPortAlert stores one capacity alert in one room. Tests replace it.
@@ -28,29 +28,31 @@ var postPortAlert = func(m *Manager, rec room.Record, alert *worktrees.PortCapac
 	return err
 }
 
-// ReportWorktreePortCapacity observes the pool and posts any new or
+// ReportWorktreePortCapacity observes the pool and posts every new or
 // undelivered capacity-band crossing to every room. Delivery is acknowledged
-// only after a full sweep succeeds, so a transient failure is retried on the
-// next observation. Allocation stays best effort: an alert failure never
-// rolls back a worktree that Git already created.
+// only after a full sweep of every crossing succeeds, so a transient failure
+// is retried on the next observation. Allocation stays best effort: an alert
+// failure never rolls back a worktree that Git already created.
 func (m *Manager) ReportWorktreePortCapacity() {
-	alert, err := observePortCapacity()
+	alerts, err := observePortCapacity()
 	if err != nil {
 		log.Printf("worktree port capacity: %v", err)
 		return
 	}
-	if alert == nil || !m.deliverPortCapacityAlert(alert) {
+	if len(alerts) == 0 || !m.deliverPortCapacityAlerts(alerts) {
 		return
 	}
-	if err := worktrees.AckPortAlertDelivery(alert.Generation, alert.Threshold); err != nil {
-		log.Printf("worktree port capacity delivery: %v", err)
+	for _, alert := range alerts {
+		if err := worktrees.AckPortAlertDelivery(alert.Generation, alert.Threshold); err != nil {
+			log.Printf("worktree port capacity delivery: %v", err)
+		}
 	}
 }
 
-// deliverPortCapacityAlert posts one band crossing to the root seat of every
-// room: the pool is host-wide, so every room's root can act on it. It reports
-// whether every room received the alert.
-func (m *Manager) deliverPortCapacityAlert(alert *worktrees.PortCapacityAlert) bool {
+// deliverPortCapacityAlerts posts each band crossing, oldest first, to the
+// root seat of every room: the pool is host-wide, so every room's root can
+// act on it. It reports whether every room received every crossing.
+func (m *Manager) deliverPortCapacityAlerts(alerts []*worktrees.PortCapacityAlert) bool {
 	rooms, err := m.rooms().List(false)
 	if err != nil {
 		log.Printf("worktree port capacity rooms: %v", err)
@@ -58,9 +60,11 @@ func (m *Manager) deliverPortCapacityAlert(alert *worktrees.PortCapacityAlert) b
 	}
 	delivered := true
 	for _, rec := range rooms {
-		if err := postPortAlert(m, rec, alert); err != nil {
-			log.Printf("worktree port capacity alert for %s: %v", rec.Name, err)
-			delivered = false
+		for _, alert := range alerts {
+			if err := postPortAlert(m, rec, alert); err != nil {
+				log.Printf("worktree port capacity alert for %s: %v", rec.Name, err)
+				delivered = false
+			}
 		}
 	}
 	return delivered
