@@ -40,6 +40,59 @@ func TestNodeSourceCarriesTheDiskRule(t *testing.T) {
 	}
 }
 
+// TestNodeSourceReadsTheCurrentProbe is the regression test for stale
+// admission: a node the registry knows is read from the registry on every
+// pass, so a disk that filled after the run was scheduled holds its checks and
+// a disk that freed releases them, and an unregistered node falls back to its
+// snapshot.
+func TestNodeSourceReadsTheCurrentProbe(t *testing.T) {
+	dir := t.TempDir()
+	registry := machines.Store{DataDir: dir}
+	pve, err := registry.Save(t.Context(), machines.Machine{Name: "pve", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	free := "3221225472"
+	prober := machines.Prober{Store: registry, Command: func(_ context.Context, _ string, _ io.Reader, w, _ io.Writer, _ string, _ ...string) error {
+		_, err := io.WriteString(w, "os=Linux\narch=x86_64\ncpus=8\ndisktotal=107374182400\ndiskfree="+free+"\n")
+		return err
+	}}
+	scheduled := Node{Name: "pve", Enabled: true, CPUs: 8, MemoryBytes: 16 << 30, Disk: machines.Disk{Total: 100 << 30, Free: 40 << 30}}
+	source := nodeSource{node: &scheduled, dataDir: dir}
+
+	if _, err := prober.ProbeAndSave(t.Context(), pve); err != nil {
+		t.Fatal(err)
+	}
+	filled, err := source.Get(t.Context(), "pve")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := filled.DiskBlock(); why == "" {
+		t.Fatal("a disk that filled after scheduling must hold the run's checks")
+	}
+
+	free = "42949672960"
+	if _, err := prober.ProbeAndSave(t.Context(), pve); err != nil {
+		t.Fatal(err)
+	}
+	freed, err := source.Get(t.Context(), "pve")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := freed.DiskBlock(); why != "" {
+		t.Fatalf("a disk that freed after scheduling still holds work: %q", why)
+	}
+
+	remote := Node{Name: "settings-remote", Enabled: true, Disk: machines.Disk{Total: 100 << 30, Free: 1 << 30}}
+	snapshot, err := nodeSource{node: &remote, dataDir: dir}.Get(t.Context(), "settings-remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := snapshot.DiskBlock(); why == "" {
+		t.Fatal("an unregistered node's snapshot must still hold its checks when its disk is full")
+	}
+}
+
 // Every failed check keeps its own output, a typed cause, a local log file and a
 // saved result, even when the report copy fails afterwards. The cases cover the
 // causes a node proves from its exit status and from the marker it writes.
