@@ -19,7 +19,10 @@ type Record struct {
 	// ContextTokens is the prompt size of one model call, cached tokens
 	// included, when the record reports a single call. Dyna's compact
 	// trigger compares the last one with the profile's threshold.
-	ContextTokens     int64
+	ContextTokens int64
+	// Call is the usage of one model call, when the record reports one. Nil
+	// means the dialect reports no per-call usage on this record.
+	Call              *CallUsage
 	dialect           string
 	valid, recognized bool
 	recordUsage
@@ -55,6 +58,45 @@ type recordUsage struct {
 	ThreadID string                     `json:"-"`
 	Usage    map[string]json.RawMessage `json:"usage"`
 	Cost     *float64                   `json:"total_cost_usd"`
+}
+
+// CallUsage is the prompt accounting of one model call. A nil field was not
+// reported, so an unreported count never reads as zero. Context is the prompt
+// size, the input plus cache reads and writes, and is nil unless all three are
+// reported.
+type CallUsage struct {
+	Input      *int64 `json:"inputTokens,omitempty"`
+	CacheRead  *int64 `json:"cacheReadTokens,omitempty"`
+	CacheWrite *int64 `json:"cacheWriteTokens,omitempty"`
+	Context    *int64 `json:"contextTokens,omitempty"`
+}
+
+// callUsage reads one model call's prompt counts from its usage object.
+func callUsage(usage map[string]json.RawMessage) *CallUsage {
+	if usage == nil {
+		return nil
+	}
+	in, read, write := usageField(usage, "input"), usageField(usage, "cacheRead"), usageField(usage, "cacheWrite")
+	c := &CallUsage{Input: in, CacheRead: read, CacheWrite: write}
+	if in != nil && read != nil && write != nil {
+		total := *in + *read + *write
+		c.Context = &total
+	}
+	return c
+}
+
+// usageField reads one non-negative integer usage field. A missing or invalid
+// field is nil, so the caller can tell it apart from a reported zero.
+func usageField(usage map[string]json.RawMessage, key string) *int64 {
+	raw, ok := usage[key]
+	if !ok || string(raw) == "null" {
+		return nil
+	}
+	var v int64
+	if json.Unmarshal(raw, &v) != nil || v < 0 {
+		return nil
+	}
+	return &v
 }
 
 // usageSum adds the named non-negative integer usage fields.
