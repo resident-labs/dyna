@@ -32,16 +32,17 @@ import (
 
 const runTimeout = 2 * time.Minute
 
-// stepShare bounds each slow step, so a step that overruns still leaves time
-// for the steps after it. The pass deadline still bounds the whole run.
+// stepShare bounds each step of a pass. A step that overruns stops at its share,
+// so the steps after it still run. The pass deadline still bounds the whole run.
 const stepShare = 30 * time.Second
-
-// repoShare bounds the worktree cleanup of one repository within the worktrees
-// step, so one slow repository cannot starve the others.
-var repoShare = 15 * time.Second
 
 // gcWorktrees is worktrees.GC; tests replace it to simulate a slow repository.
 var gcWorktrees = worktrees.GC
+
+// worktreeTurn counts passes. Each pass starts the worktree cleanup at the next
+// repository, so a slow repository cannot hold back the others on every pass.
+// Only Run reads and writes it, under the pass lock.
+var worktreeTurn int
 
 // pass holds one maintenance pass at a time. The hourly built-in hook and the
 // loop's disk-pressure pass both call Run, and two passes must not delete the
@@ -109,6 +110,9 @@ func CleanBranch(ctx context.Context, repos []string, branch string) (Result, er
 
 // Run collects worktrees before cleaning scratch files. The total pass is bounded.
 // One pass runs at a time, so the schedule and a by-hand run never overlap.
+// Every step runs under its own share (stepShare). A step that overruns stops at
+// its share. Steps do not start after the pass deadline or the caller's context
+// ends, so a canceled pass removes nothing further.
 func Run(ctx context.Context, options ...Options) (Result, error) {
 	select {
 	case pass <- struct{}{}:
@@ -128,113 +132,158 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	workspaceJobs := jobs.Service{Store: jobs.Store{DataDir: store.DataDir()}, Machines: machines.Store{DataDir: store.DataDir()}, DataDir: store.DataDir()}
-	done := result.timer("job workspaces")
-	n, workspaceErr := workspaceJobs.CleanupWorkspaces(ctx, jobs.WorkspaceCleanup{Session: opts.Session, Now: now})
-	result.add("job workspaces", Pruned{Items: n})
-	if err := done(workspaceErr); err != nil {
-		errs = append(errs, fmt.Errorf("job workspaces: %w", err))
+	step := func(name string, fn func(context.Context) error) {
+		errs = append(errs, runStep(ctx, &result, name, stepShare, fn))
 	}
+	sweepStep := func(kind string, age time.Duration, sweep func(context.Context, bool) (Pruned, error)) {
+		step(kind, func(ctx context.Context) error {
+			return sweepWithDryPass(ctx, &result, kind, age, sweep)
+		})
+	}
+	workspaceJobs := jobs.Service{Store: jobs.Store{DataDir: store.DataDir()}, Machines: machines.Store{DataDir: store.DataDir()}, DataDir: store.DataDir()}
+	step("job workspaces", func(ctx context.Context) error {
+		n, err := workspaceJobs.CleanupWorkspaces(ctx, jobs.WorkspaceCleanup{Session: opts.Session, Now: now})
+		result.add("job workspaces", Pruned{Items: n})
+		return err
+	})
 	// Run SQLite retention before filesystem sweeps. Those sweeps used to spend
 	// the whole shared deadline first, so later retention never ran.
 	if opts.Session == "" {
 		// PR state removes closed records 14 days after close on each write;
-		// the pass reports how many it removed since the last pass.
-		done = result.timer("closed PR records")
-		if n, err := state.TakePruned(state.Root(store.DataDir())); done(err) != nil {
-			errs = append(errs, err)
-		} else {
+		// the pass reports how many it removed since the last pass. The read
+		// takes no context, so this step cannot be cut short.
+		step("closed PR records", func(context.Context) error {
+			n, err := state.TakePruned(state.Root(store.DataDir()))
+			if err != nil {
+				return err
+			}
 			result.add("closed PR records", Pruned{Items: n})
-		}
-		done = result.timer("delivered PR notices")
-		if n, err := state.PruneDoneNotices(ctx, state.Root(store.DataDir()), now); done(err) != nil {
-			errs = append(errs, fmt.Errorf("delivered PR notices: %w", err))
-		} else {
+			return nil
+		})
+		step("delivered PR notices", func(ctx context.Context) error {
+			n, err := state.PruneDoneNotices(ctx, state.Root(store.DataDir()), now)
+			if err != nil {
+				return err
+			}
 			result.add("delivered PR notices", Pruned{Items: n})
-		}
-		done = result.timer("shell job rows")
-		if n, err := pruneShellJobs(ctx, &shells.Store{Root: filepath.Join(store.DataDir(), "shells")}, now); done(err) != nil {
-			errs = append(errs, fmt.Errorf("shell job rows: %w", err))
-		} else {
+			return nil
+		})
+		step("shell job rows", func(ctx context.Context) error {
+			n, err := pruneShellJobs(ctx, &shells.Store{Root: filepath.Join(store.DataDir(), "shells")}, now)
+			if err != nil {
+				return err
+			}
 			result.add("shell job rows", Pruned{Items: n})
-		}
-		done = result.timer("local CI results")
-		localCtx, stopLocal := context.WithTimeout(ctx, stepShare)
-		n, localErr := pruneLocalCIResults(localCtx, store.DataDir(), now)
-		stopLocal()
-		if done(localErr) != nil {
-			errs = append(errs, fmt.Errorf("local CI results: %w", localErr))
-		} else {
+			return nil
+		})
+		step("local CI results", func(ctx context.Context) error {
+			n, err := pruneLocalCIResults(ctx, store.DataDir(), now)
+			if err != nil {
+				return err
+			}
 			result.add("local CI results", Pruned{Items: n})
-		}
-		done = result.timer("CI health rows")
-		if n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now); done(err) != nil {
-			errs = append(errs, fmt.Errorf("CI health rows: %w", err))
-		} else {
+			return nil
+		})
+		step("CI health rows", func(ctx context.Context) error {
+			n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now)
+			if err != nil {
+				return err
+			}
 			result.add("CI health rows", Pruned{Items: n})
-		}
+			return nil
+		})
 	}
 	repos := opts.Repos
-	var discoveryErr error
 	if repos == nil {
-		done = result.timer("discover")
-		repos, discoveryErr = discover(ctx, opts.Session)
-		errs = append(errs, done(discoveryErr))
+		step("discover", func(ctx context.Context) error {
+			var err error
+			repos, err = discover(ctx, opts.Session)
+			return err
+		})
 	}
-	done = result.timer("worktrees")
-	worktreesCtx, stopWorktrees := context.WithTimeout(ctx, stepShare)
-	errs = append(errs, done(cleanWorktrees(worktreesCtx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})))
-	stopWorktrees()
-	done = result.timer("scratch")
-	scratchCtx, stopScratch := context.WithTimeout(ctx, stepShare)
-	cleaned, scratchErr := scratch.Sweep(scratchCtx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
-	stopScratch()
-	result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
-	for _, kept := range cleaned.Kept {
-		result.Kept["scratch: "+kept.Reason]++
-	}
-	if err := done(scratchErr); err != nil {
-		errs = append(errs, fmt.Errorf("scratch sweep: %w", err))
-	}
+	turnRepos := fromTurn(repos, worktreeTurn)
+	worktreeTurn++
+	step("worktrees", func(ctx context.Context) error {
+		return cleanWorktrees(ctx, &result, turnRepos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})
+	})
+	step("scratch", func(ctx context.Context) error {
+		cleaned, err := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
+		result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
+		for _, kept := range cleaned.Kept {
+			result.Kept["scratch: "+kept.Reason]++
+		}
+		return err
+	})
 	// Session cleanup must not remove unrelated archived workflow runs.
 	if opts.Session == "" {
-		done = result.timer("archived runs")
-		v, err := settings.Load("")
-		if err == nil {
-			freed, sweepErr := sweepArchivedRuns(ctx, now, v.RunsRetention, opts.Logf)
+		step("archived runs", func(ctx context.Context) error {
+			v, err := settings.Load("")
+			if err != nil {
+				return err
+			}
+			freed, err := sweepArchivedRuns(ctx, now, v.RunsRetention, opts.Logf)
 			result.add("archived runs", freed)
-			err = sweepErr
-		}
-		errs = append(errs, done(err))
-		errs = append(errs, sweepWithDryPass(ctx, &result, "closed session stdout", sessionLogRetention, func(dry bool) (Pruned, error) {
+			return err
+		})
+		sweepStep("closed session stdout", sessionLogRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 			return sweepClosedSessionLogs(ctx, now, dry, opts.Logf)
-		}))
+		})
 		if opts.RetainClosedSession != nil {
-			errs = append(errs, sweepWithDryPass(ctx, &result, "closed sessions", closedSessionRetention, func(dry bool) (Pruned, error) {
+			sweepStep("closed sessions", closedSessionRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 				return sweepClosedSessions(ctx, now, dry, opts.RetainClosedSession, opts.Logf)
-			}))
+			})
 		}
-		errs = append(errs, sweepWithDryPass(ctx, &result, "rejected runner spool lines", rejectedSpoolRetention, func(dry bool) (Pruned, error) {
+		sweepStep("rejected runner spool lines", rejectedSpoolRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 			return sweepRejectedSpools(ctx, sessionlife.RunnerSpoolDir(store.DataDir()), now, dry)
-		}))
-		errs = append(errs, sweepWithDryPass(ctx, &result, "review inputs", reviewInputRetention, func(dry bool) (Pruned, error) {
+		})
+		sweepStep("review inputs", reviewInputRetention, func(ctx context.Context, dry bool) (Pruned, error) {
 			return sweepReviewInputs(ctx, state.Root(store.DataDir()), now, dry)
-		}))
-		errs = append(errs, sweepWithDryPass(ctx, &result, "stale test folders", testFolderRetention, func(dry bool) (Pruned, error) {
+		})
+		// These two sweeps take no context, so their share cannot stop them once
+		// started. They still do not start after the pass deadline.
+		sweepStep("stale test folders", testFolderRetention, func(_ context.Context, dry bool) (Pruned, error) {
 			return sweepTestFolders(now, os.TempDir(), processAlive, dry)
-		}))
+		})
 		if owner, ownerErr := user.Current(); ownerErr == nil && owner.HomeDir != "" {
 			root := filepath.Join(owner.HomeDir, ".cache", "dyna", scratch.SharedTempName)
-			errs = append(errs, sweepWithDryPass(ctx, &result, "stale disk temp folders", diskTempRetention, func(dry bool) (Pruned, error) {
+			sweepStep("stale disk temp folders", diskTempRetention, func(_ context.Context, dry bool) (Pruned, error) {
 				return sweepDiskTemp(now, root, processAlive, dry)
-			}))
+			})
 		}
 	}
 	return result, errors.Join(errs...)
 }
 
+// fromTurn returns repos in order, starting at the repository whose turn it is.
+// Repositories wrap around, so each one starts first once every len(repos) passes.
+func fromTurn(repos []string, turn int) []string {
+	if len(repos) == 0 {
+		return nil
+	}
+	start := turn % len(repos)
+	return append(append([]string{}, repos[start:]...), repos[:start]...)
+}
+
+// runStep runs one step of a pass under its own share of time. The step's
+// context ends when the share or the pass ends, whichever comes first. A step
+// does not start once the pass context has ended, so a canceled pass removes
+// nothing further. The step's duration and error are recorded in result.
+func runStep(ctx context.Context, result *Result, name string, share time.Duration, fn func(context.Context) error) error {
+	done := result.timer(name)
+	err := ctx.Err()
+	if err == nil {
+		stepCtx, stop := context.WithTimeout(ctx, share)
+		err = fn(stepCtx)
+		stop()
+	}
+	if err = done(err); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return nil
+}
+
 // cleanWorktrees runs the worktree cleanup for each repository and adds the
-// trees to result.
+// trees to result. The caller's context bounds the whole cleanup.
 func cleanWorktrees(ctx context.Context, result *Result, repos []string, gc worktrees.GCOptions) error {
 	var errs []error
 	seen := map[string]bool{}
@@ -252,9 +301,7 @@ func cleanWorktrees(ctx context.Context, result *Result, repos []string, gc work
 			errs = append(errs, err)
 			break
 		}
-		repoCtx, stopRepo := context.WithTimeout(ctx, repoShare)
-		trees, err := gcWorktrees(repoCtx, repo, gc)
-		stopRepo()
+		trees, err := gcWorktrees(ctx, repo, gc)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("worktree cleanup %s: %w", repo, err))
 		}

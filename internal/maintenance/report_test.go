@@ -111,7 +111,7 @@ func TestDryPassUsesWriterWithoutUnusedEvents(t *testing.T) {
 	writer.SetPublish(func(event hub.Event) { t.Errorf("unused event: %+v", event) })
 	var result Result
 	for _, wantDry := range []bool{true, false} {
-		if err := sweepWithDryPass(context.Background(), &result, "test", time.Hour, func(dry bool) (Pruned, error) {
+		if err := sweepWithDryPass(context.Background(), &result, "test", time.Hour, func(_ context.Context, dry bool) (Pruned, error) {
 			if dry != wantDry {
 				t.Errorf("dry = %v, want %v", dry, wantDry)
 			}
