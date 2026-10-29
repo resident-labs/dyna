@@ -516,7 +516,7 @@ function fixtureTip(payload: EventPayload): string {
   // A worktree payload shows its detail over its reason kind, so a card that
   // names only the kind fails.
   if ('detail' in payload && payload.detail) return payload.detail
-  if ('reason' in payload) return payload.reason
+  if ('reason' in payload) return payload.reason ?? ''
   return String(payload)
 }
 

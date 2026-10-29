@@ -223,6 +223,7 @@ func webEventComponents(t *testing.T) map[string]bool {
 	}
 	out := map[string]bool{}
 	for _, name := range strings.Split(string(block), ",") {
+		name, _, _ = strings.Cut(name, ":")
 		if name = strings.TrimSpace(name); name != "" {
 			out[name] = true
 		}
