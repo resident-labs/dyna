@@ -77,6 +77,7 @@ type Report struct {
 	BytesFreed int64
 	Summary    string
 	Error      string
+	Steps      []Step
 }
 
 // keepReports bounds the report table; one pass runs about every hour.
@@ -86,6 +87,13 @@ const reportSchema = `CREATE TABLE maintenance_reports (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  at_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, bytes_freed INTEGER NOT NULL,
  summary TEXT NOT NULL, error TEXT NOT NULL
+);`
+
+// stepSchema is version 2. Each row is one timed step of a saved pass.
+const stepSchema = `CREATE TABLE maintenance_steps (
+ report_id INTEGER NOT NULL, seq INTEGER NOT NULL,
+ name TEXT NOT NULL, duration_ms INTEGER NOT NULL, error TEXT NOT NULL,
+ PRIMARY KEY (report_id, seq)
 );`
 
 // Migrate brings the maintenance report tables in dataDir's dyna.db to this version.
@@ -100,8 +108,14 @@ func reportDB(dataDir string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "maintenance.reports.schema", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), reportSchema)
+	err = database.Migrate(db, "maintenance.reports.schema", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old == 0 {
+			if _, err := conn.ExecContext(ctx, reportSchema); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(ctx, stepSchema)
 		return err
 	})
 	return db, err
@@ -120,11 +134,25 @@ func SaveReport(dataDir string, at time.Time, took time.Duration, r Result, runE
 	// Maintenance has no change-bus consumer, so this write emits no event.
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		ctx := context.Background()
-		if _, err := conn.ExecContext(ctx, `INSERT INTO maintenance_reports(at_ms,duration_ms,bytes_freed,summary,error) VALUES(?,?,?,?,?)`,
-			at.UnixMilli(), took.Milliseconds(), r.BytesFreed, r.Summary(), text); err != nil {
+		res, err := conn.ExecContext(ctx, `INSERT INTO maintenance_reports(at_ms,duration_ms,bytes_freed,summary,error) VALUES(?,?,?,?,?)`,
+			at.UnixMilli(), took.Milliseconds(), r.BytesFreed, r.Summary(), text)
+		if err != nil {
 			return err
 		}
-		_, err := conn.ExecContext(ctx, `DELETE FROM maintenance_reports WHERE id <= (SELECT MAX(id) FROM maintenance_reports) - ?`, keepReports)
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		for seq, step := range r.Steps {
+			if _, err := conn.ExecContext(ctx, `INSERT INTO maintenance_steps(report_id,seq,name,duration_ms,error) VALUES(?,?,?,?,?)`,
+				id, seq, step.Name, step.Took.Milliseconds(), step.Error); err != nil {
+				return err
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `DELETE FROM maintenance_reports WHERE id <= (SELECT MAX(id) FROM maintenance_reports) - ?`, keepReports); err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, `DELETE FROM maintenance_steps WHERE report_id NOT IN (SELECT id FROM maintenance_reports)`)
 		return err
 	})
 }
@@ -135,22 +163,52 @@ func RecentReports(dataDir string, n int) ([]Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.Query(`SELECT at_ms,duration_ms,bytes_freed,summary,error FROM maintenance_reports ORDER BY id DESC LIMIT ?`, n)
+	rows, err := db.Query(`SELECT id,at_ms,duration_ms,bytes_freed,summary,error FROM maintenance_reports ORDER BY id DESC LIMIT ?`, n)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Report{}
+	ids := []int64{}
 	for rows.Next() {
 		var r Report
-		var at, took int64
-		if err := rows.Scan(&at, &took, &r.BytesFreed, &r.Summary, &r.Error); err != nil {
+		var id, at, took int64
+		if err := rows.Scan(&id, &at, &took, &r.BytesFreed, &r.Summary, &r.Error); err != nil {
 			return nil, err
 		}
 		r.At, r.Duration = time.UnixMilli(at), time.Duration(took)*time.Millisecond
 		out = append(out, r)
+		ids = append(ids, id)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, id := range ids {
+		if out[i].Steps, err = reportSteps(db, id); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// reportSteps returns the timed steps of one saved pass, in the order they ran.
+func reportSteps(db *sql.DB, id int64) ([]Step, error) {
+	rows, err := db.Query(`SELECT name,duration_ms,error FROM maintenance_steps WHERE report_id=? ORDER BY seq`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	steps := []Step{}
+	for rows.Next() {
+		var s Step
+		var took int64
+		if err := rows.Scan(&s.Name, &took, &s.Error); err != nil {
+			return nil, err
+		}
+		s.Took = time.Duration(took) * time.Millisecond
+		steps = append(steps, s)
+	}
+	return steps, rows.Err()
 }
 
 // dryPassKey names a kind's first pass at one retention age.
@@ -162,32 +220,33 @@ func dryPassKey(kind string, age time.Duration) string {
 // measures, and the report names it "<kind> (dry run)", so the real numbers
 // are seen once before anything is removed.
 func sweepWithDryPass(ctx context.Context, result *Result, kind string, age time.Duration, sweep func(dry bool) (Pruned, error)) error {
+	done := result.timer(kind)
 	db, err := reportDB(store.DataDir())
 	if err != nil {
-		return err
+		return done(err)
 	}
 	key := dryPassKey(kind, age)
-	var done string
-	err = db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&done)
+	var marked string
+	err = db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&marked)
 	dry := err == sql.ErrNoRows
 	if err != nil && !dry {
-		return err
+		return done(err)
 	}
 	freed, err := sweep(dry)
 	if !dry {
 		result.add(kind, freed)
-		return err
+		return done(err)
 	}
 	if result.Pruned == nil {
 		result.Pruned = map[string]Pruned{}
 	}
 	result.Pruned[kind+" (dry run)"] = freed // measured only; not added to BytesFreed
 	if err != nil {
-		return err
+		return done(err)
 	}
 	// Maintenance has no change-bus consumer, so this write emits no event.
-	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+	return done(state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO meta(key,value) VALUES(?, '1')`, key)
 		return err
-	})
+	}))
 }
