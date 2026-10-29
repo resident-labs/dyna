@@ -93,7 +93,7 @@ var dynamicCallSites = map[string][]string{
 	"internal/cli/room/pins.go call":                {"Pin", "Unpin"},
 	"internal/cli/room/session_controls.go method":  {"PauseRoomSessions", "ResumeRoomSessions", "ClearDormantSessions"},
 	"internal/cli/request/request.go method":        {"ApproveRequest", "DenyRequest", "WithdrawRequest"},
-	"internal/cli/room/mcp.go method":               {"RoomMCPSetToken", "RoomMCPRemoveToken", "RoomMCPRemove", "RoomMCPAttach", "RoomMCPAllow", "RoomMCPBlockTerm", "RoomMCPAllowLogin", "RoomMCPDetach", "RoomMCPTools", "RoomMCPGrant", "RoomMCPList"},
+	"internal/cli/room/mcp.go method":               {"RoomMCPSetToken", "RoomMCPRemoveToken", "RoomMCPRemove", "RoomMCPAttach", "RoomMCPAllow", "RoomMCPDetach", "RoomMCPTools", "RoomMCPGrant", "RoomMCPList"},
 	"internal/cli/rules/rules.go method":            {"AddRule", "EditRule", "RemoveRule"},
 	"internal/cli/subagent/consolidation.go method": {"ResumeSessionConsolidation", "CancelSessionConsolidation"},
 	"internal/cli/sync/operation.go method":         {"SyncRefresh"},

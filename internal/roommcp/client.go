@@ -124,9 +124,9 @@ func (c *Client) request(ctx context.Context, method string, params json.RawMess
 			err = nil
 		}
 		if limit := now.Add(maxRetryAfter); until.After(limit) {
-				until = limit
-			}
-			if err == nil && until.After(now) {
+			until = limit
+		}
+		if err == nil && until.After(now) {
 			c.mu.Lock()
 			if until.After(c.retryUntil) {
 				c.retryUntil = until
