@@ -23,6 +23,20 @@ func TestPiCodemodeUpdateStreamsScriptOutput(t *testing.T) {
 	}
 }
 
+// A Pi model streams a long first thought as deltas minutes before its
+// completed block exists. The delta record itself is model work, so startup
+// and transfer progress see a healthy start instead of silence (D-434).
+func TestPiStreamedDeltaCountsAsGeneration(t *testing.T) {
+	decl := &Declaration{Dialect: DialectPiJSON}
+	line := `{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"I'm resuming after a model transfer."}}`
+	if !DecodeLine(decl, line).Generates() {
+		t.Fatal("a streamed thinking delta did not count as model work")
+	}
+	if DecodeLine(decl, `{"type":"message_update","assistantMessageEvent":{"type":"thinking_start","contentIndex":0}}`).Generates() {
+		t.Fatal("a delta-less update counted as model work")
+	}
+}
+
 // Pi lists a thought before the reply it led to; the events keep that order.
 func TestPiReasoningKeepsBlockOrder(t *testing.T) {
 	line := `{"type":"message_end","message":{"role":"assistant","content":[` +
