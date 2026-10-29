@@ -114,9 +114,11 @@ export type EventRenderer = Component<EventProps>
 
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
+// The approval aliases are core fallbacks until their dedicated cards land.
 export const eventComponents: Record<string, EventRenderer> = {
   WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineCacheCleanCard, MachineScratchCard, MachineLimitsCard, RoomCapCard, WorktreePortsCard,
   CallCard, VoiceSessionCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, ServiceWaitCard, HelperOutcomeRow, MCPCallRow, EngineNoticeCard, QuestionNoteCard, TerminalRequestCard, ReviewResultCard,
+  ApprovalRequestCard: TerminalRequestCard, ApprovalDecisionRow: QuestionNoteCard, ApprovalResultCard: QuestionNoteCard,
   ShellResultRow, ShellSilenceCard, RunResultCard, JobCard, TurnCompletionRow,
 }
 
