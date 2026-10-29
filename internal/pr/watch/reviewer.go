@@ -707,48 +707,15 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 	// transient poll error once hid running reviews from Busy; the close then
 	// stopped a verdict shell mid-command, and a non-busy live turn could push
 	// the pool past its profile cap or double-review a moved head.
-	busyIDs := map[string]bool{}
-	busy := 0
-	for id, live := range facts.Sessions {
-		if live.Info.RoomID != roomID || !prfacts.TurnLive(live.Info, live.Turn) {
-			continue
-		}
-		busyIDs[id] = true
-		busy++
-	}
-	failures := st.Reviewers[roomID].FailedProfiles
-	retired := map[string]bool{}
-	for id, live := range facts.Sessions {
-		if live.Info.RoomID != roomID || busyIDs[id] {
-			continue
-		}
-		failures = rolesession.RecordFailure(failures, live.Info, live.Turn, s.now())
+	busyIDs, retired, failures := retirePlan(facts, roomID, s.now())
+	busy := len(busyIDs)
+	for id := range retired {
 		if err = s.closeReviewer(ctx, id); err != nil {
 			return err
 		}
-		retired[id] = true
 	}
 	if err = s.Store.updateSelected(func(row state.RecordScope) bool { return row.RoomID == roomID || cleanupScope(row) }, func(current *State) error {
-		cfg := current.Reviewers[roomID]
-		cfg.FailedProfiles = failures
-		cfg.LastError = ""
-		current.Reviewers[roomID] = cfg
-		for _, r := range current.Records {
-			if r.RoomID != roomID {
-				continue
-			}
-			for id := range retired {
-				retireSessionReviewNotices(r, id, "review-reconciled")
-			}
-			if retired[r.Reviewer] && needsReview(*current, *r) {
-				rememberReviewAssignment(r)
-				r.Reviewer, r.ReviewerName, r.ReviewerMode, r.RoundHead = "", "", "", ""
-				r.RoundStarted = time.Time{}
-			}
-			if strings.HasPrefix(r.PauseReason, "review paused:") {
-				r.PauseReason = ""
-			}
-		}
+		applyRetire(current, roomID, retired, failures)
 		return nil
 	}); err != nil {
 		return err
@@ -827,19 +794,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		}
 		applied := false
 		if e = s.Store.update(func(current *State) error {
-			live := current.Records[r.Key]
-			if live == nil || current.Reviewers[roomID].Profile != cfg.Profile || current.Reviewers[roomID].ReviewPublishing != cfg.ReviewPublishing || live.Author == id || live.Head != r.Head || !needsReview(*current, *live) || dependencyWaiting(*current, *live) {
-				return nil
-			}
-			rememberReviewAssignment(live)
-			live.Round, live.RoundHead, live.RoundStarted = r.Round, r.Head, r.RoundStarted
-			live.Verdict, live.Summary, live.ReviewID = "", "", 0
-			live.StopReason, live.FastLand = "", nil
-			live.Reviewer, live.ReviewerName, live.ReviewerMode = id, r.ReviewerName, state.ReviewerModeSession
-			live.ReviewPublishing = r.ReviewPublishing
-			live.PauseReason = ""
-			rememberReviewAssignment(live)
-			applied = true
+			applied = assignReview(current, r, id, cfg)
 			return nil
 		}); e != nil {
 			return e
