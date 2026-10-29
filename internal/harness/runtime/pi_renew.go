@@ -29,20 +29,31 @@ func (m *nativeFilesManager) renewPi(ctx context.Context, c native.Captured) (na
 	if err != nil {
 		return c, err
 	}
-	if err = piRenewRunner(ctx, home, provider, m.host.Executable); err != nil {
-		return c, err
+	runnerErr := piRenewRunner(ctx, home, provider, m.host.Executable)
+	if runnerErr != nil && !errors.Is(runnerErr, native.ErrNotSignedIn) {
+		return c, runnerErr
 	}
 	entries, err := readPiAuthEntries(filepath.Join(home, "auth.json"))
 	if err != nil {
+		if runnerErr != nil {
+			return c, runnerErr
+		}
 		return c, err
 	}
 	renewed, err := native.PiCapturedFromAuth(entries)
 	if err != nil {
+		if runnerErr != nil {
+			return c, runnerErr
+		}
 		return c, err
 	}
 	if renewed.Identity != c.Identity {
 		return c, native.ErrNoIdentity
 	}
+	// Pi's refresh command reports no_credential for an OAuth login it still
+	// holds, because it checks auth.apiKey, which no OAuth provider sets. The
+	// account's own auth.json is the truth: the login is there, and Pi may
+	// even have rotated it while reporting the miss.
 	return renewed, nil
 }
 

@@ -378,3 +378,30 @@ func TestPiRenewalSavesTheRenewedCredentialInTheStore(t *testing.T) {
 		t.Fatalf("stored access = %q, want the renewed credential saved in the store", access)
 	}
 }
+
+// A valid OAuth login that Pi reports as no_credential must not be recorded as
+// a failed renewal: Pi's refresh command checks auth.apiKey, which an OAuth
+// provider never has, so a healthy sign-in looks like a missing one.
+func TestPiRenewalKeepsALoginPiStillHas(t *testing.T) {
+	accounts := testAccounts(t)
+	account, err := accounts.CreateProvider("pi", store.ProviderChatGPT, store.KindOAuth, "ChatGPT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePiGrants(t, account, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "valid-access", Refresh: "grant", Expires: time.Now().Add(10 * time.Minute).UnixMilli(), AccountID: "workspace"}})
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	piRenewRunner = func(_ context.Context, _, _, _ string) error { return native.ErrNotSignedIn }
+
+	m, _, err := accounts.scopedManager("pi", account.Home, "/fake/pi/bin/pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewed, err := m.(*nativeFilesManager).Refresh(context.Background(), piLoginOf(t, "valid-access"))
+	if err != nil {
+		t.Fatalf("a login Pi still holds failed its renewal: %v", err)
+	}
+	if _, access, _, _, err := native.PiGrant(renewed.Credential); err != nil || access != "valid-access" {
+		t.Fatalf("renewed access = %q, %v", access, err)
+	}
+}
