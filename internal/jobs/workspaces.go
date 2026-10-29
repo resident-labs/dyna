@@ -72,7 +72,7 @@ func isWorkspaceResource(name machines.ResourceName) bool {
 }
 
 // newWorkspacePath makes the one stable folder of a session and repository
-// on a node. A cleaning row blocks submission until the old folder is gone.
+// on a node. A cleaning row at that path blocks submission until removal ends.
 func newWorkspacePath(node, session, repo string) string {
 	return path.Join(NodeBase(node), "workspaces", RepoKey(session+"\x00"+repo))
 }
@@ -81,14 +81,17 @@ func newWorkspacePath(node, session, repo string) string {
 // The caller holds the SQLite writer transaction that also inserts the job.
 func ensureWorkspace(ctx context.Context, conn *sql.Conn, job Job, now time.Time) (string, error) {
 	var kept string
-	var cleaning int
-	err := conn.QueryRowContext(ctx, "SELECT path,cleaning FROM workspaces WHERE node=? AND session=? AND repo=?", job.Node, job.Session, job.Repo).Scan(&kept, &cleaning)
+	err := conn.QueryRowContext(ctx, "SELECT path FROM workspaces WHERE node=? AND session=? AND repo=? AND cleaning=0", job.Node, job.Session, job.Repo).Scan(&kept)
 	if err == nil {
-		if cleaning != 0 {
-			return "", fmt.Errorf("workspace %s is being cleaned; retry after cleanup", kept)
-		}
 		_, err = conn.ExecContext(ctx, "UPDATE workspaces SET last_used_ms=?, closed=0 WHERE node=? AND path=? AND cleaning=0", now.UnixMilli(), job.Node, kept)
 		return kept, err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	err = conn.QueryRowContext(ctx, "SELECT path FROM workspaces WHERE node=? AND path=? AND cleaning=1", job.Node, job.Workspace).Scan(&kept)
+	if err == nil {
+		return "", fmt.Errorf("workspace %s is being cleaned; retry after cleanup", kept)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
@@ -152,20 +155,24 @@ func (s Store) listWorkspaces(ctx context.Context) ([]workspace, error) {
 	return out, errors.Join(rows.Err(), rows.Close())
 }
 
-// claimWorkspace excludes a live job and marks the folder cleaning in one
-// write. A later submission cannot reuse this path. The last-used check
-// rejects a stale cleanup decision after another submission touched the row.
+// claimWorkspace revalidates the snapshot under the cleanup lock. It excludes
+// a live job and rejects a row that another pass removed or a submission reused.
 func (s Store) claimWorkspace(ctx context.Context, w workspace) (bool, error) {
-	if w.Cleaning {
-		// The lock holder is recovering a pass that did not finish removal.
-		return true, nil
-	}
 	db, err := s.db()
 	if err != nil {
 		return false, err
 	}
 	claimed := false
 	err = state.For(db).Write(ctx, hub.Event{Topic: WorkspaceTopic}, func(conn *sql.Conn) error {
+		if w.Cleaning {
+			var present int
+			err := conn.QueryRowContext(ctx, "SELECT 1 FROM workspaces WHERE node=? AND path=? AND last_used_ms=? AND cleaning=1", w.Node, w.Path, w.LastUsed.UnixMilli()).Scan(&present)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			claimed = err == nil
+			return err
+		}
 		result, err := conn.ExecContext(ctx, "UPDATE workspaces SET cleaning=1\nWHERE node=? AND path=? AND last_used_ms=? AND cleaning=0\nAND NOT EXISTS (SELECT 1 FROM jobs WHERE workspace=? AND state IN ('queued','running'))", w.Node, w.Path, w.LastUsed.UnixMilli(), w.Path)
 		if err != nil {
 			return err
