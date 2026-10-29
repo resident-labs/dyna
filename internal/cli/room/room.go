@@ -92,6 +92,14 @@ func createCmd() *cobra.Command {
 	return cmd
 }
 
+// upstreamOrOff shows an empty upstream as off, the value that clears it.
+func upstreamOrOff(upstream string) string {
+	if upstream == "" {
+		return "off"
+	}
+	return upstream
+}
+
 // setCmd is `dyna room set`: one room setting, shown without a value.
 func setCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -101,15 +109,32 @@ func setCmd() *cobra.Command {
 			"checkInInterval is how often Dyna wakes a parent to check its children in this room: a duration such as 30m,\n" +
 			"off to stop check-ins in this room, or default to use the parent check-ins hook's global interval.\n" +
 			"limits.memoryHigh, limits.memoryMax and limits.tasksMax are the room's resource limits: a size such as 2G for\n" +
-			"memory, a count such as 512 for tasks, off to remove one limit, or default to use the machine default.",
+			"memory, a count such as 512 for tasks, off to remove one limit, or default to use the machine default.\n" +
+			"upstream is the parent repository of this room's fork, such as github.com/owner/repo, so that `pr track`\n" +
+			"accepts a PR opened on that parent; off clears it.",
 		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if args[1] != "checkInInterval" && !strings.HasPrefix(args[1], "limits.") {
-				return fmt.Errorf("unknown room setting %q; checkInInterval and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
+			if args[1] != "checkInInterval" && args[1] != "upstream" && !strings.HasPrefix(args[1], "limits.") {
+				return fmt.Errorf("unknown room setting %q; checkInInterval, upstream and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
 			}
 			rec, err := store().Resolve(args[0])
 			if err != nil {
 				return err
+			}
+			if args[1] == "upstream" {
+				if len(args) == 2 {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s\n", upstreamOrOff(rec.Upstream))
+					return nil
+				}
+				upstream, err := room.ParseUpstream(args[2])
+				if err != nil {
+					return err
+				}
+				if err := engineClient().Call(cmd.Context(), "SetRoomUpstream", []any{rec.Name, args[2]}, nil); err != nil {
+					return fmt.Errorf("the room was not updated: %w", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s upstream: %s\n", rec.Name, upstreamOrOff(upstream))
+				return nil
 			}
 			if args[1] == "checkInInterval" {
 				if len(args) == 2 {

@@ -2,8 +2,11 @@ package room
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"dyna-agent/internal/repoid"
 )
 
 // UpdatePreferences changes room settings without changing routing addresses.
@@ -44,6 +47,37 @@ func (s *Store) SetRootProfile(ref, name string) error {
 		r.RootProfile = strings.TrimSpace(name)
 		return nil
 	})
+}
+
+// SetUpstream stores the parent repository of this room's fork checkout.
+// Empty clears it. The caller passes a value from ParseUpstream.
+func (s *Store) SetUpstream(ref, upstream string) error {
+	return s.UpdatePreferences(ref, func(r *Record) error {
+		r.Upstream = upstream
+		return nil
+	})
+}
+
+// ParseUpstream reads a room's upstream repository, as the CLI and the app
+// accept it. "off" or empty clears it. A repository such as github.com/owner/repo
+// or https://github.com/owner/repo.git is stored as host/owner/repo.
+func ParseUpstream(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.EqualFold(trimmed, "off") {
+		return "", nil
+	}
+	remote := trimmed
+	if !strings.ContainsAny(remote, ":") {
+		remote = "https://" + remote
+	}
+	id, err := repoid.RemoteIdentity("", remote)
+	if err != nil {
+		return "", err
+	}
+	if parts := strings.Split(id, "/"); len(parts) != 3 || slices.Contains(parts, "") {
+		return "", fmt.Errorf("upstream %q must name one repository as host/owner/repo", value)
+	}
+	return id, nil
 }
 
 // SetLibraryPin stores this room's librarian profile. set false clears the

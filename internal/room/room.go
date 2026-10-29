@@ -57,6 +57,9 @@ type Record struct {
 	MergeMaxParallel int          `json:"mergeMaxParallel,omitempty"`
 	GitHubAccess     GitHubAccess `json:"githubAccess,omitempty"`
 	RootProfile      string       `json:"rootProfile,omitempty"`
+	// Upstream is the parent repository, as host/owner/repo, of this room's
+	// fork checkout (see ParseUpstream). Empty means the room has no parent.
+	Upstream string `json:"upstream,omitempty"`
 	// LibraryPinSet is true when this room has its own librarian profile.
 	// LibraryPin is that profile; empty means auto for this room only.
 	// When LibraryPinSet is false, the room uses the global library.profile.
