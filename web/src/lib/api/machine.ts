@@ -9,13 +9,8 @@ export type MachineRole = 'engine' | 'agents' | 'ci'
 
 // MachineStatus is what the engine knows about a machine right now.
 // "disabled" means switched off in the registry, "offline" means the probe
-// could not reach it, "degraded" means it answered but needs attention, such
-// as low free disk space, and "unknown" means no probe has run yet.
-export type MachineStatus = 'online' | 'degraded' | 'disabled' | 'offline' | 'unknown'
-
-// MachineStatusReason names why a machine is degraded. The page words it, so a
-// probe message never reaches the screen.
-export type MachineStatusReason = 'low-disk'
+// could not reach it, and "unknown" means no probe has run yet.
+export type MachineStatus = 'online' | 'disabled' | 'offline' | 'unknown'
 
 // MachineCIWork is the CI work this machine's node queue holds now: the runs
 // it admitted and the units still waiting for room.
@@ -115,8 +110,6 @@ export interface MachineDetail extends MachineSummary {
   seenAt?: string
   capabilities?: MachineCapabilities
   load?: MachineLoad
-  // statusReason names why a degraded machine needs attention.
-  statusReason?: MachineStatusReason
 }
 
 // MachineCapabilities is what the last probe read about a machine. Memory
@@ -136,10 +129,12 @@ export interface MachineCapabilities {
   computers: boolean
   stream: boolean
   // freeDisk is the free space on the machine's disk in bytes. It is absent
-  // when the probe could not read it. diskFloor is the free space Dyna keeps
-  // for CI work on the machine; below it, no CI starts there.
+  // when the probe could not read it. diskKeeps words the free space the
+  // node's disk rule keeps while it admits work, and diskBlock is the queue's
+  // words for why it admits none.
   freeDisk?: number
-  diskFloor?: number
+  diskKeeps?: string
+  diskBlock?: string
 }
 
 // MachineLoad is the last load reading of a machine. cpuPercent is absent when
@@ -211,12 +206,11 @@ export interface MachineCapacity {
   memoryMiB: number
   cpusUsed: number
   memoryMiBUsed: number
-  // diskFree and diskTotal are bytes; diskFloor is the free space admission
-  // keeps, and maxDiskPercent replaces it when set.
+  // diskFree and diskTotal are bytes; diskKeeps words the free space the
+  // node's disk rule keeps while it admits work.
   diskFree: number
   diskTotal: number
-  diskFloor: number
-  maxDiskPercent?: number
+  diskKeeps?: string
   // diskBlock is the queue's words for a disk that admits no work.
   diskBlock?: string
   heavyRunning: number

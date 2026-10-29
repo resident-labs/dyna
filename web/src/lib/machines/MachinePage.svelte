@@ -19,7 +19,7 @@
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole, MachineWork } from '../api/machine.ts'
-  import { ciRunDetail, ciRunText, computersText, diskText, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
+  import { ciRunDetail, ciRunText, computersText, diskText, loadText, memoryPct, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, rooms = [], owner = true, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
@@ -123,10 +123,6 @@
           <!-- r8: a designed line, never the engine's probe error text. -->
           <Row dense text="Last probe">
             {#snippet trail()}<span class="value warn">Did not reach the machine. Check the SSH route, then probe again.</span>{/snippet}
-          </Row>
-        {:else if machine.status === 'degraded'}
-          <Row dense text="Needs attention">
-            {#snippet meta()}<span class="gold">{reasonText(machine.statusReason)}</span>{/snippet}
           </Row>
         {/if}
         {#if machine.seenAt}

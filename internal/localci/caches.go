@@ -32,11 +32,12 @@ const (
 	ciCacheCleanAge = 48 * time.Hour
 )
 
-// ciDiskFloorBytes is the free space a CI machine must keep, as the owner's
-// settings say it. The same floor holds new CI work and lets a run clean Dyna's
-// caches first, so an owner changes one policy. A settings file that cannot be
-// read keeps the default floor, so a broken file never leaves a full machine
-// unclean. Zero turns cache recovery off, as it turns CI admission off.
+// ciDiskFloorBytes is the free space a CI machine keeps for Dyna's own
+// recovery, as the owner's settings say it. Which work starts is the node's
+// own disk rule (DiskBlock), not this floor; a run below it cleans Dyna's
+// caches and scratch first. A settings file that cannot be read keeps the
+// default floor, so a broken file never leaves a full machine unclean. Zero
+// turns that recovery off.
 func ciDiskFloorBytes() int64 {
 	values, err := settings.Load("")
 	if err != nil {
