@@ -56,6 +56,13 @@ func isReadCommand(args []string) bool {
 	if len(args) == 1 && args[0] == "status" {
 		return true
 	}
+	// --show-token prints the credential, so it is not a read.
+	if len(args) >= 2 && args[0] == "auth" && args[1] == "status" {
+		flags := parseArgs(args[:2], args[2:]).flags
+		_, long := flags["--show-token"]
+		_, short := flags["-t"]
+		return !long && !short
+	}
 	if len(args) >= 2 && args[0] == "codespace" && args[1] == "ports" && codespacePortsListFlags(args[2:]) {
 		return true
 	}
