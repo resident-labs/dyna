@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/store"
 )
 
 // slowTestRepeatGap separates two breach episodes. One loaded host breaches
@@ -31,14 +29,7 @@ const (
 
 // ciHealth keeps the rows beside this watcher's own state, in dyna.db.
 func (s *Service) ciHealth() cihealth.Store {
-	root := ""
-	if s.Store != nil {
-		root = filepath.Dir(s.Store.Root)
-	}
-	if root == "" || root == "." {
-		root = store.DataDir()
-	}
-	return cihealth.Store{DataDir: root}
+	return cihealth.Store{DataDir: s.dataDir()}
 }
 
 // recordTestHealth saves the run's near-limit tests and returns the tests

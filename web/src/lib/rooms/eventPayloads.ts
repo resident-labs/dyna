@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isApprovalDecidedEvent, isApprovalRequestedEvent, isApprovalResultEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isJobEvent, isMachineCacheEvent, isMachineCacheCleanFailedEvent, isMachineEvent, isMachineLimitsEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRoomCapEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTerminalDoneEvent, isTerminalRequestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent, isWorktreePortsEvent } from './events.gen.ts'
-import type { AlertEvent, ApprovalDecidedEvent, ApprovalRequestedEvent, ApprovalResultEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, JobEvent, MachineCacheEvent, MachineCacheCleanFailedEvent, MachineEvent, MachineLimitsEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RoomCapEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TerminalDoneEvent, TerminalRequestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent, WorktreePortsEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isApprovalDecidedEvent, isApprovalRequestedEvent, isApprovalResultEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isIssueWatchEvent, isJobEvent, isMachineCacheEvent, isMachineCacheCleanFailedEvent, isMachineEvent, isMachineLimitsEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRoomCapEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTerminalDoneEvent, isTerminalRequestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent, isWorktreePortsEvent } from './events.gen.ts'
+import type { AlertEvent, ApprovalDecidedEvent, ApprovalRequestedEvent, ApprovalResultEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, IssueWatchEvent, JobEvent, MachineCacheEvent, MachineCacheCleanFailedEvent, MachineEvent, MachineLimitsEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RoomCapEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TerminalDoneEvent, TerminalRequestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent, WorktreePortsEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -112,6 +112,13 @@ export function legacyEvent(post: EventPost): boolean {
 export function issueEvent(post: EventPost): IssueEvent | undefined {
   if (post.kind !== 'issue') return undefined
   return isIssueEvent(post.payload) ? post.payload : undefined
+}
+
+// issueWatchEvent returns the typed payload of an upstream issue fact. A watched
+// issue's comment, close or reopen carries it, and the card reads it.
+export function issueWatchEvent(post: EventPost): IssueWatchEvent | undefined {
+  if (post.kind !== 'issue-watch') return undefined
+  return isIssueWatchEvent(post.payload) ? post.payload : undefined
 }
 
 // goalEvent returns the typed payload of a goal post. A post stored before the
