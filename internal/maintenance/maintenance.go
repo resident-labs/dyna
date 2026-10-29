@@ -44,6 +44,29 @@ type Result struct {
 	Kept       map[string]int
 	// Pruned totals each kind of removal, so every pass reports what it freed.
 	Pruned map[string]Pruned
+	// Steps records how long each part of the pass took, in the order it ran.
+	Steps []Step
+}
+
+// Step is one timed part of a pass. Error is empty when the step succeeded.
+type Step struct {
+	Name  string
+	Took  time.Duration
+	Error string
+}
+
+// timer starts timing one step. Pass the step's error to the returned func
+// when the step ends; it records the step and returns the error unchanged.
+func (r *Result) timer(name string) func(error) error {
+	started := time.Now()
+	return func(err error) error {
+		step := Step{Name: name, Took: time.Since(started)}
+		if err != nil {
+			step.Error = err.Error()
+		}
+		r.Steps = append(r.Steps, step)
+		return err
+	}
 }
 
 // Options restricts a lifecycle pass or selects disk-pressure scratch cleanup.
@@ -95,37 +118,43 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		now = time.Now()
 	}
 	workspaceJobs := jobs.Service{Store: jobs.Store{DataDir: store.DataDir()}, Machines: machines.Store{DataDir: store.DataDir()}, DataDir: store.DataDir()}
+	done := result.timer("job workspaces")
 	n, workspaceErr := workspaceJobs.CleanupWorkspaces(ctx, jobs.WorkspaceCleanup{Session: opts.Session, Now: now})
 	result.add("job workspaces", Pruned{Items: n})
-	if workspaceErr != nil {
-		errs = append(errs, fmt.Errorf("job workspaces: %w", workspaceErr))
+	if err := done(workspaceErr); err != nil {
+		errs = append(errs, fmt.Errorf("job workspaces: %w", err))
 	}
 	// Run SQLite retention before filesystem sweeps. Those sweeps used to spend
 	// the whole shared deadline first, so later retention never ran.
 	if opts.Session == "" {
 		// PR state removes closed records 14 days after close on each write;
 		// the pass reports how many it removed since the last pass.
-		if n, err := state.TakePruned(state.Root(store.DataDir())); err != nil {
+		done = result.timer("closed PR records")
+		if n, err := state.TakePruned(state.Root(store.DataDir())); done(err) != nil {
 			errs = append(errs, err)
 		} else {
 			result.add("closed PR records", Pruned{Items: n})
 		}
-		if n, err := state.PruneDoneNotices(ctx, state.Root(store.DataDir()), now); err != nil {
+		done = result.timer("delivered PR notices")
+		if n, err := state.PruneDoneNotices(ctx, state.Root(store.DataDir()), now); done(err) != nil {
 			errs = append(errs, fmt.Errorf("delivered PR notices: %w", err))
 		} else {
 			result.add("delivered PR notices", Pruned{Items: n})
 		}
-		if n, err := pruneShellJobs(ctx, &shells.Store{Root: filepath.Join(store.DataDir(), "shells")}, now); err != nil {
+		done = result.timer("shell job rows")
+		if n, err := pruneShellJobs(ctx, &shells.Store{Root: filepath.Join(store.DataDir(), "shells")}, now); done(err) != nil {
 			errs = append(errs, fmt.Errorf("shell job rows: %w", err))
 		} else {
 			result.add("shell job rows", Pruned{Items: n})
 		}
-		if n, err := pruneLocalCIResults(ctx, store.DataDir(), now); err != nil {
+		done = result.timer("local CI results")
+		if n, err := pruneLocalCIResults(ctx, store.DataDir(), now); done(err) != nil {
 			errs = append(errs, fmt.Errorf("local CI results: %w", err))
 		} else {
 			result.add("local CI results", Pruned{Items: n})
 		}
-		if n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now); err != nil {
+		done = result.timer("CI health rows")
+		if n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now); done(err) != nil {
 			errs = append(errs, fmt.Errorf("CI health rows: %w", err))
 		} else {
 			result.add("CI health rows", Pruned{Items: n})
@@ -134,24 +163,31 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	repos := opts.Repos
 	var discoveryErr error
 	if repos == nil {
+		done = result.timer("discover")
 		repos, discoveryErr = discover(ctx, opts.Session)
+		errs = append(errs, done(discoveryErr))
 	}
-	errs = append(errs, discoveryErr, cleanWorktrees(ctx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed}))
+	done = result.timer("worktrees")
+	errs = append(errs, done(cleanWorktrees(ctx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})))
+	done = result.timer("scratch")
 	cleaned, scratchErr := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
 	result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
 	for _, kept := range cleaned.Kept {
 		result.Kept["scratch: "+kept.Reason]++
 	}
-	errs = append(errs, scratchErr)
+	if err := done(scratchErr); err != nil {
+		errs = append(errs, fmt.Errorf("scratch sweep: %w", err))
+	}
 	// Session cleanup must not remove unrelated archived workflow runs.
 	if opts.Session == "" {
+		done = result.timer("archived runs")
 		v, err := settings.Load("")
 		if err == nil {
 			freed, sweepErr := sweepArchivedRuns(ctx, now, v.RunsRetention, opts.Logf)
 			result.add("archived runs", freed)
 			err = sweepErr
 		}
-		errs = append(errs, err)
+		errs = append(errs, done(err))
 		errs = append(errs, sweepWithDryPass(ctx, &result, "closed session stdout", sessionLogRetention, func(dry bool) (Pruned, error) {
 			return sweepClosedSessionLogs(ctx, now, dry, opts.Logf)
 		}))
