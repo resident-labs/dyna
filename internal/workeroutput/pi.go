@@ -132,6 +132,12 @@ func decodePi(line []byte) Record {
 		}
 	case "message_update":
 		// Final message_end is authoritative. Do not duplicate its text or usage.
+		// The streamed delta itself is model work: a long first thought arrives
+		// only here, minutes before its completed block, so the record still
+		// counts as generation without any display event.
+		if p.AssistantMessageEvent.Delta != "" {
+			r.Generation = true
+		}
 	case "tool_execution_start", "tool_execution_update", "tool_execution_end":
 		state, output := "started", ""
 		if p.Type == "tool_execution_update" {

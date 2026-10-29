@@ -205,6 +205,23 @@ func (m *Manager) journalProgress(meta Meta) map[string]string {
 }
 
 func (s *Store) transferHasOutput(id string, t Turn) bool {
+	// A Pi model's first message can stream deltas for minutes before its
+	// completed block is normalized, so the raw records are scanned for that
+	// streamed work too; without it a healthy slow start looks silent (D-434).
+	if t.OutputDialect != "" {
+		if raw, err := s.RawOutputPath(id); err == nil {
+			decl := &workeroutput.Declaration{Dialect: t.OutputDialect}
+			found := false
+			scanTail(raw, t.RawStart, func(line []byte) {
+				if !found && workeroutput.DecodeLine(decl, string(line)).Generation {
+					found = true
+				}
+			})
+			if found {
+				return true
+			}
+		}
+	}
 	path, _ := s.NormalizedPath(id)
 	found := false
 	scanTail(path, t.NormStart, func(line []byte) {

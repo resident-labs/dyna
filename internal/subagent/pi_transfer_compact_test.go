@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/workeroutput"
 )
 
 // nativePiTransferStarting starts a Pi session, then moves a native Pi-to-Pi
@@ -86,6 +87,54 @@ func TestPiTransferCountsCompactionAsStartupProgress(t *testing.T) {
 	}
 	held.lock.Close()
 	e.m.Spawner = runner
+	if _, err := e.m.Store.UpdateTurn(info.ID, 2, func(turn *Turn) {
+		turn.Status, turn.Ended = TurnOK, *now
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A Pi model that thinks through a huge resumed history streams deltas for
+// minutes before its first completed message. The streamed content is model
+// output, so the startup window completes the transfer instead of aborting
+// a healthy turn (D-434).
+func TestPiTransferStreamedThinkingIsStartupOutput(t *testing.T) {
+	e, now, info, state, held, runner := nativePiTransferStarting(t)
+	if _, err := e.m.Store.UpdateTurn(info.ID, 2, func(turn *Turn) {
+		turn.OutputDialect = workeroutput.DialectPiJSON
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := e.m.Store.RawOutputPath(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(raw, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"I'm resuming after a model transfer."}}` + "\n")
+	if cerr := file.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The turn keeps running under its own governance once the transfer sees
+	// output, so the test releases the runner lock the way retirement would.
+	held.lock.Close()
+	e.m.Spawner = runner
+	*now = now.Add(startupLimit + time.Second)
+	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.m.TransferStatus(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Phase != "completed" || got.Ended.IsZero() {
+		t.Fatalf("streamed thinking did not complete the startup window: %+v", got)
+	}
 	if _, err := e.m.Store.UpdateTurn(info.ID, 2, func(turn *Turn) {
 		turn.Status, turn.Ended = TurnOK, *now
 	}); err != nil {
