@@ -337,9 +337,6 @@ func classifyHostedSuite(definition *localci.Definition, checks []Check, suite i
 }
 
 func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns, definition *localci.Definition) Snapshot {
-	if snap.hostedCISelection == nil {
-		snap.hostedCISelection = selectedHostedCIChecks(snap)
-	}
 	snap.localCIDef = definition
 	current := snap.currentSuiteChecks()
 	cancelledSuites, ignoredSuites := map[int64]bool{}, map[int64]bool{}

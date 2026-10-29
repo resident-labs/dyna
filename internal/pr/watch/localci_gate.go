@@ -1,7 +1,6 @@
 package watch
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -469,16 +468,19 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		}
 	}
 	if observation.Status == VerdictPassed || observation.Status == VerdictPending && result.Status == localci.OutcomePassed {
-		required := neededCIChecks(policy, plan, snap, trial)
+		required := append([]string(nil), policy.RequiredChecks...)
+		// Local CI runs merge trials only, so a pull request head has no local
+		// run to supply the names the base definition requires. Only a trial head
+		// must cover them; the hosted provider decides a pull request head.
+		if trial && plan.required != nil {
+			required = trialRequiredChecks(policy, plan)
+		}
 		missing := missingRequiredCIChecks(required, result, snap)
 		if len(missing) > 0 {
 			observation.Status = VerdictPending
-			observation.Key = "required:" + r.Head + ":" + digest(fmt.Sprint(missing))
-			observation.Jobs = make([]string, len(missing))
-			for i, check := range missing {
-				observation.Jobs[i] = check.Name
-			}
-			observation.Reason = requiredCIWaitReason(missing, result, snap)
+			observation.Key = "required:" + r.Head + ":" + digest(strings.Join(missing, "\n"))
+			observation.Jobs = missing
+			observation.Reason = "waiting for required CI checks: " + strings.Join(missing, ", ")
 		}
 	}
 	observation.Checks = registeredCheckSummaries(result)
@@ -501,132 +503,6 @@ func trialRequiredChecks(policy ChangePolicy, plan localCIPlan) []string {
 		}
 	}
 	return required
-}
-
-func hostedRunCheckID(run Run) hostedCheckID {
-	return hostedCheckID{Name: run.Name, Suite: run.CheckSuiteID, Workflow: run.WorkflowID, Run: true, Selected: true}
-}
-
-// selectedHostedCIChecks names the jobs the hosted provider selected for this
-// head. Skipped jobs were not selected. A cancelled run without job rows keeps
-// its workflow name as the only check identity another path can satisfy.
-func selectedHostedCIChecks(snap Snapshot) []selectedHostedCheck {
-	selected := []selectedHostedCheck{}
-	add := func(id hostedCheckID, state string) {
-		if id.Name == "" || slices.ContainsFunc(selected, func(check selectedHostedCheck) bool { return check.hostedCheckID == id }) {
-			return
-		}
-		selected = append(selected, selectedHostedCheck{hostedCheckID: id, State: state})
-	}
-	for _, check := range snap.currentSuiteChecks() {
-		if check.App.Slug == "github-actions" && check.Conclusion != "skipped" {
-			id := hostedCheckID{Name: check.Name, Suite: check.CheckSuite.ID, Selected: true}
-			add(id, checkState(check.Status, check.Conclusion))
-		}
-	}
-	suitesWithChecks := map[int64]bool{}
-	for _, check := range snap.currentSuiteChecks() {
-		if check.App.Slug == "github-actions" && check.CheckSuite.ID != 0 && check.Conclusion != "skipped" {
-			suitesWithChecks[check.CheckSuite.ID] = true
-		}
-	}
-	for _, run := range currentRuns(snap.Runs) {
-		if run.Conclusion != "skipped" && !suitesWithChecks[run.CheckSuiteID] {
-			add(hostedRunCheckID(run), checkState(run.Status, run.Conclusion))
-		}
-	}
-	slices.SortFunc(selected, func(a, b selectedHostedCheck) int {
-		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Suite, b.Suite), cmp.Compare(a.Workflow, b.Workflow))
-	})
-	return selected
-}
-
-// neededCIChecks combines base-required names and provider-selected identities.
-// A local pass answers every selected identity with its name. A hosted pass
-// answers only its own suite or workflow. A trial keeps its base-selected checks.
-func baseRequiredCIChecks(names []string) []selectedHostedCheck {
-	checks := make([]selectedHostedCheck, len(names))
-	for i, name := range names {
-		checks[i].hostedCheckID = hostedCheckID{Name: name}
-	}
-	return checks
-}
-
-func neededCIChecks(policy ChangePolicy, plan localCIPlan, snap Snapshot, trial bool) []selectedHostedCheck {
-	required := []selectedHostedCheck{}
-	add := func(check selectedHostedCheck) {
-		if !slices.ContainsFunc(required, func(other selectedHostedCheck) bool { return other.hostedCheckID == check.hostedCheckID }) {
-			required = append(required, check)
-		}
-	}
-	for _, check := range baseRequiredCIChecks(policy.RequiredChecks) {
-		add(check)
-	}
-	if trial && plan.required != nil {
-		for _, check := range baseRequiredCIChecks(trialRequiredChecks(policy, plan)) {
-			add(check)
-		}
-	}
-	selected := snap.hostedCISelection
-	if selected == nil {
-		selected = selectedHostedCIChecks(snap)
-	}
-	for _, check := range selected {
-		add(check)
-	}
-	slices.SortFunc(required, func(a, b selectedHostedCheck) int {
-		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Suite, b.Suite), cmp.Compare(a.Workflow, b.Workflow))
-	})
-	return required
-}
-
-// requiredCIWaitReason explains why each needed name has no passing result.
-// The existing CIReason field carries these facts to the CLI and web views.
-func requiredCIWaitReason(missing []selectedHostedCheck, result localci.Result, hosted Snapshot) string {
-	reasons := make([]string, 0, len(missing))
-	for _, needed := range missing {
-		name := needed.Name
-		hostedReason := "no hosted result"
-		if needed.Selected {
-			source, state := "hosted check", needed.State
-			if needed.Run {
-				source = "hosted run"
-			}
-			if state == "failure" {
-				state = "failed"
-			}
-			hostedReason = source + " " + state
-		} else {
-			// A base-required external check need not belong to Actions.
-			for _, check := range hosted.currentChecks() {
-				if check.Name != name {
-					continue
-				}
-				state := checkState(check.Status, check.Conclusion)
-				if state == "failure" {
-					state = "failed"
-				}
-				hostedReason = "hosted check " + state
-				break
-			}
-		}
-		localReason := "no local check"
-		if result.Node != "" {
-			for _, check := range result.Checks {
-				if string(check.Name()) != name {
-					continue
-				}
-				state := string(check.Status)
-				if state == "" {
-					state = "pending"
-				}
-				localReason = "local check " + state
-				break
-			}
-		}
-		reasons = append(reasons, name+": "+hostedReason+", "+localReason)
-	}
-	return strings.Join(reasons, "; ")
 }
 
 // liveLocalCIRun is the local run now executing for a record's head, if any.
@@ -775,29 +651,19 @@ func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangeP
 
 // A provider's pass cannot replace an extra required check that never passed.
 // Posted local statuses stay separate from current hosted check/status evidence.
-func missingRequiredCIChecks(required []selectedHostedCheck, result localci.Result, hosted Snapshot) []selectedHostedCheck {
-	localPassed := map[string]bool{}
+func missingRequiredCIChecks(required []string, result localci.Result, hosted Snapshot) []string {
+	passed := map[string]bool{}
 	if result.Node != "" {
 		for _, check := range result.Checks {
+			name := string(check.Name())
 			if check.Status == localci.OutcomePassed {
-				localPassed[string(check.Name())] = true
+				passed[name] = true
 			}
 		}
 	}
-	hostedPassed := map[hostedCheckID]bool{}
-	hostedNamePassed := map[string]bool{}
-	for _, check := range hosted.currentSuiteChecks() {
-		if checkState(check.Status, check.Conclusion) != "success" {
-			continue
-		}
-		id := hostedCheckID{Name: check.Name, Suite: check.CheckSuite.ID, Selected: true}
-		hostedPassed[id] = true
-		hostedNamePassed[check.Name] = true
-	}
-	for _, run := range currentRuns(hosted.Runs) {
-		if run.Status == "completed" && run.Conclusion != "skipped" && success(run.Conclusion) {
-			hostedPassed[hostedRunCheckID(run)] = true
-			hostedNamePassed[run.Name] = true
+	for _, check := range hosted.currentChecks() {
+		if checkState(check.Status, check.Conclusion) == "success" {
+			passed[check.Name] = true
 		}
 	}
 	latest := map[string]Status{}
@@ -809,21 +675,16 @@ func missingRequiredCIChecks(required []selectedHostedCheck, result localci.Resu
 			latest[v.Context] = v
 		}
 	}
-	statusPassed := map[string]bool{}
 	for name, status := range latest {
 		if status.State == "success" {
-			statusPassed[name] = true
+			passed[name] = true
 		}
 	}
-	var missing []selectedHostedCheck
-	for _, check := range required {
-		if localPassed[check.Name] || hostedPassed[check.hostedCheckID] {
-			continue
+	var missing []string
+	for _, name := range required {
+		if !passed[name] {
+			missing = append(missing, name)
 		}
-		if !check.Selected && (hostedNamePassed[check.Name] || statusPassed[check.Name]) {
-			continue
-		}
-		missing = append(missing, check)
 	}
 	return missing
 }
