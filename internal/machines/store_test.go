@@ -46,6 +46,11 @@ INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES
 		if !local.Local || local.SSH != "" || !local.Enabled {
 			t.Fatalf("local machine = %#v", local)
 		}
+		// The enabled local node kept its CI work on this machine, so the
+		// engine host row carries the ci label.
+		if !local.HasLabel(LabelCI) {
+			t.Fatalf("engine host lost the local node's CI work: %#v", local)
+		}
 		// An old CI node keeps taking local CI, so its label says so.
 		want := Machine{Name: "hermes", SSH: "pip@hermeslab", Enabled: true, Labels: []string{LabelCI}, Health: HealthUnknown}
 		if got := list[1]; !sameMachine(got, want) {
@@ -64,6 +69,10 @@ INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES ('local','',3,0);`)
 		}
 		if !list[0].Local {
 			t.Fatalf("local machine = %#v", list[0])
+		}
+		// A disabled local node opted out of CI, so the row stays unlabeled.
+		if list[0].HasLabel(LabelCI) {
+			t.Fatalf("engine host took CI from a disabled local node: %#v", list[0])
 		}
 	})
 }

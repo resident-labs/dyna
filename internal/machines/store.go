@@ -835,9 +835,15 @@ func importLocalCINodes(ctx context.Context, conn *sql.Conn) error {
 // said whether its work ran, and it becomes the machine's switch.
 func importNode(ctx context.Context, conn *sql.Conn, name, ssh string, enabled bool) error {
 	if ssh == "" {
-		// A local node's switch covered its CI work only. The engine host row
-		// keeps its own switch, so an import changes nothing on it.
-		return nil
+		// A local node ran its CI work on the engine host. An enabled node keeps
+		// that work, so the engine host row carries the ci label; a disabled one
+		// leaves the row opted out.
+		if !enabled {
+			return nil
+		}
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET labels=json_insert(labels, '$[#]', 'ci')
+			WHERE local=1 AND NOT EXISTS (SELECT 1 FROM json_each(labels) WHERE value='ci')`)
+		return err
 	}
 	now := time.Now().UnixMilli()
 	name, err := freeName(ctx, conn, sanitizeName(name))
