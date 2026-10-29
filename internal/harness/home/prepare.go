@@ -128,7 +128,7 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 		return nil, err
 	}
 	bin := filepath.Join(publication, "bin")
-	out["PATH"] = bin + string(os.PathListSeparator) + path
+	out["PATH"] = bin + string(os.PathListSeparator) + withToolBins(path, tools)
 	out["DYNA_BIN"] = filepath.Join(bin, "dyna")
 	// Tools write the global Git config (gh auth setup-git, git config --global),
 	// so GIT_CONFIG_GLOBAL is a writable file that includes the immutable one.
@@ -140,6 +140,27 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	}
 	out["GIT_CONFIG_GLOBAL"] = writable
 	return out, nil
+}
+
+// withToolBins appends the bin folders of the owner's toolchain roots that exist.
+// A toolchain installed by its own tool, such as rustup or bun, is then on PATH
+// in a private HOME, where the login profile cannot add it. Existing entries keep
+// their order, and a folder that is missing or already listed adds nothing.
+func withToolBins(path string, tools map[string]string) string {
+	gopath, _, _ := strings.Cut(tools["GOPATH"], string(os.PathListSeparator))
+	var present []string
+	for _, dir := range []string{
+		filepath.Join(tools["CARGO_HOME"], "bin"),
+		filepath.Join(gopath, "bin"),
+		filepath.Join(tools["BUN_INSTALL"], "bin"),
+		tools["PNPM_HOME"],
+	} {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			present = append(present, dir)
+		}
+	}
+	// withLoginPath keeps only absolute folders, so a relative or empty root adds nothing.
+	return withLoginPath(path, strings.Join(present, string(os.PathListSeparator)))
 }
 
 // removeWorktreesLink deletes the symlink older builds put in the private HOME.
