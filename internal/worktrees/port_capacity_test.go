@@ -92,8 +92,10 @@ func TestObservePortCapacityCountsReclaimableBlocksAsFree(t *testing.T) {
 	protected[0] = root + "/missing"
 	seedPortRecords(t, db, 0, len(protected), protected...)
 
-	savedFree, savedPaths := portFree, reclaimablePaths
-	t.Cleanup(func() { portFree, reclaimablePaths = savedFree, savedPaths })
+	savedFree, savedPaths, savedCount := portFree, reclaimablePaths, reclaimablePortBlockCount
+	t.Cleanup(func() {
+		portFree, reclaimablePaths, reclaimablePortBlockCount = savedFree, savedPaths, savedCount
+	})
 	trees := make([]string, 2)
 	for i := range trees {
 		trees[i], err = os.MkdirTemp("", "dyna-wt-alert-")
@@ -166,6 +168,64 @@ func TestObservePortCapacityCountsReclaimableBlocksAsFree(t *testing.T) {
 	replacement := root + strings.Repeat("/.", 1000)
 	seedPortRecords(t, db, 950, 1, replacement)
 	assertPending(t, observePortCapacity(t), wantAlert{90, 3})
+	ack(t, 3, 90)
+
+	// Replace a reclaimable record after measurement but before the release.
+	// Raw use stays unchanged, so only the record-set check can reject the
+	// stale projection and prevent a duplicate alert generation.
+	measure := reclaimablePortBlockCount
+	replaced := false
+	reclaimablePortBlockCount = func(ctx context.Context, records []Record) int {
+		used := measure(ctx, records)
+		if !replaced {
+			replaced = true
+			if err := os.Mkdir(missing[0], 0o700); err != nil {
+				t.Fatal(err)
+			}
+			rec := Record{Path: missing[0], RunID: "protected", Port: portMin + 900*blockSize}
+			if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+				return saveRecord(ctx, conn, rec)
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return used
+	}
+	current, err = loadRecords(context.Background(), db, "WHERE path=?", protected[2])
+	if err != nil || len(current) != 1 {
+		t.Fatalf("load stale-release candidate = %#v, %v", current, err)
+	}
+	if released, err := releaseRecord(context.Background(), db, current[0], true); err != nil || !released {
+		t.Fatalf("stale releaseRecord() = %v, %v; want a release", released, err)
+	}
+	reclaimablePortBlockCount = measure
+	if !replaced {
+		t.Fatal("release did not measure effective capacity")
+	}
+	seedPortRecords(t, db, 951, 1, root+strings.Repeat("/.", 1001))
+	assertPending(t, observePortCapacity(t))
+
+	// With only the remaining missing blocks free, allocation must reclaim
+	// them in one batch. The active alert period needs one measurement, not
+	// one full registry and socket scan per released record.
+	freeBlocks := map[int]bool{}
+	for i := 1; i < len(missing); i++ {
+		freeBlocks[portMin+(900+i)*blockSize] = true
+	}
+	portFree = func(port int) bool {
+		return freeBlocks[port-(port-portMin)%blockSize]
+	}
+	observations := 0
+	reclaimablePortBlockCount = func(ctx context.Context, records []Record) int {
+		observations++
+		return measure(ctx, records)
+	}
+	if err := Track(Record{Path: pathsWithBlock(t, portMin, 1)[0]}); err != nil {
+		t.Fatalf("Track() with a full pool = %v; want batched reclamation", err)
+	}
+	if observations != 1 {
+		t.Fatalf("release observations = %d; want 1 for the batch", observations)
+	}
 	if scans != 3 {
 		t.Fatalf("ownership scans = %d; want one per observation with a free candidate", scans)
 	}

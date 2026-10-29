@@ -72,23 +72,23 @@ func blockFree(start int, isFree func(int) bool) bool {
 // compares the record read earlier, so a record that another caller replaced
 // meanwhile is left alone. It reports whether a block was freed.
 func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except string) bool {
+	var missing []portRelease
 	var held []Record
-	freed := false
 	for _, rec := range records {
 		if rec.Port == 0 || rec.Path == except {
 			continue
 		}
 		if provenMissingPath(rec.Path) {
 			// Only a proven absent path counts; any other error is uncertain.
-			if ok, err := releaseRecord(ctx, db, rec, true); err == nil && ok {
-				freed = true
-			}
+			missing = append(missing, portRelease{record: rec, remove: true})
 			continue
 		}
 		held = append(held, rec)
 	}
-	if freed {
-		return true
+	if len(missing) != 0 {
+		if ok, err := releaseRecords(ctx, db, missing); err == nil && ok {
+			return true
+		}
 	}
 	slices.SortFunc(held, func(a, b Record) int {
 		return cmp.Or(a.RetainedAt.Compare(b.RetainedAt), a.CreatedAt.Compare(b.CreatedAt), strings.Compare(a.Path, b.Path))
@@ -151,44 +151,68 @@ func heldPortReclaimable(ctx context.Context, rec Record, reclaimable map[string
 	return paths[filepath.Clean(rec.Path)]
 }
 
+type portRelease struct {
+	record Record
+	remove bool
+}
+
 // releaseRecord deletes orig, or clears its port, in one transaction. It does
 // nothing and reports false when the stored record no longer equals orig.
 func releaseRecord(ctx context.Context, db *sql.DB, orig Record, remove bool) (bool, error) {
-	want, err := json.Marshal(orig)
-	if err != nil {
-		return false, err
+	return releaseRecords(ctx, db, []portRelease{{record: orig, remove: remove}})
+}
+
+// releaseRecords applies one batch with one capacity observation. Each record
+// keeps its independent compare-and-swap protection. It reports any release.
+func releaseRecords(ctx context.Context, db *sql.DB, releases []portRelease) (bool, error) {
+	wants := make([][]byte, len(releases))
+	for i, release := range releases {
+		want, err := json.Marshal(release.record)
+		if err != nil {
+			return false, err
+		}
+		wants[i] = want
 	}
-	used, raw, measured := observePortUseAfterRelease(ctx, db, []Record{orig})
+	observation := observePortUseAfterRelease(ctx, db, releases)
 	released := false
 	// Worktree records have no change-bus consumer.
-	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		current, err := loadRecords(ctx, conn, "WHERE path=?", orig.Path)
-		if err != nil || len(current) != 1 {
-			return err
-		}
-		have, err := json.Marshal(current[0])
-		if err != nil || !bytes.Equal(have, want) {
-			return err
-		}
-		if remove {
-			if _, err = conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, orig.Path); err != nil {
+	err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		for i, release := range releases {
+			rec := release.record
+			current, err := loadRecords(ctx, conn, "WHERE path=?", rec.Path)
+			if err != nil {
 				return err
 			}
-		} else {
-			cleared := orig
-			cleared.Port = 0
-			if err = saveRecord(ctx, conn, cleared); err != nil {
+			if len(current) != 1 {
+				continue
+			}
+			have, err := json.Marshal(current[0])
+			if err != nil {
 				return err
 			}
+			if !bytes.Equal(have, wants[i]) {
+				continue
+			}
+			if release.remove {
+				if _, err = conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, rec.Path); err != nil {
+					return err
+				}
+			} else {
+				cleared := rec
+				cleared.Port = 0
+				if err = saveRecord(ctx, conn, cleared); err != nil {
+					return err
+				}
+			}
+			released = true
 		}
-		// A release that drops use below the 90% band rearms the next alert period.
-		if err = rearmPortCapacity(ctx, conn, used, raw, measured); err != nil {
-			return err
+		if !released {
+			return nil
 		}
-		released = true
-		return nil
+		// A batch that drops use below the 90% band rearms the next alert period.
+		return rearmPortCapacity(ctx, conn, observation)
 	})
-	return released, err
+	return released && err == nil, err
 }
 
 // reclaimablePaths returns trees whose recorded and inferred owners are all
