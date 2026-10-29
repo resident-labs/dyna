@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/harness"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/structuredoutput"
@@ -36,6 +37,20 @@ type Engine struct {
 	held        chan struct{}
 	heldOnce    sync.Once
 	heldStarted sync.Once
+
+	// JobHold keeps submitted jobs unfinished until its channel closes. Nil
+	// finishes each job when WaitJob arrives. SaveJob seeds a resumed job.
+	JobHold <-chan struct{}
+	// JobSubmitErrors returns errors after storing new jobs, simulating a lost
+	// submission response. A retry with the same key recovers the stored row.
+	JobSubmitErrors []error
+	// JobExitCodes gives a submitted job ID its final exit code.
+	JobExitCodes map[string]int
+	jobMu        sync.Mutex
+	jobRows      map[string]jobs.Job
+	jobStarts    []callspec.RunJobInput
+	jobWaits     []string
+	jobStops     []string
 }
 
 type agent struct {
@@ -81,8 +96,146 @@ func (f *Engine) Call(ctx context.Context, method string, args []any, result any
 	case "CloseRunAgents":
 		run, _ := args[0].(string)
 		return f.closeRun(ctx, run)
+	case "RunJob":
+		spec, _ := args[0].(callspec.RunJobInput)
+		return f.runJob(spec, result)
+	case "WaitJob":
+		id, _ := args[0].(string)
+		return f.waitJob(ctx, id, result)
+	case "CancelJob":
+		id, _ := args[0].(string)
+		return f.cancelJob(id, result)
 	}
 	return fmt.Errorf("enginefake: unexpected call %s", method)
+}
+
+// SaveJob seeds a job that a resumed workflow can wait for.
+func (f *Engine) SaveJob(job jobs.Job) {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	if f.jobRows == nil {
+		f.jobRows = map[string]jobs.Job{}
+	}
+	f.jobRows[job.ID] = job
+}
+
+// JobStarts lists the typed RunJob requests received, in order.
+func (f *Engine) JobStarts() []callspec.RunJobInput {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	return append([]callspec.RunJobInput(nil), f.jobStarts...)
+}
+
+// JobCount counts distinct stored jobs, excluding idempotent retries.
+func (f *Engine) JobCount() int {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	return len(f.jobRows)
+}
+
+// JobWaits lists the job IDs passed to WaitJob, in order.
+func (f *Engine) JobWaits() []string {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	return append([]string(nil), f.jobWaits...)
+}
+
+// JobStops lists the job IDs passed to CancelJob, in order.
+func (f *Engine) JobStops() []string {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	return append([]string(nil), f.jobStops...)
+}
+
+func (f *Engine) runJob(spec callspec.RunJobInput, result any) error {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	f.jobStarts = append(f.jobStarts, spec)
+	if f.jobRows == nil {
+		f.jobRows = map[string]jobs.Job{}
+	}
+	if spec.IdempotencyKey != "" {
+		for _, existing := range f.jobRows {
+			if existing.IdempotencyKey == spec.IdempotencyKey {
+				if existing.RequestHash != spec.RequestHash {
+					return fmt.Errorf("enginefake: job key %s reused with a different request", spec.IdempotencyKey)
+				}
+				return writeJobResult(result, existing)
+			}
+		}
+	}
+	job := jobs.Job{
+		ID: fmt.Sprintf("job_%d", len(f.jobRows)+1), Node: spec.Node,
+		IdempotencyKey: spec.IdempotencyKey, RequestHash: spec.RequestHash, Command: spec.Command, State: jobs.StateQueued,
+	}
+	if job.Node == "" {
+		job.Node = "local"
+	}
+	f.jobRows[job.ID] = job
+	if len(f.JobSubmitErrors) > 0 {
+		err := f.JobSubmitErrors[0]
+		f.JobSubmitErrors = f.JobSubmitErrors[1:]
+		return err
+	}
+	return writeJobResult(result, job)
+}
+
+func (f *Engine) waitJob(ctx context.Context, id string, result any) error {
+	f.jobMu.Lock()
+	f.jobWaits = append(f.jobWaits, id)
+	job, ok := f.jobRows[id]
+	f.jobMu.Unlock()
+	if !ok {
+		return fmt.Errorf("enginefake: no job %s", id)
+	}
+	if !job.State.Finished() {
+		if f.JobHold != nil {
+			select {
+			case <-f.JobHold:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		f.jobMu.Lock()
+		job = f.jobRows[id]
+		if !job.State.Finished() {
+			code, configured := f.JobExitCodes[id]
+			job.State = jobs.StatePassed
+			if configured && code != 0 {
+				job.State = jobs.StateFailed
+			}
+			job.ExitCode = &code
+			f.jobRows[id] = job
+		}
+		f.jobMu.Unlock()
+	}
+	return writeJobResult(result, jobs.WaitResult{Job: job, Done: true})
+}
+
+func (f *Engine) cancelJob(id string, result any) error {
+	f.jobMu.Lock()
+	defer f.jobMu.Unlock()
+	f.jobStops = append(f.jobStops, id)
+	job, ok := f.jobRows[id]
+	if !ok {
+		return fmt.Errorf("enginefake: no job %s", id)
+	}
+	if !job.State.Finished() {
+		job.State, job.ExitCode = jobs.StateCancelled, nil
+		f.jobRows[id] = job
+	}
+	return writeJobResult(result, job)
+}
+
+func writeJobResult(result any, value any) error {
+	if result == nil {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, result)
 }
 
 // Bindings serve the same calls on a test engine's socket.

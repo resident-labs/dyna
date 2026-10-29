@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
@@ -100,25 +101,22 @@ func runCmd() *cobra.Command {
 			if ioWeight != "" && ioWeight != "heavy" && ioWeight != "light" {
 				return fmt.Errorf("io must be heavy or light, not %q", ioWeight)
 			}
-			resources, err := machines.ParseResourceNames(resourceNames)
-			if err != nil {
-				return err
-			}
 			repo := ""
 			if commit != "" {
 				repo, _ = os.Getwd()
 			}
-			request := map[string]any{
-				"node": node, "labels": labels, "command": args, "repo": repo, "ref": commit,
-				"host": host, "image": image, "cpus": cpus, "memory": memory,
-				"timeoutSec": int(timeout / time.Second), "io": ioWeight, "artifacts": artifacts,
-				"resources": resources, "workspace": workspace,
+			request := callspec.RunJobInput{
+				Node: node, Labels: labels, Command: args, Repo: repo, Ref: commit,
+				Host: host, Image: image, CPUs: cpus, Memory: memory,
+				Timeout: int(timeout / time.Second), IO: ioWeight, Artifacts: artifacts,
+				Resources: resourceNames, Workspace: workspace,
 			}
 			if c.Flags().Changed("idle") {
-				request["idleSec"] = int(idle / time.Second)
+				seconds := int(idle / time.Second)
+				request.Idle = &seconds
 			}
 			var job jobs.Job
-			err = engineclient.New("").Call(c.Context(), "RunJob", []any{request}, &job)
+			err := engineclient.New("").Call(c.Context(), "RunJob", []any{request}, &job)
 			if err != nil {
 				return err
 			}

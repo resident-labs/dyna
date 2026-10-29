@@ -25,7 +25,7 @@ import (
 
 // ExtractorVersion is hashed into planHash. Bump when graph or instrumentation
 // metadata extraction rules change.
-const ExtractorVersion = "7"
+const ExtractorVersion = "11"
 
 const (
 	StatusComplete    = "complete"
@@ -35,6 +35,7 @@ const (
 	KindWorkflow = "workflow"
 	KindPhase    = "phase"
 	KindAgent    = "agent"
+	KindJob      = "job"
 	KindParallel = "parallel"
 	KindPipeline = "pipeline"
 	KindBranch   = "branch"
@@ -152,6 +153,7 @@ type Node struct {
 	PromptPreview     string      `json:"promptPreview,omitempty"`
 	AuthorID          string      `json:"authorId,omitempty"`
 	StageCallback     string      `json:"stageCallback,omitempty"`
+	ReplayUnsafe      bool        `json:"replayUnsafe,omitempty"`
 	CallArguments     int         `json:"callArguments,omitempty"`
 	CallTrailingComma bool        `json:"callTrailingComma,omitempty"`
 	CalleeStartByte   int         `json:"calleeStartByte,omitempty"`

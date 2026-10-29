@@ -887,7 +887,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st := Store{DataDir: dir}
 	job := Job{
-		ID: "job_round", RoomID: "dyna", Session: "ses_1", Node: "here",
+		ID: "job_round", RoomID: "dyna", Session: "ses_1", Run: "wf_1", IdempotencyKey: "j3:round", RequestHash: "r1:round", Node: "here",
 		Command: []string{"echo", "with spaces"}, Repo: "/repo/.git", SHA: strings.Repeat("a", 40),
 		Host: true, CPUs: 4, MemoryMiB: 8192, Timeout: 90 * time.Minute, Idle: 20 * time.Minute,
 		State: StateRunning, LogPath: filepath.Join(dir, "log"),
@@ -902,7 +902,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Session != job.Session || !got.Host || got.Timeout != job.Timeout || got.Idle != job.Idle || got.SHA != job.SHA {
+	if got.Session != job.Session || got.Run != job.Run || got.IdempotencyKey != job.IdempotencyKey || got.RequestHash != job.RequestHash || !got.Host || got.Timeout != job.Timeout || got.Idle != job.Idle || got.SHA != job.SHA {
 		t.Fatalf("round trip = %+v", got)
 	}
 	if len(got.Command) != 2 || got.Command[1] != "with spaces" {
@@ -918,7 +918,7 @@ func TestStoreRoundTrip(t *testing.T) {
 }
 
 // Named resources used version 4. Their existing databases still need the
-// idle and workspace columns when this store moves them to version 6.
+// idle, workspace, workflow-run and idempotency columns at store version 9.
 func TestStoreMigrationUpdatesVersionFour(t *testing.T) {
 	dir := t.TempDir()
 	db, err := database.Open(dir)
@@ -936,17 +936,17 @@ func TestStoreMigrationUpdatesVersionFour(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name IN ('idle_s','workspace')`).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name IN ('idle_s','workspace','run','idempotency_key','request_hash')`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Fatal("the version 4 database did not gain idle_s and workspace")
+	if count != 5 {
+		t.Fatal("the version 4 database did not gain all later job columns")
 	}
 	var version string
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key='jobs.version'`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != "6" {
-		t.Fatalf("jobs.version = %s, want 6", version)
+	if version != "9" {
+		t.Fatalf("jobs.version = %s, want 9", version)
 	}
 }
