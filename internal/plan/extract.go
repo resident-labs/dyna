@@ -54,6 +54,7 @@ type walkCtx struct {
 	groupDepth     int
 	loopDepth      int
 	groupLoopDepth int
+	replayUnsafe   bool
 }
 
 type scope struct {

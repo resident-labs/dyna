@@ -25,7 +25,7 @@ import (
 
 // ExtractorVersion is hashed into planHash. Bump when graph or instrumentation
 // metadata extraction rules change.
-const ExtractorVersion = "10"
+const ExtractorVersion = "11"
 
 const (
 	StatusComplete    = "complete"
