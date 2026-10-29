@@ -50,6 +50,7 @@ type walkCtx struct {
 	lastFlow      *string
 	card          Cardinality
 	stageCallback string
+	functionDepth int
 }
 
 type scope struct {
@@ -126,6 +127,10 @@ func Extract(src string, opts Options) *Plan {
 	last := ""
 	phase := ""
 	ctx := walkCtx{parentID: root, lastFlow: &last, phase: &phase, card: exactOne()}
+	if ex.wrapPrefix > 0 {
+		// The parser-added async wrapper is not a user function scope.
+		ctx.functionDepth = -1
+	}
 	sc := &scope{bound: map[string]bool{}}
 	ex.visitProgram(prog, ctx, sc)
 	p.Status = ex.status

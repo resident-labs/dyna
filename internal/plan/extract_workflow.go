@@ -78,6 +78,7 @@ func (ex *extractor) hookJob(call *ast.CallExpression, ctx walkCtx, sc *scope) {
 	node := Node{
 		Kind: KindJob, ParentID: ctx.parentID, GroupID: ctx.groupID,
 		Label: "job", Phase: phaseOf(ctx), StageCallback: ctx.stageCallback,
+		FunctionScope: ctx.functionDepth > 0,
 		CallArguments: len(call.ArgumentList), CallTrailingComma: ex.callTrailingComma(call),
 		Certainty: certOf(ctx), Cardinality: card,
 	}

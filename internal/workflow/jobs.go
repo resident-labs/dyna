@@ -40,11 +40,12 @@ type jobCallSpec struct {
 
 // jobPlanCall is the stable source and branch identity injected by the plan.
 type jobPlanCall struct {
-	NodeID     string   `json:"__planNodeId"`
-	GroupID    string   `json:"__planGroupId"`
-	StageIndex *int     `json:"__stageIndex"`
-	ItemIndex  *int     `json:"__itemIndex"`
-	Path       []string `json:"__planPath"`
+	NodeID        string   `json:"__planNodeId"`
+	GroupID       string   `json:"__planGroupId"`
+	StageIndex    *int     `json:"__stageIndex"`
+	ItemIndex     *int     `json:"__itemIndex"`
+	Path          []string `json:"__planPath"`
+	FunctionScope bool     `json:"__planFunctionScope"`
 }
 
 func jobPositionHash(workflowID string, plan jobPlanCall) string {
@@ -179,6 +180,7 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 	requestHash := jobRequestHash(spec)
 	positionHash := jobPositionHash(e.workflowID, plan)
 	identity := requestHash + "\n" + positionHash
+	replayUnsafe := plan.FunctionScope && len(plan.Path) == 0
 	e.shared.mu.Lock()
 	e.shared.execSeq++
 	id := e.shared.execSeq
@@ -198,6 +200,7 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 			ID: id, Label: label, Key: key, Cwd: spec.Repo, Prompt: line,
 			Result: result, Error: errStr, Workflow: e.workflowID,
 			Kind: "job", State: state, Job: jobID, RequestHash: requestHash, PositionHash: positionHash,
+			JobReplayUnsafe: replayUnsafe,
 		})
 	}
 	// No submission can precede this record. Its identity lets a resumed run

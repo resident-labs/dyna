@@ -137,7 +137,7 @@ globalThis.run = function (command, opts) {
   return __exec(command, applyPlanCtx(opts));
 };
 
-globalThis.__planJob = function (planNodeId, ...args) {
+globalThis.__planJob = function (planNodeId, functionScope, ...args) {
   let ctx;
   const last = args[args.length - 1];
   if (last && __planContexts.has(last)) {
@@ -145,13 +145,17 @@ globalThis.__planJob = function (planNodeId, ...args) {
   }
   const opts = applyPlanCtx({}, ctx);
   opts.__planNodeId = String(planNodeId);
+  opts.__planFunctionScope = functionScope;
   return __job(args[0], opts);
 };
 
 // job(spec) -> Promise<{ id, node, state, exitCode, log }>
 // Runs one command through the engine job queue. Durations use Go syntax.
 globalThis.job = function (spec) {
-  return __job(spec, applyPlanCtx({}));
+  const opts = applyPlanCtx({});
+  // Uninstrumented calls have no proof of a stable top-level call position.
+  opts.__planFunctionScope = true;
+  return __job(spec, opts);
 };
 
 // post(to, text, data?) or post(to, { text, data }) -> { id, deliveries, skipped?, error? }
