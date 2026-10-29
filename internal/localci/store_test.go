@@ -326,9 +326,13 @@ func TestSaveResultStoresOnlyTheTailOfAFailedLog(t *testing.T) {
 	s := fixtureStore(t)
 	repo := t.TempDir()
 	sha := strings.Repeat("c", 40)
-	log := "write: no space left on device\n" + strings.Repeat("x", 200<<10) + "\n--- FAIL: TestSlow (0.01s)\nFAIL\n"
+	log := "=== RUN TestEarly\nwrite: no space left on device\n--- FAIL: TestEarly (0.00s)\nFAIL\n" + strings.Repeat("x", 200<<10) + "\n--- FAIL: TestSlow (0.01s)\nFAIL\n"
+	path := filepath.Join(t.TempDir(), "go.log")
+	if err := os.WriteFile(path, []byte(log), 0600); err != nil {
+		t.Fatal(err)
+	}
 	result := Result{Repo: repo, SHA: sha, Status: OutcomeFailed, Checks: []SuiteResult{
-		{Suite: "go", Status: OutcomeFailed, LogTail: log},
+		{Suite: "go", Status: OutcomeFailed, LogTail: log, FailureExcerpt: checkFailureExcerpt(path)},
 		{Suite: "lint", Status: OutcomePassed, LogTail: log},
 	}}
 	if err := s.SaveResult(ctx, result); err != nil {
@@ -342,7 +346,11 @@ func TestSaveResultStoresOnlyTheTailOfAFailedLog(t *testing.T) {
 	if len(failed) > 4<<10+512 || !diskFull(failed) || !strings.Contains(failed, "--- FAIL: TestSlow") {
 		t.Fatalf("failed check kept %d bytes, want the disk-full line and the end of the log", len(failed))
 	}
-	if loaded.Checks[1].LogTail != "" {
+	excerpt := loaded.Checks[0].FailureExcerpt
+	if !strings.Contains(excerpt, "=== RUN TestEarly") || !diskFull(excerpt) || len(excerpt) > 4<<10 {
+		t.Fatalf("stored excerpt = %q, want the early failing block within the bound", excerpt)
+	}
+	if loaded.Checks[1].LogTail != "" || loaded.Checks[1].FailureExcerpt != "" {
 		t.Fatalf("passed check kept its log: %d bytes", len(loaded.Checks[1].LogTail))
 	}
 }
