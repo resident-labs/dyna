@@ -24,6 +24,9 @@ const AdmissionTopic = "admission"
 // engine's pass writes the row; this only notices.
 const pollEvery = time.Second
 
+// reservationMargin gives recovery time beyond a check's own deadline.
+const reservationMargin = 5 * time.Minute
+
 // maxPortsPerNode bounds the port indexes a node hands to its checks. The
 // index offsets two base ports (sccache and act artifacts) whose ranges then
 // never meet; no node runs this many checks at once.
@@ -51,6 +54,8 @@ const admissionSchema = `CREATE TABLE admissions (
 	engine INTEGER NOT NULL DEFAULT 0,
 	owner_pid INTEGER NOT NULL DEFAULT 0,
 	owner_start INTEGER NOT NULL DEFAULT 0,
+	timeout_ms INTEGER NOT NULL DEFAULT 1800000,
+	expires_ms INTEGER NOT NULL DEFAULT 0,
 	created_ms INTEGER NOT NULL
 );
 CREATE INDEX admissions_open ON admissions(node, state);
@@ -69,6 +74,8 @@ type Demand struct {
 	Heavy     bool
 	CPUs      int
 	MemoryMiB int64
+	// Timeout is the check deadline, starting when the check is admitted.
+	Timeout time.Duration
 }
 
 // Admission is the engine-side queue of every node: the one place that
@@ -88,6 +95,14 @@ type Admission struct {
 	// the engine, such as the manual CI command, leaves this off, so the pass
 	// can reap its rows once its process is gone.
 	Engine bool
+	clock  func() time.Time
+}
+
+func (a Admission) now() time.Time {
+	if a.clock != nil {
+		return a.clock()
+	}
+	return time.Now()
 }
 
 // admissionOwner names the process that holds a row, so a reused pid is not
@@ -154,15 +169,16 @@ type admissionRow struct {
 	Created time.Time
 }
 
-const admissionColumns = "id,node,room,cpus,memory_mib,heavy,port,state,reason,engine,owner_pid,owner_start,created_ms"
+const admissionColumns = "id,node,room,cpus,memory_mib,heavy,port,state,reason,engine,owner_pid,owner_start,timeout_ms,expires_ms,created_ms"
 
 func scanAdmission(row interface{ Scan(...any) error }) (admissionRow, error) {
 	var r admissionRow
 	var heavy, engine int
-	var created int64
-	if err := row.Scan(&r.ID, &r.Node, &r.Room, &r.CPUs, &r.MemoryMiB, &heavy, &r.Port, &r.State, &r.Reason, &engine, &r.PID, &r.Start, &created); err != nil {
+	var created, timeout, expires int64
+	if err := row.Scan(&r.ID, &r.Node, &r.Room, &r.CPUs, &r.MemoryMiB, &heavy, &r.Port, &r.State, &r.Reason, &engine, &r.PID, &r.Start, &timeout, &expires, &created); err != nil {
 		return admissionRow{}, err
 	}
+	r.Timeout = time.Duration(timeout) * time.Millisecond
 	r.Heavy, r.Engine = heavy == 1, engine == 1
 	r.Created = time.UnixMilli(created)
 	return r, nil
@@ -220,6 +236,9 @@ func (a Admission) Acquire(ctx context.Context, d Demand, wait func(context.Cont
 
 // Hold reattaches running work while preserving its original port.
 func (a Admission) Hold(ctx context.Context, d Demand) (int, error) {
+	if d.Timeout <= 0 {
+		d.Timeout = DefaultTimeout
+	}
 	db, err := a.db()
 	if err != nil {
 		return -1, err
@@ -235,7 +254,8 @@ func (a Admission) Hold(ctx context.Context, d Demand) (int, error) {
 				return fmt.Errorf("admission %s belongs to node %s", d.ID, row.Node)
 			}
 			port = row.Port
-			return nil
+			_, err = conn.ExecContext(ctx, "UPDATE admissions SET timeout_ms=?, expires_ms=? WHERE id=?", d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), d.ID)
+			return err
 		}
 		rows, err := rowsConn(ctx, conn, "admitted")
 		if err != nil {
@@ -249,11 +269,60 @@ func (a Admission) Hold(ctx context.Context, d Demand) (int, error) {
 		if a.Engine {
 			pid, start = 0, 0
 		}
-		_, err = conn.ExecContext(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, port=excluded.port, state='admitted', reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start",
-			d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), port, "admitted", "", boolInt(a.Engine), pid, start, time.Now().UnixMilli())
+		_, err = conn.ExecContext(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, port=excluded.port, state='admitted', reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
+			d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), port, "admitted", "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
 		return err
 	})
 	return port, err
+}
+
+// Reattach recovers only an existing reservation. Allocating a new port would
+// be unsafe because a detached check still uses its original port.
+func (a Admission) Reattach(ctx context.Context, d Demand) (int, error) {
+	if d.Timeout <= 0 {
+		d.Timeout = DefaultTimeout
+	}
+	db, err := a.db()
+	if err != nil {
+		return -1, err
+	}
+	port := -1
+	err = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+		row, err := scanAdmission(conn.QueryRowContext(ctx, "SELECT "+admissionColumns+" FROM admissions WHERE id=? AND node=? AND state='admitted'", d.ID, d.Node))
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("reservation for check %s on %s is missing", d.ID, d.Node)
+		}
+		if err != nil {
+			return err
+		}
+		port = row.Port
+		_, err = conn.ExecContext(ctx, "UPDATE admissions SET timeout_ms=?, expires_ms=? WHERE id=?", d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), d.ID)
+		return err
+	})
+	return port, err
+}
+
+// Renew extends an admitted check's reservation while its node still reports
+// it running. A missing reservation cannot safely be recreated with a new port.
+func (a Admission) Renew(ctx context.Context, node, id string) error {
+	db, err := a.db()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, "UPDATE admissions SET expires_ms=?+timeout_ms WHERE id=? AND node=? AND state='admitted'", a.now().Add(reservationMargin).UnixMilli(), id, node)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("reservation for check %s on %s is missing", id, node)
+		}
+		return nil
+	})
 }
 
 // Release ends this holder's row. Its capacity and its port index return at
@@ -286,6 +355,9 @@ func (a Admission) get(ctx context.Context, id string) (admissionRow, error) {
 }
 
 func (a Admission) upsert(ctx context.Context, d Demand, admitted bool) error {
+	if d.Timeout <= 0 {
+		d.Timeout = DefaultTimeout
+	}
 	pid, start := admissionOwner()
 	if a.Engine {
 		pid, start = 0, 0
@@ -294,8 +366,8 @@ func (a Admission) upsert(ctx context.Context, d Demand, admitted bool) error {
 	if admitted {
 		state = "admitted"
 	}
-	return a.write(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, state=excluded.state, reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start",
-		d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), -1, state, "", boolInt(a.Engine), pid, start, time.Now().UnixMilli())
+	return a.write(ctx, "INSERT INTO admissions("+admissionColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET node=excluded.node, room=excluded.room, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, state=excluded.state, reason='', engine=excluded.engine, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, timeout_ms=excluded.timeout_ms, expires_ms=excluded.expires_ms",
+		d.ID, d.Node, d.Room, d.CPUs, d.MemoryMiB, boolInt(d.Heavy), -1, state, "", boolInt(a.Engine), pid, start, d.Timeout.Milliseconds(), a.now().Add(d.Timeout+reservationMargin).UnixMilli(), a.now().UnixMilli())
 }
 
 // rows lists the queue rows in one state, grouped by node, oldest first.
@@ -432,7 +504,7 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 				}
 				current = append(current, job)
 			}
-			if err := passNode(ctx, conn, node, facts[node], factErrors[node], waiting[node], current, held[node], running[node], admitted, reasons); err != nil {
+			if err := passNode(ctx, conn, a.now(), node, facts[node], factErrors[node], waiting[node], current, held[node], running[node], admitted, reasons); err != nil {
 				return err
 			}
 		}
@@ -471,7 +543,7 @@ func (a Admission) sweep(ctx context.Context) error {
 	}
 	_ = db // one shared handle per data folder; never closed
 	return state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE state='released'"); err != nil {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", a.now().UnixMilli()); err != nil {
 			return err
 		}
 		rows, err := conn.QueryContext(ctx, "SELECT id,owner_pid,owner_start FROM admissions WHERE engine=0")
@@ -511,7 +583,7 @@ func (a Admission) sweep(ctx context.Context) error {
 // jobs plus the admitted rows; capacity, limits and disk use come from the
 // machine's last probe and its stored limits. Reads and writes of admission
 // state share the caller's transaction.
-func passNode(ctx context.Context, conn *sql.Conn, node string, machine machines.Machine, machineErr error, waiting []admissionRow, candidates []Job, heldRows []admissionRow, running []Job, admitted map[string]bool, reasons map[string]string) error {
+func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, waiting []admissionRow, candidates []Job, heldRows []admissionRow, running []Job, admitted map[string]bool, reasons map[string]string) error {
 	capacityCPUs, capacityMemMiB := 0, int64(0)
 	limits := machines.Machine{}
 	if machineErr == nil {
@@ -618,7 +690,7 @@ func passNode(ctx context.Context, conn *sql.Conn, node string, machine machines
 	}
 	for _, write := range writes {
 		if write.reason == "" {
-			if _, err := conn.ExecContext(ctx, "UPDATE admissions SET state='admitted', port=?, reason='' WHERE id=? AND state='waiting'", write.port, write.id); err != nil {
+			if _, err := conn.ExecContext(ctx, "UPDATE admissions SET state='admitted', port=?, reason='', expires_ms=?+timeout_ms WHERE id=? AND state='waiting'", write.port, now.Add(reservationMargin).UnixMilli(), write.id); err != nil {
 				return err
 			}
 		} else if _, err := conn.ExecContext(ctx, "UPDATE admissions SET reason=? WHERE id=? AND state='waiting'", write.reason, write.id); err != nil {
@@ -688,6 +760,9 @@ func orderWaiters(waiters []waiter) []waiter {
 // room on it, checks and jobs both. A node's page reads it, so the queue is
 // visible without reading a log.
 func (a Admission) Snapshot(ctx context.Context, node string) (running, waiting int, err error) {
+	if err := a.sweep(ctx); err != nil {
+		return 0, 0, err
+	}
 	waitingRows, err := a.rows(ctx, "waiting")
 	if err != nil {
 		return 0, 0, err
@@ -722,6 +797,9 @@ func (a Admission) FreeCPUs(ctx context.Context, node string, capacity int) int 
 	if capacity <= 0 {
 		// No probe read the node, so its queue counts nothing against it.
 		return unlimitedCPUs
+	}
+	if err := a.sweep(ctx); err != nil {
+		return 0
 	}
 	limits := machines.Machine{}
 	limits.Capabilities.CPUs = capacity

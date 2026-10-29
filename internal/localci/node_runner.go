@@ -397,6 +397,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			failure = r.nodeCommand(cleanup, &tail, &tail, script)
 			stop()
 			if failure == nil {
+				// Teardown confirmed that every check stopped. Any reservation
+				// retained after an uncertain poll can now be released.
+				for _, check := range checks {
+					if err := r.queue().Release(context.Background(), node.Name, runID+"-"+string(check.id)); err != nil {
+						log.Printf("local CI %s: release check reservation: %v", node.Name, err)
+					}
+				}
 				return
 			}
 			lastOutput = tail.String()
@@ -437,6 +444,19 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// One poller follows every check of this run with one call at a time.
 	poller, stopPoller := r.exec().NewPoller(control)
 	defer stopPoller()
+	// Renew a live check at most once per minute. The expiry is much longer
+	// than this interval, including when a poll takes time to return.
+	renewed := map[string]time.Time{}
+	poller.Polled = func(spec jobs.RunSpec) {
+		if time.Since(renewed[spec.ID]) < time.Minute {
+			return
+		}
+		if err := r.queue().Renew(control, node.Name, runID+"-"+spec.ID); err != nil {
+			log.Printf("local CI %s: renew check reservation: %v", node.Name, err)
+			return
+		}
+		renewed[spec.ID] = time.Now()
+	}
 	var attachedMu sync.Mutex
 	// Record each check before admission. If the engine stops between
 	// admission and launch, recovery can inspect the node and release its
@@ -507,13 +527,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				// is visible. A resumed check already runs on the node, so it only
 				// takes its place back.
 				queue := r.queue()
-				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB}
+				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB, Timeout: req.Timeout}
 				runErr := recordCheck(check.id)
 				port := 0
 				if runErr != nil {
 					runErr = fmt.Errorf("record check before admission: %w", runErr)
 				} else if spec.Attach {
-					held, holdErr := queue.Hold(checkCtx, demand)
+					held, holdErr := queue.Reattach(checkCtx, demand)
 					if holdErr != nil {
 						runErr = fmt.Errorf("record the running check %s in the queue: %w", check.id, holdErr)
 					} else {
@@ -536,10 +556,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				if runErr == nil {
 					runErr = poller.Run(checkCtx, spec, writer)
 				}
-				// The check's place in the queue ends with the check, whatever
-				// ended it; a released row frees its room and its port at the next
-				// pass.
-				if !r.Engine || !EngineStopping() {
+				// An exit record proves the check ended. A transport failure or
+				// failed stop does not; retain its reservation until teardown
+				// confirms the stop or the reservation expires.
+				var exited *jobs.DetachedExit
+				if (!r.Engine || !EngineStopping()) && (runErr == nil || errors.As(runErr, &exited)) {
 					releaseCtx, releaseStop := context.WithTimeout(context.WithoutCancel(checkCtx), 10*time.Second)
 					_ = queue.Release(releaseCtx, node.Name, demand.ID)
 					releaseStop()
