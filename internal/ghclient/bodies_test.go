@@ -1,6 +1,7 @@
 package ghclient
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -53,7 +54,7 @@ func TestOwnerIdentityRefusedInPublicText(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := refuseOwnerIdentity(cmd)
+			err := refuseOwnerIdentity(WithAgentText(context.Background()), cmd)
 			if tt.uninspectable {
 				if !errors.Is(err, errUninspectableText) {
 					t.Fatalf("error = %v, want the uninspectable refusal", err)
@@ -73,5 +74,16 @@ func TestOwnerIdentityRefusedInPublicText(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Dyna's own calls carry the owner's text, so the check leaves them alone.
+func TestOwnerIdentityIgnoredForDynaCalls(t *testing.T) {
+	previous := ownerIdentities
+	ownerIdentities = func() ([]string, error) { return []string{"Pat Example"}, nil }
+	t.Cleanup(func() { ownerIdentities = previous })
+	cmd := exec.Command("gh", "pr", "edit", "1", "--body", "by Pat Example")
+	if err := refuseOwnerIdentity(context.Background(), cmd); err != nil {
+		t.Fatalf("owner edit refused: %v", err)
 	}
 }

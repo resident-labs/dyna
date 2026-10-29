@@ -2,6 +2,7 @@ package ghclient
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -11,6 +12,20 @@ import (
 
 	"dyna-agent/internal/account/store"
 )
+
+type agentTextKey struct{}
+
+// WithAgentText marks a context whose gh commands carry text an agent wrote.
+// Only the agent's gh shim sets it. Dyna's own calls, such as the owner's PR
+// edit, carry the owner's text and are never checked or changed.
+func WithAgentText(ctx context.Context) context.Context {
+	return context.WithValue(ctx, agentTextKey{}, true)
+}
+
+func isAgentText(ctx context.Context) bool {
+	agent, _ := ctx.Value(agentTextKey{}).(bool)
+	return agent
+}
 
 // errOwnerIdentityInBody refuses text that names a person behind a saved sign-in.
 // The message never repeats the matched text, so a refusal cannot leak it again.
@@ -116,7 +131,10 @@ func publicText(cmd *exec.Cmd) (string, error) {
 
 // refuseOwnerIdentity refuses a title or body that contains a saved sign-in
 // identity of the owner (D-501). Issues and pull requests are often public.
-func refuseOwnerIdentity(cmd *exec.Cmd) error {
+func refuseOwnerIdentity(ctx context.Context, cmd *exec.Cmd) error {
+	if !isAgentText(ctx) {
+		return nil
+	}
 	text, err := publicText(cmd)
 	if err != nil || text == "" {
 		return err
