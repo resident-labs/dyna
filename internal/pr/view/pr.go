@@ -241,9 +241,10 @@ func (s *Service) UntrackPR(ctx context.Context, roomRef, key string) error {
 	return p.Untrack(ctx, key)
 }
 
-// PRHold returns the hold on the tracked change at url in roomRef, or nil when
-// no hold applies. A change that is not tracked in the room has no hold.
-func (s *Service) PRHold(roomRef, url string) (*state.Hold, error) {
+// PRHold returns the hold on the tracked change named by ref in roomRef, or nil when
+// no hold applies. ref is a PR URL or the change's branch name. A change that is
+// not tracked in the room has no hold.
+func (s *Service) PRHold(roomRef, ref string) (*state.Hold, error) {
 	rec, err := s.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return nil, err
@@ -253,7 +254,7 @@ func (s *Service) PRHold(roomRef, url string) (*state.Hold, error) {
 		return nil, err
 	}
 	for _, r := range projection.state.Records {
-		if r.RoomID == rec.ID && r.URL == url {
+		if r.RoomID == rec.ID && (r.URL == ref || r.Branch == ref) {
 			return r.Hold, nil
 		}
 	}
