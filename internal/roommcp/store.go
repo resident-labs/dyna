@@ -24,16 +24,6 @@ CREATE TABLE room_mcp_grants (
  subject TEXT NOT NULL, granted_by TEXT NOT NULL,
  PRIMARY KEY (room, server, kind, subject),
  FOREIGN KEY (room, server) REFERENCES room_mcp_servers(room, name) ON DELETE CASCADE
-);
-CREATE TABLE room_mcp_block_terms (
- room TEXT NOT NULL, server TEXT NOT NULL, hash TEXT NOT NULL, words INTEGER NOT NULL,
- PRIMARY KEY (room, server, hash),
- FOREIGN KEY (room, server) REFERENCES room_mcp_servers(room, name) ON DELETE CASCADE
-);
-CREATE TABLE room_mcp_logins (
- room TEXT NOT NULL, server TEXT NOT NULL, login TEXT NOT NULL,
- PRIMARY KEY (room, server, login),
- FOREIGN KEY (room, server) REFERENCES room_mcp_servers(room, name) ON DELETE CASCADE
 );`
 
 // Migrate creates the room MCP tables. Only the engine calls it, at startup.
