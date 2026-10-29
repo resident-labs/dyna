@@ -176,3 +176,31 @@ func TestDisableDuringProbeWins(t *testing.T) {
 		t.Fatalf("machine after it was enabled again = %s (%q), want unknown", enabled.Status(), enabled.HealthReason)
 	}
 }
+
+// A node keeps admitting work while its free space is at least the larger of
+// 20 GiB and 5% of the disk, however full the disk is in percent: a 1.8 TiB
+// disk with 96 GiB free is not full. A set percent limit overrides the floor.
+func TestDiskBlocksWorkByFreeSpace(t *testing.T) {
+	const gib = uint64(1) << 30
+	cases := []struct {
+		name        string
+		total, free uint64
+		maxPercent  int
+		blocked     bool
+	}{
+		{"big disk 95% used, 96 GiB free", 1843 * gib, 96 * gib, 0, false},
+		{"big disk below 5% free", 1843 * gib, 80 * gib, 0, true},
+		{"small disk above the 20 GiB floor", 100 * gib, 25 * gib, 0, false},
+		{"small disk below the 20 GiB floor", 100 * gib, 15 * gib, 0, true},
+		{"percent override blocks", 1843 * gib, 96 * gib, 90, true},
+		{"percent override admits", 100 * gib, 15 * gib, 90, false},
+		{"never probed", 0, 0, 0, false},
+	}
+	for _, tc := range cases {
+		m := Machine{MaxDiskPercent: tc.maxPercent, Capabilities: Capabilities{Disk: Disk{Total: tc.total, Free: tc.free}}}
+		why := m.DiskBlock()
+		if (why != "") != tc.blocked {
+			t.Fatalf("%s: DiskBlock() = %q, want blocked=%v", tc.name, why, tc.blocked)
+		}
+	}
+}
