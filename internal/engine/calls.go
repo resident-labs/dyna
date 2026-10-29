@@ -132,6 +132,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SystemLoad", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.systemLoad},
 		{Name: "Machines", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Machines},
 		{Name: "Machine", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Machine},
+		{Name: "MachineWork", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.MachineWork},
 		// Changing a machine's roles or route retargets the engine's work, so
 		// the write needs the admin scope, like other settings.
 		{Name: "SaveMachine", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.SaveMachine},
