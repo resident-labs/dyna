@@ -385,6 +385,11 @@ func TestSessionSayReplaceCancelsAndAppendWaits(t *testing.T) {
 	if m := r.next(t); m.Type != agentwire.OutResponseDone {
 		t.Fatalf("got %+v, want response_done with no audio of the cancelled reply", m)
 	}
+	// The queued reply leaves after the done line, so sync waits for its send.
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after response done = %+v", m)
+	}
 	want := "[text:Say exactly this, word for word, and nothing else: one text:Say exactly this, word for word, and nothing else: two cancel respond:]"
 	if got := fmt.Sprint(conn.sentSoFar()); got != want {
 		t.Fatalf("sent = %s\nwant %s", got, want)
@@ -413,6 +418,11 @@ func TestSessionTextRespondAsksOnceAndWaitsLikeAppend(t *testing.T) {
 	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
 	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
 		t.Fatalf("got %+v, want response_done for r1", m)
+	}
+	// The queued reply leaves after the done line, so sync waits for its send.
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after response done = %+v", m)
 	}
 	want := "[text:a player joined text:what changed? respond: text:[BACKEND] the door is open respond:]"
 	if got := fmt.Sprint(conn.sentSoFar()); got != want {
@@ -636,6 +646,11 @@ func TestSessionCommitAndVADEagerness(t *testing.T) {
 	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
 		t.Fatalf("response done = %+v", m)
 	}
+	// The queued reply leaves after the done line, so sync waits for its send.
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after response done = %+v", m)
+	}
 	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond: audio:2 commit respond:]" {
 		t.Fatalf("queued reply sent %s", got)
 	}
@@ -753,6 +768,11 @@ func TestSessionCommitWithoutEchoDoesNotSwallowTheNextTurn(t *testing.T) {
 	conn.events <- realtime.Event{Kind: realtime.ResponseDone}
 	if m := r.next(t); m.Type != agentwire.OutResponseDone {
 		t.Fatalf("done = %+v", m)
+	}
+	// The queued reply leaves after the done line, so sync waits for its send.
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after response done = %+v", m)
 	}
 	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond: respond:]" {
 		t.Fatalf("next turn sent %s, want a reply after speech", got)
@@ -893,6 +913,11 @@ func TestSessionManualTurns(t *testing.T) {
 	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
 	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
 		t.Fatalf("response done = %+v", m)
+	}
+	// The queued reply leaves after the done line, so sync waits for its send.
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after response done = %+v", m)
 	}
 	if got := fmt.Sprint(conn.sentSoFar()); strings.Count(got, "respond:") != 2 || strings.Count(got, "commit") != 2 {
 		t.Fatalf("queued reply sent %s, want the waiting commit to ask once", got)
@@ -1144,6 +1169,11 @@ func TestSessionReplyInstructionsOnAutomaticAndToolReplies(t *testing.T) {
 	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
 	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
 		t.Fatalf("response done = %+v", m)
+	}
+	// The queued reply leaves after the done line, so sync waits for its send.
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after response done = %+v", m)
 	}
 	if got := fmt.Sprint(conn.sentSoFar()); got != "[respond::steady accent tool:c1:done respond::steady accent]" {
 		t.Fatalf("reply after tool result sent %s, want the session default", got)
