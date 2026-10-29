@@ -372,6 +372,7 @@ type TurnEnd struct {
 	Model              string                          `json:"model,omitempty"`
 	Usage              workeroutput.Usage              `json:"usage"`
 	UsageNormalization workeroutput.UsageNormalization `json:"usageNormalization,omitempty"`
+	FirstCall          *workeroutput.CallUsage         `json:"firstCall,omitempty"`
 	HarnessSession     string                          `json:"harnessSession,omitempty"`
 	RawEnd             int64                           `json:"rawEnd"`
 	NormEnd            int64                           `json:"normEnd"`
@@ -433,7 +434,7 @@ func (m *Manager) endTurn(ctx context.Context, id string, e TurnEnd) error {
 		}
 		t.RoomHeld, t.HeldPrompt, t.HeldAccepted = false, "", false
 		t.PendingInputIDs = nil
-		t.Usage, t.UsageNormalization = e.Usage, e.UsageNormalization
+		t.Usage, t.UsageNormalization, t.FirstCall = e.Usage, e.UsageNormalization, e.FirstCall
 		if e.HarnessSession != "" {
 			t.HarnessSession = e.HarnessSession
 		}

@@ -160,6 +160,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			UsageNormalization: turnNormalization, HarnessSession: sid, RawEnd: fileSize(rawPath), NormEnd: fileSize(normPath),
 			InputCutoff: cutoff, CutoffPending: cutoff == nil, FallbackCutoff: &fallback}
 		if result != nil {
+			if r, ok := result.(harness.Result); ok {
+				end.FirstCall = r.FirstCall
+			}
 			if b, err := json.Marshal(result); err == nil {
 				end.Result = b
 			}
