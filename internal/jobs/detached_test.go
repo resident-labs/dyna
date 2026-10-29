@@ -134,9 +134,10 @@ func TestDetachedCheckReportsItsExitStatus(t *testing.T) {
 // lets the stop succeed. The script runs for real against a local wrapper
 // process group and a held writer process.
 func TestStopScriptFailsWhileTheLogWriterRuns(t *testing.T) {
-	// The runner scrubs the environment, so the short writer bound rides in as
-	// the first line of the same script: the stop text itself runs unchanged.
-	stop := "DYNA_CI_WRITER_WAIT_TENTHS=3\n" + StopScript
+	// The runner scrubs the environment, so the writer bound rides in as the
+	// first line of the same script: the stop text itself runs unchanged, and
+	// a bound of zero tenths checks the writer at once without a real sleep.
+	stop := "DYNA_CI_WRITER_WAIT_TENTHS=0\n" + StopScript
 	dir := t.TempDir()
 	wrapper := exec.Command("setsid", "sleep", "60")
 	if err := wrapper.Start(); err != nil {
