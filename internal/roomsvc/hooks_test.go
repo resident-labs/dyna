@@ -3,6 +3,8 @@ package roomsvc
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -40,5 +42,22 @@ func TestQueueRowsWakeHookWorker(t *testing.T) {
 	svc.scanHookSpool(&version, true, emit)
 	if len(events) != 1 {
 		t.Fatal("initial scan emitted event")
+	}
+	// A legacy spool file a previous-release emitter appended wakes the
+	// worker the same way, with no queue row behind it.
+	spool := filepath.Join(store.DataDir(), "hook-spool")
+	if err := os.MkdirAll(spool, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(spool, "1.json"), []byte(`{"event":"after-land"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	svc.scanHookSpool(&version, false, emit)
+	if len(events) != 2 || events[1].Kind != "hooks" || !events[1].WorkerWake {
+		t.Fatalf("legacy spool file did not wake worker: %#v", events)
+	}
+	svc.scanHookSpool(&version, false, emit)
+	if len(events) != 2 {
+		t.Fatal("unchanged spool woke worker")
 	}
 }
