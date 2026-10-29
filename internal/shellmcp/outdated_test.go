@@ -175,3 +175,55 @@ func TestServeRestartWaitsForAHalfReadRequest(t *testing.T) {
 	<-s.restarted
 	s.finish()
 }
+
+const callWrite = `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"shell","arguments":{"command":"true","description":"Run true"}}}` + "\n"
+
+// A store the engine migrated past this binary refuses this server's next
+// write from inside its transaction, even when the write still fits the old
+// tables, and the server then restarts on the current binary (D-468). Only
+// the version row advances; no real migration runs.
+func TestServeRefusesAWriteToAStoreThatAdvancedPastThisBinary(t *testing.T) {
+	dir := t.TempDir()
+	if err := shells.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	s := &outdatedServer{t: t, restarted: make(chan struct{}, 1), served: make(chan error, 1)}
+	tools := &Tools{Store: &shells.Store{Root: filepath.Join(dir, "shells")}}
+	tools.SetRestart(func() { s.restarted <- struct{}{} })
+	requests, writes, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads, answers, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.writes, s.replies = writes, bufio.NewReader(reads)
+	go func() { s.served <- Serve(context.Background(), requests, answers, tools) }()
+	t.Cleanup(func() { reads.Close() })
+	s.send(callJobs)
+	if line := s.reply(); strings.Contains(line, "newer dyna") {
+		t.Fatalf("a current store refused a call: %s", line)
+	}
+	s.notRestarted()
+	// The engine's forward migration moved the store past this build.
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Immediate(context.Background(), db, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), "UPDATE meta SET value='99' WHERE key='shells.version'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// This server is an installed client, not the engine.
+	database.DisownSchema()
+	t.Cleanup(database.OwnSchema)
+	s.send(callWrite)
+	if line := s.reply(); !strings.Contains(line, "newer dyna") {
+		t.Fatalf("the write into the advanced store was not refused: %s", line)
+	}
+	<-s.restarted
+	s.finish()
+}

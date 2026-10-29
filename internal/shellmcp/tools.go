@@ -329,9 +329,11 @@ func (t *Tools) Call(ctx context.Context, name string, raw json.RawMessage, clie
 		err = fmt.Errorf("unknown tool %q", name)
 	}
 	if err != nil {
-		if database.NewerSchema(err) {
+		if database.NewerSchema(err) || database.OutdatedStore() {
 			// This binary is older than the state it serves; Serve restarts
-			// the server once this call's answer is out.
+			// the server once this call's answer is out. The recheck catches a
+			// raw schema error from a store that moved past this build after
+			// its first check (D-468).
 			t.markOutdated()
 		}
 		// A failed call reports no exit, so its hold must not delay the wake.

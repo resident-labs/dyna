@@ -382,6 +382,11 @@ func transact(ctx context.Context, db *sql.DB, update func(*sql.Conn) error) err
 		return fmt.Errorf("database stayed busy: %w", err)
 	}
 	began = now()
+	if !migrates.Load() {
+		if err := refuseAdvancedStore(ctx, conn, db); err != nil {
+			return err
+		}
+	}
 	if err := update(conn); err != nil {
 		logSlowWrite(began.Sub(start), now().Sub(began), 0)
 		return err
@@ -455,6 +460,90 @@ func Migrate(db *sql.DB, key string, version int, apply func(conn *sql.Conn, old
 	}
 	migrations.Store(ready, version)
 	return nil
+}
+
+// refuseAdvancedStore refuses a write to a store a newer dyna migrated past
+// this binary. Migrate checks a store's version once per process, so a
+// long-lived writer's cached check misses a later upgrade, and its write can
+// fit the old columns and land silently (D-468). The check runs inside the
+// caller's write transaction: a migration commits its schema change and its
+// version row together, and SQLite write transactions serialize, so none can
+// slip between this check and the write it guards. A check that cannot run
+// refuses the write too: the transaction context can expire after BEGIN,
+// while an update callback may keep its own context and COMMIT runs without
+// cancellation, so a failed check must never let the update proceed. The
+// engine never calls this; it owns the schema, and its version rows never
+// advance behind its back.
+func refuseAdvancedStore(ctx context.Context, conn *sql.Conn, db *sql.DB) error {
+	cached := map[string]int{}
+	migrations.Range(func(key, version any) bool {
+		if m, ok := key.(migrated); ok && m.db == db {
+			if v, ok := version.(int); ok {
+				cached[m.key] = v
+			}
+		}
+		return true
+	})
+	if len(cached) == 0 {
+		return nil
+	}
+	query := "SELECT key, value FROM meta WHERE key IN ("
+	args := make([]any, 0, len(cached))
+	for key := range cached {
+		if len(args) > 0 {
+			query += ","
+		}
+		query += "?"
+		args = append(args, key)
+	}
+	rows, err := conn.QueryContext(ctx, query+")", args...)
+	if err != nil {
+		return fmt.Errorf("check store versions before writing: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return fmt.Errorf("check store versions before writing: %w", err)
+		}
+		have, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("check store versions before writing: %s: stored schema version %q is not a number", key, value)
+		}
+		if have > cached[key] {
+			return newerSchema(key, have, cached[key])
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("check store versions before writing: %w", err)
+	}
+	return nil
+}
+
+// OutdatedStore reports whether a store this process validated has since
+// been migrated past the version this binary knows. Reads run outside any
+// write transaction, so a reader whose tables moved under it fails with raw
+// schema errors instead of ErrNewerSchema; a failed call rechecks this
+// before its process restarts on the current binary (D-468).
+func OutdatedStore() bool {
+	outdated := false
+	migrations.Range(func(key, version any) bool {
+		m, ok := key.(migrated)
+		if !ok {
+			return true
+		}
+		known, ok := version.(int)
+		if !ok {
+			return true
+		}
+		have, err := storedVersion(m.db.QueryRow("SELECT value FROM meta WHERE key=?", m.key), m.key)
+		if err == nil && have > known {
+			outdated = true
+			return false
+		}
+		return true
+	})
+	return outdated
 }
 
 // storedVersion reads a store's version from its meta row, 0 when none is stored.
