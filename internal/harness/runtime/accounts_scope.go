@@ -166,21 +166,38 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 
 // SelectProbeAccount runs before a health probe of p. When a ready account that
 // runs p's provider has a stated usage hold, it makes that account active, so the
-// probe runs p's own model on the account whose limit the provider named.
-// Otherwise it selects as SelectAccount does.
-func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, error) {
-	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, ProviderForModel(p.Harness, p.Model), time.Now())
+// probe runs p's own model on the account whose limit the provider named. The
+// returned restore makes the previously active account active again; it is a
+// no-op when the probe did not move the account. Otherwise it selects as
+// SelectAccount does.
+func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, func(), error) {
+	noRestore := func() {}
+	provider := ProviderForModel(p.Harness, p.Model)
+	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, provider, time.Now())
 	if err != nil {
-		return p, err
+		return p, noRestore, err
 	}
 	if !ok {
-		return r.SelectAccount(ctx, p, dir)
+		selected, err := r.SelectAccount(ctx, p, dir)
+		return selected, noRestore, err
 	}
 	b, _, err := (&FirstUse{Bundles: r.Bundles}).EnsureBundle(ctx, p.Harness, p.RuntimeVersion)
 	if err != nil {
-		return p, err
+		return p, noRestore, err
 	}
-	return p, r.Accounts.Switch(ctx, held.ID, b.Executable)
+	previous, err := r.Accounts.activeAccount(p.Harness, provider, "")
+	if err != nil {
+		return p, noRestore, err
+	}
+	if err := r.Accounts.Switch(ctx, held.ID, b.Executable); err != nil {
+		return p, noRestore, err
+	}
+	restore := func() {
+		if err := r.Accounts.Switch(context.WithoutCancel(ctx), previous.ID, b.Executable); err != nil {
+			log.Printf("restore active account %s after a health probe: %v", previous.Label, err)
+		}
+	}
+	return p, restore, nil
 }
 
 // StatedHoldAccount returns the ready account that runs provider for harness
