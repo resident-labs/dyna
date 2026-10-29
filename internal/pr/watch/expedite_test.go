@@ -146,7 +146,7 @@ func TestExpeditedMergeTrialsAreIsolatedAndFair(t *testing.T) {
 			for _, r := range st.Records {
 				t.Logf("PR %d CI=%s reason=%s checks=%+v", r.Number, r.CI, r.CIReason, r.Checks)
 			}
-			t.Fatalf("trial %d: %+v queue=%+v merged=%v", i, st.MergeTrials, mergeQueue(st, nil), *f.merged)
+			t.Fatalf("trial %d: %+v queue=%+v merged=%v", i, st.MergeTrials, mergeQueue(st, nil, nil), *f.merged)
 		}
 		var got []int
 		for _, trial := range st.MergeTrials {

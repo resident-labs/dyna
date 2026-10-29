@@ -71,6 +71,7 @@ export interface ChangeView {
   base?: string
   reviewState?: string
   reviewBlocked?: string
+  upstreamPr?: boolean // maintainers merge this PR; Dyna never queues or merges it
   requiredReviewers?: string[] // canonical session IDs the owner requires
   missingRequiredReviewers?: string[] // required IDs with no approval at the current head
   key?: string
