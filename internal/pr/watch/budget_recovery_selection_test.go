@@ -2,6 +2,7 @@ package watch
 
 import (
 	"bytes"
+	prstate "dyna-agent/internal/pr/state"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -56,7 +57,7 @@ func TestQuietTestBudgetDecodesEachCIInputOnce(t *testing.T) {
 	const reason = "tests over 1s: package/TestSlow"
 	r := Record{
 		Host: "github.com", Repo: "owner/repo", Head: head,
-		CI: ci, CIKey: key, CIReason: reason,
+		CI: prstate.CIState(ci), CIKey: key, CIReason: reason,
 		CITestHead: head, CITestRuns: map[string]string{"81/1": reason},
 	}
 	s := &Service{}

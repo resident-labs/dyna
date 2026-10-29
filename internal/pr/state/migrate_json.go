@@ -25,7 +25,7 @@ func importLegacyRows(conn *sql.Conn, docs legacyDocuments) error {
 		room, repo, number, closed := "", "", 0, false
 		if r != nil {
 			room, repo, number = r.RoomID, r.Repo, r.Number
-			closed = r.State == "closed" || r.State == "merged"
+			closed = r.State == PRClosed || r.State == PRMerged
 		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO pr_records(key,room,repo,number,closed,rev,body) VALUES(?,?,?,?,?,1,?)`, key, room, repo, number, closed, string(body)); err != nil {
 			return err

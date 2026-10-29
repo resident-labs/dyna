@@ -41,7 +41,7 @@ func budgetPolicyKey(p ChangePolicy) string {
 
 // budgetRecordMatches rechecks the identity and policy used during slow reads.
 func budgetRecordMatches(st State, live *Record, r Record, policy ChangePolicy) bool {
-	return live != nil && live.Watching && live.State == "open" &&
+	return live != nil && live.Watching && live.State == state.PROpen &&
 		live.Head == r.Head && live.RoomID == r.RoomID && live.Author == r.Author &&
 		live.Host == r.Host && live.Repo == r.Repo && live.Number == r.Number &&
 		live.RepoPath == r.RepoPath && live.Branch == r.Branch && live.BaseRef == r.BaseRef && live.Base == r.Base &&
@@ -139,7 +139,7 @@ func budgetOutcomesEqual(a, b Record) bool {
 // Pending and cancelled CI retain applyCI's existing CIKey rules.
 func (s *Service) budgetCIUnreconciled(r Record, snap Snapshot, policy ChangePolicy) bool {
 	ci, key, _, _ := s.ciStatus(snap, r, policy)
-	if ci != r.CI {
+	if ci != string(r.CI) {
 		return true
 	}
 	if ci == "pending" || key == r.CIKey {
@@ -160,7 +160,7 @@ func (s *Service) quietBudgetRecovery(ctx context.Context, r Record, policy Chan
 	if !policy.EnforceCITimeBudget() {
 		return false
 	}
-	candidate, reconciled := false, r.CI == "failed"
+	candidate, reconciled := false, r.CI == state.CIFailed
 	for _, outcome := range []struct {
 		head, prefix string
 		runs         map[string]string
@@ -183,7 +183,7 @@ func (s *Service) quietBudgetRecovery(ctx context.Context, r Record, policy Chan
 	}
 	// With no current overrun, the applied cancellation reason already
 	// accounts for the retained key. Quiet probes need no saved-CI read.
-	if !candidate && r.CI == "failed" && r.CIReason == cancelledCIReason {
+	if !candidate && r.CI == state.CIFailed && r.CIReason == cancelledCIReason {
 		return false
 	}
 	// A replaced overrun can leave its old applied key behind. That key is

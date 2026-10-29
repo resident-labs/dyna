@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"errors"
 	"fmt"
 	"slices"
@@ -68,7 +69,7 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 	var summary []sessionclose.Outcome
 	err := s.Store.update(func(st *State) error {
 		for _, r := range st.Records {
-			if r.RoomID != from.RoomID || r.State != "open" || !r.Watching {
+			if r.RoomID != from.RoomID || r.State != state.PROpen || !r.Watching {
 				continue
 			}
 			reviewer := r.Reviewer == from.ID || r.ReviewerOverride == from.ID || slices.Contains(r.RequiredReviewers, from.ID)
@@ -96,7 +97,7 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 	}
 	var errs []error
 	for key, r := range st.Records {
-		if r.RoomID != from.RoomID || r.State != "open" || !r.Watching || r.Author != from.ID {
+		if r.RoomID != from.RoomID || r.State != state.PROpen || !r.Watching || r.Author != from.ID {
 			continue
 		}
 		if heir.ID == "" {

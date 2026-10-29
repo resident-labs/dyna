@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	prstate "dyna-agent/internal/pr/state"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -329,7 +330,7 @@ func TestTickFairnessWithManySlowRecords(t *testing.T) {
 				ci = "passed"
 				roundHead = "abcdef0"
 			}
-			st.Records[ref.Key()] = &Record{Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, State: "open", Watching: true, Head: "abcdef0", RoundHead: roundHead, CI: ci, Checked: initial}
+			st.Records[ref.Key()] = &Record{Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, State: "open", Watching: true, Head: "abcdef0", RoundHead: roundHead, CI: prstate.CIState(ci), Checked: initial}
 		}
 		return nil
 	}); err != nil {

@@ -332,7 +332,7 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 		ci, polled  string
 		stale, want bool
 	}{{"passed", head, false, true}, {"failed", head, false, true}, {"pending", head, false, false}, {"passed", "old", false, false}, {"passed", head, true, false}} {
-		r.CI, r.Polling.PullHead, r.HeadStale = tc.ci, tc.polled, tc.stale
+		r.CI, r.Polling.PullHead, r.HeadStale = state.CIState(tc.ci), tc.polled, tc.stale
 		got, err := s.scheduledCIConclusive(context.Background(), registeredCIJob{record: r, head: head}, "repo", watchDynaDefinition(t), nil)
 		if err != nil || got != tc.want {
 			t.Fatalf("ci=%s polled=%s stale=%t: settled=%t err=%v", tc.ci, tc.polled, tc.stale, got, err)

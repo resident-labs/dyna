@@ -30,7 +30,7 @@ func migrateClosedAt(conn *sql.Conn, _ int) error {
 			return fmt.Errorf("invalid PR record %s: %w", key, err)
 		}
 		r := row.Record
-		if r == nil || (r.State != "closed" && r.State != "merged") || !r.ClosedAt.IsZero() {
+		if r == nil || (r.State != PRClosed && r.State != PRMerged) || !r.ClosedAt.IsZero() {
 			continue
 		}
 		at := r.Created

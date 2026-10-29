@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"sort"
 )
 
@@ -125,8 +126,8 @@ func repositoryRepresentatives(st State, paused func(string) (bool, error)) ([]R
 			continue
 		}
 		repo := defaultRepo(*r)
-		if !r.Watching || r.State != "open" {
-			if r.State == "merged" {
+		if !r.Watching || r.State != state.PROpen {
+			if r.State == state.PRMerged {
 				old, found := latest[repo]
 				if !found || r.ClosedAt.After(old.ClosedAt) {
 					latest[repo] = *r
