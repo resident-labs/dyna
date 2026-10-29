@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/state"
 )
 
 // One read gives a node's capacity, its running jobs and checks, and its
@@ -70,5 +72,40 @@ func TestWorkReadsCapacityRunningAndWaiting(t *testing.T) {
 	}
 	if second.ID != "run-2-test" || second.Position != 2 || second.Reason != "waiting: asks 4 CPUs, 3 free" {
 		t.Fatalf("second waiter = %+v", second)
+	}
+}
+
+// A read must not publish. An open machine page rereads on every admission
+// event, so a read that wrote one would keep the page and the database busy.
+func TestWorkReadPublishesOnlyWhenItSweepsARow(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	queue := Admission{DataDir: t.TempDir(), Engine: true, clock: func() time.Time { return now }}
+	node := machines.Machine{Name: "node", Enabled: true}
+	if err := queue.upsert(ctx, Demand{ID: "held", Node: "node", CPUs: 1, Timeout: time.Minute}, true); err != nil {
+		t.Fatal(err)
+	}
+	db, err := queue.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := state.For(db)
+	writer.WaitPublished()
+	var events []hub.Event
+	writer.SetPublish(func(ev hub.Event) { events = append(events, ev) })
+	if _, err := queue.Work(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	writer.WaitPublished()
+	if len(events) != 0 {
+		t.Fatalf("an idle read published %v", events)
+	}
+	queue.clock = func() time.Time { return now.Add(time.Hour) }
+	if _, err := queue.Work(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	writer.WaitPublished()
+	if len(events) != 1 || events[0].Topic != AdmissionTopic {
+		t.Fatalf("sweeping an expired row published %v, want one admission event", events)
 	}
 }
