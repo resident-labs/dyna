@@ -83,10 +83,14 @@ type Record struct {
 	Repo          string `json:"repo,omitempty"`
 	// ExtraRepos lists more repositories, as main worktree paths, whose
 	// checkouts the room accepts for local changes (see AddRepo).
-	ExtraRepos   []string  `json:"extraRepos,omitempty"`
-	CreatedBy    string    `json:"createdBy,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	LastActivity time.Time `json:"lastActivity"`
+	ExtraRepos []string `json:"extraRepos,omitempty"`
+	// RepoUpstreams maps a registered extra repository's main worktree path to
+	// its parent, as host/owner/repo (see ParseUpstream). The room's own
+	// repository keeps its parent in Upstream (see UpstreamOf).
+	RepoUpstreams map[string]string `json:"repoUpstreams,omitempty"`
+	CreatedBy     string            `json:"createdBy,omitempty"`
+	CreatedAt     time.Time         `json:"createdAt"`
+	LastActivity  time.Time         `json:"lastActivity"`
 }
 
 // Archived reports whether this room is dormant at now. Live work keeps a
