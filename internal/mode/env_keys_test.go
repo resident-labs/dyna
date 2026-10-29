@@ -124,7 +124,6 @@ var nonStampKeys = map[string]string{
 	"DYNA_LOCKCHECK":                      "The optional lock-order diagnostics switch.",
 	"DYNA_NO_AUTO_UPDATE":                 "The setting that disables automatic updates.",
 	"DYNA_ALLOW_DEV_MIGRATION":            "The explicit owner recovery switch for live schema migration.",
-	"DYNA_INSTALL_DIR":                    "The configured Dyna installation directory, not a caller stamp.",
 	"DYNA_OWNER_DISPLAY":                  "The owner display used by the computer service.",
 	"DYNA_OWNER_DBUS_SESSION_BUS_ADDRESS": "The owner session bus saved before a computer bus replaced it.",
 	"DYNA_OWNER_WAYLAND_DISPLAY":          "The owner Wayland display used by the computer service.",

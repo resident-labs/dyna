@@ -162,6 +162,11 @@ if [ "$os" = linux ] && command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
+# A custom install remains recognizable when its binary starts from a fresh
+# shell without DYNA_INSTALL_DIR. The engine checks this marker before it
+# migrates the owner's default data directory.
+printf 'installed by install.sh\n' > "$INSTALL_DIR/.dyna-installed"
+
 bold "next steps"
 info "dyna profiles add --name my-builder --harness codex --model <model-id>  # add one profile per model you use"
 info "dyna demo            # sample workflow on mock workers; saves no profiles"
