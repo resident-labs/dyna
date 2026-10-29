@@ -320,3 +320,29 @@ func TestBlockedSuiteNamesTheSuiteNoMachineAllows(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveResultStoresOnlyTheTailOfAFailedLog(t *testing.T) {
+	ctx := context.Background()
+	s := fixtureStore(t)
+	repo := t.TempDir()
+	sha := strings.Repeat("c", 40)
+	log := "write: no space left on device\n" + strings.Repeat("x", 200<<10) + "\n--- FAIL: TestSlow (0.01s)\nFAIL\n"
+	result := Result{Repo: repo, SHA: sha, Status: OutcomeFailed, Checks: []SuiteResult{
+		{Suite: "go", Status: OutcomeFailed, LogTail: log},
+		{Suite: "lint", Status: OutcomePassed, LogTail: log},
+	}}
+	if err := s.SaveResult(ctx, result); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.LoadResult(ctx, repo, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := loaded.Checks[0].LogTail
+	if len(failed) > 4<<10+512 || !diskFull(failed) || !strings.Contains(failed, "--- FAIL: TestSlow") {
+		t.Fatalf("failed check kept %d bytes, want the disk-full line and the end of the log", len(failed))
+	}
+	if loaded.Checks[1].LogTail != "" {
+		t.Fatalf("passed check kept its log: %d bytes", len(loaded.Checks[1].LogTail))
+	}
+}
