@@ -66,6 +66,42 @@ describe("auth storage commands", () => {
 		expect(JSON.parse(output[1])).toEqual({ beta: { type: "api_key", key: "b" } });
 	});
 
+	it("survives concurrent first use without losing a written login", async () => {
+		// Every backend here sees the same missing file at first. An
+		// exclusive create keeps any placeholder from replacing a login
+		// another backend wrote first, so every written provider survives.
+		const runs = [1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+			runAuthStorageCommand(
+				storageCommand(["auth", "set", "--provider", `p${n}`]),
+				JSON.stringify({ type: "api_key", key: `key-${n}` }),
+				new FileAuthStorageBackend(join(dir, "auth.json")),
+			),
+		);
+		await Promise.all(runs);
+		const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"));
+		for (let n = 1; n <= 8; n++) {
+			expect(stored[`p${n}`]).toEqual({ type: "api_key", key: `key-${n}` });
+		}
+	});
+
+	it("reports the replaced entries as before, so a caller can roll back", async () => {
+		await runAuthStorageCommand(
+			storageCommand(["auth", "set", "--provider", "alpha"]),
+			JSON.stringify({ type: "api_key", key: "old" }),
+			backend,
+		);
+		await runAuthStorageCommand(
+			storageCommand(["auth", "apply"]),
+			JSON.stringify({ set: { alpha: { type: "api_key", key: "new" } } }),
+			backend,
+		);
+		const report = JSON.parse(output[0]);
+		expect(report.before).toEqual({ alpha: { type: "api_key", key: "old" } });
+		expect(report.after).toEqual({ alpha: { type: "api_key", key: "new" } });
+		const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"));
+		expect(stored).toEqual(report.after);
+	});
+
 	it("applies when expect still matches the file", async () => {
 		await runAuthStorageCommand(
 			storageCommand(["auth", "set", "--provider", "alpha"]),
