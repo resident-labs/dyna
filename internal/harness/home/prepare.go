@@ -553,6 +553,14 @@ func createWritableGitConfig(path, published string) error {
 	}
 	return nil
 }
+
+// AgentGitName and AgentGitEmail are the Git identity of agent commits. The
+// address is reserved and never delivers mail.
+const (
+	AgentGitName  = "Dyna agent"
+	AgentGitEmail = "agent@dyna.invalid"
+)
+
 func gitQuote(value string) string {
 	value = strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n", "\t", "\\t", "\b", "\\b").Replace(value)
 	return "\"" + value + "\""
@@ -569,7 +577,10 @@ func globalConfig(owner map[string]string, home, config string) string {
 	for _, path := range paths {
 		result += "[include]\n\tpath = " + gitQuote(path) + "\n"
 	}
-	return result
+	// The owner's files supply tools, aliases and signing, but never who an agent
+	// commit comes from: this section follows them, so it wins. A repository's
+	// own config or GIT_AUTHOR_* still overrides it.
+	return result + "[user]\n\tname = " + gitQuote(AgentGitName) + "\n\temail = " + gitQuote(AgentGitEmail) + "\n"
 }
 
 // limitedOutput prevents an inherited executable from returning unbounded data.
