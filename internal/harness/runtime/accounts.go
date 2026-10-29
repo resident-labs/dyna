@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -828,10 +829,14 @@ func (a *Accounts) Capture(ctx context.Context, id, executable string) (result N
 // recordSignIn writes a renewed attempt, so the account's last renewal failure
 // no longer shows after a successful sign-in or import.
 func (a *Accounts) recordSignIn(ctx context.Context, n NativeAccount) error {
-	return (&store.Store{Root: a.Root, Quiet: a.Quiet}).RecordRenewal(ctx, store.Renewal{
+	err := (&store.Store{Root: a.Root, Quiet: a.Quiet}).RecordRenewal(ctx, store.Renewal{
 		AccountID: n.ID, Harness: n.Harness, Provider: n.Provider,
 		AttemptedAt: time.Now(), Result: store.RenewalResultRenewed, Reason: "signed in",
 	})
+	if err != nil {
+		return fmt.Errorf("sign-in saved, but its renewal history was not written: %w", err)
+	}
+	return nil
 }
 
 // Saved login snapshots are private credential files, never index metadata.
