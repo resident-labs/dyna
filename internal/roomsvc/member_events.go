@@ -181,8 +181,9 @@ func (s *Service) scanMembers(sessions []subagent.Info, records []room.Record, s
 			next[info.ID] = old
 			continue
 		}
-		// info was read this scan, so its turn count is current.
-		queue := s.sessions().QueueSignature(info.ID)
+		// info was read this scan, so its turn count is current, and its record
+		// names the delivery keys, so the queue signature needs no address read.
+		queue := s.sessions().QueueSignatureOf(info.Meta)
 		session := queue + s.sessions().TurnSignature(info.ID, info.Turns)
 		turnVersion, turnState := session, old.turnState
 		// A turn write can change held work or queue delivery without changing member status.
