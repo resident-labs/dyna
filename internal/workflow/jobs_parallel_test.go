@@ -68,9 +68,10 @@ return await parallel([
 	}
 	fake := &enginefake.Engine{}
 	raw, _, err := runCommandScript(t, script, Options{Run: source, Args: map[string]any{"wait": "a"}, Engine: fake, JobNamespace: source.Meta.ID})
-	if err != nil || raw != `[["job_1","job_2"]]` {
+	if err != nil {
 		t.Fatalf("nested different source = %s, %v", raw, err)
 	}
+	want := raw
 	entries, err := runstore.ReadJournal(source.Meta.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -80,8 +81,8 @@ return await parallel([
 		t.Fatal(err)
 	}
 	raw, _, err = runCommandScript(t, script, Options{Run: resumed, Args: map[string]any{"wait": "b"}, Engine: fake, Cache: NewCache(entries), JobNamespace: source.Meta.ID})
-	if err != nil || raw != `[["job_1","job_2"]]` {
-		t.Fatalf("nested different resume = %s, %v", raw, err)
+	if err != nil || raw != want {
+		t.Fatalf("nested different resume = %s, %v; want original mapping %s", raw, err, want)
 	}
 	if got := len(fake.JobStarts()); got != 2 {
 		t.Fatalf("RunJob calls = %d, want no replay submissions", got)
@@ -199,6 +200,48 @@ return await parallel([
 	}
 	if got := len(fake.JobStarts()); got != 1 {
 		t.Fatalf("RunJob calls = %d, want no nested partial-journal submission", got)
+	}
+}
+
+func TestJobResumeRejectsConcurrentRepeatedGroups(t *testing.T) {
+	script := `
+async function repeated(shouldYield, skip) {
+  return await parallel([
+    async () => {
+      if (skip) return -1
+      if (shouldYield) await Promise.resolve()
+      return (await job({command: ['same']})).exitCode
+    },
+  ])
+}
+return await Promise.all([
+  repeated(args.wait === 'a', args.skip === 'a'),
+  repeated(args.wait === 'b', args.skip === 'b'),
+])
+`
+	source, err := runstore.Create("repeated group source", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &enginefake.Engine{JobExitCodes: map[string]int{"job_1": 0, "job_2": 7}}
+	raw, _, err := runCommandScript(t, script, Options{Run: source, Args: map[string]any{"wait": "a", "skip": "a"}, Engine: fake, JobNamespace: source.Meta.ID})
+	if err != nil || raw != `[[-1],[0]]` {
+		t.Fatalf("repeated group source = %s, %v", raw, err)
+	}
+	entries, err := runstore.ReadJournal(source.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := runstore.Create("repeated group resumed", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err = runCommandScript(t, script, Options{Run: resumed, Args: map[string]any{"wait": "b"}, Engine: fake, Cache: NewCache(entries), JobNamespace: source.Meta.ID})
+	if err != nil || raw != `[[null],[null]]` {
+		t.Fatalf("repeated group resume = %s, %v; want rejected group calls", raw, err)
+	}
+	if got := len(fake.JobStarts()); got != 1 {
+		t.Fatalf("RunJob calls = %d, want no repeated-group replay submission", got)
 	}
 }
 
