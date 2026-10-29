@@ -33,7 +33,7 @@ const postOnChangePrompt = `Post only to the session that must act next, for a b
 
 const parentCheckInPrompt = `All parents, including root, remain responsible for their direct children. Check-ins cover running, queued, or idle children, listed stalest first with state, duration, goal/item, and PR state. Dormant and closed children do not count. Act on stuck work. If everything is on track, end your turn without posting.`
 
-const stateSnapshotPrompt = "Never open or copy the live dyna.db directly. Use dyna state snapshot <path> for debugging or benchmarks. Snapshots contain private state; keep them in $DYNA_SCRATCH and remove them when finished."
+const stateSnapshotPrompt = "Never open or copy the live dyna.db directly. For debugging or benchmarks, use the latest daily backup first. Use dyna state snapshot <path> only when you need newer state, and run at most one snapshot at a time. Snapshots contain private state; keep them in $DYNA_SCRATCH and remove them when finished."
 
 // sessionRules is the core contract and topic triggers, without task or worker
 // metadata. Service sessions hold no goals. A session holds a goal of its own,
