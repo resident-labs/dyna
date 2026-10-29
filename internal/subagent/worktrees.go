@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -11,6 +12,63 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/worktrees"
 )
+
+// observePortCapacity reads new and undelivered pool crossings. Tests replace it.
+var observePortCapacity = worktrees.ObservePortCapacity
+
+// postPortAlert stores one capacity alert in one room. Tests replace it.
+var postPortAlert = func(m *Manager, rec room.Record, alert *worktrees.PortCapacityAlert) error {
+	_, err := m.rooms().PostEventInput(room.PostEventInput{
+		RoomID: rec.ID,
+		Event: room.WorktreePortsEvent{
+			Used: alert.Used, Limit: alert.Limit, Threshold: alert.Threshold, Generation: alert.Generation,
+		},
+		To: []string{rec.Name + ":" + room.RootAgent},
+	})
+	return err
+}
+
+// ReportWorktreePortCapacity observes the pool and posts every new or
+// undelivered capacity-band crossing to every room. Delivery is acknowledged
+// only after a full sweep of every crossing succeeds, so a transient failure
+// is retried on the next observation. Allocation stays best effort: an alert
+// failure never rolls back a worktree that Git already created.
+func (m *Manager) ReportWorktreePortCapacity() {
+	alerts, err := observePortCapacity()
+	if err != nil {
+		log.Printf("worktree port capacity: %v", err)
+		return
+	}
+	if len(alerts) == 0 || !m.deliverPortCapacityAlerts(alerts) {
+		return
+	}
+	for _, alert := range alerts {
+		if err := worktrees.AckPortAlertDelivery(alert.Generation, alert.Threshold); err != nil {
+			log.Printf("worktree port capacity delivery: %v", err)
+		}
+	}
+}
+
+// deliverPortCapacityAlerts posts each band crossing, oldest first, to the
+// root seat of every room: the pool is host-wide, so every room's root can
+// act on it. It reports whether every room received every crossing.
+func (m *Manager) deliverPortCapacityAlerts(alerts []*worktrees.PortCapacityAlert) bool {
+	rooms, err := m.rooms().List(false)
+	if err != nil {
+		log.Printf("worktree port capacity rooms: %v", err)
+		return false
+	}
+	delivered := true
+	for _, rec := range rooms {
+		for _, alert := range alerts {
+			if err := postPortAlert(m, rec, alert); err != nil {
+				log.Printf("worktree port capacity alert for %s: %v", rec.Name, err)
+				delivered = false
+			}
+		}
+	}
+	return delivered
+}
 
 // keptWorktreeReason is the lock reason cleanup and the owner see on a tree
 // that a manual handoff asked to keep.

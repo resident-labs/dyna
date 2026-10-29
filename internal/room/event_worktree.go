@@ -1,5 +1,7 @@
 package room
 
+import "strconv"
+
 // WorktreeReason is the class of a kept worktree. It keys the dedupe of the
 // notice and picks the wording of the card.
 type WorktreeReason string
@@ -44,4 +46,23 @@ func (w WorktreeEvent) eventSubject() string   { return w.Path }
 // that finds the same tree with other counts posts nothing, a new reason does.
 func (w WorktreeEvent) eventDedupe() string {
 	return w.Owner + "\x00" + w.Path + "\x00" + string(w.Reason)
+}
+
+// WorktreePortsEvent tells every room that the host-wide worktree port pool
+// is close to exhaustion. Generation identifies one continuous high-capacity
+// period, and Threshold is the crossed percentage of the pool.
+type WorktreePortsEvent struct {
+	Used       int `json:"used"`
+	Limit      int `json:"limit"`
+	Threshold  int `json:"threshold"`
+	Generation int `json:"generation"`
+}
+
+func (WorktreePortsEvent) eventFamily() EventFamily { return FamilyMachine }
+func (WorktreePortsEvent) eventType() EventType     { return TypeWorktreePorts }
+func (WorktreePortsEvent) eventSubject() string     { return "worktree-ports" }
+
+// eventDedupe permits one 90% and one 95% alert in each high-capacity period.
+func (w WorktreePortsEvent) eventDedupe() string {
+	return strconv.Itoa(w.Generation) + "\x00" + strconv.Itoa(w.Threshold)
 }

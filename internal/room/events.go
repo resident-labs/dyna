@@ -152,6 +152,8 @@ const (
 	TypeLimitsOff EventType = "limits-off"
 	// TypeRoomCap is a room's work close to one cap of its resource slice.
 	TypeRoomCap EventType = "room-cap"
+	// TypeWorktreePorts is the host-wide worktree port pool nearing exhaustion.
+	TypeWorktreePorts EventType = "worktree-ports"
 
 	// FamilyCall reports how the owner answered a call request. The engine
 	// posts it, so the answer wears no invented voice and carries no raw ID in
@@ -681,6 +683,18 @@ func (m Message) MachineCache() (MachineCacheEvent, bool) {
 	var ev MachineCacheEvent
 	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return MachineCacheEvent{}, false
+	}
+	return ev, true
+}
+
+// WorktreePorts returns the payload of a port-capacity alert.
+func (m Message) WorktreePorts() (WorktreePortsEvent, bool) {
+	if m.Kind != string(FamilyMachine) || m.Notice.Kind != string(TypeWorktreePorts) || len(m.Payload.raw) == 0 {
+		return WorktreePortsEvent{}, false
+	}
+	var ev WorktreePortsEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
+		return WorktreePortsEvent{}, false
 	}
 	return ev, true
 }
