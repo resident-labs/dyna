@@ -1,7 +1,7 @@
 <script lang="ts">
   import UsageDrawer from './UsageDrawer.svelte'
   import UsageMeter from './UsageMeter.svelte'
-  import { accountKindLabel, accountLabel, accountStatus, dateTime, needsSignIn, providerName, reposLabel, usageUnavailableText } from './state.ts'
+  import { accountKindLabel, accountLabel, accountStatus, dateTime, needsSignIn, providerName, renewalText, reposLabel, usageUnavailableText } from './state.ts'
   import { blockUntil } from './reset.ts'
   import { deadlineClock } from './clock.svelte.ts'
   import type { ScopeAccount } from '../../api/account.ts'
@@ -45,6 +45,7 @@
     {#if account.source}<dt>Source</dt><dd>{account.source}</dd>{/if}
     <dt>Repos</dt><dd>{reposLabel(account)}</dd>
     {#if account.observedAt}<dt>Checked</dt><dd>{dateTime(account.observedAt) || 'Not reported'}</dd>{/if}
+    {#if account.lastRenewal}<dt>Engine renewal</dt><dd>{renewalText(account.lastRenewal)}</dd>{/if}
   </dl></section>
   <section><h3>Linked profiles</h3><div class="profiles">
     {#each account.profiles ?? [] as name}<button class="quiet" onclick={() => onprofile(name)}>{name} ↗</button>{:else}<p class="muted">No linked profiles reported</p>{/each}
