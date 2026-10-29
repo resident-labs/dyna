@@ -83,10 +83,14 @@ func parseJobCall(call goja.FunctionCall, workDir string) (callspec.RunJobInput,
 	}, nil
 }
 
-func jobKey(spec callspec.RunJobInput) string {
-	payload, _ := json.Marshal(spec)
+func jobKey(namespace, workflowID string, invocation int) string {
+	payload, _ := json.Marshal(struct {
+		Namespace  string
+		Workflow   string
+		Invocation int
+	}{namespace, workflowID, invocation})
 	sum := sha256.Sum256(payload)
-	return "j1:" + hex.EncodeToString(sum[:])
+	return "j2:" + hex.EncodeToString(sum[:])
 }
 
 // jobRecord is what a resumed run knows of one earlier job() call.
@@ -113,9 +117,9 @@ func resultForJob(job jobs.Job) jobResult {
 	}
 }
 
-// job implements one job() call through the engine's job API. The journal
-// records the submitted ID before the wait, so resume never submits that call
-// again, including when its earlier wait ended in an error.
+// job implements one job() call through the engine's job API. Its durable
+// idempotency key recovers a submission even when the response or journal was
+// lost. Once the journal has an ID, resume waits for that job directly.
 func (e *engine) job(call goja.FunctionCall) goja.Value {
 	vm := e.vm
 	promise, resolveFn, rejectFn := vm.NewPromise()
@@ -139,7 +143,8 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 	id := e.shared.execSeq
 	e.shared.mu.Unlock()
 	label := fmt.Sprintf("job-%d", id)
-	key := jobKey(spec)
+	key := jobKey(e.shared.jobNamespace, e.workflowID, id)
+	spec.IdempotencyKey = key
 	line := commandLine(spec.Command)
 	e.emit(runstore.Event{T: "exec_start", ID: id, Label: label, Command: textutil.ClipOneLine(line, 400)})
 	if !e.beginWorker() {
@@ -183,9 +188,11 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 		jobID := prior.Job
 		if !hasPrior {
 			var submitted jobs.Job
-			// Do not retry an uncertain submission. Once an ID is known, all
-			// later waits and resumes use that ID instead.
-			if err := e.opts.Engine.Call(e.ctx, "RunJob", []any{spec}, &submitted); err != nil {
+			// The engine stores the idempotency key with the job, so retrying an
+			// uncertain response returns the original job instead of starting another.
+			if err := retryEngine(e.ctx, recoveryBudget, func() error {
+				return e.opts.Engine.Call(e.ctx, "RunJob", []any{spec}, &submitted)
+			}); err != nil {
 				fail("", fmt.Errorf("submit job: %w", err))
 				return
 			}
@@ -227,7 +234,19 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 			T: "exec_end", ID: id, Label: label, Status: "ok",
 			ExitCode: final.ExitCode, Preview: string(final.State),
 		})
-		resolve(result)
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			value := vm.NewObject()
+			_ = value.Set("id", result.ID)
+			_ = value.Set("node", result.Node)
+			_ = value.Set("state", result.State)
+			if result.ExitCode == nil {
+				_ = value.Set("exitCode", goja.Null())
+			} else {
+				_ = value.Set("exitCode", *result.ExitCode)
+			}
+			_ = value.Set("log", result.Log)
+			resolveFn(value)
+		})
 	}()
 	return vm.ToValue(promise)
 }

@@ -5,7 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workflow/enginefake"
@@ -57,11 +56,13 @@ return await job({
 	if !slices.Equal(spec.Artifacts, []string{"out/report"}) {
 		t.Fatalf("submitted artifacts = %v", spec.Artifacts)
 	}
+	if spec.IdempotencyKey == "" {
+		t.Fatal("workflow submitted no durable idempotency key")
+	}
 }
 
 func TestJobResumeReusesSubmittedJobAfterInterruptedWait(t *testing.T) {
-	spec := callspec.RunJobInput{Command: []string{"make", "test"}, Node: "builder"}
-	key := jobKey(spec)
+	key := jobKey("wf_root", "", 1)
 	cache := NewCache([]runstore.JournalEntry{
 		{ID: 1, Key: key, Kind: "job", State: "running", Job: "job_old"},
 		{ID: 1, Key: key, Kind: "job", State: "error", Job: "job_old", Error: "context canceled"},
@@ -69,7 +70,7 @@ func TestJobResumeReusesSubmittedJobAfterInterruptedWait(t *testing.T) {
 	code := 0
 	fake := &enginefake.Engine{}
 	fake.SaveJob(jobs.Job{ID: "job_old", Node: "builder", State: jobs.StatePassed, ExitCode: &code})
-	raw, _, err := runCommandScript(t, `return await job({command: ['make', 'test'], node: 'builder'})`, Options{Engine: fake, Cache: cache})
+	raw, _, err := runCommandScript(t, `return await job({command: ['make', 'test'], node: 'builder'})`, Options{Engine: fake, Cache: cache, JobNamespace: "wf_root"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

@@ -90,25 +90,20 @@ func (c *Cache) addExecs(entries []runstore.JournalEntry) {
 	}
 }
 
-// addJobs keeps one record per job() call. Any entry with a submitted job ID
-// stays resumable, including an interrupted wait: another submission could run
-// the command twice. Only a finished result resolves without a new wait.
+// addJobs keeps one record per job() invocation. Its key includes the stable
+// resume namespace and invocation number, so identical commands stay distinct.
+// Any submitted job ID stays resumable after an interrupted wait.
 func (c *Cache) addJobs(entries []runstore.JournalEntry) {
 	last := map[int]runstore.JournalEntry{}
 	for _, e := range entries {
 		last[e.ID] = e
 	}
-	calls := map[string]int{}
-	for _, e := range last {
-		calls[e.Key]++
-	}
 	for _, e := range last {
 		c.priorCalls++
-		if calls[e.Key] != 1 || !strings.HasPrefix(e.Key, "j1:") || e.Job == "" {
+		if !strings.HasPrefix(e.Key, "j2:") || e.Job == "" {
 			continue
 		}
-		record := jobRecord{Job: e.Job, Done: e.State == "done", Result: e.Result}
-		c.jobs[e.Key] = record
+		c.jobs[e.Key] = jobRecord{Job: e.Job, Done: e.State == "done", Result: e.Result}
 	}
 }
 
