@@ -28,6 +28,11 @@ func ParseRunID(s string) (RunID, error) {
 // run is not stale.
 var ErrRunLive = errors.New("local CI run is live")
 
+// ErrRunUnclaimed reports that a kept run's record cannot be taken over: it is
+// past the attachment TTL, or another process claimed it first. Nothing is
+// released for such a run, because its checks may still hold the machine.
+var ErrRunUnclaimed = errors.New("local CI run record cannot be claimed")
+
 // AbandonedRun reports what one teardown did. Node is empty when no kept folder
 // record existed, so only reservations were released.
 type AbandonedRun struct {
@@ -75,6 +80,9 @@ func (r Runner) AbandonRun(ctx context.Context, store Store, id RunID, inFlight 
 		if ownerAlive(row.ownerPID, row.ownerStart) {
 			return out, fmt.Errorf("%w: run %s on %s, so cancel its trial or pull request instead", ErrRunLive, id, row.Node)
 		}
+		if !row.orphaned() {
+			return out, fmt.Errorf("%w: run %s on %s has a record past the attachment TTL", ErrRunUnclaimed, id, row.Node)
+		}
 	}
 	queue := r.queue()
 	ids, err := queue.RunReservations(ctx, string(id))
@@ -86,8 +94,12 @@ func (r Runner) AbandonRun(ctx context.Context, store Store, id RunID, inFlight 
 	}
 	for _, row := range rows {
 		orphan := OrphanedAttachment{Repo: row.Repo, SHA: row.SHA, Node: row.Node, RunID: row.RunID, Source: row.Source}
-		if err := r.AbandonOrphanedRun(ctx, store, orphan); err != nil {
+		torn, err := r.abandonClaimed(ctx, store, orphan)
+		if err != nil {
 			return out, err
+		}
+		if !torn {
+			return out, fmt.Errorf("%w: run %s on %s was claimed by another process; no reservation was released", ErrRunUnclaimed, id, row.Node)
 		}
 		out.Node = row.Node
 	}
