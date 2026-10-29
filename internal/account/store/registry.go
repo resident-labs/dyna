@@ -489,6 +489,11 @@ func (s *Store) syncCredentialDir() error {
 //     two leaves a row that reads as signed out.
 //   - A removed account loses its row, then its secret.
 func (s *Store) save(ctx context.Context, db *sql.DB, committed, next State) error {
+	for _, e := range next.Entries {
+		if e.Provider == ProviderMCPBearer && (e.RoomID == "" || e.Harness != "room-mcp" || e.Credential.Schema != "mcp-bearer/v1") {
+			return errors.New("An MCP bearer credential needs exactly one room.")
+		}
+	}
 	old := map[string]Entry{}
 	for _, e := range committed.Entries {
 		old[e.ID] = e
