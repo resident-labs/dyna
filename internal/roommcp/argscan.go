@@ -1,9 +1,11 @@
 package roommcp
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"regexp"
@@ -134,7 +136,10 @@ func scanArguments(arguments json.RawMessage, in scanInput) (Rule, bool, error) 
 		counts[term.Words] = true
 	}
 
-	decoder := json.NewDecoder(strings.NewReader(string(arguments)))
+	if len(arguments) > 0 && !json.Valid(arguments) {
+		return "", false, errors.New("the arguments are not valid JSON")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(arguments))
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
