@@ -343,3 +343,44 @@ func TestAdmissionDeclaredResourceCountAdmitsTwo(t *testing.T) {
 		t.Fatalf("two-unit resource admissions = %v, want job_a and job_b only", admitted)
 	}
 }
+
+// A room's ahead check, a merge trial's, is admitted before that room's older
+// waiting checks when the node frees: a merge queue must never wait behind its
+// own room's pull-request CI. Other rooms still take their turns.
+func TestAdmissionAdmitsARoomsAheadCheckBeforeItsOlderWaitingChecks(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	node := machines.Machine{Name: "node", Enabled: true}
+	node.Capabilities.CPUs = 2
+	queue := Admission{DataDir: dir, Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, Engine: true}
+	holder := Demand{ID: "holder", Node: "node", Room: "room", CPUs: 2, Timeout: time.Minute}
+	if _, err := queue.Hold(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	prHead := Demand{ID: "pr-head", Node: "node", Room: "room", CPUs: 2, Timeout: time.Minute}
+	if err := queue.upsert(ctx, prHead, false); err != nil {
+		t.Fatal(err)
+	}
+	trial := Demand{ID: "trial", Node: "node", Room: "room", CPUs: 2, Timeout: time.Minute, Ahead: true}
+	if err := queue.upsert(ctx, trial, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Capacity frees, and only one of the two waiting checks fits.
+	if err := queue.Release(ctx, holder.Node, holder.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	row, err := queue.get(ctx, trial.ID)
+	if err != nil || row.State != "admitted" {
+		t.Fatalf("trial check = %+v, %v; want admitted ahead of the room's waiting checks", row, err)
+	}
+	row, err = queue.get(ctx, prHead.ID)
+	if err != nil || row.State != "waiting" {
+		t.Fatalf("pull-request check = %+v, %v; want still waiting", row, err)
+	}
+}

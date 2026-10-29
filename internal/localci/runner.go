@@ -62,6 +62,11 @@ type Request struct {
 	Timeout time.Duration
 	MaxTest time.Duration
 	Allowed map[string]bool
+	// Ahead moves every check of this run in front of its room's other waiting
+	// work in the shared node queue. The scheduler sets it for merge-trial and
+	// integration-sync runs, so a merge queue never waits behind its own room's
+	// pull-request checks.
+	Ahead bool
 	// OnStart runs after node setup, before the first check starts.
 	OnStart func(context.Context) error
 	// DeferSave lets the scheduler apply room budgets before publishing a result.
