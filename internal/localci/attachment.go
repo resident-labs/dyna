@@ -206,6 +206,76 @@ func (s Store) OrphanedAttachments(ctx context.Context) ([]OrphanedAttachment, e
 	return out, errors.Join(rows.Err(), rows.Close())
 }
 
+// PruneAttachments deletes the kept run records saved before now minus
+// attachmentTTL whose owner process is gone and that hold no admitted node
+// reservation. A younger record stays, because a restarted engine may still
+// reattach it. It returns how many records it deleted.
+func (s Store) PruneAttachments(ctx context.Context, now time.Time) (int, error) {
+	db, err := s.open()
+	if err != nil {
+		return 0, err
+	}
+	cutoff := now.Add(-attachmentTTL)
+	rows, err := db.QueryContext(ctx, "SELECT repo, sha, node, run_id, owner_pid, owner_start FROM local_ci_attachments WHERE saved_at<?", cutoff.Unix())
+	if isMissingAttachmentTable(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	type record struct {
+		repo, sha, node, runID string
+		pid                    int
+		start                  uint64
+	}
+	var dead []record
+	for rows.Next() {
+		var r record
+		if err := rows.Scan(&r.repo, &r.sha, &r.node, &r.runID, &r.pid, &r.start); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if !ownerAlive(r.pid, r.start) {
+			dead = append(dead, r)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	queue := jobs.Admission{DataDir: s.root()}
+	var doomed []record
+	for _, r := range dead {
+		reserved, err := queue.RunReservations(ctx, r.runID)
+		if err != nil {
+			return 0, err
+		}
+		if len(reserved) == 0 {
+			doomed = append(doomed, r)
+		}
+	}
+	if len(doomed) == 0 {
+		return 0, nil
+	}
+	removed := 0
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
+		for _, r := range doomed {
+			// A record saved again or claimed after the scan keeps its new owner or time.
+			res, err := conn.ExecContext(ctx, "DELETE FROM local_ci_attachments WHERE repo=? AND sha=? AND node=? AND run_id=? AND owner_pid=? AND owner_start=? AND saved_at<?",
+				r.repo, r.sha, r.node, r.runID, r.pid, r.start, cutoff.Unix())
+			if err != nil {
+				return err
+			}
+			n, _ := res.RowsAffected()
+			removed += int(n)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
 // AbandonOrphanedRun finds the registered machine and tears down one kept run.
 func (s Store) AbandonOrphanedRun(ctx context.Context, orphan OrphanedAttachment) error {
 	r, err := s.runnerFor(ctx, orphan.Node)
