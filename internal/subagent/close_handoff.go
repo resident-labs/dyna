@@ -191,6 +191,11 @@ func (m *Manager) forwardClosedInbox(ctx context.Context, source Info) error {
 			if _, ok := original.InstructionNote(); ok {
 				continue
 			}
+			// A finished shell job belonged to the closed session; its result is
+			// stale for the heir, and the shell view keeps the full output.
+			if _, ok := original.Shell(); ok {
+				continue
+			}
 			id := hashPostID("close-inbox:" + meta.ID + ":" + item.ID)
 			forwarded, err := m.rooms().Message(meta.RoomID, id)
 			if errors.Is(err, room.ErrPostNotFound) {
