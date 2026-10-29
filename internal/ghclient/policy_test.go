@@ -225,6 +225,39 @@ esac
 	}
 }
 
+// A fork-head PR's head refresh reads the upstream repository, so the account
+// for that read must be chosen even though the room only knows its fork.
+func TestForkHeadRefreshChoosesUpstreamReadAccount(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"login":"reader"}]}}';;
+"auth token") echo reader-secret;;
+"api --hostname")
+ case "$4 $5:$GH_TOKEN" in
+ "repos/upstream/project --include:reader-secret") echo '{"permissions":{"push":false}}';;
+ *) exit 1;;
+ esac;;
+*) exit 1;;
+esac
+`
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(BinaryEnv, exe)
+	login, err := AccountFor(WithRoom(context.Background(), records[0].ID), exe, "github.com", "upstream/project")
+	if err != nil || login != "reader" {
+		t.Fatalf("upstream read account = %q, %v; want reader", login, err)
+	}
+}
+
 func TestMergeStrategiesRejectCrossRoomTargets(t *testing.T) {
 	records := setupRooms(t, "resident-labs/project", "other/project")
 	ctx := WithRoom(context.Background(), records[0].ID)
