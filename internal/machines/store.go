@@ -218,7 +218,7 @@ func (m Machine) DiskBlock() string {
 		}
 		return ""
 	}
-	floor := max(DiskFloorMin, disk.Total/100*DiskFloorShare)
+	floor := min(max(DiskFloorMin, disk.Total/100*DiskFloorShare), disk.Total/DiskFloorCapDivisor)
 	if disk.Free < floor {
 		return fmt.Sprintf("disk has %d GiB free, below the %d GiB floor", disk.Free>>30, floor>>30)
 	}
@@ -226,10 +226,13 @@ func (m Machine) DiskBlock() string {
 }
 
 // DiskFloorMin and DiskFloorShare are the free space a node with no percent
-// limit keeps: at least 20 GiB, and at least 5% of the disk.
+// limit keeps: at least 20 GiB, and at least 5% of the disk. The floor never
+// exceeds a tenth of the disk (DiskFloorCapDivisor), so a disk under 200 GiB
+// keeps 10% free and an empty small disk always admits work.
 const (
-	DiskFloorMin   = uint64(20) << 30
-	DiskFloorShare = 5
+	DiskFloorMin        = uint64(20) << 30
+	DiskFloorShare      = 5
+	DiskFloorCapDivisor = 10
 )
 
 // HasHostChecksGrants reports whether anyone allows host checks on this
