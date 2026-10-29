@@ -317,8 +317,9 @@ func selectAccountAfterPolicy(ctx context.Context, cmd *exec.Cmd, r repository) 
 	rec, err := roomFor(ctx, cmd.Dir, r)
 	write := Access(ctx, rec) == ReadWrite
 	if errors.Is(err, errNotInRoom) {
-		// Only a fork of a recorded upstream needs write access; other admitted reads and parents do not.
-		err, write = nil, isRepoFork(cmd.Args[1:])
+		// Only a fork of a recorded upstream and an edit of the account's own comment there need write access; other admitted reads and parents do not.
+		_, comment := ownCommentCall(cmd.Args[1:])
+		err, write = nil, isRepoFork(cmd.Args[1:]) || comment
 	}
 	if err != nil {
 		return "", "", err
