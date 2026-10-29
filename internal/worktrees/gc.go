@@ -227,12 +227,6 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 		return Record{}, errors.New("branch is required and must not start with '-'")
 	}
 	if base == "" {
-		// git config exits 1 when the repository sets no worktrees.defaultBase.
-		if out, err := gitOutput(ctx, repo, "config", "--get", "worktrees.defaultBase"); err == nil {
-			base = strings.TrimSpace(string(out))
-		}
-	}
-	if base == "" {
 		enabled, err := locallane.Enabled(ctx, repo)
 		if err != nil {
 			return Record{}, err
