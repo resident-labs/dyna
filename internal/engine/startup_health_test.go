@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/callspec"
 )
 
 func TestStartupHealthMarksEngineNotReady(t *testing.T) {
@@ -28,5 +30,11 @@ func TestStartupHealthMarksEngineNotReady(t *testing.T) {
 	startupHealthHandler(started).ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://engine/api/Post", nil))
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("an ordinary call ran before migrations: %d", res.Code)
+	}
+	var reply struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&reply); err != nil || reply.Code != callspec.CodeEngineStarting {
+		t.Fatalf("startup reply code = %q, %v; want %q", reply.Code, err, callspec.CodeEngineStarting)
 	}
 }
