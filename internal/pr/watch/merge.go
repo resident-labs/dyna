@@ -175,19 +175,24 @@ func upstreamPR(r Record, upstreams RoomUpstreams) bool {
 	return false
 }
 
-// readOnlyUpstreamPR reports an upstream pull request whose head is a fork other
-// than the room's own checkout. Dyna only reads it, so it sends no CI notes about
-// it. A room whose checkout cannot be resolved keeps its notes.
+// readOnlyUpstreamPR reports an upstream pull request whose head is a fork that
+// none of the room's checkouts owns. Dyna only reads it, so it sends no CI notes
+// about it. A room with no resolvable checkout keeps its notes.
 func (s *Service) readOnlyUpstreamPR(r Record) bool {
 	if !upstreamPR(r, s.roomUpstreams()) {
 		return false
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)
-	if err != nil || rec.Repo == "" {
+	if err != nil {
 		return false
 	}
-	own, err := resolveCheckoutRepo(context.Background(), rec.Repo)
-	if err != nil {
+	var owned []string
+	for _, entry := range rec.Repos() {
+		if own, err := resolveCheckoutRepo(context.Background(), entry.Path); err == nil {
+			owned = append(owned, own.ID)
+		}
+	}
+	if len(owned) == 0 {
 		return false
 	}
 	host := r.Host
@@ -195,7 +200,7 @@ func (s *Service) readOnlyUpstreamPR(r Record) bool {
 		host = "github.com"
 	}
 	head, err := repoid.RemoteIdentity("", "https://"+host+"/"+r.HeadRepo)
-	return err != nil || head != own.ID
+	return err != nil || !slices.Contains(owned, head)
 }
 
 func mergeQueue(st State, where LocalTrialRooms, upstreams RoomUpstreams) []MergeQueueItem {
