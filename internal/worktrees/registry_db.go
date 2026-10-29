@@ -1,6 +1,7 @@
 package worktrees
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,6 +11,8 @@ import (
 	"strings"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
 
@@ -110,6 +113,46 @@ func decodeLegacyRecord(data []byte) (Record, error) {
 	}
 	rec.Path = safe
 	return rec, nil
+}
+
+// removeObservedRecord deletes the record only while it still equals the
+// version its removal observed. A path recreated and tracked after that keeps
+// its new record and its port.
+func removeObservedRecord(ctx context.Context, conn *sql.Conn, observed Record) error {
+	current, err := loadRecords(ctx, conn, "WHERE path=?", observed.Path)
+	if err != nil || len(current) != 1 {
+		return err
+	}
+	want, err := json.Marshal(observed)
+	if err != nil {
+		return err
+	}
+	have, err := json.Marshal(current[0])
+	if err != nil || !bytes.Equal(have, want) {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, observed.Path)
+	return err
+}
+
+// markRemovedBatch deletes the registry records of the removals one cleanup
+// pass observed, in one transaction, then rearms the port alert once for the
+// whole release. Each record is deleted only while it still equals the
+// version its removal observed, so a path recreated meanwhile keeps its new
+// record. Tests replace it.
+var markRemovedBatch = func(ctx context.Context, removed []Record) error {
+	db, err := registryDB()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		for _, rec := range removed {
+			if err := removeObservedRecord(ctx, conn, rec); err != nil {
+				return err
+			}
+		}
+		return rearmPortCapacity(ctx, conn)
+	})
 }
 
 // HandoffRunTx moves registered trees in the run ownership transaction.

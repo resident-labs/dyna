@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The scan inspects trees concurrently. Each result must still describe its own tree.
@@ -93,10 +94,10 @@ func TestGCCommitsRemovalsOutsideTheRemovalLock(t *testing.T) {
 	arrived := make(chan struct{}, 1)
 	release := make(chan struct{})
 	realBatch := markRemovedBatch
-	markRemovedBatch = func(ctx context.Context, batch []string) error {
+	markRemovedBatch = func(ctx context.Context, removed []Record) error {
 		arrived <- struct{}{}
 		<-release
-		return realBatch(ctx, batch)
+		return realBatch(ctx, removed)
 	}
 	t.Cleanup(func() { markRemovedBatch = realBatch })
 	done := make(chan error, 1)
@@ -131,13 +132,13 @@ func TestGCBatchCommitSurvivesExpiredDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	realBatch := markRemovedBatch
 	var batchErr error
-	markRemovedBatch = func(bctx context.Context, paths []string) error {
+	markRemovedBatch = func(bctx context.Context, removed []Record) error {
 		// The cleanup deadline expires while the commit runs.
 		cancel()
 		if err := bctx.Err(); err != nil {
 			t.Errorf("batch commit context died with the cleanup deadline: %v", err)
 		}
-		batchErr = realBatch(bctx, paths)
+		batchErr = realBatch(bctx, removed)
 		return batchErr
 	}
 	t.Cleanup(func() { markRemovedBatch = realBatch })
@@ -152,6 +153,34 @@ func TestGCBatchCommitSurvivesExpiredDeadline(t *testing.T) {
 	}
 	if _, err := Get(path); err == nil {
 		t.Fatal("record of the removed tree was not committed")
+	}
+}
+
+// A path that another process recreates and tracks between the removal and
+// the batch commit keeps its new record: the batch deletes only the record
+// version each removal observed, never the path.
+func TestGCBatchKeepsARecreatedRecord(t *testing.T) {
+	repo := gcRepo(t)
+	path := gcTree(t, repo, "dyna/race", "closed")
+	ageGCTree(t, path)
+	realBatch := markRemovedBatch
+	markRemovedBatch = func(ctx context.Context, removed []Record) error {
+		git(t, repo, "worktree", "add", "-b", "dyna/race-2", path, "origin/main")
+		if err := Track(Record{Path: path, Session: "recreated-owner", Branch: "dyna/race-2", Repo: repo, CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		return realBatch(ctx, removed)
+	}
+	t.Cleanup(func() { markRemovedBatch = realBatch })
+	if _, err := GC(context.Background(), repo, GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := Get(path)
+	if err != nil {
+		t.Fatalf("recreated record was deleted by the batch: %v", err)
+	}
+	if rec.Session != "recreated-owner" || rec.Port == 0 {
+		t.Fatalf("recreated record = %+v; want the new owner and its port kept", rec)
 	}
 }
 
