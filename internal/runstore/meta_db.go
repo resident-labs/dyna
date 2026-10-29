@@ -471,6 +471,32 @@ type Changes struct {
 	Rev     int64
 }
 
+// Revision returns the runs table's revision. It moves on every row write
+// and on every run folder move or removal, so a reader that stored it knows
+// whether the runs changed since.
+func Revision() (int64, error) {
+	db, err := runsDB()
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	err = db.QueryRow("SELECT n FROM runs_rev").Scan(&n)
+	return n, err
+}
+
+// bumpRunsRev moves the revision for a change that writes no row, such as a
+// run folder moving into or out of the archive.
+func bumpRunsRev() error {
+	db, err := runsDB()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		_, err := nextRev(context.Background(), conn)
+		return err
+	})
+}
+
 // ChangesSince returns the live runs and the rows written after rev.
 func ChangesSince(rev int64) (Changes, error) {
 	db, err := runsDB()
@@ -627,10 +653,14 @@ func IsPaused(id string) bool {
 }
 
 // deleteMeta removes a run's rows (meta and ancestry) and their
-// copies' stamps, in one write.
+// copies' stamps, in one write. The write moves the runs revision, so a
+// reader sees the run leave.
 func deleteMeta(db *sql.DB, id string) error {
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		ctx := context.Background()
+		if _, err := nextRev(ctx, conn); err != nil {
+			return err
+		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM runs WHERE id=?", id); err != nil {
 			return err
 		}

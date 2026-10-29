@@ -606,8 +606,8 @@ func (r *Run) FinishWorkflow(id, resultJSON string) error {
 }
 
 // appendLog adds one line to a run log, on disk before it returns: a run's
-// events, journal and directory list must survive a crash. Run logs publish
-// nothing while roomsvc's run scan still covers runs.
+// events, journal and directory list must survive a crash. Log lines are not
+// published: they do not change the runs table that Watch reads.
 func appendLog(path string, line []byte) error {
 	db, err := runsDB()
 	if err != nil {
@@ -1116,6 +1116,11 @@ func RemoveWith(id string, beforeRemove func(Meta) error) error {
 		return err
 	}
 	if err := os.RemoveAll(filepath.Join(RunsDir(), id)); err != nil {
+		return err
+	}
+	// The folder goes after the row, so a reader that saw the row move may
+	// still list the folder. This second move lets it sync again.
+	if err := bumpRunsRev(); err != nil {
 		return err
 	}
 	return removeRunLocks(id)
