@@ -164,6 +164,94 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 	return p, r.Accounts.SelectForRepo(ctx, p.Harness, ProviderForModel(p.Harness, p.Model), p.Env[mode.EnvRoomID], p.RuntimeRepo, b.Executable)
 }
 
+// turnAccount returns the account a turn of p runs on. A held-account probe pins
+// its own account, so the global selection that other turns read does not change.
+func (a *Accounts) turnAccount(harness string, provider store.Provider, p profile.Profile) (NativeAccount, error) {
+	if p.RuntimeAccount == "" {
+		return a.activeFor(harness, provider, p.Env[mode.EnvRoomID], p.RuntimeRepo)
+	}
+	n, err := a.Find(p.RuntimeAccount)
+	if err != nil {
+		return n, err
+	}
+	rules, err := a.rules()
+	if err != nil {
+		return n, err
+	}
+	if !rules.Allows(n.ID, p.RuntimeRepo) {
+		return n, fmt.Errorf("%w: the held %s account %s may not run in %s.", errScopeRefused, n.Provider, n.Label, repoName(p.RuntimeRepo))
+	}
+	return n, nil
+}
+
+// SelectProbeAccount runs before a health probe of p in dir. When a ready account
+// that runs p's provider and may run in dir's repo has a stated usage hold for p's
+// model, it returns that account's ID as heldID and pins it on the returned
+// profile, so the probe runs that model on the account whose limit the provider
+// named. The global selection does not change. Only a harness that keeps each
+// account's credentials in its own home can run a probe on a held account; a
+// harness with one shared sign-in would run the probe on the active account.
+// Otherwise it selects as SelectAccount does and heldID is "".
+func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, string, error) {
+	if !pinsPerAccount(p.Harness) {
+		selected, err := r.SelectAccount(ctx, p, dir)
+		return selected, "", err
+	}
+	provider := ProviderForModel(p.Harness, p.Model)
+	repo := RepoIdentity(ctx, dir)
+	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, provider, p.Model, repo, time.Now())
+	if err != nil {
+		return p, "", err
+	}
+	if !ok {
+		selected, err := r.SelectAccount(ctx, p, dir)
+		return selected, "", err
+	}
+	p.RuntimeRepo = repo
+	p.RuntimeAccount = held.ID
+	return p, held.ID, nil
+}
+
+// StatedHoldAccount returns the ready account that runs provider for harness,
+// may run in repo, and whose stated usage hold for model is still in force at now
+// and ends first. An unstated hold is a guess, so it never selects an account. A
+// hold scoped to another model never selects an account for this model.
+func (a *Accounts) StatedHoldAccount(harness string, provider store.Provider, model, repo string, now time.Time) (NativeAccount, bool, error) {
+	h, err := canonicalAccountHarness(harness)
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	all, err := a.List()
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	scopes, err := a.scopes()
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	stated, err := scopes.StatedHolds(now)
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	rules, err := scopes.Rules()
+	if err != nil {
+		return NativeAccount{}, false, err
+	}
+	var held NativeAccount
+	var heldEnd time.Time
+	found := false
+	for _, n := range all {
+		hold, hit := stated[n.ID]
+		if !hit || hold.Model != model || n.Status != "ready" || !accountRuns(h, n, provider) || !rules.Allows(n.ID, repo) {
+			continue
+		}
+		if !found || hold.Until.Before(heldEnd) {
+			held, heldEnd, found = n, hold.Until, true
+		}
+	}
+	return held, found, nil
+}
+
 // resetSentence says when label's account resets. A time that is only a stored
 // guess (in limits, not in stated) is never shown: the sentence says the
 // provider named no time. A credit hold has no end, so it says so.
@@ -263,8 +351,18 @@ func (a *Accounts) LimitOf(id string) (reposcope.Hold, error) {
 	return scopes.LimitOf(id)
 }
 
-// ClearUnstated removes the account's unstated hold after a successful turn or
-// probe that began at since. A stated reset and a hold recorded after since stay.
+// ClearHold removes the account's hold after a successful turn that began at
+// since. A hold recorded after since stays.
+func (a *Accounts) ClearHold(id string, since time.Time) error {
+	scopes, err := a.scopes()
+	if err != nil {
+		return err
+	}
+	return scopes.ClearHold(id, since)
+}
+
+// ClearUnstated removes the account's unstated hold after a successful usage
+// probe that began at since. A stated hold and a later hold stay.
 func (a *Accounts) ClearUnstated(id string, since time.Time) error {
 	scopes, err := a.scopes()
 	if err != nil {
@@ -457,7 +555,9 @@ func (a *Accounts) refreshReading(ctx context.Context, n NativeAccount) *store.O
 	}, true); err != nil {
 		return nil
 	}
-	if err = a.ClearUnstated(n.ID, probeStart); err != nil {
+	// A stated hold stays. The provider names a limit that a usage reading may
+	// omit, such as a model-scoped one, so no reading shows that it reset.
+	if err := a.ClearUnstated(n.ID, probeStart); err != nil {
 		log.Printf("clear quota hold for account %s: %v", n.ID, err)
 	}
 	return &observation
