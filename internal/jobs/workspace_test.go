@@ -223,6 +223,60 @@ func TestWorkspaceCleanupRenamesBeforeRemoval(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCleanupSkipsOverlappingPass(t *testing.T) {
+	now := time.Unix(2_000_000, 0)
+	node := machines.Machine{Name: "here", Enabled: true}
+	first, store, _, _ := newWorkspaceCleanupService(t, node)
+	store.clock = func() time.Time { return now }
+	now = now.Add(-25 * time.Hour)
+	kept := putWorkspaceTestRow(t, store, Job{ID: "job_idle", State: StatePassed})
+	now = now.Add(25 * time.Hour)
+
+	baseExecutor := first.NewExecutor
+	entered, release := make(chan struct{}), make(chan struct{})
+	first.NewExecutor = func(conn Conn) Executor {
+		x := baseExecutor(conn)
+		command := x.Command
+		x.Command = func(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
+			script, _, ok := jobstest.DecodeNodeScript(name, args)
+			if ok && strings.Contains(script, "|| mv") {
+				close(entered)
+				<-release
+			}
+			return command(ctx, dir, in, out, stderr, name, args...)
+		}
+		return x
+	}
+	type cleanupResult struct {
+		removed int
+		err     error
+	}
+	firstDone := make(chan cleanupResult, 1)
+	go func() {
+		n, err := first.CleanupWorkspaces(t.Context(), WorkspaceCleanup{Now: now})
+		firstDone <- cleanupResult{removed: n, err: err}
+	}()
+	<-entered
+
+	second := &Service{Store: store, Machines: first.Machines, DataDir: store.DataDir, NewExecutor: baseExecutor}
+	secondResult, secondErr := second.CleanupWorkspaces(t.Context(), WorkspaceCleanup{Now: now})
+	next := kept
+	next.ID, next.State = "job_next", StateQueued
+	_, submitErr := store.saveSubmitted(t.Context(), next)
+	close(release)
+	firstResult := <-firstDone
+
+	if secondErr != nil || secondResult != 0 {
+		t.Fatalf("overlapping cleanup removed %d, %v; want it skipped", secondResult, secondErr)
+	}
+	if submitErr == nil || !strings.Contains(submitErr.Error(), "being cleaned") {
+		t.Fatalf("submission during overlapping cleanup = %v, want a cleaning error", submitErr)
+	}
+	if firstResult.err != nil || firstResult.removed != 1 {
+		t.Fatalf("first cleanup removed %d, %v; want one", firstResult.removed, firstResult.err)
+	}
+}
+
 // Disk-pressure cleanup stops as soon as a fresh probe meets the node's floor.
 func TestWorkspaceCleanupStopsWhenDiskFloorIsMet(t *testing.T) {
 	now := time.Unix(2_000_000, 0)

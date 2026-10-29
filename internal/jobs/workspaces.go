@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 // workspaceSchema keeps one active workspace per session, node and repository.
@@ -154,7 +157,7 @@ func (s Store) listWorkspaces(ctx context.Context) ([]workspace, error) {
 // rejects a stale cleanup decision after another submission touched the row.
 func (s Store) claimWorkspace(ctx context.Context, w workspace) (bool, error) {
 	if w.Cleaning {
-		// A previous pass moved the folder aside but did not finish removal.
+		// The lock holder is recovering a pass that did not finish removal.
 		return true, nil
 	}
 	db, err := s.db()
@@ -193,6 +196,47 @@ func (s Store) removeWorkspace(ctx context.Context, w workspace) error {
 type WorkspaceCleanup struct {
 	Session string
 	Now     time.Time
+}
+
+// cleanupWorkspace removes one expired workspace while holding its local
+// cross-process lock. A contending maintenance process skips it. The lock
+// covers the claim, node removal and row deletion, so a stale pass cannot
+// touch a path that a finished pass has already released for reuse.
+func (s *Service) cleanupWorkspace(ctx context.Context, w workspace, x Executor) (bool, error) {
+	dir := s.Store.DataDir
+	if dir == "" {
+		dir = defaultDataDir()
+	}
+	lockDir := filepath.Join(dir, "jobs", "workspace-locks")
+	if err := os.MkdirAll(lockDir, 0o700); err != nil {
+		return false, err
+	}
+	lockPath := filepath.Join(lockDir, RepoKey(w.Node+"\x00"+w.Path)+".lock")
+	unlock, owned, err := store.TryLockAndRemove(lockPath)
+	if err != nil || !owned {
+		return false, err
+	}
+	defer unlock()
+	claimed, err := s.Store.claimWorkspace(ctx, w)
+	if err != nil {
+		return false, fmt.Errorf("claim workspace %s: %w", w.Path, err)
+	}
+	if !claimed {
+		return false, nil
+	}
+	var out TailBuffer
+	trash := w.Path + ".trash"
+	quotedPath, quotedTrash := shellquote.Quote(w.Path), shellquote.Quote(trash)
+	if err := x.NodeCommand(ctx, &out, &out, "test ! -e "+quotedPath+" || mv -- "+quotedPath+" "+quotedTrash); err != nil {
+		return false, fmt.Errorf("move workspace %s aside on %s: %w: %s", w.Path, w.Node, err, out.String())
+	}
+	if err := x.NodeCommand(ctx, &out, &out, "rm -rf -- "+quotedTrash); err != nil {
+		return false, fmt.Errorf("remove workspace trash %s on %s: %w: %s", trash, w.Node, err, out.String())
+	}
+	if err := s.Store.removeWorkspace(ctx, w); err != nil {
+		return false, fmt.Errorf("forget workspace %s: %w", w.Path, err)
+	}
+	return true, nil
 }
 
 // nodeDiskFree measures the filesystem that holds one node's workspaces.
@@ -271,14 +315,6 @@ func (s *Service) CleanupWorkspaces(ctx context.Context, options WorkspaceCleanu
 		if !expired {
 			continue
 		}
-		claimed, err := s.Store.claimWorkspace(ctx, w)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("claim workspace %s: %w", w.Path, err))
-			continue
-		}
-		if !claimed {
-			continue
-		}
 		if answer.machine.Name == "" && answer.err == nil {
 			answer = machineFor(w.Node)
 		}
@@ -288,19 +324,12 @@ func (s *Service) CleanupWorkspaces(ctx context.Context, options WorkspaceCleanu
 		}
 		conn := Conn{Name: answer.machine.Name, SSH: answer.machine.SSH, SSHConnectTimeout: answer.machine.SSHConnectTimeout}
 		x := s.executor(conn)
-		var out TailBuffer
-		trash := w.Path + ".trash"
-		quotedPath, quotedTrash := shellquote.Quote(w.Path), shellquote.Quote(trash)
-		if err := x.NodeCommand(ctx, &out, &out, "test ! -e "+quotedPath+" || mv -- "+quotedPath+" "+quotedTrash); err != nil {
-			errs = append(errs, fmt.Errorf("move workspace %s aside on %s: %w: %s", w.Path, w.Node, err, out.String()))
+		cleaned, err := s.cleanupWorkspace(ctx, w, x)
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		if err := x.NodeCommand(ctx, &out, &out, "rm -rf -- "+quotedTrash); err != nil {
-			errs = append(errs, fmt.Errorf("remove workspace trash %s on %s: %w: %s", trash, w.Node, err, out.String()))
-			continue
-		}
-		if err := s.Store.removeWorkspace(ctx, w); err != nil {
-			errs = append(errs, fmt.Errorf("forget workspace %s: %w", w.Path, err))
+		if !cleaned {
 			continue
 		}
 		removed++
