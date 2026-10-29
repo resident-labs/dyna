@@ -610,7 +610,32 @@ func checkWorkerPolicy(args []string) error {
 			return nil
 		}
 	}
+	if isRepoFork(args) {
+		return nil
+	}
 	return errAgentGitHubWrite
+}
+
+// isRepoFork admits gh repo fork of one repository, with only the flags that
+// keep the fork out of local checkouts and organizations. Writes still need a
+// read-write room and a recorded upstream, which checkPolicy checks.
+func isRepoFork(args []string) bool {
+	args = commandArgs(args)
+	if len(args) < 3 || args[0] != "repo" || args[1] != "fork" {
+		return false
+	}
+	repos := 0
+	for _, arg := range args[2:] {
+		switch arg {
+		case "--clone=false", "--remote=false", "--default-branch-only":
+		default:
+			if !repoName.MatchString(arg) {
+				return false
+			}
+			repos++
+		}
+	}
+	return repos == 1
 }
 
 func codespacePortsListFlags(args []string) bool {
@@ -649,7 +674,7 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 		return nil
 	}
 	rec, err := roomFor(ctx, cmdDir, r)
-	if errors.Is(err, errNotInRoom) && isRead(args) && matchesUpstream(rec, r) {
+	if errors.Is(err, errNotInRoom) && (isRead(args) || isRepoFork(args)) && matchesUpstream(rec, r) {
 		err = nil
 	}
 	if err != nil {
