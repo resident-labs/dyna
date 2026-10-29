@@ -50,6 +50,11 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 	if err := refuseOwnerIdentity(ctx, cmd); err != nil {
 		return err
 	}
+	cleanup, err := withAttribution(ctx, cmd, r)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	token, login := "", ""
 	if r.name != "" {
 		var err error

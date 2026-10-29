@@ -58,6 +58,34 @@ func (s *Store) SetUpstream(ref, upstream string) error {
 	})
 }
 
+// SetAttribution stores the line that agent-written GitHub text ends with.
+// The caller passes a value from ParseAttribution.
+func (s *Store) SetAttribution(ref, line string) error {
+	return s.UpdatePreferences(ref, func(r *Record) error {
+		r.Attribution = line
+		return nil
+	})
+}
+
+// MaxAttributionLen bounds the attribution line, so it stays a short signature.
+const MaxAttributionLen = 500
+
+// ParseAttribution reads a room's attribution line. "off" or empty clears it.
+// The line is one line of text.
+func ParseAttribution(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.EqualFold(trimmed, "off") {
+		return "", nil
+	}
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return "", fmt.Errorf("the attribution must be one line")
+	}
+	if len(trimmed) > MaxAttributionLen {
+		return "", fmt.Errorf("the attribution is longer than %d characters", MaxAttributionLen)
+	}
+	return trimmed, nil
+}
+
 // ParseUpstream reads a room's upstream repository, as the CLI and the app
 // accept it. "off" or empty clears it. A repository such as github.com/owner/repo
 // or https://github.com/owner/repo.git is stored as host/owner/repo.

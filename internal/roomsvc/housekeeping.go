@@ -61,6 +61,19 @@ func (s *Service) SetRoomUpstream(ctx context.Context, ref, value string) error 
 	return s.rooms().SetUpstream(ref, upstream)
 }
 
+// SetRoomAttribution sets the line that agent-created pull request and issue
+// text ends with. "off" clears it. Only the owner and the room's root may change it.
+func (s *Service) SetRoomAttribution(ctx context.Context, ref, value string) error {
+	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return err
+	}
+	line, err := room.ParseAttribution(value)
+	if err != nil {
+		return err
+	}
+	return s.rooms().SetAttribution(ref, line)
+}
+
 // SetRoomLimitResult is the answer to a saved limit: ApplyWarning names why
 // the live slice did not pick the saved limit up, empty when it did. The
 // saved value is the source of truth: later launches and applies use it even
