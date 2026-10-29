@@ -266,3 +266,18 @@ func TestRoomForReportsEndedContext(t *testing.T) {
 		t.Fatalf("ended context = %v", err)
 	}
 }
+
+func TestMatchesUpstreamAdmitsEveryRecordedParent(t *testing.T) {
+	rec := room.Record{
+		Upstream:      "github.com/acme/main",
+		RepoUpstreams: map[string]string{"/work/sidecar": "github.com/horizon-rust/horizon-mixins"},
+	}
+	for _, name := range []string{"acme/main", "horizon-rust/horizon-mixins"} {
+		if !matchesUpstream(rec, repository{host: "github.com", name: name}) {
+			t.Fatalf("%s is a recorded upstream but was not admitted", name)
+		}
+	}
+	if matchesUpstream(rec, repository{host: "github.com", name: "acme/other"}) {
+		t.Fatal("an unrecorded repository was admitted as an upstream")
+	}
+}

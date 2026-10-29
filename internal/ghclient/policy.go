@@ -279,7 +279,12 @@ func matchesRepository(ctx context.Context, rec room.Record, r repository) bool 
 // that the room's fork checkout belongs to. Reads of it are allowed; writes stay
 // on the room's own repository.
 func matchesUpstream(rec room.Record, r repository) bool {
-	return rec.Upstream != "" && r.name != "" && strings.EqualFold(rec.Upstream, r.host+"/"+r.name)
+	if r.name == "" {
+		return false
+	}
+	return slices.ContainsFunc(rec.Upstreams(), func(up string) bool {
+		return strings.EqualFold(up, r.host+"/"+r.name)
+	})
 }
 
 // matchesForkParent asks GitHub for the parent of the room's origin repository.
