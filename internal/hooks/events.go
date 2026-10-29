@@ -97,6 +97,25 @@ func (s Service) dispatch(ctx context.Context, e Event, preparationErr error) er
 	return errors.Join(errs...)
 }
 
+// RunWorktreeCreated runs each enabled worktree-created hook for a new tree and
+// waits for it. Each hook ends at its own timeout, and a failure names its
+// hook. No lock is held while a hook runs.
+func (s Service) RunWorktreeCreated(ctx context.Context, e Event) error {
+	hooks, err := s.List(ctx, e.Repo)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, h := range hooks {
+		if h.Event == WorktreeCreated && !h.Disabled {
+			if _, err := s.run(ctx, e, h.Name, nil, false); err != nil {
+				errs = append(errs, fmt.Errorf("hook %s: %w", h.Name, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Tick uses persisted state to claim schedule intervals and default branch
 // changes once across all maintenance processes. Main hooks refresh the remote
 // default branch at most once every five minutes, independently of tracked pull

@@ -54,6 +54,7 @@ func caller(ctx context.Context) (authority.Actor, error) {
 }
 
 type NewResult struct {
+	Outcome
 	Record  worktrees.Record `json:"record"`
 	Notices []string         `json:"notices,omitempty"`
 }
@@ -67,11 +68,11 @@ func New(ctx context.Context, repo, branch, base string, noDeps bool, session st
 	if err != nil {
 		return NewResult{}, err
 	}
-	_ = hooks.Emit(ctx, hooks.Event{Event: hooks.WorktreeCreated, Repo: rec.Path, Worktree: rec.Path, Branch: branch, Session: session, Room: a.Room})
 	result := NewResult{Record: rec}
 	if !noDeps {
-		// Dependency restoration is best effort, as it was in the CLI.
-		summary, err := nodedeps.Prepare(ctx, rec.Path)
+		// Dependency restoration is best effort, as it was in the CLI. It runs
+		// before the hooks, so a hook can use a tool from node_modules.
+		summary, err := prepareDeps(ctx, rec.Path)
 		if summary != "" {
 			result.Notices = append(result.Notices, summary)
 		}
@@ -79,8 +80,14 @@ func New(ctx context.Context, repo, branch, base string, noDeps bool, session st
 			result.Notices = append(result.Notices, "node_modules: prepare failed: "+err.Error())
 		}
 	}
+	hookErr := hooks.New().RunWorktreeCreated(ctx, hooks.Event{Event: hooks.WorktreeCreated, Repo: rec.Path, Worktree: rec.Path, Branch: branch, Session: session, Room: a.Room})
+	result.Outcome = failure(hookErr)
 	return result, nil
 }
+
+// prepareDeps is nodedeps.Prepare. Tests replace it to observe the order of
+// the steps in New.
+var prepareDeps = nodedeps.Prepare
 
 type GCResult struct {
 	Outcome
