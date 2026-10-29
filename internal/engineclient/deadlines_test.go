@@ -259,6 +259,29 @@ func TestLateAddGoalTwiceSaysTheEngineMayStillApplyIt(t *testing.T) {
 	}
 }
 
+// legacyEngine answers every send with the plain late line of an engine from
+// before the typed code, as a 422 with no code.
+type legacyEngine struct{ seen int }
+
+func (e *legacyEngine) RoundTrip(r *http.Request) (*http.Response, error) {
+	e.seen++
+	body := `{"error":"engine did not answer RemoveRule in 5 s"}`
+	return &http.Response{StatusCode: http.StatusUnprocessableEntity, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+}
+
+// An older engine's late write has no code, so the client still says the
+// outcome is unknown and does not send the write again.
+func TestLegacyLateWriteSaysItsOutcomeIsUnknown(t *testing.T) {
+	engine := &legacyEngine{}
+	err := engineclient.New("", engineclient.Notices(nil), engineclient.RoundTrip(engine)).Call(t.Context(), "RemoveRule", nil, nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "outcome unknown: engine did not answer RemoveRule") {
+		t.Fatalf("legacy late write = %v", err)
+	}
+	if engine.seen != 1 {
+		t.Fatalf("sends = %d, want 1: a write is not repeated", engine.seen)
+	}
+}
+
 // A late write is not repeated, and its error says the outcome is unknown and
 // names the method. A late read keeps the plain "engine did not answer" error.
 func TestLateWriteSaysItsOutcomeIsUnknown(t *testing.T) {
