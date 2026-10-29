@@ -23,6 +23,11 @@ const CodeEngineStopping = "engine_stopping"
 // the same request again once the engine serves calls.
 const CodeEngineStarting = "engine_starting"
 
+// CodeOutcomeUnknown is the reply code of a write that ran past its deadline.
+// The engine may still apply it, so the caller reads the state it changes
+// before it sends the call again.
+const CodeOutcomeUnknown = "outcome_unknown"
+
 // ErrRetryable marks a write the engine could not apply yet but may apply
 // later, so the caller keeps the request and sends it again with the same
 // request ID instead of dropping it.
@@ -135,16 +140,21 @@ var LongCalls = map[string]time.Duration{
 	"VoiceSay": 75 * time.Second,
 	// Explicit account sync performs the same synchronous private generation.
 	"SyncCatalogAccount": 10 * time.Minute,
-	// Each save below commits first, then marks every open session, which can take longer than 5 s with many sessions.
-	"SaveProfile": 2 * time.Minute, "RemoveProfile": 2 * time.Minute, "SetDefaultProfile": 2 * time.Minute,
-	"SetProfileDisabled": 2 * time.Minute, "UpsertProfile": 2 * time.Minute, "SetProfileUses": 2 * time.Minute,
-	"AddRule": 2 * time.Minute, "EditRule": 2 * time.Minute, "RemoveRule": 2 * time.Minute,
 }
+
+// WriteTimeout is the deadline of every write that LongCalls does not name. A
+// write commits, then may wait for the engine's other work, which can take
+// longer than a read's 5 s.
+const WriteTimeout = 2 * time.Minute
 
 // Deadline is how long the engine may take to answer method.
 func Deadline(method string) time.Duration {
 	if d, ok := LongCalls[method]; ok {
 		return d
+	}
+	// A runner claims input on the 5 s budget, so a stuck claim retries quickly.
+	if WriteCalls[method] && method != "RunnerClaimInput" {
+		return WriteTimeout
 	}
 	return callTimeout
 }
@@ -169,6 +179,12 @@ func Late(method string, d time.Duration) error { return lateError{method, d} }
 func IsLate(err error) bool {
 	var late lateError
 	return errors.As(err, &late)
+}
+
+// OutcomeUnknown is the error of a write that ran past its deadline. The engine
+// and the client both return it, so a caller reads the same line either way.
+func OutcomeUnknown(method string, err error) error {
+	return fmt.Errorf("outcome unknown: %w; the engine may still apply %s, so read the state it changes before you repeat it", err, method)
 }
 
 // VersionHeader carries the build of the sender, both ways on every call.
