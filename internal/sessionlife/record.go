@@ -24,9 +24,8 @@ import (
 // database in the data folder above sessions. The session's folder still
 // holds its turns, transcripts and locks.
 //
-// The columns are what listings filter and sort on; meta is the hot record.
-// Content-addressed blobs hold the two large instruction fields. Readers join
-// those fields back into the complete record. revision grows with every write in the table, so a reader can tell whether
+// The columns are what listings filter and sort on; meta is the whole record.
+// revision grows with every write in the table, so a reader can tell whether
 // its cached copy is current. session_records_closed covers the listing
 // queries (every version, or open ones only), so they never read the wide
 // meta rows. session_records_effective_name covers a lookup by address or
@@ -49,15 +48,12 @@ const recordSchema = `CREATE TABLE IF NOT EXISTS session_records (
   dir TEXT NOT NULL DEFAULT '',
   service INTEGER NOT NULL DEFAULT 0,
   meta_id TEXT NOT NULL DEFAULT '',
-  meta_digest TEXT NOT NULL DEFAULT '',
-  instructions_hash TEXT NOT NULL DEFAULT '',
-  instructions_known_hash TEXT NOT NULL DEFAULT ''
+  meta_digest TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS session_records_room ON session_records(room_id, closed);
 CREATE UNIQUE INDEX IF NOT EXISTS session_records_revision ON session_records(revision);
 CREATE INDEX IF NOT EXISTS session_records_closed ON session_records(closed, id, revision);
-CREATE INDEX IF NOT EXISTS session_records_effective_name ON session_records(` + effectiveName + `, room);
-` + instructionBlobSchema
+CREATE INDEX IF NOT EXISTS session_records_effective_name ON session_records(` + effectiveName + `, room)`
 
 // recordLimit bounds one record; real records stay under 1 MB.
 const recordLimit = 4 << 20
@@ -99,7 +95,7 @@ func Migrate(dataDir string) error {
 	return err
 }
 
-const recordSchemaVersion = 5
+const recordSchemaVersion = 6
 
 // records opens dyna.db for the sessions folder and prepares the table, for
 // writes. It takes the database writer when the table is new.
@@ -110,7 +106,8 @@ func records(sessions string) (*sql.DB, error) {
 	}
 	// Version 2 adds session_records_closed, version 3
 	// session_records_effective_name, version 4 the ownership columns, and
-	// version 5 the instruction blob import; the schema is idempotent.
+	// version 6 the return to inline instruction texts, which undoes the
+	// version 5 blob split; the schema is idempotent.
 	err = database.Migrate(db, "sessions.records", recordSchemaVersion, func(conn *sql.Conn, old int) error {
 		if _, err := conn.ExecContext(context.Background(), recordSchema); err != nil {
 			return err
@@ -120,8 +117,8 @@ func records(sessions string) (*sql.DB, error) {
 				return err
 			}
 		}
-		if old < 5 {
-			return migrateInstructionBlobs(context.Background(), conn)
+		if old < 6 {
+			return restoreInstructionBodies(context.Background(), conn)
 		}
 		return nil
 	})
@@ -288,21 +285,14 @@ func StoredVersion(ctx context.Context, q state.Reader, id string) (Version, err
 func loadStored(ctx context.Context, q querier, id string) ([]byte, Version, error) {
 	var meta string
 	var revision int64
-	instructions, err := scanInstructionRead(q.QueryRowContext(ctx, "SELECT meta,revision,"+instructionReadProjection+" FROM session_records WHERE id = ?", id), &meta, &revision)
+	err := q.QueryRowContext(ctx, "SELECT meta, revision FROM session_records WHERE id = ?", id).Scan(&meta, &revision)
 	if err != nil {
 		return nil, "", err
 	}
 	if !isObject([]byte(meta)) {
 		return nil, "", fmt.Errorf("%w: session %s record is not a bounded JSON object", ErrRecord, id)
 	}
-	raw, err := instructions.join([]byte(meta))
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: session %s: %v", ErrRecord, id, err)
-	}
-	if len(raw) > recordLimit {
-		return nil, "", fmt.Errorf("%w: session %s record exceeds %d bytes", ErrRecord, id, recordLimit)
-	}
-	return raw, rowVersion(revision), nil
+	return []byte(meta), rowVersion(revision), nil
 }
 
 func rowVersion(revision int64) Version { return Version("r" + strconv.FormatInt(revision, 10)) }
@@ -388,7 +378,7 @@ func SaveTx(conn *sql.Conn, id string, v any) error {
 	if !isObject(raw) || len(raw) > recordLimit {
 		return fmt.Errorf("%w: session %s record is not a JSON object under %d bytes", ErrRecord, id, recordLimit)
 	}
-	return writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest, instructions_hash=excluded.instructions_hash, instructions_known_hash=excluded.instructions_known_hash")
+	return writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest")
 }
 
 // recordColumns are the record fields copied into columns.
@@ -423,24 +413,10 @@ func writeRow(conn *sql.Conn, id string, raw []byte, conflict string) error {
 	if c.Service {
 		service = 1
 	}
-	instructions, err := splitInstructions(raw)
-	if err != nil {
-		return fmt.Errorf("%w: session %s: %v", ErrRecord, id, err)
-	}
-	previous, err := readInstructionHashes(conn, id)
-	if err != nil {
-		return err
-	}
-	if err := instructions.store(conn); err != nil {
-		return err
-	}
-	_, err = conn.ExecContext(context.Background(), `INSERT INTO session_records(id, revision, room_id, room, name, status, closed, parent, created_ns, activity_ms, history_only, meta, dir, service, meta_id, meta_digest, instructions_hash, instructions_known_hash)
-VALUES (?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `+conflict,
-		id, c.RoomID, c.Room, c.Name, c.Status, closed, c.ParentSession, created, c.LastActivity.UnixMilli(), c.HistoryOnly, string(instructions.hot), c.Dir, service, c.ID, ownerDigest(raw), instructions.hashes[0], instructions.hashes[1])
-	if err != nil {
-		return err
-	}
-	return deleteUnreferencedInstructionBlobs(conn, previous, instructions.hashes)
+	_, err := conn.ExecContext(context.Background(), `INSERT INTO session_records(id, revision, room_id, room, name, status, closed, parent, created_ns, activity_ms, history_only, meta, dir, service, meta_id, meta_digest)
+VALUES (?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `+conflict,
+		id, c.RoomID, c.Room, c.Name, c.Status, closed, c.ParentSession, created, c.LastActivity.UnixMilli(), c.HistoryOnly, string(raw), c.Dir, service, c.ID, ownerDigest(raw))
+	return err
 }
 
 func isObject(raw []byte) bool {
@@ -476,14 +452,7 @@ func Delete(sessions, id string) error {
 		return err
 	}
 	if err := state.For(db).Write(context.Background(), Changed(id), func(conn *sql.Conn) error {
-		previous, err := readInstructionHashes(conn, id)
-		if err != nil {
-			return err
-		}
 		if _, err := conn.ExecContext(context.Background(), "DELETE FROM session_records WHERE id = ?", id); err != nil {
-			return err
-		}
-		if err := deleteUnreferencedInstructionBlobs(conn, previous, [2]string{}); err != nil {
 			return err
 		}
 		if err := deleteTurnsAndQueue(conn, id); err != nil {
@@ -689,7 +658,7 @@ func Each(sessions string, open bool, fn func(id string, raw []byte, err error) 
 	if err != nil || !ok {
 		return err
 	}
-	query := "SELECT id,meta," + instructionReadProjection + " FROM session_records"
+	query := "SELECT id, meta FROM session_records"
 	if open {
 		query += " WHERE closed = 0"
 	}
@@ -700,21 +669,13 @@ func Each(sessions string, open bool, fn func(id string, raw []byte, err error) 
 	type record struct {
 		id  string
 		raw []byte
-		err error
 	}
 	var records []record
 	for res.Next() {
 		var r record
-		instructions, err := scanInstructionRead(res, &r.id, &r.raw)
-		if err != nil {
+		if err := res.Scan(&r.id, &r.raw); err != nil {
 			res.Close()
 			return err
-		}
-		if instructions.hashes != [2]string{} {
-			r.raw, r.err = instructions.join(r.raw)
-			if r.err != nil {
-				r.err = fmt.Errorf("%w: session %s: %v", ErrRecord, r.id, r.err)
-			}
 		}
 		records = append(records, r)
 	}
@@ -722,8 +683,8 @@ func Each(sessions string, open bool, fn func(id string, raw []byte, err error) 
 		return err
 	}
 	for _, r := range records {
-		err := r.err
-		if err == nil && !isObject(r.raw) {
+		var err error
+		if !isObject(r.raw) {
 			err = fmt.Errorf("%w: session %s record is not a bounded JSON object", ErrRecord, r.id)
 		}
 		if err := fn(r.id, r.raw, err); err != nil {
@@ -818,7 +779,7 @@ func OpenWithPhase(sessions, key string, phases ...string) ([]string, error) {
 // roll back when it returns false. SaveTx advances revisions for cached reads.
 func MoveSpawnItemTx(conn *sql.Conn, room, goal, item, toGoal, toItem string, locked func(string) bool) error {
 	ctx := context.Background()
-	rows, err := conn.QueryContext(ctx, "SELECT id,meta,"+instructionReadProjection+" FROM session_records WHERE room_id=? AND json_extract(meta,'$.goal')=? AND json_extract(meta,'$.item')=?", room, goal, item)
+	rows, err := conn.QueryContext(ctx, "SELECT id, meta FROM session_records WHERE room_id=? AND json_extract(meta,'$.goal')=? AND json_extract(meta,'$.item')=?", room, goal, item)
 	if err != nil {
 		return err
 	}
@@ -826,17 +787,10 @@ func MoveSpawnItemTx(conn *sql.Conn, room, goal, item, toGoal, toItem string, lo
 	var records []record
 	for rows.Next() {
 		var r record
-		instructions, err := scanInstructionRead(rows, &r.id, &r.meta)
-		if err != nil {
+		if err := rows.Scan(&r.id, &r.meta); err != nil {
 			rows.Close()
 			return err
 		}
-		raw, err := instructions.join([]byte(r.meta))
-		if err != nil {
-			rows.Close()
-			return err
-		}
-		r.meta = string(raw)
 		records = append(records, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -877,18 +831,15 @@ func RemapSpawnGoalsTx(conn *sql.Conn, remap func(room, goal string) (parent, it
 	if exists == 0 {
 		return nil
 	}
-	rows, err := conn.QueryContext(ctx, "SELECT id,room_id,meta,"+instructionReadProjection+" FROM session_records")
+	rows, err := conn.QueryContext(ctx, "SELECT id, room_id, meta FROM session_records")
 	if err != nil {
 		return err
 	}
-	type record struct {
-		id, room, meta string
-		instructions   instructionRead
-	}
+	type record struct{ id, room, meta string }
 	var records []record
 	for rows.Next() {
 		var r record
-		if r.instructions, err = scanInstructionRead(rows, &r.id, &r.room, &r.meta); err != nil {
+		if err := rows.Scan(&r.id, &r.room, &r.meta); err != nil {
 			rows.Close()
 			return err
 		}
@@ -909,13 +860,6 @@ func RemapSpawnGoalsTx(conn *sql.Conn, remap func(room, goal string) (parent, it
 		parent, item, ok := remap(r.room, goal)
 		if !ok {
 			continue
-		}
-		raw, err := r.instructions.join([]byte(r.meta))
-		if err != nil {
-			return fmt.Errorf("%w: session %s: %v", ErrRecord, r.id, err)
-		}
-		if err := json.Unmarshal(raw, &meta); err != nil {
-			return fmt.Errorf("%w: session %s: %v", ErrRecord, r.id, err)
 		}
 		meta["goal"], meta["item"] = parent, item
 		// SaveTx rewrites the meta with its typed columns and digest in one
