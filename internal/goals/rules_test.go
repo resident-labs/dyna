@@ -69,6 +69,24 @@ func TestRulesLifecycle(t *testing.T) {
 	}
 }
 
+func TestRulesCapFollowsOwnerSetting(t *testing.T) {
+	s := testStore(t)
+	s.RulesLimit = func() (int, error) { return 3500, nil }
+	for _, n := range []int{500, 500, 500, 500, 500, 500, 200} {
+		if _, err := s.AddRule("room", "owner", "owner", strings.Repeat("x", n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, err := s.RulesView("room")
+	if err != nil || view.Max != 3500 || view.Used != 3200 {
+		t.Fatal(view, err)
+	}
+	want := "Rules are full (3 200 / 3 500 characters). Shorten or remove a rule first."
+	if _, err := s.AddRule("room", "owner", "owner", strings.Repeat("x", 301)); err == nil || err.Error() != want {
+		t.Fatal(err)
+	}
+}
+
 func TestRuleLimits(t *testing.T) {
 	s := testStore(t)
 	for _, tc := range []struct{ text, want string }{{" \n", "rule text is required"}, {strings.Repeat("界", 501), "rule text exceeds 500 characters"}} {

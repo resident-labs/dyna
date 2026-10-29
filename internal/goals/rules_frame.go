@@ -8,14 +8,14 @@ import (
 )
 
 // RuleLines renders one line per rule: ID, text and author. The guard counts
-// rule text, like the store limit, so valid sets fit in full.
-func RuleLines(rules []Rule) []string {
+// rule text against limit, like the store cap, so valid sets fit in full.
+func RuleLines(rules []Rule, limit int) []string {
 	var lines []string
 	used := 0
 	for i, rule := range rules {
 		text := strings.Join(strings.Fields(rule.Text), " ")
 		size := utf8.RuneCountInString(text)
-		if used+size > MaxRulesText {
+		if used+size > limit {
 			lines = append(lines, fmt.Sprintf("+%d more: dyna rules", len(rules)-i))
 			break
 		}
@@ -49,7 +49,7 @@ func (s *Store) InstructionSections(roomID string) []instructions.Section {
 		if scope == "" || err != nil || len(view.Rules) == 0 {
 			return instructions.Section{Name: name}
 		}
-		return instructions.Section{Name: name, Text: heading, Items: RuleLines(view.Rules)}
+		return instructions.Section{Name: name, Text: heading, Items: RuleLines(view.Rules, view.Max)}
 	}
 	return []instructions.Section{
 		section("Global rules", Global, "[DYNA GLOBAL RULES] Standing rules for every Dyna room, set by the owner and agents. Follow them. Owner rules win if two conflict. Room rules win over these. Change them with `dyna rules --global`."),

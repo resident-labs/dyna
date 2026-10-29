@@ -42,6 +42,7 @@ const (
 	KeyMaxCardBytes          = "content.maxCardBytes"
 	KeyMaxFileBytes          = "content.maxFileBytes"
 	KeyDatabaseCallerDetail  = "database.callerDetail"
+	KeyRulesMaxChars         = "rules.maxChars"
 	SourceDefault            = "default"
 	SourceFile               = "file"
 	SourceEnv                = "env"
@@ -64,6 +65,10 @@ const (
 	DefaultComputersReminderMinutes       = 2
 	DefaultComputersRenderNode            = "auto"
 	DefaultWorktreesMinFreeBytes    int64 = 10 << 30
+	// DefaultRulesMaxChars caps the text of room rules and of global rules.
+	DefaultRulesMaxChars = 3000
+	// MinRulesMaxChars keeps one longest rule (500 characters) within the cap.
+	MinRulesMaxChars = 500
 )
 
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
@@ -109,6 +114,8 @@ type Values struct {
 	WorktreesRetention    string
 	WorktreesRoot         string
 	WorktreesMinFreeBytes int64
+	// RulesMaxChars caps the rule text of one room or of the global rules.
+	RulesMaxChars int
 	// SubagentMaxDepth caps subagent-session nesting (top-level sessions are
 	// depth 1).
 	SubagentMaxDepth int
@@ -161,6 +168,7 @@ func Defaults() Values {
 		WorktreesRetention:       WorktreesRetentionChanged,
 		WorktreesRoot:            "~/.dyna-worktrees",
 		WorktreesMinFreeBytes:    DefaultWorktreesMinFreeBytes,
+		RulesMaxChars:            DefaultRulesMaxChars,
 		SubagentMaxDepth:         DefaultSubagentMaxDepth,
 		SteeringMaxToolWait:      DefaultSteeringToolWait,
 		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
@@ -344,6 +352,13 @@ func Load(path string) (Values, error) {
 			if ValidWorktreesRetention(retention) {
 				v.WorktreesRetention = retention
 				v.fromFile[KeyWorktreesRetention] = true
+			}
+		}
+	}
+	if rules, ok := raw["rules"].(map[string]any); ok {
+		if value, exists := rules["maxChars"]; exists {
+			if err := v.Set(KeyRulesMaxChars, numberText(value)); err != nil {
+				return Values{}, err
 			}
 		}
 	}
@@ -578,6 +593,13 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.WorktreesMinFreeBytes = n
 		v.fromFile[key] = true
+	case KeyRulesMaxChars:
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < MinRulesMaxChars {
+			return fmt.Errorf("%s must be a whole number of characters, %d or more", key, MinRulesMaxChars)
+		}
+		v.RulesMaxChars = n
+		v.fromFile[key] = true
 	case KeyRootProfile:
 		v.RootProfile = strings.TrimSpace(value)
 		v.fromFile[key] = true
@@ -673,6 +695,9 @@ func (v Values) Save() error {
 	worktrees["root"] = v.WorktreesRoot
 	worktrees["minFreeBytes"] = v.WorktreesMinFreeBytes
 	raw["worktrees"] = worktrees
+	rules := nested(raw, "rules")
+	rules["maxChars"] = v.RulesMaxChars
+	raw["rules"] = rules
 	root := nested(raw, "root")
 	root["profile"] = v.RootProfile
 	raw["root"] = root
