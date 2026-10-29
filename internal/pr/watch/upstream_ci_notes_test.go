@@ -36,18 +36,20 @@ func TestUpstreamPRSendsNoCIBudgetNotes(t *testing.T) {
 	}
 }
 
-// A failed upstream pull request notifies its author only when the head is the
-// room's own checkout. A fork head is read-only here, so its failure stays quiet
+// A failed upstream pull request notifies its author only when the head is one of
+// the room's checkouts. A fork head is read-only here, so its failure stays quiet
 // while the failure count still updates.
 func TestUpstreamPRFailureNoticeFollowsHeadRepo(t *testing.T) {
-	own, err := repoid.RemoteIdentity("", "https://github.com/mine/repo")
-	if err != nil {
-		t.Fatal(err)
-	}
+	const extraDir = "/extra/checkout"
+	checkouts := map[string]string{extraDir: "github.com/mine/extra"}
 	original := resolveCheckoutRepo
 	t.Cleanup(func() { resolveCheckoutRepo = original })
 	resolveCheckoutRepo = func(_ context.Context, dir string) (repoid.Repo, error) {
-		return repoid.Repo{ID: own, Root: dir, Main: dir}, nil
+		id, ok := checkouts[dir]
+		if !ok {
+			id = "github.com/mine/repo"
+		}
+		return repoid.Repo{ID: id, Root: dir, Main: dir}, nil
 	}
 	for _, tc := range []struct {
 		name, head string
@@ -55,6 +57,7 @@ func TestUpstreamPRFailureNoticeFollowsHeadRepo(t *testing.T) {
 	}{
 		{"read-only fork", "someone/repo", false},
 		{"room's own fork", "mine/repo", true},
+		{"room's extra repository fork", "mine/extra", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -62,6 +65,7 @@ func TestUpstreamPRFailureNoticeFollowsHeadRepo(t *testing.T) {
 			e.s.Notify = notify.New(rooms, subagent.NewManager())
 			if err := rooms.UpdatePreferences(e.author.RoomID, func(rec *room.Record) error {
 				rec.Upstream = "github.com/owner/repo"
+				rec.ExtraRepos = []string{extraDir}
 				return nil
 			}); err != nil {
 				t.Fatal(err)
