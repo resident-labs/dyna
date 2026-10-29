@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
@@ -569,7 +571,15 @@ func TestMainUpdatedFetchesWithoutTrackedPR(t *testing.T) {
 func TestSpoolWriteFailureNotifies(t *testing.T) {
 	s, repo := setup(t)
 	add(t, s, repo, hook("queued", AfterLand))
-	if err := os.WriteFile(filepath.Join(s.DataDir, "hook-spool"), []byte("blocked"), 0600); err != nil {
+	// A queue store this binary cannot write refuses the enqueue.
+	db, err := database.Open(s.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Immediate(context.Background(), db, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), "INSERT INTO meta(key,value) VALUES('hooks.queue','99')")
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	notices := 0
@@ -581,7 +591,7 @@ func TestSpoolWriteFailureNotifies(t *testing.T) {
 		return nil
 	}
 	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err == nil || notices != 1 {
-		t.Fatalf("spool failure: %v; notices %d", err, notices)
+		t.Fatalf("queue failure: %v; notices %d", err, notices)
 	}
 }
 
