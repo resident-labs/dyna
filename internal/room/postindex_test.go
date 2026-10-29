@@ -9,6 +9,59 @@ import (
 	"time"
 )
 
+// The version-4 migration builds the partial covering index DeliverySignature
+// seeks, and its answer stays the newest claim, cancellation or dismissal
+// write: a newer queued post must not move it. The expected value is computed
+// in Go from the rows, so an index predicate that drifts from the query's
+// filter fails the test.
+func TestDeliverySignaturePartialIndex(t *testing.T) {
+	s := recordsStore(t)
+	rec, err := s.Create(CreateInput{Name: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := "ses_sig"
+	rows := []struct {
+		post, state string
+		turn, at    int64
+	}{
+		{"post_delivered", "delivered", 2, 500},
+		{"post_claimed", "claimed", 1, 1000},
+		{"post_dismissed", "dismissed", 0, 1500},
+		{"post_cancelled", "cancelled", 0, 2000},
+		{"post_queued", "queued", 0, 3000},
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if _, err := db.Exec(`INSERT INTO post_deliveries(room_id, post_id, session_id, mode, category, state, claimed_turn, updated_at)
+VALUES(?, ?, ?, 'wake', '', ?, ?, ?)`, rec.ID, row.post, session, row.state, row.turn, row.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var indexName string
+	if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='index' AND name='post_deliveries_signature'").Scan(&indexName); err != nil {
+		t.Fatalf("post_deliveries_signature index missing after store setup: %v", err)
+	}
+	got, err := s.DeliverySignature(rec.ID, DeliveryKeys(session, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := int64(0)
+	for _, row := range rows {
+		if row.turn > 0 || row.state == "cancelled" || row.state == "dismissed" || row.state == "failed" {
+			if row.at > want {
+				want = row.at
+			}
+		}
+	}
+	if got != want {
+		t.Fatalf("DeliverySignature = %d, want %d: the newest queued write must not move it", got, want)
+	}
+}
+
 // A bound recipient gets one row with the post's mode, an agent address without
 // a binding gets a row keyed by the address, and the root seat gets its own row
 // with its category.

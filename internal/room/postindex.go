@@ -29,8 +29,9 @@ import (
 // claimed_turn and the dismissed state, which replaced the session_queues
 // JSON blob (see room/deliverystate.go). Version 3 adds delivered_at, a clock
 // time, and how, which says whether the delivery woke the turn, was batched
-// into it, or stayed quiet context.
-const postIndexVersion = 3
+// into it, or stayed quiet context. Version 4 adds the partial covering index
+// DeliverySignature seeks instead of scanning every row a session ever got.
+const postIndexVersion = 4
 
 const postIndexSchema = `CREATE TABLE post_homes (
  room_id TEXT NOT NULL,
@@ -128,6 +129,15 @@ func (s *Store) postIndexDB() (*sql.DB, error) {
 				return err
 			}
 			if _, err := conn.ExecContext(ctx, `ALTER TABLE post_deliveries ADD COLUMN how TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+		}
+		if old < 4 {
+			// DeliverySignature's WHERE is this index's WHERE, so its read is one
+			// seek over the rows that moved it, not a scan of every delivery row
+			// the session ever got. A queued row that no turn claimed is outside
+			// the index, so storing a post costs no index write.
+			if _, err := conn.ExecContext(ctx, `CREATE INDEX post_deliveries_signature ON post_deliveries(room_id, session_id, updated_at) WHERE claimed_turn > 0 OR state IN ('cancelled','dismissed','failed')`); err != nil {
 				return err
 			}
 		}
