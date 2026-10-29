@@ -231,8 +231,12 @@ export async function runAuthStorageCommand(
 			if (edit.expect !== undefined && !sameJsonValues(entries, edit.expect)) {
 				throw new AuthCommandError("The login file changed since it was read.");
 			}
+			// before is a copy of the entries the edit replaces, because
+			// applyAuthEdit mutates the entries it is given; a caller restores
+			// this state when the edit's own record fails.
+			const before = current === undefined ? null : { ...entries };
 			const next = applyAuthEdit(entries, edit);
-			return { result: { before: current === undefined ? null : entries, after: next }, next: JSON.stringify(next, null, 2) };
+			return { result: { before, after: next }, next: JSON.stringify(next, null, 2) };
 		});
 		console.log(JSON.stringify(result));
 		return;
