@@ -21,11 +21,18 @@ func NewCommand() *cobra.Command {
 	return cmd
 }
 
-// TODO: legacy/shim — remove after one release. `dyna git issue` moved to
-// top-level `dyna issue`.
+// `dyna git issue` groups the upstream issue watch commands. Its room-issue
+// subcommands moved to top-level `dyna issue` and stay hidden until the shim
+// is removed.
+// TODO: legacy/shim — remove the hidden subcommands after one release.
 func legacyIssueCommand() *cobra.Command {
 	cmd := issue.NewCommand()
-	cmd.Hidden = true
+	cmd.Use = "issue"
+	cmd.Short = "Watch upstream GitHub issues for a room"
+	cmd.Long = "Watch upstream GitHub issues for a room. Room issues moved to top-level dyna issue."
+	for _, sub := range cmd.Commands() {
+		sub.Hidden = true
+	}
 	cmd.AddCommand(issueWatchCommand(), issueUnwatchCommand())
 	return cmd
 }
