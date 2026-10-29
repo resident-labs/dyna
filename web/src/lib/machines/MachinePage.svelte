@@ -19,7 +19,7 @@
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole, MachineWork } from '../api/machine.ts'
-  import { ciRunDetail, ciRunText, computersText, count, diskText, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
+  import { ciRunDetail, ciRunText, computersText, diskText, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, rooms = [], owner = true, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
@@ -217,14 +217,10 @@
 
       <MachineWorkCard work={workHere?.value ?? null} failed={workHere !== null && workHere.value === null} />
 
-      {#if machine.ci && machine.roles.includes('ci')}
-        {@const ci = machine.ci}
-        {@const runs = machine.ciRuns ?? []}
-        <Card title="CI" count={runs.length || null}>
-          <Row dense text="Node queue">
-            {#snippet trail()}<span class="value">{count(ci.running, 'run')} · {count(ci.waiting, 'waiting unit')}</span>{/snippet}
-          </Row>
-          {#each runs as run (`${run.url}@${run.started}`)}
+      <!-- The Work card holds the queue; this card keeps what it lacks: the PR each CI run checks. -->
+      {#if machine.ciRuns?.length}
+        <Card title="CI runs" count={machine.ciRuns.length}>
+          {#each machine.ciRuns as run (`${run.url}@${run.started}`)}
             <Row dense text={ciRunText(run)}>
               {#snippet meta()}
                 {#if run.trial}<Chip>Trial</Chip>{/if}
@@ -235,8 +231,6 @@
                 {#if run.url}<a class="open" href={run.url} target="_blank" rel="noreferrer" title="Open this PR on GitHub">Open ↗</a>{/if}
               {/snippet}
             </Row>
-          {:else}
-            <p class="note">No CI run here now.</p>
           {/each}
         </Card>
       {/if}
