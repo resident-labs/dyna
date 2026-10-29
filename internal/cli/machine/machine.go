@@ -20,7 +20,6 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/settings"
 	"dyna-agent/internal/websvc"
 )
 
@@ -50,21 +49,11 @@ var saveMachine = func(ctx context.Context, ref string, patch websvc.MachinePatc
 	return detail, err
 }
 
-// prober is the prober the CLI saves through. It reads the same disk floor as
-// the engine, so a probe from the command line marks a CI machine that is low
-// on disk exactly as the engine's own probe does.
+// prober is the prober the CLI saves through. It reads the same disk rule as
+// the engine, so a probe from the command line stores what the engine's own
+// probe stores.
 func prober() machines.Prober {
-	return machines.Prober{Store: store(), DiskFloorBytes: diskFloorBytes()}
-}
-
-// diskFloorBytes is the free space a CI machine must keep. A settings file that
-// cannot be read keeps the default floor.
-func diskFloorBytes() uint64 {
-	values, err := settings.Load("")
-	if err != nil {
-		return settings.Defaults().CIDiskFloorBytes()
-	}
-	return values.CIDiskFloorBytes()
+	return machines.Prober{Store: store()}
 }
 
 func listCommand() *cobra.Command {
@@ -207,12 +196,11 @@ func writeCapabilities(out io.Writer, m machines.Machine) {
 	fmt.Fprintf(out, "Computers: %t, stream: %t\n", caps.Computers.Ready(), caps.Computers.Stream)
 	fmt.Fprintf(out, "Dyna:     %s\n", orNone(caps.DynaVersion))
 	if caps.Disk.Total > 0 {
-		fmt.Fprintf(out, "Disk:     %s free of %s on /var/tmp\n", size(caps.Disk.Free), size(caps.Disk.Total))
-	}
-	// A CI machine below the floor keeps its CI work until space is freed, so
-	// the reason is named, not only the health.
-	if m.HoldsCI() {
-		fmt.Fprintf(out, "CI:       held; free space is below the %s floor of machines.ciDiskFloorGB\n", size(diskFloorBytes()))
+		rule := "keeps " + m.DiskKeeps()
+		if block := m.DiskBlock(); block != "" {
+			rule = block
+		}
+		fmt.Fprintf(out, "Disk:     %s free of %s on /var/tmp · %s\n", size(caps.Disk.Free), size(caps.Disk.Total), rule)
 	}
 	if load.CPUPercent != nil {
 		fmt.Fprintf(out, "Load:     %.2f %.2f %.2f, CPU %.0f%%, %s free\n",

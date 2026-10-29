@@ -18,9 +18,9 @@ import (
 )
 
 // TestCleanBeforeRunFollowsTheConfiguredDiskFloor checks that cache recovery
-// uses machines.ciDiskFloorGB, the same setting that holds CI admission. It
-// also checks the two edges: a settings file that cannot be read keeps the
-// default floor, and a zero floor turns recovery off.
+// uses machines.ciDiskFloorGB. It also checks the two edges: a settings file
+// that cannot be read keeps the default floor, and a zero floor turns recovery
+// off.
 func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

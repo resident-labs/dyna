@@ -56,8 +56,8 @@ func TestWorkReadsCapacityRunningAndWaiting(t *testing.T) {
 	if len(capacity.Resources) != 1 || capacity.Resources[0] != (ResourceUse{Name: "display", Used: 1, Limit: 1}) {
 		t.Fatalf("resources = %+v, want display 1 of 1", capacity.Resources)
 	}
-	if capacity.DiskFree != 60<<30 || capacity.DiskFloor != 10<<30 || capacity.DiskBlock != "" {
-		t.Fatalf("disk = %+v, want 60 GiB free over a 10 GiB floor and no block", capacity)
+	if capacity.DiskFree != 60<<30 || capacity.DiskKeeps != "a tenth of the disk" || capacity.DiskBlock != "" {
+		t.Fatalf("disk = %+v, want 60 GiB free, a tenth of the disk kept and no block", capacity)
 	}
 	if len(work.Running) != 2 || work.Running[0].ID != "running" || work.Running[0].Kind != WorkJob || work.Running[0].Label != "make test" || work.Running[1].Kind != WorkCheck {
 		t.Fatalf("running = %+v, want the job then the check", work.Running)

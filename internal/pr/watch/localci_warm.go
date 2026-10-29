@@ -160,7 +160,7 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 			node := nodes[i]
 			// A warm run takes room on the node queue, so it waits for a
 			// machine with room: a pull request's checks come first.
-			if node.LowDisk || s.freeCINodeCPUs(ctx, node) < 1 {
+			if s.freeCINodeCPUs(ctx, node) < 1 {
 				continue
 			}
 			warmed, err := store.WarmedHead(ctx, repo, node.Name)

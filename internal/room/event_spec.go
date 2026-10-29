@@ -310,8 +310,8 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Merge fix requested by {actor} for {label} at {head}. This one merge bypasses main CI; fresh PR checks and approval remain required.",
 	},
-	// A machine that is low on disk warns root once per low-disk period, and
-	// holds its CI work until space is freed.
+	// A machine whose disk admits no new work warns root once per blocked
+	// period, with the queue's own words, until space is freed.
 	{
 		Family:   FamilyMachine,
 		Type:     TypeLowDisk,
@@ -319,7 +319,7 @@ var eventSpecs = []EventSpec{
 		Payload:  reflect.TypeOf(MachineEvent{}),
 		Wake:     WakeRootIfNeeded,
 		Once:     true,
-		Text:     "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+		Text:     "Machine {name} is low on disk: {block}. Dyna starts no new work there until space is freed.",
 	},
 	// A run that repaired a linked cache posts one quiet machine fact, so the
 	// owner sees that Dyna switched it back without waking a session.

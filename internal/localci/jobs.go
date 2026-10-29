@@ -85,13 +85,9 @@ func (s nodeSource) GetLocal(ctx context.Context) (machines.Machine, error) {
 }
 
 // machine turns the node into a machine record: its probed CPUs and memory,
-// and a full disk when the last probe found the node under the disk floor.
+// which bound what a check may ask for.
 func (s nodeSource) machine() machines.Machine {
-	m := machines.Machine{Name: s.node.Name, Enabled: true, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes}}
-	if s.node.LowDisk {
-		m.Capabilities.Disk = machines.Disk{Total: 100, Free: 0}
-	}
-	return m
+	return machines.Machine{Name: s.node.Name, Enabled: true, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes}}
 }
 
 // exec builds the node executor of this runner.
