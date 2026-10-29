@@ -3,22 +3,34 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
 	"time"
 
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/ghclient"
 )
 
 func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput) (approvals.Request, error) {
-	payload, err := json.Marshal(approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files})
+	actor := authority.Of(ctx)
+	ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, actor.Room), s.rooms.Notify.Rooms)
+	class, err := ghclient.ClassifyForApproval(ctx, "", in.Cwd, in.Argv)
 	if err != nil {
 		return approvals.Request{}, err
 	}
-	return s.rooms.Approvals.Create(ctx, authority.Of(ctx), approvals.CreateInput{
-		Kind: approvals.KindGH, Class: in.Class, Payload: payload, Repository: in.Repo,
-		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: approvalArgument(in.Argv, "--body"),
+	if class == approvals.ClassRead {
+		return approvals.Request{}, errors.New("read commands do not need approval")
+	}
+	stored := approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files}
+	payload, err := json.Marshal(stored)
+	if err != nil {
+		return approvals.Request{}, err
+	}
+	return s.rooms.Approvals.Create(ctx, actor, approvals.CreateInput{
+		Kind: approvals.KindGH, Class: class, Payload: payload, Repository: in.Repo,
+		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: stored.DisplayBody(),
 	})
 }
 
