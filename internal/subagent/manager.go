@@ -477,6 +477,14 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 		}
 	}()
 
+	// The hook wait runs before the names lock. A failed hook does not fail the
+	// start; the first turn learns of it from the brief.
+	if created != nil {
+		if hookErr := hooks.New().RunWorktreeCreated(ctx, hooks.Event{Event: hooks.WorktreeCreated, Repo: created.Path, Worktree: created.Path, Branch: created.Branch, Session: id, Room: roomRec.ID}); hookErr != nil {
+			task = fmt.Sprintf("Setup note: a worktree-created hook failed for this session's worktree. Read its log with dyna git hooks log before you rely on the tree. Failure: %v\n\n%s", hookErr, task)
+		}
+	}
+
 	unlock, err := lockNames(store)
 	if err != nil {
 		return Info{}, Turn{}, err
