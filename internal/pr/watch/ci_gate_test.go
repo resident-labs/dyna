@@ -55,6 +55,21 @@ func TestReviewBotCannotEstablishCI(t *testing.T) {
 	}
 }
 
+func TestSameNamedChecksInDifferentWorkflowsNeedSeparatePassesHostedOnly(t *testing.T) {
+	pending := actionsCheck(Check{ID: 1, Name: "build", Status: "in_progress"})
+	pending.CheckSuite.ID = 1
+	passed := actionsCheck(Check{ID: 2, Name: "build", Status: "completed", Conclusion: "success"})
+	passed.CheckSuite.ID = 2
+	snap := Snapshot{Checks: []Check{pending, passed}}
+	state, _, _, _ := snap.CIStatus()
+	if state != "pending" {
+		t.Fatalf("one workflow's pass replaced another workflow's pending check: %s", state)
+	}
+	if summaries := snap.CheckSummaries(Ref{}); len(summaries) != 2 {
+		t.Fatalf("the PR view hid a same-named workflow check: %+v", summaries)
+	}
+}
+
 // A review bot's status never counts as CI: the reviewer starts at once, but
 // Dyna reports ready only after real CI passes.
 func TestFakeGHReviewBotDoesNotPassCI(t *testing.T) {
