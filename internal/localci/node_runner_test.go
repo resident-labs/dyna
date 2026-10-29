@@ -6,7 +6,6 @@ import (
 	"context"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
-	"dyna-agent/internal/shellquote"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -382,7 +381,9 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	var started, crossStarted atomic.Bool
 	slotsStarted := make(chan struct{})
 	release := make(chan struct{})
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 8, Enabled: true}}
+	// Eight probed CPUs against two per check bound the node to four checks
+	// at once through the admission queue, whatever worker count the run has.
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true, CPUs: 8}, wait: func(context.Context, time.Duration) error { return nil }}
 	legacy := func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -409,7 +410,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 				t.Errorf("scope lacks %s", want)
 			}
 		}
-		for _, want := range []string{"flock -n 9", "--cpus=2", "--memory=4g", "--tmpfs /tmp:rw,exec,nosuid,nodev,size=1g", "sudo -n docker", "GITHUB_STEP_SUMMARY=/reports/step-summary.md", ":/workspace", "-w /workspace", "GIT_CONFIG_VALUE_0=/workspace"} {
+		for _, want := range []string{"--cpus=2", "--memory=4g", "--tmpfs /tmp:rw,exec,nosuid,nodev,size=1g", "sudo -n docker", "GITHUB_STEP_SUMMARY=/reports/step-summary.md", ":/workspace", "-w /workspace", "GIT_CONFIG_VALUE_0=/workspace"} {
 			if !strings.Contains(script, want) {
 				t.Errorf("check lacks %s", want)
 			}
@@ -443,9 +444,6 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 			}
 		}
 		if current == slots {
-			if !crossStarted.Load() {
-				t.Error("cross-build did not start beside the other checks")
-			}
 			select {
 			case <-slotsStarted:
 			default:
@@ -467,7 +465,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), RepoDir: t.TempDir(), Suites: []Suite{"go", "cross-build"}, Parallelism: slots, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
+		result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), RepoDir: t.TempDir(), Suites: []Suite{"go", "cross-build"}, Parallelism: 32, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
 		done <- outcome{result, err}
 	}()
 	select {
@@ -477,8 +475,8 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	close(release)
 	got := <-done
-	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
-		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
+	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots || !crossStarted.Load() {
+		t.Fatalf("result=%+v err=%v peak=%d cross started=%t", got.result, got.err, peak.Load(), crossStarted.Load())
 	}
 	wanted := map[CheckName]bool{"frontend test (0)": true, "frontend test (1)": true, "frontend test (2)": true, "frontend test (3)": true, "frontend test (4)": true, "frontend test (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true,
 		"cross-build (linux/amd64)": true, "cross-build (linux/arm64)": true, "cross-build (darwin/amd64)": true, "cross-build (darwin/arm64)": true, "cross-build": true}
@@ -506,6 +504,17 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	if len(wanted) != 0 {
 		t.Fatalf("missing checks: %v", wanted)
+	}
+	// A check that waited shows why in its log: the queue writes a wait reason
+	// into every row it holds back, and the runner prints it.
+	waited := false
+	for _, check := range got.result.Checks {
+		if strings.Contains(check.LogTail, "local CI: ") {
+			waited = true
+		}
+	}
+	if !waited {
+		t.Error("no check logged its queue wait reason")
 	}
 }
 
@@ -698,7 +707,6 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 		}
 	}
 	check := nodeCheck{id: SuiteFrontend, name: "frontend", inner: "true", image: "node:22"}
-	keepActive(t, dir)
 	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -922,7 +930,7 @@ func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
 // a lock nobody will release. The daemon blocks on a pipe the test owns, and
 // the cleanup that closes it is registered before anything can fail, so no
 // child outlives a failing run.
-func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
+func TestHostCheckLeavesADetachedDaemonRunning(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"docker", "git"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
@@ -957,7 +965,7 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "mkfifo " + ready + "; setsid sh -c 'echo > " + ready + "; read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; read ready < " + ready + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd := exec.Command("bash", "-c", inner)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -972,12 +980,10 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	if convErr != nil {
 		t.Fatal(convErr)
 	}
-	// The daemon is still running and the slot must already be free.
+	// The daemon is still running: the check ended, and the queue place it
+	// held ended with the check, while the daemon keeps its own session.
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatalf("daemon %d did not survive its check: %v", pid, err)
-	}
-	if output, err := exec.Command("flock", "-n", filepath.Join(dir, "slots", "0.lock"), "true").CombinedOutput(); err != nil {
-		t.Fatalf("the daemon kept the slot lock: %v: %s", err, output)
 	}
 }
 
@@ -1037,7 +1043,7 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "printf 'check-end\\n' >> " + events + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd := exec.Command("bash", "-c", inner)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	var out bytes.Buffer
@@ -1102,138 +1108,18 @@ func TestEachCheckGetsItsOwnSccacheServerPort(t *testing.T) {
 	dir := t.TempDir()
 	check := nodeCheck{id: "build", name: "build", host: true, inner: "cargo build", resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
 	script := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
-	if !strings.Contains(script, "SCCACHE_SERVER_PORT=$(( 4226 + slot ))") {
+	if !strings.Contains(script, "SCCACHE_SERVER_PORT=4226") {
 		t.Fatalf("a host check did not get its own sccache port: %s", script)
+	}
+	other := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 3, false, "catthehacker/ubuntu:act-22.04", "", "")
+	if !strings.Contains(other, "SCCACHE_SERVER_PORT=4229") {
+		t.Fatalf("two checks of one node shared one sccache port: %s", other)
 	}
 	own := check
 	own.env = map[string]string{"SCCACHE_SERVER_PORT": "5000"}
 	script = nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), own, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
-	if strings.Contains(script, "4226 + slot") || !strings.Contains(script, "SCCACHE_SERVER_PORT=5000") {
+	if strings.Contains(script, "4226") || !strings.Contains(script, "SCCACHE_SERVER_PORT=5000") {
 		t.Fatalf("a check that sets the port lost it: %s", script)
-	}
-}
-
-// A check that waits for a busy slot keeps the slot it waits for: with every
-// slot busy the scan ends on the last one, so the waiting path must name the
-// lock it actually takes, and its sccache port follows that slot. A fake flock
-// makes both answers immediate, so the test takes no time and starts no waiter.
-func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Both non-blocking attempts of the scan fail, so it finds no free slot, and
-	// the first attempt of the waiting loop succeeds at once.
-	attempts := filepath.Join(dir, "attempts")
-	fake := "#!/bin/sh\ncount=$(cat " + shellquote.Quote(attempts) + " 2>/dev/null || echo 0)\ncount=$((count + 1))\necho \"$count\" > " + shellquote.Quote(attempts) + "\nif [ \"$1\" = \"-n\" ] && [ \"$count\" -le 2 ]; then exit 1; fi\nexit 0\n"
-	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// The inner script names the port the way a check does, from its slot.
-	script := jobs.SlotScript(dir, 2, 2, keepActive(t, dir), time.Hour, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
-	var out, errOut bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errOut
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("wrapper: %v: %s", err, errOut.String())
-	}
-	if got := strings.TrimSpace(out.String()); got != "slot=0 port=4226" {
-		t.Fatalf("the check ran with %q, want slot 0 and its own port", got)
-	}
-	if !strings.Contains(errOut.String(), "waiting for any free slot") {
-		t.Fatalf("the check's log does not say why it waited: %s", errOut.String())
-	}
-}
-
-// keepActive marks a run as live for a slot script, as the run's keeper does.
-func keepActive(t *testing.T, dir string) string {
-	t.Helper()
-	active := filepath.Join(dir, ".active")
-	if err := os.WriteFile(active, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return active
-}
-
-// A queued wrapper whose run is cancelled must not run its check, even when the
-// slot comes free in the same moment. A successful FIFO writer open is the
-// handshake: it proves the wrapper's fake sleep opened its reader, so the test
-// removes the run and frees the slot at exactly that point.
-func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "slots"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	active := keepActive(t, dir)
-	gate := filepath.Join(dir, "gate")
-	if err := syscall.Mkfifo(gate, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	sleeper := "#!/bin/sh\nread -r _ < " + shellquote.Quote(gate) + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "sleep"), []byte(sleeper), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// A check holds the only slot, as a running check does.
-	lock, err := os.OpenFile(filepath.Join(dir, "slots", "0.lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatal(err)
-	}
-	ran := filepath.Join(dir, "ran")
-	script := jobs.SlotScript(dir, 1, 0, active, time.Hour, "printf 'ran\\n' > "+shellquote.Quote(ran))
-	// The writer open blocks until the wrapper's fake sleep opens the reader, and
-	// then reports that it did.
-	writerReady := make(chan *os.File, 1)
-	writerErr := make(chan error, 1)
-	go func() {
-		file, err := os.OpenFile(gate, os.O_WRONLY, 0o600)
-		if err != nil {
-			writerErr <- err
-			return
-		}
-		writerReady <- file
-	}()
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
-	done := make(chan error, 1)
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	go func() { done <- cmd.Wait() }()
-	// The handshake is the wrapper opening its sleep gate. An early exit means it
-	// never waited for the slot, and a failed open is its own error.
-	var writer *os.File
-	select {
-	case writer = <-writerReady:
-	case err := <-writerErr:
-		t.Fatalf("open the sleep gate: %v", err)
-	case err := <-done:
-		t.Fatalf("the wrapper exited before it waited for the slot: %v", err)
-	}
-	// The wrapper is waiting for the slot: cancel the run and free the slot, so
-	// its next acquisition succeeds on a run that is gone.
-	if err := os.Remove(active); err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writer.WriteString("go\n"); err != nil {
-		t.Fatal(err)
-	}
-	_ = writer.Close()
-	err = <-done
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 75 {
-		t.Fatalf("queued check for a cancelled run exited %v, want status 75", err)
-	}
-	if _, err := os.Stat(ran); !os.IsNotExist(err) {
-		t.Fatal("a cancelled run's queued check started its work")
 	}
 }
 
@@ -1305,8 +1191,8 @@ func runHostCheck(t *testing.T, node Node, home string, env ...string) (seen str
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "printf %s \"$TMPDIR\" > " + record + "; touch \"$TMPDIR/scratch\""}
 	inner := nodeCheckScript(node, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
-	// The wrapper kills the rest of its process group when the check ends.
+	cmd := exec.Command("bash", "-c", inner)
+	// The script kills the rest of its process group when the check ends.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+dir+":"+os.Getenv("PATH"))
 	cmd.Env = append(cmd.Env, env...)
@@ -1412,7 +1298,7 @@ func TestHostCheckDoesNotStartWithoutItsTempFolder(t *testing.T) {
 	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd := exec.Command("bash", "-c", inner)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot make") {

@@ -13,12 +13,12 @@ test('a machine row shows one count for each figure the machine reports', () => 
   assert.equal(summaryText(machine()), '', 'a machine with no live figure shows no counts')
 })
 
-test('a CI machine shows its slots, and its use once the CI work reports it', () => {
+test('a CI machine shows its queue, and its waiting count once the node queue reports it', () => {
   const ci = machine({ roles: ['ci'], ciSlots: 16, agents: 0 })
-  assert.equal(summaryText(ci), '0 agents · CI 16 slots')
-  assert.equal(summaryText({ ...ci, ci: { used: 6, slots: 16 } }), '0 agents · CI 6/16 slots')
-  assert.equal(summaryText({ ...ci, ciSlots: 1, ci: { used: 1, slots: 1 } }), '0 agents · CI 1/1 slot', 'the noun follows the total')
-  assert.equal(summaryText({ ...ci, enabled: false, status: 'disabled', ciSlots: 2, ci: { used: 0, slots: 2 } }), '0 agents · CI off', 'a disabled machine takes no CI work')
+  assert.equal(summaryText(ci), '0 agents · CI')
+  assert.equal(summaryText({ ...ci, ci: { running: 2, waiting: 5 } }), '0 agents · CI 2 runs, 5 waiting')
+  assert.equal(summaryText({ ...ci, ci: { running: 1, waiting: 0 } }), '0 agents · CI 1 run', 'no waiting work hides the waiting count')
+  assert.equal(summaryText({ ...ci, enabled: false, status: 'disabled', ci: { running: 0, waiting: 0 } }), '0 agents · CI off', 'a disabled machine takes no CI work')
 })
 
 test('the header counts machines by status and leaves out what is zero', () => {

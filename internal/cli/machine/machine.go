@@ -339,6 +339,7 @@ func editCommand() *cobra.Command {
 	var rename, ssh string
 	var roleNames []string
 	var slots int
+	var maxIOHeavy, maxDiskPercent int
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
 	var rooms []string
@@ -412,6 +413,12 @@ func editCommand() *cobra.Command {
 			if c.Flags().Changed("check-tmp") {
 				patch.CheckTmp, changed = &checkTmp, true
 			}
+			if c.Flags().Changed("max-io-heavy") {
+				patch.MaxIOHeavy, changed = &maxIOHeavy, true
+			}
+			if c.Flags().Changed("max-disk-percent") {
+				patch.MaxDiskPercent, changed = &maxDiskPercent, true
+			}
 			if allowHostChecks || disallowHostChecks {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
@@ -439,6 +446,8 @@ func editCommand() *cobra.Command {
 	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
 	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the machine, such as 60s (0 restores the default of 10s)")
 	cmd.Flags().StringVar(&checkTmp, "check-tmp", "", "folder that holds each host check's temporary folder, such as /dev/shm (empty uses the machine's TMPDIR, else /tmp)")
+	cmd.Flags().IntVar(&maxIOHeavy, "max-io-heavy", 0, "IO-heavy jobs and checks this machine runs at once (0: one per 16 CPUs, at least 1)")
+	cmd.Flags().IntVar(&maxDiskPercent, "max-disk-percent", 0, "used-disk percent above which the machine admits no new work (0: 90)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd

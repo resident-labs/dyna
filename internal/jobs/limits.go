@@ -6,8 +6,7 @@ import (
 	"strings"
 )
 
-// A job's default resources. The slot pool hands every job two CPUs and the
-// default container memory, so a request that asks for nothing keeps exactly
+// A job's default resources. A request that asks for nothing keeps exactly
 // the limits a CI check had before it could ask for more.
 const (
 	// DefaultCPUs is what a job that asks for no CPUs runs with.
@@ -37,15 +36,14 @@ type Resources struct {
 
 // Facts is the machine capacity a request is clamped against.
 type Facts struct {
-	Slots       int
 	CPUs        int
 	MemoryBytes uint64
 }
 
-// ClampResources bounds a job's request by the machine. The slot pool gives
-// two CPUs and the default container memory per slot, and a probe of the
-// machine bounds both again. A request within the bound is granted. A default
-// is never clamped, so a small machine keeps the limits its jobs already had.
+// ClampResources bounds a job's request by the machine's last probe. A
+// request within the bound is granted. A default is never clamped, so a
+// small machine keeps the limits its jobs already had, and a machine with no
+// probe keeps the job's own request.
 func ClampResources(host bool, cpus int, memoryMiB int64, facts Facts) Resources {
 	resources := Resources{CPUs: DefaultCPUs, MemoryMiB: DefaultContainerMemoryMiB}
 	if host {
@@ -57,18 +55,16 @@ func ClampResources(host bool, cpus int, memoryMiB int64, facts Facts) Resources
 	if memoryMiB > 0 {
 		resources.MemoryMiB = memoryMiB
 	}
-	cpuLimit := facts.Slots * DefaultCPUs
-	memoryLimit := int64(facts.Slots) * DefaultContainerMemoryMiB
+	cpuLimit, memoryLimit := DefaultCPUs, DefaultContainerMemoryMiB
 	if facts.CPUs > 0 {
-		cpuLimit = min(cpuLimit, facts.CPUs)
+		cpuLimit = facts.CPUs
 	}
 	if facts.MemoryBytes > 0 {
 		// A probe total sits a little below the nominal size, so the bound is
 		// a whole GiB and reads as one number in a report.
 		probed := int64(facts.MemoryBytes / (1 << 20))
-		memoryLimit = min(memoryLimit, probed-probed%1024)
+		memoryLimit = probed - probed%1024
 	}
-	cpuLimit = max(cpuLimit, DefaultCPUs)
 	memoryLimit = max(memoryLimit, DefaultContainerMemoryMiB)
 	if host {
 		memoryLimit = max(memoryLimit, DefaultHostMemoryMiB)

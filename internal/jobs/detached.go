@@ -357,6 +357,8 @@ type Poller struct {
 	// returned. The caller records it, so a restart can tell a launch the
 	// crashed engine completed from one that died inside the start.
 	Launched func(RunSpec)
+	// Polled is told when the node reports a check still running.
+	Polled func(RunSpec)
 	// applied, when set, is told after one poll's bytes reached the run's
 	// writer. Tests use it to wait for output that is durably written, not
 	// merely requested.
@@ -516,6 +518,9 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 		frame, ok := frames[w.spec.Dir]
 		if !ok || w.closed {
 			continue
+		}
+		if frame.Unit == UnitRunning && p.Polled != nil {
+			p.Polled(w.spec)
 		}
 		if len(frame.Payload) > 0 {
 			_, _ = w.out.Write(frame.Payload)
