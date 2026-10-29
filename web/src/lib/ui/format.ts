@@ -143,6 +143,16 @@ export function duration(a: string | number | Date = NaN, b?: string | number | 
   return `${Math.floor(s / 3600)}h${two(Math.floor(s / 60) % 60)}m`
 }
 
+// durationMs reads a finished span from its milliseconds with room for a
+// sub-second run — 250 ms, 12.3 s, 3m 27s — so a quick run does not look like
+// a clock that failed to move. A span of zero or less reads as empty.
+export function durationMs(ms: number): string {
+  if (ms <= 0) return ''
+  if (ms < 1000) return `${ms} ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+}
+
 export function tokens(n: number | null | undefined): string {
   if (!n) return '0'
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
