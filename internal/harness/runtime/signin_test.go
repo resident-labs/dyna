@@ -10,7 +10,7 @@ import (
 
 // piDeviceSample is one sign-in state that the Pi helper prints, in the same
 // JSON line format it writes for the card.
-const piDeviceSample = "PI_SIGNIN {\"url\":\"https://example.test/oauth\",\"message\":\"Sign in to Pi\"}\n"
+const piDeviceSample = "{\"type\":\"auth_url\",\"url\":\"https://example.test/oauth\",\"instructions\":\"Sign in to Pi\"}\n"
 
 // printSampleArgv prints the Pi sample and exits, so the runner sees a
 // login that finishes on its own.

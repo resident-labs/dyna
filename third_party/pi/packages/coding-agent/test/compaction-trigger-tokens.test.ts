@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { shouldCompact, withCompactionTriggerOverride } from "../src/core/compaction/compaction.ts";
 import { parseArgs } from "../src/cli/args.ts";
+import { shouldCompact, withCompactionTriggerOverride } from "../src/core/compaction/compaction.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 
 // A model that runs on derived metadata can be absent from every model list;
@@ -46,7 +46,9 @@ describe("compaction.triggerTokens", () => {
 				},
 			});
 			expect(manager.getCompactionSettings(terra).triggerTokens).toBe(200000);
-			expect(manager.getCompactionSettings({ provider: "openai-codex", id: "gpt-6.1-sol" }).triggerTokens).toBe(150000);
+			expect(manager.getCompactionSettings({ provider: "openai-codex", id: "gpt-6.1-sol" }).triggerTokens).toBe(
+				150000,
+			);
 		} finally {
 			if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 		}
@@ -55,7 +57,6 @@ describe("compaction.triggerTokens", () => {
 
 describe("--compaction-trigger-tokens", () => {
 	const window = 483616;
-	const reserve = 16384;
 
 	test("parses a non-negative integer and rejects other values", () => {
 		expect(parseArgs(["--compaction-trigger-tokens", "150000"]).compactionTriggerTokens).toBe(150000);
@@ -74,8 +75,8 @@ describe("--compaction-trigger-tokens", () => {
 			const manager = SettingsManager.create(dir, dir);
 			manager.applyOverrides({
 				compaction: {
-				triggerTokens: 200000,
-				modelOverrides: { "openai-codex/gpt-6.1-terra": { triggerTokens: 250000 } },
+					triggerTokens: 200000,
+					modelOverrides: { "openai-codex/gpt-6.1-terra": { triggerTokens: 250000 } },
 				},
 			});
 			const terra = { provider: "openai-codex", id: "gpt-6.1-terra" };

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"dyna-agent/internal/childenv"
@@ -18,7 +17,16 @@ import (
 )
 
 const piSignInCommand = "_pi-signin"
-const piSignInPrefix = "PI_SIGNIN "
+
+type piSignInEvent struct {
+	Type            string         `json:"type"`
+	URL             string         `json:"url"`
+	Instructions    string         `json:"instructions"`
+	VerificationURI string         `json:"verificationUri"`
+	UserCode        string         `json:"userCode"`
+	Message         string         `json:"message"`
+	Options         []SignInChoice `json:"options"`
+}
 
 func piOAuthArgv(piExe, providerID string) []string {
 	exe, err := os.Executable()
@@ -32,30 +40,63 @@ func piOAuthArgv(piExe, providerID string) []string {
 	return argv
 }
 
+func validPiSignInURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil
+}
+
+// parsePiSignIn decodes the native Pi JSONL events into the shared card state.
 func parsePiSignIn(st *SignInState, line string) {
-	raw, ok := strings.CutPrefix(line, piSignInPrefix)
-	if !ok || len(raw) > 64<<10 {
+	if len(line) > 64<<10 {
 		return
 	}
-	var next SignInState
-	if json.Unmarshal([]byte(raw), &next) != nil || len(next.Choices) > 100 {
+	var event piSignInEvent
+	if json.Unmarshal([]byte(line), &event) != nil {
 		return
 	}
-	if next.URL != "" {
-		u, err := url.Parse(next.URL)
-		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
+	next := *st
+	next.Phase = signInWaiting
+	switch event.Type {
+	case "auth_url":
+		if !validPiSignInURL(event.URL) {
 			return
 		}
-	}
-	for _, choice := range next.Choices {
-		if choice.ID == "" || len(choice.ID) > 128 || choice.Label == "" || len(choice.Label) > 200 {
+		next.URL, next.Code, next.Choices, next.AcceptsPaste = event.URL, "", nil, true
+		next.Message = event.Instructions
+		if next.Message == "" {
+			next.Message = "Open the sign-in link."
+		}
+	case "device_code":
+		if !validPiSignInURL(event.VerificationURI) {
 			return
 		}
+		next.URL, next.Code, next.Choices, next.AcceptsPaste = event.VerificationURI, event.UserCode, nil, false
+		next.Message = "Open the link and enter this code."
+	case "select":
+		if len(event.Options) > 100 {
+			return
+		}
+		for _, choice := range event.Options {
+			if choice.ID == "" || len(choice.ID) > 128 || choice.Label == "" || len(choice.Label) > 200 {
+				return
+			}
+		}
+		next.URL, next.Code, next.AcceptsPaste = "", "", true
+		next.Message, next.Choices = event.Message, event.Options
+	case "prompt":
+		next.Message, next.Choices, next.AcceptsPaste = event.Message, nil, true
+	case "progress":
+		next.Message = event.Message
+	case "done":
+		next.Phase, next.Choices, next.AcceptsPaste = signInVerifying, nil, false
+	case "error":
+		next.Message, next.Choices, next.AcceptsPaste = event.Message, nil, false
+	default:
+		return
 	}
 	if message := []rune(next.Message); len(message) > signInMessageLimit {
 		next.Message = string(message[:signInMessageLimit])
 	}
-	next.Phase = signInWaiting
 	*st = next
 }
 
@@ -78,117 +119,18 @@ func PiSignInCommand(ctx context.Context, args []string) error {
 	return runPiOAuth(ctx, *pi, scope, *provider, os.Stdin, os.Stdout)
 }
 
-// runPiOAuth uses the SDK embedded in the selected Pi binary. The extension
-// exits before Pi can create a model session or run a prompt.
+// runPiOAuth asks the selected Pi fork to run its own headless OAuth flow.
 func runPiOAuth(ctx context.Context, pi, scope, provider string, in io.Reader, out io.Writer) error {
-	dir, err := os.MkdirTemp(scope, ".oauth-")
-	if err != nil {
-		return err
+	argv := []string{"auth", "login"}
+	if provider != "" {
+		argv = append(argv, "--provider", provider)
 	}
-	defer os.RemoveAll(dir)
-	extension := filepath.Join(dir, "signin.mjs")
-	if err := os.WriteFile(extension, []byte(piOAuthExtension), 0600); err != nil {
-		return err
-	}
-	argv := []string{
-		"--print", "--no-session", "--no-extensions", "--no-skills",
-		"--no-prompt-templates", "--no-themes", "--no-context-files",
-		"--no-mcp", "--no-tools", "--no-approve", "--extension", extension,
-	}
+	argv = append(argv, "--json")
 	cmd := exec.CommandContext(ctx, pi, argv...)
 	cmd.Dir = scope
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, out
-	cmd.Env = append(os.Environ(), "PI_DYNA_PROVIDER="+provider)
 	cmd.WaitDelay = time.Second
 	// Pi stays in the helper's private process group. Cancellation joins it;
 	// the shared runner also kills every group in the helper's OS session.
 	return childenv.Clean(cmd).Run()
 }
-
-// piOAuthExtension calls Pi's own provider login and credential store. It
-// loads no user extensions, provider files, project rules, or model sessions.
-const piOAuthExtension = `
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { createInterface } from "node:readline";
-
-export default async function () {
-  const rl = createInterface({input: process.stdin, terminal: false});
-  const queued = [];
-  const pending = [];
-  let ended = false;
-  let view = {url: "", code: "", message: "", choices: [], acceptsPaste: true};
-  function publish(patch) {
-    view = {...view, ...patch};
-    console.log("PI_SIGNIN " + JSON.stringify(view));
-  }
-  rl.on("line", line => {
-    if (pending.length) pending.shift().resolve(line.trim());
-    else queued.push(line.trim());
-  });
-  rl.on("close", () => {
-    ended = true;
-    for (const entry of pending.splice(0)) entry.reject(new Error("Input closed"));
-  });
-  function readLine(signal) {
-    if (signal?.aborted) return Promise.reject(new Error("Login cancelled"));
-    if (queued.length) return Promise.resolve(queued.shift());
-    if (ended) return Promise.reject(new Error("Input closed"));
-    return new Promise((resolve, reject) => {
-      const cleanup = () => signal?.removeEventListener("abort", abort);
-      const entry = {
-        resolve(value) { cleanup(); resolve(value); },
-        reject(error) { cleanup(); reject(error); }
-      };
-      const abort = () => {
-        const index = pending.indexOf(entry);
-        if (index >= 0) pending.splice(index, 1);
-        entry.reject(new Error("Login cancelled"));
-      };
-      pending.push(entry);
-      signal?.addEventListener("abort", abort, {once: true});
-    });
-  }
-  async function choose(message, options, signal) {
-    publish({url: "", code: "", message, choices: options, acceptsPaste: true});
-    const value = await readLine(signal);
-    if (!options.some(option => option.id === value)) throw new Error("Invalid choice");
-    return value;
-  }
-  try {
-    const runtime = await ModelRuntime.create({modelsPath: null, refreshOnCreate: false});
-    const providers = runtime.getProviders().filter(provider => provider.auth?.oauth)
-      .map(provider => ({id: provider.id, label: provider.name ?? provider.id}));
-    const requested = (process.env.PI_DYNA_PROVIDER ?? "").trim();
-    const provider = requested
-      ? providers.find(entry => entry.id === requested)?.id
-      : await choose("Choose an OAuth provider.", providers);
-    if (!provider) throw new Error("Unknown OAuth provider");
-    await runtime.login(provider, "oauth", {
-      async prompt(prompt) {
-        if (prompt.type === "select") {
-          // Prefer the native headless method when Pi offers it.
-          if (prompt.options.some(option => option.id === "copy_code")) return "copy_code";
-          return choose(prompt.message, prompt.options, prompt.signal);
-        }
-        publish({message: prompt.message, choices: [], acceptsPaste: true});
-        return readLine(prompt.signal);
-      },
-      notify(event) {
-        if (event.type === "auth_url") {
-          publish({url: event.url, code: "", choices: [], message: event.instructions ?? "Open the sign-in link.", acceptsPaste: true});
-        } else if (event.type === "device_code") {
-          publish({url: event.verificationUri, code: event.userCode, choices: [], message: "Open the link and enter this code.", acceptsPaste: false});
-        } else if (event.message) {
-          publish({message: event.message});
-        }
-      }
-    });
-    rl.close();
-    process.exit(0);
-  } catch {
-    rl.close();
-    console.error("Pi OAuth sign-in did not finish. Try again.");
-    process.exit(1);
-  }
-}
-`

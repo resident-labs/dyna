@@ -5,6 +5,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import { builtinProviderEnvVars } from "@earendil-works/pi-ai/providers/all";
@@ -28,6 +29,7 @@ import {
 	runAuthStorageCommand,
 	validateAuthCommandArgs,
 } from "./cli/auth-command.ts";
+import { type AuthRefreshResult, createAuthLineReader, runAuthLogin, runAuthRefresh } from "./cli/auth-login.ts";
 import { resolveCredentialForPrint } from "./cli/credential-print.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
@@ -35,7 +37,16 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, setAgentFileOverrides, type AgentFileOverrides, VERSION } from "./config.ts";
+import {
+	type AgentFileOverrides,
+	APP_NAME,
+	ENV_SESSION_DIR,
+	expandTildePath,
+	getAgentDir,
+	getPackageDir,
+	setAgentFileOverrides,
+	VERSION,
+} from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -71,7 +82,6 @@ import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/inte
 import { validateThemeJson } from "./modes/interactive/theme/theme-schema.ts";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
-import { existsSync } from "node:fs";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
@@ -133,7 +143,10 @@ function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 	return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
 }
 
-async function runAuthCommand(args: string[], readStdin: () => Promise<string | undefined> = readPipedStdin): Promise<boolean> {
+async function runAuthCommand(
+	args: string[],
+	readStdin: () => Promise<string | undefined> = readPipedStdin,
+): Promise<boolean> {
 	if (isAuthCommandHelp(args)) {
 		printAuthCommandHelp();
 		return true;
@@ -165,6 +178,42 @@ async function runAuthCommand(args: string[], readStdin: () => Promise<string | 
 		if (command.kind === "list" || command.kind === "set" || command.kind === "remove" || command.kind === "apply") {
 			const stdin = command.kind === "set" || command.kind === "apply" ? await readStdin() : undefined;
 			await runAuthStorageCommand(command, stdin);
+			return true;
+		}
+		if (command.kind === "login") {
+			const reader = createAuthLineReader(process.stdin);
+			try {
+				const modelRuntime = await ModelRuntime.create({
+					modelsPath: null,
+					allowModelNetwork: false,
+					refreshOnCreate: false,
+				});
+				const succeeded = await runAuthLogin(modelRuntime, command.provider ?? "", reader.readLine, (event) => {
+					console.log(JSON.stringify(event));
+				});
+				process.exitCode = succeeded ? 0 : 1;
+			} catch {
+				console.log(JSON.stringify({ type: "error", message: "Pi OAuth sign-in did not finish. Try again." }));
+				process.exitCode = 1;
+			} finally {
+				reader.close();
+			}
+			return true;
+		}
+		if (command.kind === "refresh") {
+			let result: AuthRefreshResult;
+			try {
+				const modelRuntime = await ModelRuntime.create({
+					modelsPath: null,
+					allowModelNetwork: false,
+					refreshOnCreate: false,
+				});
+				result = await runAuthRefresh(modelRuntime, command.provider!);
+			} catch {
+				result = { status: "failed", kind: "unknown", httpStatus: 0 };
+			}
+			console.log(JSON.stringify(result));
+			process.exitCode = result.status === "renewed" ? 0 : result.status === "no_credential" ? 3 : 5;
 			return true;
 		}
 		if (command.kind !== "check") {
