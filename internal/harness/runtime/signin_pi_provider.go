@@ -72,7 +72,7 @@ func (a *Runtime) piProviderFlow(exe, target string, provider accountstore.Provi
 	if err != nil {
 		return nil, err
 	}
-	sweepStaleSignInScratch(dir)
+	a.sweepStaleSignInScratch(dir)
 	id := make([]byte, 8)
 	if _, err = rand.Read(id); err != nil {
 		return nil, err
@@ -133,14 +133,16 @@ func (a *Runtime) piProviderFlow(exe, target string, provider accountstore.Provi
 }
 
 // sweepStaleSignInScratch removes provider sign-in folders older than the
-// sign-in timeout. A flow outlives its login child, so only its owner's
-// settle or this sweep removes its folder; a live flow never runs past the
-// timeout, so the sweep takes only folders nothing can finish anymore.
-func sweepStaleSignInScratch(dir string) {
+// sign-in timeout. A flow outlives its login child, and a retained flow's
+// folder keeps aging, so age alone never marks a folder unused: folders of
+// registered flows are spared, and only their own completion or
+// cancellation, which a finish serializes with, removes them.
+func (a *Runtime) sweepStaleSignInScratch(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
+	owned := a.ownedSignInScratch()
 	cutoff := time.Now().Add(-signInTimeout)
 	for _, entry := range entries {
 		name := entry.Name()
@@ -151,9 +153,28 @@ func sweepStaleSignInScratch(dir string) {
 		if err != nil || !info.IsDir() || !info.ModTime().Before(cutoff) {
 			continue
 		}
-		_ = os.RemoveAll(filepath.Join(dir, name))
-		_ = os.RemoveAll(filepath.Join(dir, name) + ".home")
+		for _, path := range []string{filepath.Join(dir, name), filepath.Join(dir, name) + ".home"} {
+			if !owned[path] {
+				_ = os.RemoveAll(path)
+			}
+		}
 	}
+}
+
+// ownedSignInScratch lists the scratch folders that registered sign-in
+// flows still hold, so no other cleanup path can take them.
+func (a *Runtime) ownedSignInScratch() map[string]bool {
+	a.privateLoginMu.Lock()
+	defer a.privateLoginMu.Unlock()
+	owned := make(map[string]bool, 2*len(a.privateLogins))
+	for _, login := range a.privateLogins {
+		if login.flow == nil || !strings.HasPrefix(filepath.Base(login.flow.Cwd), signInScratchPrefix) {
+			continue
+		}
+		owned[login.flow.Cwd] = true
+		owned[login.flow.Cwd+".home"] = true
+	}
+	return owned
 }
 
 // addPiSignIn stores each provider a finished sign-in saved in scratch in that

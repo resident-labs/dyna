@@ -291,6 +291,49 @@ func TestPiProviderFlowSweepsStaleScratchFolders(t *testing.T) {
 	}
 }
 
+// A retained flow keeps its scratch folder however long its owner leaves the
+// card open, so another sign-in start must spare that folder even when it is
+// older than the sign-in timeout, and a finish that runs while the other
+// sign-in starts still completes from it.
+func TestPiProviderFlowSweepSparesTheFlowItsFinishIsCompleting(t *testing.T) {
+	r := providerKeysRuntime(t)
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.9")
+	ctx := context.Background()
+	target := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep-a"}`)
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, target.ID, store.ProviderKimiCode); err != nil {
+		t.Fatal(err)
+	}
+	login := r.findPrivateLogin(piProviderSignInID)
+	if login == nil || login.flow == nil {
+		t.Fatal("the sign-in flow is not running")
+	}
+	<-login.signIn.done
+	body := `{"kimi-code":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
+	if err := os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-2 * signInTimeout)
+	if err := os.Chtimes(login.flow.Cwd, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	// Another sign-in starts: its sweep step runs while the old flow is open.
+	flow, err := r.piProviderFlow(bundle.Executable, target.ID, store.ProviderKimiCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = flow.Cancel() })
+	if _, err := r.FinishPrivateRuntimeLogin(ctx, piProviderSignInID); err != nil {
+		t.Fatalf("the open flow could not finish while another sign-in started: %v", err)
+	}
+	saved, err := r.Accounts.Find(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if piAuthTypes(t, saved.Home)["kimi-code"] != "oauth" {
+		t.Fatalf("the finished sign-in lost its credential: %v", piAuthTypes(t, saved.Home))
+	}
+}
+
 // The split gives every provider of the shared login its own account and home,
 // and writes only that provider's entry into the home. The shared login keeps
 // serving turns that started before the split.
