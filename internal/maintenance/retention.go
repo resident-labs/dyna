@@ -413,11 +413,17 @@ func liveCommits(st state.State) map[string]bool {
 }
 
 // pruneLocalCIResults deletes local CI results older than localCIResultRetention
-// whose commit is not live.
+// whose commit is not live, and kept run records past their attachment TTL.
 func pruneLocalCIResults(ctx context.Context, dataDir string, now time.Time) (int, error) {
 	st, err := state.Read(state.Root(dataDir))
 	if err != nil {
 		return 0, err
 	}
-	return (localci.Store{DataDir: dataDir}).PruneResults(ctx, now.Add(-localCIResultRetention), liveCommits(st))
+	store := localci.Store{DataDir: dataDir}
+	results, err := store.PruneResults(ctx, now.Add(-localCIResultRetention), liveCommits(st))
+	if err != nil {
+		return 0, err
+	}
+	attachments, err := store.PruneAttachments(ctx, now)
+	return results + attachments, err
 }
