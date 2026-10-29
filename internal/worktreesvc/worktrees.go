@@ -65,17 +65,23 @@ func New(ctx context.Context, repo, branch, base string, noDeps bool, session st
 	if err != nil {
 		return NewResult{}, err
 	}
-	// A room with an upstream starts from the upstream's default branch when
-	// the caller names no base.
+	// A room's upstream describes its fork checkout only. That checkout starts
+	// from the upstream's default branch when the caller names no base.
 	if base == "" && a.Room != "" {
 		rec, err := room.DefaultStore().Resolve(a.Room)
 		if err != nil {
 			return NewResult{}, err
 		}
 		if rec.Upstream != "" {
-			base, err = worktrees.UpstreamBase(ctx, repo, rec.Upstream)
+			root, err := room.RepoRoot(repo)
 			if err != nil {
 				return NewResult{}, err
+			}
+			if root == rec.Repo {
+				base, err = worktrees.UpstreamBase(ctx, repo, rec.Upstream)
+				if err != nil {
+					return NewResult{}, err
+				}
 			}
 		}
 	}
