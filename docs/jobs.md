@@ -27,6 +27,7 @@ machine's node queue, and store their log and exit code.
   removes the directory at the end. Without it the command runs with no source,
   in an empty work folder of its own. Either way, the work folder is the
   command's working directory, and `/workspace` in a container.
+- A local host job gets the caller's `DYNA_SCRATCH`; a remote job leaves it unset. Use `--workspace` or `--artifact` to send files.
 - `--host` runs on the machine itself; `--image IMG` runs in a container. The
   command's first word is the container's entrypoint and the rest are its
   arguments, so any image works, with or without a shell.

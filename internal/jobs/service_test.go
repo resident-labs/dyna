@@ -19,6 +19,9 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/jobstest"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/scratch"
+	"dyna-agent/internal/shellquote"
+	"dyna-agent/internal/store/storetest"
 )
 
 // fakeMachines answers the machine registry from one fixed set.
@@ -180,6 +183,56 @@ func blockingJob(line string) jobstest.RunFunc {
 func exitWith(t *testing.T, code int) error {
 	t.Helper()
 	return exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+}
+
+// A local job inherits its caller's scratch folder. A remote job cannot use
+// that local path, so submission refuses it before the node starts anything.
+func TestJobScratchEnvironment(t *testing.T) {
+	storetest.Isolate(t)
+	const session = "ses_scratch"
+	scratchDir := filepath.Join(scratch.Root(), session)
+
+	t.Run("local", func(t *testing.T) {
+		svc, fake, reporter, _ := newService(t, func(_ context.Context, _ string, _ io.Reader, _ io.Writer, _ io.Writer, _ string, _ ...string) error {
+			return nil
+		})
+		defer svc.Stop()
+		_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Session: session, Command: []string{"bash", "-c", `printf %s "$DYNA_SCRATCH"`}, Host: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-reporter.finished
+		starts := fake.StartCalls()
+		if len(starts) != 1 {
+			t.Fatalf("node starts = %d, want 1", len(starts))
+		}
+		want := "export DYNA_SCRATCH=" + shellquote.Quote(scratchDir)
+		if !strings.Contains(starts[0].Script, want) {
+			t.Fatalf("local job environment lacks %q:\n%s", want, starts[0].Script)
+		}
+	})
+
+	t.Run("remote", func(t *testing.T) {
+		svc, fake, _, _ := newService(t, func(_ context.Context, _ string, _ io.Reader, _ io.Writer, _ io.Writer, _ string, _ ...string) error {
+			return nil
+		})
+		defer svc.Stop()
+		remote := machines.Machine{Name: "remote", SSH: "build@remote", Enabled: true, HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
+		svc.Machines = fakeMachines{local: remote, byName: map[string]machines.Machine{"remote": remote}}
+		const want = "a remote job cannot use the caller's DYNA_SCRATCH; send files with --workspace or --artifact"
+		for _, command := range []string{"$DYNA_SCRATCH/run.sh", "${DYNA_SCRATCH}/run.sh", filepath.Join(scratchDir, "run.sh")} {
+			_, err := svc.Submit(t.Context(), Input{Node: "remote", RoomID: "dyna", Session: session, Command: []string{command}, Host: true})
+			var scratchErr *RemoteScratchError
+			if !errors.As(err, &scratchErr) {
+				t.Errorf("remote command %q error = %v, want RemoteScratchError", command, err)
+			} else if err.Error() != want {
+				t.Errorf("remote command %q error = %q, want %q", command, err, want)
+			}
+		}
+		if starts := fake.StartCalls(); len(starts) != 0 {
+			t.Errorf("remote node started %d jobs, want none", len(starts))
+		}
+	})
 }
 
 // A job that passes records its log, its exit code, and both events, and its

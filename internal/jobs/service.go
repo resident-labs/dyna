@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -119,6 +120,32 @@ func (s *Service) executor(conn Conn) Executor {
 	return Executor{Node: conn}
 }
 
+// RemoteScratchError refuses a command that needs the caller's local
+// scratch folder on another node.
+type RemoteScratchError struct{}
+
+func (*RemoteScratchError) Error() string {
+	return "a remote job cannot use the caller's DYNA_SCRATCH; send files with --workspace or --artifact"
+}
+
+// remoteScratchReference recognizes shell references and absolute paths that
+// the caller's shell already expanded. Session and scratch.Root are trusted
+// engine values, so the path needs no client-supplied validation.
+func remoteScratchReference(command []string, scratchDir string) bool {
+	for _, word := range command {
+		if strings.Contains(word, "$DYNA_SCRATCH") || strings.Contains(word, "${DYNA_SCRATCH}") {
+			return true
+		}
+		if scratchDir != "" && filepath.IsAbs(word) {
+			clean := filepath.Clean(word)
+			if clean == scratchDir || strings.HasPrefix(clean, scratchDir+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Input is one job to submit.
 type Input struct {
 	RoomID  string
@@ -183,6 +210,15 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	// grant: a one-machine owner runs jobs with no setup.
 	if host && machine.SSH != "" && !machine.HostChecksAllowed(in.RoomID) {
 		return Job{}, hostGrantError(machine)
+	}
+	if machine.SSH != "" {
+		scratchDir := ""
+		if root := scratch.Root(); root != "" && in.Session != "" {
+			scratchDir = filepath.Join(root, in.Session)
+		}
+		if remoteScratchReference(in.Command, scratchDir) {
+			return Job{}, &RemoteScratchError{}
+		}
 	}
 	id, err := s.Store.NewID()
 	if err != nil {
@@ -730,7 +766,17 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		spec.Limits = &limits
 	}
 	if launch {
-		spec.Script = jobScript(machine, job, resources)
+		// A detached unit cannot inherit the CLI environment. Rebuild the
+		// caller's folder from the session identity stored at submission.
+		scratchDir := ""
+		if machine.SSH == "" && job.Session != "" {
+			scratchDir, err = scratch.Ensure(job.Session)
+			if err != nil {
+				s.finish(&job, err)
+				return
+			}
+		}
+		spec.Script = jobScript(machine, job, resources, scratchDir)
 		// A recovered launch of a unit the node already accepted - the engine
 		// died between the unit starting and the launch record - starts
 		// nothing: the node's start is locked and idempotent, and an active
@@ -955,12 +1001,18 @@ func workspaceCheckoutScript(cache, work, sha string) string {
 // when the job has one and runs the command under the job's deadline. The
 // node queue admitted the job before it started, so the script waits for
 // nothing.
-func jobScript(machine machines.Machine, job Job, resources Resources) string {
+func jobScript(machine machines.Machine, job Job, resources Resources, scratchDir string) string {
 	q := shellquote.Quote
 	base := NodeBase(machine.Name)
 	work := workDir(job)
 	seconds := int64((job.Timeout + time.Second - 1) / time.Second)
-	inner := "set -euo pipefail; mkdir -p " + q(path.Dir(work)) + "; "
+	inner := "set -euo pipefail; "
+	if scratchDir != "" {
+		inner += "export " + scratch.Env + "=" + q(scratchDir) + "; "
+	} else {
+		inner += "unset " + scratch.Env + "; "
+	}
+	inner += "mkdir -p " + q(path.Dir(work)) + "; "
 	if job.SHA != "" {
 		cache := path.Join(base, RepoKey(job.Repo)+".git")
 		if job.Workspace != "" {
