@@ -111,15 +111,31 @@ func setCmd() *cobra.Command {
 			"limits.memoryHigh, limits.memoryMax and limits.tasksMax are the room's resource limits: a size such as 2G for\n" +
 			"memory, a count such as 512 for tasks, off to remove one limit, or default to use the machine default.\n" +
 			"upstream is the parent repository of this room's fork, such as github.com/owner/repo, so that `pr track`\n" +
-			"accepts a PR opened on that parent; off clears it.",
+			"accepts a PR opened on that parent; off clears it.\n" +
+			"attribution is the one line that PR and issue text written by agents ends with; off clears it.",
 		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if args[1] != "checkInInterval" && args[1] != "upstream" && !strings.HasPrefix(args[1], "limits.") {
-				return fmt.Errorf("unknown room setting %q; checkInInterval, upstream and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
+			if args[1] != "checkInInterval" && args[1] != "upstream" && args[1] != "attribution" && !strings.HasPrefix(args[1], "limits.") {
+				return fmt.Errorf("unknown room setting %q; checkInInterval, upstream, attribution and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
 			}
 			rec, err := store().Resolve(args[0])
 			if err != nil {
 				return err
+			}
+			if args[1] == "attribution" {
+				if len(args) == 2 {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s\n", upstreamOrOff(rec.Attribution))
+					return nil
+				}
+				line, err := room.ParseAttribution(args[2])
+				if err != nil {
+					return err
+				}
+				if err := engineClient().Call(cmd.Context(), "SetRoomAttribution", []any{rec.Name, args[2]}, nil); err != nil {
+					return fmt.Errorf("the room was not updated: %w", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s attribution: %s\n", rec.Name, upstreamOrOff(line))
+				return nil
 			}
 			if args[1] == "upstream" {
 				if len(args) == 2 {
