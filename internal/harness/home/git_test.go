@@ -37,8 +37,11 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 	}
 	privateEnv := merged(env, out)
 	bridge := filepath.Join(filepath.Dir(out["DYNA_BIN"]), "git")
-	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.name"); got != "HOME identity\n" {
-		t.Fatal(got)
+	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.name"); got != AgentGitName+"\n" {
+		t.Fatalf("agent commits took the owner's identity: %q", got)
+	}
+	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.email"); got != AgentGitEmail+"\n" {
+		t.Fatalf("agent email = %q", got)
 	}
 	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "test.tilde"); got != "owner\n" {
 		t.Fatal(got)
