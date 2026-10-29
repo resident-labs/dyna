@@ -59,7 +59,7 @@ func TestFirstPassAtANewAgeOnlyMeasures(t *testing.T) {
 	pass := func() Result {
 		t.Helper()
 		result := Result{Kept: map[string]int{}, Pruned: map[string]Pruned{}}
-		if err := sweepWithDryPass(context.Background(), &result, "closed session stdout", sessionLogRetention, func(dry bool) (Pruned, error) {
+		if err := sweepWithDryPass(context.Background(), &result, "closed session stdout", sessionLogRetention, func(_ context.Context, dry bool) (Pruned, error) {
 			return sweepClosedSessionLogs(context.Background(), now, dry, nil)
 		}); err != nil {
 			t.Fatal(err)
