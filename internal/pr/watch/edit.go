@@ -26,7 +26,7 @@ func (s *Service) Edit(ctx context.Context, key string, edit PREdit) error {
 		args = append(args, "--raw-field", "title="+publicationBody(*edit.Title))
 	}
 	if edit.Body != nil {
-		args = append(args, "--raw-field", "body="+publicationBody(*edit.Body))
+		args = append(args, "--raw-field", "body="+Sanitize(*edit.Body))
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.GH.requestTimeout())
 	defer cancel()
