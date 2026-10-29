@@ -625,13 +625,18 @@ func TestLocalOnlyCallsAreMarked(t *testing.T) {
 
 func TestRequirePRReviewersUsesPRCallerGuard(t *testing.T) {
 	var got authority.Actor
-	calls := map[string]websvc.Call{
-		"RequirePRReviewers": func(ctx context.Context, _ []json.RawMessage) (any, error) {
+	table := []websvc.Binding{{Name: "RequirePRReviewers", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyPR,
+		Method: func(ctx context.Context, _ []json.RawMessage) (any, error) {
 			got = authority.Of(ctx)
 			return nil, nil
-		},
+		}}}
+	calls, err := websvc.Bind(table)
+	if err != nil {
+		t.Fatal(err)
 	}
-	protectPRCalls(calls)
+	if err := applyCallerPolicies(calls, table); err != nil {
+		t.Fatal(err)
+	}
 	// A claimed session must not carry the process owner's authority into a PR write.
 	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
 	claim := callspec.Claim{Session: "ordinary-session", Room: "work"}
@@ -649,13 +654,18 @@ func TestMergeControlUsesPRCallerGuard(t *testing.T) {
 	for _, name := range []string{"MergeControl", "SetMergePaused"} {
 		t.Run(name, func(t *testing.T) {
 			var got authority.Actor
-			calls := map[string]websvc.Call{
-				name: func(ctx context.Context, _ []json.RawMessage) (any, error) {
+			table := []websvc.Binding{{Name: name, Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyPR,
+				Method: func(ctx context.Context, _ []json.RawMessage) (any, error) {
 					got = authority.Of(ctx)
 					return nil, nil
-				},
+				}}}
+			calls, err := websvc.Bind(table)
+			if err != nil {
+				t.Fatal(err)
 			}
-			protectPRCalls(calls)
+			if err := applyCallerPolicies(calls, table); err != nil {
+				t.Fatal(err)
+			}
 			// The shared policy refuses unverified callers before merge controls run.
 			ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
 			claim := callspec.Claim{Session: "ordinary-session", Room: "work"}
