@@ -35,6 +35,9 @@ type Scheduler struct {
 	IntervalFor func(room string, global time.Duration) time.Duration
 	Targets     func() ([]Target, error)
 	Deliver     func(context.Context, Target, string) (bool, error)
+	// Expedite names parents whose check-in is due now, whatever the schedule
+	// says. A pass sets their row due at once; one row per parent keeps it to one post.
+	Expedite map[string]bool
 }
 
 func Migrate(root string) error {
@@ -42,19 +45,25 @@ func Migrate(root string) error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "parent_checkins.schema", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), `CREATE TABLE IF NOT EXISTS parent_checkins (
-   session TEXT PRIMARY KEY, room TEXT NOT NULL, due INTEGER NOT NULL, pending INTEGER NOT NULL DEFAULT 0, interval_ns INTEGER NOT NULL
+	return database.Migrate(db, "parent_checkins.schema", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		_, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS parent_checkins (
+   session TEXT PRIMARY KEY, room TEXT NOT NULL, due INTEGER NOT NULL, pending INTEGER NOT NULL DEFAULT 0, interval_ns INTEGER NOT NULL, delivered INTEGER NOT NULL DEFAULT 0
   )`)
+		if err != nil || old != 1 {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, "ALTER TABLE parent_checkins ADD COLUMN delivered INTEGER NOT NULL DEFAULT 0")
 		return err
 	})
 }
 
 type entry struct {
 	Target
-	due      int64
-	pending  bool
-	interval int64
+	due       int64
+	pending   bool
+	interval  int64
+	delivered int64
 }
 
 // Tick reconciles eligibility, delivers due work, and returns the next deadline.
@@ -107,13 +116,13 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 	}
 	var entries []entry
 	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		rows, err := conn.QueryContext(ctx, "SELECT session,room,due,pending,interval_ns FROM parent_checkins")
+		rows, err := conn.QueryContext(ctx, "SELECT session,room,due,pending,interval_ns,delivered FROM parent_checkins")
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var e entry
-			if err := rows.Scan(&e.ID, &e.Room, &e.due, &e.pending, &e.interval); err != nil {
+			if err := rows.Scan(&e.ID, &e.Room, &e.due, &e.pending, &e.interval, &e.delivered); err != nil {
 				rows.Close()
 				return err
 			}
@@ -140,8 +149,14 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 					return err
 				}
 			}
-			if e.due <= now.Add(min(dueSlack, every/2)).UnixNano() && !e.pending {
-				if _, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET pending=1 WHERE session=?", e.ID); err != nil {
+			// A turn end expedites at most one check-in per interval: a delivery
+			// within the last interval, or a pending row, blocks it.
+			expedite := !e.pending && s.Expedite[e.ID] && e.delivered+int64(every) <= now.UnixNano()
+			if expedite {
+				e.due = now.UnixNano()
+			}
+			if (expedite || e.due <= now.Add(min(dueSlack, every/2)).UnixNano()) && !e.pending {
+				if _, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET due=?,pending=1 WHERE session=?", e.due, e.ID); err != nil {
 					return err
 				}
 				e.pending = true
@@ -152,7 +167,10 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 		for _, target := range active {
 			every := effective(target.Room)
 			e := entry{Target: target, due: now.Add(every).UnixNano(), interval: int64(every)}
-			if _, err := conn.ExecContext(ctx, "INSERT INTO parent_checkins(session,room,due,interval_ns) VALUES(?,?,?,?)", e.ID, e.Room, e.due, e.interval); err != nil {
+			if s.Expedite[target.ID] {
+				e.due, e.pending = now.UnixNano(), true
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO parent_checkins(session,room,due,pending,interval_ns) VALUES(?,?,?,?,?)", e.ID, e.Room, e.due, e.pending, e.interval); err != nil {
 				return err
 			}
 			entries = append(entries, e)
@@ -186,7 +204,7 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 		posted++
 		due := now.Add(time.Duration(e.interval))
 		err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-			_, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET due=?,pending=0 WHERE session=? AND due=?", due.UnixNano(), e.ID, e.due)
+			_, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET due=?,pending=0,delivered=? WHERE session=? AND due=?", due.UnixNano(), now.UnixNano(), e.ID, e.due)
 			return err
 		})
 		if err != nil {
