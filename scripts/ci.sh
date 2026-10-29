@@ -66,15 +66,28 @@ case "$suite" in
     esac
     ;;
   pi)
+    # Phases: all (tests and pack), test-shard (PI_SHARD=i/n), pack.
+    case "$phase" in
+      all|test-shard|pack) ;;
+      *) echo "Unknown Pi phase: $phase" >&2; exit 2 ;;
+    esac
     started=$SECONDS
     cd third_party/pi
     npm ci --ignore-scripts
     bash ../../scripts/pi-hydrate.sh
     npm run build:offline
-    npm test --workspace=@earendil-works/pi-coding-agent -- --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/pi-test.xml}"
-    cd ../..
-    PI_PACK_SKIP_BUILD=1 bash scripts/pi-pack.sh "$RUNNER_TEMP/pi-fork.tgz"
-    echo "Pi suite completed in $((SECONDS - started)) seconds." >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+    if [[ $phase != pack ]]; then
+      test_args=(--maxWorkers=2 --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/pi-test.xml}")
+      if [[ $phase == test-shard ]]; then
+        test_args+=(--shard="${PI_SHARD:?test-shard requires PI_SHARD=i/n}")
+      fi
+      npm test --workspace=@earendil-works/pi-coding-agent -- "${test_args[@]}"
+    fi
+    if [[ $phase != test-shard ]]; then
+      cd ../..
+      PI_PACK_SKIP_BUILD=1 bash scripts/pi-pack.sh "$RUNNER_TEMP/pi-fork.tgz"
+    fi
+    echo "Pi $phase completed in $((SECONDS - started)) seconds." >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
     ;;
   android)
     # TODO: legacy/shim remove later — engines released before the Android app
