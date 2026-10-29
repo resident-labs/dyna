@@ -155,6 +155,52 @@ func TestFailureCacheRecovery(t *testing.T) {
 	}
 }
 
+// A scan reads a session's turn only when its turn count changed or the cached
+// turn had not ended. A steady session costs no read, and a running turn is read
+// again until it ends.
+func TestFailureCacheReadsOnlyChangedTurns(t *testing.T) {
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	var cache FailureCache
+	infos := []subagent.Info{
+		{Meta: subagent.Meta{ID: "quota", Profile: "argon", Turns: 1}},
+		{Meta: subagent.Meta{ID: "healthy", Profile: "sol", Turns: 1}},
+	}
+	quota := "worker argon: protocol result ERROR: Individual quota reached. Resets in 152h54m19s."
+	turns := map[string]subagent.Turn{
+		"quota":   {Profile: "argon", N: 1, Created: now, Ended: now, Status: subagent.TurnError, FailureReason: providerfailure.Quota, Error: quota},
+		"healthy": {Profile: "sol", N: 1, Created: now, Ended: now, Status: subagent.TurnOK},
+	}
+	var reads []string
+	snapshot := func() ([]subagent.Info, error) { return infos, nil }
+	read := func(id string, _ int) (subagent.Turn, error) {
+		reads = append(reads, id)
+		return turns[id], nil
+	}
+	got, err := cache.Recent(now, snapshot, read)
+	if err != nil || got["argon"].IsZero() || len(reads) != 2 {
+		t.Fatalf("first scan: %v %v reads %v", got, err, reads)
+	}
+	// Both turns ended and no turn count changed, so a later scan reads nothing.
+	reads = nil
+	got, err = cache.Recent(now.Add(2*time.Minute), snapshot, read)
+	if err != nil || got["argon"].IsZero() || len(reads) != 0 {
+		t.Fatalf("steady scan: %v %v reads %v", got, err, reads)
+	}
+	// The healthy session starts a turn that is still running, so only it is read.
+	infos[1].Turns = 2
+	turns["healthy"] = subagent.Turn{Profile: "sol", N: 2, Created: now.Add(3 * time.Minute), Status: subagent.TurnRunning}
+	reads = nil
+	if _, err := cache.Recent(now.Add(4*time.Minute), snapshot, read); err != nil || len(reads) != 1 || reads[0] != "healthy" {
+		t.Fatalf("running scan read %v, want only healthy: %v", reads, err)
+	}
+	// That turn ends, and the next scan reads exactly that session again.
+	turns["healthy"] = subagent.Turn{Profile: "sol", N: 2, Created: now.Add(3 * time.Minute), Ended: now.Add(5 * time.Minute), Status: subagent.TurnOK}
+	reads = nil
+	if _, err := cache.Recent(now.Add(6*time.Minute), snapshot, read); err != nil || len(reads) != 1 || reads[0] != "healthy" {
+		t.Fatalf("ended scan read %v, want only healthy: %v", reads, err)
+	}
+}
+
 func TestFailureCacheErrorsAndExpiry(t *testing.T) {
 	now := time.Now()
 	var cache FailureCache
