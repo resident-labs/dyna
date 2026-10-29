@@ -237,10 +237,15 @@ func privateBusEnvironment(id string) map[string]string {
 	return map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=" + BusSocket(id)}
 }
 
-// mergeEnvironment builds a computer launch environment. Every computer process
-// starts from it, so base drops the engine's secrets here.
+// engineEnvironment is the engine's own environment for a computer process the
+// engine starts. It never carries the engine's secrets. A harness launch is not
+// one of these: its environment holds the session's own credentials.
+func engineEnvironment() []string {
+	return processguard.WithoutSecrets(os.Environ())
+}
+
+// mergeEnvironment builds a computer launch environment from base with values set.
 func mergeEnvironment(base []string, values map[string]string) []string {
-	base = processguard.WithoutSecrets(base)
 	out := make([]string, 0, len(base)+len(values))
 	for _, s := range base {
 		k, _, _ := strings.Cut(s, "=")
