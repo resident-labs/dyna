@@ -13,7 +13,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -291,7 +290,7 @@ func (r Runner) resultDir(repo, sha string) string {
 
 func (r Runner) Show(repo, sha string) (Result, error) {
 	var result Result
-	if !regexp.MustCompile(`^[0-9a-f]{40,64}$`).MatchString(sha) {
+	if !commitSHA.MatchString(sha) {
 		return result, fmt.Errorf("expected a full commit SHA")
 	}
 	common, err := r.commonDir(context.Background(), repo)

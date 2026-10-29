@@ -38,6 +38,18 @@ func TestRunRejectsUnknownSuiteBeforeAnyCommand(t *testing.T) {
 	}
 }
 
+// A short SHA can name no stored result, so the guard needs no repository:
+// it must stop the read before any git command runs.
+func TestShowRejectsAShortSHABeforeAnyCommand(t *testing.T) {
+	runner := Runner{DataDir: t.TempDir(), Command: func(context.Context, string, io.Reader, io.Writer, io.Writer, string, ...string) error {
+		t.Fatal("ran a command for a short SHA")
+		return nil
+	}}
+	if _, err := runner.Show(t.TempDir(), "abc123"); err == nil || !strings.Contains(err.Error(), "full commit SHA") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestReadArchiveRejectsPathsAndLinks(t *testing.T) {
 	for _, name := range []string{"../escape.xml", "/escape.xml"} {
 		var b bytes.Buffer

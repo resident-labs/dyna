@@ -7,6 +7,7 @@
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { runEvent } from './eventPayloads.ts'
+  import { durationMs } from '../ui/format.ts'
   import type { RunState } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
@@ -21,15 +22,7 @@
   let state = $derived<RunState>(payload?.state ?? 'completed')
   let name = $derived(payload?.name || 'Workflow')
   let chips = $derived([{ label: stateWords[state], tone: stateTone[state], failure: state === 'failed' }])
-  // A run under a second reads in milliseconds, so a quick run does not look
-  // like a clock that failed to move.
-  let elapsed = $derived.by(() => {
-    const ms = payload?.durationMs ?? 0
-    if (ms <= 0) return ''
-    if (ms < 1000) return `${ms} ms`
-    if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
-    return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
-  })
+  let elapsed = $derived(durationMs(payload?.durationMs ?? 0))
   let counts = $derived.by(() => {
     const steps = payload?.steps ?? 0
     const agents = payload?.agents ?? 0
