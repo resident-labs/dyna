@@ -164,6 +164,10 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 	return p, r.Accounts.SelectForRepo(ctx, p.Harness, ProviderForModel(p.Harness, p.Model), p.Env[mode.EnvRoomID], p.RuntimeRepo, b.Executable)
 }
 
+// probeBeforeHeldSwitch runs in SelectProbeAccount just before the held switch.
+// Tests set it to interleave a concurrent switch.
+var probeBeforeHeldSwitch func()
+
 // SelectProbeAccount runs before a health probe of p in dir. When a ready account
 // that runs p's provider and may run in dir's repo has a stated usage hold for p's
 // model, it makes that account active, so the probe runs that model on the account
@@ -189,20 +193,26 @@ func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir
 	if err != nil {
 		return p, "", noRestore, err
 	}
-	previous, err := r.Accounts.activeAccount(p.Harness, provider, "")
-	if err != nil {
-		return p, "", noRestore, err
+	if probeBeforeHeldSwitch != nil {
+		probeBeforeHeldSwitch()
 	}
-	if err := r.Accounts.Switch(ctx, held.ID, b.Executable); err != nil {
+	// The previous account is read under the same lock as the held switch, so a
+	// switch that lands before it is the one the restore returns to.
+	var previousID string
+	err = r.Accounts.switchTo(ctx, held.ID, b.Executable, nil, func(active string) bool {
+		previousID = active
+		return true
+	})
+	if err != nil {
 		return p, "", noRestore, err
 	}
 	restore := func() {
 		// The held account must still be active. Any other switch keeps its choice.
-		err := r.Accounts.switchTo(context.WithoutCancel(ctx), previous.ID, b.Executable, nil, func(active string) bool {
+		err := r.Accounts.switchTo(context.WithoutCancel(ctx), previousID, b.Executable, nil, func(active string) bool {
 			return active == held.ID
 		})
 		if err != nil && !errors.Is(err, errSwitchKept) {
-			log.Printf("restore active account %s after a health probe: %v", previous.Label, err)
+			log.Printf("restore active account %s after a health probe: %v", previousID, err)
 		}
 	}
 	return p, held.ID, restore, nil
