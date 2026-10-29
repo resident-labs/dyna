@@ -83,21 +83,31 @@ func parseJobCall(call goja.FunctionCall, workDir string) (callspec.RunJobInput,
 	}, nil
 }
 
-func jobKey(namespace, workflowID string, invocation int) string {
+func jobKey(namespace, requestHash string, occurrence int) string {
 	payload, _ := json.Marshal(struct {
-		Namespace  string
-		Workflow   string
-		Invocation int
-	}{namespace, workflowID, invocation})
+		Namespace   string
+		RequestHash string
+		Occurrence  int
+	}{namespace, requestHash, occurrence})
 	sum := sha256.Sum256(payload)
-	return "j2:" + hex.EncodeToString(sum[:])
+	return "j3:" + hex.EncodeToString(sum[:])
+}
+
+// jobRequestHash fingerprints a typed request for its key and recovery check.
+func jobRequestHash(spec callspec.RunJobInput) string {
+	spec.IdempotencyKey = ""
+	spec.RequestHash = ""
+	payload, _ := json.Marshal(spec)
+	sum := sha256.Sum256(payload)
+	return "r1:" + hex.EncodeToString(sum[:])
 }
 
 // jobRecord is what a resumed run knows of one earlier job() call.
 type jobRecord struct {
-	Job    string
-	Done   bool
-	Result any
+	Job         string
+	RequestHash string
+	Done        bool
+	Result      any
 }
 
 // jobResult is the value a job() promise resolves with. Log matches the log
@@ -138,13 +148,17 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(promise)
 	}
 
+	requestHash := jobRequestHash(spec)
 	e.shared.mu.Lock()
 	e.shared.execSeq++
 	id := e.shared.execSeq
+	occurrence := e.shared.jobOccurrences[requestHash]
+	e.shared.jobOccurrences[requestHash] = occurrence + 1
 	e.shared.mu.Unlock()
 	label := fmt.Sprintf("job-%d", id)
-	key := jobKey(e.shared.jobNamespace, e.workflowID, id)
+	key := jobKey(e.shared.jobNamespace, requestHash, occurrence)
 	spec.IdempotencyKey = key
+	spec.RequestHash = requestHash
 	line := commandLine(spec.Command)
 	e.emit(runstore.Event{T: "exec_start", ID: id, Label: label, Command: textutil.ClipOneLine(line, 400)})
 	if !e.beginWorker() {
@@ -170,13 +184,17 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 			e.opts.Run.Journal(runstore.JournalEntry{
 				ID: id, Label: label, Key: key, Cwd: spec.Repo, Prompt: line,
 				Result: result, Error: errStr, Workflow: e.workflowID,
-				Kind: "job", State: state, Job: jobID,
+				Kind: "job", State: state, Job: jobID, RequestHash: requestHash,
 			})
 		}
 		fail := func(jobID string, err error) {
 			journal("error", jobID, nil, err.Error())
 			e.emit(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "error", Error: textutil.ClipOneLine(err.Error(), 2000)})
 			reject(err)
+		}
+		if hasPrior && prior.RequestHash != requestHash {
+			fail("", errors.New("job() replay is ambiguous: the recovered request hash does not match"))
+			return
 		}
 		if hasPrior && prior.Done {
 			e.emit(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "ok", Cached: true, Preview: cachedSummary(prior.Result)})

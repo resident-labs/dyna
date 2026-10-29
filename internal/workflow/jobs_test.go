@@ -5,7 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workflow/enginefake"
 )
@@ -62,15 +61,31 @@ return await job({
 }
 
 func TestJobResumeReusesSubmittedJobAfterInterruptedWait(t *testing.T) {
-	key := jobKey("wf_root", "", 1)
-	cache := NewCache([]runstore.JournalEntry{
-		{ID: 1, Key: key, Kind: "job", State: "running", Job: "job_old"},
-		{ID: 1, Key: key, Kind: "job", State: "error", Job: "job_old", Error: "context canceled"},
-	})
-	code := 0
+	script := `return await job({command: ['make', 'test'], node: 'builder'})`
+	source, err := runstore.Create("job source", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fake := &enginefake.Engine{}
-	fake.SaveJob(jobs.Job{ID: "job_old", Node: "builder", State: jobs.StatePassed, ExitCode: &code})
-	raw, _, err := runCommandScript(t, `return await job({command: ['make', 'test'], node: 'builder'})`, Options{Engine: fake, Cache: cache, JobNamespace: "wf_root"})
+	if _, _, err := runCommandScript(t, script, Options{Run: source, Engine: fake, JobNamespace: source.Meta.ID}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := runstore.ReadJournal(source.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Kind == "job" {
+			entries[i].State = "error"
+			entries[i].Error = "context canceled"
+			break
+		}
+	}
+	resumed, err := runstore.Create("job resumed", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := runCommandScript(t, script, Options{Run: resumed, Engine: fake, Cache: NewCache(entries), JobNamespace: source.Meta.ID})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -78,13 +93,14 @@ func TestJobResumeReusesSubmittedJobAfterInterruptedWait(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.ID != "job_old" || result.State != "passed" {
+	if result.ID != "job_1" || result.State != "passed" {
 		t.Fatalf("resumed result = %+v", result)
 	}
-	if starts := fake.JobStarts(); len(starts) != 0 {
-		t.Fatalf("resume submitted %d jobs, want 0: %+v", len(starts), starts)
+	if starts := fake.JobStarts(); len(starts) != 1 {
+		t.Fatalf("total submissions = %d, want only the source job", len(starts))
 	}
-	if waits := fake.JobWaits(); !slices.Equal(waits, []string{"job_old"}) {
-		t.Fatalf("WaitJob IDs = %v, want only job_old", waits)
+	waits := fake.JobWaits()
+	if len(waits) != 2 || waits[1] != "job_1" {
+		t.Fatalf("WaitJob IDs = %v, want resume to reattach to job_1", waits)
 	}
 }
