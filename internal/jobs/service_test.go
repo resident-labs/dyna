@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/jobstest"
 	"dyna-agent/internal/machines"
 )
@@ -299,22 +300,16 @@ func TestIdleTimeoutDrainsRemainingLog(t *testing.T) {
 // retained log reached its cap and stopped growing.
 func TestOutputAfterLogCapPreventsIdleTimeout(t *testing.T) {
 	var fake *jobstest.Fake
-	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, _, _ io.Writer, _ string, args ...string) error {
 		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
 			return nil
 		}
 		fake.CapLogs()
-		for range 4 {
-			polls := fake.PollCount()
-			fmt.Fprintln(out, "working")
-			for fake.PollCount() == polls {
-				runtime.Gosched()
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-			}
+		fake.OutputEveryPoll()
+		for fake.PollCount() < 4 && ctx.Err() == nil {
+			runtime.Gosched()
 		}
-		return nil
+		return ctx.Err()
 	})
 	defer svc.Stop()
 	idle := 5 * time.Second
@@ -538,5 +533,39 @@ func TestStoreRoundTrip(t *testing.T) {
 	list, err := st.List(t.Context(), false)
 	if err != nil || len(list) != 1 || list[0].ID != job.ID {
 		t.Fatalf("open list = %v, %v", list, err)
+	}
+}
+
+// Named resources used version 4. Their existing databases still need the
+// idle column when this store moves them to version 5.
+func TestStoreMigrationAddsIdleToVersionFour(t *testing.T) {
+	dir := t.TempDir()
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE jobs(id TEXT PRIMARY KEY, resources TEXT NOT NULL DEFAULT '[]')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO meta(key,value) VALUES('jobs.version','4')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name='idle_s'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("the version 4 database did not gain idle_s")
+	}
+	var version string
+	if err := db.QueryRow(`SELECT value FROM meta WHERE key='jobs.version'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != "5" {
+		t.Fatalf("jobs.version = %s, want 5", version)
 	}
 }

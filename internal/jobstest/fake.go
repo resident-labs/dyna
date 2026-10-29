@@ -39,14 +39,15 @@ type Fake struct {
 	legacy RunFunc
 	proto  Protocol
 
-	mu           sync.Mutex
-	procs        map[string]*fakeProc
-	folders      map[string]bool
-	starts       []Start
-	polls        int
-	stops        int
-	stopFailures int
-	now          time.Time
+	mu              sync.Mutex
+	procs           map[string]*fakeProc
+	folders         map[string]bool
+	starts          []Start
+	polls           int
+	stops           int
+	stopFailures    int
+	outputEveryPoll bool
+	now             time.Time
 	// Down makes every call fail like a dropped connection while it returns
 	// true.
 	Down func() bool
@@ -202,6 +203,14 @@ func (m *Fake) CapLogs() {
 	}
 }
 
+// OutputEveryPoll writes output from each running job as part of its poll.
+// It keeps output and the fake clock in step, without depending on scheduling.
+func (m *Fake) OutputEveryPoll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.outputEveryPoll = true
+}
+
 // VanishAll makes every unit disappear without an exit record, as a machine
 // that rebooted does.
 func (m *Fake) VanishAll() {
@@ -276,6 +285,9 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 		} else if proc.exited {
 			state, code = "exited", strconv.Itoa(proc.code)
 		}
+		if m.outputEveryPoll && state == "running" {
+			proc.write(m.now, []byte("working\n"))
+		}
 		size := len(proc.log)
 		chunk := proc.log[min(offset, size):min(size, offset+256<<10)]
 		modified := proc.modified
@@ -291,6 +303,18 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 	return nil
 }
 
+func (p *fakeProc) write(now time.Time, data []byte) {
+	if !p.capped {
+		p.log = append(p.log, data...)
+	}
+	if len(data) > 0 {
+		p.activity = now
+		if !p.capped {
+			p.modified = now
+		}
+	}
+}
+
 // fakeLog is the output of a running fake job.
 type fakeLog struct {
 	m    *Fake
@@ -300,15 +324,7 @@ type fakeLog struct {
 func (l fakeLog) Write(p []byte) (int, error) {
 	l.m.mu.Lock()
 	defer l.m.mu.Unlock()
-	if !l.proc.capped {
-		l.proc.log = append(l.proc.log, p...)
-	}
-	if len(p) > 0 {
-		l.proc.activity = l.m.now
-		if !l.proc.capped {
-			l.proc.modified = l.m.now
-		}
-	}
+	l.proc.write(l.m.now, p)
 	return len(p), nil
 }
 
