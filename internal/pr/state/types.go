@@ -247,12 +247,21 @@ type ReviewerMode string
 // Reviewer modes. The zero value means no reviewer mode is recorded.
 const ReviewerModeSession ReviewerMode = "session"
 
+// Hold keeps a PR out of merge in Dyna's own state. GitHub draft status alone
+// does not hold it, because any ready-for-review call lifts that draft.
+type Hold struct {
+	Reason string    `json:"reason"`
+	By     string    `json:"by,omitempty"` // session that set the hold, empty for the owner
+	At     time.Time `json:"at"`
+}
+
 type Record struct {
 	PendingVerdict *PendingVerdict `json:"pendingVerdict,omitempty"`
 	// ReleaseReviewersAfterReplay holds closed reviewers until their saved verdicts replay.
 	ReleaseReviewersAfterReplay []string           `json:"releaseReviewersAfterReplay,omitempty"`
 	MergeTrialFailure           *MergeTrialFailure `json:"mergeTrialFailure,omitempty"`
 	IsDraft                     bool               `json:"isDraft,omitempty"`
+	Hold                        *Hold              `json:"hold,omitempty"`
 	Mergeable                   *bool              `json:"mergeable,omitempty"`
 	DefaultBranch               string             `json:"defaultBranch,omitempty"`
 	ChecksAt                    time.Time          `json:"checksAt,omitempty"`
