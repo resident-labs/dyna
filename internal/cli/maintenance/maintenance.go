@@ -19,7 +19,7 @@ func NewCommand() *cobra.Command {
 
 func statusCommand(dataDir func() string) *cobra.Command {
 	var last int
-	var asJSON bool
+	var asJSON, withSteps bool
 	cmd := &cobra.Command{Use: "status", Short: "List recent maintenance passes and what each freed", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		reports, err := maintenance.RecentReports(dataDir(), last)
 		if err != nil {
@@ -40,10 +40,23 @@ func statusCommand(dataDir func() string) *cobra.Command {
 			if _, err := fmt.Fprintln(c.OutOrStdout(), line); err != nil {
 				return err
 			}
+			if !withSteps {
+				continue
+			}
+			for _, s := range r.Steps {
+				step := fmt.Sprintf("    %s  %s", s.Name, s.Took.Round(time.Millisecond))
+				if s.Error != "" {
+					step += "  error: " + s.Error
+				}
+				if _, err := fmt.Fprintln(c.OutOrStdout(), step); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	}}
 	cmd.Flags().IntVarP(&last, "last", "n", 10, "number of passes to show")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	cmd.Flags().BoolVar(&withSteps, "steps", false, "list the timed steps of each pass")
 	return cmd
 }
