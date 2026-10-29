@@ -67,7 +67,7 @@ func (h PiImportHost) createLocked(ctx context.Context, provider store.Provider,
 		clear(entries)
 		entries[login.EntryID] = login.Entry
 	}
-	if _, err := piEditAuth(ctx, account.Home, edit); err != nil {
+	if _, err := h.Runtime.Accounts.piEditAuth(ctx, account.Home, edit); err != nil {
 		return account, err
 	}
 	if _, err := h.Runtime.Accounts.Capture(ctx, account.ID, ""); err != nil {

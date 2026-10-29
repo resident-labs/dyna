@@ -48,7 +48,9 @@ func importFixture(t *testing.T) (*store.Store, *Runtime, string) {
 	if err := scopes.Set(source, []string{"github.com/org/name"}); err != nil {
 		t.Fatal(err)
 	}
-	return st, &Runtime{Accounts: &Accounts{Root: st.Root}}, source
+	r := &Runtime{Accounts: &Accounts{Root: st.Root}}
+	installFakePiAuth(t, r.Accounts)
+	return st, r, source
 }
 
 // TestImportKeepsTheSourceWhenThePiWriteFails stops the Pi write at the file
