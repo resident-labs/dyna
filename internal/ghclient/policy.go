@@ -680,6 +680,31 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	return refuseHeldReady(ctx, rec, cmdDir, r, args)
 }
 
+// createValueFlags are the gh pr create flags that consume the next argument.
+var createValueFlags = map[string]bool{
+	"-a": true, "--assignee": true, "-B": true, "--base": true, "-b": true, "--body": true,
+	"-F": true, "--body-file": true, "-H": true, "--head": true, "-l": true, "--label": true,
+	"-m": true, "--milestone": true, "-p": true, "--project": true, "--recover": true,
+	"-r": true, "--reviewer": true, "-T": true, "--template": true, "-t": true, "--title": true,
+}
+
+// createNamesRepo reports whether the flags of gh pr create carry -R or --repo.
+// A flag value that looks like a flag, as in --title --repo=x, is not one.
+func createNamesRepo(flags []string) bool {
+	for i := 0; i < len(flags); i++ {
+		name, _, attached := strings.Cut(flags[i], "=")
+		switch {
+		case flags[i] == "--":
+			return false
+		case name == "--repo" || name == "-R" || (strings.HasPrefix(flags[i], "-R") && !strings.HasPrefix(flags[i], "--")):
+			return true
+		case createValueFlags[name] && !attached:
+			i++
+		}
+	}
+	return false
+}
+
 // refuseImplicitForkPR refuses gh pr create without --repo in a fork checkout.
 // gh then picks the fork's parent, which opens a PR on a repository the owner
 // never chose. The message names both choices so the agent picks one on purpose.
@@ -688,15 +713,19 @@ func refuseImplicitForkPR(rec room.Record, cmdDir string, r repository, args []s
 	if len(command) < 2 || command[0] != "pr" || command[1] != "create" {
 		return nil
 	}
-	if _, repo := readyTarget(command); repo != "" || len(command) != len(args) {
+	if len(command) != len(args) || createNamesRepo(command[2:]) {
 		return nil
 	}
-	upstream := rec.Upstream
-	for path, up := range rec.RepoUpstreams {
+	if cmdDir == "" {
+		cmdDir, _ = os.Getwd()
+	}
+	checkout := rec.Repo
+	for _, path := range rec.ExtraRepos {
 		if sameCheckout(cmdDir, path) {
-			upstream = up
+			checkout = path
 		}
 	}
+	upstream := rec.UpstreamOf(checkout)
 	if upstream == "" {
 		return nil
 	}
