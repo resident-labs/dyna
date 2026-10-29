@@ -369,8 +369,15 @@ func transact(ctx context.Context, db *sql.DB, update func(*sql.Conn) error) err
 	var committed bool
 	defer func() {
 		conn.ExecContext(finish, "ROLLBACK")
-		if !began.IsZero() && !committed {
-			writeHold.record(now().Sub(began))
+		if began.IsZero() {
+			return
+		}
+		held := now().Sub(began)
+		if !committed {
+			writeHold.record(held)
+		}
+		if callerDetail.Load() {
+			recordCaller(caller(), held)
 		}
 	}()
 	err = Retry(begin, func() error { return beginImmediate(begin, conn) })

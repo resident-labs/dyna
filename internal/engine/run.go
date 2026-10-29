@@ -51,6 +51,7 @@ import (
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/scope"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
@@ -635,6 +636,10 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		db, err := database.Open(filepath.Dir(cstore.Dir()))
 		if err != nil {
 			return err
+		}
+		// An unreadable settings file leaves the caller detail off, its default.
+		if v, err := settings.Load(""); err == nil {
+			database.SetCallerDetail(v.DatabaseCallerDetail)
 		}
 		writer = state.For(db)
 		writer.SetPublish(publishState(events, rooms, signals))
