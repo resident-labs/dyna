@@ -33,20 +33,26 @@ func (a *Runtime) cancelPrivateLogin(id string) error {
 	if login == nil {
 		return nil
 	}
-	login.control.Lock()
-	defer login.control.Unlock()
-	// Stop and join native work before restoring credentials or releasing the gate.
-	login.signIn.set(func(st *SignInState) { st.Phase = signInCancelled })
-	login.signIn.stop()
-	<-login.signIn.done
-	var err error
-	if login.flow != nil {
-		err = login.flow.Cancel()
-	}
+	err := settlePrivateLogin(login)
 	a.privateLoginMu.Lock()
 	if a.privateLogins[id] == login {
 		delete(a.privateLogins, id)
 	}
 	a.privateLoginMu.Unlock()
 	return err
+}
+
+// settlePrivateLogin stops a login's native work and settles its flow, so a
+// cancelled or replaced card leaves no flow folder or gate behind.
+func settlePrivateLogin(login *privateRuntimeLogin) error {
+	login.control.Lock()
+	defer login.control.Unlock()
+	// Stop and join native work before restoring credentials or releasing the gate.
+	login.signIn.set(func(st *SignInState) { st.Phase = signInCancelled })
+	login.signIn.stop()
+	<-login.signIn.done
+	if login.flow != nil {
+		return login.flow.Cancel()
+	}
+	return nil
 }

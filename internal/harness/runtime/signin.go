@@ -73,13 +73,18 @@ type signInSpec struct {
 	Respond func(context.Context, SignInState, string) error
 	// GracefulStop lets a helper stop and join children in separate groups.
 	GracefulStop bool
+	// ResultOutlivesChild keeps a flow open when its login child exits
+	// without finishing: the child writes the sign-in's result into the flow
+	// folder, so the owner's finish or cancel settles the flow, never the
+	// child's exit alone.
+	ResultOutlivesChild bool
 	// Timeout bounds the wait for the owner. Zero uses signInTimeout.
 	Timeout time.Duration
 }
 
 // signInSpecs lists the harnesses with an in-app sign-in adapter.
 var signInSpecs = map[string]signInSpec{
-	"pi":          {Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true},
+	"pi":          {Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true, ResultOutlivesChild: true},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 }
 
@@ -305,9 +310,15 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	if a.privateLogins == nil {
 		a.privateLogins = map[string]*privateRuntimeLogin{}
 	}
+	replaced := a.privateLogins[id]
 	login := &privateRuntimeLogin{flow: flow, signIn: signIn, harness: harness}
 	a.privateLogins[id] = login
 	a.privateLoginMu.Unlock()
+	if replaced != nil {
+		// A flow can outlive its login child, so a new sign-in for the same
+		// card settles the flow it replaces instead of abandoning its folder.
+		_ = settlePrivateLogin(replaced)
+	}
 	go func() {
 		a.watchPrivateSignIn(ctx, login, spec, cmd, out, writer, cancel, func() {
 			if stopTimer != nil {
@@ -359,6 +370,11 @@ func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeL
 			signIn.set(func(st *SignInState) { st.Message = "Sign-in did not finish. Try again." })
 		}
 		signIn.set(func(st *SignInState) { st.Phase = signInFailed })
+		if spec.ResultOutlivesChild {
+			// The flow folder may still hold a sign-in the child saved before
+			// it died, so the flow stays open until its owner settles it.
+			return
+		}
 		_ = login.flow.Cancel()
 		return
 	}
