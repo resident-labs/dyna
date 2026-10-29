@@ -327,6 +327,9 @@ func (m *Manager) sourceReview(meta Meta, turn int) string {
 // room posts. It also resolves the replacement directory from saved hints.
 func (m *Manager) handoffPacket(meta Meta, t TransferState) (string, string, error) {
 	dir := meta.Dir
+	if t.RequestedDir != "" {
+		t.Dir = t.RequestedDir
+	}
 	hintDir, hintBranch := handoffHints(t.Handoff)
 	if t.Dir == "" && validTaskDir(hintDir) {
 		t.Dir = hintDir
