@@ -14,6 +14,7 @@ func TestClassify(t *testing.T) {
 	authors := map[string]string{
 		"issue:7": room, "issue:8": "someone-else", "pr:12": room, "pr:13": "someone-else",
 		"pr:": room, "run:99": room, "run:98": "someone-else",
+		"comment:issues/comments/55": room, "comment:issues/comments/56": "someone-else", "comment:pulls/comments/57": room,
 	}
 	endpointRepos := map[string]string{"other/repo": "someone-else"}
 	in := ClassifyInput{
@@ -86,7 +87,11 @@ func TestClassify(t *testing.T) {
 		{"api POST issue", "api repos/o/r/issues -f title=t", agent},
 		{"api POST issue with leading slash", "api /repos/o/r/issues -X POST -f title=t", agent},
 		{"api POST comment", "api repos/o/r/issues/5/comments -f body=hi", agent},
-		{"api PATCH comment", "api repos/o/r/issues/comments/55 -X PATCH -f body=hi", agent},
+		{"api PATCH own comment", "api repos/o/r/issues/comments/55 -X PATCH -f body=hi", agent},
+		{"api PATCH another author comment", "api repos/o/r/issues/comments/56 -X PATCH -f body=hi", owner},
+		{"api PATCH own comment without a body", "api repos/o/r/issues/comments/55 -X PATCH -f title=hi", owner},
+		{"api PATCH own comment with input", "api repos/o/r/issues/comments/55 -X PATCH --input body.json", owner},
+		{"api PATCH own pull comment", "api repos/o/r/pulls/comments/57 -X PATCH -f body=hi", agent},
 		{"api POST pr", "api repos/o/r/pulls -f title=t -f head=h -f base=b", agent},
 		{"api POST pr comment", "api repos/o/r/pulls/5/comments -f body=hi", agent},
 		{"api PATCH issue title", "api repos/o/r/issues/8 -X PATCH -f title=t", agent},
@@ -100,7 +105,9 @@ func TestClassify(t *testing.T) {
 		{"api PUT pr merge", "api repos/o/r/pulls/5/merge -X PUT", owner},
 		{"api POST pr merge", "api repos/o/r/pulls/5/merge -f merge_method=squash", owner},
 		{"api POST review", "api repos/o/r/pulls/5/reviews -f event=APPROVE", owner},
-		{"api DELETE", "api repos/o/r/issues/comments/55 -X DELETE", owner},
+		{"api DELETE own comment", "api repos/o/r/issues/comments/55 -X DELETE", agent},
+		{"api DELETE another author comment", "api repos/o/r/issues/comments/56 -X DELETE", owner},
+		{"api DELETE own upstream comment", "api repos/org/project/issues/comments/55 -X DELETE", agent},
 		{"api PUT", "api repos/o/r/collaborators/bob -X PUT", owner},
 		{"api POST labels endpoint", "api repos/o/r/labels -f name=bug", owner},
 		{"api POST outside repos", "api user/repos -f name=x", owner},
