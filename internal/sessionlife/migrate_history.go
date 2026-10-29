@@ -43,7 +43,7 @@ func prepareHistory(db *sql.DB) error {
 func migrateHistory(db *sql.DB) error {
 	return database.Migrate(db, "sessions.history", 1, func(conn *sql.Conn, _ int) error {
 		ctx := context.Background()
-		rows, err := conn.QueryContext(ctx, "SELECT id, meta FROM session_records")
+		rows, err := conn.QueryContext(ctx, "SELECT id,meta,"+instructionReadProjection+" FROM session_records")
 		if err != nil {
 			return err
 		}
@@ -54,7 +54,14 @@ func migrateHistory(db *sql.DB) error {
 		var records []record
 		for rows.Next() {
 			var r record
-			if err := rows.Scan(&r.id, &r.raw); err != nil {
+			var meta []byte
+			var instructions instructionRead
+			if err := rows.Scan(&r.id, &meta, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+				rows.Close()
+				return err
+			}
+			r.raw, err = instructions.join(meta)
+			if err != nil {
 				rows.Close()
 				return err
 			}
@@ -80,7 +87,7 @@ func migrateHistory(db *sql.DB) error {
 			if err != nil {
 				return err
 			}
-			if err := writeRow(conn, r.id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest"); err != nil {
+			if err := writeRow(conn, r.id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest, instructions_hash=excluded.instructions_hash, instructions_known_hash=excluded.instructions_known_hash"); err != nil {
 				return err
 			}
 		}

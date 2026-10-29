@@ -14,7 +14,7 @@ import (
 // TODO: legacy/shim remove later — persist lifecycle fields for historical session records.
 func migrateLifecycle(db *sql.DB) error {
 	return database.Migrate(db, "sessions.lifecycle", 1, func(conn *sql.Conn, _ int) error {
-		rows, err := conn.QueryContext(context.Background(), "SELECT id, meta FROM session_records WHERE json_type(meta,'$.done') IS NOT NULL OR status = ''")
+		rows, err := conn.QueryContext(context.Background(), "SELECT id,meta,"+instructionReadProjection+" FROM session_records WHERE json_type(meta,'$.done') IS NOT NULL OR status = ''")
 		if err != nil {
 			return err
 		}
@@ -25,10 +25,17 @@ func migrateLifecycle(db *sql.DB) error {
 		var records []record
 		for rows.Next() {
 			var id, raw string
-			if err := rows.Scan(&id, &raw); err != nil {
+			var instructions instructionRead
+			if err := rows.Scan(&id, &raw, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
 				rows.Close()
 				return err
 			}
+			joined, err := instructions.join([]byte(raw))
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			raw = string(joined)
 			var fields map[string]json.RawMessage
 			var lifecycle struct {
 				Closed   time.Time
