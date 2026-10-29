@@ -26,12 +26,15 @@ export function count(n: number, noun: string): string {
 export function summaryParts(machine: MachineSummary): string[] {
   const parts: string[] = []
   if (machine.agents !== undefined) parts.push(count(machine.agents, 'agent'))
-  // A disabled machine takes no CI work, so it reports no queue figure.
+  // A machine takes local CI only when enabled and carrying the ci label, so
+  // only that row reports a queue figure.
   if (!machine.enabled) parts.push('CI off')
-  else if (machine.ci) {
-    parts.push(`${machine.ci.running} running`)
-    if (machine.ci.waiting > 0) parts.push(`${machine.ci.waiting} waiting`)
-  }
+  else if (machine.labels?.includes('ci')) {
+    if (machine.ci) {
+      parts.push(`${machine.ci.running} running`)
+      if (machine.ci.waiting > 0) parts.push(`${machine.ci.waiting} waiting`)
+    }
+  } else parts.push('no CI label')
   if (machine.computers !== undefined) parts.push(count(machine.computers, 'computer'))
   return parts
 }

@@ -329,6 +329,16 @@ The node's admission queue bounds how much runs at once on a machine, from its
 probed CPUs and memory. Merge trials take free capacity first; they do not
 interrupt active runs.
 
+A machine runs local CI checks only when it carries the `ci` label; jobs use
+any enabled machine. The migration from the old role model gives every
+machine that had the `ci` role the label, and every other machine starts
+without it:
+
+```sh
+dyna machine edit omarchy --label ci
+dyna machine edit omarchy --unlabel ci
+```
+
 The local machine is the machine that runs this engine. It is the only row
 marked `*` in the LOCAL column:
 

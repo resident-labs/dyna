@@ -96,6 +96,41 @@ func TestStoreRoomModes(t *testing.T) {
 
 // Nodes reads every machine, and the local machine runs on this host, so it
 // carries no SSH destination.
+// TestNodesTakeCIOnlyWithTheLabel checks the one placement rule for local CI:
+// an enabled machine needs the ci label, so the engine host row and any
+// unlabeled machine stay out, and jobs still see every machine from Nodes.
+func TestNodesTakeCIOnlyWithTheLabel(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	ms := machines.Store{DataDir: dir}
+	if _, err := ms.Save(ctx, machines.Machine{Name: "unlabeled", SSH: "pip@build", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.Save(ctx, machines.Machine{Name: "runner", SSH: "pip@runner", Enabled: true, Labels: []string{machines.LabelCI}}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := Store{DataDir: dir}.Nodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nodes lists every machine, the engine host first, so jobs can use them.
+	if len(nodes) != 3 {
+		t.Fatalf("nodes = %#v, want the engine host and two machines", nodes)
+	}
+	for _, node := range nodes {
+		switch node.Name {
+		case "runner":
+			if !node.TakesCI() {
+				t.Fatalf("labeled machine takes no local CI: %#v", node)
+			}
+		default:
+			if node.TakesCI() {
+				t.Fatalf("unlabeled machine %s takes local CI: %#v", node.Name, node)
+			}
+		}
+	}
+}
+
 func TestStoreNodesReadsMachines(t *testing.T) {
 	ctx := context.Background()
 	s := fixtureStore(t)

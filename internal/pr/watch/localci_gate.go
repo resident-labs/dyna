@@ -265,7 +265,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			return snap, err
 		}
 		for _, node := range nodes {
-			enabled = enabled || node.Enabled
+			enabled = enabled || node.TakesCI()
 		}
 	}
 	dir, dirErr := s.checkoutDir(ctx, r)

@@ -4,7 +4,7 @@ import { computersText, diskText, loadText, machinesSub, memoryPct, runtimeText,
 import type { MachineCapabilities, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
-  id: 'm_1', name: 'this-machine', local: true, enabled: true, status: 'online', allowHostChecks: false, ...over,
+  id: 'm_1', name: 'this-machine', local: true, enabled: true, status: 'online', allowHostChecks: false, labels: ['ci'], ...over,
 })
 
 test('a machine row shows one count for each figure the machine reports', () => {
@@ -14,10 +14,15 @@ test('a machine row shows one count for each figure the machine reports', () => 
 })
 
 test('a machine shows its queue, and its waiting count once the node queue reports it', () => {
-  const ci = machine({ agents: 0 })
+  const ci = machine({ agents: 0, labels: ['ci'] })
   assert.equal(summaryText({ ...ci, ci: { running: 2, waiting: 5 } }), '0 agents · 2 running · 5 waiting')
   assert.equal(summaryText({ ...ci, ci: { running: 1, waiting: 0 } }), '0 agents · 1 running', 'no waiting work hides the waiting count')
   assert.equal(summaryText({ ...ci, enabled: false, status: 'disabled', ci: { running: 0, waiting: 0 } }), '0 agents · CI off', 'a disabled machine takes no CI work')
+})
+
+test('a machine without the ci label reports no CI queue', () => {
+  const plain = machine({ agents: 0, labels: [] })
+  assert.equal(summaryText({ ...plain, ci: { running: 2, waiting: 5 } }), '0 agents · no CI label', 'only the ci label runs local CI checks')
 })
 
 test('the header counts machines by status and leaves out what is zero', () => {

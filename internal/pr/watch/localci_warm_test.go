@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/state"
 )
 
@@ -122,7 +123,7 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 	// run rather than one that has not recorded its commit yet.
 	saved := make(chan struct{}, 4)
 	store.savedCh = saved
-	s := warmService(t, []localci.Node{{Name: "hermeslab", Enabled: true}}, store, func(_ context.Context, _ localci.Node, req localci.WarmRequest) error {
+	s := warmService(t, []localci.Node{{Name: "hermeslab", Enabled: true, Labels: []string{machines.LabelCI}}}, store, func(_ context.Context, _ localci.Node, req localci.WarmRequest) error {
 		started <- req
 		<-release
 		return nil
@@ -159,7 +160,7 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 func TestWarmWaitsForRoomAndNeedsAJob(t *testing.T) {
 	store := newFakeWarmStore()
 	runs := 0
-	s := warmService(t, []localci.Node{{Name: "busy", Enabled: true, CPUs: 2}}, store, func(context.Context, localci.Node, localci.WarmRequest) error {
+	s := warmService(t, []localci.Node{{Name: "busy", Enabled: true, CPUs: 2, Labels: []string{machines.LabelCI}}}, store, func(context.Context, localci.Node, localci.WarmRequest) error {
 		runs++
 		return nil
 	})
@@ -192,8 +193,8 @@ func TestWarmTakesTheRoomEachMachineServes(t *testing.T) {
 	store := newFakeWarmStore()
 	requests := make(chan localci.WarmRequest, 4)
 	s := warmService(t, []localci.Node{
-		{Name: "hermeslab", Enabled: true, Rooms: []string{"room_one"}},
-		{Name: "pve", Enabled: true, Rooms: []string{"room_two"}},
+		{Name: "hermeslab", Enabled: true, Labels: []string{machines.LabelCI}, Rooms: []string{"room_one"}},
+		{Name: "pve", Enabled: true, Labels: []string{machines.LabelCI}, Rooms: []string{"room_two"}},
 	}, store, func(_ context.Context, node localci.Node, req localci.WarmRequest) error {
 		requests <- req
 		return nil
@@ -238,7 +239,7 @@ func matchingRepoDir(t *testing.T, repo string) string {
 func TestWarmUsesALiveCheckoutOfAMergedChange(t *testing.T) {
 	store := newFakeWarmStore()
 	requests := make(chan localci.WarmRequest, 2)
-	s := warmService(t, []localci.Node{{Name: "hermeslab", Enabled: true}}, store, func(_ context.Context, _ localci.Node, req localci.WarmRequest) error {
+	s := warmService(t, []localci.Node{{Name: "hermeslab", Enabled: true, Labels: []string{machines.LabelCI}}}, store, func(_ context.Context, _ localci.Node, req localci.WarmRequest) error {
 		requests <- req
 		return nil
 	})

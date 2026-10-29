@@ -248,6 +248,12 @@
           {/snippet}
           {#snippet detail()}<ScopeList label="Suites" values={machine.suites ?? []} everyText="Every suite" placeholder="Suite name" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ suites: list })} />{/snippet}
         </Row>
+        <Row dense text="Labels">
+          {#snippet meta()}
+            <span class="note">The ci label makes this machine run local CI checks. dyna machine edit {machine.name} --label ci sets it.</span>
+          {/snippet}
+          {#snippet detail()}<span class="note">{machine.labels?.length ? machine.labels.join(', ') : 'none'}</span>{/snippet}
+        </Row>
         <Row dense text="Host checks">
           {#snippet meta()}
             <span class="note">Off by default. Allow only repositories you trust to run outside containers.</span>

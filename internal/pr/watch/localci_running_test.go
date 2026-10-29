@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
@@ -23,7 +24,7 @@ import (
 type runningCIRegistry struct{ hostedCIRegistry }
 
 func (r *runningCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "hermes", Enabled: true}}, nil
+	return []localci.Node{{Name: "hermes", Enabled: true, Labels: []string{machines.LabelCI}}}, nil
 }
 func (r *runningCIRegistry) Mode(context.Context, string) (string, error) {
 	return localci.ModeLocal, nil
@@ -260,7 +261,7 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 type oneSlotRegistry struct{ runningCIRegistry }
 
 func (r *oneSlotRegistry) Nodes(context.Context) ([]localci.Node, error) {
-	return []localci.Node{{Name: "hermes", Enabled: true, CPUs: 2}}, nil
+	return []localci.Node{{Name: "hermes", Enabled: true, CPUs: 2, Labels: []string{machines.LabelCI}}}, nil
 }
 
 // hostedJob is a tracked pull request record that shares the local repository, so

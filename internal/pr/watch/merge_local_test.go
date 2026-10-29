@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
@@ -59,8 +60,8 @@ type fakeLocalCI struct {
 	started   chan struct{}
 	release   chan struct{}
 	// nodes, when set, are the machines this registry offers. A test that leaves
-	// it empty gets one 16-slot machine named hermes that allows every room and
-	// every suite.
+	// it empty gets one machine named hermes, carrying the ci label, that allows
+	// every room and every suite.
 	nodes []localci.Node
 }
 
@@ -68,7 +69,7 @@ func (f *fakeLocalCI) Nodes(context.Context) ([]localci.Node, error) {
 	if len(f.nodes) > 0 {
 		return f.nodes, nil
 	}
-	return []localci.Node{{Name: "hermes", Enabled: true}}, nil
+	return []localci.Node{{Name: "hermes", Enabled: true, Labels: []string{machines.LabelCI}}}, nil
 }
 func (f *fakeLocalCI) Mode(context.Context, string) (string, error) { return localci.ModeLocal, nil }
 func (f *fakeLocalCI) SaveResult(_ context.Context, result localci.Result) error {
@@ -553,7 +554,7 @@ func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
 	r := records[0]
 	// This machine runs only the relay suite, and a trial runs every workflow
 	// suite of its base definition.
-	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, Suites: []string{string(localci.SuiteRelay)}}}
+	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, Labels: []string{machines.LabelCI}, Suites: []string{string(localci.SuiteRelay)}}}
 	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
 	if err != nil {
 		t.Fatal(err)
@@ -598,8 +599,8 @@ func TestLocalTrialFailsWhenAnotherRoomOwnsTheSuite(t *testing.T) {
 	// This room's machine runs only the go suite. The machine that takes every
 	// suite belongs to another room, so it is not a candidate.
 	ci.nodes = []localci.Node{
-		{Name: "room-ci", Enabled: true, Suites: []string{string(localci.SuiteGo)}, Rooms: []string{r.RoomID}},
-		{Name: "other-room-ci", Enabled: true, Rooms: []string{"room_other"}},
+		{Name: "room-ci", Enabled: true, Labels: []string{machines.LabelCI}, Suites: []string{string(localci.SuiteGo)}, Rooms: []string{r.RoomID}},
+		{Name: "other-room-ci", Enabled: true, Labels: []string{machines.LabelCI}, Rooms: []string{"room_other"}},
 	}
 	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
 	if err != nil {
