@@ -50,8 +50,7 @@ const fixtures: Record<string, EventPayload> = {
   'machine/low-disk': {
     name: 'hermeslab',
     freeBytes: 3 * 1024 ** 3,
-    floorBytes: 20 * 1024 ** 3,
-    summary: '3.0 GiB free, needs 20 GiB',
+    block: 'disk has 3 GiB free, below the 90 GiB floor',
     atMs: 1792774800000,
   },
   'machine/cache-repaired': {
@@ -477,7 +476,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('crossings' in payload) return payload.run
   if ('children' in payload) return payload.children[0]?.name ?? payload.parent
   if ('ruleId' in payload) return payload.sessions?.length ? `reached ${payload.sessions.length} sessions` : payload.ruleId
-  if ('floorBytes' in payload) return payload.name
+  if ('block' in payload) return payload.name
   if ('caches' in payload) return payload.name
   if ('builds' in payload) return payload.name
   if ('topByMemory' in payload) return payload.room

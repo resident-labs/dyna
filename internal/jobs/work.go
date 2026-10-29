@@ -62,12 +62,11 @@ type NodeCapacity struct {
 	CPUsUsed      int   `json:"cpusUsed"`
 	MemoryMiBUsed int64 `json:"memoryMiBUsed"`
 	// DiskFree and DiskTotal are bytes of the disk that holds Dyna's work, and
-	// zero when no probe read it. DiskFloor is the free space admission keeps,
-	// and MaxDiskPercent is the used-percent limit that replaces it when set.
-	DiskFree       uint64 `json:"diskFree"`
-	DiskTotal      uint64 `json:"diskTotal"`
-	DiskFloor      uint64 `json:"diskFloor"`
-	MaxDiskPercent int    `json:"maxDiskPercent,omitempty"`
+	// zero when no probe read it. DiskKeeps words the free space the node's
+	// disk rule keeps while it admits work.
+	DiskFree  uint64 `json:"diskFree"`
+	DiskTotal uint64 `json:"diskTotal"`
+	DiskKeeps string `json:"diskKeeps,omitempty"`
 	// DiskBlock is the queue's words for a disk that admits no work, and empty
 	// when it admits work.
 	DiskBlock    string        `json:"diskBlock,omitempty"`
@@ -105,14 +104,13 @@ func (a Admission) Work(ctx context.Context, m machines.Machine) (NodeWork, erro
 	}
 	caps := m.Capabilities
 	work := NodeWork{Running: []WorkItem{}, Waiting: []WorkItem{}, Capacity: NodeCapacity{
-		CPUs:           caps.CPUs,
-		MemoryMiB:      int64(caps.MemTotal >> 20),
-		DiskFree:       caps.Disk.Free,
-		DiskTotal:      caps.Disk.Total,
-		DiskFloor:      m.DiskFloorBytes(),
-		MaxDiskPercent: m.MaxDiskPercent,
-		DiskBlock:      m.DiskBlock(),
-		HeavyLimit:     m.IOHeavyLimit(),
+		CPUs:       caps.CPUs,
+		MemoryMiB:  int64(caps.MemTotal >> 20),
+		DiskFree:   caps.Disk.Free,
+		DiskTotal:  caps.Disk.Total,
+		DiskKeeps:  m.DiskKeeps(),
+		DiskBlock:  m.DiskBlock(),
+		HeavyLimit: m.IOHeavyLimit(),
 	}}
 	var waiters []waiter
 	reasons := map[string]string{}

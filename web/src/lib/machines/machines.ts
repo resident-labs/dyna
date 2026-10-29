@@ -1,36 +1,21 @@
-import type { MachineCIRun, MachineCapabilities, MachineCapacity, MachineLoad, MachineRole, MachineStatus, MachineStatusReason, MachineSummary, MachineWorkItem } from '../api/machine.ts'
+import type { MachineCIRun, MachineCapabilities, MachineCapacity, MachineLoad, MachineRole, MachineStatus, MachineSummary, MachineWorkItem } from '../api/machine.ts'
 
 // roleLabel is the short name a role chip shows.
 export function roleLabel(role: MachineRole): string {
   return role === 'ci' ? 'CI' : role
 }
 
-// statusText words a machine's status for a title or a row. A degraded machine
-// works, but it needs attention.
+// statusText words a machine's status for a title or a row.
 export function statusText(status: MachineStatus): string {
   switch (status) {
     case 'online':
       return 'Online'
-    case 'degraded':
-      return 'Degraded'
     case 'disabled':
       return 'Disabled'
     case 'offline':
       return 'Offline'
     default:
       return 'Not probed'
-  }
-}
-
-// reasonText words why a machine is degraded. It is a designed line, never the
-// probe's own message. Below the disk floor the scheduler starts no CI on the
-// machine, so the line says what stops.
-export function reasonText(reason: MachineStatusReason | undefined): string {
-  switch (reason) {
-    case 'low-disk':
-      return 'Low disk space. Dyna starts no new CI here until space is freed.'
-    default:
-      return 'The machine still works, but it needs attention.'
   }
 }
 
@@ -85,7 +70,6 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
   const of = (status: MachineStatus) => machines.filter((m) => m.status === status).length
   return [
     { status: 'online', n: of('online') },
-    { status: 'degraded', n: of('degraded') },
     { status: 'disabled', n: of('disabled') },
     { status: 'offline', n: of('offline') },
     { status: 'unknown', n: of('unknown') },
@@ -97,7 +81,7 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
 export function machinesSub(machines: readonly MachineSummary[] | null): string {
   if (!machines) return ''
   if (!machines.length) return 'No machines yet'
-  const words: Record<MachineStatus, string> = { online: 'online', degraded: 'degraded', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
+  const words: Record<MachineStatus, string> = { online: 'online', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
   return statusCounts(machines)
     .filter((c) => c.n > 0)
     .map((c) => `${c.n} ${words[c.status]}`)
@@ -187,12 +171,14 @@ export function loadText(load: Pick<MachineLoad, 'memAvailable'>): string {
   return `${sizeText(load.memAvailable)} free`
 }
 
-// diskText words a machine's free disk space, and the floor Dyna keeps for CI
-// work on it. It is empty when the probe read no free space.
-export function diskText(caps: Pick<MachineCapabilities, 'freeDisk' | 'diskFloor'>): string {
+// diskText words a machine's free disk space and the node's one disk rule:
+// what it keeps while it admits work, or the queue's words when it admits
+// none. It is empty when the probe read no free space.
+export function diskText(caps: Pick<MachineCapabilities, 'freeDisk' | 'diskKeeps' | 'diskBlock'>): string {
   if (caps.freeDisk === undefined) return ''
   const free = `${sizeText(caps.freeDisk)} free`
-  return caps.diskFloor ? `${free} · needs ${sizeText(caps.diskFloor)}` : free
+  const rule = caps.diskBlock || (caps.diskKeeps ? `keeps ${caps.diskKeeps}` : '')
+  return rule ? `${free} · ${rule}` : free
 }
 
 // ScopeEdit is one change to a CI machine's room or suite list.
@@ -224,13 +210,12 @@ export function memoryUseText(c: Pick<MachineCapacity, 'memoryMiB' | 'memoryMiBU
   return c.memoryMiB > 0 ? `${held} of ${sizeText(c.memoryMiB * 2 ** 20)}` : `${held} held`
 }
 
-// diskLimitText words a node's free disk against what admission keeps. A node
-// with a used-percent limit keeps under that percent; otherwise it keeps a
-// free floor. A block is a designed line of its own, so this stays a figure.
-export function diskLimitText(c: Pick<MachineCapacity, 'diskFree' | 'diskTotal' | 'diskFloor' | 'maxDiskPercent'>): string {
+// diskLimitText words a node's free disk against what its disk rule keeps. A
+// block is a designed line of its own, so this stays a figure.
+export function diskLimitText(c: Pick<MachineCapacity, 'diskFree' | 'diskTotal' | 'diskKeeps'>): string {
   if (c.diskTotal === 0) return 'Not probed'
   const free = `${sizeText(c.diskFree)} free`
-  return c.maxDiskPercent ? `${free} · limit ${c.maxDiskPercent}% used` : `${free} · keeps ${sizeText(c.diskFloor)}`
+  return c.diskKeeps ? `${free} · keeps ${c.diskKeeps}` : free
 }
 
 // workHoldsText words what one unit of work holds or asks of its node.

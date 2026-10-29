@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computersText, diskText, loadText, machinesSub, memoryPct, reasonText, roleLabel, runtimeText, statusText, summaryText, systemText, versionText, editScope } from './machines.ts'
+import { computersText, diskText, loadText, machinesSub, memoryPct, roleLabel, runtimeText, statusText, summaryText, systemText, versionText, editScope } from './machines.ts'
 import type { MachineCapabilities, MachineRole, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
@@ -24,32 +24,26 @@ test('a CI machine shows its queue, and its waiting count once the node queue re
 test('the header counts machines by status and leaves out what is zero', () => {
   const list = [
     machine(),
-    machine({ id: 'm_5', status: 'degraded' }),
     machine({ id: 'm_2', status: 'disabled' }),
     machine({ id: 'm_3', local: false, status: 'offline' }),
     machine({ id: 'm_4', local: false, status: 'unknown' }),
   ]
-  assert.equal(machinesSub(list), '1 online · 1 degraded · 1 disabled · 1 offline · 1 not probed')
+  assert.equal(machinesSub(list), '1 online · 1 disabled · 1 offline · 1 not probed')
   assert.equal(machinesSub([machine(), machine({ id: 'm_2' })]), '2 online')
   assert.equal(machinesSub([]), 'No machines yet')
   assert.equal(machinesSub(null), '', 'a list that has not loaded yet has no subline')
 })
 
 test('status words separate a switched off machine from one that is not probed', () => {
-  assert.deepEqual(['online', 'degraded', 'disabled', 'offline', 'unknown'].map((s) => statusText(s as MachineSummary['status'])), ['Online', 'Degraded', 'Disabled', 'Offline', 'Not probed'])
+  assert.deepEqual(['online', 'disabled', 'offline', 'unknown'].map((s) => statusText(s as MachineSummary['status'])), ['Online', 'Disabled', 'Offline', 'Not probed'])
 })
 
-test('a degraded machine says why in a designed line', () => {
-  assert.equal(reasonText('low-disk'), 'Low disk space. Dyna starts no new CI here until space is freed.')
-  assert.equal(reasonText(undefined), 'The machine still works, but it needs attention.', 'an unknown reason still reads as a sentence')
-})
-
-test('the Disk row words the free space and the floor Dyna keeps', () => {
+test('the Disk row words the free space and the rule the node keeps, or the block words', () => {
   const GiB = 2 ** 30
   const TiB = 2 ** 40
-  assert.equal(diskText({ freeDisk: 3 * GiB, diskFloor: 20 * GiB }), '3.0 GiB free · needs 20.0 GiB')
-  assert.equal(diskText({ freeDisk: 40 * GiB }), '40.0 GiB free', 'no floor shows only what is free')
-  assert.equal(diskText({ freeDisk: 1000 * GiB, diskFloor: 2000 * GiB }), '1000.0 GiB free · needs 2.0 TiB', 'a large floor steps up to the next unit')
+  assert.equal(diskText({ freeDisk: 271 * GiB, diskKeeps: '20 GiB and 5% of the disk' }), '271.0 GiB free · keeps 20 GiB and 5% of the disk')
+  assert.equal(diskText({ freeDisk: 3 * GiB, diskKeeps: '20 GiB and 5% of the disk', diskBlock: 'disk has 3 GiB free, below the 20 GiB floor' }), '3.0 GiB free · disk has 3 GiB free, below the 20 GiB floor', 'the block words win over what the rule keeps')
+  assert.equal(diskText({ freeDisk: 40 * GiB }), '40.0 GiB free', 'no rule words shows only what is free')
   assert.equal(diskText({ freeDisk: 2 * TiB }), '2.0 TiB free')
   assert.equal(diskText({}), '', 'no reading shows no row')
 })

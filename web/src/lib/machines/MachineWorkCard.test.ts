@@ -17,7 +17,7 @@ async function mountCard(work: MachineWork | null) {
 
 const unit = (over: Partial<MachineWorkItem>): MachineWorkItem => ({ kind: 'job', id: 'job_1', label: 'make test', cpus: 2, memoryMiB: 2048, heavy: false, since: new Date(Date.now() - 125_000).toISOString(), ...over })
 
-const capacity = { cpus: 8, memoryMiB: 16384, cpusUsed: 3, memoryMiBUsed: 3072, diskFree: 60 * 2 ** 30, diskTotal: 100 * 2 ** 30, diskFloor: 10 * 2 ** 30, heavyRunning: 1, heavyLimit: 1 }
+const capacity = { cpus: 8, memoryMiB: 16384, cpusUsed: 3, memoryMiBUsed: 3072, diskFree: 60 * 2 ** 30, diskTotal: 100 * 2 ** 30, diskKeeps: 'a tenth of the disk', heavyRunning: 1, heavyLimit: 1 }
 
 const rows = () => [...document.querySelectorAll('.text')].map((n) => n.textContent)
 

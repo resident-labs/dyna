@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"dyna-agent/internal/machines"
-	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -31,19 +30,6 @@ const (
 	ciRunCleanAge   = 2 * time.Hour
 	ciCacheCleanAge = 48 * time.Hour
 )
-
-// ciDiskFloorBytes is the free space a CI machine must keep, as the owner's
-// settings say it. The same floor holds new CI work and lets a run clean Dyna's
-// caches first, so an owner changes one policy. A settings file that cannot be
-// read keeps the default floor, so a broken file never leaves a full machine
-// unclean. Zero turns cache recovery off, as it turns CI admission off.
-func ciDiskFloorBytes() int64 {
-	values, err := settings.Load("")
-	if err != nil {
-		return int64(settings.Defaults().CIDiskFloorBytes())
-	}
-	return int64(values.CIDiskFloorBytes())
-}
 
 // legacyCacheDir is where the old single-node runner kept its caches. No run
 // writes there now, so its entries stay until their age passes.
@@ -469,15 +455,17 @@ func (r Runner) runNodeWithDiskRetry(ctx context.Context, req Request) (Result, 
 	return result, err
 }
 
-// cleanBeforeRun frees Dyna's caches when the node is close to a full disk, and
-// reports how much it freed in the run log.
+// cleanBeforeRun frees Dyna's caches when the node's disk blocks new work, and
+// reports how much it freed in the run log. It reads the free space now and
+// judges it with the node's one disk rule, so a run frees its own caches as
+// soon as the queue would hold it. A node that was never probed has no rule
+// to judge, so it is left alone.
 func (r Runner) cleanBeforeRun(ctx context.Context, node Node) error {
 	free, err := r.freeSpaceBytes(ctx, node, "/var/tmp")
 	if err != nil {
 		return err
 	}
-	floor := ciDiskFloorBytes()
-	if floor <= 0 || free >= floor {
+	if keep := machines.KeepFreeBytes(node.MaxDiskPercent, node.Disk.Total); keep == 0 || uint64(free) >= keep {
 		return nil
 	}
 	cleaned, err := r.CleanCaches(ctx, node, false)

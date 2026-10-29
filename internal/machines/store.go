@@ -138,7 +138,6 @@ type Machine struct {
 	// The probe fields are what the last probe read. A machine that has never
 	// been probed has Health unknown and no capabilities.
 	Health       Health       `json:"health"`
-	HealthReason HealthReason `json:"healthReason,omitempty"`
 	Capabilities Capabilities `json:"capabilities"`
 	Load         Load         `json:"load"`
 	// LastProbe is when the last probe started, and LastSeen when a probe last
@@ -242,28 +241,50 @@ func (m Machine) IOHeavyLimit() int {
 // disk free, so a large disk is not called full while it still has plenty of
 // room. A node that was never probed is not blocked.
 func (m Machine) DiskBlock() string {
+	return diskBlock(m.MaxDiskPercent, m.Capabilities.Disk)
+}
+
+// diskBlock is DiskBlock for one disk reading. KeepFreeBytes is the
+// boundary it judges: the node blocks while its free space is under it.
+func diskBlock(maxPercent int, disk Disk) string {
+	if disk.Total == 0 {
+		return ""
+	}
+	if keep := KeepFreeBytes(maxPercent, disk.Total); disk.Free < keep {
+		if maxPercent > 0 {
+			used := int(100 * (disk.Total - disk.Free) / disk.Total)
+			return fmt.Sprintf("disk %d%% at the %d%% limit", used, maxPercent)
+		}
+		return fmt.Sprintf("disk has %d GiB free, below the %d GiB floor", disk.Free>>30, keep>>30)
+	}
+	return ""
+}
+
+// DiskKeeps words the free space the node's disk rule keeps while it admits
+// work: the floor for a node with no percent limit, or the percent limit. It
+// is empty for a node that was never probed.
+func (m Machine) DiskKeeps() string {
 	disk := m.Capabilities.Disk
 	if disk.Total == 0 {
 		return ""
 	}
 	if m.MaxDiskPercent > 0 {
-		if used := int(100 * (disk.Total - disk.Free) / disk.Total); used >= m.MaxDiskPercent {
-			return fmt.Sprintf("disk %d%% at the %d%% limit", used, m.MaxDiskPercent)
-		}
-		return ""
+		return fmt.Sprintf("used under %d%%", m.MaxDiskPercent)
 	}
-	floor := m.DiskFloorBytes()
-	if disk.Free < floor {
-		return fmt.Sprintf("disk has %d GiB free, below the %d GiB floor", disk.Free>>30, floor>>30)
+	switch floor := diskFloorBytes(disk.Total); floor {
+	case DiskFloorMin:
+		return fmt.Sprintf("%d GiB and %d%% of the disk", DiskFloorMin>>30, DiskFloorShare)
+	case disk.Total / 100 * DiskFloorShare:
+		return fmt.Sprintf("%d%% of the disk", DiskFloorShare)
+	default:
+		return "a tenth of the disk"
 	}
-	return ""
 }
 
-// DiskFloorBytes is the free space a node with no percent limit keeps: the
+// diskFloorBytes is the free space a node with no percent limit keeps: the
 // larger of DiskFloorMin and DiskFloorShare of its disk, never over a tenth of
-// it. It is zero for a node that was never probed.
-func (m Machine) DiskFloorBytes() uint64 {
-	total := m.Capabilities.Disk.Total
+// it. It is zero for a disk that was never probed.
+func diskFloorBytes(total uint64) uint64 {
 	return min(max(DiskFloorMin, total/100*DiskFloorShare), total/DiskFloorCapDivisor)
 }
 
@@ -276,6 +297,23 @@ const (
 	DiskFloorShare      = 5
 	DiskFloorCapDivisor = 10
 )
+
+// KeepFreeBytes is the least free space the node's disk rule keeps for a
+// disk of this size: with a percent limit, the free space that holds the used
+// percent under it; without one, the floor DiskBlock judges. It is zero for a
+// disk that was never probed. Cache recovery cleans to this boundary, so a
+// node whose caches and scratch reach it admits work again.
+func KeepFreeBytes(maxPercent int, total uint64) uint64 {
+	if total == 0 {
+		return 0
+	}
+	if maxPercent > 0 {
+		// One byte over the limit's share holds the whole-point used percent
+		// under the limit.
+		return total - total*uint64(maxPercent)/100 + 1
+	}
+	return diskFloorBytes(total)
+}
 
 // HasHostChecksGrants reports whether anyone allows host checks on this
 // machine, whatever the room.
@@ -454,7 +492,7 @@ func validateSuiteList(suites []string) error {
 	return nil
 }
 
-const schemaVersion = 12
+const schemaVersion = 13
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -468,7 +506,6 @@ const schema = `CREATE TABLE machines (
 	updated_ms     INTEGER NOT NULL,
 	capabilities   TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities)),
 	health         TEXT    NOT NULL DEFAULT 'unknown',
-	health_reason  TEXT    NOT NULL DEFAULT '',
 	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
 	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
 	probe_error    TEXT    NOT NULL DEFAULT '',
@@ -518,7 +555,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -554,8 +591,9 @@ func (s Store) db() (*sql.DB, error) {
 
 // prepare runs inside the migration. Version 1 created the registry and
 // imported the old local CI nodes. Later versions added probe data, degradation
-// reasons, the host-check permission as one switch, and who allows host checks
-// for which room.
+// reasons, the host-check permission as one switch, who allows host checks for
+// which room, and dropped the degradation reason when the one disk rule
+// replaced it.
 func prepare(conn *sql.Conn, old int) error {
 	ctx := context.Background()
 	if old >= schemaVersion {
@@ -644,6 +682,13 @@ func prepare(conn *sql.Conn, old int) error {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100)`); err != nil {
+			return err
+		}
+	}
+	if old < 13 {
+		// The one disk rule dropped the reason a degraded health carried: the
+		// queue's own words say why a disk admits no work.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines DROP COLUMN health_reason`); err != nil {
 			return err
 		}
 	}
@@ -910,10 +955,10 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites, resources string
+	var roles, capabilities, health, load, probeError, grants, rooms, suites, resources string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
+		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -954,7 +999,7 @@ func scan(row scanner) (Machine, error) {
 	if err := json.Unmarshal([]byte(load), &m.Load); err != nil {
 		return Machine{}, fmt.Errorf("machine %s load: %w", m.Name, err)
 	}
-	m.Health, m.HealthReason, m.ProbeError = parseHealth(health), parseHealthReason(reason), probeError
+	m.Health, m.ProbeError = parseHealth(health), probeError
 	m.Created = time.UnixMilli(created)
 	m.Updated = time.UnixMilli(updated)
 	if probed > 0 {
@@ -970,11 +1015,6 @@ func scan(row scanner) (Machine, error) {
 // disabled while it is turned off. A machine that comes back starts unknown,
 // so no client reads the last probe of a machine that was off.
 const healthOnToggle = `CASE WHEN ? = 0 THEN 'disabled' WHEN health = 'disabled' THEN 'unknown' ELSE health END`
-
-// reasonOnToggle drops the reason of a degraded health once the machine is off
-// or comes back, so a stored row never claims a reason it no longer holds. It
-// reads the row's old health, as healthOnToggle does.
-const reasonOnToggle = `CASE WHEN ? = 0 OR health IN ('disabled','unknown') THEN '' ELSE health_reason END`
 
 // healthOnCreate is the health a new machine starts with.
 func healthOnCreate(enabled bool) Health {
@@ -1009,28 +1049,17 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) (Machine
 	if r.At.IsZero() {
 		r.At = time.Now()
 	}
-	// A reason belongs to a health that a probe reached: an online or degraded
-	// machine. A probe that failed says nothing about the reason it carried.
-	reason := ReasonNone
-	if health == HealthOnline || health == HealthDegraded {
-		reason = r.Reason
-	}
-	// A machine that could not be reached keeps the reason of its last probe,
-	// so a low-disk hold survives a connection failure. Only a probe that
-	// reached the machine can show that space came back.
-	if health == HealthOffline && stored.HealthReason == ReasonLowDisk {
-		reason = ReasonLowDisk
-	}
 	// A machine the owner turned off holds nothing and shows nothing: it takes
 	// no work either way. Its readings stay as the last good probe left them,
 	// and enabling it again starts unknown, so this comes last.
 	if !stored.Enabled {
-		health, reason = HealthDisabled, ReasonNone
+		health = HealthDisabled
 	}
 	// Only a probe that reached the machine replaces what the last good probe
 	// read, so a machine that is off keeps its capabilities for the owner.
 	var capabilities, load string
-	if health == HealthOnline || health == HealthDegraded {
+	diskAfter := stored.Capabilities.Disk
+	if health == HealthOnline {
 		rawCaps, err := json.Marshal(r.Capabilities)
 		if err != nil {
 			return Machine{}, err
@@ -1040,42 +1069,39 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) (Machine
 			return Machine{}, err
 		}
 		capabilities, load = string(rawCaps), string(rawLoad)
+		diskAfter = r.Capabilities.Disk
 	}
 	probeErr := ""
 	if health == HealthOffline {
 		probeErr = r.Err
 	}
 	probed := r.At.UnixMilli()
-	// A probe that starts or ends a hold changes where CI work can run, so it
-	// wakes the CI workers. Any other probe result changes no work.
+	// A probe that starts or ends a disk block changes where new work can run,
+	// so it wakes the workers that queue it. Any other probe result changes no
+	// work.
 	key := probeKeyPrefix + stored.Name
-	if heldAfter := holdsCI(health, reason); heldAfter != holdsCI(stored.Health, stored.HealthReason) {
-		key = holdKeyPrefix + stored.Name
+	if diskBlock(stored.MaxDiskPercent, diskAfter) != diskBlock(stored.MaxDiskPercent, stored.Capabilities.Disk) {
+		key = blockKeyPrefix + stored.Name
 	}
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: key}, func(conn *sql.Conn) error {
-		if health == HealthOnline || health == HealthDegraded {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET capabilities=?, last_load=?, health=?, health_reason=?, last_probe_ms=?, last_seen_ms=?, probe_error='' WHERE id=?`,
-				capabilities, load, string(health), string(reason), probed, probed, id)
+		if health == HealthOnline {
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET capabilities=?, last_load=?, health=?, last_probe_ms=?, last_seen_ms=?, probe_error='' WHERE id=?`,
+				capabilities, load, string(health), probed, probed, id)
 			return err
 		}
 		if health == HealthDisabled {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, health_reason='', last_probe_ms=?, probe_error='' WHERE id=?`,
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error='' WHERE id=?`,
 				string(health), probed, id)
 			return err
 		}
-		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, health_reason=?, last_probe_ms=?, probe_error=? WHERE id=?`,
-			string(health), string(reason), probed, probeErr, id)
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error=? WHERE id=?`,
+			string(health), probed, probeErr, id)
 		return err
 	})
 	if err != nil {
 		return Machine{}, err
 	}
 	return getByID(ctx, db, id)
-}
-
-// holdsCI reports whether a stored health and reason hold CI work.
-func holdsCI(health Health, reason HealthReason) bool {
-	return health != HealthDisabled && reason == ReasonLowDisk
 }
 
 // Save inserts a machine, or updates the stored row that has this ID, and
@@ -1121,8 +1147,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if !m.HasRole(RoleCI) {
 				grants = "host_checks_grants='[]'"
 			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)

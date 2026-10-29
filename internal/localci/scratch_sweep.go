@@ -4,7 +4,7 @@ package localci
 // a task can name its folder itself, so the engine host's closed-session
 // retention cannot apply there. This sweep judges a folder by its last file
 // change, never by its name, and a free-space guard removes idle build outputs
-// first when the machine is under its CI disk floor.
+// first when the machine's disk blocks new work.
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/shellquote"
 )
@@ -70,7 +71,9 @@ type ScratchReporter func(ctx context.Context, node Node, result ScratchResult) 
 // SweepScratch removes every folder that no file has changed in for
 // scratch.ClosedRetention. Then, when free space is under floor, it removes
 // build outputs idle for scratchBuildIdle or more, oldest first, until free
-// space reaches floor. A zero floor turns the guard off.
+// space reaches floor. Callers pass the boundary of the node's disk rule, so a
+// sweep ends with a node that admits work again. A zero floor turns the guard
+// off, such as for a node that was never probed.
 func SweepScratch(ctx context.Context, host ScratchHost, now time.Time, floor int64) (ScratchResult, error) {
 	var result ScratchResult
 	folders, err := host.List(ctx)
@@ -212,7 +215,8 @@ func sweepNodeScratch(ctx context.Context, r Runner, node Node, now time.Time) (
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	result, err := SweepScratch(ctx, nodeScratch{r: r, node: node}, now, ciDiskFloorBytes())
+	floor := int64(machines.KeepFreeBytes(node.MaxDiskPercent, node.Disk.Total))
+	result, err := SweepScratch(ctx, nodeScratch{r: r, node: node}, now, floor)
 	result.Node = node.Name
 	return result, err
 }

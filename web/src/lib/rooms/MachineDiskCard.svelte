@@ -14,8 +14,7 @@
   let payload = $derived(machineEvent(post))
   let name = $derived(payload?.name ?? 'A machine')
   let free = $derived(payload ? formatBytes(payload.freeBytes) : '')
-  let floor = $derived(payload ? formatBytes(payload.floorBytes) : '')
-  let chips = $derived(payload ? [{ label: `${free} free`, tone: 'gold' }, { label: `needs ${floor}` }] : [])
+  let chips = $derived(payload ? [{ label: `${free} free`, tone: 'gold' }, { label: payload.block }] : [])
 </script>
 
 {#snippet icon()}
@@ -27,7 +26,7 @@
 {/snippet}
 
 {#snippet body()}
-  <p class="text">Dyna starts no CI work on {name} until space is freed.</p>
+  <p class="text">Dyna starts no new work on {name} until space is freed.</p>
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
 {/snippet}
 

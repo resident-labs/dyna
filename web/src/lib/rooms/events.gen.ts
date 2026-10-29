@@ -251,8 +251,7 @@ export interface MergeDecisionEvent {
 export interface MachineEvent {
   name: string
   freeBytes: number
-  floorBytes: number
-  summary: string
+  block: string
   atMs: number
 }
 
@@ -818,7 +817,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "root-if-needed",
     once: true,
     audience: "room",
-    text: "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+    text: "Machine {name} is low on disk: {block}. Dyna starts no new work there until space is freed.",
   },
   {
     family: "machine",
@@ -1598,8 +1597,7 @@ export function isMachineEvent(v: unknown): v is MachineEvent {
   return isRecord(v) &&
     typeof v.name === "string" &&
     Number.isInteger(v.freeBytes) &&
-    Number.isInteger(v.floorBytes) &&
-    typeof v.summary === "string" &&
+    typeof v.block === "string" &&
     Number.isInteger(v.atMs)
 }
 

@@ -62,36 +62,52 @@ func detachedDir(runDir string, id Suite) string {
 // queue is the node admission queue this runner joins: the one queue that
 // jobs and checks of every room share on a node.
 func (r Runner) queue() jobs.Admission {
-	a := jobs.Admission{DataDir: r.root(), Engine: r.Engine}
+	root := r.root()
+	a := jobs.Admission{DataDir: root, Engine: r.Engine}
 	if r.Node != nil {
-		a.Machines = nodeSource{node: r.Node}
+		a.Machines = nodeSource{node: r.Node, dataDir: root}
 	}
 	return a
 }
 
-// nodeSource serves the runner's own node to the admission queue, so the
-// queue reads the node's probed capacity without the machine registry.
-type nodeSource struct{ node *Node }
+// nodeSource serves the runner's own node to the admission queue. A node the
+// registry knows is read from the registry on every call, so each admission
+// pass sees its current probe: a disk that freed or filled after the run was
+// scheduled releases or holds the run's checks. A node the registry does not
+// know, such as one named by settings, falls back to the snapshot taken when
+// the run was scheduled.
+type nodeSource struct {
+	node *Node
+	// dataDir roots the machine registry the queue reads.
+	dataDir string
+}
 
 func (s nodeSource) Get(ctx context.Context, name string) (machines.Machine, error) {
 	if name != s.node.Name {
 		return machines.Machine{}, fmt.Errorf("machine %s: %w", name, os.ErrNotExist)
 	}
-	return s.machine(), nil
+	return s.current(ctx)
 }
 
 func (s nodeSource) GetLocal(ctx context.Context) (machines.Machine, error) {
+	return s.current(ctx)
+}
+
+// current reads the registered record of the node, or the scheduling snapshot
+// when the registry holds no such machine.
+func (s nodeSource) current(ctx context.Context) (machines.Machine, error) {
+	if m, err := (machines.Store{DataDir: s.dataDir}).Get(ctx, s.node.Name); err == nil {
+		return m, nil
+	}
 	return s.machine(), nil
 }
 
-// machine turns the node into a machine record: its probed CPUs and memory,
-// and a full disk when the last probe found the node under the disk floor.
+// machine turns the node into a machine record: its probed CPUs, memory and
+// disk, and its disk percent limit. The CPUs and memory bound what a check
+// may ask for, and the admission queue reads the disk through this record, so
+// it holds new work while the node's disk blocks.
 func (s nodeSource) machine() machines.Machine {
-	m := machines.Machine{Name: s.node.Name, Enabled: true, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes}}
-	if s.node.LowDisk {
-		m.Capabilities.Disk = machines.Disk{Total: 100, Free: 0}
-	}
-	return m
+	return machines.Machine{Name: s.node.Name, Enabled: true, MaxDiskPercent: s.node.MaxDiskPercent, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes, Disk: s.node.Disk}}
 }
 
 // exec builds the node executor of this runner.
