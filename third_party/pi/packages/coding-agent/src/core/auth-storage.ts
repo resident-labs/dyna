@@ -4,7 +4,7 @@
  */
 
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { setTimeout as sleep } from "timers/promises";
@@ -74,7 +74,18 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 
 	private ensureFileExists(): void {
 		if (!existsSync(this.authPath)) {
-			this.replaceAuthFileSync("{}");
+			// Creates the placeholder exclusively: another process may create
+			// the file or write a login between the check and the create, and
+			// a hard link never replaces an existing file, so a lost race
+			// cannot rename an empty login over a saved credential.
+			const tempPath = `${this.authPath}.${process.pid}.init`;
+			writeFileSync(tempPath, "{}", AUTH_FILE_WRITE_OPTIONS);
+			try {
+				linkSync(tempPath, this.authPath);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			}
+			unlinkSync(tempPath);
 		}
 	}
 
