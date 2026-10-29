@@ -13,10 +13,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
 )
@@ -64,6 +67,58 @@ func Access(_ context.Context, rec room.Record) string {
 // errNotInRoom is the refusal for a repository that is not the acting room's.
 var errNotInRoom = errors.New("GitHub repository does not belong to the acting room")
 var errReadOnly = errors.New("GitHub writes are disabled: this room is read-only")
+
+// HeldError refuses gh pr ready on a PR that Dyna holds. Only dyna git pr release lifts the hold.
+type HeldError struct {
+	Ref    string
+	Reason string
+}
+
+func (e *HeldError) Error() string {
+	return fmt.Sprintf("PR %s is held in Dyna: %s. Run dyna git pr release %s to lift the hold.", e.Ref, e.Reason, e.Ref)
+}
+
+// engineHold asks the engine for the hold on a PR. Tests replace it.
+var engineHold = func(ctx context.Context, roomID, prURL string) (*state.Hold, error) {
+	var hold *state.Hold
+	err := engineclient.New("").Call(ctx, "PRHold", []any{roomID, prURL}, &hold)
+	return hold, err
+}
+
+// refuseHeldReady refuses gh pr ready on a PR the engine reports as held. With no
+// engine running nothing can hold the PR, so the command runs, as engine status does.
+// A branch name or a bare gh pr ready (no number or URL) is not matched here.
+func refuseHeldReady(ctx context.Context, rec room.Record, r repository, args []string) error {
+	command := commandArgs(args)
+	if len(command) < 2 || command[0] != "pr" || command[1] != "ready" || slices.Contains(command, "--undo") {
+		return nil
+	}
+	target := ""
+	for _, a := range command[2:] {
+		if !strings.HasPrefix(a, "-") {
+			target = a
+			break
+		}
+	}
+	if target == "" {
+		return nil
+	}
+	prURL := target
+	if n, err := strconv.Atoi(target); err == nil {
+		prURL = fmt.Sprintf("https://%s/%s/pull/%d", r.host, r.name, n)
+	}
+	hold, err := engineHold(ctx, rec.ID, prURL)
+	if errors.Is(err, engineclient.ErrNotRunning) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if hold == nil {
+		return nil
+	}
+	return &HeldError{Ref: target, Reason: hold.Reason}
+}
 
 // outsideReadError explains a refused read of a repository outside the room. Only
 // a REST read of a public repository outside every room is allowed (D-272), so
@@ -519,5 +574,5 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	if Access(ctx, rec) != ReadWrite && !isRead(args) {
 		return errReadOnly
 	}
-	return nil
+	return refuseHeldReady(ctx, rec, r, args)
 }

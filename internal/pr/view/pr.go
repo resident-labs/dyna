@@ -241,6 +241,25 @@ func (s *Service) UntrackPR(ctx context.Context, roomRef, key string) error {
 	return p.Untrack(ctx, key)
 }
 
+// PRHold returns the hold on the tracked change at url in roomRef, or nil when
+// no hold applies. A change that is not tracked in the room has no hold.
+func (s *Service) PRHold(roomRef, url string) (*state.Hold, error) {
+	rec, err := s.Notify.Rooms.Resolve(roomRef)
+	if err != nil {
+		return nil, err
+	}
+	projection, err := s.readProjection()
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range projection.state.Records {
+		if r.RoomID == rec.ID && r.URL == url {
+			return r.Hold, nil
+		}
+	}
+	return nil, nil
+}
+
 // EditPR changes a PR title or body through the engine.
 func (s *Service) EditPR(ctx context.Context, roomRef, key string, edit watch.PREdit) error {
 	p, _, err := s.authorPRInRoom(ctx, "git pr edit", roomRef, key)
