@@ -412,12 +412,14 @@ func MarkRemoved(rec Record) error {
 	if err != nil {
 		return err
 	}
+	ctx := context.Background()
+	observation := observePortUseAfterRelease(ctx, db, []portRelease{{record: rec, remove: true}})
 	// Worktree records have no change-bus consumer.
-	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		if err := removeObservedRecord(context.Background(), conn, rec); err != nil {
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if err := removeObservedRecord(ctx, conn, rec); err != nil {
 			return err
 		}
-		return rearmPortCapacity(context.Background(), conn)
+		return rearmPortCapacity(ctx, conn, observation)
 	})
 }
 

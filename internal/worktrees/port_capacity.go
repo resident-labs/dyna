@@ -2,8 +2,10 @@ package worktrees
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -44,6 +46,7 @@ type portAlertReader interface {
 // oldest first, and records a new crossing when use reaches one. Crossings
 // persist in SQLite until acknowledged, so repeated allocations and engine
 // restarts do not repeat a delivered alert and never lose an undelivered one.
+// At high raw use, the count excludes blocks that allocation can safely reuse.
 // Use below 90%, observed at allocation or release, ends the period: the next
 // crossing starts a new generation.
 func ObservePortCapacity() ([]*PortCapacityAlert, error) {
@@ -52,30 +55,67 @@ func ObservePortCapacity() ([]*PortCapacityAlert, error) {
 		return nil, err
 	}
 	ctx := context.Background()
-	current, err := readPortAlertState(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	if portCapacityBand(current.used) <= current.band && len(current.pending) == 0 {
-		return nil, nil
-	}
-	var pending []*PortCapacityAlert
-	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		current, err := readPortAlertState(ctx, conn)
+	for {
+		current, err := readPortAlertState(ctx, db)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := applyPortAlertState(ctx, conn, &current); err != nil {
-			return err
+		raw := current.used
+		rawBand := portCapacityBand(raw)
+		measure := rawBand > current.band || (rawBand > 0 && current.band > 0)
+		if rawBand <= current.band && len(current.pending) == 0 && !measure {
+			return nil, nil
 		}
-		pending = alertsOf(current.pending)
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		var observation portUseObservation
+		if measure {
+			records, err := loadRecords(ctx, db, "")
+			if err == nil {
+				// Filesystem, ownership and socket checks stay outside the write
+				// transaction. Any record change during measurement retries the step.
+				observation = newPortUseObservation(ctx, records)
+				if observation.measured {
+					current.used = observation.used
+				}
+			}
+			// A registry read error leaves the raw count in place.
+		}
+		used := current.used
+		var pending []*PortCapacityAlert
+		err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			current, err := readPortAlertState(ctx, conn)
+			if err != nil {
+				return err
+			}
+			if current.used != raw {
+				return errPortCapacityChanged
+			}
+			if observation.measured {
+				matches, err := observedRecordsMatch(ctx, conn, observation)
+				if err != nil {
+					return err
+				}
+				if !matches {
+					return errPortCapacityChanged
+				}
+			}
+			current.used = used
+			if err := applyPortAlertState(ctx, conn, &current); err != nil {
+				return err
+			}
+			pending = alertsOf(current.pending)
+			return nil
+		})
+		if errors.Is(err, errPortCapacityChanged) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return pending, nil
 	}
-	return pending, nil
 }
+
+var errPortCapacityChanged = errors.New("worktree port capacity changed during observation")
 
 // applyPortAlertState writes one state step: a new crossing is appended to
 // the pending list, superseding an undelivered crossing of the same
@@ -141,16 +181,89 @@ func AckPortAlertDelivery(generation, threshold int) error {
 	})
 }
 
+type portUseObservation struct {
+	fingerprint [sha256.Size]byte
+	used        int
+	measured    bool
+}
+
+func newPortUseObservation(ctx context.Context, records []Record) portUseObservation {
+	raw := 0
+	for _, rec := range records {
+		if rec.Port != 0 {
+			raw++
+		}
+	}
+	body, err := json.Marshal(records)
+	if err != nil {
+		return portUseObservation{}
+	}
+	return portUseObservation{
+		fingerprint: sha256.Sum256(body),
+		used:        raw - reclaimablePortBlockCount(ctx, records),
+		measured:    true,
+	}
+}
+
+func observedRecordsMatch(ctx context.Context, conn *sql.Conn, observation portUseObservation) (bool, error) {
+	records, err := loadRecords(ctx, conn, "")
+	if err != nil {
+		return false, err
+	}
+	body, err := json.Marshal(records)
+	if err != nil {
+		return false, err
+	}
+	return sha256.Sum256(body) == observation.fingerprint, nil
+}
+
+// observePortUseAfterRelease measures the projected post-release count before
+// the release takes the SQLite write lock. Its fingerprint covers the exact
+// projected record set. An inactive period or a read error skips the scan.
+func observePortUseAfterRelease(ctx context.Context, db *sql.DB, releases []portRelease) portUseObservation {
+	current, err := readPortAlertState(ctx, db)
+	if err != nil || current.band == 0 {
+		return portUseObservation{}
+	}
+	records, err := loadRecords(ctx, db, "")
+	if err != nil {
+		return portUseObservation{}
+	}
+	byPath := make(map[string]bool, len(releases))
+	for _, release := range releases {
+		byPath[release.record.Path] = release.remove
+	}
+	projected := make([]Record, 0, len(records))
+	for _, rec := range records {
+		remove, released := byPath[rec.Path]
+		if released && remove {
+			continue
+		}
+		if released {
+			rec.Port = 0
+		}
+		projected = append(projected, rec)
+	}
+	return newPortUseObservation(ctx, projected)
+}
+
 // rearmPortCapacity runs inside a transaction that releases a port block.
-// When the release drops pool use below the 90% band, the next high-capacity
-// period can alert again without waiting for the next allocation to observe
-// the recovery. Undelivered crossings stay pending.
-func rearmPortCapacity(ctx context.Context, conn *sql.Conn) error {
+// Raw use below 90% is always safe. Effective rearming also requires the exact
+// measured record set; any concurrent change conservatively skips the rearm.
+func rearmPortCapacity(ctx context.Context, conn *sql.Conn, observation portUseObservation) error {
 	current, err := readPortAlertState(ctx, conn)
 	if err != nil {
 		return err
 	}
-	if current.band == 0 || portCapacityBand(current.used) != 0 {
+	if current.band == 0 {
+		return nil
+	}
+	rearm := portCapacityBand(current.used) == 0
+	if !rearm && observation.measured && portCapacityBand(observation.used) == 0 {
+		matches, err := observedRecordsMatch(ctx, conn, observation)
+		rearm = err == nil && matches
+	}
+	if !rearm {
 		return nil
 	}
 	return writePortAlertMeta(ctx, conn, map[string]string{portAlertBandKey: "0"})
