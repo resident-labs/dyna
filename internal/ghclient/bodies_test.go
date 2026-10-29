@@ -78,7 +78,6 @@ func TestOwnerIdentityRefusedInPublicText(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 // Dyna's own calls carry the owner's text, so the check leaves them alone.
 func TestOwnerIdentityIgnoredForDynaCalls(t *testing.T) {
 	previous := ownerIdentities
@@ -87,7 +86,9 @@ func TestOwnerIdentityIgnoredForDynaCalls(t *testing.T) {
 	cmd := exec.Command("gh", "pr", "edit", "1", "--body", "by Pat Example")
 	if err := refuseOwnerIdentity(context.Background(), cmd); err != nil {
 		t.Fatalf("owner edit refused: %v", err)
-=======
+	}
+}
+
 func TestAttributionEndsPublishedBodies(t *testing.T) {
 	records := setupRooms(t, "fork/project")
 	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
