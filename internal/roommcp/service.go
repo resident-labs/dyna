@@ -62,6 +62,8 @@ type Service struct {
 	now      func() time.Time
 	// inChange lets a test look at the service while a change holds the lock.
 	inChange func()
+	// beforeChange lets a test run another operation just before a change takes the lock.
+	beforeChange func()
 	// afterDial lets a test pause a connection between dialing and registering.
 	afterDial func()
 	mu        sync.Mutex
@@ -139,11 +141,12 @@ func (s *Service) RemoveToken(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
-	id, err := s.credentialID(ctx, rec.ID, name)
-	if err != nil {
-		return err
-	}
 	return s.change(serverKey{rec.ID, name}, func() error {
+		// Read the credential under the lock: the server may have been replaced since the call began.
+		id, err := s.credentialID(ctx, rec.ID, name)
+		if err != nil {
+			return err
+		}
 		if err := s.setAttached(ctx, rec.ID, name, false); err != nil {
 			return err
 		}
@@ -160,11 +163,11 @@ func (s *Service) Remove(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
-	id, err := s.credentialID(ctx, rec.ID, name)
-	if err != nil {
-		return err
-	}
 	return s.change(serverKey{rec.ID, name}, func() error {
+		id, err := s.credentialID(ctx, rec.ID, name)
+		if err != nil {
+			return err
+		}
 		if err := state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 			_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_servers WHERE room=? AND name=?", rec.ID, name)
 			return err
@@ -194,6 +197,9 @@ func (s *Service) credentialID(ctx context.Context, roomID, name string) (string
 // during or after the change. Detach, token removal, a new token and removal
 // all go through here.
 func (s *Service) change(key serverKey, write func() error) error {
+	if s.beforeChange != nil {
+		s.beforeChange()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gen[key]++
