@@ -6,6 +6,54 @@ import (
 	"dyna-agent/internal/room"
 )
 
+func TestCloseDropsInstructionNotesAndForwardsPosts(t *testing.T) {
+	e := newTestEnv(t)
+	source := completedFixtureSession(t, e)
+	heir := completedFixtureSession(t, e)
+	if _, err := e.m.Store.UpdateMeta(source.ID, func(m *Meta) { m.ParentSession = heir.ID; m.Depth = 2 }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.rooms().PostEvent(source.RoomID, room.SessionEvent{
+		Type: room.SessionInstructions, Session: source.Address(), Detail: "stale instruction change",
+	}, source.Address()); err != nil {
+		t.Fatal(err)
+	}
+	work, err := e.m.rooms().Post(source.RoomID, room.PostInput{
+		From: heir.Address(), To: []string{source.Address()}, Wake: true, Text: "pending work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Close(e.ctx, source.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertForwards := func() {
+		t.Helper()
+		messages, err := e.m.rooms().Messages(source.RoomID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var forwards []room.Message
+		for _, msg := range messages {
+			if msg.Forward != nil {
+				forwards = append(forwards, msg)
+			}
+		}
+		if len(forwards) != 1 || forwards[0].Forward.ID != work.ID {
+			t.Fatalf("heir forwards = %+v; want only agent post %s", forwards, work.ID)
+		}
+	}
+	assertForwards()
+	closed, err := e.m.Store.Info(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.forwardClosedInbox(e.ctx, closed); err != nil {
+		t.Fatal(err)
+	}
+	assertForwards()
+}
+
 func TestCloseForwardsPendingPostsOnce(t *testing.T) {
 	for _, withParent := range []bool{true, false} {
 		t.Run(map[bool]string{true: "parent", false: "root seat"}[withParent], func(t *testing.T) {
