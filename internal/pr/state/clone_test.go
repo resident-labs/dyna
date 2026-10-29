@@ -36,8 +36,9 @@ func TestCloneStateCopiesFlatValuesInBulk(t *testing.T) {
 		return testing.AllocsPerRun(5, func() { cloneState(st) })
 	}
 	one, many := allocs(1), allocs(500)
-	if many > one {
-		t.Fatalf("cloning 500 notices and checks took %.0f allocations, and 1 of each took %.0f; flat entries must add none", many, one)
+	// The margin absorbs a few allocations of runtime noise that differ between Go versions; a per-entry regression adds about 1,000.
+	if many > one+4 {
+		t.Fatalf("cloning 500 notices and checks took %.0f allocations, and 1 of each took %.0f; flat entries may add at most 4", many, one)
 	}
 }
 
