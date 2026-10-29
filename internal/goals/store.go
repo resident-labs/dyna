@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 )
 
@@ -105,9 +106,17 @@ type Store struct {
 	Root   string
 	Now    func() time.Time
 	Issues *room.Store
+	// RulesLimit returns the rule text cap for one operation. Nil uses the
+	// default cap, so tests need no settings file.
+	RulesLimit func() (int, error)
 }
 
-func DefaultStore() *Store { return &Store{Root: filepath.Join(store.DataDir(), "goals")} }
+func DefaultStore() *Store {
+	return &Store{Root: filepath.Join(store.DataDir(), "goals"), RulesLimit: func() (int, error) {
+		v, err := settings.Load(settings.DefaultPath())
+		return v.RulesMaxChars, err
+	}}
+}
 func (s *Store) now() time.Time {
 	if s.Now != nil {
 		return s.Now()

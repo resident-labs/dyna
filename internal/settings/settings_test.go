@@ -325,3 +325,16 @@ func TestIdleUnloadMinutesSettingValidatesAndConverts(t *testing.T) {
 		t.Fatalf("30: %v, %v", err, v.HarnessIdleUnload())
 	}
 }
+
+func TestRulesMaxCharsSetting(t *testing.T) {
+	v, err := loadSettingsFile(t, `{"version": 1, "rules": {"maxChars": 4e3}}`)
+	if err != nil || v.RulesMaxChars != 4000 || v.Source(KeyRulesMaxChars) != SourceFile {
+		t.Fatal(v.RulesMaxChars, err)
+	}
+	if _, err := loadSettingsFile(t, `{"rules": {"maxChars": 499}}`); err == nil {
+		t.Fatal("cap below one longest rule accepted")
+	}
+	if err := v.Set(KeyRulesMaxChars, "2.5"); err == nil {
+		t.Fatal("fractional cap accepted")
+	}
+}
