@@ -3,34 +3,22 @@ package sessionlife
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 )
 
-// Instruction snapshots are large and shared by many sessions. The hot
-// session row keeps their hashes; this table stores each distinct JSON value
-// once. The hash is a content address, not a secret or an integrity boundary.
-const instructionBlobSchema = "CREATE TABLE IF NOT EXISTS session_instruction_blobs (\n" +
-	" hash TEXT PRIMARY KEY,\n" +
-	" body TEXT NOT NULL CHECK(json_valid(body))\n" +
-	") WITHOUT ROWID;"
-
-var instructionFields = [2]string{"instructions", "instructionsKnown"}
-
+// Legacy layout of schema version 5: session_records stored hot rows whose
+// two instruction fields were null placeholders, with hash columns pointing
+// at session_instruction_blobs rows. Version 6 restored every instruction
+// text inline and removed the layout; this file only reads that layout, to
+// migrate it away.
 const instructionReadProjection = "instructions_hash, instructions_known_hash,\n" +
 	" (SELECT body FROM session_instruction_blobs WHERE hash=session_records.instructions_hash),\n" +
 	" (SELECT body FROM session_instruction_blobs WHERE hash=session_records.instructions_known_hash)"
 
-type instructionWrite struct {
-	hot    []byte
-	hashes [2]string
-	bodies [2][]byte
-}
+var instructionFields = [2]string{"instructions", "instructionsKnown"}
 
 type instructionSpan struct {
 	field, start, end int
@@ -39,18 +27,6 @@ type instructionSpan struct {
 type instructionRead struct {
 	hashes [2]string
 	bodies [2]sql.NullString
-}
-
-// scanInstructionRead keeps the projection column order beside its destinations.
-func scanInstructionRead(row interface{ Scan(...any) error }, dest ...any) (read instructionRead, err error) {
-	dest = append(dest, &read.hashes[0], &read.hashes[1], &read.bodies[0], &read.bodies[1])
-	err = row.Scan(dest...)
-	return
-}
-
-func instructionHash(body []byte) string {
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
 }
 
 // instructionSpans finds top-level instruction values without changing any
@@ -107,84 +83,6 @@ func replaceInstructionSpans(raw []byte, spans []instructionSpan, bodies [2][]by
 	return out.Bytes()
 }
 
-// splitInstructions replaces each instruction value with null in its original
-// position. Joining the blob bytes back into that position reproduces the
-// exact input, including field order, unknown fields and insignificant space.
-func splitInstructions(raw []byte) (instructionWrite, error) {
-	var out instructionWrite
-	spans, err := instructionSpans(raw)
-	if err != nil {
-		return out, err
-	}
-	nulls := [2][]byte{[]byte("null"), []byte("null")}
-	for _, span := range spans {
-		body := append([]byte(nil), raw[span.start:span.end]...)
-		out.bodies[span.field] = body
-		out.hashes[span.field] = instructionHash(body)
-	}
-	out.hot = replaceInstructionSpans(raw, spans, nulls)
-	return out, nil
-}
-
-// putInstructionBlob stores body once. A matching hash with different bytes
-// is refused rather than silently associating a session with the wrong text.
-func putInstructionBlob(conn *sql.Conn, hash string, body []byte) error {
-	if hash == "" {
-		return nil
-	}
-	if instructionHash(body) != hash {
-		return fmt.Errorf("%w: instruction hash does not match its body", ErrRecord)
-	}
-	var stored string
-	err := conn.QueryRowContext(context.Background(), "SELECT body FROM session_instruction_blobs WHERE hash=?", hash).Scan(&stored)
-	if err == nil {
-		if stored != string(body) {
-			return fmt.Errorf("%w: instruction hash collision", ErrRecord)
-		}
-		return nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	_, err = conn.ExecContext(context.Background(), "INSERT INTO session_instruction_blobs(hash,body) VALUES(?,?)", hash, string(body))
-	return err
-}
-
-func (w instructionWrite) store(conn *sql.Conn) error {
-	for i := range w.hashes {
-		if err := putInstructionBlob(conn, w.hashes[i], w.bodies[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func readInstructionHashes(conn *sql.Conn, id string) ([2]string, error) {
-	var hashes [2]string
-	err := conn.QueryRowContext(context.Background(), "SELECT instructions_hash,instructions_known_hash FROM session_records WHERE id=?", id).Scan(&hashes[0], &hashes[1])
-	if errors.Is(err, sql.ErrNoRows) {
-		err = nil
-	}
-	return hashes, err
-}
-
-// deleteUnreferencedInstructionBlobs runs after a reference change in the
-// same write transaction. Other sessions keep their shared values, and a
-// conflicting insert that does nothing cannot delete the existing references.
-func deleteUnreferencedInstructionBlobs(conn *sql.Conn, old, new [2]string) error {
-	if old == new {
-		return nil
-	}
-	_, err := conn.ExecContext(context.Background(), `DELETE FROM session_instruction_blobs
-WHERE hash IN (?,?) AND hash NOT IN (?,?)
-AND NOT EXISTS (
- SELECT 1 FROM session_records
- WHERE instructions_hash=session_instruction_blobs.hash
- OR instructions_known_hash=session_instruction_blobs.hash
-)`, old[0], old[1], new[0], new[1])
-	return err
-}
-
 // join reconstructs the exact full record from its hot row and blobs.
 func (r instructionRead) join(hot []byte) ([]byte, error) {
 	spans, err := instructionSpans(hot)
@@ -221,26 +119,36 @@ func (r instructionRead) join(hot []byte) ([]byte, error) {
 	return replaceInstructionSpans(hot, replacements, bodies), nil
 }
 
-// migrateInstructionBlobs is schema version 5. It runs in the same
-// transaction as the schema change and does not advance record revisions.
-func migrateInstructionBlobs(ctx context.Context, conn *sql.Conn) error {
-	for _, column := range []string{"instructions_hash", "instructions_known_hash"} {
-		if _, err := conn.ExecContext(ctx, "ALTER TABLE session_records ADD COLUMN "+column+" TEXT NOT NULL DEFAULT ''"); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-			return err
-		}
-	}
-	if _, err := conn.ExecContext(ctx, instructionBlobSchema); err != nil {
+// restoreInstructionBodies is schema version 6, the revert of the version 5
+// blob split. It runs in the same transaction as the schema change: every
+// row is re-joined with its blobs byte-for-byte (field order, unknown
+// fields and spacing preserved) and written back as text, revisions do not
+// advance, and a row whose blobs are gone fails the migration instead of
+// silently losing its instructions. The blob table and hash columns drop
+// only after every row is restored; the version 5 import had also left some
+// metas with the blob storage class, which this rewrites as text. A store
+// that never ran version 5 has no blob table and keeps its rows untouched.
+func restoreInstructionBodies(ctx context.Context, conn *sql.Conn) error {
+	var blobs int
+	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='session_instruction_blobs'").Scan(&blobs); err != nil {
 		return err
 	}
-	type row struct{ id, meta string }
-	rows, err := conn.QueryContext(ctx, "SELECT id,meta FROM session_records ORDER BY id")
+	if blobs == 0 {
+		return nil
+	}
+	rows, err := conn.QueryContext(ctx, "SELECT id,meta,"+instructionReadProjection+" FROM session_records ORDER BY id")
 	if err != nil {
 		return err
+	}
+	type row struct {
+		id           string
+		meta         string
+		instructions instructionRead
 	}
 	var records []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.id, &r.meta); err != nil {
+		if err := rows.Scan(&r.id, &r.meta, &r.instructions.hashes[0], &r.instructions.hashes[1], &r.instructions.bodies[0], &r.instructions.bodies[1]); err != nil {
 			rows.Close()
 			return err
 		}
@@ -250,21 +158,22 @@ func migrateInstructionBlobs(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	for _, r := range records {
-		raw := []byte(r.meta)
-		if !isObject(raw) {
-			// Keep damaged rows fail-closed with their existing digest.
-			continue
-		}
-		w, err := splitInstructions(raw)
+		raw, err := r.instructions.join([]byte(r.meta))
 		if err != nil {
-			return err
+			return fmt.Errorf("session %s: %w", r.id, err)
 		}
-		if err := w.store(conn); err != nil {
-			return err
+		if !isObject(raw) || len(raw) > recordLimit {
+			return fmt.Errorf("%w: session %s record is not a JSON object under %d bytes", ErrRecord, r.id, recordLimit)
 		}
-		if _, err := conn.ExecContext(ctx, "UPDATE session_records SET meta=?,instructions_hash=?,instructions_known_hash=? WHERE id=?", w.hot, w.hashes[0], w.hashes[1], r.id); err != nil {
+		if _, err := conn.ExecContext(ctx, "UPDATE session_records SET meta=?,instructions_hash='',instructions_known_hash='' WHERE id=?", string(raw), r.id); err != nil {
 			return err
 		}
 	}
-	return nil
+	for _, column := range []string{"instructions_hash", "instructions_known_hash"} {
+		if _, err := conn.ExecContext(ctx, "ALTER TABLE session_records DROP COLUMN "+column); err != nil {
+			return err
+		}
+	}
+	_, err = conn.ExecContext(ctx, "DROP TABLE session_instruction_blobs")
+	return err
 }

@@ -14,7 +14,7 @@ import (
 // TODO: legacy/shim remove later — persist lifecycle fields for historical session records.
 func migrateLifecycle(db *sql.DB) error {
 	return database.Migrate(db, "sessions.lifecycle", 1, func(conn *sql.Conn, _ int) error {
-		rows, err := conn.QueryContext(context.Background(), "SELECT id,meta,"+instructionReadProjection+" FROM session_records WHERE json_type(meta,'$.done') IS NOT NULL OR status = ''")
+		rows, err := conn.QueryContext(context.Background(), "SELECT id, meta FROM session_records WHERE json_type(meta,'$.done') IS NOT NULL OR status = ''")
 		if err != nil {
 			return err
 		}
@@ -25,13 +25,7 @@ func migrateLifecycle(db *sql.DB) error {
 		var records []record
 		for rows.Next() {
 			var id, raw string
-			instructions, err := scanInstructionRead(rows, &id, &raw)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			joined, err := instructions.join([]byte(raw))
-			if err != nil {
+			if err := rows.Scan(&id, &raw); err != nil {
 				rows.Close()
 				return err
 			}
@@ -41,7 +35,7 @@ func migrateLifecycle(db *sql.DB) error {
 				Finished time.Time
 				Status   string
 			}
-			if err := json.Unmarshal(joined, &fields); err != nil {
+			if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 				rows.Close()
 				return fmt.Errorf("%w: lifecycle session %s: %v", ErrRecord, id, err)
 			}
@@ -49,7 +43,7 @@ func migrateLifecycle(db *sql.DB) error {
 				rows.Close()
 				return fmt.Errorf("%w: lifecycle session %s is not an object", ErrRecord, id)
 			}
-			if err := json.Unmarshal(joined, &lifecycle); err != nil {
+			if err := json.Unmarshal([]byte(raw), &lifecycle); err != nil {
 				rows.Close()
 				return err
 			}

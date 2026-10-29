@@ -14,7 +14,7 @@ import (
 // sessions that predate always-named sessions, once.
 func migrateNames(db *sql.DB) error {
 	return database.Migrate(db, "sessions.names", 1, func(conn *sql.Conn, _ int) error {
-		rows, err := conn.QueryContext(context.Background(), "SELECT id,meta,"+instructionReadProjection+" FROM session_records WHERE name = '' ORDER BY id")
+		rows, err := conn.QueryContext(context.Background(), "SELECT id, meta FROM session_records WHERE name = '' ORDER BY id")
 		if err != nil {
 			return err
 		}
@@ -25,18 +25,12 @@ func migrateNames(db *sql.DB) error {
 		var pending []record
 		for rows.Next() {
 			var id, raw string
-			instructions, err := scanInstructionRead(rows, &id, &raw)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			joined, err := instructions.join([]byte(raw))
-			if err != nil {
+			if err := rows.Scan(&id, &raw); err != nil {
 				rows.Close()
 				return err
 			}
 			var fields map[string]json.RawMessage
-			if err := json.Unmarshal(joined, &fields); err != nil || fields == nil {
+			if err := json.Unmarshal([]byte(raw), &fields); err != nil || fields == nil {
 				rows.Close()
 				return fmt.Errorf("%w: session %s name metadata is not an object", ErrRecord, id)
 			}
