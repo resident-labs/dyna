@@ -499,19 +499,8 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// A machine with room in the shared node queue must exist before the plan
 	// does any work, so a fleet that is only busy keeps the job waiting without
 	// a fetch.
-	chosen := s.availableCINode(ctx, enabled, job.record.RoomID, retriedFrom)
-	if pinned := pinnedCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom); pinned != nil {
-		chosen = pinned
-	}
-	if chosen == nil && retriedFrom != "" {
-		// The machine that failed is the only one that can take this work, so it
-		// runs there once more instead of the head waiting with nothing running.
-		// The replacement carries Result.Resumed, which keeps that to one retry.
-		chosen = s.availableCINode(ctx, enabled, job.record.RoomID, "")
-		if chosen != nil {
-			resumed = true
-		}
-	}
+	chosen, retryResumed := s.chooseCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom)
+	resumed = resumed || retryResumed
 	if chosen == nil {
 		return false, nil
 	}
@@ -555,19 +544,8 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// caller gets a typed error that names it; a fleet that is only busy or
 	// whose disks are full keeps waiting, in the node queue.
 	suited := localci.NodesForSuites(enabled, plan.suites)
-	chosen = s.availableCINode(ctx, suited, job.record.RoomID, retriedFrom)
-	if pinned := pinnedCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom); pinned != nil {
-		chosen = pinned
-	}
-	if chosen == nil && retriedFrom != "" {
-		// The machine that failed is the only one that can take this work, so it
-		// runs there once more instead of the head waiting with nothing running.
-		// The replacement carries Result.Resumed, which keeps that to one retry.
-		chosen = s.availableCINode(ctx, suited, job.record.RoomID, "")
-		if chosen != nil {
-			resumed = true
-		}
-	}
+	chosen, retryResumed = s.chooseCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom)
+	resumed = resumed || retryResumed
 	if chosen == nil {
 		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
 	}
@@ -581,6 +559,27 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	runs.runs[key] = run
 	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run, retriedFrom, resumed)
 	return true, nil
+}
+
+// chooseCINode picks the machine for a run from nodes: the head's pinned node
+// when it has one, else a free one. When the head retries from a failed
+// machine and no other node can take the work, that machine runs it once
+// more, and the returned resumed mark keeps that to one retry.
+func (s *Service) chooseCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, roomID, retriedFrom string) (chosen *localci.Node, resumed bool) {
+	chosen = s.availableCINode(ctx, nodes, roomID, retriedFrom)
+	if pinned := pinnedCINode(ctx, registry, repo, head, nodes, roomID, retriedFrom); pinned != nil {
+		chosen = pinned
+	}
+	if chosen == nil && retriedFrom != "" {
+		// The machine that failed is the only one that can take this work, so it
+		// runs there once more instead of the head waiting with nothing running.
+		// The replacement carries Result.Resumed, which keeps that to one retry.
+		chosen = s.availableCINode(ctx, nodes, roomID, "")
+		if chosen != nil {
+			resumed = true
+		}
+	}
+	return chosen, resumed
 }
 
 // savedResultAction says what admission does with a saved result that already
