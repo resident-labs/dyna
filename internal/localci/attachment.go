@@ -295,15 +295,23 @@ func (s Store) AttachedNode(ctx context.Context, repo, sha string) (string, erro
 // AbandonOrphanedRun claims one kept run and tears it down. A failed machine
 // call hands the record back so the next scheduler tick can try again.
 func (r Runner) AbandonOrphanedRun(ctx context.Context, store Store, orphan OrphanedAttachment) error {
+	_, err := r.abandonClaimed(ctx, store, orphan)
+	return err
+}
+
+// abandonClaimed claims one kept run and tears it down. It reports false, with
+// no error, when no record could be claimed: it expired, or another process took
+// it first.
+func (r Runner) abandonClaimed(ctx context.Context, store Store, orphan OrphanedAttachment) (bool, error) {
 	att, err := store.claimAttachmentRun(ctx, orphan.Repo, orphan.SHA, orphan.Node, orphan.RunID)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("claim orphaned local CI run %s on %s: %w", orphan.RunID, orphan.Node, err)
+		return false, fmt.Errorf("claim orphaned local CI run %s on %s: %w", orphan.RunID, orphan.Node, err)
 	}
 	cache := path.Join(cacheBase(orphan.Node), repoKey(orphan.Repo)+".git")
-	return r.teardownAttachment(ctx, store, orphan.Repo, orphan.SHA, cache, att, nil)
+	return true, r.teardownAttachment(ctx, store, orphan.Repo, orphan.SHA, cache, att, nil)
 }
 
 // resumeRun finds the checks an earlier engine left on this machine for the same

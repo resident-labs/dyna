@@ -58,6 +58,18 @@ func TestAbandonRunReleasesAStaleRunsReservations(t *testing.T) {
 		t.Fatalf("refused teardown released reservations: %v, %v", left, err)
 	}
 
+	// Past the attachment TTL the record is not claimed, so the command refuses and releases nothing.
+	previousClock := resultClock
+	t.Cleanup(func() { resultClock = previousClock })
+	resultClock = func() time.Time { return time.Now().Add(4 * time.Hour) }
+	if _, err := runner.AbandonRun(t.Context(), store, run, nil); !errors.Is(err, ErrRunUnclaimed) {
+		t.Fatalf("abandoning an expired record returned %v, want ErrRunUnclaimed", err)
+	}
+	if left, err := admission.RunReservations(t.Context(), string(run)); err != nil || len(left) != 2 || removed.Load() != 0 {
+		t.Fatalf("expired record refusal released or removed something: %v, %v, removed %d", left, err, removed.Load())
+	}
+	resultClock = previousClock
+
 	got, err := runner.AbandonRun(t.Context(), store, run, nil)
 	if err != nil {
 		t.Fatal(err)
