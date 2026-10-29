@@ -50,7 +50,39 @@ func TestTransferDirOverrideMustExist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Dir != tree {
-		t.Fatalf("transfer dir = %q, want the override %q", state.Dir, tree)
+	if state.RequestedDir != tree {
+		t.Fatalf("requested dir = %q, want the override %q", state.RequestedDir, tree)
+	}
+}
+
+// The root override outranks the directory in a cooperative handoff. A handoff
+// that names no directory must not replace the override.
+func TestTransferDirOverrideSurvivesCooperativeHandoff(t *testing.T) {
+	e, _ := transferEnv(t)
+	info, _ := e.start("RESPOND: original work")
+	info, _ = e.wait(info.ID, 1)
+	ctx := context.Background()
+	tree := worktreetest.Tracked(t)
+	state, err := e.m.TransferContext(ctx, info.ID, TransferOptions{Profile: "next", Dir: tree, WaitSeconds: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.SubmitHandoff(ctx, info.ID, state.ID, "Continue the parser work.", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := e.m.TransferStatus(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := e.m.Store.ReadMeta(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, dir, err := e.m.handoffPacket(meta, *saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != tree {
+		t.Fatalf("replacement directory = %q, want the override %q", dir, tree)
 	}
 }
