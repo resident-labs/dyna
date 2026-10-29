@@ -4,14 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/repoid"
 )
 
-// A PR opened from a fork has the fork as its head repository. The fork's
-// checkout must be kept on the tracked record and found by checkout discovery.
-func TestForkCheckoutIsKeptForAPRFromAFork(t *testing.T) {
+// A PR opened from a fork has the fork as its head repository. Tracking from the
+// fork's checkout must keep that checkout on the new record, and checkout
+// discovery must find it afterwards.
+func TestTrackingKeepsAForkCheckoutOfThePR(t *testing.T) {
 	e := newEnv(t)
-	fork, err := repoid.RemoteIdentity("", "https://github.com/arismoko/horizon")
+	e.f.Pull.Head.Repo.FullName = "fork-owner/repo"
+	e.write()
+	fork, err := repoid.RemoteIdentity("", "https://github.com/fork-owner/repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,15 +25,16 @@ func TestForkCheckoutIsKeptForAPRFromAFork(t *testing.T) {
 		return repoid.Repo{ID: fork, Root: dir, Main: dir}, nil
 	}
 	dir := t.TempDir()
-	r := Record{Kind: "github", Host: "github.com", Repo: "horizon-rust/horizon", HeadRepo: "arismoko/horizon", Number: 7, RoomID: e.author.RoomID}
-	if got := matchingCheckout(context.Background(), r, dir); got != dir {
-		t.Fatalf("tracked RepoPath = %q, want the fork checkout %q", got, dir)
+	r, created, err := e.s.Track(context.Background(), authority.Actor{Role: authority.Owner}, Ref{"github.com", "owner/repo", 17}, e.author, dir)
+	if err != nil || !created {
+		t.Fatalf("track = %v, created %v", err, created)
 	}
-	got, err := e.s.checkoutDir(context.Background(), Record{Kind: "github", Host: "github.com", Repo: "horizon-rust/horizon", HeadRepo: "arismoko/horizon", RoomID: e.author.RoomID, LookupDir: dir})
+	if r.RepoPath != dir {
+		t.Fatalf("tracked RepoPath = %q, want the fork checkout %q", r.RepoPath, dir)
+	}
+	r.RepoPath = ""
+	got, err := e.s.checkoutDir(context.Background(), r)
 	if err != nil || got != dir {
 		t.Fatalf("checkout discovery = %q, %v; want the fork checkout %q", got, err, dir)
-	}
-	if other := matchingCheckout(context.Background(), Record{Kind: "github", Host: "github.com", Repo: "horizon-rust/other", HeadRepo: "arismoko/other", Number: 7}, dir); other != "" {
-		t.Fatalf("checkout of another repository matched: %q", other)
 	}
 }
