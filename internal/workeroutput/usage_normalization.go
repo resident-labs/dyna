@@ -1,7 +1,6 @@
 package workeroutput
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -165,17 +164,7 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 	if record.Usage == nil {
 		return Usage{}, false
 	}
-	read := func(key string) *int64 {
-		raw, ok := record.Usage[key]
-		if !ok || string(raw) == "null" {
-			return nil
-		}
-		var v int64
-		if json.Unmarshal(raw, &v) != nil || v < 0 {
-			return nil
-		}
-		return &v
-	}
+	read := func(key string) *int64 { return usageField(record.Usage, key) }
 	in, cached, out := read("input_tokens"), read("cached_input_tokens"), read("output_tokens")
 	if dialect == DialectClaudeStreamJSON {
 		readCache, writeCache := read("cache_read_input_tokens"), read("cache_creation_input_tokens")
