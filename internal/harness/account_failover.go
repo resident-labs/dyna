@@ -37,10 +37,11 @@ func failoverAccount(ctx context.Context, p profile.Profile, cwd string, account
 	if err != nil {
 		return nil, err
 	}
-	// The window reset is probed only when the failure text states none.
+	// The window reset is probed only when the failure names that window and
+	// its text states no reset.
 	var current time.Time
-	if UsageResetAt(failure.Error(), now).IsZero() {
-		current = rt.Accounts.WindowReset(ctx, accountID, harnessruntime.FiveHourWindow)
+	if window := probeWindowFor(failure.Error()); window != "" && UsageResetAt(failure.Error(), now).IsZero() {
+		current = rt.Accounts.WindowReset(ctx, accountID, window)
 	}
 	hold := quotaHold(failure.Error(), now, prev, current)
 	from, to, err := rt.Accounts.Failover(ctx, harnessruntime.ProviderForModel(p.Harness, p.Model), accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, hold)
@@ -50,9 +51,23 @@ func failoverAccount(ctx context.Context, p profile.Profile, cwd string, account
 	return &AccountSwitch{From: from.Label, To: to.Label, Until: hold.Until, Stated: hold.Stated}, nil
 }
 
-// clearAccountHold drops a stored hold after a turn on the account succeeded.
+// probeWindowFor names the usage window that a quota failure is about, so only
+// that window's reset is probed. A credit failure and a window of another
+// length name none.
+func probeWindowFor(text string) string {
+	if creditsOut.MatchString(text) || windowLength.FindStringSubmatch(text) == nil {
+		return ""
+	}
+	if quotaWindow(text) == 5*time.Hour {
+		return harnessruntime.FiveHourWindow
+	}
+	return ""
+}
+
+// clearAccountHold drops an unstated hold after a turn on the account succeeded.
+// A hold recorded after the turn began stays, so a concurrent failure is kept.
 // A hold store error is logged, because the turn itself already succeeded.
-func clearAccountHold(accountID string) {
+func clearAccountHold(accountID string, turnStart time.Time) {
 	if accountID == "" {
 		return
 	}
@@ -64,7 +79,7 @@ func clearAccountHold(accountID string) {
 		}
 		return
 	}
-	if err := rt.Accounts.ClearLimit(accountID); err != nil {
+	if err := rt.Accounts.ClearUnstated(accountID, turnStart); err != nil {
 		log.Printf("clear account hold %s: %v", accountID, err)
 	}
 }
@@ -81,9 +96,10 @@ const accountFailoverPrompt = "Your account hit its usage limit, so Dyna moved t
 // no session to resume, the turn is not replayed. When no account is left, the
 // error says when the first one resets.
 func withAccountFailover(ctx context.Context, p profile.Profile, cwd string, exec ExecutionOptions, once func(opts ExecutionOptions, resumeID string) (Result, error)) (Result, error) {
+	turnStart := time.Now()
 	res, err := once(exec, "")
 	if err == nil {
-		clearAccountHold(res.AccountID)
+		clearAccountHold(res.AccountID, turnStart)
 		return res, nil
 	}
 	if isNativeAdmissionError(err) || ctx.Err() != nil || exec.ProcessRunner != nil || !providerfailure.Is(err, providerfailure.Quota) {

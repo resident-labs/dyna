@@ -96,7 +96,7 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 		return result, accountnative.ErrUnsupported
 	}
 	defer func() {
-		if err == nil {
+		if err == nil && result.Refreshed {
 			a.clearRefreshedHold(id, refreshStart)
 		}
 	}()
