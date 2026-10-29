@@ -377,3 +377,89 @@ func TestSharedRoomUpstreamResolvesToCheckoutRoom(t *testing.T) {
 		t.Fatalf("roomFor from the second checkout = %s, %v; want that room with errNotInRoom", rec.ID, err)
 	}
 }
+
+func TestWorkerRepoForkIsScoped(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		args    []string
+		allowed bool
+	}{
+		{"fork a repository", []string{"repo", "fork", "upstream/project"}, true},
+		{"fork without a clone", []string{"repo", "fork", "upstream/project", "--clone=false", "--remote=false"}, true},
+		{"fork into an organization", []string{"repo", "fork", "upstream/project", "--org", "acme"}, false},
+		{"fork and clone", []string{"repo", "fork", "upstream/project", "--clone"}, false},
+		{"fork under a new name", []string{"repo", "fork", "upstream/project", "--fork-name", "other"}, false},
+		{"fork two repositories", []string{"repo", "fork", "upstream/project", "other/project"}, false},
+		{"fork without a repository", []string{"repo", "fork"}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := checkWorkerPolicy(tt.args) == nil; got != tt.allowed {
+				t.Fatalf("checkWorkerPolicy(%v) allowed = %v, want %v", tt.args, got, tt.allowed)
+			}
+		})
+	}
+}
+
+// A fork of a recorded upstream is admitted only in a read-write room. The
+// fork goes to the signed-in account, so the room must be writable.
+func TestRecordedUpstreamForkNeedsWritableRoom(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	upstream := repository{"github.com", "upstream/project"}
+	fork := []string{"repo", "fork", "upstream/project", "--clone=false"}
+	ctx := WithRoom(context.Background(), records[0].ID)
+	if err := checkPolicy(ctx, "", upstream, fork); err != nil {
+		t.Fatalf("fork of the recorded upstream: %v", err)
+	}
+	other := repository{"github.com", "other/project"}
+	if err := checkPolicy(ctx, "", other, []string{"repo", "fork", "other/project", "--clone=false"}); err == nil {
+		t.Fatal("fork of an unrecorded repository was admitted")
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkPolicy(ctx, "", upstream, fork); !errors.Is(err, errReadOnly) {
+		t.Fatalf("fork in a read-only room = %v, want %v", err, errReadOnly)
+	}
+}
+
+// A fork of a recorded upstream, run outside the room, uses the room's write
+// account. The read account that reads the upstream cannot create the fork.
+func TestRecordedUpstreamForkUsesWriteAccount(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status")
+ if [ -n "$TEST_ORIGIN_WRITER" ]; then
+  echo '{"hosts":{"github.com":[{"login":"writer"}]}}'
+ else
+  echo '{"hosts":{"github.com":[{"login":"reader"}]}}'
+ fi;;
+"auth token") case "$*" in *reader*) echo reader-secret;; *writer*) echo writer-secret;; esac;;
+"api --hostname") echo '{"permissions":{"push":true}}';;
+"repo fork") [ "$GH_TOKEN" = writer-secret ];;
+*) exit 1;;
+esac
+`
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(BinaryEnv, exe)
+	t.Setenv("TEST_ORIGIN_WRITER", "1")
+	ctx := context.Background()
+	if err := Run(ctx, Command(ctx, exe, "", "repo", "fork", "upstream/project", "--clone=false")); err != nil {
+		t.Fatalf("fork of the recorded upstream: %v", err)
+	}
+}
