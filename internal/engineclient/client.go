@@ -132,7 +132,8 @@ func New(path string, opts ...Option) *Client {
 // refused) or running its startup migrations (a 503 with
 // callspec.CodeEngineStarting), it retries for up to the restart wait, every
 // 100 ms rising to 1 s. A call the engine accepted is never retried: past its
-// deadline it fails with "engine did not answer".
+// deadline a read fails with "engine did not answer", and a write fails with
+// "outcome unknown", because the engine may still apply it.
 //
 // A call without a request ID gets one. When the engine closes the connection
 // before it answers (a restart for an update), a call that repeatsAfterCutOff
@@ -175,6 +176,11 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 			return fmt.Errorf("%w; the engine may still apply it, so check before you repeat it", err)
 		}
 		var remote *RemoteError
+		// An engine from before the typed code sends the plain late line with no code.
+		legacyLate := errors.As(err, &remote) && remote.Code == "" && strings.HasPrefix(remote.Message, "engine did not answer "+method+" in ")
+		if (callspec.IsLate(err) || legacyLate) && callspec.WriteCalls[method] {
+			return callspec.OutcomeUnknown(method, err)
+		}
 		starting := errors.As(err, &remote) && remote.Code == callspec.CodeEngineStarting
 		if !errors.Is(err, ErrNotRunning) && !starting {
 			return err
