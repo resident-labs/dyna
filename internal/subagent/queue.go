@@ -283,6 +283,16 @@ func (s *Store) queueSig(id string) string {
 // QueueSignature changes when claim, cancellation or delivery state changes.
 func (s *Store) QueueSignature(id string) string { return s.queueSig(id) }
 
+// QueueSignatureOf is QueueSignature for a session whose record the caller
+// just read, such as a roster scan holding every record already: it skips the
+// delivery-address query, which is half the scan's signature reads. The
+// record's address is the same string the queue readers key rows by
+// (SessionQueue), so a stale record can only miss rows a fresh one finds for
+// the one scan before the record write wakes the next one.
+func (s *Store) QueueSignatureOf(meta Meta) string {
+	return s.deliverySignature(meta.ID, meta.RoomID, meta.Address())
+}
+
 // TurnSignature changes when turn number turns of session id is written,
 // which changes the transcript or queue display: it is the turn row's
 // revision. turns comes from the session's record, which the caller has
