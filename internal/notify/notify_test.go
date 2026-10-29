@@ -429,6 +429,25 @@ func TestSessionCrossRoomPostCopiesFilesAndForward(t *testing.T) {
 	}
 }
 
+// A refused cross-room post, here a card without text, saves no file in
+// either room.
+func TestRefusedSessionCrossRoomPostSavesNoFiles(t *testing.T) {
+	f := newFixture(t)
+	files := []File{{Name: "note.txt", Data: []byte("hi")}, {Name: "card.html", Data: []byte("<p>x</p>"), Render: room.RenderHTML}}
+	if _, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, Files: files}); err == nil {
+		t.Fatal("a card without text was accepted")
+	}
+	for _, r := range []room.Record{f.a, f.b} {
+		dir, err := f.svc.Rooms.FilesDir(r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entries, err := os.ReadDir(dir); err != nil && !os.IsNotExist(err) || len(entries) != 0 {
+			t.Fatalf("room %s files = %v, %v", r.Name, entries, err)
+		}
+	}
+}
+
 // The owner writes from room a to a session of room b. The post lives in b and
 // names room a as its sender, so the session's reply goes to a, where the
 // owner wrote. Room a keeps a copy with the same ID, which wakes nobody.
