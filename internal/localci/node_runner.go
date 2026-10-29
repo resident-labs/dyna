@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dyna-agent/internal/jobs"
@@ -285,6 +286,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// learn that the run died, so a crashed run's directory never stays forever.
 	active := path.Join(runDir, ".active")
 	reports := path.Join(runDir, "reports")
+	// A check whose exit the engine did not see may still run on the machine. Only
+	// such a run keeps its folder and record for a restarted engine.
+	var unsettled atomic.Bool
 	control, cancel := context.WithTimeout(ctx, time.Duration(len(checks))*(req.Timeout+admissionWait)+2*time.Minute)
 	defer cancel()
 	// A run removes its own directory on the node, whatever ended it: a finished
@@ -294,9 +298,10 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// own context, so a cancelled run still removes it, and it runs last, after
 	// the reports were copied back.
 	defer func() {
-		if EngineStopping() {
-			// An engine stop leaves the run on its machine: its checks keep running
-			// and a restarted engine reattaches.
+		if EngineStopping() && unsettled.Load() {
+			// An engine stop leaves an unfinished run on its machine: its checks keep
+			// running and a restarted engine reattaches. A run whose checks all ended
+			// has nothing to reattach to, so its folder goes now and no keeper waits.
 			return
 		}
 		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), runRemovalTimeout)
@@ -315,7 +320,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	defer func() {
 		background := context.WithoutCancel(ctx)
-		if EngineStopping() {
+		if EngineStopping() && unsettled.Load() {
 			// The checks stay on the machine, and the record passes to whoever runs
 			// the commit next.
 			if e := localStore.releaseAttachment(background, attachKey, sha, node.Name, runID); e != nil {
@@ -380,7 +385,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		taggedWorkflows[string(check.id)] = string(tagged)
 	}
 	defer func() {
-		if EngineStopping() {
+		if EngineStopping() && unsettled.Load() {
 			return
 		}
 		script := teardownScript(node, cache, runDir, runID, checks)
@@ -572,7 +577,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				// failed stop does not; retain its reservation until teardown
 				// confirms the stop or the reservation expires.
 				var exited *jobs.DetachedExit
-				if (!r.Engine || !EngineStopping()) && (runErr == nil || errors.As(runErr, &exited)) {
+				settled := runErr == nil || errors.As(runErr, &exited)
+				if !settled {
+					unsettled.Store(true)
+				}
+				if (!r.Engine || !EngineStopping()) && settled {
 					releaseCtx, releaseStop := context.WithTimeout(context.WithoutCancel(checkCtx), 10*time.Second)
 					_ = queue.Release(releaseCtx, node.Name, demand.ID)
 					releaseStop()
