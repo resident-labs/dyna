@@ -61,11 +61,11 @@ func TestMachineFailureMovesTheRunToAnotherMachineOnce(t *testing.T) {
 		}
 		return 16
 	}
-	chosen := availableCINode(nodes, "", machineFailureRetryFrom(machineFailure), free)
+	chosen := availableCINode(nodes, "", machineFailureRetryFrom(machineFailure), 0, free)
 	if chosen == nil || chosen.Name != "hermeslab" {
 		t.Fatalf("retry chose %+v, want hermeslab", chosen)
 	}
-	if chosen := availableCINode(nodes[:1], "", "arch", free); chosen != nil {
+	if chosen := availableCINode(nodes[:1], "", "arch", 0, free); chosen != nil {
 		t.Fatalf("a fleet of one machine retried on itself: %+v", chosen)
 	}
 }

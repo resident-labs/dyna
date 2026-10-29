@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/gitexec"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/state"
 )
 
@@ -497,9 +498,15 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		return false, nil
 	}
 	// A machine with room in the shared node queue must exist before the plan
-	// does any work, so a fleet that is only busy keeps the job waiting without
-	// a fetch.
-	chosen, retryResumed := s.chooseCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom)
+	// does any work, so a fleet that is only busy keeps a pull request head
+	// waiting without a fetch. A trial or a sync instead joins the node queue:
+	// only its own reader asks for it, so waiting for a machine nothing else
+	// holds would starve the merge queue behind it.
+	nodeFloor := 0
+	if job.trial || job.sync {
+		nodeFloor = -1
+	}
+	chosen, retryResumed := s.chooseCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom, nodeFloor)
 	resumed = resumed || retryResumed
 	if chosen == nil {
 		return false, nil
@@ -544,7 +551,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// caller gets a typed error that names it; a fleet that is only busy or
 	// whose disks are full keeps waiting, in the node queue.
 	suited := localci.NodesForSuites(enabled, plan.suites)
-	chosen, retryResumed = s.chooseCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom)
+	chosen, retryResumed = s.chooseCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom, nodeFloor)
 	resumed = resumed || retryResumed
 	if chosen == nil {
 		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
@@ -562,11 +569,13 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 }
 
 // chooseCINode picks the machine for a run from nodes: the head's pinned node
-// when it has one, else a free one. When the head retries from a failed
-// machine and no other node can take the work, that machine runs it once
-// more, and the returned resumed mark keeps that to one retry.
-func (s *Service) chooseCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, roomID, retriedFrom string) (chosen *localci.Node, resumed bool) {
-	chosen = s.availableCINode(ctx, nodes, roomID, retriedFrom)
+// when it has one, else a free one. A floor below zero also takes a node whose
+// queue is full, so a merge trial joins the node queue instead of waiting for
+// a machine nothing else holds. When the head retries from a failed machine
+// and no other node can take the work, that machine runs it once more, and
+// the returned resumed mark keeps that to one retry.
+func (s *Service) chooseCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, roomID, retriedFrom string, floor int) (chosen *localci.Node, resumed bool) {
+	chosen = s.availableCINode(ctx, nodes, roomID, retriedFrom, floor)
 	if pinned := pinnedCINode(ctx, registry, repo, head, nodes, roomID, retriedFrom); pinned != nil {
 		chosen = pinned
 	}
@@ -574,7 +583,7 @@ func (s *Service) chooseCINode(ctx context.Context, registry localCIRegistry, re
 		// The machine that failed is the only one that can take this work, so it
 		// runs there once more instead of the head waiting with nothing running.
 		// The replacement carries Result.Resumed, which keeps that to one retry.
-		chosen = s.availableCINode(ctx, nodes, roomID, "")
+		chosen = s.availableCINode(ctx, nodes, roomID, "", floor)
 		if chosen != nil {
 			resumed = true
 		}
@@ -746,10 +755,14 @@ const registeredCIRunParallelism = 6
 
 // availableCINode prefers the node with the most room in the shared node
 // queue: the CPUs it keeps free after the work it holds and the work that
-// waits for it. A machine that is low on disk takes no new run, so its work
-// waits for a node that has space. A machine that names rooms takes only those
-// rooms' work. skip names the machine a run just failed on, so a retry lands
-// somewhere else.
+// waits for it. A machine that names rooms takes only those rooms' work. A
+// machine whose disk rule blocks admission counts as having no room and never
+// wins against a healthy machine, whatever their capacity; only a fleet with
+// no healthy machine takes one, where the queued work waits behind the rule.
+// skip names the machine a run just
+// failed on, so a retry lands somewhere else. A floor below zero also returns
+// a node whose queue is full, so work that must join the node queue, a merge
+// trial, starts on the roomiest node there is and waits there.
 // attachedCINodes names the machine that still holds checks of an earlier engine
 // for a commit.
 type attachedCINodes interface {
@@ -782,16 +795,32 @@ func pinnedCINode(ctx context.Context, registry localCIRegistry, repo, head stri
 	return nil
 }
 
-func availableCINode(nodes []localci.Node, roomID, skip string, free func(node localci.Node) int) *localci.Node {
+func availableCINode(nodes []localci.Node, roomID, skip string, floor int, free func(node localci.Node) int) *localci.Node {
 	var chosen *localci.Node
-	roomiest := 0
+	chosenBlocked := false
+	roomiest := floor
 	for i := range nodes {
 		node := &nodes[i]
 		if !node.AllowsRoom(roomID) || node.Name == skip || !node.Enabled {
 			continue
 		}
-		if available := free(*node); available > roomiest {
-			chosen, roomiest = node, available
+		available := free(*node)
+		// A disk-blocked node admits no work: its queue holds every check
+		// behind the disk rule, so it counts as no room however free its CPUs
+		// read. Health outranks room, so a blocked node never wins against a
+		// healthy one, whatever their capacity: only work that joins a queue
+		// whatever happens, a merge trial on a fleet with no healthy node,
+		// still takes a blocked node and waits there with the visible reason.
+		blocked := (machines.Machine{MaxDiskPercent: node.MaxDiskPercent, Capabilities: machines.Capabilities{Disk: node.Disk}}).DiskBlock() != ""
+		if blocked {
+			available = 0
+		}
+		better := available > roomiest
+		if chosen != nil && chosenBlocked != blocked {
+			better = !blocked
+		}
+		if better {
+			chosen, chosenBlocked, roomiest = node, blocked, available
 		}
 	}
 	return chosen
@@ -810,9 +839,9 @@ func (s *Service) ciAdmission() jobs.Admission {
 
 // availableCINode reads each node's room from the shared node queue, against
 // the capacity of the node view the scheduler already holds.
-func (s *Service) availableCINode(ctx context.Context, nodes []localci.Node, roomID, skip string) *localci.Node {
+func (s *Service) availableCINode(ctx context.Context, nodes []localci.Node, roomID, skip string, floor int) *localci.Node {
 	queue := s.ciAdmission()
-	return availableCINode(nodes, roomID, skip, func(node localci.Node) int { return queue.FreeCPUs(ctx, node.Name, node.CPUs) })
+	return availableCINode(nodes, roomID, skip, floor, func(node localci.Node) int { return queue.FreeCPUs(ctx, node.Name, node.CPUs) })
 }
 
 // freeCINodeCPUs reads the CPUs a node keeps free after the work its queue
@@ -859,7 +888,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	}
 	result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: node.Name, Started: s.now(), Status: "error"}
 	if err == nil && len(suites) > 0 {
-		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, Base: job.record.Base, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: registeredCIRunParallelism}
+		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, Base: job.record.Base, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: registeredCIRunParallelism, Ahead: job.trial || job.sync}
 		req.OnStart = func(startCtx context.Context) error {
 			// Hosted work is only replaced for a hosted head. A local change has
 			// no queued GitHub run to cancel.

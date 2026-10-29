@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/state"
 )
 
@@ -464,12 +465,12 @@ func TestRegisteredCIPreservesRequiredCheckCoverage(t *testing.T) {
 // Automatic work that holds every node slot still keeps its reservation.
 type savedCIRegistry struct {
 	occupiedCIRegistry
-	result localci.Result
+	results map[string]localci.Result
 }
 
 func (r *savedCIRegistry) LoadResult(_ context.Context, _, sha string) (localci.Result, error) {
-	if sha == r.result.SHA {
-		return r.result, nil
+	if result, ok := r.results[sha]; ok {
+		return result, nil
 	}
 	return localci.Result{}, os.ErrNotExist
 }
@@ -483,7 +484,16 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 		t.Run(fmt.Sprintf("earlier_waiting=%t", earlierWaiting), func(t *testing.T) {
 			head := strings.Repeat("a", 40)
 			r := &Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "dyna/merge-trial/1", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
-			registry := &savedCIRegistry{result: localci.Result{Repo: repo, SHA: head, Node: "node", Status: "failed", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "failed"}}}}
+			saved := localci.Result{Repo: repo, SHA: head, Node: "node", Status: "failed", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "failed"}}}
+			results := map[string]localci.Result{head: saved}
+			if earlierWaiting {
+				// The batch's bisect prefix head carries its own saved
+				// evidence, so it settles too and posts nothing.
+				prefix := saved
+				prefix.SHA = strings.Repeat("b", 40)
+				results[prefix.SHA] = prefix
+			}
+			registry := &savedCIRegistry{results: results}
 			key := registeredJobKey(registeredCIJob{record: *r, head: head})
 			cancelled := false
 			run := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
@@ -592,13 +602,50 @@ func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 		{map[string]int{"local": 1, "hermeslab": 1}, "local"},
 		{map[string]int{"local": 0, "hermeslab": 0}, ""},
 	} {
-		node := availableCINode(nodes, "", "", func(n localci.Node) int { return tc.free[n.Name] })
+		node := availableCINode(nodes, "", "", 0, func(n localci.Node) int { return tc.free[n.Name] })
 		got := ""
 		if node != nil {
 			got = node.Name
 		}
 		if got != tc.want {
 			t.Fatalf("free=%v: chose %q, want %q", tc.free, got, tc.want)
+		}
+	}
+}
+
+// A disk-blocked node admits no work, so it never wins the choice against a
+// node that can admit work, however free its CPUs read: work must not queue
+// behind a disk rule while a healthy node has room.
+func TestRegisteredCISkipsADiskBlockedNodeForANodeThatCanAdmit(t *testing.T) {
+	blocked := localci.Node{Name: "blocked", Enabled: true, CPUs: 8, Disk: machines.Disk{Total: 100 << 30, Free: 1 << 30}, MaxDiskPercent: 10}
+	healthy := localci.Node{Name: "healthy", Enabled: true, CPUs: 2}
+	free := func(n localci.Node) int {
+		if n.Name == "healthy" {
+			return 1
+		}
+		return 8
+	}
+	// A pull request head needs a node with room, and the blocked node reads
+	// as the roomiest: the healthy node still wins.
+	if node := availableCINode([]localci.Node{blocked, healthy}, "", "", 0, free); node == nil || node.Name != "healthy" {
+		t.Fatalf("pull request head chose %+v, want the healthy node", node)
+	}
+	// A trial joins a queue even on a full node, but not behind a disk rule
+	// while a healthy node can take the work.
+	if node := availableCINode([]localci.Node{blocked, healthy}, "", "", -1, free); node == nil || node.Name != "healthy" {
+		t.Fatalf("trial chose %+v, want the healthy node", node)
+	}
+	// A fleet with no healthy node still takes the blocked node, so the trial
+	// waits in its queue with the disk reason instead of waiting for a tick.
+	if node := availableCINode([]localci.Node{blocked}, "", "", -1, free); node == nil || node.Name != "blocked" {
+		t.Fatalf("trial chose %+v, want the blocked node as the only choice", node)
+	}
+	// A blocked node and a healthy but full node both have no room; the tie
+	// must not depend on node order, or a trial would wait behind a disk rule
+	// while the healthy node frees instead of joining its queue.
+	for _, order := range [][]localci.Node{{blocked, healthy}, {healthy, blocked}} {
+		if node := availableCINode(order, "", "", -1, func(localci.Node) int { return 0 }); node == nil || node.Name != "healthy" {
+			t.Fatalf("trial over a blocked and a full node chose %+v, want the healthy node", node)
 		}
 	}
 }
@@ -625,7 +672,7 @@ func TestRegisteredCISkipsMachinesLimitedToOtherRooms(t *testing.T) {
 		// A machine with no room list takes every room's work.
 		{"room_other", "", "arch"},
 	} {
-		node := availableCINode(nodes, tc.room, "", func(n localci.Node) int {
+		node := availableCINode(nodes, tc.room, "", 0, func(n localci.Node) int {
 			if n.Name == tc.full {
 				return 0
 			}
@@ -641,7 +688,7 @@ func TestRegisteredCISkipsMachinesLimitedToOtherRooms(t *testing.T) {
 	}
 	// A room that no machine allows waits for one, and takes no other room's
 	// machine.
-	if node := availableCINode(nodes[:2], "room_other", "", free); node != nil {
+	if node := availableCINode(nodes[:2], "room_other", "", 0, free); node != nil {
 		t.Fatalf("room with no machine chose %q", node.Name)
 	}
 }
