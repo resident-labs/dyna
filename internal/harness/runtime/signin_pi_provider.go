@@ -129,7 +129,7 @@ func (a *Runtime) piProviderFlow(exe, target string, provider accountstore.Provi
 // provider's own account. It returns one of them, for the card that started it.
 // target is the account a sign-in again must write, or empty for a new account.
 func (a *Runtime) addPiSignIn(ctx context.Context, scratch, target string) (NativeAccount, error) {
-	entries, err := piEditAuth(ctx, scratch, nil)
+	entries, err := a.Accounts.piEditAuth(ctx, scratch, nil)
 	if err != nil {
 		return NativeAccount{}, err
 	}
