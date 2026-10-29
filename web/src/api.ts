@@ -252,6 +252,7 @@ export const api = {
   runResult: (id: string, agent = 0) => app.RunResult(id, agent),
   termOpen: (ref: string, cols = 80, rows = 24) => app.TermOpen(ref, cols, rows),
   termRequestRun: (room: string, id: string, argv: string[] | null = null, cols = 80, rows = 24) => app.TermRequestRun(room, id, argv, cols, rows),
+  approvalList: (room: string) => app.ApprovalList(room),
   // The engine returns the updated request; the card reads the feed's events instead.
   approvalDecide: (room: string, requestId: string, action: ApprovalDecision, reason = '') => app.ApprovalDecide({ room, requestId, action, reason }),
   termRequestReport: (room: string, id: string, verdict: 'done' | 'failed' | 'declined', note = '', shareLines = false) => app.TermRequestReport(room, id, verdict, note, shareLines),
