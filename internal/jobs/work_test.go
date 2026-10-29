@@ -135,3 +135,47 @@ func TestSweepKeepsRowAdmittedWhileItRuns(t *testing.T) {
 		t.Fatalf("row = %+v, err = %v, want the admitted reservation kept", row, err)
 	}
 }
+
+// The projections of one node's queue tell one story: the machine page's
+// held counts, the snapshot counts and the free-CPU figure all shape the
+// same read, so the page can never disagree with what admission holds.
+func TestSnapshotWorkAndFreeCPUsShapeOneQueue(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	node := machines.Machine{Name: "node", Enabled: true}
+	node.Capabilities.CPUs = 8
+	queue := Admission{DataDir: dir}
+	store := Store{DataDir: dir}
+	job := Job{ID: "job", Node: "node", Command: []string{"go", "test"}, State: StateRunning, Created: time.Now().Add(-time.Hour), Started: time.Now().Add(-30 * time.Minute), CPUs: 3, MemoryMiB: 1024}
+	if err := store.Save(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	// One check runs and one waits, each asking for 2 of the 8 CPUs.
+	if err := queue.upsert(ctx, Demand{ID: "run-check", Node: "node", Room: "r2", CPUs: 2, MemoryMiB: 512}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.upsert(ctx, Demand{ID: "wait-check", Node: "node", Room: "r2", CPUs: 2, MemoryMiB: 512}, false); err != nil {
+		t.Fatal(err)
+	}
+	work, err := queue.Work(ctx, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if work.Capacity.CPUsUsed != 5 {
+		t.Fatalf("CPUs used = %d, want the job's 3 plus the running check's 2", work.Capacity.CPUsUsed)
+	}
+	running, waiting, err := queue.Snapshot(ctx, "node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running != len(work.Running) || waiting != len(work.Waiting) {
+		t.Fatalf("snapshot counts %d running and %d waiting, work lists %d and %d", running, waiting, len(work.Running), len(work.Waiting))
+	}
+	waitingCPUs := 0
+	for _, item := range work.Waiting {
+		waitingCPUs += item.CPUs
+	}
+	if free := queue.FreeCPUs(ctx, "node", 8); free != 8-work.Capacity.CPUsUsed-waitingCPUs {
+		t.Fatalf("free CPUs = %d, want capacity less the %d held and %d waiting", free, work.Capacity.CPUsUsed, waitingCPUs)
+	}
+}
