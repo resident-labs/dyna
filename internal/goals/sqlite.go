@@ -623,6 +623,19 @@ func (s *Store) Revision() (string, error) {
 	return revision, err
 }
 
+// ItemsRevision changes whenever any goal item row is written, moved, deleted
+// or reassigned, including writes from another process. A missing row reads
+// as zero: no item has been written yet.
+func (s *Store) ItemsRevision() (string, error) {
+	db, err := s.open()
+	if err != nil {
+		return "", err
+	}
+	var revision string
+	err = db.QueryRow("SELECT COALESCE((SELECT value FROM meta WHERE key='goal_items.revision'), '0')").Scan(&revision)
+	return revision, err
+}
+
 // RoomRevisions identifies rooms changed by committed writes without decoding goals.
 func (s *Store) RoomRevisions() (map[string]string, error) {
 	db, err := s.open()
@@ -790,6 +803,9 @@ func (s *Store) foldLegacyChildren(conn *sql.Conn) error {
 			child.Room, parent.ID, itemID, text, ItemOpen, assignee, now.UnixMilli()); err != nil {
 			return err
 		}
+		if err := bumpItemsRevision(conn); err != nil {
+			return err
+		}
 		// Items already on the child, from deeper folds, move with it.
 		moved, err := conn.QueryContext(ctx, "SELECT id FROM goal_items WHERE room=? AND goal=?"+itemOrder, child.Room, child.ID)
 		if err != nil {
@@ -813,6 +829,9 @@ func (s *Store) foldLegacyChildren(conn *sql.Conn) error {
 			next := fmt.Sprintf("i%d", parent.NextItem)
 			if _, err := conn.ExecContext(ctx, "UPDATE goal_items SET goal=?, id=?, updated_at=? WHERE room=? AND goal=? AND id=?",
 				parent.ID, next, now.UnixMilli(), child.Room, child.ID, id); err != nil {
+				return err
+			}
+			if err := bumpItemsRevision(conn); err != nil {
 				return err
 			}
 			movedMap[id] = next
