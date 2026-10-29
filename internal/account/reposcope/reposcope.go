@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS account_limits (
  until INTEGER NOT NULL,
  stated INTEGER NOT NULL DEFAULT 0,
  recorded_at INTEGER NOT NULL DEFAULT 0,
- backoff INTEGER NOT NULL DEFAULT 0
+ backoff INTEGER NOT NULL DEFAULT 0,
+ model TEXT NOT NULL DEFAULT ''
 );`
 
 // OpenEnded is the end of a hold with no timer. A credit failure (402) holds
@@ -36,11 +37,14 @@ CREATE TABLE IF NOT EXISTS account_limits (
 var OpenEnded = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
 
 // Hold is one account's usage-limit hold. Level counts the failures that
-// stepped the backoff, so the next unstated hold waits longer.
+// stepped the backoff, so the next unstated hold waits longer. Model is the
+// model of the turn that hit the limit; a stated hold ends only on a probe of
+// that model. It is empty when the turn named no model.
 type Hold struct {
 	Until  time.Time
 	Stated bool
 	Level  int
+	Model  string
 }
 
 // Store reads and writes account_repo_scopes in one data directory.
@@ -64,7 +68,7 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account_repo_scopes.version", 5, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account_repo_scopes.version", 6, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if _, err := conn.ExecContext(ctx, schema); err != nil {
 			return err
@@ -76,6 +80,11 @@ func Open(dataDir string) (*Store, error) {
 		}
 		if old >= 2 && old < 5 {
 			if _, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN backoff INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
+		if old >= 2 && old < 6 {
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN model TEXT NOT NULL DEFAULT ''`); err != nil {
 				return err
 			}
 		}
@@ -203,8 +212,8 @@ func (s *Store) Hold(accountID string, h Hold) error {
 	defer cancel()
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx,
-			`INSERT INTO account_limits(account_id, until, stated, recorded_at, backoff) VALUES(?,?,?,?,?)
- ON CONFLICT(account_id) DO UPDATE SET stated=CASE WHEN excluded.until>=until THEN excluded.stated ELSE stated END, backoff=CASE WHEN excluded.until>=until THEN excluded.backoff ELSE backoff END, until=MAX(until, excluded.until), recorded_at=excluded.recorded_at`, accountID, h.Until.Unix(), h.Stated, time.Now().UnixNano(), h.Level)
+			`INSERT INTO account_limits(account_id, until, stated, recorded_at, backoff, model) VALUES(?,?,?,?,?,?)
+ ON CONFLICT(account_id) DO UPDATE SET stated=CASE WHEN excluded.until>=until THEN excluded.stated ELSE stated END, backoff=CASE WHEN excluded.until>=until THEN excluded.backoff ELSE backoff END, model=CASE WHEN excluded.until>=until THEN excluded.model ELSE model END, until=MAX(until, excluded.until), recorded_at=excluded.recorded_at`, accountID, h.Until.Unix(), h.Stated, time.Now().UnixNano(), h.Level, h.Model)
 		return err
 	})
 }
@@ -213,14 +222,15 @@ func (s *Store) Hold(accountID string, h Hold) error {
 func (s *Store) LimitOf(accountID string) (Hold, error) {
 	var until, backoff int64
 	var stated bool
-	err := s.db.QueryRow("SELECT until, stated, backoff FROM account_limits WHERE account_id=?", accountID).Scan(&until, &stated, &backoff)
+	var model string
+	err := s.db.QueryRow("SELECT until, stated, backoff, model FROM account_limits WHERE account_id=?", accountID).Scan(&until, &stated, &backoff, &model)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Hold{}, nil
 	}
 	if err != nil {
 		return Hold{}, err
 	}
-	return Hold{Until: time.Unix(until, 0), Stated: stated, Level: int(backoff)}, nil
+	return Hold{Until: time.Unix(until, 0), Stated: stated, Level: int(backoff), Model: model}, nil
 }
 
 // ClearOpenEnded removes the account's no-timer hold after a successful
@@ -235,9 +245,22 @@ func (s *Store) ClearOpenEnded(accountID string, since time.Time) error {
 	})
 }
 
-// ClearUnstated removes the account's unstated hold, timed or not, after a
-// successful usage probe. A stated reset stays until it passes. A hold recorded
-// at or after since stays too, so a failure during the probe is not wiped.
+// ClearHold removes the account's hold, timed, open or stated, after a
+// successful turn. A hold recorded at or after since stays, so a failure during
+// that turn is not wiped.
+func (s *Store) ClearHold(accountID string, since time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
+	defer cancel()
+	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=? AND recorded_at<?", accountID, since.UnixNano())
+		return err
+	})
+}
+
+// ClearUnstated removes the account's hold when the provider did not state its
+// end, after a successful usage probe. A stated hold stays, because the probe's
+// reading alone does not show that the stated limit has reset. A hold recorded
+// at or after since stays too.
 func (s *Store) ClearUnstated(accountID string, since time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
 	defer cancel()
@@ -250,19 +273,33 @@ func (s *Store) ClearUnstated(accountID string, since time.Time) error {
 // Stated returns the limit ends that the provider stated and that are still
 // after now. A limit end not in it is a guess.
 func (s *Store) Stated(now time.Time) (map[string]time.Time, error) {
-	rows, err := s.db.Query("SELECT account_id, until FROM account_limits WHERE until>? AND stated=1", now.Unix())
+	holds, err := s.StatedHolds(now)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]time.Time, len(holds))
+	for id, h := range holds {
+		out[id] = h.Until
+	}
+	return out, nil
+}
+
+// StatedHolds returns the stated holds that are still in force at now, with the
+// model each one scopes to.
+func (s *Store) StatedHolds(now time.Time) (map[string]Hold, error) {
+	rows, err := s.db.Query("SELECT account_id, until, model FROM account_limits WHERE until>? AND stated=1", now.Unix())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]time.Time{}
+	out := map[string]Hold{}
 	for rows.Next() {
-		var id string
+		var id, model string
 		var until int64
-		if err := rows.Scan(&id, &until); err != nil {
+		if err := rows.Scan(&id, &until, &model); err != nil {
 			return nil, err
 		}
-		out[id] = time.Unix(until, 0)
+		out[id] = Hold{Until: time.Unix(until, 0), Stated: true, Model: model}
 	}
 	return out, rows.Err()
 }

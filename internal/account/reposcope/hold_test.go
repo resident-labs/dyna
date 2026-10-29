@@ -35,11 +35,11 @@ func TestHoldSurvivesRestartAndClears(t *testing.T) {
 	if got.Until.Unix() != want.Until.Unix() || got.Level != want.Level || got.Stated {
 		t.Fatalf("LimitOf after restart = %+v, want until %d level %d unstated", got, want.Until.Unix(), want.Level)
 	}
-	if err := reopened.ClearUnstated("acct", time.Now().Add(time.Hour)); err != nil {
+	if err := reopened.ClearHold("acct", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := reopened.LimitOf("acct"); err != nil || !got.Until.IsZero() || got.Level != 0 {
-		t.Fatalf("LimitOf after ClearUnstated = %+v, %v; want no hold", got, err)
+		t.Fatalf("LimitOf after ClearHold = %+v, %v; want no hold", got, err)
 	}
 }
 
@@ -67,9 +67,9 @@ func TestHoldKeepsTheLevelOfTheLaterEnd(t *testing.T) {
 	}
 }
 
-// A successful usage probe clears unstated holds, timed or not, but keeps a
-// stated reset and any hold recorded after the probe began.
-func TestClearUnstatedKeepsStatedAndLaterHolds(t *testing.T) {
+// A successful turn clears holds, timed, open or stated, but keeps any hold
+// recorded after the turn began.
+func TestClearHoldKeepsLaterHolds(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
 	if err != nil {
@@ -86,32 +86,62 @@ func TestClearUnstatedKeepsStatedAndLaterHolds(t *testing.T) {
 	if err := s.Hold("stated", Hold{Until: now.Add(2 * time.Hour), Stated: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ClearUnstated("timed", time.Now().Add(time.Hour)); err != nil {
+	if err := s.ClearHold("timed", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ClearUnstated("open", time.Now().Add(time.Hour)); err != nil {
+	if err := s.ClearHold("open", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ClearUnstated("stated", time.Now().Add(time.Hour)); err != nil {
+	if err := s.ClearHold("stated", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"timed", "open"} {
 		if got, _ := s.LimitOf(id); !got.Until.IsZero() {
-			t.Fatalf("%s hold after ClearUnstated = %+v, want cleared", id, got)
+			t.Fatalf("%s hold after ClearHold = %+v, want cleared", id, got)
 		}
 	}
-	if got, _ := s.LimitOf("stated"); got.Until.IsZero() {
-		t.Fatalf("stated hold after ClearUnstated = %+v, want kept", got)
+	if got, _ := s.LimitOf("stated"); !got.Until.IsZero() {
+		t.Fatalf("stated hold after ClearHold = %+v, want cleared by a successful turn", got)
 	}
 
 	if err := s.Hold("late", Hold{Until: now.Add(time.Hour), Level: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ClearUnstated("late", time.Now().Add(-time.Hour)); err != nil {
+	if err := s.ClearHold("late", time.Now().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.LimitOf("late"); got.Until.IsZero() {
-		t.Fatalf("hold recorded after the probe began = %+v, want kept", got)
+		t.Fatalf("hold recorded after the turn began = %+v, want kept", got)
+	}
+}
+
+// A successful probe clears an unstated hold but keeps a provider-stated one,
+// because a usage reading alone does not show that the stated limit reset.
+func TestClearUnstatedKeepsStatedHolds(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	now := time.Unix(1_700_000_000, 0)
+	if err := s.Hold("timed", Hold{Until: now.Add(time.Hour), Level: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Hold("stated", Hold{Until: now.Add(2 * time.Hour), Stated: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearUnstated("timed", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearUnstated("stated", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.LimitOf("timed"); !got.Until.IsZero() {
+		t.Fatalf("unstated hold after ClearUnstated = %+v, want cleared", got)
+	}
+	if got, _ := s.LimitOf("stated"); got.Until.IsZero() {
+		t.Fatalf("stated hold after ClearUnstated = %+v, want kept", got)
 	}
 }
 
