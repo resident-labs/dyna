@@ -287,8 +287,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	active := path.Join(runDir, ".active")
 	reports := path.Join(runDir, "reports")
 	// A check whose exit the engine did not see may still run on the machine. Only
-	// such a run keeps its folder and record for a restarted engine.
+	// such a run keeps its folder and record for a restarted engine. A resumed run
+	// starts with its checks already on the machine, so it counts as unsettled
+	// until it ends, even if it returns before its workers observe an exit.
 	var unsettled atomic.Bool
+	unsettled.Store(resume != nil)
 	control, cancel := context.WithTimeout(ctx, time.Duration(len(checks))*(req.Timeout+admissionWait)+2*time.Minute)
 	defer cancel()
 	// A run removes its own directory on the node, whatever ended it: a finished
