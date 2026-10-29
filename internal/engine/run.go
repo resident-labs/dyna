@@ -48,6 +48,7 @@ import (
 	"dyna-agent/internal/mode"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/roommcp"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/scope"
 	"dyna-agent/internal/sessionlife"
@@ -661,7 +662,13 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		}
 	}
 	jobsSvc := newJobsService(rooms)
-	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc, events: events}, readOnly)
+	var mcpRooms *roommcp.Service
+	if !readOnly {
+		if mcpRooms, err = roommcp.NewService(dataDir, accountstore.DefaultStore(), rooms.Notify.Rooms, rooms.Notify.Sessions.Store); err != nil {
+			return err
+		}
+	}
+	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, roommcp: mcpRooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc, events: events}, readOnly)
 	if err != nil {
 		return err
 	}

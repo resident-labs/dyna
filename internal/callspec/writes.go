@@ -5,6 +5,14 @@ package callspec
 // list and the bindings differ. The client uses it to bound a write with
 // WriteTimeout and to report a late write as an unknown outcome.
 var WriteCalls = map[string]bool{
+	"RoomMCPAllow":                true,
+	"RoomMCPAttach":               true,
+	"RoomMCPDetach":               true,
+	"RoomMCPGrant":                true,
+	"RoomMCPRemove":               true,
+	"RoomMCPRemoveToken":          true,
+	"RoomMCPSetToken":             true,
+	"RoomMCPTools":                true,
 	"AccountsAdd":                 true,
 	"AccountsImport":              true,
 	"AccountsList":                true,

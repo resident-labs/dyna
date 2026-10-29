@@ -39,6 +39,7 @@ import (
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/questions"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/roommcp"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shells"
@@ -104,6 +105,7 @@ var migrations = []func(dataDir string) error{
 	watch.Migrate,
 	questions.Migrate,
 	room.Migrate,
+	roommcp.Migrate,
 	sessionlife.Migrate,
 	shells.Migrate,
 	state.MigrateRequests,
