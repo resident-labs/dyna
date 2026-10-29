@@ -54,8 +54,10 @@ type Service struct {
 	rooms    *room.Store
 	sessions Sessions
 	now      func() time.Time
-	mu       sync.Mutex
-	active   map[serverKey]serverRuntime
+	// beforeDrop lets a test see the stored state at the moment a connection ends.
+	beforeDrop func(key serverKey)
+	mu         sync.Mutex
+	active     map[serverKey]serverRuntime
 }
 
 // NewService opens the server registry. The engine migrates its tables first (Migrate). Tokens stay in the accounts store.
@@ -108,8 +110,9 @@ func (s *Service) SetToken(ctx context.Context, roomRef, name, serverURL, token 
 	if err != nil {
 		return err
 	}
-	s.drop(serverKey{rec.ID, name})
-	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+	// Change the stored state first, then end the live connection: a stale call
+	// that registers a connection in between is ended by the drop.
+	if err := state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		// A new URL is a new server: its tools start off and nobody holds a grant.
 		for _, table := range []string{"room_mcp_tools", "room_mcp_grants"} {
 			if _, err := conn.ExecContext(ctx, "DELETE FROM "+table+" WHERE room=? AND server=? AND EXISTS (SELECT 1 FROM room_mcp_servers WHERE room=? AND name=? AND url<>?)", rec.ID, name, rec.ID, name, serverURL); err != nil {
@@ -119,7 +122,11 @@ func (s *Service) SetToken(ctx context.Context, roomRef, name, serverURL, token 
 		_, err := conn.ExecContext(ctx, `INSERT INTO room_mcp_servers(room,name,url,credential_id,attached) VALUES(?,?,?,?,0)
    ON CONFLICT(room,name) DO UPDATE SET url=excluded.url, credential_id=excluded.credential_id, attached=0`, rec.ID, name, serverURL, credential.ID)
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	s.drop(serverKey{rec.ID, name})
+	return nil
 }
 
 // RemoveToken deletes the saved token and detaches the server. The pinned tools stay.
@@ -132,14 +139,15 @@ func (s *Service) RemoveToken(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
-	s.drop(serverKey{rec.ID, name})
-	if err := s.accounts.Update(func(st *accountstore.State) error {
-		st.Remove(id)
-		return nil
-	}); err != nil {
+	// Clear the flag, then end the live connection, then delete the token.
+	if err := s.setAttached(ctx, rec.ID, name, false); err != nil {
 		return err
 	}
-	return s.setAttached(ctx, rec.ID, name, false)
+	s.drop(serverKey{rec.ID, name})
+	return s.accounts.Update(func(st *accountstore.State) error {
+		st.Remove(id)
+		return nil
+	})
 }
 
 // Remove deletes the server, its tools, its grants and its token.
@@ -152,16 +160,17 @@ func (s *Service) Remove(ctx context.Context, roomRef, name string) error {
 	if err != nil {
 		return err
 	}
-	s.drop(serverKey{rec.ID, name})
-	if err := s.accounts.Update(func(st *accountstore.State) error {
-		st.Remove(id)
-		return nil
+	// Delete the server first, so a stale call cannot register a connection for it.
+	if err := state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_servers WHERE room=? AND name=?", rec.ID, name)
+		return err
 	}); err != nil {
 		return err
 	}
-	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_servers WHERE room=? AND name=?", rec.ID, name)
-		return err
+	s.drop(serverKey{rec.ID, name})
+	return s.accounts.Update(func(st *accountstore.State) error {
+		st.Remove(id)
+		return nil
 	})
 }
 
@@ -176,6 +185,9 @@ func (s *Service) credentialID(ctx context.Context, roomID, name string) (string
 
 // drop ends the live connection and every call in flight on it.
 func (s *Service) drop(key serverKey) {
+	if s.beforeDrop != nil {
+		s.beforeDrop(key)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if active, ok := s.active[key]; ok {
