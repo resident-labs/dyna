@@ -14,6 +14,10 @@ func TestDisplayApprovalBodyUsesBoundFileSnapshot(t *testing.T) {
 			t.Fatalf("body = %q for %q", got, argv)
 		}
 	}
+	payload := approvals.GHPayload{Argv: []string{"pr", "create", "--body-file", "safe.md", "--body-file", "actual.md"}, Files: []approvals.FileSnapshot{{Path: "safe.md", Data: []byte("safe")}, {Path: "actual.md", Data: []byte("actual")}}}
+	if got := DisplayApprovalBody(payload); got != "actual" {
+		t.Fatalf("repeated body flag shows %q", got)
+	}
 }
 
 func TestDisplayApprovalBodyUsesEveryBoundAPIField(t *testing.T) {
