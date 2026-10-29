@@ -102,6 +102,7 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 	r := Request{
 		Room: rec.ID, Requester: requester.ID, Kind: in.Kind, Class: in.Class,
 		Payload: append(json.RawMessage(nil), in.Payload...), PayloadHash: hex.EncodeToString(hash[:]),
+		Repository: in.Repository, Server: in.Server, Command: in.Command, Tool: in.Tool, Title: in.Title, Body: in.Body,
 		State: StatePending, atID: requester.ParentSession,
 	}
 	if r.atID == "" || in.Class == ClassOwner {
@@ -121,7 +122,7 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 	if existing, err := s.duplicate(r.Room, r.Requester, r.Kind, r.Class, r.PayloadHash); err != nil {
 		return Request{}, err
 	} else if existing.ID != "" {
-		if err := s.postRequested(existing, nil); err != nil {
+		if err := s.postRequested(existing); err != nil {
 			return Request{}, err
 		}
 		return s.public(existing)
@@ -141,7 +142,7 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 	if auto {
 		err = s.postDecided(r, requester.Address(), ActionAuto, "root", "")
 	} else {
-		err = s.postRequested(r, &in)
+		err = s.postRequested(r)
 	}
 	if err != nil {
 		return Request{}, err
@@ -443,7 +444,7 @@ func (s *Service) CloseSession(ctx context.Context, roomID, closingID, heirID st
 				return err
 			}
 			r.atID, r.At = next, next
-			if err := s.postRequested(r, nil); err != nil {
+			if err := s.postRequested(r); err != nil {
 				return err
 			}
 			s.changed(r.Room, r.ID)
@@ -507,7 +508,7 @@ func (s *Service) holderAddress(rec room.Record, id string) (string, map[string]
 	return address, map[string]string{address: info.ID}, nil
 }
 
-func (s *Service) postRequested(r Request, in *CreateInput) error {
+func (s *Service) postRequested(r Request) error {
 	rec, err := s.Rooms.Resolve(r.Room)
 	if err != nil {
 		return err
@@ -520,36 +521,9 @@ func (s *Service) postRequested(r Request, in *CreateInput) error {
 	if err != nil {
 		return err
 	}
-	ev := room.ApprovalRequestedEvent{RequestID: r.ID, Kind: string(r.Kind), Class: room.ApprovalClass(r.Class), Requester: requester.Address(), At: at}
-	if in != nil {
-		ev.Repository, ev.Server, ev.Command, ev.Tool, ev.Title, ev.Body = in.Repository, in.Server, in.Command, in.Tool, in.Title, in.Body
-	} else if r.Kind == KindGH {
-		var payload GHPayload
-		if err := json.Unmarshal(r.Payload, &payload); err != nil {
-			return err
-		}
-		ev.Repository = payload.Repo
-		ev.Command = "gh " + strings.Join(payload.Argv, " ")
-		ev.Title = argument(payload.Argv, "--title")
-		ev.Body = payload.DisplayBody()
-	}
+	ev := room.ApprovalRequestedEvent{RequestID: r.ID, Kind: string(r.Kind), Class: room.ApprovalClass(r.Class), Requester: requester.Address(), At: at, Repository: r.Repository, Server: r.Server, Command: r.Command, Tool: r.Tool, Title: r.Title, Body: r.Body}
 	_, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: r.Room, Event: ev, To: []string{at}, SessionIDs: sessionIDs, NoWake: r.atID == Owner})
 	return err
-}
-
-func argument(argv []string, flag string) string {
-	for i, arg := range argv {
-		if arg == flag && i+1 < len(argv) {
-			return argv[i+1]
-		}
-		if value, ok := strings.CutPrefix(arg, flag+"="); ok {
-			return value
-		}
-		if len(flag) == 2 && strings.HasPrefix(arg, flag) {
-			return strings.TrimPrefix(arg[len(flag):], "=")
-		}
-	}
-	return ""
 }
 
 func (s *Service) postDecided(r Request, actor string, action Action, reason, next string) error {

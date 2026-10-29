@@ -3,7 +3,6 @@ package approvals
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -72,58 +71,6 @@ type GHPayload struct {
 	Files []FileSnapshot `json:"files,omitempty"`
 }
 
-// DisplayBody returns the exact inline or file-backed text shown for approval.
-func (p GHPayload) DisplayBody() string {
-	if body := argument(p.Argv, "--body"); body != "" {
-		return body
-	}
-	snapshot := func(path string) (string, bool) {
-		for _, file := range p.Files {
-			if file.Path == path {
-				return string(file.Data), true
-			}
-		}
-		return "", false
-	}
-	path := argument(p.Argv, "--body-file")
-	if path == "" {
-		path = argument(p.Argv, "-F")
-	}
-	if body, ok := snapshot(path); ok {
-		return body
-	}
-	var parts []string
-	if path := argument(p.Argv, "--input"); path != "" {
-		if body, ok := snapshot(path); ok {
-			parts = append(parts, body)
-		}
-	}
-	for i := 0; i < len(p.Argv); i++ {
-		arg := p.Argv[i]
-		value := ""
-		switch {
-		case arg == "-F" || arg == "--field":
-			if i+1 < len(p.Argv) {
-				i++
-				value = p.Argv[i]
-			}
-		case strings.HasPrefix(arg, "--field="):
-			value = strings.TrimPrefix(arg, "--field=")
-		case strings.HasPrefix(arg, "-F"):
-			value = strings.TrimPrefix(arg[len("-F"):], "=")
-		}
-		key, body, ok := strings.Cut(value, "=")
-		if !ok {
-			continue
-		}
-		if strings.HasPrefix(body, "@") {
-			body, _ = snapshot(strings.TrimPrefix(body, "@"))
-		}
-		parts = append(parts, key+":\n"+body)
-	}
-	return strings.Join(parts, "\n\n")
-}
-
 // CreateInput is the typed input to the kind-independent core.
 type CreateInput struct {
 	Room       string
@@ -156,6 +103,12 @@ type Request struct {
 	Class       Class           `json:"class"`
 	Payload     json.RawMessage `json:"payload"`
 	PayloadHash string          `json:"payloadHash"`
+	Repository  string          `json:"repository,omitempty"`
+	Server      string          `json:"server,omitempty"`
+	Command     string          `json:"command,omitempty"`
+	Tool        string          `json:"tool,omitempty"`
+	Title       string          `json:"title,omitempty"`
+	Body        string          `json:"body,omitempty"`
 	State       State           `json:"state"`
 	At          string          `json:"at"`
 	ExpiresAt   time.Time       `json:"expiresAt"`
