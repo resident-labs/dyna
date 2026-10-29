@@ -34,8 +34,6 @@ checks:
     name: pi test (0)
     providerGroup: pi-test
     image: node:22
-    hostUser: true
-    setup: &pi-test-setup timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq ripgrep fd-find >/dev/null || exit 69
     command: bash scripts/ci.sh pi test-shard
     caches: [npm]
     reports: junit
@@ -46,8 +44,6 @@ checks:
     name: pi test (1)
     providerGroup: pi-test
     image: node:22
-    hostUser: true
-    setup: *pi-test-setup
     command: bash scripts/ci.sh pi test-shard
     caches: [npm]
     reports: junit
@@ -59,8 +55,6 @@ checks:
     name: pi test (2)
     providerGroup: pi-test
     image: node:22
-    hostUser: true
-    setup: *pi-test-setup
     command: bash scripts/ci.sh pi test-shard
     caches: [npm]
     reports: junit
@@ -72,8 +66,6 @@ checks:
     name: pi test (3)
     providerGroup: pi-test
     image: node:22
-    hostUser: true
-    setup: *pi-test-setup
     command: bash scripts/ci.sh pi test-shard
     caches: [npm]
     reports: junit

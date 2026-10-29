@@ -77,6 +77,13 @@ case "$suite" in
     bash ../../scripts/pi-hydrate.sh
     npm run build:offline
     if [[ $phase != pack ]]; then
+      PI_OFFLINE= node --import ./packages/coding-agent/src/experimental/source-resolver.ts --input-type=module -e '
+        import { ensureTool } from "./packages/coding-agent/src/utils/tools-manager.ts";
+        for (const tool of ["fd", "rg"]) {
+          const path = await ensureTool(tool, ({ message }) => console.log(message));
+          if (!path) throw new Error(`Unable to provision ${tool}`);
+        }
+      '
       test_args=(--maxWorkers=2 --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/pi-test.xml}")
       if [[ $phase == test-shard ]]; then
         test_args+=(--shard="${PI_SHARD:?test-shard requires PI_SHARD=i/n}")
