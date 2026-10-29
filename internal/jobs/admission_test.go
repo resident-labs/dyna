@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/state"
 )
 
 // A database written before check names still opens, from either earlier
@@ -66,6 +67,104 @@ INSERT INTO admissions(id,node,room,cpus,memory_mib,heavy,port,state,created_ms,
 				t.Fatalf("waiting = %+v, want the new row named lint with its source", work.Waiting)
 			}
 		})
+	}
+}
+
+func BenchmarkAdmissionNoOpPass(b *testing.B) {
+	ctx := context.Background()
+	queue := Admission{DataDir: b.TempDir(), Engine: true}
+	if err := queue.upsert(ctx, Demand{ID: "check", Node: "missing"}, false); err != nil {
+		b.Fatal(err)
+	}
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		b.Fatal(err)
+	}
+	db, err := queue.db()
+	if err != nil {
+		b.Fatal(err)
+	}
+	before := state.For(db).Health().Writes
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, _, err := queue.Pass(ctx, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(state.For(db).Health().Writes-before)/float64(b.N), "writes/pass")
+}
+
+func TestAdmissionNoOpPassDoesNotWrite(t *testing.T) {
+	ctx := context.Background()
+	queue := Admission{DataDir: t.TempDir(), Engine: true}
+	if err := queue.upsert(ctx, Demand{ID: "check", Node: "missing"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	db, err := queue.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := state.For(db).Health().Writes
+	if _, _, err := queue.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if writes := state.For(db).Health().Writes - before; writes != 0 {
+		t.Fatalf("no-op pass wrote %d transactions", writes)
+	}
+}
+
+func TestAdmissionRechecksAfterRead(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	node := machines.Machine{Name: "node", Enabled: true}
+	node.Capabilities.CPUs = 1
+	source := fakeMachines{byName: map[string]machines.Machine{"node": node}}
+	entered, resume := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	queue := Admission{DataDir: dir, Machines: source, Engine: true, RoomName: func(string) string {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-resume
+		}
+		return ""
+	}}
+	store := Store{DataDir: dir}
+	now := time.Now()
+	holder := Job{ID: "holder", Node: "node", RoomID: "room", State: StateRunning, Created: now, Resources: []machines.ResourceName{"lock"}}
+	job := Job{ID: "job", Node: "node", State: StateQueued, Host: true, CPUs: 1, Created: now}
+	blocked := Job{ID: "blocked", Node: "node", State: StateQueued, Created: now.Add(time.Second), Resources: []machines.ResourceName{"lock"}}
+	for _, item := range []Job{holder, job, blocked} {
+		if err := store.Save(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type result struct {
+		admitted map[string]bool
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		admitted, _, err := queue.Pass(ctx, []Job{job, blocked})
+		done <- result{admitted, err}
+	}()
+	<-entered
+	other := Admission{DataDir: dir, Machines: source, Engine: true}
+	if err := other.upsert(ctx, Demand{ID: "check", Node: "node", CPUs: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := other.Pass(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	got := <-done
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got.admitted[job.ID] {
+		t.Fatal("job admitted using stale capacity")
 	}
 }
 
