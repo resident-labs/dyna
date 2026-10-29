@@ -52,8 +52,9 @@ func (r Rules) Triage(pr PRContext, events []Event) []Decision {
 		}
 		// Repeated bot issue/review status comments add no second copy. Inline
 		// comments can repeat text at different code locations, so keep those.
+		// A review that approves or requests changes is a new fact each time.
 		key := e.Commenter + "/" + e.Kind + "/" + strings.TrimSpace(e.Text)
-		if d.Action == "keep" && d.Reason != "owner" && e.IsBot && e.Kind != "comments" {
+		if d.Action == "keep" && d.Reason != "owner" && e.IsBot && e.Kind != "comments" && !reviewStateChange(e) {
 			if seen[key] {
 				d = Decision{Action: "drop", Reason: "duplicate_bot_comment"}
 			} else {
@@ -182,6 +183,12 @@ Review rate limited.
 > Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.
 
 </details>`
+
+// reviewStateChange reports a GitHub review that approves or requests changes.
+// Its body may be empty; the state is the fact the author needs.
+func reviewStateChange(e Event) bool {
+	return e.Kind == "reviews" && (e.ReviewState == "APPROVED" || e.ReviewState == "CHANGES_REQUESTED")
+}
 
 func trustedEvent(e Event, bots []string) bool {
 	switch strings.ToUpper(e.Association) {
