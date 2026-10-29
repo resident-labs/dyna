@@ -72,27 +72,56 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 	}
 }
 
+// TestShardFailsWhenPackageListFails checks that a failed go list stops the
+// shard script. Otherwise the shard would run no packages and still pass.
+func TestShardFailsWhenPackageListFails(t *testing.T) {
+	dir := fakeGoDir(t, []string{
+		`if [ "$1" = list ] && [ "$2" = -m ]; then echo dyna-agent; exit 0; fi`,
+		`echo "load failed" >&2`,
+		"exit 1",
+	})
+	out, err := runScript(t, dir, "ci-shard.sh", "0", "10")
+	if err == nil {
+		t.Fatalf("ci-shard.sh succeeded with no package list, printed %q", out)
+	}
+}
+
 // shardPackages runs the real script against a fake go command, so the test
 // proves the script's own map without depending on this checkout's packages.
 func shardPackages(t *testing.T, index, count int, mode string, packages []string) []string {
 	t.Helper()
-	dir := t.TempDir()
-	lines := []string{
-		"#!/bin/sh",
+	body := []string{
 		`if [ "$1" = list ] && [ "$2" = -m ]; then echo dyna-agent; exit 0; fi`,
 		`if [ "$1" = list ]; then`,
 		"cat <<'EOF'",
 	}
-	lines = append(lines, packages...)
-	lines = append(lines, "EOF", "exit 0", "fi", "exit 1")
-	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(strings.Join(lines, "\n")+"\n"), 0o755); err != nil {
+	body = append(body, packages...)
+	body = append(body, "EOF", "exit 0", "fi", "exit 1")
+	dir := fakeGoDir(t, body)
+	out, err := runScript(t, dir, "ci-shard.sh", fmt.Sprint(index), fmt.Sprint(count), mode)
+	if err != nil {
+		t.Fatalf("ci-shard.sh %d %d %s: %v", index, count, mode, err)
+	}
+	return strings.Fields(out)
+}
+
+// fakeGoDir writes a go command that runs body and returns the directory that
+// holds it, so a script under test finds the fake first on PATH.
+func fakeGoDir(t *testing.T, body []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := strings.Join(append([]string{"#!/bin/sh"}, body...), "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "ci-shard.sh", fmt.Sprint(index), fmt.Sprint(count), mode)
-	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return dir
+}
+
+// runScript runs a script in scripts/ with the fake go directory first on PATH.
+func runScript(t *testing.T, goDir, script string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("bash", append([]string{script}, args...)...)
+	cmd.Env = append(os.Environ(), "PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("ci-shard.sh %d %d: %v", index, count, err)
-	}
-	return strings.Fields(string(out))
+	return string(out), err
 }

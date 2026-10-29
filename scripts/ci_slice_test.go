@@ -2,9 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -20,7 +17,11 @@ func TestSliceRunsEveryTestOnce(t *testing.T) {
 	const count = 3
 	seen := map[string]int{}
 	for i := 0; i < count; i++ {
-		for _, name := range sliceTests(t, i, count, tests) {
+		out, err := runSlice(t, listingTests(tests), i, count)
+		if err != nil {
+			t.Fatalf("ci-slice.sh %d %d: %v", i, count, err)
+		}
+		for _, name := range strings.Fields(out) {
 			seen[name]++
 		}
 	}
@@ -31,25 +32,29 @@ func TestSliceRunsEveryTestOnce(t *testing.T) {
 	}
 }
 
-// sliceTests runs scripts/ci-slice.sh against a fake go command that lists tests.
-func sliceTests(t *testing.T, index, count int, tests []string) []string {
-	t.Helper()
-	dir := t.TempDir()
-	lines := []string{
-		"#!/bin/sh",
+// TestSliceFailsWhenListingFails checks that a package that cannot list its
+// tests stops the slice. An empty slice would hide the package from CI.
+func TestSliceFailsWhenListingFails(t *testing.T) {
+	failing := []string{`echo "build failed" >&2`, "exit 1"}
+	out, err := runSlice(t, failing, 0, 3)
+	if err == nil {
+		t.Fatalf("ci-slice.sh succeeded with no test list, printed %q", out)
+	}
+}
+
+// listingTests is the fake go body that lists tests for go test -list.
+func listingTests(tests []string) []string {
+	body := []string{
 		`if [ "$1" = test ] && [ "$2" = -list ]; then`,
 		"cat <<'EOF'",
 	}
-	lines = append(lines, tests...)
-	lines = append(lines, "EOF", "exit 0", "fi", "exit 1")
-	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(strings.Join(lines, "\n")+"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("bash", "ci-slice.sh", "dyna-agent/internal/pr/watch", fmt.Sprint(index), fmt.Sprint(count))
-	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("ci-slice.sh %d %d: %v", index, count, err)
-	}
-	return strings.Fields(string(out))
+	body = append(body, tests...)
+	return append(body, "EOF", "exit 0", "fi", "exit 1")
+}
+
+// runSlice runs scripts/ci-slice.sh for one package against a fake go command.
+func runSlice(t *testing.T, goBody []string, index, count int) (string, error) {
+	t.Helper()
+	dir := fakeGoDir(t, goBody)
+	return runScript(t, dir, "ci-slice.sh", "dyna-agent/internal/pr/watch", fmt.Sprint(index), fmt.Sprint(count))
 }
