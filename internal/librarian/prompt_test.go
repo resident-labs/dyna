@@ -37,7 +37,7 @@ func TestTaskStatesMaintainModeAndTheReadmeGate(t *testing.T) {
 		"(120 lines)",
 		"do not open a pull request",
 		"Never push to a docs pull request whose base is another repository",
-		"gh search prs --head <branch> --state all",
+		"gh search prs --head <branch> --limit 100",
 		"gh pr create --repo github.com/fork/app --body-file FILE",
 		"dyna git pr track",
 		"Never merge",
