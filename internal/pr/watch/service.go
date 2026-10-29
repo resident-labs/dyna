@@ -714,6 +714,9 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 	r.CI = ci
 	r.LocalCIConfig = snap.localCIConfig
 	r.CIReason, _ = budgetFailure(*r, snap, EffectivePolicy(*st, *r))
+	if ci == "pending" && r.CIReason == "" && snap.localCI != nil {
+		r.CIReason = snap.localCI.Reason
+	}
 	// Cancelled CI did not test the head: it needs a push or rerun, but it
 	// neither wakes the author nor counts toward the failure pause.
 	cancelled := ci == "failed" && r.CIReason == "" && snap.ciOnlyCancelled(EffectivePolicy(*st, *r).RequiredChecks...)
