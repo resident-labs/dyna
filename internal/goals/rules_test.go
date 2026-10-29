@@ -2,10 +2,14 @@ package goals
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/settings"
 )
 
 func TestRulesLifecycle(t *testing.T) {
@@ -66,6 +70,36 @@ func TestRulesLifecycle(t *testing.T) {
 	}
 	if _, err := s.RemoveRule("room", "missing", "owner"); err == nil {
 		t.Fatal("missing rule")
+	}
+}
+
+// setRulesCap writes the owner's rules.maxChars into a test-only settings file.
+func setRulesCap(t *testing.T, limit int) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := settings.DefaultPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"rules":{"maxChars":%d}}`, limit)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRulesCapFollowsOwnerSetting(t *testing.T) {
+	s := testStore(t)
+	setRulesCap(t, 3500)
+	for _, n := range []int{500, 500, 500, 500, 500, 500, 200} {
+		if _, err := s.AddRule("room", "owner", "owner", strings.Repeat("x", n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, err := s.RulesView("room")
+	if err != nil || view.Max != 3500 || view.Used != 3200 {
+		t.Fatal(view, err)
+	}
+	want := "Rules are full (3 200 / 3 500 characters). Shorten or remove a rule first."
+	if _, err := s.AddRule("room", "owner", "owner", strings.Repeat("x", 301)); err == nil || err.Error() != want {
+		t.Fatal(err)
 	}
 }
 
