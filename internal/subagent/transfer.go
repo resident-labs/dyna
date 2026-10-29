@@ -55,8 +55,11 @@ type TransferState struct {
 	WrittenHandoff     string              `json:"writtenHandoff,omitempty"`
 	Handoff            string              `json:"handoff,omitempty"`
 	Dir                string              `json:"dir,omitempty"`
-	Branch             string              `json:"branch,omitempty"`
-	Source             string              `json:"source,omitempty"` // cooperative, transcript, native (same Pi session) or converted
+	// RequestedDir is the root override from --dir. It outranks Dir, which a
+	// handoff may set, so no later handoff replaces it.
+	RequestedDir string `json:"requestedDir,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Source       string `json:"source,omitempty"` // cooperative, transcript, native (same Pi session) or converted
 	// ConvertedSession is the target session id of a cross-harness
 	// conversion. It is saved before the file is written, so a restarted
 	// coordinator writes the same session again instead of a second one.
@@ -112,6 +115,10 @@ type TransferOptions struct {
 	WaitSeconds int    `json:"waitSeconds"` // 0 means immediate transcript fallback; maximum 120
 	Retry       bool   `json:"retry,omitempty"`
 
+	// Dir is the root override for the task directory of a fresh conversation.
+	// It replaces the session's directory and any saved handoff hint.
+	Dir string `json:"dir,omitempty"`
+
 	// Fallback marks an automatic move after a usage limit. Only the engine's
 	// usage-limit fallback sets it: Notice is the one DM that explains the
 	// move, and LimitReason says what the previous profile could not do.
@@ -135,6 +142,9 @@ func (m *Manager) TransferContext(ctx context.Context, ref string, opts Transfer
 func (m *Manager) requestTransfer(ctx context.Context, ref string, opts TransferOptions) (TransferState, error) {
 	if opts.WaitSeconds < 0 || opts.WaitSeconds > 120 {
 		return TransferState{}, errors.New("handoff wait must be between 0 and 120 seconds")
+	}
+	if opts.Dir != "" && (!filepath.IsAbs(opts.Dir) || !validTaskDir(opts.Dir)) {
+		return TransferState{}, fmt.Errorf("task directory %q must be an existing absolute directory", opts.Dir)
 	}
 	ps, err := m.profiles()
 	if err != nil {
@@ -207,6 +217,9 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		// the transfer stops the old turn and resumes at once. Every other pair
 		// still starts a fresh native conversation.
 		plan := transferPlanFor(ps, meta, candidate, fresh, opts)
+		if opts.Dir != "" && (plan.native || plan.convert) {
+			return errors.New("--dir applies to a fresh conversation; a native or converted transfer keeps its worktree")
+		}
 		// A fallback chain continues from the profile the session is on. When the
 		// turn that this transfer moved it to hits its own limit, that move is
 		// over: the next move supersedes it here, in the same transaction. Its
@@ -266,6 +279,7 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		if previous := meta.Transfer; !plan.native && !plan.convert && !opts.rootSeat && !opts.Fresh && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
 			out.WrittenHandoff, out.Handoff, out.Dir, out.Branch, out.Source = previous.WrittenHandoff, previous.WrittenHandoff, previous.Dir, previous.Branch, "cooperative"
 		}
+		out.RequestedDir = opts.Dir
 		// Freeze labels for records written before per-turn profile snapshots.
 		previousModel := currentModel
 		for n := 1; n <= meta.Turns; n++ {
