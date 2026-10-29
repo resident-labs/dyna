@@ -26,6 +26,7 @@ func NewCommand() *cobra.Command {
 func legacyIssueCommand() *cobra.Command {
 	cmd := issue.NewCommand()
 	cmd.Hidden = true
+	cmd.AddCommand(issueWatchCommand(), issueUnwatchCommand())
 	return cmd
 }
 

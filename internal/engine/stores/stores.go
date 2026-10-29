@@ -36,6 +36,7 @@ import (
 	"dyna-agent/internal/notices"
 	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/plan/ancestry"
+	"dyna-agent/internal/pr/issuewatch"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/questions"
@@ -84,6 +85,7 @@ var migrations = []func(dataDir string) error{
 	hooks.MigrateDocuments,
 	hookinstall.Migrate,
 	cihealth.Migrate,
+	issuewatch.Migrate,
 	// ghclient keeps the proved GitHub account of each room, so turn startup
 	// makes no GitHub API call after an engine restart.
 	ghclient.Migrate,
