@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -177,5 +178,30 @@ func TestSnapshotWorkAndFreeCPUsShapeOneQueue(t *testing.T) {
 	}
 	if free := queue.FreeCPUs(ctx, "node", 8); free != 8-work.Capacity.CPUsUsed-waitingCPUs {
 		t.Fatalf("free CPUs = %d, want capacity less the %d held and %d waiting", free, work.Capacity.CPUsUsed, waitingCPUs)
+	}
+}
+
+// A backlog of newer open jobs elsewhere must not hide a node's older running
+// work: the queue reads all of one node's open jobs, with no list limit, so
+// the free-CPU figure keeps counting it.
+func TestFreeCPUsCountsRunningWorkBeyondTheListLimit(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store := Store{DataDir: dir}
+	queue := Admission{DataDir: dir}
+	base := time.Now().Add(-2 * time.Hour).Truncate(time.Millisecond)
+	old := Job{ID: "old", Node: "busy", Command: []string{"go", "test"}, State: StateRunning, Created: base, Started: base, CPUs: 4}
+	if err := store.Save(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	// Newer queued work on other nodes fills the store's list limit of 200.
+	for i := 0; i < 200; i++ {
+		job := Job{ID: fmt.Sprintf("newer-%d", i), Node: "elsewhere", Command: []string{"x"}, State: StateQueued, Created: base.Add(time.Duration(i+1) * time.Minute)}
+		if err := store.Save(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if free := queue.FreeCPUs(ctx, "busy", 8); free != 4 {
+		t.Fatalf("free CPUs = %d, want 4 after the older running job's 4", free)
 	}
 }

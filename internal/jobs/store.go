@@ -663,6 +663,30 @@ func (s Store) Running(ctx context.Context) ([]Job, error) {
 	return out, errors.Join(rows.Err(), rows.Close())
 }
 
+// NodeOpen returns one node's open jobs, oldest first, with no list limit: a
+// node's queue must count every unit it holds, even behind a backlog of newer
+// work on other nodes.
+func (s Store) NodeOpen(ctx context.Context, node string) ([]Job, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT "+columns+" FROM jobs WHERE node=? AND state IN ('queued','running') ORDER BY created_ms, id", node)
+	if err != nil {
+		return nil, err
+	}
+	var out []Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
+}
+
 // LogDir is the folder a job's local log file lives in.
 func LogDir(dataDir, id string) string {
 	return filepath.Join(dataDir, "jobs", id)

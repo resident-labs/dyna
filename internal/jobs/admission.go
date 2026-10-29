@@ -420,17 +420,12 @@ func (a Admission) readQueue(ctx context.Context, node string) (nodeQueue, error
 	if err := errors.Join(query.Err(), query.Close()); err != nil {
 		return nodeQueue{}, err
 	}
-	open, err := (Store{DataDir: a.DataDir}).List(ctx, true)
+	open, err := (Store{DataDir: a.DataDir}).NodeOpen(ctx, node)
 	if err != nil {
 		return nodeQueue{}, err
 	}
-	// List answers newest first; both of the queue's job lists keep oldest
-	// first, the order the running list shows.
-	slices.Reverse(open)
+	// NodeOpen answers oldest first, the order the running list shows.
 	for _, job := range open {
-		if job.Node != node {
-			continue
-		}
 		switch job.State {
 		case StateRunning:
 			q.running = append(q.running, job)
