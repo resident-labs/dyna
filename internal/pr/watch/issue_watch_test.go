@@ -93,6 +93,39 @@ func TestIssueWatchReadsEventsWhenTimestampMatches(t *testing.T) {
 	}
 }
 
+// A close and a reopen in one second can return the issue to its earlier
+// representation. GitHub then answers the issue with 304, and the event log
+// still holds both transitions, so the poll reads it.
+func TestIssueWatchReadsEventsAfterNotModified(t *testing.T) {
+	e := newEnv(t)
+	const stamp = "2026-10-29T10:00:00Z"
+	base := "repos/owner/repo/issues/3"
+	e.f.Raw[base] = "HTTP/2.0 304 Not Modified\r\n\r\n"
+	e.f.Raw[base+"/events?per_page=100"] = "HTTP/2.0 200 OK\r\n\r\n" + `[{"id":41,"event":"closed"},{"id":42,"event":"reopened"}]`
+	e.write()
+	watch := issuewatch.Watch{Room: e.author.RoomID, Host: "github.com", Repo: "owner/repo", Number: 3,
+		State: "open", Updated: stamp, CommentAt: stamp, EventID: 40, ETag: `"etag-1"`,
+		Body: `{"title":"Crash","state":"open","updated_at":"` + stamp + `"}`}
+	dir := e.s.dataDir()
+	if err := (issuewatch.Store{DataDir: dir}).Save(t.Context(), watch); err != nil {
+		t.Fatal(err)
+	}
+	before, err := room.DefaultStore().Messages(e.author.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.pollIssueWatches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := room.DefaultStore().Messages(e.author.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(after) - len(before); got != 2 {
+		t.Fatalf("poll after 304 posted %d messages, want a close and a reopen", got)
+	}
+}
+
 // A close and a reopen between two polls both reach the room. The issue is
 // open again at the poll, so comparing states alone would report nothing.
 func TestIssueWatchKeepsCloseAndReopenBetweenPolls(t *testing.T) {

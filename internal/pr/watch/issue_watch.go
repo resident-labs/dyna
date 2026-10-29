@@ -251,15 +251,16 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error 
 	}
 	var comments []Comment
 	var log []issueEvent
-	// A 304 means GitHub's ETag still matches, so the issue is unchanged. Its
-	// updated_at has one-second resolution, so it cannot prove that alone.
+	// A 304 means the issue representation matches its ETag, and a new comment
+	// changes that representation. The event log is read on every poll: a close
+	// and a reopen in one second can restore the same representation.
 	if !cache.notModified[key] {
 		if comments, err = issueComments(ctx, gh, ref, w.CommentAt); err != nil {
 			return err
 		}
-		if log, err = issueEvents(ctx, gh, ref); err != nil {
-			return err
-		}
+	}
+	if log, err = issueEvents(ctx, gh, ref); err != nil {
+		return err
 	}
 	events, next := nextIssueEvents(w, issue, comments, log)
 	for _, ev := range events {
