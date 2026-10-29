@@ -362,3 +362,18 @@ func TestRoomUpstreamReadsWithoutActingRoom(t *testing.T) {
 		t.Fatal("write to the upstream was admitted")
 	}
 }
+
+// Two rooms can share an upstream. A command in one room's checkout resolves to that room.
+func TestSharedRoomUpstreamResolvesToCheckoutRoom(t *testing.T) {
+	records := setupRooms(t, "fork/project", "fork/other")
+	for _, rec := range records {
+		if err := room.DefaultStore().SetUpstream(rec.ID, "github.com/upstream/project"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upstream := repository{"github.com", "upstream/project"}
+	rec, err := roomFor(context.Background(), records[1].Repo, upstream)
+	if !errors.Is(err, errNotInRoom) || rec.ID != records[1].ID {
+		t.Fatalf("roomFor from the second checkout = %s, %v; want that room with errNotInRoom", rec.ID, err)
+	}
+}
