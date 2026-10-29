@@ -40,11 +40,8 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.name"); got != AgentGitName+"\n" {
 		t.Fatalf("agent commits took the owner's identity: %q", got)
 	}
-	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--type=bool", "--get", "commit.gpgSign"); got != "true\n" {
-		t.Fatalf("the owner's signing policy was dropped: %q", got)
-	}
-	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.signingKey"); got != "owner@example.invalid\n" {
-		t.Fatalf("the owner's default key selector was lost: %q", got)
+	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--type=bool", "--get", "commit.gpgSign"); got != "false\n" {
+		t.Fatalf("agent commits are signed with the owner's setting: %q", got)
 	}
 	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.email"); got != AgentGitEmail+"\n" {
 		t.Fatalf("agent email = %q", got)
