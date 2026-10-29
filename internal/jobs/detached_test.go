@@ -137,6 +137,7 @@ func TestIdleTimeoutIgnoresEngineClockSkew(t *testing.T) {
 		return nil
 	})
 	runner.Clock = func() time.Time { return machine.ClockFunc()().Add(24 * time.Hour) }
+	machine.OutputEveryPoll()
 	poller, stop := runner.NewPoller(t.Context())
 	defer stop()
 	spec := testSpec("skew")
