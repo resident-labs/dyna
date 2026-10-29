@@ -11,6 +11,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/mode"
+	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runsvc"
 	"dyna-agent/internal/workflowsvc"
@@ -91,14 +92,15 @@ func (s *Service) StartRun(ctx context.Context, ref string, source RunSource, in
 }
 
 // runEnv is the child environment for a run started by actor: this process's
-// environment without Dyna stamps, plus the room, plus the caller's session
-// when a session started the run, so the run stays that session's work. A
-// session caller gets subagent mode, as its own shell would pass it, so the
-// runner keeps the role that may start work.
+// environment without Dyna stamps or GitHub tokens, plus the room, plus the
+// caller's session when a session started the run, so the run stays that
+// session's work. A session caller gets subagent mode, as its own shell would
+// pass it, so the runner keeps the role that may start work.
 func runEnv(actor authority.Actor, rec room.Record) []string {
 	env := make([]string, 0, len(os.Environ())+4)
 	for _, item := range os.Environ() {
-		if !strings.HasPrefix(item, "DYNA_") {
+		key, _, _ := strings.Cut(item, "=")
+		if !strings.HasPrefix(key, "DYNA_") && !processguard.GitHubTokenName(key) {
 			env = append(env, item)
 		}
 	}
