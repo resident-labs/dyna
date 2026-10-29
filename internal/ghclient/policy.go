@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/repoid"
@@ -78,17 +79,41 @@ func (e *HeldError) Error() string {
 	return fmt.Sprintf("PR %s is held in Dyna: %s. Run dyna git pr release %s to lift the hold.", e.Ref, e.Reason, e.Ref)
 }
 
-// engineHold asks the engine for the hold on a PR. Tests replace it.
-var engineHold = func(ctx context.Context, roomID, prURL string) (*state.Hold, error) {
+// engineHold asks the engine for the hold on a PR named by URL or branch. Tests replace it.
+var engineHold = func(ctx context.Context, roomID, ref string) (*state.Hold, error) {
 	var hold *state.Hold
-	err := engineclient.New("").Call(ctx, "PRHold", []any{roomID, prURL}, &hold)
+	err := engineclient.New("").Call(ctx, "PRHold", []any{roomID, ref}, &hold)
 	return hold, err
+}
+
+// gitBranch names the branch checked out in dir. Tests replace it.
+var gitBranch = func(ctx context.Context, dir string) (string, error) {
+	out, err := childenv.Clean(exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// holdRef names the PR a gh pr ready target refers to, as a URL or a branch. A bare
+// command uses the checked-out branch, which gh also resolves to its PR.
+func holdRef(ctx context.Context, cmdDir string, r repository, target string) (string, error) {
+	if n, err := strconv.Atoi(target); err == nil {
+		return fmt.Sprintf("https://%s/%s/pull/%d", r.host, r.name, n), nil
+	}
+	if target == "" {
+		return gitBranch(ctx, cmdDir)
+	}
+	if strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "http://") {
+		return target, nil
+	}
+	if _, branch, ok := strings.Cut(target, ":"); ok {
+		return branch, nil
+	}
+	return target, nil
 }
 
 // refuseHeldReady refuses gh pr ready on a PR the engine reports as held. With no
 // engine running nothing can hold the PR, so the command runs, as engine status does.
-// A branch name or a bare gh pr ready (no number or URL) is not matched here.
-func refuseHeldReady(ctx context.Context, rec room.Record, r repository, args []string) error {
+// A bare command in a checkout with no branch is left to gh, which reports it.
+func refuseHeldReady(ctx context.Context, rec room.Record, cmdDir string, r repository, args []string) error {
 	command := commandArgs(args)
 	if len(command) < 2 || command[0] != "pr" || command[1] != "ready" || slices.Contains(command, "--undo") {
 		return nil
@@ -100,14 +125,11 @@ func refuseHeldReady(ctx context.Context, rec room.Record, r repository, args []
 			break
 		}
 	}
-	if target == "" {
+	ref, err := holdRef(ctx, cmdDir, r, target)
+	if err != nil || ref == "" {
 		return nil
 	}
-	prURL := target
-	if n, err := strconv.Atoi(target); err == nil {
-		prURL = fmt.Sprintf("https://%s/%s/pull/%d", r.host, r.name, n)
-	}
-	hold, err := engineHold(ctx, rec.ID, prURL)
+	hold, err := engineHold(ctx, rec.ID, ref)
 	if errors.Is(err, engineclient.ErrNotRunning) {
 		return nil
 	}
@@ -116,6 +138,9 @@ func refuseHeldReady(ctx context.Context, rec room.Record, r repository, args []
 	}
 	if hold == nil {
 		return nil
+	}
+	if target == "" {
+		target = ref
 	}
 	return &HeldError{Ref: target, Reason: hold.Reason}
 }
@@ -574,5 +599,5 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	if Access(ctx, rec) != ReadWrite && !isRead(args) {
 		return errReadOnly
 	}
-	return refuseHeldReady(ctx, rec, r, args)
+	return refuseHeldReady(ctx, rec, cmdDir, r, args)
 }
