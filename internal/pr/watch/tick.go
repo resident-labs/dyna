@@ -307,6 +307,9 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 		stop()
 		slog.Debug("PR watcher phase", "key", key, "phase", "unwatched", "duration", time.Since(started))
 	}
+	issueCtx, stopIssues := context.WithTimeout(ctx, s.recordBudget())
+	remember(s.pollIssueWatches(issueCtx))
+	stopIssues()
 	pollErr := errors.Join(first, ctx.Err(), s.cleanupPublicationGates())
 	// Discovery uses this poll's existing repository observation. Tracking a
 	// new PR is ancillary and cannot turn a completed poll into a failure.

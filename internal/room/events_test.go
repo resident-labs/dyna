@@ -58,7 +58,7 @@ var eventFamilyFacts = []familyFacts{
 	{Family: FamilyWorktree, Renderers: []string{"WorktreeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceSession}},
 	{Family: FamilyHook, Renderers: []string{"HookCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyIssue, Renderers: []string{"IssueCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
-	{Family: FamilyIssueWatch, Renderers: []string{"IssueWatchCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceSession}},
+	{Family: FamilyIssueWatch, Renderers: []string{"IssueWatchCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyGoal, Renderers: []string{"GoalPost"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyCheckin, Renderers: []string{"CheckinCard"}, Producers: []EventProducer{ProducerParentCheckin}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceSession}},
 	{Family: FamilyCIHealth, Renderers: []string{"SlowTestCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},

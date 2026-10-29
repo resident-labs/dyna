@@ -18,6 +18,9 @@ export type IssueChange = "filed" | "updated" | "closed" | "noted"
 // IssueState is a named string type of an event payload.
 export type IssueState = "open" | "goal" | "exported" | "closed"
 
+// IssueWatchType is a named string type of an event payload.
+export type IssueWatchType = "comment" | "closed" | "reopened"
+
 // GoalChange is a named string type of an event payload.
 export type GoalChange = "added" | "edited" | "amended" | "items_done" | "finished" | "dropped"
 
@@ -366,6 +369,19 @@ export interface ReviewEvent {
   detail?: string
 }
 
+// IssueWatchEvent is the payload of the issue-watch/comment and issue-watch/closed and issue-watch/reopened events.
+export interface IssueWatchEvent {
+  type: IssueWatchType
+  repo: string
+  number: number
+  title?: string
+  url: string
+  key: string
+  commenter?: string
+  summary: string
+  body?: string
+}
+
 // PREvent is the payload of the pr/opened and pr/ready and pr/approved and pr/changes and pr/ci-failed and pr/ci-paused and pr/ci-passed and pr/returned and pr/merged and pr/closed and pr/comment and pr/held-comment and pr/review-assigned and pr/update events.
 export interface PREvent {
   type: PRType
@@ -585,10 +601,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | JobEvent | RunEvent | TurnEvent
+export type EventPayload = MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | IssueWatchEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | JobEvent | RunEvent | TurnEvent
 
-export type EventFamily = "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "approval" | "terminal" | "shell" | "job" | "run" | "turn"
-export type EventType = "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
+export type EventFamily = "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "issue-watch" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "approval" | "terminal" | "shell" | "job" | "run" | "turn"
+export type EventType = "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "comment" | "reopened" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1006,6 +1022,36 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: false,
     audience: "room",
     text: "{location}\nHead: {head}\n\nReviewer result for {label}: {kind}.",
+  },
+  {
+    family: "issue-watch",
+    type: "comment",
+    renderer: "IssueWatchCard",
+    quiet: false,
+    wake: "root",
+    once: false,
+    audience: "room",
+    text: "{summary}\n{url}\n\n{body}",
+  },
+  {
+    family: "issue-watch",
+    type: "closed",
+    renderer: "IssueWatchCard",
+    quiet: false,
+    wake: "root",
+    once: false,
+    audience: "room",
+    text: "{summary}\n{url}",
+  },
+  {
+    family: "issue-watch",
+    type: "reopened",
+    renderer: "IssueWatchCard",
+    quiet: false,
+    wake: "root",
+    once: false,
+    audience: "room",
+    text: "{summary}\n{url}",
   },
   {
     family: "pr",
@@ -1485,6 +1531,7 @@ const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "
 const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision", "fix-requested"])
 const ISSUE_CHANGE: ReadonlySet<unknown> = new Set(["filed", "updated", "closed", "noted"])
 const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "closed"])
+const ISSUE_WATCH_TYPE: ReadonlySet<unknown> = new Set(["comment", "closed", "reopened"])
 const GOAL_CHANGE: ReadonlySet<unknown> = new Set(["added", "edited", "amended", "items_done", "finished", "dropped"])
 const GOAL_STATE: ReadonlySet<unknown> = new Set(["active", "done", "dropped"])
 const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"])
@@ -1802,6 +1849,19 @@ export function isReviewEvent(v: unknown): v is ReviewEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isIssueWatchEvent(v: unknown): v is IssueWatchEvent {
+  return isRecord(v) &&
+    ISSUE_WATCH_TYPE.has(v.type) &&
+    typeof v.repo === "string" &&
+    Number.isInteger(v.number) &&
+    (v.title === undefined || typeof v.title === "string") &&
+    typeof v.url === "string" &&
+    typeof v.key === "string" &&
+    (v.commenter === undefined || typeof v.commenter === "string") &&
+    typeof v.summary === "string" &&
+    (v.body === undefined || typeof v.body === "string")
+}
+
 export function isPREvent(v: unknown): v is PREvent {
   return isRecord(v) &&
     P_R_TYPE.has(v.type) &&
@@ -2061,6 +2121,9 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "voice-session" && type === "started") return isVoiceSessionEvent(v)
   if (family === "voice-session" && type === "ended") return isVoiceSessionEvent(v)
   if (family === "review" && type === "result") return isReviewEvent(v)
+  if (family === "issue-watch" && type === "comment") return isIssueWatchEvent(v)
+  if (family === "issue-watch" && type === "closed") return isIssueWatchEvent(v)
+  if (family === "issue-watch" && type === "reopened") return isIssueWatchEvent(v)
   if (family === "pr" && type === "opened") return isPREvent(v)
   if (family === "pr" && type === "ready") return isPREvent(v)
   if (family === "pr" && type === "approved") return isPREvent(v)
