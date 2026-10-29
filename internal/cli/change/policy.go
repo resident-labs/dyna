@@ -15,7 +15,7 @@ func policyCommand(o Options, roomFor func(*watch.Service, string) (string, erro
 	room := c.Flags().String("room", "", "room name or ID (default: current room)")
 	reviewers := c.Flags().StringSlice("reviewers", nil, "exact session IDs allowed to review without a pool assignment (room policy only; empty clears)")
 	budgetMode := c.Flags().String("ci-time-budget", "", "enforce or warn (room policy only)")
-	github := c.Flags().String("github", "", "read-only or read-write (room owner only)")
+	github := c.Flags().String("github", "", "read-only or read-write (owner or root only)")
 	var change watch.PolicyOverride
 	c.Flags().StringVar(&change.Review, "review", "", "on or off")
 	c.Flags().StringSliceVar(&change.RequiredChecks, "required-checks", nil, "required GitHub check names, comma-separated (empty clears the list)")

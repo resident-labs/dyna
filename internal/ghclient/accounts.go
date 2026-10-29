@@ -14,6 +14,7 @@ import (
 
 	"dyna-agent/internal/boundedio"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/room"
 )
 
 type repositoryContextKey struct{}
@@ -289,13 +290,40 @@ func accountKey(cmd *exec.Cmd, r repository) string {
 	return cmd.Path + "\n" + config + strings.ToLower(r.host+"/"+r.name)
 }
 
+func accountProofKey(ctx context.Context, cmd *exec.Cmd, r repository, rec room.Record, write bool) string {
+	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
+	// Read and write proofs can select different accounts and must not share.
+	if write {
+		return key + ":write"
+	}
+	return key + ":read"
+}
+
 func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, string, error) {
 	rec, err := roomFor(ctx, cmd.Dir, r)
 	if err != nil {
 		return "", "", err
 	}
+	return selectAccountForRoom(ctx, cmd, r, rec, Access(ctx, rec) == ReadWrite)
+}
+
+// selectAccountAfterPolicy uses the room that checkPolicy just admitted. A
+// fork parent needs only read access, even though the acting room is read-write.
+func selectAccountAfterPolicy(ctx context.Context, cmd *exec.Cmd, r repository) (string, string, error) {
+	rec, err := roomFor(ctx, cmd.Dir, r)
 	write := Access(ctx, rec) == ReadWrite
-	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
+	if errors.Is(err, errNotInRoom) && write {
+		err = nil
+		write = false
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return selectAccountForRoom(ctx, cmd, r, rec, write)
+}
+
+func selectAccountForRoom(ctx context.Context, cmd *exec.Cmd, r repository, rec room.Record, write bool) (string, string, error) {
+	key := accountProofKey(ctx, cmd, r, rec, write)
 	config := ghConfigFingerprint(cmd)
 	accounts.Lock()
 	inMemory, haveMemory := accounts.choices[key]
@@ -627,7 +655,7 @@ func Account(ctx context.Context, executable, dir string, args ...string) string
 	if err != nil {
 		return ""
 	}
-	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
+	key := accountProofKey(ctx, cmd, r, rec, Access(ctx, rec) == ReadWrite)
 	config := ghConfigFingerprint(cmd)
 	accounts.Lock()
 	defer accounts.Unlock()

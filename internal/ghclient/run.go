@@ -50,7 +50,7 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 	token, login := "", ""
 	if r.name != "" {
 		var err error
-		login, token, err = selectAccount(ctx, cmd, r)
+		login, token, err = selectAccountAfterPolicy(ctx, cmd, r)
 		if err != nil {
 			return err
 		}
