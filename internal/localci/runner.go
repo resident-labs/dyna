@@ -76,6 +76,10 @@ type Request struct {
 	// "push" and names Branch in the payload.
 	Event  string
 	Branch string
+	// Source says what this run tests, so the node's queue words each check
+	// it admits instead of reading its ID. A zero kind sends no source, and
+	// the runner adds the short commit it resolved.
+	Source jobs.CheckSource
 }
 
 // Outcome is how one local CI check or a whole run ended. A check that could
