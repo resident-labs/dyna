@@ -324,6 +324,10 @@ type ExecutionOptions struct {
 	// preparation, so generated configuration cannot widen those permissions.
 	ConstrainProfile func(profile.Profile) (profile.Profile, error)
 
+	// ProbeHeldAccount runs the health probe on the account whose stated usage
+	// hold ends first, so a successful probe clears that hold.
+	ProbeHeldAccount bool
+
 	// SkipComputer prevents provisioning a desktop for a managed service turn.
 	SkipComputer bool
 	// HealthProbe leaves health persistence to the caller after probe validation.
@@ -527,7 +531,14 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 	accountID := ""
 	// A ProcessRunner replaces the process, so no private copy is needed.
 	if p.DynaManaged() && exec.ProcessRunner == nil {
-		withRepo, err := harnessruntime.New().SelectAccount(ctx, p, cwd)
+		rt := harnessruntime.New()
+		var withRepo profile.Profile
+		var err error
+		if exec.ProbeHeldAccount {
+			withRepo, err = rt.SelectProbeAccount(ctx, p, cwd)
+		} else {
+			withRepo, err = rt.SelectAccount(ctx, p, cwd)
+		}
 		if err != nil {
 			return Result{}, notReady(ctx, p, err)
 		}
