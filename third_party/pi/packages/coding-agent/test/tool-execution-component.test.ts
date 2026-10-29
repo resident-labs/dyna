@@ -674,6 +674,8 @@ describe("ToolExecutionComponent parity", () => {
 		},
 	] as const) {
 		test(`renders ${scenario.title} read results compactly until expanded`, () => {
+			// Absolute paths can exceed the default width in deep worktrees.
+			const renderWidth = Math.max(120, scenario.compact.length + 40);
 			const component = new ToolExecutionComponent(
 				"read",
 				`tool-compact-${scenario.title}`,
@@ -688,7 +690,7 @@ describe("ToolExecutionComponent parity", () => {
 				false,
 			);
 
-			const collapsed = stripAnsi(component.render(120).join("\n"));
+			const collapsed = stripAnsi(component.render(renderWidth).join("\n"));
 			expect(collapsed).toContain(scenario.compact);
 			expect(collapsed).not.toContain(scenario.hidden);
 			if (scenario.absent) {
@@ -696,7 +698,7 @@ describe("ToolExecutionComponent parity", () => {
 			}
 
 			component.setExpanded(true);
-			const expanded = stripAnsi(component.render(120).join("\n"));
+			const expanded = stripAnsi(component.render(renderWidth).join("\n"));
 			expect(expanded).toContain(scenario.hidden);
 		});
 	}

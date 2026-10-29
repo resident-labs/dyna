@@ -1,8 +1,10 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { join, sep } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../src/core/trust-manager.ts";
+
+vi.mock("node:fs", { spy: true });
 
 describe("ProjectTrustStore", () => {
 	let tempDir: string;
@@ -18,6 +20,7 @@ describe("ProjectTrustStore", () => {
 	});
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
@@ -36,7 +39,21 @@ describe("ProjectTrustStore", () => {
 		expect(store.get(childDir)).toBe(true);
 	});
 
-	it("detects trust-requiring project resources", () => {
+	it("detects trust-requiring project resources", async () => {
+		const { existsSync: hostExistsSync } = await vi.importActual<typeof import("node:fs")>("node:fs");
+		const existsSyncMock = vi.mocked(existsSync);
+		existsSyncMock.mockImplementation((path) => {
+			// Ignore host skills above the temporary root; this test supplies every project resource.
+			if (
+				typeof path === "string" &&
+				path.endsWith(join(".agents", "skills")) &&
+				!path.startsWith(`${tempDir}${sep}`)
+			) {
+				return false;
+			}
+			return hostExistsSync(path);
+		});
+
 		const originalHome = process.env.HOME;
 		process.env.HOME = tempDir;
 		try {

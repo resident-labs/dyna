@@ -252,6 +252,8 @@ Content`,
 				symlinkSync(sharedPromptsDir, join(tempDir, ".pi", "prompts"), "dir");
 				symlinkSync(sharedThemesDir, join(tempDir, ".pi", "themes"), "dir");
 
+				// Keep ancestor skill discovery inside the temporary root.
+				mkdirSync(join(tempDir, ".git"));
 				const result = await packageManager.resolve();
 
 				expect({
@@ -2015,6 +2017,8 @@ Content`,
 				{ source: relative(join(tempDir, ".pi"), pkgDir), autoload: false, extensions: ["+extensions/foo.ts"] },
 			]);
 
+			// Keep ancestor skill discovery inside the temporary root.
+			mkdirSync(join(tempDir, ".git"));
 			const result = await packageManager.resolve();
 
 			expect(result.extensions.map((resource) => resource.path)).toEqual([join(pkgDir, "extensions", "foo.ts")]);
