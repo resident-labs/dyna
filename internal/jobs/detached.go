@@ -535,6 +535,10 @@ func (p *Poller) drain(ctx context.Context, w *watch) {
 
 // drainIdle copies every log chunk left after an idle stop. The regular poll
 // bounds each reply, so one last chunk is not enough when the engine was behind.
+// A stopped unit can also flush its final output after the stop was confirmed,
+// so an empty poll of a still-running unit means "not settled yet", not "done":
+// the drain ends when the unit has left the running state and its whole log has
+// arrived, or when StopTimeout bounds the wait.
 func (p *Poller) drainIdle(ctx context.Context, w *watch) {
 	last, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopTimeout)
 	defer cancel()
@@ -549,7 +553,10 @@ func (p *Poller) drainIdle(ctx context.Context, w *watch) {
 		}
 		n, writeErr := w.out.Write(frame.Payload)
 		w.offset += int64(n)
-		if writeErr != nil || n != len(frame.Payload) || len(frame.Payload) == 0 || w.offset >= frame.Size {
+		if writeErr != nil || n != len(frame.Payload) {
+			return
+		}
+		if frame.Unit != UnitRunning && w.offset >= frame.Size {
 			return
 		}
 	}
