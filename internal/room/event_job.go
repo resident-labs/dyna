@@ -29,9 +29,11 @@ type JobEvent struct {
 	// Label is the job's command, as one short line.
 	Label string   `json:"label"`
 	State JobState `json:"state"`
-	// ExitCode is the command's exit status, -1 when a stop ended the job
-	// before it finished. A queued job has none.
-	ExitCode int `json:"exitCode,omitempty"`
+	// ExitCode is the command's exit status. It is absent when the command did
+	// not exit, including a cancellation, timeout, loss, queue or start.
+	ExitCode *int `json:"exitCode,omitempty"`
+	// Outcome says how a finished job ended, with its exit code or stop cause.
+	Outcome string `json:"outcome,omitempty"`
 	// WaitReason is why a queued job has not started, as the node's queue
 	// words it.
 	WaitReason string `json:"waitReason,omitempty"`

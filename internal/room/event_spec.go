@@ -859,7 +859,7 @@ var eventSpecs = []EventSpec{
 		RootOnOwnerReport: true,
 		Audience:          AudienceSession,
 		Blocks:            []string{"detail"},
-		Text:              "Job {label} on {node} {state} with exit code {exitCode}.",
+		Text:              "Job {label} on {node} {outcome}.",
 		Producers:         []EventProducer{ProducerJobs},
 	},
 	// A workflow run result is the parent's work too, and stays out of the
