@@ -57,7 +57,7 @@ func TestRunStepSkipsStepsAfterExternalCancel(t *testing.T) {
 }
 
 // A removal needs its repository scanned first, so the worktree step must not
-// stop at the per-step share. It still ends at the pass deadline.
+// stop at the per-step share. It still leaves stepShare for the later steps.
 func TestWorktreeCleanupIsNotCutAtTheStepShare(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -74,8 +74,8 @@ func TestWorktreeCleanupIsNotCutAtTheStepShare(t *testing.T) {
 	if _, err := Run(context.Background(), Options{Repos: []string{"repo"}}); err != nil {
 		t.Fatal(err)
 	}
-	if left <= stepShare {
-		t.Fatalf("worktree cleanup had %v left, want more than the %v step share", left, stepShare)
+	if left <= stepShare || left > runTimeout-stepShare {
+		t.Fatalf("worktree cleanup had %v left, want more than %v and at most %v so later steps keep %v", left, stepShare, runTimeout-stepShare, stepShare)
 	}
 }
 

@@ -36,6 +36,10 @@ const runTimeout = 2 * time.Minute
 // so the steps after it still run. The pass deadline still bounds the whole run.
 const stepShare = 30 * time.Second
 
+// worktreeShare caps the worktree cleanup. The rest of the pass stays with the
+// later steps, so a slow repository cannot starve them.
+const worktreeShare = runTimeout - stepShare
+
 // gcWorktrees is worktrees.GC; tests replace it to simulate a slow repository.
 var gcWorktrees = worktrees.GC
 
@@ -105,8 +109,9 @@ func CleanBranch(ctx context.Context, repos []string, branch string) (Result, er
 
 // Run collects worktrees before cleaning scratch files. The total pass is bounded.
 // One pass runs at a time, so the schedule and a by-hand run never overlap.
-// Every step runs under its own share (stepShare). A step that overruns stops at
-// its share. Steps do not start after the pass deadline or the caller's context
+// Every step runs under its own share (stepShare), except the worktree cleanup,
+// which runs under worktreeShare. A step that overruns
+// stops at its share. Steps do not start after the pass deadline or the caller's context
 // ends, so a canceled pass removes nothing further.
 func Run(ctx context.Context, options ...Options) (Result, error) {
 	select {
@@ -198,11 +203,12 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	}
 	// Each pass starts the worktree cleanup at the next repository, so a slow
 	// repository cannot hold back the others on every pass. The turn is stored,
-	// because each hook run is a new process. This step takes the pass deadline,
-	// not stepShare: a removal needs its repository fetched and scanned first, and
-	// a cap that stops the scan would stop every removal. Trees left unfinished
-	// at the deadline are kept and marked deferred, so the next pass retries them.
-	errs = append(errs, runStep(ctx, &result, "worktrees", runTimeout, func(ctx context.Context) error {
+	// because each hook run is a new process. The cleanup runs
+	// within worktreeShare, which leaves stepShare for the later steps. A removal
+	// needs its repository fetched and scanned first, so a shorter cap would stop
+	// every removal. Trees left unfinished at that point are kept and marked
+	// deferred, so the next pass retries them.
+	errs = append(errs, runStep(ctx, &result, "worktrees", worktreeShare, func(ctx context.Context) error {
 		turn, err := nextWorktreeTurn(ctx, store.DataDir())
 		if err != nil {
 			return err
