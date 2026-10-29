@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -125,6 +126,26 @@ func TestDetachedCheckReportsItsExitStatus(t *testing.T) {
 	}
 }
 
+// Idle elapsed time comes from the node, so a skewed engine clock cannot
+// stop an active job before its first node-side idle deadline.
+func TestIdleTimeoutIgnoresEngineClockSkew(t *testing.T) {
+	var machine *jobstest.Fake
+	runner, machine := remoteRunner(t, func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, _ string, _ ...string) error {
+		for machine.PollCount() < 2 {
+			runtime.Gosched()
+		}
+		return nil
+	})
+	runner.Clock = func() time.Time { return machine.ClockFunc()().Add(24 * time.Hour) }
+	poller, stop := runner.NewPoller(t.Context())
+	defer stop()
+	spec := testSpec("skew")
+	spec.Idle = 5 * time.Second
+	if err := poller.Run(t.Context(), spec, io.Discard); err != nil {
+		t.Fatalf("engine clock skew ended the active job: %v", err)
+	}
+}
+
 // Cancelling a run stops the unit on the node, but an engine stop leaves it
 // running: the restarted engine reattaches.
 func TestDetachedCancelStopsTheUnitButEngineStopDoesNot(t *testing.T) {
@@ -184,7 +205,7 @@ func TestOnePollCoversEveryCheck(t *testing.T) {
 
 // A poll reply that ends inside a log is dropped whole, and the offset stays.
 func TestPollReplyCutShortAdvancesNothing(t *testing.T) {
-	if _, err := ParsePoll(strings.NewReader("DYNA_DETACH dir=/d state=running code= size=10 mtime=1000 bytes=10\nhalf")); err == nil {
+	if _, err := ParsePoll(strings.NewReader("DYNA_DETACH dir=/d state=running code= size=10 quiet_s=10 bytes=10\nhalf")); err == nil {
 		t.Fatal("a cut reply was accepted")
 	}
 }
