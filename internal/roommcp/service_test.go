@@ -199,6 +199,8 @@ func TestManagementAuthority(t *testing.T) {
 		{"root attaches", f.svc.Attach(root, f.room.ID, "board")},
 		{"root allows", f.svc.Allow(root, f.room.ID, "board", []string{"claim_issue"}, false)},
 		{"root removes", f.svc.Remove(root, f.room.ID, "board")},
+		{"root adds block term", f.svc.BlockTerm(root, f.room.ID, "board", "term", false)},
+		{"root allows login", f.svc.AllowLogin(root, f.room.ID, "board", "login", false)},
 		{"session detaches", f.svc.Detach(session, f.room.ID, "board")},
 		{"session grants", f.svc.Grant(session, f.room.ID, "board", GrantSession, "ses_b", false)},
 		{"root in another room detaches", f.svc.Detach(crossRoom, f.room.ID, "board")},
