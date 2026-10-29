@@ -208,19 +208,9 @@ func (s *Service) runs() []runEntry {
 	}
 	var out []runEntry
 	for _, id := range live {
-		ent, ok := s.runIdx.entries[id]
-		if !ok {
-			// A run back from the archive keeps its row's revision, and a
-			// starting run has no row yet.
-			m, err := runstore.ReadMeta(id)
-			if err != nil {
-				continue
-			}
-			ent = runEntry{rev: s.runIdx.rev, meta: m, room: s.runRoom(m)}
-			s.runIdx.entries[id] = ent
-			s.runIdx.touch(ent.room)
+		if ent, ok := s.runIdx.entries[id]; ok {
+			out = append(out, ent)
 		}
-		out = append(out, ent)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].meta.StartedAt.After(out[j].meta.StartedAt) })
 	return out
@@ -255,6 +245,20 @@ func (s *Service) syncRunsLocked() ([]string, error) {
 			s.runIdx.touch(ent.room)
 			delete(s.runIdx.entries, id)
 		}
+	}
+	for _, id := range c.Live {
+		if _, ok := s.runIdx.entries[id]; ok {
+			continue
+		}
+		// A run back from the archive keeps its row's revision, and a
+		// starting run has no row yet, so its meta comes from the folder.
+		m, err := runstore.ReadMeta(id)
+		if err != nil {
+			continue
+		}
+		room := s.runRoom(m)
+		s.runIdx.touch(room)
+		s.runIdx.entries[id] = runEntry{rev: c.Rev, meta: m, room: room}
 	}
 	return c.Live, nil
 }
