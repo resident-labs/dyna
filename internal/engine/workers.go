@@ -401,7 +401,7 @@ func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *w
 			// same switch.
 			var checkins error
 			if len(ids) > 0 || resumed {
-				_, _, checkins = RunParentCheckIns(ctx, rooms)
+				_, _, checkins = RunParentCheckIns(ctx, rooms, ids)
 			}
 			ran, next, err := spool.Drain(ctx, time.Now())
 			if sweep {
