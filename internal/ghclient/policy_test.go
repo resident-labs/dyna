@@ -380,9 +380,10 @@ func TestForkCheckoutPRCreateNeedsExplicitRepo(t *testing.T) {
 		t.Fatalf("implicit pr create = %v; want a refusal naming both repositories", err)
 	}
 	// A flag value that looks like --repo does not name the repository.
-	err = checkPolicy(ctx, records[0].Repo, own, []string{"pr", "create", "--title", "--repo=other/repo", "--fill"})
-	if err == nil {
-		t.Fatal("a title that looks like --repo bypassed the refusal")
+	for _, flag := range []string{"--title", "--attach"} {
+		if err := checkPolicy(ctx, records[0].Repo, own, []string{"pr", "create", flag, "--repo=other/repo", "--fill"}); err == nil {
+			t.Fatalf("a %s value that looks like --repo bypassed the refusal", flag)
+		}
 	}
 	// An empty working directory resolves to the process directory, and an extra
 	// checkout without an upstream is no fork.
