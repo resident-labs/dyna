@@ -247,6 +247,7 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 			return nil, fmt.Errorf("reattach to the run of %s on %s: %w", sha[:12], r.Node.Name, err)
 		}
 		launched := attachment{RunID: att.RunID}
+		var missing []string
 		for _, spec := range specs {
 			switch frames[spec.Dir].Unit {
 			case jobs.UnitRunning, jobs.UnitExited:
@@ -254,10 +255,22 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 			default:
 				// Gone without an exit record: the run cannot be followed. A check
 				// without a folder was never launched and is simply not attached.
-				stale = stale || frames[spec.Dir].Unit != jobs.UnitMissing
+				if frames[spec.Dir].Unit == jobs.UnitMissing {
+					missing = append(missing, spec.ID)
+				} else {
+					stale = true
+				}
 			}
 		}
 		stale = stale || len(launched.Checks) == 0
+		if !stale {
+			for _, id := range missing {
+				if err := r.queue().Release(ctx, r.Node.Name, att.RunID+"-"+id); err != nil {
+					giveBack()
+					return nil, fmt.Errorf("release unlaunched check %s: %w", id, err)
+				}
+			}
+		}
 		att = launched
 	}
 	if !stale {
@@ -284,6 +297,13 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 	if e := r.nodeCommand(ctx, &out, &out, removeRunDir(base, path.Join(runDir, ".active"))); e != nil {
 		giveBack()
 		return nil, fmt.Errorf("remove the old run on %s: %w: %s", r.Node.Name, e, out.String())
+	}
+	// Teardown stopped every old check, so their ports and capacity are free.
+	for _, spec := range specs {
+		if err := r.queue().Release(ctx, r.Node.Name, att.RunID+"-"+spec.ID); err != nil {
+			giveBack()
+			return nil, fmt.Errorf("release stopped check %s: %w", spec.ID, err)
+		}
 	}
 	if err := store.deleteAttachment(ctx, repo, sha, r.Node.Name, att.RunID); err != nil {
 		log.Printf("local CI %s: forget started checks: %v", r.Node.Name, err)
