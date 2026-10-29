@@ -2,20 +2,53 @@ package ghclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"time"
+
+	"dyna-agent/internal/approvals"
+	"dyna-agent/internal/engineclient"
 )
 
-// SessionCommand runs the gh multicall guard through the shared room policy.
+var requestApproval = func(ctx context.Context, in approvals.RequestInput) (approvals.Request, error) {
+	var request approvals.Request
+	err := engineclient.New("", engineclient.Notices(nil)).Call(ctx, "ApprovalRequest", []any{in}, &request)
+	return request, err
+}
+
+var waitApproval = func(ctx context.Context, room, id string, timeout time.Duration) (approvals.Request, error) {
+	var request approvals.Request
+	err := engineclient.New("", engineclient.Notices(nil)).Call(ctx, "ApprovalWait", []any{room, id, timeout}, &request)
+	return request, err
+}
+
+type sessionExitError struct {
+	code    int
+	message string
+}
+
+func (e *sessionExitError) Error() string { return e.message }
+
+// SessionExitCode preserves gh's result and uses EX_TEMPFAIL for a held write.
+func SessionExitCode(err error) int {
+	var held *sessionExitError
+	if errors.As(err, &held) {
+		return held.code
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return 1
+}
+
+// SessionCommand runs reads directly and holds every worker write for approval.
 func SessionCommand(ctx context.Context, args []string) error {
 	mode := GuardMode(os.Getenv(ReadOnlyEnv))
-	switch mode {
-	case GuardReadOnly:
-	case GuardWorker:
-		if err := checkWorkerPolicy(args); err != nil {
-			return err
-		}
-	default:
+	if mode != GuardReadOnly && mode != GuardWorker {
 		return fmt.Errorf("invalid GitHub guard mode")
 	}
 	binary := os.Getenv(BinaryEnv)
@@ -26,11 +59,57 @@ func SessionCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if ref := os.Getenv("DYNA_ROOM_ID"); ref != "" {
-		ctx = WithRoom(ctx, ref)
+	roomID := os.Getenv("DYNA_ROOM_ID")
+	if roomID != "" {
+		ctx = WithRoom(ctx, roomID)
 	}
 	ctx = WithAgentText(ctx)
 	cmd := Command(ctx, binary, dir, args...)
+	if mode == GuardWorker && Classify(ctx, args, ClassifyInput{}) != approvals.ClassRead {
+		return sessionApproval(ctx, cmd, roomID, args)
+	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return Run(ctx, cmd)
+}
+
+func sessionApproval(ctx context.Context, cmd *exec.Cmd, roomID string, args []string) error {
+	files, err := SnapshotFiles(args, cmd.Dir, os.Stdin)
+	if err != nil {
+		return err
+	}
+	repository := repositoryFor(ctx, cmd)
+	request, err := requestApproval(ctx, approvals.RequestInput{Argv: args, Cwd: cmd.Dir, Repo: repository.name, Files: files})
+	if err != nil {
+		return err
+	}
+	result, err := waitApproval(ctx, roomID, request.ID, 0)
+	if err != nil {
+		return err
+	}
+	return approvalResult(result, os.Stdout)
+}
+
+func approvalResult(request approvals.Request, stdout io.Writer) error {
+	result := request.Result
+	switch request.State {
+	case approvals.StateDone, approvals.StateFailed:
+		if result != nil {
+			for _, line := range result.Output {
+				fmt.Fprintln(stdout, line)
+			}
+			code := 1
+			if result.ExitCode != nil {
+				code = *result.ExitCode
+			}
+			if code != 0 || request.State == approvals.StateFailed {
+				return &sessionExitError{code: code, message: result.Reason}
+			}
+			return nil
+		}
+	case approvals.StateDenied:
+		return fmt.Errorf("GitHub write denied by %s: %s (%s)", result.Actor, result.Reason, request.ID)
+	case approvals.StateExpired, approvals.StateCancelled:
+		return fmt.Errorf("GitHub write %s (%s): %s", request.State, request.ID, result.Reason)
+	}
+	return &sessionExitError{code: 75, message: fmt.Sprintf("GitHub write held for approval as %s (waiting on %s). You will be woken with the result; do not retry.", request.ID, request.At)}
 }

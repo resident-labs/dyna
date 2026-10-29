@@ -84,8 +84,10 @@ func main() {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		if err := ghclient.SessionCommand(ctx, os.Args[1:]); err != nil {
-			fmt.Fprintln(os.Stderr, "gh:", err)
-			os.Exit(1)
+			if err.Error() != "" {
+				fmt.Fprintln(os.Stderr, "gh:", err)
+			}
+			os.Exit(ghclient.SessionExitCode(err))
 		}
 		return
 	}
