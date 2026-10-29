@@ -42,7 +42,8 @@ func TestCallCanceledByEngineStopAnswers503WithCode(t *testing.T) {
 // the plain line and no code.
 func TestLateWriteReplyCarriesOutcomeUnknownCode(t *testing.T) {
 	old := deadline
-	deadline = func(string) time.Duration { return 10 * time.Millisecond }
+	// A zero deadline is already past, so the call ends late with no real wait.
+	deadline = func(string) time.Duration { return 0 }
 	t.Cleanup(func() { deadline = old })
 	stall := func(ctx context.Context) error {
 		<-ctx.Done()
@@ -60,12 +61,12 @@ func TestLateWriteReplyCarriesOutcomeUnknownCode(t *testing.T) {
 	e.srv.o.CallScopes = map[string]Scope{"RemoveRule": ScopeRead, "Slow": ScopeRead}
 	var write callErrorResponse
 	response := e.do(asCaller(e.srv.UnixHandler(), owner), req{url: "http://engine/api/RemoveRule", body: "[]"})
-	if err := json.Unmarshal(response.Body.Bytes(), &write); err != nil || response.Code != http.StatusUnprocessableEntity || write.Code != callspec.CodeOutcomeUnknown || !strings.HasPrefix(write.Error, "outcome unknown: engine did not answer RemoveRule in 0.01 s") {
+	if err := json.Unmarshal(response.Body.Bytes(), &write); err != nil || response.Code != http.StatusUnprocessableEntity || write.Code != callspec.CodeOutcomeUnknown || !strings.HasPrefix(write.Error, "outcome unknown: engine did not answer RemoveRule in 0 s") {
 		t.Fatalf("late write = %d %+v, %v", response.Code, write, err)
 	}
 	var read callErrorResponse
 	response = e.do(asCaller(e.srv.UnixHandler(), owner), req{url: "http://engine/api/Slow", body: "[]"})
-	if err := json.Unmarshal(response.Body.Bytes(), &read); err != nil || response.Code != http.StatusUnprocessableEntity || read.Code != "" || read.Error != "engine did not answer Slow in 0.01 s" {
+	if err := json.Unmarshal(response.Body.Bytes(), &read); err != nil || response.Code != http.StatusUnprocessableEntity || read.Code != "" || read.Error != "engine did not answer Slow in 0 s" {
 		t.Fatalf("late read = %d %+v, %v", response.Code, read, err)
 	}
 }
