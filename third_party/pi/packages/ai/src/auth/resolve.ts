@@ -21,6 +21,8 @@ export interface AuthResolutionOverrides {
 	env?: ProviderEnv;
 	/** Require this much remaining OAuth-token validity; defaults to five minutes. */
 	minOAuthValidityMs?: number;
+	/** Refresh a stored OAuth credential even when its access token remains valid. */
+	forceOAuthRefresh?: boolean;
 	signal?: AbortSignal;
 }
 
@@ -77,6 +79,7 @@ async function resolveProviderAuthWithSignal(
 				stored,
 				signal,
 				overrides?.minOAuthValidityMs,
+				overrides?.forceOAuthRefresh,
 			);
 		}
 		if (stored.type === "api_key" && provider.auth.apiKey) {
@@ -165,14 +168,16 @@ async function resolveStoredOAuth(
 	stored: OAuthCredential,
 	signal: AbortSignal,
 	minOAuthValidityMs?: number,
+	forceRefresh = false,
 ): Promise<AuthResult | undefined> {
 	const minimumValidityMs = Math.max(DEFAULT_OAUTH_MINIMUM_VALIDITY_MS, minOAuthValidityMs ?? 0);
 	const expiresSoon = (credential: OAuthCredential) => Date.now() + minimumValidityMs >= credential.expires;
+	const needsRefresh = (credential: OAuthCredential) => forceRefresh || expiresSoon(credential);
 	let credential = stored;
 
-	if (expiresSoon(credential)) {
-		// Optimistic check said expired; the authoritative check runs under the lock.
-		const post = await refreshStoredOAuthCredential(credentials, providerId, oauth, expiresSoon, signal);
+	if (needsRefresh(credential)) {
+		// The authoritative check runs under the lock, even when this caller forces a refresh.
+		const post = await refreshStoredOAuthCredential(credentials, providerId, oauth, needsRefresh, signal);
 		if (!post) return undefined; // logged out meanwhile
 		credential = post;
 		// The normal five-minute window triggers a refresh but does not impose a
