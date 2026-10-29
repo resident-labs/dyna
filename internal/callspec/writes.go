@@ -6,9 +6,7 @@ package callspec
 // WriteTimeout and to report a late write as an unknown outcome.
 var WriteCalls = map[string]bool{
 	"RoomMCPAllow":                true,
-	"RoomMCPAllowLogin":           true,
 	"RoomMCPAttach":               true,
-	"RoomMCPBlockTerm":            true,
 	"RoomMCPDetach":               true,
 	"RoomMCPGrant":                true,
 	"RoomMCPRemove":               true,

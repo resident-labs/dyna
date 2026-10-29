@@ -494,8 +494,6 @@ func bindings(s services) []websvc.Binding {
 		{Name: "RoomMCPRemove", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Remove},
 		{Name: "RoomMCPAttach", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Attach},
 		{Name: "RoomMCPAllow", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Allow},
-		{Name: "RoomMCPBlockTerm", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.BlockTerm},
-		{Name: "RoomMCPAllowLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.AllowLogin},
 		// Root may detach, list tools and grant read. The service checks the caller's room and role.
 		{Name: "RoomMCPDetach", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Detach},
 		{Name: "RoomMCPTools", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Tools},

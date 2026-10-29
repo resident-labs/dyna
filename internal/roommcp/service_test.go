@@ -28,6 +28,8 @@ type fakeServer struct {
 	methods  []string
 	auth     []string
 	callBody func(w http.ResponseWriter, params json.RawMessage)
+	// failInitialize is how many initialize requests still answer HTTP 500.
+	failInitialize int
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
@@ -43,7 +45,15 @@ func newFakeServer(t *testing.T) *fakeServer {
 		f.mu.Lock()
 		f.methods = append(f.methods, req.Method)
 		f.auth = append(f.auth, r.Header.Get("Authorization"))
+		failing := req.Method == "initialize" && f.failInitialize > 0
+		if failing {
+			f.failInitialize--
+		}
 		f.mu.Unlock()
+		if failing {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if req.ID == nil {
 			w.WriteHeader(http.StatusAccepted)
 			return
@@ -189,8 +199,6 @@ func TestManagementAuthority(t *testing.T) {
 		{"root attaches", f.svc.Attach(root, f.room.ID, "board")},
 		{"root allows", f.svc.Allow(root, f.room.ID, "board", []string{"claim_issue"}, false)},
 		{"root removes", f.svc.Remove(root, f.room.ID, "board")},
-		{"root adds block term", f.svc.BlockTerm(root, f.room.ID, "board", "term", false)},
-		{"root allows login", f.svc.AllowLogin(root, f.room.ID, "board", "login", false)},
 		{"session detaches", f.svc.Detach(session, f.room.ID, "board")},
 		{"session grants", f.svc.Grant(session, f.room.ID, "board", GrantSession, "ses_b", false)},
 		{"root in another room detaches", f.svc.Detach(crossRoom, f.room.ID, "board")},
@@ -437,5 +445,64 @@ func TestTokenStaysOutOfDatabaseAndRoomFiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestRacingCallCannotReopenADetachedServer(t *testing.T) {
+	f := newFixture(t)
+	f.ready(t)
+	// An engine restart leaves no live connection. A call that read attached=1
+	// just before Detach commits then reaches connection after the detach.
+	f.svc.drop(serverKey{f.room.ID, "board"})
+	if err := f.svc.Detach(owner, f.room.ID, "board"); err != nil {
+		t.Fatal(err)
+	}
+	before := len(f.server.methods)
+	if _, err := f.svc.connection(context.Background(), f.room.ID, "board"); err == nil || !strings.Contains(err.Error(), "detached") {
+		t.Fatalf("connection after detach: %v", err)
+	}
+	if len(f.server.methods) != before {
+		t.Fatal("a request reached the server after detach")
+	}
+}
+
+func TestFailedHandshakeDoesNotStickToTheConnection(t *testing.T) {
+	f := newFixture(t)
+	f.ready(t)
+	f.svc.drop(serverKey{f.room.ID, "board"})
+	f.server.failInitialize = 1
+	session := f.as(authority.Session, "ses_a", f.room)
+	if _, err := f.svc.Call(session, "board", "list_issues", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("the first call should fail with the server's 500")
+	}
+	if out, err := f.svc.Call(session, "board", "list_issues", json.RawMessage(`{}`)); err != nil || !strings.Contains(out, "issue 1") {
+		t.Fatalf("the next call should reconnect: %q, %v", out, err)
+	}
+}
+
+func TestNewURLResetsToolsAndGrants(t *testing.T) {
+	f := newFixture(t)
+	f.ready(t)
+	elsewhere := newFakeServer(t)
+	if err := f.svc.SetToken(owner, f.room.ID, "board", elsewhere.URL, fixtureToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Attach(owner, f.room.ID, "board"); err != nil {
+		t.Fatal(err)
+	}
+	tools, err := f.svc.Tools(owner, f.room.ID, "board", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools {
+		if tool.Allowed {
+			t.Fatalf("%s stayed allowed for the new URL", tool.Name)
+		}
+	}
+	if _, err := f.svc.Call(f.as(authority.Session, "ses_a", f.room), "board", "list_issues", json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not granted") {
+		t.Fatalf("the old grant survived the new URL: %v", err)
+	}
+	if len(elsewhere.methods) == 0 || f.server.count("tools/call") != 0 {
+		t.Fatal("unexpected traffic")
 	}
 }
