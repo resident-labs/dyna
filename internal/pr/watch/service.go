@@ -169,11 +169,11 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	rec := Record{PolicyOverride: override, Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(), Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: author.Dir, LookupDir: lookupDir, Head: snap.Pull.Head.SHA, State: state.PROpen, Watching: true, Created: s.now(), HeadSeen: s.now(), HeadVerifiedAt: s.now(), Seen: map[string]string{}}
 	rec.Kind = "github"
 	rec.ChangeID = rec.Key
+	rec.HeadRepo = snap.Pull.Head.Repo.FullName
 	rec.RepoPath = matchingCheckout(ctx, rec, lookupDir)
 	rec.BaseRef = snap.Pull.Base.Ref
 	rec.IsDraft = snap.Pull.Draft
 	rec.Branch, rec.Base = snap.Pull.Head.Ref, snap.Pull.Base.SHA
-	rec.HeadRepo = snap.Pull.Head.Repo.FullName
 	if rec.Base == "" {
 		rec.Base = snap.Pull.Base.Ref
 	}
