@@ -189,6 +189,16 @@ func TestMachineEditContainerRegistrations(t *testing.T) {
 	if out, err := run(t, "show", "build"); err != nil || !strings.Contains(out, "/srv/data:ro") || !strings.Contains(out, "/dev/dri") {
 		t.Fatalf("node show lacks container registrations: %q, %v", out, err)
 	}
+	if _, err := run(t, "edit", "build", "--unmount", "data", "--undevice", "/dev/dri", "--room", "dyna"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = (machines.Store{}).Get(context.Background(), "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Mounts) != 1 || stored.Mounts[0].Name != "cache" || len(stored.Devices) != 0 {
+		t.Fatalf("registrations after revocation = %#v, %#v", stored.Mounts, stored.Devices)
+	}
 	if _, err := run(t, "edit", "build", "--mount", "other=/srv/other:ro"); err == nil || !strings.Contains(err.Error(), "--room") {
 		t.Fatalf("a mount without its room = %v", err)
 	}

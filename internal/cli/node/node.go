@@ -329,7 +329,7 @@ func addCommand() *cobra.Command {
 func editCommand() *cobra.Command {
 	var rename, ssh string
 	var maxIOHeavy, maxDiskPercent int
-	var resourceEdits, labels, unlabels, mountEdits, deviceEdits []string
+	var resourceEdits, labels, unlabels, mountEdits, deviceEdits, unmountEdits, undeviceEdits []string
 	var registrationRoom string
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
@@ -422,9 +422,9 @@ func editCommand() *cobra.Command {
 				}
 				patch.Resources, changed = &updated, true
 			}
-			if c.Flags().Changed("mount") || c.Flags().Changed("device") {
+			if c.Flags().Changed("mount") || c.Flags().Changed("device") || c.Flags().Changed("unmount") || c.Flags().Changed("undevice") {
 				if !c.Flags().Changed("room") || registrationRoom == "" {
-					return fmt.Errorf("--mount and --device need --room")
+					return fmt.Errorf("--mount, --unmount, --device and --undevice need --room")
 				}
 				ids, err := resolveRooms([]string{registrationRoom})
 				if err != nil {
@@ -452,6 +452,28 @@ func editCommand() *cobra.Command {
 						updates = append(updates, device)
 					}
 					patch.Devices = &updates
+				}
+				if c.Flags().Changed("unmount") {
+					removals := make([]machines.MountRef, 0, len(unmountEdits))
+					for _, edit := range unmountEdits {
+						mount, err := machines.ParseMountRef(edit, roomID)
+						if err != nil {
+							return err
+						}
+						removals = append(removals, mount)
+					}
+					patch.RemoveMounts = &removals
+				}
+				if c.Flags().Changed("undevice") {
+					removals := make([]machines.DeviceRef, 0, len(undeviceEdits))
+					for _, edit := range undeviceEdits {
+						device, err := machines.ParseDeviceRef(edit, roomID)
+						if err != nil {
+							return err
+						}
+						removals = append(removals, device)
+					}
+					patch.RemoveDevices = &removals
 				}
 				changed = true
 			}
@@ -486,9 +508,13 @@ func editCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&resourceEdits, "resource", nil, "set a named resource count, such as ghidra=1 (repeatable; NAME=0 removes it)")
 	cmd.Flags().StringArrayVar(&mountEdits, "mount", nil, "register NAME=HOST_PATH:ro|rw for container jobs (repeatable; needs --room)")
 	cmd.Flags().StringArrayVar(&deviceEdits, "device", nil, "allow a host device path for container jobs (repeatable; needs --room)")
+	cmd.Flags().StringArrayVar(&unmountEdits, "unmount", nil, "remove a named mount registration (repeatable; needs --room)")
+	cmd.Flags().StringArrayVar(&undeviceEdits, "undevice", nil, "remove a device from the room's allow list (repeatable; needs --room)")
 	cmd.Flags().StringVar(&registrationRoom, "room", "", "room that owns the --mount or --device registration")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
+	cmd.MarkFlagsMutuallyExclusive("mount", "unmount")
+	cmd.MarkFlagsMutuallyExclusive("device", "undevice")
 	return cmd
 }
 

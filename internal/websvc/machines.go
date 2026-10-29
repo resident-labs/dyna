@@ -224,6 +224,9 @@ type MachinePatch struct {
 	// registrations stay unchanged, so one room's edit cannot replace another's.
 	Mounts  *[]machines.NamedMount  `json:"mounts,omitempty"`
 	Devices *[]machines.DeviceGrant `json:"devices,omitempty"`
+	// RemoveMounts and RemoveDevices revoke only the matching room's access.
+	RemoveMounts  *[]machines.MountRef  `json:"removeMounts,omitempty"`
+	RemoveDevices *[]machines.DeviceRef `json:"removeDevices,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -439,6 +442,26 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 			} else {
 				m.Devices = append(m.Devices, update)
 			}
+		}
+	}
+	if patch.RemoveMounts != nil {
+		for _, remove := range *patch.RemoveMounts {
+			if err := remove.Validate(); err != nil {
+				return err
+			}
+			m.Mounts = slices.DeleteFunc(m.Mounts, func(stored machines.NamedMount) bool {
+				return stored.Name == remove.Name && stored.Room == remove.Room
+			})
+		}
+	}
+	if patch.RemoveDevices != nil {
+		for _, remove := range *patch.RemoveDevices {
+			if err := remove.Validate(); err != nil {
+				return err
+			}
+			m.Devices = slices.DeleteFunc(m.Devices, func(stored machines.DeviceGrant) bool {
+				return stored.Path == remove.Path && stored.Room == remove.Room
+			})
 		}
 	}
 	return nil
