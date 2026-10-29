@@ -100,7 +100,7 @@ func runEnv(actor authority.Actor, rec room.Record) []string {
 	env := make([]string, 0, len(os.Environ())+4)
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
-		if !strings.HasPrefix(key, "DYNA_") && !processguard.GitHubTokenName(key) {
+		if !strings.HasPrefix(key, "DYNA_") && !processguard.SecretName(key) {
 			env = append(env, item)
 		}
 	}
