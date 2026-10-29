@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/listpage"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/terminalsvc"
@@ -668,7 +669,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		}
 	}
 	scanCoordinators(map[string]bool{"": true})
-	runSig := map[string]string{}
+	var runVersion int64
 	jobs := newShellJobWatch()
 	defer jobs.close()
 	pinSig := map[string]string{}
@@ -709,10 +710,9 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		s.scanQuestions(questionSig, &questionVersion, first, emit)
 		s.scanCallRequests(callRequestSig, &callRequestVersion, first, emit)
 		s.scanNotices(&noticeVersion, first, emit)
-		// Runs change slowly and a store can hold thousands; scan them on
-		// every fourth tick only.
-		if n%RunScanEvery == 0 {
-			s.scanRuns(runSig, first, emit)
+		s.scanRuns(&runVersion, first, emit)
+		// Shell jobs, PRs and goals scan on every fourth tick only.
+		if n%4 == 0 {
 			s.scanShellJobs(jobs, first, emit)
 			// TODO: legacy/shim remove later — catches PR state that a dyna git pr CLI process wrote (track, verdict, hold, release, transfer, reviewer, policy); remove when item 2 moves those writes into the engine, whose writes wake Watch through PRsChanged.
 			s.scanPRs(prSig, prWork, &prVersion, first, emit)
@@ -825,27 +825,29 @@ func (s *Service) scanPosts(roomID string, offsets map[string]int64, first bool,
 	}
 }
 
-// RunScanEvery is how many Watch ticks pass between run scans.
-const RunScanEvery = 4
-
 // MemberFullScanEvery is how many member scans pass between full member
 // scans. Other scans keep closed sessions' events, so an edit of a closed
 // session appears within 10 seconds at the 500 ms Watch interval.
 const MemberFullScanEvery = 20
 
-func (s *Service) scanRuns(sigs map[string]string, first bool, emit func(Event)) {
-	next := s.runSigs()
-	for id, v := range next {
-		if !first && sigs[id] != v {
-			emit(Event{Kind: "runs", RoomID: id})
-		}
-		sigs[id] = v
+// scanRuns emits {kind: "runs"} for each room that a run change reached. It
+// reads the runs revision on every tick and syncs the run index only when
+// the revision moved.
+func (s *Service) scanRuns(version *int64, first bool, emit func(Event)) {
+	rev, err := runstore.Revision()
+	if err != nil || rev == *version {
+		return
 	}
-	for id := range sigs {
-		if _, ok := next[id]; !ok {
-			delete(sigs, id)
-			emit(Event{Kind: "runs", RoomID: id})
-		}
+	touched, err := s.takeRunChanges()
+	if err != nil {
+		return
+	}
+	*version = rev
+	if first {
+		return
+	}
+	for room := range touched {
+		emit(Event{Kind: "runs", RoomID: room})
 	}
 }
 
