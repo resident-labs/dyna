@@ -38,6 +38,24 @@ type jobCallSpec struct {
 	Artifacts []string `json:"artifacts"`
 }
 
+// jobPlanCall is the stable source and branch identity injected by the plan.
+type jobPlanCall struct {
+	NodeID     string   `json:"__planNodeId"`
+	GroupID    string   `json:"__planGroupId"`
+	StageIndex *int     `json:"__stageIndex"`
+	ItemIndex  *int     `json:"__itemIndex"`
+	Path       []string `json:"__planPath"`
+}
+
+func jobPositionHash(workflowID string, plan jobPlanCall) string {
+	payload, _ := json.Marshal(struct {
+		Workflow string
+		Plan     jobPlanCall
+	}{workflowID, plan})
+	sum := sha256.Sum256(payload)
+	return "p1:" + hex.EncodeToString(sum[:])
+}
+
 // parseJobCall validates the script value once and returns the typed request
 // used by the existing RunJob engine API.
 func parseJobCall(call goja.FunctionCall, workDir string) (callspec.RunJobInput, error) {
@@ -83,14 +101,15 @@ func parseJobCall(call goja.FunctionCall, workDir string) (callspec.RunJobInput,
 	}, nil
 }
 
-func jobKey(namespace, requestHash string, occurrence int) string {
+func jobKey(namespace, requestHash, positionHash string, occurrence int) string {
 	payload, _ := json.Marshal(struct {
-		Namespace   string
-		RequestHash string
-		Occurrence  int
-	}{namespace, requestHash, occurrence})
+		Namespace    string
+		RequestHash  string
+		PositionHash string
+		Occurrence   int
+	}{namespace, requestHash, positionHash, occurrence})
 	sum := sha256.Sum256(payload)
-	return "j3:" + hex.EncodeToString(sum[:])
+	return "j4:" + hex.EncodeToString(sum[:])
 }
 
 // jobRequestHash fingerprints a typed request for its key and recovery check.
@@ -140,6 +159,15 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 		e.loop.RunOnLoop(func(vm *goja.Runtime) { rejectFn(vm.NewGoError(err)) })
 	}
 	spec, err := parseJobCall(call, e.opts.WorkDir)
+	var plan jobPlanCall
+	if err == nil {
+		encoded, marshalErr := json.Marshal(call.Argument(1).Export())
+		if marshalErr != nil {
+			err = marshalErr
+		} else if decodeErr := json.Unmarshal(encoded, &plan); decodeErr != nil {
+			err = decodeErr
+		}
+	}
 	if err == nil && e.opts.Engine == nil {
 		err = errors.New("this run cannot run jobs")
 	}
@@ -149,55 +177,76 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 	}
 
 	requestHash := jobRequestHash(spec)
+	positionHash := jobPositionHash(e.workflowID, plan)
+	identity := requestHash + "\n" + positionHash
 	e.shared.mu.Lock()
 	e.shared.execSeq++
 	id := e.shared.execSeq
-	occurrence := e.shared.jobOccurrences[requestHash]
-	e.shared.jobOccurrences[requestHash] = occurrence + 1
+	occurrence := e.shared.jobOccurrences[identity]
+	e.shared.jobOccurrences[identity] = occurrence + 1
 	e.shared.mu.Unlock()
 	label := fmt.Sprintf("job-%d", id)
-	key := jobKey(e.shared.jobNamespace, requestHash, occurrence)
+	key := jobKey(e.shared.jobNamespace, requestHash, positionHash, occurrence)
 	spec.IdempotencyKey = key
 	spec.RequestHash = requestHash
 	line := commandLine(spec.Command)
-	e.emit(runstore.Event{T: "exec_start", ID: id, Label: label, Command: textutil.ClipOneLine(line, 400)})
+	journal := func(state, jobID string, result any, errStr string) {
+		if e.opts.Run == nil {
+			return
+		}
+		e.opts.Run.Journal(runstore.JournalEntry{
+			ID: id, Label: label, Key: key, Cwd: spec.Repo, Prompt: line,
+			Result: result, Error: errStr, Workflow: e.workflowID,
+			Kind: "job", State: state, Job: jobID, RequestHash: requestHash, PositionHash: positionHash,
+		})
+	}
+	// No submission can precede this record. Its identity lets a resumed run
+	// reject duplicate calls that have no stable branch or call position.
+	journal("invoked", "", nil, "")
+	cp := e.snapshotCallPlan(plan.NodeID)
+	cp.groupID = plan.GroupID
+	cp.stage = plan.StageIndex
+	cp.item = plan.ItemIndex
+	emitJob := func(event runstore.Event) {
+		cp.apply(&event)
+		e.emit(event)
+	}
+	emitJob(runstore.Event{T: "exec_start", ID: id, Label: label, Command: textutil.ClipOneLine(line, 400)})
 	if !e.beginWorker() {
 		err := e.ctx.Err()
 		if err == nil {
 			err = errors.New("workflow is already finishing")
 		}
-		e.emit(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "error", Error: textutil.ClipOneLine(err.Error(), 2000)})
+		journal("error", "", nil, err.Error())
+		emitJob(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "error", Error: textutil.ClipOneLine(err.Error(), 2000)})
 		reject(err)
 		return vm.ToValue(promise)
 	}
 	var prior jobRecord
-	var hasPrior bool
+	var hasPrior, ambiguousPrior bool
 	if e.opts.Cache != nil {
-		prior, hasPrior = e.opts.Cache.popJob(key)
+		ambiguousPrior = e.opts.Cache.ambiguousJob(identity)
+		if !ambiguousPrior {
+			prior, hasPrior = e.opts.Cache.popJob(key)
+		}
 	}
 	go func() {
 		defer e.workers.Done()
-		journal := func(state, jobID string, result any, errStr string) {
-			if e.opts.Run == nil {
-				return
-			}
-			e.opts.Run.Journal(runstore.JournalEntry{
-				ID: id, Label: label, Key: key, Cwd: spec.Repo, Prompt: line,
-				Result: result, Error: errStr, Workflow: e.workflowID,
-				Kind: "job", State: state, Job: jobID, RequestHash: requestHash,
-			})
-		}
 		fail := func(jobID string, err error) {
 			journal("error", jobID, nil, err.Error())
-			e.emit(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "error", Error: textutil.ClipOneLine(err.Error(), 2000)})
+			emitJob(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "error", Error: textutil.ClipOneLine(err.Error(), 2000)})
 			reject(err)
+		}
+		if ambiguousPrior {
+			fail("", errors.New("job() replay is ambiguous: identical calls have no stable branch or call identity"))
+			return
 		}
 		if hasPrior && prior.RequestHash != requestHash {
 			fail("", errors.New("job() replay is ambiguous: the recovered request hash does not match"))
 			return
 		}
 		if hasPrior && prior.Done {
-			e.emit(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "ok", Cached: true, Preview: cachedSummary(prior.Result)})
+			emitJob(runstore.Event{T: "exec_end", ID: id, Label: label, Status: "ok", Cached: true, Preview: cachedSummary(prior.Result)})
 			journal("done", prior.Job, prior.Result, "")
 			resolve(prior.Result)
 			return
@@ -248,7 +297,7 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 		}
 		result := resultForJob(final)
 		journal("done", jobID, result, "")
-		e.emit(runstore.Event{
+		emitJob(runstore.Event{
 			T: "exec_end", ID: id, Label: label, Status: "ok",
 			ExitCode: final.ExitCode, Preview: string(final.State),
 		})

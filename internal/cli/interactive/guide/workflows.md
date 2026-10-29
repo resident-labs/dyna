@@ -99,7 +99,7 @@ For long-running workflows, use `run()` to read a changing manifest at each disp
 
 ### `job(spec)`
 
-Runs a command through the queue. Returns `{id,node,state,exitCode,log}`. Resume waits for the original job ID by spec and occurrence, not order. Stopping cancels it.
+Runs a command through the queue. Returns `{id,node,state,exitCode,log}`. Resume waits for the original job ID by spec, call and branch. Ambiguous replay rejects; stopping cancels it.
 
 ```js
 const check = await job({ command: ['make', 'test'], labels: ['os=linux'] })

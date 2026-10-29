@@ -125,7 +125,7 @@ func capMermaidNodes(in []Node) ([]Node, bool) {
 
 func mermaidKeepPriority(n Node) int {
 	switch n.Kind {
-	case KindWorkflow, KindAgent, KindPhase, KindParallel, KindPipeline, KindBranch, KindLoop:
+	case KindWorkflow, KindAgent, KindJob, KindPhase, KindParallel, KindPipeline, KindBranch, KindLoop:
 		return 0
 	default:
 		return 1

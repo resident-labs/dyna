@@ -59,8 +59,9 @@ func TestJobRecoversSubmissionWithoutJournalID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Job != "" {
-		t.Fatalf("first journal = %+v, want an error without a job ID", entries)
+	last := entries[len(entries)-1]
+	if last.State != "error" || last.Job != "" {
+		t.Fatalf("first journal = %+v, want a final error without a job ID", entries)
 	}
 	resumed, err := runstore.Create("job recovered response", script, nil)
 	if err != nil {

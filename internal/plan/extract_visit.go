@@ -298,6 +298,8 @@ func (ex *extractor) visitCall(call *ast.CallExpression, ctx walkCtx, sc *scope)
 	switch name {
 	case "agent":
 		ex.hookAgent(call, ctx, sc)
+	case "job":
+		ex.hookJob(call, ctx, sc)
 	case "workflow":
 		ex.hookWorkflow(call, ctx, sc)
 	case "phase":

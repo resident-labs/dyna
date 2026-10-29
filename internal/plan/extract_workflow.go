@@ -69,6 +69,31 @@ func (ex *extractor) hookAgent(call *ast.CallExpression, ctx walkCtx, sc *scope)
 	ex.flow(ctx, id)
 }
 
+func (ex *extractor) hookJob(call *ast.CallExpression, ctx walkCtx, sc *scope) {
+	ex.visitCallArguments(call, ctx, sc)
+	card := ctx.card
+	if !ctx.inLoop {
+		card = exactOne()
+	}
+	node := Node{
+		Kind: KindJob, ParentID: ctx.parentID, GroupID: ctx.groupID,
+		Label: "job", Phase: phaseOf(ctx), StageCallback: ctx.stageCallback,
+		CallArguments: len(call.ArgumentList), CallTrailingComma: ex.callTrailingComma(call),
+		Certainty: certOf(ctx), Cardinality: card,
+	}
+	ex.setCallMetadata(&node, call)
+	id := ex.addNode(node)
+	ex.edge(ctx.parentID, id, EdgeContains)
+	if ctx.groupID != "" {
+		kind := EdgeParallel
+		if parentKind(ex, ctx.parentID) == KindPipeline {
+			kind = EdgePipeline
+		}
+		ex.edge(ctx.groupID, id, kind)
+	}
+	ex.flow(ctx, id)
+}
+
 func (ex *extractor) hookPhase(call *ast.CallExpression, ctx walkCtx, sc *scope) {
 	title, ok := firstStaticString(call.ArgumentList)
 	if !ok {
