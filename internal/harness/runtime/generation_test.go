@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	accountstore "dyna-agent/internal/account/store"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,5 +65,54 @@ func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
 				t.Fatal("generation did not restore")
 			}
 		})
+	}
+}
+
+// A room MCP token lives only in the accounts store and the engine's request
+// header. No generated harness file and no generation env may carry it or its URL.
+func TestGenerationNeverCarriesRoomMCPToken(t *testing.T) {
+	accounts := testAccounts(t)
+	t.Setenv("DYNA_BIN", "/fake/dyna")
+	n, err := accounts.Create("pi", "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := accounts.HarnessHome("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const token, serverURL = "room-mcp-token-canary", "https://board.example.test/mcp"
+	if err := accountstore.DefaultStore().Update(func(st *accountstore.State) error {
+		_, err := st.SaveMCPBearer("room_1", "board", token)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runtime{Accounts: accounts, Config: config.NewConfigManager(), Generations: filepath.Join(store.DataDir(), "harnesses", "generations")}
+	t.Cleanup(func() { _ = removeBundle(r.Generations) })
+	gen, err := r.generate("pi", home, n.ID, func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range gen.Env {
+		if strings.Contains(key+value, token) || strings.Contains(key+value, serverURL) {
+			t.Fatalf("generation env %s carries the room MCP token or URL", key)
+		}
+	}
+	err = filepath.WalkDir(gen.Directory, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err == nil && (strings.Contains(string(raw), token) || strings.Contains(string(raw), serverURL)) {
+			t.Errorf("%s carries the room MCP token or URL", path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
