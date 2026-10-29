@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/listpage"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/terminalsvc"
 	"dyna-agent/internal/transcript"
@@ -380,5 +381,57 @@ func TestRunningShellJobOutputIsReadOnItsEventOnly(t *testing.T) {
 	})
 	if len(rows) != 1 || rows[0].State != "running" || rows[0].Tail != "progress" {
 		t.Fatalf("after the event: %+v, want one running row with the tail", rows)
+	}
+}
+
+// A room's first page reads only its open jobs and its closed jobs from the
+// last 24 hours. A job closed before that window never reaches the page build,
+// so a dirty room does not rebuild over every job it has ever run.
+func TestDirtyRoomPageSkipsClosedJobsOutsideTheWindow(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("shell-window")
+	store := terminalsvc.ShellStore(e.svc.sessions().Root)
+	now := time.Now()
+	oldClock := terminalsvc.Clock
+	terminalsvc.Clock = func() time.Time { return now }
+	t.Cleanup(func() { terminalsvc.Clock = oldClock })
+	closed := func(ended time.Time) {
+		t.Helper()
+		job, err := store.Create(shells.StartOptions{Cmd: []string{"true"}, Cwd: t.TempDir(), RoomID: rec.ID, Owner: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Save(job, &shells.Exit{Ended: ended}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	closed(now.Add(-time.Hour))
+	closed(now.Add(-48 * time.Hour))
+	jobs := newShellJobWatch()
+	t.Cleanup(jobs.close)
+	e.svc.scanShellJobs(jobs, true, func(Event) {})
+	var built []listpage.Meta
+	oldPage := pageShellJobs
+	pageShellJobs = func(items []listpage.Meta) (listpage.Page[listpage.Meta], error) {
+		built = items
+		return oldPage(items)
+	}
+	t.Cleanup(func() { pageShellJobs = oldPage })
+	open, err := store.Create(shells.StartOptions{Cmd: []string{"true"}, Cwd: t.TempDir(), RoomID: rec.ID, Owner: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []Event
+	e.svc.scanShellJobs(jobs, false, func(event Event) { events = append(events, event) })
+	if len(built) != 2 {
+		t.Fatalf("page built over %d jobs, want the open job and the recent closed job", len(built))
+	}
+	for _, m := range built {
+		if m.ID != open.ID && m.At.Before(now.Add(-listpage.Recent)) {
+			t.Fatalf("page built over job %s closed before the 24 hour window", m.ID)
+		}
+	}
+	if len(events) != 1 || events[0].Change == nil || events[0].Change.ID != open.ID || events[0].Change.InHead == nil || !*events[0].Change.InHead {
+		t.Fatalf("events = %+v, want one head upsert for the open job", events)
 	}
 }
