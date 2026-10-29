@@ -167,14 +167,45 @@ func AckPortAlertDelivery(generation, threshold int) error {
 	})
 }
 
+// observePortUseAfterRelease measures the projected post-release count before
+// the release takes the SQLite write lock. The raw result lets the transaction
+// reject a stale projection. An inactive period or a read error skips the scan.
+func observePortUseAfterRelease(ctx context.Context, db *sql.DB, released []Record) (int, int, bool) {
+	current, err := readPortAlertState(ctx, db)
+	if err != nil || current.band == 0 {
+		return 0, 0, false
+	}
+	records, err := loadRecords(ctx, db, "")
+	if err != nil {
+		return 0, 0, false
+	}
+	paths := make(map[string]bool, len(released))
+	for _, rec := range released {
+		paths[rec.Path] = true
+	}
+	raw := 0
+	for i := range records {
+		if paths[records[i].Path] {
+			records[i].Port = 0
+		}
+		if records[i].Port != 0 {
+			raw++
+		}
+	}
+	return raw - reclaimablePortBlockCount(ctx, records), raw, true
+}
+
 // rearmPortCapacity runs inside a transaction that releases a port block.
-// When the release drops pool use below the 90% band, the next high-capacity
-// period can alert again without waiting for the next allocation to observe
-// the recovery. Undelivered crossings stay pending.
-func rearmPortCapacity(ctx context.Context, conn *sql.Conn) error {
+// When the release drops effective use below the 90% band, the next period can
+// alert again without waiting for another allocation. A stale projection or a
+// measurement error conservatively keeps the transaction's raw count.
+func rearmPortCapacity(ctx context.Context, conn *sql.Conn, used, raw int, measured bool) error {
 	current, err := readPortAlertState(ctx, conn)
 	if err != nil {
 		return err
+	}
+	if measured && current.used == raw {
+		current.used = used
 	}
 	if current.band == 0 || portCapacityBand(current.used) != 0 {
 		return nil

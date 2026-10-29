@@ -158,6 +158,7 @@ func releaseRecord(ctx context.Context, db *sql.DB, orig Record, remove bool) (b
 	if err != nil {
 		return false, err
 	}
+	used, raw, measured := observePortUseAfterRelease(ctx, db, []Record{orig})
 	released := false
 	// Worktree records have no change-bus consumer.
 	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
@@ -181,7 +182,7 @@ func releaseRecord(ctx context.Context, db *sql.DB, orig Record, remove bool) (b
 			}
 		}
 		// A release that drops use below the 90% band rearms the next alert period.
-		if err = rearmPortCapacity(ctx, conn); err != nil {
+		if err = rearmPortCapacity(ctx, conn, used, raw, measured); err != nil {
 			return err
 		}
 		released = true
