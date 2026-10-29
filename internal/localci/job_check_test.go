@@ -12,8 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"dyna-agent/internal/jobs"
 )
 
 // A check may name one job of a GitHub Actions workflow instead of a command of
@@ -184,7 +182,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-shard", Matrix: []string{"shard:7"}},
 		resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
 	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock", workflowTagged)
-	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, script))
+	cmd := exec.Command("bash", "-c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A host-only variable stands in for a session token or an account key.
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "DYNA_HOST_ONLY_SECRET=do-not-leak")

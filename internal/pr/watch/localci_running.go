@@ -28,16 +28,14 @@ const (
 	RunningCISync RunningCIKind = "sync"
 )
 
-// RunningCI is one local CI run in flight: the machine it holds slots on, the
+// RunningCI is one local CI run in flight: the machine it runs on, the
 // work it checks, and the suites it runs once they are known. It is a copy, so
 // a reader never shares state with the scheduler.
 type RunningCI struct {
 	// Machine is the name of the CI node, which is a machine with the CI role.
 	Machine string `json:"machine"`
-	// Slots is how many of the machine's CI slots the run reserved.
-	Slots  int    `json:"slots"`
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
+	Repo    string `json:"repo"`
+	Number  int    `json:"number"`
 	// Kind is the work the run checks, which a client words without a number.
 	Kind RunningCIKind `json:"kind"`
 	// Branch names the branch of a local change, which has no pull request.
@@ -104,7 +102,7 @@ func (r *registeredCIRun) runningCI() RunningCI {
 		head = head[:shortHeadLength]
 	}
 	return RunningCI{
-		Machine: r.node, Slots: r.slots, Repo: r.repo, Number: r.number,
+		Machine: r.node, Repo: r.repo, Number: r.number,
 		Kind: r.kind, Branch: r.branch, Trial: r.trial, Head: head, Title: r.title, URL: r.url,
 		Suites: localci.SuiteNames(r.suites), Started: r.started,
 	}

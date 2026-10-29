@@ -61,6 +61,12 @@ type Machine struct {
 	Roles   []Role `json:"roles"`
 	SSH     string `json:"ssh"`
 	CISlots int    `json:"ciSlots"`
+	// MaxIOHeavy caps how many IO-heavy jobs and checks the node runs at once.
+	// Zero reads the default of one per sixteen probed CPUs, at least one.
+	MaxIOHeavy int `json:"maxIOHeavy"`
+	// MaxDiskPercent is the used-disk percent above which the node admits no
+	// new work. Zero reads the default of 90.
+	MaxDiskPercent int `json:"maxDiskPercent"`
 	// HostChecksGrants lists who allows repository-defined CI commands to run
 	// on this machine outside a container: the owner for every room, or the
 	// root of one room for that room's CI work. It is empty unless someone
@@ -187,6 +193,38 @@ func (m Machine) HostChecksAllowed(room string) bool {
 	return HostChecksAllowed(m.HostChecksGrants, room)
 }
 
+// IOHeavyLimit is how many IO-heavy jobs and checks this node runs at once.
+// Zero reads the default: one per sixteen probed CPUs, at least one.
+func (m Machine) IOHeavyLimit() int {
+	if m.MaxIOHeavy > 0 {
+		return m.MaxIOHeavy
+	}
+	return max(1, m.Capabilities.CPUs/16)
+}
+
+// DiskLimitPercent is the used-disk percent above which this node admits no
+// new work. Zero reads the default of 90.
+func (m Machine) DiskLimitPercent() int {
+	if m.MaxDiskPercent > 0 {
+		return m.MaxDiskPercent
+	}
+	return DefaultDiskLimitPercent
+}
+
+// DefaultDiskLimitPercent is the used-disk percent a node with no stored limit
+// keeps its work under.
+const DefaultDiskLimitPercent = 90
+
+// DiskUsedPercent is the used share of the filesystem that holds this node's
+// Dyna work, as the last probe read it. It is -1 when no probe read a total.
+func (m Machine) DiskUsedPercent() int {
+	total := m.Capabilities.Disk.Total
+	if total == 0 {
+		return -1
+	}
+	return int(100 * (total - m.Capabilities.Disk.Free) / total)
+}
+
 // HasHostChecksGrants reports whether anyone allows host checks on this
 // machine, whatever the room.
 func (m Machine) HasHostChecksGrants() bool { return len(m.HostChecksGrants) > 0 }
@@ -296,6 +334,12 @@ func (m Machine) Validate() error {
 	if m.HasRole(RoleCI) && m.CISlots < 1 {
 		return errors.New("a machine with the ci role needs at least one CI slot")
 	}
+	if m.MaxIOHeavy < 0 || m.MaxIOHeavy > 1024 {
+		return errors.New("the IO-heavy limit must be between 0, the default, and 1024")
+	}
+	if m.MaxDiskPercent < 0 || m.MaxDiskPercent > 100 {
+		return errors.New("the disk limit percent must be between 0, the default, and 100")
+	}
 	if err := validateRoomList(m.Rooms); err != nil {
 		return err
 	}
@@ -350,7 +394,7 @@ func validateSuiteList(suites []string) error {
 	return nil
 }
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -374,7 +418,9 @@ const schema = `CREATE TABLE machines (
 	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
 	container_socket TEXT  NOT NULL DEFAULT '',
 	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
-	check_tmp TEXT NOT NULL DEFAULT ''
+	check_tmp TEXT NOT NULL DEFAULT '',
+	max_io_heavy INTEGER NOT NULL DEFAULT 0 CHECK(max_io_heavy >= 0),
+	max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100)
 );
 
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
@@ -411,7 +457,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -520,6 +566,17 @@ func prepare(conn *sql.Conn, old int) error {
 		// A machine with no suite list takes every suite, which is what every
 		// machine allowed before it could name suites.
 		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN suites TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(suites))`); err != nil {
+			return err
+		}
+	}
+	if old < 11 {
+		// A machine with no stored node limit reads the default of its limits:
+		// one IO-heavy job per sixteen probed CPUs, at least one, and 90
+		// percent of the disk in use.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN max_io_heavy INTEGER NOT NULL DEFAULT 0 CHECK(max_io_heavy >= 0)`); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100)`); err != nil {
 			return err
 		}
 	}
@@ -789,7 +846,7 @@ func scan(row scanner) (Machine, error) {
 	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -990,8 +1047,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if !m.HasRole(RoleCI) {
 				grants = "host_checks_grants='[]'"
 			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1001,9 +1058,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent)
 		return err
 	})
 	if err != nil {

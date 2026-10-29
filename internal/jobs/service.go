@@ -32,6 +32,8 @@ type MachineSource interface {
 // Reporter posts a job's typed events. The engine implements it with the room
 // event contract; tests record the calls.
 type Reporter interface {
+	// JobQueued reports a queued job and why it waits for its node.
+	JobQueued(ctx context.Context, job Job) error
 	// JobStarted reports a job that began to run.
 	JobStarted(ctx context.Context, job Job) error
 	// JobFinished reports a job that reached a final state.
@@ -39,7 +41,7 @@ type Reporter interface {
 }
 
 // NodeBase names the one directory a node keeps on its machine. Local CI and
-// jobs share it, so a node's CI slots bound both. The user ID is the
+// jobs share it, and one admission queue bounds both. The user ID is the
 // controller's, not the SSH account's.
 func NodeBase(node string) string {
 	return fmt.Sprintf("/var/tmp/dyna-local-ci-%d/%s", os.Getuid(), node)
@@ -132,6 +134,8 @@ type Input struct {
 	Timeout time.Duration
 	// Artifacts are paths in the job's work folder to keep after it ends.
 	Artifacts []string
+	// Heavy marks an IO-heavy job, which a node runs only a few of.
+	Heavy bool
 }
 
 // Submit stores a queued job and starts it. The job runs detached, so Submit
@@ -171,7 +175,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	job := Job{
 		ID: id, RoomID: in.RoomID, Session: in.Session, Node: machine.Name,
 		Command: in.Command, Host: host, Image: in.Image,
-		CPUs: in.CPUs, Timeout: in.Timeout, Artifacts: in.Artifacts,
+		CPUs: in.CPUs, Timeout: in.Timeout, Heavy: in.Heavy, Artifacts: in.Artifacts,
 		State: StateQueued, Created: s.Store.now(),
 		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
 	}
@@ -288,6 +292,12 @@ func (s *Service) Start(ctx context.Context) {
 	done := make(chan struct{})
 	s.claimDone = done
 	s.mu.Unlock()
+	// This engine starts clean: the engine that held queue rows is gone, and
+	// the queue rebuilds from the running job rows and the checks this engine
+	// reattaches to.
+	if err := s.admission().ResetEngine(ctx); err != nil {
+		s.logger()("jobs: reset the node queue: %v", err)
+	}
 	s.claim(ctx)
 	running, err := s.Store.Running(ctx)
 	if err != nil {
@@ -373,14 +383,53 @@ func (s *Service) stopRequested(ctx context.Context) {
 	}
 }
 
-// claim starts every queued job, oldest first.
+// admission is the node queue this engine decides with.
+func (s *Service) admission() Admission {
+	return Admission{DataDir: s.dataDir(), Machines: s.Machines, Engine: true}
+}
+
+// claim admits the queued jobs through the node queue: what fits starts now,
+// oldest first with rooms taking turns; the rest waits with a visible reason.
+// The pass also decides the waiting checks of the queue table, which share
+// every node with jobs.
 func (s *Service) claim(ctx context.Context) {
 	queued, err := s.Store.ClaimQueued(ctx)
 	if err != nil {
 		s.logger()("jobs: read queued jobs: %v", err)
+		return
+	}
+	admitted, reasons, err := s.admission().Pass(ctx, queued)
+	if err != nil {
+		s.logger()("jobs: admission pass: %v", err)
+		return
 	}
 	for _, job := range queued {
-		s.start(job)
+		if admitted[job.ID] {
+			job.WaitReason = ""
+			s.start(job)
+			continue
+		}
+		s.noteWait(ctx, job, reasons[job.ID])
+	}
+}
+
+// noteWait records why a queued job still waits and posts its queued event,
+// so the wait is visible to the session that submitted the job. Each reason
+// writes the row, which dyna job show reads; the queued event posts once,
+// with the first reason.
+func (s *Service) noteWait(ctx context.Context, job Job, reason string) {
+	if reason == "" || job.WaitReason == reason {
+		return
+	}
+	job.WaitReason = reason
+	if _, _, err := s.Store.SaveOpen(ctx, job); err != nil {
+		s.logger()("jobs: record wait of job %s: %v", job.ID, err)
+		return
+	}
+	if s.Reporter != nil {
+		if err := s.Reporter.JobQueued(ctx, job); err != nil {
+			s.logger()("jobs: report queued job %s: %v", job.ID, err)
+		}
 	}
 }
 
@@ -623,10 +672,11 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if poller == nil {
 		return
 	}
-	// The node enforces the deadline itself; the engine allows the queue wait
-	// and a slow route on top before it stops following the job.
+	// The node enforces the deadline itself; the engine allows a slow route
+	// on top before it stops following the job. The queue wait is over: the
+	// job was admitted before it started.
 	var timeoutCancel context.CancelFunc
-	runCtx, timeoutCancel := context.WithTimeout(ctx, job.Timeout+AdmissionWait+2*time.Minute)
+	runCtx, timeoutCancel := context.WithTimeout(ctx, job.Timeout+2*time.Minute)
 	defer timeoutCancel()
 	runErr := poller.Run(runCtx, spec, logWriter)
 	if runErr != nil && errors.Is(runErr, context.Canceled) && EngineStopping() {
@@ -760,14 +810,10 @@ func (s *Service) finish(job *Job, err error) {
 	}
 }
 
-// machineFacts reads a machine's clamp facts. A machine with no CI slots
-// still runs one job at a time, so the slot floor is one.
+// machineFacts reads a machine's clamp facts: its last probe. A machine with
+// no probe keeps the job's own request.
 func machineFacts(m machines.Machine) Facts {
-	slots := m.CISlots
-	if slots < 1 {
-		slots = 1
-	}
-	return Facts{Slots: slots, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal}
+	return Facts{CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal}
 }
 
 // logStore streams a job log to its file and tracks the stored size on the
@@ -795,9 +841,10 @@ func (l *logStore) snapshot() Job {
 	return *l.job
 }
 
-// jobScript is the script a job runs on its node: it takes a CI slot, checks
-// out the commit when the job has one, and runs the command under the job's
-// deadline.
+// jobScript is the script a job runs on its node: it checks out the commit
+// when the job has one and runs the command under the job's deadline. The
+// node queue admitted the job before it started, so the script waits for
+// nothing.
 func jobScript(machine machines.Machine, job Job, resources Resources) string {
 	q := shellquote.Quote
 	base := NodeBase(machine.Name)
@@ -841,15 +888,5 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 		inner += "cd " + q(work) + "; "
 		inner += "timeout --foreground --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s bash -o pipefail -c " + q(command)
 	}
-	slots := machine.CISlots
-	if slots < 1 {
-		slots = 1
-	}
-	// The slot wrapper runs the job only while its .active file exists. Local CI
-	// creates that file in its setup step; a job has none, so the script makes
-	// it here; if that fails, the wrapper's own check ends the job with 75. A
-	// cancel removes the job's folder, which ends a waiting wrapper.
-	active := path.Join(job.Dir, ".active")
-	return "mkdir -p " + q(job.Dir) + "; : > " + q(active) + "; " +
-		SlotScript(base, slots, 0, active, job.Timeout+AdmissionWait, inner)
+	return inner
 }

@@ -16,6 +16,7 @@ import (
 
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/gitexec"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 )
@@ -49,7 +50,6 @@ type registeredCIRuns struct {
 // RunningCI.
 type registeredCIRun struct {
 	node   string
-	slots  int
 	cancel context.CancelFunc
 	// stopped is closed when the run's work on the node has ended. An engine that
 	// stops waits on it, because a run that outlives its engine leaves a keeper
@@ -289,7 +289,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	}
 	var enabled []localci.Node
 	for _, node := range nodes {
-		if node.Enabled && node.Slots > 0 {
+		if node.Enabled {
 			enabled = append(enabled, node)
 		}
 	}
@@ -350,9 +350,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 			jobs = append(jobs, job)
 		}
 	}
-	active := map[string]int{}
 	for key, run := range runs.runs {
-		active[run.node] += max(1, run.slots)
 		ready := false
 		for _, node := range enabled {
 			ready = ready || node.Name == run.node
@@ -370,7 +368,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if runs.closed.Load() {
 			break
 		}
-		another, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, active, runs)
+		another, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, runs)
 		if err != nil {
 			// A suite that no machine allows fails the trial that asked for it,
 			// and that trial reports the failure on its own read. The tick keeps
@@ -406,7 +404,7 @@ func (s *Service) startRegisteredCI(ctx context.Context, job registeredCIJob) (b
 	if runs.closed.Load() {
 		return false, nil
 	}
-	started, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, activeRegisteredCISlots(runs), runs)
+	started, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, runs)
 	if started {
 		s.runningCIChanged()
 	}
@@ -421,7 +419,7 @@ func (s *Service) registeredCINodes(ctx context.Context) ([]localci.Node, error)
 	}
 	var enabled []localci.Node
 	for _, node := range nodes {
-		if node.Enabled && node.Slots > 0 {
+		if node.Enabled {
 			enabled = append(enabled, node)
 		}
 	}
@@ -439,20 +437,11 @@ func (s *Service) roomServedByCI(roomID string) bool {
 	return err != nil || len(localci.NodesForRoom(nodes, roomID)) > 0
 }
 
-// activeRegisteredCISlots counts the slots the runs in flight hold per machine.
-func activeRegisteredCISlots(runs *registeredCIRuns) map[string]int {
-	active := map[string]int{}
-	for _, run := range runs.runs {
-		active[run.node] += max(1, run.slots)
-	}
-	return active
-}
-
 // admitRegisteredCI is the one admission path for a job: it reports the saved
 // result a head already has, plans the suites from the base definition, picks
 // the machine with a free slot, and starts the run. It returns whether it
 // started a run. Callers hold the runs lock.
-func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistry, st State, job registeredCIJob, enabled []localci.Node, active map[string]int, runs *registeredCIRuns) (bool, error) {
+func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistry, st State, job registeredCIJob, enabled []localci.Node, runs *registeredCIRuns) (bool, error) {
 	if !job.hosted() {
 		// A held room or merge queue admits no local run, whichever path asks
 		// for it: the trial that reads the result cannot stop a run that the
@@ -507,9 +496,10 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if runs.runs[key] != nil {
 		return false, nil
 	}
-	// A machine with a free slot must exist before the plan does any work, so a
-	// fleet that is only busy keeps the job waiting without a fetch.
-	chosen := availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
+	// A machine with room in the shared node queue must exist before the plan
+	// does any work, so a fleet that is only busy keeps the job waiting without
+	// a fetch.
+	chosen := s.availableCINode(ctx, enabled, job.record.RoomID, retriedFrom)
 	if pinned, wait := pinnedCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom); wait {
 		return false, nil
 	} else if pinned != nil {
@@ -519,7 +509,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		// The machine that failed is the only one that can take this work, so it
 		// runs there once more instead of the head waiting with nothing running.
 		// The replacement carries Result.Resumed, which keeps that to one retry.
-		chosen = availableCINodeExcept(enabled, active, job.record.RoomID, "")
+		chosen = s.availableCINode(ctx, enabled, job.record.RoomID, "")
 		if chosen != nil {
 			resumed = true
 		}
@@ -567,7 +557,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// caller gets a typed error that names it; a fleet that is only busy or low
 	// on disk keeps waiting.
 	suited := localci.NodesForSuites(enabled, plan.suites)
-	chosen = availableCINodeExcept(suited, active, job.record.RoomID, retriedFrom)
+	chosen = s.availableCINode(ctx, suited, job.record.RoomID, retriedFrom)
 	if pinned, wait := pinnedCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom); wait {
 		return false, nil
 	} else if pinned != nil {
@@ -577,7 +567,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		// The machine that failed is the only one that can take this work, so it
 		// runs there once more instead of the head waiting with nothing running.
 		// The replacement carries Result.Resumed, which keeps that to one retry.
-		chosen = availableCINodeExcept(suited, active, job.record.RoomID, "")
+		chosen = s.availableCINode(ctx, suited, job.record.RoomID, "")
 		if chosen != nil {
 			resumed = true
 		}
@@ -586,17 +576,13 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	// A run pinned to a machine whose scheduler count is full still holds one slot
-	// there.
-	slots := max(1, min(registeredCIRunSlots, chosen.Slots-active[chosen.Name]))
 	run := &registeredCIRun{
-		node: chosen.Name, slots: slots, cancel: cancel, stopped: make(chan struct{}),
+		node: chosen.Name, cancel: cancel, stopped: make(chan struct{}),
 		repo: job.record.Repo, number: job.record.Number, kind: job.kind(), branch: job.branch,
 		trial: job.trial, local: !job.hosted(),
 		head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
 	}
 	runs.runs[key] = run
-	active[chosen.Name] += slots
 	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run, retriedFrom, resumed)
 	return true, nil
 }
@@ -757,22 +743,18 @@ func (s *Service) RefreshSavedLocalResult(result localci.Result) error {
 	})
 }
 
-// Bound each run so queued heads can share a node. Slot locks in the runner
-// still enforce the node-wide limit across processes. Six is the measured best
-// on a 16-slot node: three heads took 121 s and gave 14.8 runs per 10 minutes.
-const registeredCIRunSlots = 6
+// registeredCIRunParallelism bounds how many checks one run starts at once,
+// so queued heads share a node. The shared node queue still enforces the
+// node-wide limits across every run and process. Six is the measured best on
+// a 16-CPU node: three heads took 121 s and gave 14.8 runs per 10 minutes.
+const registeredCIRunParallelism = 6
 
-// Prefer the node with the most unreserved check slots. A machine that is low
-// on disk takes no new run, so its work waits for a node that has space. A
-// machine that names rooms takes only those rooms' work, and one that names
-// suites takes only runs whose every suite it allows, so callers pass the
-// machines that allow the run's suites.
-func availableCINode(nodes []localci.Node, active map[string]int, roomID string) *localci.Node {
-	return availableCINodeExcept(nodes, active, roomID, "")
-}
-
-// availableCINodeExcept is availableCINode without the machine the run just
-// failed on, so a retry lands somewhere else.
+// availableCINode prefers the node with the most room in the shared node
+// queue: the CPUs it keeps free after the work it holds and the work that
+// waits for it. A machine that is low on disk takes no new run, so its work
+// waits for a node that has space. A machine that names rooms takes only those
+// rooms' work. skip names the machine a run just failed on, so a retry lands
+// somewhere else.
 // attachedCINodes names the machine that still holds checks of an earlier engine
 // for a commit.
 type attachedCINodes interface {
@@ -780,9 +762,9 @@ type attachedCINodes interface {
 }
 
 // pinnedCINode pins a run to the machine that still runs its checks from before
-// an engine restart. Those checks already hold the machine's slots, so the
-// machine takes the run even when the scheduler's own count shows it full; any
-// other machine would start the checks again and abandon the first ones. When
+// an engine restart. Those checks already hold the machine's queue rows, so
+// the machine takes the run back; any other machine would start the checks
+// again and abandon the first ones. When
 // the machine cannot take work for now, such as a low disk, the run waits for it
 // instead. It returns no pin when there is no record, when the run just failed
 // there, or when the machine is no longer registered, enabled or allowed for
@@ -809,19 +791,43 @@ func pinnedCINode(ctx context.Context, registry localCIRegistry, repo, head stri
 	return nil, false
 }
 
-func availableCINodeExcept(nodes []localci.Node, active map[string]int, roomID, skip string) *localci.Node {
+func availableCINode(nodes []localci.Node, roomID, skip string, free func(node localci.Node) int) *localci.Node {
 	var chosen *localci.Node
-	free := 0
+	roomiest := 0
 	for i := range nodes {
 		node := &nodes[i]
-		if node.LowDisk || !node.AllowsRoom(roomID) || node.Name == skip {
+		if node.LowDisk || !node.AllowsRoom(roomID) || node.Name == skip || !node.Enabled {
 			continue
 		}
-		if available := node.Slots - active[node.Name]; node.Enabled && available > free {
-			chosen, free = node, available
+		if available := free(*node); available > roomiest {
+			chosen, roomiest = node, available
 		}
 	}
 	return chosen
+}
+
+// ciAdmission reads the shared node queue of this engine's data folder. A
+// service built without a store, as focused tests are, reads no queue: every
+// node then reads as unprobed, which the queue counts as room for one of
+// everything.
+func (s *Service) ciAdmission() jobs.Admission {
+	if s.Store == nil || s.Store.Root == "" {
+		return jobs.Admission{Engine: true}
+	}
+	return jobs.Admission{DataDir: filepath.Dir(s.Store.Root), Engine: true}
+}
+
+// availableCINode reads each node's room from the shared node queue, against
+// the capacity of the node view the scheduler already holds.
+func (s *Service) availableCINode(ctx context.Context, nodes []localci.Node, roomID, skip string) *localci.Node {
+	queue := s.ciAdmission()
+	return availableCINode(nodes, roomID, skip, func(node localci.Node) int { return queue.FreeCPUs(ctx, node.Name, node.CPUs) })
+}
+
+// freeCINodeCPUs reads the CPUs a node keeps free after the work its queue
+// holds, from the shared node queue.
+func (s *Service) freeCINodeCPUs(ctx context.Context, node localci.Node) int {
+	return s.ciAdmission().FreeCPUs(ctx, node.Name, node.CPUs)
 }
 
 func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, plan localCIPlan, repo string, node localci.Node, key string, run *registeredCIRun, retriedFrom string, resumed bool) {
@@ -862,7 +868,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	}
 	result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: node.Name, Started: s.now(), Status: "error"}
 	if err == nil && len(suites) > 0 {
-		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, Base: job.record.Base, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: run.slots}
+		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, Base: job.record.Base, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: registeredCIRunParallelism}
 		req.OnStart = func(startCtx context.Context) error {
 			// Hosted work is only replaced for a hosted head. A local change has
 			// no queued GitHub run to cancel.
@@ -876,7 +882,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		if s.RunNodeCI != nil {
 			result, err = s.RunNodeCI(ctx, node, req)
 		} else {
-			runner := localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node}
+			runner := localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node, Engine: true}
 			runner.OnCacheRepair = s.CacheRepairReporter(job.record.RoomID)
 			result, err = runner.Run(ctx, req)
 		}

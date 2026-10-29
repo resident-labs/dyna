@@ -93,7 +93,7 @@ Each item in `checks` supports these fields:
   is set.
 - `job` names a GitHub Actions job instead of a command, so one definition runs
   the same work as the provider. Dyna runs the job with a pinned `act` inside
-  the usual slot, deadline and report handling. See
+  the usual queue, deadline and report handling. See
   [Workflow job checks](#workflow-job-checks).
 - `host: true` runs outside a container. The machine owner must allow this;
   see [Host checks](#host-checks).
@@ -120,6 +120,10 @@ Each item in `checks` supports these fields:
 - `cpus` is the CPU count the check asks for, and `memory` its memory, such as
   `memory: 16g`. Both keep a default when they are absent; see
   [Resource limits](#resource-limits).
+- `io: heavy` marks a check whose work saturates the machine's disk, such as a
+  container build or a linker with many object files. A node runs only a few
+  heavy checks at once, beside any light ones; `io: light`, the default, needs
+  no such room. See [Resource limits](#resource-limits).
 
 Dyna supplies isolated home and temporary directories, report paths, a safe Git
 directory setting, and `JUNIT_REPORT_PATH`. The runner always writes
@@ -197,9 +201,9 @@ warm:
 
 After the default branch moves, Dyna runs that job through act on each CI
 machine that serves the repository, into the same cache store the job checks
-read. The run takes a slot like every other check, so it never starves a pull
-request's checks, and each machine remembers the commit it last warmed, so a
-commit warms a machine once.
+read. The run takes queue room like every other check, so it never starves a
+pull request's checks, and each machine remembers the commit it last warmed, so
+a commit warms a machine once.
 
 ## Resource limits
 
@@ -217,9 +221,8 @@ A check runs with 2 CPUs and 4 GiB of memory in a container, and with 2 CPUs and
 `cpus` is a whole number. `memory` needs a unit, `m` or `g`.
 
 Dyna bounds a request by the machine, so a repository cannot take more than the
-machine has. The slot pool gives two CPUs and 4 GiB per slot, and the machine's
-last probe bounds both again. A request above a bound is clamped, and the check's
-result and its log say so:
+machine has: the machine's last probe bounds both, and a request above the bound
+is clamped. The check's result and its log say so:
 
 ```
 Dyna clamped cpus from 32 to 16 and memory from 64 GiB to 32 GiB
@@ -230,19 +233,28 @@ already had. A container check keeps 1 GiB above its own memory limit in the
 systemd scope, so the docker client fits in the scope. A host check's scope is
 its only memory bound, so it gets exactly the granted memory.
 
+Every check, and every `dyna job` job, joins one queue per node. The queue
+admits a unit of work when its CPUs and memory fit the node's free capacity,
+when the node's disk use stays under its disk limit, and, for an IO-heavy unit,
+when fewer heavy units run than the node's limit. Work that waits is oldest
+first and rooms take turns, and the check's log names the reason it waits, such
+as `local CI: 4 of 4 IO-heavy jobs running, position 3 of 7`. The owner or the
+room's root sets a node's limits with `dyna machine edit <name> --max-io-heavy
+N --max-disk-percent P`.
+
 The scope also bounds the tasks a check may start: 768, or 256 for each CPU it
 was given when that is more. A compiler and its linker threads need many tasks
 per CPU, so a large build that asks for more CPUs gets a larger bound.
 
 Each check starts a build daemon of its own. Dyna gives every check a separate
-`SCCACHE_SERVER_PORT`, taken from the slot it holds, and keeps the cache
-directory the repository set. Ending one check therefore stops only its own
-sccache server, not a server another check still uses. A check that sets
+`SCCACHE_SERVER_PORT`, taken from its place in the node queue, and keeps the
+cache directory the repository set. Ending one check therefore stops only its
+own sccache server, not a server another check still uses. A check that sets
 `SCCACHE_SERVER_PORT` itself keeps that value.
 
-A check holds one slot whatever it asks for. A wide check therefore shares the
-machine with the other slots' checks, so keep the machine's slot count and the
-requests in mind together.
+A check holds in the node queue what it asks for. A wide check therefore shares
+the machine with fewer others, so keep the machine's capacity and the requests
+in mind together.
 
 ## Caches
 
@@ -296,10 +308,9 @@ Rules for a check:
   components in the same toolchain home at once will conflict.
 - Write test reports to the report path Dyna supplies. Never write them to a
   fixed shared path, or two runs will mix their results.
-- Do not open the slot lock, and do not use its file descriptors for your own
-  locks. Dyna gives your command no slot lock, so a background server that you
-  start cannot keep a slot busy after the check ends. Pick your own descriptor
-  numbers for your own locks, and stop daemons you start.
+- Pick your own descriptor numbers for the locks your command takes, and stop
+  daemons you start. A background server cannot keep queue room after the check
+  ends: the check's place in the node queue ends with it.
 
 ### Example: a Rust check
 
