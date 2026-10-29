@@ -35,7 +35,11 @@ func TestHoldAndReleaseUseGitHubDraftAndPostReason(t *testing.T) {
 	// pr/view service over this same PR store.
 	view := &prview.Service{Notify: s.Notify}
 	s.Store = view.Watcher().Store
-	engineCalls, err := websvc.Bind([]websvc.Binding{{Name: "SetPRDraft", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.SetPRDraft}})
+	engineCalls, err := websvc.Bind([]websvc.Binding{
+		{Name: "SetPRDraft", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.SetPRDraft},
+		// gh pr ready checks the hold through the engine, as the engine serves it.
+		{Name: "PRHold", Access: websvc.Read, Scope: websvc.ScopeRead, Method: view.PRHold},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
