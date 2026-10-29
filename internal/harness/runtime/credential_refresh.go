@@ -299,13 +299,20 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 }
 
 // renewalOutcome maps provider and local errors to public, non-secret facts.
+// The reason names the exact error class so a stored record shows which path
+// failed; every reason is a fixed label, never provider or reader text.
 func renewalOutcome(result CredentialRefreshResult, err error) (store.RenewalResult, string) {
 	switch {
 	case errors.Is(err, accountnative.ErrInvalidGrant):
 		return store.RenewalResultInvalidGrant, "invalid_grant"
-	case errors.Is(err, accountnative.ErrNotSignedIn), errors.Is(err, accountnative.ErrNoIdentity),
-		errors.Is(err, accountnative.ErrUnsupported), errors.Is(err, os.ErrNotExist):
-		return store.RenewalResultNoCredential, "no_credential"
+	case errors.Is(err, accountnative.ErrNotSignedIn):
+		return store.RenewalResultNoCredential, "not signed in"
+	case errors.Is(err, accountnative.ErrNoIdentity):
+		return store.RenewalResultNoCredential, "identity mismatch"
+	case errors.Is(err, accountnative.ErrUnsupported):
+		return store.RenewalResultNoCredential, "unsupported"
+	case errors.Is(err, os.ErrNotExist):
+		return store.RenewalResultNoCredential, "login file missing"
 	case errors.Is(err, context.DeadlineExceeded):
 		return store.RenewalResultTransient, "deadline exceeded"
 	case errors.Is(err, context.Canceled):
