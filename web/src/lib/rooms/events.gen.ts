@@ -302,6 +302,14 @@ export interface RoomCapEvent {
   atMs: number
 }
 
+// WorktreePortsEvent is the payload of the machine/worktree-ports events.
+export interface WorktreePortsEvent {
+  used: number
+  limit: number
+  threshold: number
+  generation: number
+}
+
 // CallEvent is the payload of the call/joined and call/declined and call/withdrawn events.
 export interface CallEvent {
   type: CallState
@@ -519,10 +527,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | JobEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | JobEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "job" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -860,6 +868,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "Room {room} is near its {cap} cap: {summary}.",
+  },
+  {
+    family: "machine",
+    type: "worktree-ports",
+    renderer: "WorktreePortsCard",
+    quiet: false,
+    wake: "root",
+    once: true,
+    audience: "room",
+    text: "Worktree port pool holds {used} of {limit} blocks ({threshold}%). Run dyna git worktrees gc before allocation fails.",
   },
   {
     family: "call",
@@ -1630,6 +1648,14 @@ export function isRoomCapEvent(v: unknown): v is RoomCapEvent {
     Number.isInteger(v.atMs)
 }
 
+export function isWorktreePortsEvent(v: unknown): v is WorktreePortsEvent {
+  return isRecord(v) &&
+    Number.isInteger(v.used) &&
+    Number.isInteger(v.limit) &&
+    Number.isInteger(v.threshold) &&
+    Number.isInteger(v.generation)
+}
+
 export function isCallEvent(v: unknown): v is CallEvent {
   return isRecord(v) &&
     CALL_STATE.has(v.type) &&
@@ -1879,6 +1905,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "machine" && type === "scratch-freed") return isMachineScratchEvent(v)
   if (family === "machine" && type === "limits-off") return isMachineLimitsEvent(v)
   if (family === "machine" && type === "room-cap") return isRoomCapEvent(v)
+  if (family === "machine" && type === "worktree-ports") return isWorktreePortsEvent(v)
   if (family === "call" && type === "joined") return isCallEvent(v)
   if (family === "call" && type === "declined") return isCallEvent(v)
   if (family === "call" && type === "withdrawn") return isCallEvent(v)

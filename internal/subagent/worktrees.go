@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -11,6 +12,43 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/worktrees"
 )
+
+// ReportWorktreePortCapacity observes the pool and posts any new
+// capacity-band crossing to every room. Allocation stays best effort: an
+// alert failure never rolls back a worktree that Git already created.
+func (m *Manager) ReportWorktreePortCapacity() {
+	alert, err := worktrees.ObservePortCapacity()
+	if err != nil {
+		log.Printf("worktree port capacity: %v", err)
+		return
+	}
+	if alert == nil {
+		return
+	}
+	m.reportPortCapacityAlert(alert)
+}
+
+// reportPortCapacityAlert posts one band crossing to the root seat of every
+// room: the pool is host-wide, so every room's root can act on it.
+func (m *Manager) reportPortCapacityAlert(alert *worktrees.PortCapacityAlert) {
+	rooms, err := m.rooms().List(false)
+	if err != nil {
+		log.Printf("worktree port capacity rooms: %v", err)
+		return
+	}
+	for _, rec := range rooms {
+		_, err := m.rooms().PostEventInput(room.PostEventInput{
+			RoomID: rec.ID,
+			Event: room.WorktreePortsEvent{
+				Used: alert.Used, Limit: alert.Limit, Threshold: alert.Threshold, Generation: alert.Generation,
+			},
+			To: []string{rec.Name + ":" + room.RootAgent},
+		})
+		if err != nil {
+			log.Printf("worktree port capacity alert for %s: %v", rec.Name, err)
+		}
+	}
+}
 
 // keptWorktreeReason is the lock reason cleanup and the owner see on a tree
 // that a manual handoff asked to keep.
