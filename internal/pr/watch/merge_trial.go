@@ -411,6 +411,11 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		if member == nil {
 			return errors.New("merge trial lost a tracked PR")
 		}
+		// A PR into an upstream repository is never published by Dyna, even when a
+		// trial made before the room recorded its upstream still holds it.
+		if upstreamPR(*member, s.roomUpstreams()) {
+			return s.discardMergeTrial(ctx, repo, *r, b)
+		}
 		if why, err := s.trialRoomHold(ctx, *member); err != nil {
 			return err
 		} else if why != "" {
