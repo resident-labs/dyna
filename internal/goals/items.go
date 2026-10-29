@@ -289,6 +289,16 @@ func readItem(conn *sql.Conn, room, goal, item string) (Item, bool, error) {
 // writeItem upserts one item row inside a writer transaction.
 func writeItem(conn *sql.Conn, room, goal string, it Item) error {
 	_, err := conn.ExecContext(context.Background(), "INSERT INTO goal_items(room,goal,id,text,state,assignee,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(room,goal,id) DO UPDATE SET text=excluded.text,state=excluded.state,assignee=excluded.assignee,updated_at=excluded.updated_at", room, goal, it.ID, it.Text, it.State, it.Assignee, it.UpdatedAt.UnixMilli())
+	if err != nil {
+		return err
+	}
+	return bumpItemsRevision(conn)
+}
+
+// bumpItemsRevision moves the item revision inside the caller's writer
+// transaction. The row is created on first use, so no migration seeds it.
+func bumpItemsRevision(conn *sql.Conn) error {
+	_, err := conn.ExecContext(context.Background(), "INSERT INTO meta(key,value) VALUES ('goal_items.revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
 	return err
 }
 
@@ -528,29 +538,43 @@ func assignedPairs(conn *sql.Conn, room, session string) ([][2]string, error) {
 // clearItemAssignee returns one item to its goal.
 func clearItemAssignee(conn *sql.Conn, room, goal, item string, now time.Time) error {
 	_, err := conn.ExecContext(context.Background(), "UPDATE goal_items SET assignee='', updated_at=? WHERE room=? AND goal=? AND id=?", now.UnixMilli(), room, goal, item)
-	return err
+	if err != nil {
+		return err
+	}
+	return bumpItemsRevision(conn)
 }
 
 // deleteItemRow removes one item inside the caller's state transaction.
 func deleteItemRow(conn *sql.Conn, room, goal, item string) error {
 	_, err := conn.ExecContext(context.Background(), "DELETE FROM goal_items WHERE room=? AND goal=? AND id=?", room, goal, item)
-	return err
+	if err != nil {
+		return err
+	}
+	return bumpItemsRevision(conn)
 }
 
 // moveItemRow moves one item row to another goal under a fresh ID.
 func moveItemRow(conn *sql.Conn, room, fromGoal, oldItem, toGoal, newItem string, now time.Time) error {
 	_, err := conn.ExecContext(context.Background(), "UPDATE goal_items SET goal=?, id=?, updated_at=? WHERE room=? AND goal=? AND id=?", toGoal, newItem, now.UnixMilli(), room, fromGoal, oldItem)
-	return err
+	if err != nil {
+		return err
+	}
+	return bumpItemsRevision(conn)
 }
 
 // reassignItemAssignees switches open items from one session to another and
-// reports how many rows changed.
+// reports how many rows changed. It bumps the item revision only when a row
+// changed.
 func reassignItemAssignees(conn *sql.Conn, room, from, to string) (int64, error) {
 	result, err := conn.ExecContext(context.Background(), "UPDATE goal_items SET assignee=? WHERE room=? AND assignee=? AND state='open'", to, room, from)
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil || n == 0 {
+		return n, err
+	}
+	return n, bumpItemsRevision(conn)
 }
 
 // EventsPage returns a goal's events newest first with a cursor, like

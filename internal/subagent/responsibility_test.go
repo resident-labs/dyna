@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"dyna-agent/internal/goals"
+	state "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/questions"
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/shells"
 )
 
@@ -75,4 +78,71 @@ func TestResponsibilityCountsMatchOneSessionReads(t *testing.T) {
 	if counts[child.ID]["item"] != 1 || len(counts[child.ID]) != 1 {
 		t.Fatalf("child session counts = %v, want one assigned item", counts[child.ID])
 	}
+}
+
+// A count reads the stores once, and reuses that read while no source changes.
+// A write to each source, including an item written through its own store
+// handle as the CLI does, makes the next count read again.
+func TestResponsibilityCountsReuseUntilASourceChanges(t *testing.T) {
+	e := newTestEnv(t)
+	e.joinRunners()
+	first, _ := e.start("RESPOND: first")
+	first, _ = e.wait(first.ID, 1)
+	e.doneGoals()
+	goal, err := e.m.goalStore().Add(first.RoomID, "owner", goals.Input{Text: "unfinished", Holders: []string{first.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	infos := []Info{first}
+	dataDir := filepath.Dir(e.m.Store.root())
+	read := func() int {
+		t.Helper()
+		if _, err := e.m.ResponsibilityCounts(e.ctx, infos); err != nil {
+			t.Fatal(err)
+		}
+		return e.m.countCache().recounts
+	}
+	if got := read(); got != 1 {
+		t.Fatalf("first count read the stores %d times, want 1", got)
+	}
+	if got := read(); got != 1 {
+		t.Fatalf("count with no change read the stores %d times, want 1", got)
+	}
+	expectReread := func(source string, change func() error) {
+		t.Helper()
+		before := read()
+		if err := change(); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(); got != before+1 {
+			t.Fatalf("count after a %s change read the stores %d times, want %d", source, got, before+1)
+		}
+		if got := read(); got != before+1 {
+			t.Fatalf("count after a %s change read again with no change: %d reads, want %d", source, got, before+1)
+		}
+	}
+	expectReread("goal", func() error {
+		_, err := e.m.goalStore().Add(first.RoomID, "owner", goals.Input{Text: "another goal"})
+		return err
+	})
+	expectReread("item", func() error {
+		_, err := e.m.goalStore().AddItem(first.RoomID, goal.ID, "owner", "step", first.ID)
+		return err
+	})
+	expectReread("question", func() error {
+		_, err := e.m.questionStore().Ask(questions.Question{Room: first.RoomID, Asker: first.ID, AskerKind: questions.AskerSession, To: "owner", Text: "Which option?", Meanwhile: "continue"}, nil)
+		return err
+	})
+	expectReread("PR state", func() error {
+		return state.Write(state.Root(dataDir), state.State{Version: 1})
+	})
+	expectReread("run", func() error {
+		runstoretest.Write(t, dataDir, runstore.Meta{ID: "wf_first", Status: "running", ParentSession: first.ID, RoomID: first.RoomID})
+		return nil
+	})
+	expectReread("session", func() error {
+		third, _ := e.start("RESPOND: third")
+		e.wait(third.ID, 1)
+		return nil
+	})
 }

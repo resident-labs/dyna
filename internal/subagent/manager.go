@@ -64,6 +64,9 @@ type Manager struct {
 	ResumeRoomLaunch func(*Manager, string, uint64) error
 	Store            *Store
 	Rooms            *room.Store
+	// counts holds the responsibility counts of the current revision key. Use
+	// countCache to read it, because a literal Manager starts with none.
+	counts *countCache
 	// Profiles loads the profile registry (default: the user's profiles.json).
 	Profiles func() (*profile.Store, error)
 	// Skills loads Dyna's skill catalog (default: harness-config.json).
