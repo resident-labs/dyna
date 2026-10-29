@@ -24,18 +24,20 @@ func TestSmellTaskReadsCodeWithAChecklist(t *testing.T) {
 			t.Errorf("smell task lacks %q", want)
 		}
 	}
-	if strings.Contains(Task("/src/app", "/data/tree", "aaa", "bbb", "change", 120), "3. Smells.") {
+	if strings.Contains(Task("/src/app", "github.com/fork/app", "/data/tree", "aaa", "bbb", "change", 120), "3. Smells.") {
 		t.Error("map task still includes smell finding")
 	}
 }
 
 func TestTaskStatesMaintainModeAndTheReadmeGate(t *testing.T) {
-	task := Task("/src/app", "/data/tree", "aaa", "bbbbbbbbbbbbbbbb", "owned file x.go changed", 120)
+	task := Task("/src/app", "github.com/fork/app", "/data/tree", "aaa", "bbbbbbbbbbbbbbbb", "owned file x.go changed", 120)
 	for _, want := range []string{
 		"Correct only statements that are now false. Leave true statements, wording and structure alone",
 		"dyna library check-readme",
 		"(120 lines)",
 		"do not open a pull request",
+		"Never push to a branch that already exists on the remote",
+		"gh pr create --repo github.com/fork/app --body-file FILE",
 		"dyna git pr track",
 		"Never merge",
 		"dyna library changed --since aaa",
