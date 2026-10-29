@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"dyna-agent/internal/callspec"
 )
 
 // connContextFunc is the socket server's current caller-identity hook. Before
@@ -23,7 +25,7 @@ func startupHealthHandler(started time.Time) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "the engine is starting"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "the engine is starting", "code": callspec.CodeEngineStarting})
 	})
 	return mux
 }
