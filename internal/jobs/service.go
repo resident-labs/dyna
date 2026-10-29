@@ -192,7 +192,12 @@ type Input struct {
 	Ref  string
 	Host bool
 	// Image runs the command in this container image; Host must be false.
-	Image   string
+	Image string
+	// Network, Mounts and Devices apply only to an image. Mount requests
+	// select registrations of the chosen node; they carry no host paths.
+	Network NetworkMode
+	Mounts  []MountRequest
+	Devices []string
 	CPUs    int
 	Memory  string
 	Timeout time.Duration
@@ -236,6 +241,9 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	if in.Host && in.Image != "" {
 		return Job{}, errors.New("a job runs either on the host or in an image, not both")
 	}
+	if in.Image == "" && (in.Network != "" || len(in.Mounts) > 0 || len(in.Devices) > 0) {
+		return Job{}, errors.New("--network, --mount and --device need --image")
+	}
 	for _, p := range in.Artifacts {
 		if err := checkArtifact(p); err != nil {
 			return Job{}, err
@@ -247,6 +255,10 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	if !machine.Enabled {
 		return Job{}, fmt.Errorf("node %s is disabled", machine.Name)
+	}
+	container, err := resolveContainer(machine, in)
+	if err != nil {
+		return Job{}, err
 	}
 	// A job runs on the host unless it names an image.
 	host := in.Host || in.Image == ""
@@ -272,7 +284,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	job := Job{
 		ID: id, RoomID: in.RoomID, Session: in.Session, Run: in.Run, IdempotencyKey: in.IdempotencyKey, RequestHash: in.RequestHash, Node: machine.Name,
-		Command: in.Command, Host: host, Image: in.Image,
+		Command: in.Command, Host: host, Image: in.Image, Container: container,
 		CPUs: in.CPUs, Timeout: in.Timeout, Heavy: in.Heavy, Artifacts: in.Artifacts,
 		Resources: in.Resources, State: StateQueued, Created: s.Store.now(),
 		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
@@ -1104,9 +1116,19 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		// works there, exactly as a CI check container does, and what the job
 		// writes there stays for its artifacts.
 		mount := " -v " + q(work+":/workspace") + " -w /workspace"
+		for _, registered := range job.Container.Mounts {
+			mount += " -v " + q(registered.Source+":"+registered.Target+":"+string(registered.Mode))
+		}
+		for _, device := range job.Container.Devices {
+			mount += " --device=" + q(device)
+		}
+		network := ""
+		if job.Container.Network == NetworkNone {
+			network = " --network=none"
+		}
 		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --cpus=" + strconv.Itoa(resources.CPUs) +
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
-			" --pids-limit=512" + mount + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
+			" --pids-limit=512" + network + mount + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
 	} else {
 		inner += "cd " + q(work) + "; "
 		inner += "timeout --foreground --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s bash -o pipefail -c " + q(command)
