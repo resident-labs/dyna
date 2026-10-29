@@ -295,6 +295,17 @@ func (a *Accounts) clearRefreshedHold(id string, since time.Time) {
 	}
 }
 
+// readingRefutesStatedHold reports whether a fresh reading positively shows
+// both the session and the weekly window with a percentage and quota left. A
+// stated hold names no window, so a reading that lacks either window is partial.
+func readingRefutesStatedHold(o *store.Observation, now time.Time) bool {
+	session, weekly := store.SessionWindow(o), store.WeeklyWindow(o)
+	if session == nil || session.UsedPercent == nil || weekly == nil || weekly.UsedPercent == nil {
+		return false
+	}
+	return store.DecideUsage(o, now).Eligible
+}
+
 // WindowReset probes the account's usage and returns when the named window
 // resets. It returns zero when the probe fails or the window has no reset.
 func (a *Accounts) WindowReset(ctx context.Context, id, windowID string) time.Time {
@@ -467,11 +478,11 @@ func (a *Accounts) refreshReading(ctx context.Context, n NativeAccount) *store.O
 	}, true); err != nil {
 		return nil
 	}
-	// A stated hold ends only when the fresh reading shows the weekly window with
+	// A stated hold ends only when the fresh reading covers both limits with
 	// quota left. Any other successful reading leaves it, so a spent or partial
 	// reading cannot end a limit the provider stated.
 	var clearErr error
-	if store.WeeklyWindow(&observation) != nil && store.DecideUsage(&observation, time.Now()).Eligible {
+	if readingRefutesStatedHold(&observation, time.Now()) {
 		clearErr = a.ClearHold(n.ID, probeStart)
 	} else {
 		clearErr = a.ClearUnstated(n.ID, probeStart)
