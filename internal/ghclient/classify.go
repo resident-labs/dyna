@@ -134,6 +134,18 @@ func parseArgs(command, args []string) parsedArgs {
 	return p
 }
 
+// commentOnlyReview reports whether a pr review only comments. An approval or
+// a change request carries a verdict, so it is not routine collaboration.
+func commentOnlyReview(p parsedArgs) bool {
+	_, comment := p.flags["--comment"]
+	_, shortComment := p.flags["-c"]
+	_, approve := p.flags["--approve"]
+	_, shortApprove := p.flags["-a"]
+	_, request := p.flags["--request-changes"]
+	_, shortRequest := p.flags["-r"]
+	return (comment || shortComment) && !approve && !shortApprove && !request && !shortRequest
+}
+
 // Classify says who may approve a gh command. Reads are never held. A write is
 // agent class when it is a routine collaboration step, and owner class in every
 // other case, including any command it does not know.
@@ -176,13 +188,7 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 	case "issue create", "issue edit", "issue comment", "pr create", "pr edit", "pr ready", "pr comment":
 		return approvals.ClassAgent
 	case "pr review":
-		_, comment := p.flags["--comment"]
-		_, shortComment := p.flags["-c"]
-		_, approve := p.flags["--approve"]
-		_, shortApprove := p.flags["-a"]
-		_, request := p.flags["--request-changes"]
-		_, shortRequest := p.flags["-r"]
-		if (comment || shortComment) && !approve && !shortApprove && !request && !shortRequest {
+		if commentOnlyReview(p) {
 			return approvals.ClassAgent
 		}
 	case "issue close", "issue reopen":
