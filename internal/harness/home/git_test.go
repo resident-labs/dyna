@@ -28,7 +28,7 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 	}
 	write(t, filepath.Join(config, "git/config"), "[user]\n name = XDG identity\n[include]\n path = ~/tilde-config\n", 0600)
 	write(t, filepath.Join(owner, "tilde-config"), "[test]\n tilde = owner\n", 0600)
-	write(t, filepath.Join(owner, ".gitconfig"), "[user]\n name = HOME identity\n", 0600)
+	write(t, filepath.Join(owner, ".gitconfig"), "[user]\n name = HOME identity\n signingKey = OWNERKEY\n[commit]\n gpgSign = true\n", 0600)
 	write(t, filepath.Join(config, "git/ignore"), "ignored-file\n", 0600)
 	write(t, filepath.Join(config, "git/attributes"), "*.example custom=owner\n", 0600)
 	out, err := Prepare(scope, "", env)
@@ -39,6 +39,9 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 	bridge := filepath.Join(filepath.Dir(out["DYNA_BIN"]), "git")
 	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.name"); got != AgentGitName+"\n" {
 		t.Fatalf("agent commits took the owner's identity: %q", got)
+	}
+	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--type=bool", "--get", "commit.gpgSign"); got != "false\n" {
+		t.Fatalf("agent commits are signed with the owner's setting: %q", got)
 	}
 	if got := run(t, privateEnv, bridge, "config", "--global", "--includes", "--get", "user.email"); got != AgentGitEmail+"\n" {
 		t.Fatalf("agent email = %q", got)
