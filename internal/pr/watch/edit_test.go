@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
@@ -32,11 +34,21 @@ func TestEditUpstreamPRUsesPREditCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls [][]string
-	s.GH = GitHub{Executable: "gh", run: func(_ context.Context, cmd *exec.Cmd) error {
+	var agentText []bool
+	s.GH = GitHub{Executable: "gh", run: func(ctx context.Context, cmd *exec.Cmd) error {
 		calls = append(calls, cmd.Args[1:])
+		agentText = append(agentText, ghclient.IsAgentText(ctx))
 		return nil
 	}}
 	title := "Fix the parser"
+	// An agent's edit is marked for the privacy checks; the owner's is not.
+	for actor, want := range map[authority.Actor]bool{{Role: authority.Session, Session: "ses_a"}: true, {Role: authority.Owner}: false} {
+		agentText = nil
+		if err := s.Edit(authority.WithActor(context.Background(), actor), key, PREdit{Title: &title}); err != nil || len(agentText) != 1 || agentText[0] != want {
+			t.Fatalf("%s edit: marked = %v, err = %v; want marked %v", actor.Role, agentText, err, want)
+		}
+	}
+	calls = nil
 	if err := s.Edit(context.Background(), key, PREdit{Title: &title}); err != nil {
 		t.Fatal(err)
 	}
