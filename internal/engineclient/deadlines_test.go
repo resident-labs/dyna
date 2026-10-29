@@ -258,3 +258,21 @@ func TestLateAddGoalTwiceSaysTheEngineMayStillApplyIt(t *testing.T) {
 		t.Fatalf("sends = %d, want 2", len(engine.seen))
 	}
 }
+
+// A late write is not repeated, and its error says the outcome is unknown and
+// names the method. A late read keeps the plain "engine did not answer" error.
+func TestLateWriteSaysItsOutcomeIsUnknown(t *testing.T) {
+	engine := newLateEngine(t, true)
+	client := engineclient.New("", engineclient.Notices(nil), engineclient.RoundTrip(engine))
+	err := client.Call(t.Context(), "RemoveRule", nil, nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "outcome unknown: engine did not answer RemoveRule") || !strings.Contains(err.Error(), "may still apply RemoveRule") {
+		t.Fatalf("late write = %v", err)
+	}
+	if n := len(engine.seen); n != 1 {
+		t.Fatalf("sends = %d, want 1: a write is not repeated", n)
+	}
+	err = client.Call(t.Context(), "Health", nil, nil)
+	if err == nil || err.Error() != "engine did not answer Health in 0 s" {
+		t.Fatalf("late read = %v", err)
+	}
+}

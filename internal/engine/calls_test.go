@@ -487,8 +487,29 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 	if callspec.Deadline("VoiceSay") <= voice.SayTimeout {
 		t.Errorf("VoiceSay deadline %v must exceed SayTimeout %v", callspec.Deadline("VoiceSay"), voice.SayTimeout)
 	}
-	if n := len(callspec.LongCalls); n != 112 {
-		t.Fatalf("LongCalls has %d calls, want 112;a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 103 {
+		t.Fatalf("LongCalls has %d calls, want 103;a call over 5 s needs a reason and a deliberate change here", n)
+	}
+}
+
+// callspec.WriteCalls sets the write deadline and the unknown-outcome error, so
+// it must list exactly the bound writes.
+func TestWriteCallsMatchBindings(t *testing.T) {
+	writes := map[string]bool{}
+	for _, binding := range bindings(services{rooms: &roomsvc.Service{}}) {
+		if binding.Access == websvc.Write {
+			writes[binding.Name] = true
+		}
+	}
+	for name := range writes {
+		if !callspec.WriteCalls[name] {
+			t.Errorf("%s is a write binding but not in callspec.WriteCalls", name)
+		}
+	}
+	for name := range callspec.WriteCalls {
+		if !writes[name] {
+			t.Errorf("callspec.WriteCalls names %s, which is not a write binding", name)
+		}
 	}
 }
 
