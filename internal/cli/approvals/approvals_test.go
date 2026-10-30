@@ -16,6 +16,13 @@ type fakeClient struct {
 }
 
 func (f *fakeClient) Call(_ context.Context, method string, args []any, out any) error {
+	if method == "ApprovalLog" {
+		if args[0] != "alpha" || args[1] != 24*time.Hour {
+			panic("bad log filter")
+		}
+		*out.(*[]core.LogEntry) = []core.LogEntry{{Actor: "alpha:root", Kind: "github.write", Target: "o/r", State: core.StateDone}, {Actor: "alpha:parent", Kind: "github.write", Target: "o/r", State: core.StateDenied}}
+		return nil
+	}
 	if method != "ApprovalSettings" {
 		panic(method)
 	}
@@ -27,6 +34,21 @@ func (f *fakeClient) Call(_ context.Context, method string, args []any, out any)
 	}
 	*out.(*core.Settings) = f.settings
 	return nil
+}
+
+func TestLogListsInlineAndDecidedWrites(t *testing.T) {
+	cmd := Command(Options{Client: &fakeClient{}})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"log", "--room", "alpha"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"alpha:root", "alpha:parent", "done", "denied"} {
+		if !strings.Contains(out.String(), text) {
+			t.Fatalf("log %q lacks %q", out.String(), text)
+		}
+	}
 }
 
 func TestHelpFirstLineNamesTheDecidingCommands(t *testing.T) {
