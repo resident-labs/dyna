@@ -81,7 +81,7 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 	if err := h.EnsureSlice(ctx, box.Slice{Name: "dyna-aaa-bbb-ccc.slice", CPUs: 2, MemHigh: 4, MemMax: 6, Pids: 8}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.CreateContainer(ctx, box.ContainerSpec{Box: "a", Image: "image", Slice: "dyna-aaa-bbb-ccc.slice", Mounts: []box.Mount{{HostPath: "/data", BoxPath: "/box"}, {HostPath: "/host/sock/a", BoxPath: "/run/dyna/engine", ReadOnly: true}}}); err != nil {
+	if err := h.CreateContainer(ctx, box.ContainerSpec{Box: "a", Image: "image", Slice: "dyna-aaa-bbb-ccc.slice", Mounts: []box.Mount{{HostPath: "/host/sock/a", BoxPath: "/run/dyna/engine", ReadOnly: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -89,7 +89,7 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		suffix string
 	}{
 		{3, "'systemctl' '--user' 'set-property' '--runtime' 'dyna-aaa-bbb-ccc.slice' 'CPUQuota=200%' 'MemoryHigh=4' 'MemoryMax=6' 'TasksMax=8'"},
-		{5, "'podman' '--cgroup-manager=systemd' 'create' '--name' 'a' '--userns=keep-id:uid=1000,gid=1000' '--user' '1000:1000' '--label' 'dyna.box=a' '--cgroup-parent=dyna-aaa-bbb-ccc.slice' '--cgroupns=private' '--systemd=always' '--stop-signal' 'SIGTERM' '--entrypoint' '/usr/bin/tini' '--tmpfs' '/run/dyna' '--env' 'HOME=/box/home' '--env' 'PI_CODING_AGENT_DIR=/box/pi' '--volume' '/data:/box' '--volume' '/host/sock/a:/run/dyna/engine:ro' 'image' '--' '/opt/dyna/bin/current/dyna' 'box-agent'"},
+		{5, "'podman' '--cgroup-manager=systemd' 'create' '--name' 'a' '--userns=keep-id:uid=1000,gid=1000' '--user' '1000:1000' '--label' 'dyna.box=a' '--cgroup-parent=dyna-aaa-bbb-ccc.slice' '--cgroupns=private' '--systemd=always' '--stop-signal' 'SIGTERM' '--entrypoint' '/usr/bin/tini' '--tmpfs' '/run/dyna' '--env' 'HOME=/box/home' '--env' 'PI_CODING_AGENT_DIR=/box/pi' '--volume' 'dyna-box-a:/box' '--volume' '/host/sock/a:/run/dyna/engine:ro' 'image' '--' '/opt/dyna/bin/current/dyna' 'box-agent'"},
 	} {
 		args := r.calls[tc.call]
 		if !strings.HasSuffix(args[len(args)-1], tc.suffix) {
@@ -97,6 +97,26 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		}
 	}
 }
+func TestRemoveContainerRemovesItsVolume(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	if err := h.RemoveContainer(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		call   int
+		suffix string
+	}{
+		{1, "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' 'a'"},
+		{3, "'podman' '--cgroup-manager=systemd' 'volume' 'rm' '-f' 'dyna-box-a'"},
+	} {
+		args := r.calls[tc.call]
+		if !strings.HasSuffix(args[len(args)-1], tc.suffix) {
+			t.Fatalf("command %q", args[len(args)-1])
+		}
+	}
+}
+
 func TestForwardRestoredAfterMasterDies(t *testing.T) {
 	r := &runner{}
 	h := newTestHost(t, r)
