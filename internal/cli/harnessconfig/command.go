@@ -8,6 +8,7 @@ import (
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/runtime"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/shellmcp"
@@ -46,7 +47,7 @@ func shellCommand() *cobra.Command {
 				}
 			}
 		}
-		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch, RoomMCP: engineRoomMCP(), Steer: steerWatch}
+		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch, RoomMCP: engineRoomMCP(), Nodes: registeredNodes, Steer: steerWatch}
 		// An update replaces the binary this server started from; when the
 		// state it serves moves past this build, restart on that binary so a
 		// schema bump never cuts the session's shells off (D-171).
@@ -89,6 +90,22 @@ func engineSearch(ctx context.Context, in callspec.WebSearchRequest) (callspec.W
 		return callspec.WebSearchResponse{}, err
 	}
 	return answer, nil
+}
+
+// registeredNodes lists the remote nodes in the machine registry. The local
+// machine is not a remote node, so it is left out.
+func registeredNodes(ctx context.Context) ([]shellmcp.Node, error) {
+	list, err := (machines.Store{}).List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var nodes []shellmcp.Node
+	for _, m := range list {
+		if !m.Local {
+			nodes = append(nodes, shellmcp.Node{Name: m.Name, SSH: m.SSH})
+		}
+	}
+	return nodes, nil
 }
 
 // engineRoomMCP reaches the room's outside MCP servers through the engine. The
