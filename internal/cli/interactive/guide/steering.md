@@ -64,7 +64,7 @@ Read `dyna guide posting` for mention rules.
 
 The final message is the turn's full result report.
 Post only when a session must act before your final result: a blocker or a decision. A post to @root, or to your parent root, wakes root. Send status to the session that needs to act.
-If a successful turn already posted to its report recipient, Dyna delivers the completion quietly: it reaches the recipient's next turn and wakes no one. Failures still report.
+If a successful turn already posted to its report recipient, Dyna delivers the completion quietly when the recipient is idle or dormant. An active recipient receives it during its current turn. Failures still report.
 
 A session turn reports once on its first turn, with a schema, or after a parent or owner post that names the session.
 Naming means its name, `<room>:<name>` address or session ID, or a consolidated session's old name.
