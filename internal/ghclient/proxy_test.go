@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,5 +102,40 @@ func TestWorkerSnapshotUsesFinalAttributedBody(t *testing.T) {
 	err := SessionCommand(context.Background(), []string{"pr", "create", "--title", "title", "--body-file", body})
 	if SessionExitCode(err) != 75 {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// A published PR comment is an agent write: it must reach the approval request
+// as a pr comment, not a refusal, and must not run gh before approval.
+func TestPinnedReviewArgsPinAndClassifyAsAgent(t *testing.T) {
+	const head = "62908e5755a767d1a3d65260fb6d11f65affcf2c"
+	args := PinnedReviewArgs("github.com", "owner/project", 7, head, "feedback")
+	if !slices.Contains(args, "commit_id="+head) {
+		t.Fatalf("review argv does not pin the reviewed head: %q", args)
+	}
+	in := ClassifyInput{Host: "github.com", Repo: "owner/project", APIHost: "github.com"}
+	if got := Classify(context.Background(), args, in); got != approvals.ClassAgent {
+		t.Fatalf("Classify(%q) = %q, want agent", args, got)
+	}
+}
+
+func TestPublishThroughApprovalHoldsPRComment(t *testing.T) {
+	originalRequest, originalWait := requestApproval, waitApproval
+	t.Cleanup(func() { requestApproval, waitApproval = originalRequest, originalWait })
+	var sent approvals.RequestInput
+	requestApproval = func(_ context.Context, in approvals.RequestInput) (approvals.Request, error) {
+		sent = in
+		return approvals.Request{ID: "A-7"}, nil
+	}
+	waitApproval = func(_ context.Context, _ string, id string, _ time.Duration) (approvals.Request, error) {
+		return approvals.Request{ID: id, State: approvals.StatePending, At: "room:parent"}, nil
+	}
+	args := []string{"pr", "comment", "https://github.com/owner/project/pull/7", "--body", "feedback"}
+	err := PublishThroughApproval(context.Background(), "room-1", t.TempDir(), args)
+	if SessionExitCode(err) != 75 {
+		t.Fatalf("error = %v", err)
+	}
+	if len(sent.Argv) < 2 || sent.Argv[0] != "pr" || sent.Argv[1] != "comment" {
+		t.Fatalf("approval argv = %q", sent.Argv)
 	}
 }

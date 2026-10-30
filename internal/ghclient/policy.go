@@ -446,6 +446,8 @@ type apiCall struct {
 	query string
 	// keys are the names of the -f, -F, --field and --raw-field fields.
 	keys []string
+	// event is the value of the event field, upper case, when one is sent.
+	event string
 }
 
 func parseAPICall(args []string) apiCall {
@@ -479,8 +481,11 @@ func parseAPICall(args []string) apiCall {
 			default:
 				field = arg[2:]
 			}
-			key, _, _ := strings.Cut(field, "=")
+			key, value, _ := strings.Cut(field, "=")
 			call.keys = append(call.keys, key)
+			if key == "event" {
+				call.event = strings.ToUpper(value)
+			}
 		}
 		if strings.HasPrefix(arg, "query=") {
 			call.query = strings.TrimSpace(strings.TrimPrefix(arg, "query="))
