@@ -3,11 +3,13 @@
   // avatar and name, then what the row knows. The caller decides what a tap
   // opens: a thread, a child session or a peer session.
   import Avatar from '../ui/Avatar.svelte'
+  import type { Avatar as AvatarIdentity } from '../api/session.gen.ts'
 
   interface Props {
     name: string
     onopen: () => void
-    emoji?: string
+    avatar?: AvatarIdentity
+    here?: string
     hue?: number
     state?: string
     status?: string
@@ -21,12 +23,12 @@
     enter?: boolean
     title?: string
   }
-  let { name, onopen, emoji = '', hue = 0, state = '', status = '', glyph = '', badge = '', note = '', snippet = '', time = '', queued = false, selected = false, enter = false, title = '' }: Props = $props()
+  let { name, onopen, avatar, here = '', hue = 0, state = '', status = '', glyph = '', badge = '', note = '', snippet = '', time = '', queued = false, selected = false, enter = false, title = '' }: Props = $props()
 </script>
 
 <button class="thread-chip" class:enter class:selected title={title || undefined} onclick={onopen}>
   {#if glyph}<span aria-hidden="true">{glyph}</span>{/if}
-  <Avatar {name} {emoji} {hue} size={18} {state} {status} />
+  {#if avatar}<Avatar {name} {avatar} {here} {hue} size={18} {state} {status} />{/if}
   <strong>{name}</strong>
   {#if badge}<b>{badge}</b>{/if}
   {#if note}<span class="note">{note}</span>{/if}

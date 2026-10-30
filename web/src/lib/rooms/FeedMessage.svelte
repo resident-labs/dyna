@@ -8,7 +8,6 @@
   import { speaker } from '../ui/posts.ts'
   import { postParts } from '../ui/postParts.ts'
   import { postPreview } from '../ui/preview.ts'
-  import RunAvatar from '../workflows/RunAvatar.svelte'
   import WorkflowMessage from './WorkflowMessage.svelte'
   import { scriptSender, scriptLabel, scriptHref } from './scriptSender.ts'
   import { look } from './look.svelte.ts'
@@ -48,6 +47,7 @@
   let isExpanded = $derived(expanded ?? localExpanded)
   let script = $derived(scriptSender(post))
   let name = $derived(script ? scriptLabel(script) : speaker(post, room.name))
+  let headerName = $derived(post.avatar?.room && post.avatar.room !== room.name && name.startsWith(`${post.avatar.room}:`) ? name.slice(post.avatar.room.length + 1) : name)
   let parts = $derived(postParts(post))
   let preview = $derived(postPreview(parts.text))
   // Root's ordinary posts always stay open. A turn result is not an ordinary
@@ -66,16 +66,16 @@
 <div class="message {surface}" data-id={turnResult ? post.id : undefined}>
   <span class="gutter">
     {#if cont}<time class="side-time">{clock(post.ts)}</time>
-    {:else if script}<a class="av" href={scriptHref(post.roomId ?? '', script)} aria-label="Open workflow run {name}"><RunAvatar size={40} /></a>
+    {:else if script && post.avatar}<a class="av" href={scriptHref(post.roomId ?? '', script)} aria-label="Open workflow run {name}"><Avatar avatar={post.avatar} here={room.name} {name} size={40} /></a>
     {:else}<button class="av" onclick={() => onaddress?.(post.from ?? '')} aria-label={name}>
-      <Avatar {name} hue={post.fromHue} owner={post.owner} emoji={post.fromEmoji} size={40} />
+      {#if post.avatar}<Avatar {name} hue={post.fromHue} avatar={post.avatar} here={room.name} size={40} />{/if}
     </button>{/if}
   </span>
   <div class="body" class:turn-result={turnResult}>
     {#if !cont}
       <header>
         {#if script}<a class="name run-name" href={scriptHref(post.roomId ?? '', script)} title="Open workflow run {script.runId}">{name}</a><span class="tag">workflow</span>
-        {:else}<button class="name hue-{post.fromHue}" onclick={() => onaddress?.(post.from ?? '')}>{name}</button>{/if}{#if post.source === 'card'}<span class="tag" title="A card wrote this text. You confirmed it before it was sent.">card</span>{/if}
+        {:else}<button class="name hue-{post.fromHue}" onclick={() => onaddress?.(post.from ?? '')}>{headerName}</button>{/if}{#if post.avatar?.room && post.avatar.room !== room.name}<span class="room-tag" style="--room:var(--room-{post.avatar.color})"><i></i>{post.avatar.room}</span>{/if}{#if post.source === 'card'}<span class="tag" title="A card wrote this text. You confirmed it before it was sent.">card</span>{/if}
         {#if post.fromRoom}<span class="tag" title="The owner sent this from the {post.fromRoom} room. Your reply goes back there.">from room {post.fromRoom}</span>{/if}
         <time title={new Date(post.ts ?? 0).toLocaleString()}>{stamp(post.ts)}</time>
         {#if recipients}
@@ -128,6 +128,8 @@
     line-height: 16px;
     align-self: center;
   }
+  .room-tag { color: var(--muted); font-size: var(--t-cap); }
+  .room-tag i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--room); margin-right: 4px; }
   time { font-size: var(--t-sm); color: var(--faint); }
   .to { font-size: var(--t-sm); color: var(--faint); display: inline-flex; gap: var(--s1); align-items: baseline; flex-wrap: wrap; }
   .arrow { color: var(--faint); }

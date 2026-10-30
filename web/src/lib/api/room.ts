@@ -1,3 +1,4 @@
+import type { Avatar } from './session.gen.ts'
 import type { EventPayload, IssueState } from '../rooms/events.gen.ts'
 
 import type { Room, RoomLimits } from './room.gen.ts'
@@ -151,7 +152,7 @@ export interface Post extends Message {
   preview?: string
   hidden?: number
   unread?: boolean
-  fromEmoji?: string
+  avatar: Avatar
   fullResult?: boolean
   resultCut?: boolean
   views?: string[]
@@ -256,7 +257,7 @@ export interface Member {
   doing?: Doing
   closed?: boolean
   closeSummary?: CloseOutcome[]
-  emoji?: string
+  avatar: Avatar
   // computer is the ID of the computer this row uses; the engine names it.
   computer?: string
   seat?: Seat
@@ -390,7 +391,7 @@ export interface Question {
   groupKey: string
   askerName: string
   askerHue: number
-  askerEmoji: string
+  avatar: Avatar
   withdrawnHue: number
   attachments: Attachment[] | null
   human?: boolean

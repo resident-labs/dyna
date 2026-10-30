@@ -13,7 +13,7 @@ test('pin search matches text, speaker and attachment names without changing pin
     { id: 'p1', text: 'Deploy rule', speaker: 'Leo' },
     { id: 'p2', text: 'Release checklist', speaker: 'Maya' },
     { id: 'p3', text: 'Weekly data', speaker: 'Leo', attachments: [{ id: 'f1', name: 'report.csv', title: 'Quarterly figures', mime: 'text/csv', size: 12 }] },
-  ].map(p => ({ ts: 1761000000000, pinnedAt: 1761000000000, ...p }))
+  ].map(p => ({ avatar: { kind: 'session', room: 'work', color: 'crimson' }, ts: 1761000000000, pinnedAt: 1761000000000, ...p }))
   const component = ui.mount(ui.default, { target: document.getElementById('app'), props: { room: { id: 'global', name: 'work' }, pins, onjump() {}, onunpin() {}, onclose() {} } })
   try {
     ui.flushSync()

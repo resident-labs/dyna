@@ -372,6 +372,7 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 		thread = threaded.eventThread()
 	}
 	msg, err := s.post(in.RoomID, PostInput{
+		SenderKind:   SenderEngine,
 		ID:           id,
 		From:         from,
 		SenderRoomID: in.SenderRoomID,

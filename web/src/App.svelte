@@ -521,7 +521,7 @@
   function rootMember(): Drill {
     const owner = hierarchy.find((m) => m.owner)
     const holder = rootSeat.external ? (rootSeat.harness ? rootSeat.harness + ' (external)' : 'External orchestrator') : 'Internal root'
-    return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, computer: owner?.computer, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
+    return { avatar: { kind: 'root', emoji: '🖥️', room: room?.name ?? '', color: room?.color ?? 'crimson' }, id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, computer: owner?.computer, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
   }
   // The breadcrumbs above a session and a run: root, then the parent sessions.
   let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(feedViews, drill.parent, rootMember()).filter((m) => m.id !== drill?.id) : [])
@@ -1501,7 +1501,7 @@
         {:else if view === 'services'}
           {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} hooks={settingsPanel.hooksAt} onopen={(m: Member) => openSession(m, 0, null, true)} onpr={openPR} />{/key}
         {:else if view === 'visuals'}
-          {#key room.id}<Visuals roomId={room.id} {visuals} onopen={(v: Visual) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
+          {#key room.id}<Visuals roomId={room.id} roomName={room.name} {visuals} onopen={(v: Visual) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
         {:else if view === 'computers' && computers}
           {#key room.id}<Computers list={computers} error={computerError} onopen={(c: ComputerInfo) => { const m = hierarchy.find((x) => x.id === c.session); if (m) { openSession(m); sessionTab = 'computer' } else popOut(room.id, c.session) }} />{/key}
         {:else if view === 'goals'}
@@ -1573,7 +1573,7 @@
 {/if}
 {#if settingsPanel.showRoomSettings && room}
   {#key settingsPanel.roomSettingsKey}
-  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => palette.registry(room).find((a) => a.id === id)?.run()} onhooks={() => openHooks()} onclose={() => (settingsPanel.closeRoomSettings())} />
+  <RoomSettings {room} {profiles} oncolor={(id, color) => { rooms = rooms.map((r) => r.id === id ? { ...r, color } : r); if (roomData.feed?.room.id === id) roomData.feed.room.color = color }} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => palette.registry(room).find((a) => a.id === id)?.run()} onhooks={() => openHooks()} onclose={() => (settingsPanel.closeRoomSettings())} />
   {/key}
 {/if}
 {#if roomMenu}

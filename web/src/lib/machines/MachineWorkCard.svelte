@@ -38,7 +38,7 @@
       <h3>Running</h3>
       {#each agents as agent (agent.id)}
         <Row dense text={agent.name} onclick={() => onagent?.(agent)}>
-          {#snippet lead()}<Avatar name={agent.name} hue={agent.hue} size={24} /><StatusPill label="Agent" />{/snippet}
+          {#snippet lead()}<Avatar avatar={agent.avatar} name={agent.name} hue={agent.hue} size={24} /><StatusPill label="Agent" />{/snippet}
           {#snippet meta()}{#if agent.room}<span>{agent.room}</span>{/if}{/snippet}
         </Row>
       {/each}

@@ -5,12 +5,12 @@ import type { Session, Turn } from '../src/lib/api/session.ts'
 import type { DmRow } from '../src/lib/sessions/dm.ts'
 
 export const member = (id: string, extra: Partial<Member> = {}): Member => ({
-  resumable: false, name: id, address: id, depth: 0, children: 0, status: 'idle', state: 'idle',
+  avatar: { kind: 'session', room: 'room', color: 'crimson' }, resumable: false, name: id, address: id, depth: 0, children: 0, status: 'idle', state: 'idle',
   turns: 0, created: '', lastActivity: '', hue: 0, id, ...extra,
 })
 
 export const post = (id: string, extra: Partial<Post> = {}): Post => ({
-  wake: false, id, ts: 0, roomId: 'room', from: 'owner', to: null, text: '',
+  avatar: { kind: 'session', room: 'room', color: 'crimson' }, wake: false, id, ts: 0, roomId: 'room', from: 'owner', to: null, text: '',
   owner: false, completion: false, fromHue: 0, speaker: '', ...extra,
 })
 

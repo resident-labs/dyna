@@ -46,7 +46,7 @@ test('the session view shows the current call from the live activity, not the fi
     { kind: 'turn', key: 'turn:1', ts: started, turn: { n: 1, status: 'running', started } },
     { kind: 'timeline', key: 'timeline:1', ts: started, turn: { n: 1, started, status: 'running' }, steps: [{ kind: 'tool', key: 'tool:1', tool: 'read', target: 'old.go', ts: started }] },
   ] }
-  const member = { name: 'root', hue: 1, state: 'live', address: 'repo:root', doing: { text: 'Read: new.go', since: now - 45000 } }
+  const member = { avatar: { kind: 'session', room: 'repo', color: 'crimson' }, name: 'root', hue: 1, state: 'live', address: 'repo:root', doing: { text: 'Read: new.go', since: now - 45000 } }
   const html = await render('../sessions/DmRows', { dm, member, room: { name: 'repo' }, members: [] }, [transcriptStubs])
   assert.match(html, /class="doing[^"]*long[^"]*"[^>]*>Read: new\.go · 45s</)
   assert.doesNotMatch(html, /old\.go · 10m/)
@@ -56,8 +56,8 @@ test('a live member row says what it is doing and for how long', async (t) => {
   const now = Date.now()
   t.mock.method(Date, 'now', () => now)
   const members = [
-    { owner: true, name: 'repo', address: 'repo', children: 1, hue: 0 },
-    { id: 's1', name: 'lead', address: 'repo:lead', profile: 'opus', state: 'live', status: 'running', turns: 3, depth: 0, hue: 2, doing: { text: 'Bash: Write a 10 GB test file', since: now - 45000 } },
+    { avatar: { kind: 'session', room: 'repo', color: 'crimson' }, owner: true, name: 'repo', address: 'repo', children: 1, hue: 0 },
+    { avatar: { kind: 'session', room: 'repo', color: 'crimson' }, id: 's1', name: 'lead', address: 'repo:lead', profile: 'opus', state: 'live', status: 'running', turns: 3, depth: 0, hue: 2, doing: { text: 'Bash: Write a 10 GB test file', since: now - 45000 } },
   ]
   const html = await render('../rooms/Members', { members, onselect: () => {}, onclosed: () => {}, onmenu: () => {} })
   assert.match(html, /class="doing[^>]*long[^>]*"[^>]*>Write a 10 GB test file · 45s</)

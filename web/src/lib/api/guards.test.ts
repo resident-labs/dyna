@@ -2,13 +2,21 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { isComputerInfo, isDraft, isFeedSearch, isMember, isPost, isPostResult, isSendResult, isSessionReference, parseAppEvent, parseVoicePageEvent } from './guards.ts'
 
-const post = { wake: false, id: 'm1', ts: 1, roomId: 'r', from: 'a', to: null, text: 'hi', owner: false, completion: false, fromHue: 3, speaker: 'a' }
+const avatar = { kind: 'session', room: 'r', color: 'crimson' }
+const post = { avatar, wake: false, id: 'm1', ts: 1, roomId: 'r', from: 'a', to: null, text: 'hi', owner: false, completion: false, fromHue: 3, speaker: 'a' }
 
 test('isSessionReference accepts one DM reference row and rejects a missing field', () => {
-  const row = { postId: 'msg_1', from: 'r:lead', speaker: 'lead', fromHue: 2, conversation: 'room', ts: 1, preview: 'hi', attachments: 1 }
+  const row = { avatar, postId: 'msg_1', from: 'r:lead', speaker: 'lead', fromHue: 2, conversation: 'room', ts: 1, preview: 'hi', attachments: 1 }
   assert.equal(isSessionReference(row), true)
   assert.equal(isSessionReference({ ...row, postId: undefined }), false)
   assert.equal(isSessionReference({ ...row, attachments: '1' }), false)
+})
+
+test('posts and references retain avatars when the home room was deleted', () => {
+  const deletedRoomAvatar = { ...avatar, color: '' }
+  assert.equal(isPost({ ...post, avatar: deletedRoomAvatar }), true)
+  assert.equal(isSessionReference({ avatar: deletedRoomAvatar, postId: 'm1', from: 'r:lead', speaker: 'lead', fromHue: 2, conversation: 'room', ts: 1, preview: 'hi', attachments: 0 }), true)
+  assert.equal(isPost({ ...post, avatar: { ...avatar, color: 'invalid' } }), false)
 })
 
 test('isPost accepts a null recipient list and rejects a missing field', () => {
@@ -90,7 +98,7 @@ test('absent optional properties stay absent', () => {
   assert.deepEqual(parseVoicePageEvent({ type: 'transcript', text: 'hi' }), { type: 'transcript', text: 'hi' })
 })
 
-const member = { resumable: true, name: 'w', address: 'r:w', depth: 1, children: 0, status: 'live', state: 'live', turns: 2, created: '2026-10-20T10:00:00Z', lastActivity: '2026-10-20T10:01:00Z', hue: 4 }
+const member = { avatar, resumable: true, name: 'w', address: 'r:w', depth: 1, children: 0, status: 'live', state: 'live', turns: 2, created: '2026-10-20T10:00:00Z', lastActivity: '2026-10-20T10:01:00Z', hue: 4 }
 const postResult = { message: post, deliveries: [{ to: 'r:w', delivery: 'session-queued', turn: 3 }] }
 
 test('isMember checks required fields and nested doing and seat', () => {

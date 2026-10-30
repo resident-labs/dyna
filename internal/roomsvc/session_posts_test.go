@@ -30,8 +30,8 @@ func TestTurnResultUsesSessionAvatar(t *testing.T) {
 		t.Fatal(err)
 	}
 	book := e.svc.avatars(rec.ID)
-	want := decorate(post, rec.Name, nil, book).FromEmoji
-	got := decorate(turn, rec.Name, nil, book).FromEmoji
+	want := decorate(post, rec.Name, nil, book).Avatar.Emoji
+	got := decorate(turn, rec.Name, nil, book).Avatar.Emoji
 	if want == "" || got != want {
 		t.Fatalf("turn avatar = %q, post avatar = %q", got, want)
 	}
@@ -618,7 +618,7 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 		}
 	}
 	first := sess.Posts[1]
-	if first.Owner || first.Speaker != "lead" || first.FromEmoji == "" || first.FromHue != NameHue(lead.Address()) {
+	if first.Owner || first.Speaker != "lead" || first.Avatar.Emoji == "" || first.FromHue != NameHue(lead.Address()) {
 		t.Fatalf("sender shaping = %+v", first)
 	}
 	if len(first.Attachments) != 1 || !first.Attachments[0].Rich() || first.Attachments[0].Title != "Build status" {
