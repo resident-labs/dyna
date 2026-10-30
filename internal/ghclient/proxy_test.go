@@ -103,3 +103,26 @@ func TestWorkerSnapshotUsesFinalAttributedBody(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+// A published PR comment is an agent write: it must reach the approval request
+// as a pr comment, not a refusal, and must not run gh before approval.
+func TestPublishThroughApprovalHoldsPRComment(t *testing.T) {
+	originalRequest, originalWait := requestApproval, waitApproval
+	t.Cleanup(func() { requestApproval, waitApproval = originalRequest, originalWait })
+	var sent approvals.RequestInput
+	requestApproval = func(_ context.Context, in approvals.RequestInput) (approvals.Request, error) {
+		sent = in
+		return approvals.Request{ID: "A-7"}, nil
+	}
+	waitApproval = func(_ context.Context, _ string, id string, _ time.Duration) (approvals.Request, error) {
+		return approvals.Request{ID: id, State: approvals.StatePending, At: "room:parent"}, nil
+	}
+	args := []string{"pr", "comment", "https://github.com/owner/project/pull/7", "--body", "feedback"}
+	err := PublishThroughApproval(context.Background(), "room-1", t.TempDir(), args)
+	if SessionExitCode(err) != 75 {
+		t.Fatalf("error = %v", err)
+	}
+	if len(sent.Argv) < 2 || sent.Argv[0] != "pr" || sent.Argv[1] != "comment" {
+		t.Fatalf("approval argv = %q", sent.Argv)
+	}
+}
