@@ -1,8 +1,8 @@
-package admission
+package doctor
 
 import (
 	"bufio"
-	"bytes"
+	bytebuf "bytes"
 	"context"
 	"fmt"
 	"os"
@@ -17,20 +17,16 @@ import (
 // Memory is the smaller of the machine's and the container's: a cgroup limit
 // counts, so containers, WSL and systemd slices are judged by what they can use.
 type Readings struct {
-	Cores    int
-	Load1    float64
 	MemTotal uint64
 	MemAvail uint64
-	// PressureCPU and PressureMem are the share of the last 10 seconds in which
+	// PressureMem is the share of the last 10 seconds in which
 	// some task stalled (Linux PSI), or -1 when the source has none.
-	PressureCPU float64
 	PressureMem float64
 	// Source names what was read, for the status the owner sees.
 	Source string
 }
 
-// Source reads the machine. A source that cannot read returns an error, and the
-// gate then lets every turn through.
+// Source reads the machine memory needed for relief.
 type Source interface {
 	Read(ctx context.Context) (Readings, error)
 }
@@ -57,14 +53,7 @@ type Linux struct{ ProcDir string }
 
 // Read implements Source.
 func (l Linux) Read(context.Context) (Readings, error) {
-	r := Readings{Cores: runtime.NumCPU(), PressureCPU: -1, PressureMem: -1}
-	loadavg, err := os.ReadFile(filepath.Join(l.ProcDir, "loadavg"))
-	if err != nil {
-		return Readings{}, err
-	}
-	if _, err := fmt.Sscanf(string(loadavg), "%f", &r.Load1); err != nil {
-		return Readings{}, fmt.Errorf("loadavg: %w", err)
-	}
+	r := Readings{PressureMem: -1}
 	meminfo, err := os.ReadFile(filepath.Join(l.ProcDir, "meminfo"))
 	if err != nil {
 		return Readings{}, err
@@ -73,9 +62,6 @@ func (l Linux) Read(context.Context) (Readings, error) {
 		return Readings{}, err
 	}
 	r.Source = "linux /proc"
-	if v, ok := readPressure(filepath.Join(l.ProcDir, "pressure", "cpu")); ok {
-		r.PressureCPU = v
-	}
 	if v, ok := readPressure(filepath.Join(l.ProcDir, "pressure", "memory")); ok {
 		r.PressureMem = v
 		r.Source += " + PSI"
@@ -96,7 +82,7 @@ func ParseMeminfo(data []byte) (total, avail uint64, err error) {
 	var free, buffers, cached uint64
 	haveAvail := false
 	have := map[string]bool{}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner := bufio.NewScanner(bytebuf.NewReader(data))
 	for scanner.Scan() {
 		key, rest, ok := strings.Cut(scanner.Text(), ":")
 		fields := strings.Fields(rest)
@@ -345,7 +331,7 @@ type Darwin struct {
 
 // Read implements Source.
 func (d Darwin) Read(ctx context.Context) (Readings, error) {
-	r := Readings{Cores: runtime.NumCPU(), PressureCPU: -1, PressureMem: -1, Source: "macOS sysctl + vm_stat"}
+	r := Readings{PressureMem: -1, Source: "macOS sysctl + vm_stat"}
 	size, err := d.Run(ctx, "sysctl", "-n", "hw.memsize")
 	if err != nil {
 		return Readings{}, err
@@ -361,13 +347,6 @@ func (d Darwin) Read(ctx context.Context) (Readings, error) {
 		return Readings{}, err
 	}
 	r.MemAvail = min(r.MemAvail, r.MemTotal)
-	load, err := d.Run(ctx, "sysctl", "-n", "vm.loadavg")
-	if err != nil {
-		return Readings{}, err
-	}
-	if r.Load1, err = ParseLoadAvg(string(load)); err != nil {
-		return Readings{}, err
-	}
 	return r, nil
 }
 
@@ -377,7 +356,7 @@ func ParseVMStat(data []byte) (uint64, error) {
 	page := uint64(0)
 	var pages uint64
 	seen := map[string]bool{}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner := bufio.NewScanner(bytebuf.NewReader(data))
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "Mach Virtual Memory Statistics") {
@@ -410,14 +389,4 @@ func ParseVMStat(data []byte) (uint64, error) {
 		return 0, fmt.Errorf("vm_stat gave no free or inactive page count")
 	}
 	return pages * page, scanner.Err()
-}
-
-// ParseLoadAvg returns the one-minute load from "{ 1.23 1.50 1.60 }" or
-// "1.23 1.50 1.60".
-func ParseLoadAvg(text string) (float64, error) {
-	fields := strings.Fields(strings.Trim(strings.TrimSpace(text), "{}"))
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("empty load average")
-	}
-	return strconv.ParseFloat(fields[0], 64)
 }

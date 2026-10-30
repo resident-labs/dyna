@@ -125,7 +125,7 @@ func TestSavePreservesUnknownKeys(t *testing.T) {
   "version": 1,
   "ui": {"defaultTab": "workflows", "theme": "dim"},
   "future": {"flag": true},
-  "admission": {"maxAgents": 99, "note": "keep"},
+  "admission": {"mode": "enforce", "maxAgents": 99, "note": "keep"},
   "checks": {"host": "unused"},
   "notifications": {"future": true},
   "worktrees": {"keep": "future"},
