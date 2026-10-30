@@ -42,16 +42,20 @@ func (s *Service) RunCommand(ctx context.Context, roomRef, name, text, target st
 	if err != nil {
 		return PostResult{}, err
 	}
+	parseText := text
 	if target != "" {
-		text = "@" + target + " " + text
+		parseText = "@" + target
 	}
-	d, err := s.parse(rec, text)
+	d, err := s.parse(rec, parseText)
 	if err != nil {
 		return PostResult{}, err
 	}
 	var skill *room.SkillRef
 	var prompt *room.PromptRef
 	message := strings.TrimSpace(d.Text)
+	if target != "" {
+		message = strings.TrimSpace(text)
+	}
 	if server, promptName, ok := strings.Cut(name, ":"); ok {
 		if server == "" || promptName == "" || s.Prompts == nil {
 			return PostResult{}, fmt.Errorf("no enabled command is named %q", name)
