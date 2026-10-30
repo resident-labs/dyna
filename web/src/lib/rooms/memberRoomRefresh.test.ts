@@ -92,6 +92,7 @@ function app() {
   c.routedParents ??= ''; c.feed ??= null
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(c)
+  Object.assign(c, { controls: c.roomSessionController, roomControls: null })
   vm.createContext(c)
   for (const name of ['roomTimer', 'roomRefreshes']) {
     const n = nodes.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === name))

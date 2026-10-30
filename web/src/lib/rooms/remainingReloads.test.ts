@@ -237,6 +237,7 @@ test('list-only events do not reload room summaries', () => {
     soonRooms: (kind = 'rooms') => kind === 'feed' ? feeds++ : kind === 'members' ? members++ : summaries++,
   }
   for (const name of ['loadQuestions', 'loadVisuals', 'loadGoals', 'loadRules', 'loadPins', 'loadIssues', 'reviewerSoon', 'loadChanges', 'loadMembers', 'loadConsolidations', 'loadRuns']) c[name] = () => {}
+  Object.assign(c, { controls: { load() {} }, roomControls: null })
   appFunctions(c, ['handle'])
   for (const kind of ['prs', 'goals', 'questions', 'pins', 'runs']) call(c, 'handle', { kind, roomId: 'a' })
   assert.equal(summaries, 0)
@@ -513,6 +514,7 @@ test('App polling leaves visible and hidden control panels unchanged', async () 
   // The transfer poll asks the selection module, which owns the batch controllers.
   installSelection(c)
   c.refreshHeldComments ??= () => {}
+  Object.assign(c, { controls: c.roomSessionController ?? { load() {} }, roomControls: null })
   vm.createContext(c)
   const transferPoll = initOf(onMountBody(), 'transferPoll')
   if (!transferPoll || !isCallTo(transferPoll, 'setInterval')) throw new Error('App.svelte has no transferPoll')
@@ -628,6 +630,7 @@ test('live posts mark a missing newer page while the reader is in history', () =
   }
   // A live page joins the feed through the room loader.
   installRoomLoader(c, {})
+  Object.assign(c, { controls: { load() {} }, roomControls: null })
   appFunctions(c, ['handle'])
   for (let i = 0; i < 1000; i++) call(c, 'handle', { kind: 'posts', roomId: 'room', posts: [{ id: 'new' + i }] })
   assert.deepEqual(c.feed.posts.map((p) => p.id), ['old'])
