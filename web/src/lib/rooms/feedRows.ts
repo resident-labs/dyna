@@ -2,7 +2,7 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload, HookEvent } from './events.gen.ts'
-import { hookEvent, issueEvent, mergeEvent, prEvent, reviewEvent, shellEvent } from './eventPayloads.ts'
+import { hookEvent, issueEvent, prEvent, reviewEvent, shellEvent } from './eventPayloads.ts'
 import { eventSpecs } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
@@ -151,8 +151,6 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
 function foldKey(post: FeedInput): string {
   const hook = hookEvent(post)
   if (hook) return hookRowKey(hook)
-  const merge = mergeEvent(post)
-  if (merge) return `merge:${merge.trialId}`
   // One result card per PR head: a new head starts a new card.
   const review = reviewEvent(post)
   if (review) return `review:${review.changeId}:${review.head}`
