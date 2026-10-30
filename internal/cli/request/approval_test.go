@@ -57,7 +57,7 @@ func TestApprovalDecisionCLIUsesEngine(t *testing.T) {
 		t.Fatalf("deny printed %q, %v", out.String(), err)
 	}
 	for _, args := range [][]string{
-		{"--room", rec.ID, "pass", "A-42", "--why", "owner should decide"},
+		{"--room", rec.ID, "pass", "A-42", "--reason", "owner should decide"},
 		{"--room", rec.ID, "cancel", "A-42"},
 	} {
 		if err := run(args...); err != nil {
