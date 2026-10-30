@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { ResultInstalling } from '../api/settings.gen.ts'
 import { hookEntries, mergeEntries, type MergeHistoryRow } from './activity.ts'
 
 const now = Date.parse('2026-10-21T22:55:00Z')
@@ -25,4 +26,10 @@ test('passing runs fold into one row a day, and a failure keeps its own row with
   assert.deepEqual(entries.map((e) => e.text).sort(), ['Maintenance · 3 runs passed today', 'Maintenance · failed: exit 2 in 1s', 'Maintenance · running'].sort())
   assert.deepEqual(entries.find((e) => e.tone === 'failed')?.run, { hook: 'maintenance', id: 'run-21' })
   assert.equal(hookEntries('maintenance', 'Maintenance', [run(1)], now, {})[0]?.text, 'Maintenance · passed in 1s')
+})
+
+test('a run that finds its install already active says so, and is not a failure', () => {
+  const [entry] = hookEntries('updates', 'Updates', [run(1, ResultInstalling)], now, {})
+  assert.equal(entry?.text, 'Updates · already installing in 1s')
+  assert.notEqual(entry?.tone, 'failed')
 })
