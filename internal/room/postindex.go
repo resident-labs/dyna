@@ -143,6 +143,9 @@ func (s *Store) postIndexDB() (*sql.DB, error) {
 		}
 		return nil
 	})
+	if err == nil {
+		err = migrateSenderPolicy(db)
+	}
 	return db, err
 }
 
@@ -491,7 +494,7 @@ func (s *Store) writePostIndex(db *sql.DB, roomName, roomID string, msgs []Messa
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		ctx := context.Background()
 		for i, msg := range msgs {
-			if err := putPostRows(ctx, conn, roomID, roomName, msg, homes[i], deliveryState, at); err != nil {
+			if err := putPostRows(ctx, conn, roomID, roomName, msg, homes[i], deliveryState, at, false); err != nil {
 				return err
 			}
 		}
@@ -524,12 +527,21 @@ func (s *Store) homesFor(db *sql.DB, roomName, roomID string, msgs []Message) []
 
 // putPostRows stores one post's home row and its delivery rows. A row for the
 // same post is kept as it is: a post's rows are written once.
-func putPostRows(ctx context.Context, conn *sql.Conn, roomID, roomName string, msg Message, home Conversation, deliveryState DeliveryState, at int64) error {
+func putPostRows(ctx context.Context, conn *sql.Conn, roomID, roomName string, msg Message, home Conversation, deliveryState DeliveryState, at int64, applyPolicy bool) error {
 	if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, ?, ?, ?, ?)`,
 		roomID, msg.ID, msg.TS, string(home.Home()), postAuthor(msg, roomName, roomID)); err != nil {
 		return err
 	}
 	for _, delivery := range DeliveriesFor(msg, roomName) {
+		if applyPolicy && delivery.SessionID == SeatSessionID(roomID) && delivery.Mode == DeliveryWake {
+			quiet, err := quietCrossRoomSender(ctx, conn, msg)
+			if err != nil {
+				return err
+			}
+			if quiet {
+				delivery.Mode, delivery.Category = DeliveryQuiet, RootQuietPost
+			}
+		}
 		if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_deliveries(room_id, post_id, session_id, mode, category, state, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
 			roomID, msg.ID, delivery.SessionID, string(delivery.Mode), delivery.Category, string(deliveryState), at); err != nil {
 			return err
@@ -608,7 +620,7 @@ func (s *Store) indexPostRows(roomID, roomName string, msg Message) error {
 	at := s.now().UnixMilli()
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		ctx := context.Background()
-		return putPostRows(ctx, conn, roomID, roomName, msg, HomeFor(msg, roomName, parent), DeliveryQueued, at)
+		return putPostRows(ctx, conn, roomID, roomName, msg, HomeFor(msg, roomName, parent), DeliveryQueued, at, true)
 	})
 }
 
