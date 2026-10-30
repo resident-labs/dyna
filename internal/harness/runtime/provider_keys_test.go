@@ -384,6 +384,13 @@ func TestPiProviderKeyCreatesAndActivatesAnAccount(t *testing.T) {
 	if err != nil || !found || !account.Active || account.Status != "ready" {
 		t.Fatalf("account after adding a key: %+v %v", account, err)
 	}
+	state, err := (&store.Store{Root: r.Accounts.Root}).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Find(account.ID).LabelSource; got != store.LabelDefault {
+		t.Fatalf("label source = %q, want default", got)
+	}
 	if want := string(store.ProviderZAI) + " · " + testProviderKey[len(testProviderKey)-4:]; account.Label != want {
 		t.Fatalf("account label = %q, want %q", account.Label, want)
 	}
