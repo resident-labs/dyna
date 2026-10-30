@@ -37,6 +37,9 @@ func DisplayApprovalBody(payload approvals.GHPayload) string {
 	var parts []string
 	var body string
 	for _, ref := range refs {
+		if ref.name == "media" {
+			continue
+		}
 		content := ref.value
 		if ref.file {
 			content = snapshots[ref.path]
@@ -67,7 +70,7 @@ func SnapshotFiles(args []string, cwd string, stdin io.Reader) ([]approvals.File
 	seen := map[string]bool{}
 	var files []approvals.FileSnapshot
 	for _, ref := range refs {
-		if !ref.file || seen[ref.path] {
+		if !ref.file || ref.name == "media" || seen[ref.path] {
 			continue
 		}
 		seen[ref.path] = true
@@ -107,7 +110,28 @@ func ValidateFileSnapshots(args []string, files []approvals.FileSnapshot) error 
 		}
 		seen[file.Path] = file.Data
 	}
-	_, err := RewriteFileArgs(args, replacements)
+	refs, err := approvalFileArguments(commandArgs(args))
+	if err != nil {
+		return err
+	}
+	used := map[string]bool{}
+	for _, ref := range refs {
+		if ref.file && ref.name != "media" {
+			used[ref.path] = true
+		}
+		if ref.name == "media" {
+			if _, ok := seen[ref.path]; ok {
+				return fmt.Errorf("media path %q is also a file snapshot", ref.path)
+			}
+			replacements[ref.path] = ref.path
+		}
+	}
+	for path := range seen {
+		if !used[path] {
+			return fmt.Errorf("unexpected file snapshot %q", path)
+		}
+	}
+	_, err = RewriteFileArgs(args, replacements)
 	return err
 }
 
@@ -160,6 +184,14 @@ func approvalFileArguments(args []string) ([]fileArgument, error) {
 				prefix = strings.TrimSuffix(arg, value)
 			}
 			switch flag {
+			case "--attach":
+				if len(args) < 2 || args[0] != "pr" || (args[1] != "create" && args[1] != "comment") {
+					return nil, errors.New("--attach is only supported for PR create and comment")
+				}
+				if value == "" || strings.HasPrefix(value, "-") {
+					return nil, errors.New("--attach requires a file path")
+				}
+				refs = append(refs, fileArgument{index: i, name: "media", path: value, prefix: prefix, file: true})
 			case "--body":
 				refs = append(refs, fileArgument{index: i, name: "body", value: value})
 			case "--body-file":
@@ -269,4 +301,24 @@ func validateFileArguments(refs []fileArgument) ([]fileArgument, error) {
 		}
 	}
 	return refs, nil
+}
+
+// MediaPaths returns attachment arguments in command order.
+func MediaPaths(args []string) ([]string, error) {
+	refs, err := approvalFileArguments(commandArgs(args))
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		if ref.name == "media" {
+			if seen[ref.path] {
+				return nil, fmt.Errorf("duplicate media path %q", ref.path)
+			}
+			seen[ref.path] = true
+			paths = append(paths, ref.path)
+		}
+	}
+	return paths, nil
 }
