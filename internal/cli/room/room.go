@@ -340,7 +340,7 @@ func deleteCmd() *cobra.Command {
 			"<room> is a name or an ID.\n\n" +
 			"Delete refuses while the room has an open session (running, queued or idle) or a " +
 			"running run or shell. It lists what blocks. Close or stop those first with " +
-			"`dyna subagent close`, `dyna runs cancel` or `dyna shell stop`. Closed sessions " +
+			"`dyna subagent close`, `dyna workflow runs cancel` or `dyna shell stop`. Closed sessions " +
 			"do not block, and their records stay.",
 		Example: "  dyna room delete old-experiment",
 		Args:    cobra.ExactArgs(1),

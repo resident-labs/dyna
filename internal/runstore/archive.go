@@ -1,7 +1,7 @@
 package runstore
 
 // Run archive: finished runs move out of RunsDir into ArchiveDir so the run
-// catalog (`dyna runs list`, the desktop app) only scans live runs, while every
+// catalog (`dyna workflow runs list`, the desktop app) only scans live runs, while every
 // id-based read path keeps resolving them.
 //
 // Layout after archiving run <id>:

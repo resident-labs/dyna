@@ -22,7 +22,7 @@ func TestSettleInterruptedByUpdate(t *testing.T) {
 	ordinary := runstore.Event{T: "agent_end", ID: 5, TS: 2000, Status: "error", Error: "optional brief failed"}
 	ok := runstore.Event{T: "agent_end", ID: 2, TS: 2000, Status: "ok"}
 	cached := runstore.Event{T: "agent_end", ID: 3, TS: 2000, Status: "error", Cached: true}
-	const msg = "interrupted by update from v1 to v2; resume it with dyna run <script.js> --resume wf_settle"
+	const msg = "interrupted by update from v1 to v2; resume it with dyna workflow run <script.js> --resume wf_settle"
 	for _, tc := range []struct {
 		name       string
 		build      string

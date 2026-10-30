@@ -23,26 +23,10 @@ func topicDocument(t *testing.T, name string) string {
 func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 	guideMD := topicDocument(t, "workflows")
 	required := []string{
-		"## Public JavaScript API",
-		"### `agent(prompt, opts?)`", "### `parallel(thunks)`",
-		"### `pipeline(items, ...stages)`", "### `post(to, text, data?)`",
-		"### `workflow(nameOrRef, args?)`",
-		"post('@root',", "### Workflow templates", "dyna templates copy",
-		"dyna run /tmp/my-review.js", "adversarial-review", "judge-panel", "research-design",
-		"meta` is a convention, not a validated runtime schema",
-		"three attempts total", "no stage barrier",
-		"(previousResult, originalItem, index)", "Handle `null` results",
-		"## Workflow shape: parallel by default", "Name the work list before writing the script",
-		"engine-verified path from `worktrees()`", "rather than a worker-reported path",
-		"Parallel writers need disjoint scopes or worktrees",
-		"Call `workflow()` from the parent", "share parent concurrency and lifetime limits",
-		"regular agent session that cannot start subagents or runs",
-		"maxCallsPerRun", "--max-concurrent", "--max-agents", "### `run(command, opts?)`", "--max-commands", "reattaches to a shell still running", "### `job(spec)`", "waits for the original job ID", "labels: ['os=linux']",
-		"`phase(title)`", "`log(message)`", "`sleep(ms)`", "`args`", "`process`", "`profiles`", "`worktrees()`",
-		`provenance: "workflow"`, `provenance: "system"`,
+		"## JavaScript API", "### `agent(prompt, opts?)`", "### `run(command, opts?)`", "### `job(spec)`", "### `parallel(thunks)`", "### `pipeline(items, ...stages)`", "### `post(to, text, data?)`", "### `workflow(nameOrRef, args?)`", "### Globals", "### Workflow templates", "dyna templates copy", "maxCallsPerRun", "--max-concurrent", "--max-agents", "--max-commands", "Handle `null` results", "worktrees()", "Workers are leaf sessions", "Children cannot call `workflow()`",
 	}
-	if words := len(strings.Fields(guideMD)); words > 1700 {
-		t.Fatalf("workflow guide is %d words; want at most 1700", words)
+	if words := len(strings.Fields(guideMD)); words > 900 {
+		t.Fatalf("workflow guide is %d words; want at most 900", words)
 	}
 	for _, contract := range required {
 		if !strings.Contains(guideMD, contract) {
@@ -79,7 +63,7 @@ func TestReadmeDocumentsDesktopAndPublicCommands(t *testing.T) {
 		"desktop/build.sh", "`/<profile> <task>`", "member list", "dyna engine run", "dyna guide",
 		"dyna post", "dyna room watch", "dyna room log", "dyna room read", "dyna room members",
 		"Mentions decide who wakes", "not a security",
-		"dyna root attach", "dyna subagent start", "dyna run", "dyna request question", "Authors\nnever merge",
+		"dyna root attach", "dyna subagent start", "dyna workflow run", "dyna request question", "Authors\nnever merge",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("README is missing %q", want)
@@ -100,7 +84,7 @@ func TestReadmeDocumentsDesktopAndPublicCommands(t *testing.T) {
 func TestGuideTopicContracts(t *testing.T) {
 	contracts := map[string][]string{
 		"git":              {"worktree-created", "before-land", "after-land", "pr-merged", "main-updated", "session-finish", "schedule", "dyna git hooks list", "dyna git hooks log", "dyna git hooks add", "dyna git hooks edit", "dyna git hooks test", "dyna git hooks run", "dyna git hooks rm", "dyna post @parent", "Use reusable hooks", "generic repo event", "outside the repo", "can change files or services", "dyna git pr track", "gh pr create --body-file", "$DYNA_SCRATCH", "dyna git pr edit", "dyna git pr verdict", "--head <assigned-sha>", "dyna git pr admit", "dyna git pr review", "dyna git pr comment", "Keep comments free of HTML markers and agent attribution", "Agent reviews stay in Dyna", "cannot publish GitHub PR comments or reviews", "dyna git pr resume", "dyna git pr noise", "agents leave merging to the engine", "dyna git change open", "dyna git change reply", "--findings-file", "dyna git pr budget", "10 seconds", "No stamp means root", "no acting `--session` flag", "outside commenter", "CI and land notices never start an agent", "then the current repo", "Reviewers leave all test suite runs to CI", "in parallel with CI", "steer the live reviewer", "answers each comment", "dyna git change policy", "dyna git pr merge-status", "No stamp means root", "exact-head approval", "--reason", "automatically", "oldest-ready", "retargets children"},
-		"delegation":       {"dyna subagent start", "Manage sessions with `dyna session`", "dyna subagent output", "--schema", "subagent.maxDepth", "DYNA_MODE", "DYNA_SESSION", "DYNA_DEPTH", "DYNA_ROOM", "DYNA_ADDRESS", "--use agents,services", "no timeout, no idle expiry, no turn cap", "Delegate through Dyna subagents", "Workflow agents are leaf sessions", "hands PR authorship and held goals to its nearest open ancestor", "Reviewer roles return to the pool", "A failed handoff keeps the session open", "Stored hierarchy controls parent selectors and depth", "validates the first turn as JSON", "--goal \"<outcome; done when>\"", "Context:", "Owned files:", "Checks:", "Return: At most 1200 characters", "goes dormant by itself", "dyna goal", "dyna request question", "parent-checkins", "Dormant and closed children do not count", "Dyna closes a dormant session after 7 dormant days", "| `DYNA_AGENT_JOURNAL` | not set | journal path |"},
+		"delegation":       {"dyna subagent start", "Manage sessions with `dyna session`", "dyna subagent output", "--schema", "subagent.maxDepth", "DYNA_MODE", "DYNA_SESSION", "DYNA_DEPTH", "DYNA_ROOM", "DYNA_ADDRESS", "--use agents,services", "no timeout, no idle expiry, no turn cap", "Delegate only through Dyna", "Workflow agents are leaf sessions", "hands PR authorship and held goals to its nearest open ancestor", "Reviewer roles return to the pool", "A failed handoff keeps the session open", "Stored hierarchy controls parent selectors and depth", "validates the first turn as JSON", "--goal \"<outcome; done when>\"", "Context:", "Owned files:", "Checks:", "Return: At most 1200 characters", "goes dormant by itself", "dyna goal", "dyna request question", "parent-checkins", "Dormant and closed children do not count", "Dyna closes a dormant session after 7 dormant days", "| `DYNA_AGENT_JOURNAL` | not set | journal path |"},
 		"posting":          {"All room members can read posts", "Mentions decide who wakes", "not a security boundary", "Records without `roomId` fail closed", "mention := @<local> | @<room>:<local> | @<room> | @run:<id>/agent:<n>", "| Sender | `@team` | `@parent` | `@siblings` | `@children` |", "unstamped external shell must qualify every mention", "Mixed rooms are rejected", "The sender is removed from groups", "Resolution errors store nothing", "non-resumable explicit names", "skipped[]", "{to, reason}", "{message, deliveries, skipped?}", "{to, delivery, turn?, pointer?, error?}", "session-steered", "session-queued", "session-quiet", "session-followup", "CLI exits nonzero", "successful deliveries remain", "reaches the open leaf session of that workflow agent", "including depth-1 `@parent`, wake root", "--html", "--attach", "dyna attachment get", "dyna room pin", "dyna room list", "dyna room log <room>", "--all", "--tail N", "--json", "dyna room read <room> <id>", "dyna room members <room>", "dyna room search <words>", "--sessions", "the last 14 days"},
 		"steering":         {"[Truncated: N of M bytes. Full text: dyna room read <room> <id>]", "[dyna message msg_ab12", "To: @siblings =", "Reply: dyna post @", "Selectors: @parent =", "A reply goes only to the sender", "next tool-call completion", "steering.maxToolWait", "with a schema", "names the session", "A group mention alone", "only by group mentions such as `@team`, end silently", "Failed and stopped turns always report", "Keep working while a useful next step is available", "End your turn when no useful work remains", "cancel a waiting steering post", "Encourage useful debate", "Known tool calls finish before steering interrupts the turn"},
 		"nodes":            {"dyna node list", "SSH column as the exact `user@host`", "Use the SSH column as the exact `user@host`", "Rooms column includes your room", "over SSH for builds and tests"},
@@ -266,7 +250,7 @@ func TestGuideLinksAndSharedContracts(t *testing.T) {
 
 func TestWorkflowGuideSaysHowToWatchAndSteerAnAgent(t *testing.T) {
 	doc := topicDocument(t, "workflows")
-	for _, want := range []string{"open its session from its row on the run page", "dyna post @run:<id>/agent:<n>", "shows only the journal and the final result"} {
+	for _, want := range []string{"Open a worker from the run page", "dyna post @run:<id>/agent:<n>"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("workflow guide misses %q", want)
 		}
@@ -276,7 +260,7 @@ func TestWorkflowGuideSaysHowToWatchAndSteerAnAgent(t *testing.T) {
 func TestWorkflowGuideStartsWithStructuredParallelExample(t *testing.T) {
 	doc := topicDocument(t, "workflows")
 	first := strings.SplitN(doc, "## Profiles", 2)[0]
-	for _, want := range []string{"const schema =", "await parallel([", "() => agent(", "{ schema }", "dyna run check.js", "Without `schema`"} {
+	for _, want := range []string{"A workflow is a JavaScript program", "Use a subagent for one check", "await parallel([", "() => agent(", "dyna workflow run check.js"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("workflow opening misses %q", want)
 		}
