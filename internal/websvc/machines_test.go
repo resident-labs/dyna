@@ -136,6 +136,34 @@ func TestContainerRegistrationPatchPreservesOtherRooms(t *testing.T) {
 	}
 }
 
+func TestInvalidContainerRegistrationRollsBackNodePatch(t *testing.T) {
+	api := machineAPI(t)
+	node, err := api.Store.Save(t.Context(), machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true, MaxIOHeavy: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxIOHeavy := 9
+	mounts := []machines.NamedMount{{Name: "bad", Source: "relative", Room: "room_dyna", Mode: machines.MountRO}}
+	root := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+	if _, err := api.SaveNode(root, node.ID, MachinePatch{MaxIOHeavy: &maxIOHeavy, Mounts: &mounts}); err == nil {
+		t.Fatal("invalid registration patch succeeded")
+	}
+	stored, err := api.Store.GetByID(t.Context(), node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MaxIOHeavy != 2 || len(stored.Mounts) != 0 {
+		t.Fatalf("failed patch partially committed: max IO heavy %d, mounts %#v", stored.MaxIOHeavy, stored.Mounts)
+	}
+	ssh := "pip@new"
+	if _, err := api.SaveNode(root, "new", MachinePatch{Create: true, SSH: &ssh, Mounts: &mounts}); err == nil {
+		t.Fatal("invalid registration creation succeeded")
+	}
+	if _, err := api.Store.Get(t.Context(), "new"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed creation left a node: %v", err)
+	}
+}
+
 func TestContainerRegistrationRemovalRejectsNewJobs(t *testing.T) {
 	api := machineAPI(t)
 	node, err := api.Store.Save(t.Context(), machines.Machine{

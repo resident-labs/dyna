@@ -352,48 +352,44 @@ func (a MachineAPI) SaveNode(ctx context.Context, ref string, patch MachinePatch
 	if found && patch.Create {
 		return MachineDetail{}, fmt.Errorf("node %s exists; use dyna node edit", m.Name)
 	}
-	if !found {
-		if !patch.Create {
-			return MachineDetail{}, fmt.Errorf("node %q: %w", ref, os.ErrNotExist)
+	apply := func(stored *machines.Machine) error {
+		if err := applyMachinePatch(stored, patch); err != nil {
+			return err
 		}
-		m = machines.Machine{Name: ref, Enabled: true}
+		if patch.AllowHostChecks != nil {
+			grants, err := hostChecksGrants(stored.HostChecksGrants, authority.Of(ctx), *patch.AllowHostChecks)
+			if err != nil {
+				return err
+			}
+			stored.HostChecksGrants = grants
+		}
+		return nil
 	}
-	if err := applyMachinePatch(&m, patch); err != nil {
+	if found {
+		// The complete patch reads, validates and writes one fresh row. A failed
+		// registration cannot commit another field, and a stale read cannot
+		// re-enable a node or restore revoked access.
+		saved, err := a.Store.Update(ctx, m.ID, apply)
+		if err != nil {
+			return MachineDetail{}, err
+		}
+		return a.machine(ctx, saved, a.ciRuns()), nil
+	}
+	if !patch.Create {
+		return MachineDetail{}, fmt.Errorf("node %q: %w", ref, os.ErrNotExist)
+	}
+	m = machines.Machine{Name: ref, Enabled: true}
+	if err := apply(&m); err != nil {
 		return MachineDetail{}, err
 	}
 	saved, err := a.Store.Save(ctx, m)
 	if err != nil {
 		return MachineDetail{}, err
 	}
-	if patch.Mounts != nil || patch.Devices != nil || patch.RemoveMounts != nil || patch.RemoveDevices != nil {
-		// Registration edits read the latest lists inside the store transaction.
-		// A concurrent node save cannot restore the lists this patch replaces.
-		if _, err := a.Store.UpdateContainerRegistrations(ctx, saved.ID, func(stored machines.Machine) ([]machines.NamedMount, []machines.DeviceGrant, error) {
-			if err := applyContainerPatch(&stored, patch); err != nil {
-				return nil, nil, err
-			}
-			return stored.Mounts, stored.Devices, nil
-		}); err != nil {
-			return MachineDetail{}, err
-		}
-	}
-	if patch.AllowHostChecks != nil {
-		// The grant changes inside the store's writer transaction, so this
-		// answer cannot restore a grant that another caller refused meanwhile.
-		if _, err := a.Store.UpdateHostChecksGrants(ctx, saved.ID, func(stored machines.Machine) ([]machines.HostChecksGrant, error) {
-			return hostChecksGrants(stored.HostChecksGrants, authority.Of(ctx), *patch.AllowHostChecks)
-		}); err != nil {
-			return MachineDetail{}, err
-		}
-	}
-	stored, err := a.find(ctx, saved.ID)
-	if err != nil {
-		return MachineDetail{}, err
-	}
-	return a.machine(ctx, stored, a.ciRuns()), nil
+	return a.machine(ctx, saved, a.ciRuns()), nil
 }
 
-// applyMachinePatch writes the non-registration fields the patch names.
+// applyMachinePatch writes the fields the patch names.
 func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Name != nil {
 		name := strings.TrimSpace(*patch.Name)
@@ -432,11 +428,6 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Resources != nil {
 		m.Resources = *patch.Resources
 	}
-	return nil
-}
-
-// applyContainerPatch applies registration edits to the fresh transaction read.
-func applyContainerPatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Mounts != nil {
 		for _, update := range *patch.Mounts {
 			at := slices.IndexFunc(m.Mounts, func(stored machines.NamedMount) bool {
