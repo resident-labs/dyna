@@ -8,7 +8,8 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { installDom, domNames } from '../prs/prDetailHarness.ts'
 import { need } from '../../../test/need.ts'
-import type { EventPayload, HookEvent } from './events.gen.ts'
+import { isShellSilenceEvent } from './events.gen.ts'
+import type { EventPayload, HookEvent, ShellSilenceEvent } from './events.gen.ts'
 import type { Message } from '../api/room.ts'
 
 // The registry test for the web side: every event in the generated registry
@@ -594,6 +595,23 @@ test('a call row says how the owner answered, without its request ID', () => {
       web.unmount(mounted)
       target.remove()
     }
+  }
+})
+
+test('a shell silence card names the session that started the job, and an old alert still shows', () => {
+  const current = need(fixtures['shell/output-silence'], 'the shell silence fixture is missing')
+  const legacy: ShellSilenceEvent = { shellId: 'sh_20261023-120000-0000000a', label: 'build', minutes: 30 }
+  assert.ok(isShellSilenceEvent(current), 'the current silence fixture is not valid')
+  assert.ok(isShellSilenceEvent(legacy), 'an alert stored before the session field is rejected')
+  for (const [payload, words] of [[current, /build started by builder has no output log growth for 30 minutes/], [legacy, /build has no output log growth for 30 minutes/]] as const) {
+    const post = postFor('shell', 'output-silence', payload, 'Shell job build has no output log growth.')
+    const target = document.createElement('div')
+    document.body.append(target)
+    const mounted = web.mount(web.eventComponents.ShellSilenceCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+    web.flushSync()
+    assert.match(target.textContent ?? '', words)
+    web.unmount(mounted)
+    target.remove()
   }
 })
 

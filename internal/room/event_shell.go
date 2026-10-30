@@ -51,8 +51,8 @@ type ShellSilenceEvent struct {
 	ShellID string `json:"shellId"`
 	Label   string `json:"label"`
 	// Session is the name of the session that started the job, or the owner
-	// when no session did.
-	Session string `json:"session"`
+	// when no session did. Alerts stored before this field have none.
+	Session string `json:"session,omitempty"`
 	Minutes int    `json:"minutes"`
 }
 
