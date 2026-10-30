@@ -102,7 +102,7 @@ func open(dir string, now func() time.Time, floor int, commit string, checkpoint
 	if format != "dyna-v2" {
 		return fail(fmt.Errorf("invalid store format %q", format))
 	}
-	if err := upgrade(writer, floor, commit); err != nil {
+	if err := upgrade(writer, floor, commit, steps); err != nil {
 		return fail(err)
 	}
 	if err := compareSchema(writer); err != nil {
