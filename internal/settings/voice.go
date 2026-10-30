@@ -26,6 +26,18 @@ const (
 // VoiceProviders are the voice.provider values.
 var VoiceProviders = []string{"openai", "speech-to-speech", "dashscope", "google-live", "doubao-seeduplex", "stepfun", "minicpm-o"}
 
+// VoiceProviderNeeds is the line the owner sees under a voice.provider choice:
+// the key variable or voice.url that provider needs. Every VoiceProviders name has one.
+var VoiceProviderNeeds = map[string]string{
+	"openai":           "Uses your ChatGPT sign-in.",
+	"speech-to-speech": "Needs voice.url, the ws:// address of your server.",
+	"dashscope":        "Needs DASHSCOPE_API_KEY.",
+	"google-live":      "Needs GOOGLE_API_KEY or GEMINI_API_KEY.",
+	"doubao-seeduplex": "Needs DOUBAO_API_KEY.",
+	"stepfun":          "Needs STEPFUN_API_KEY.",
+	"minicpm-o":        "Needs voice.url. It cannot use tools, so Voice cannot dispatch work.",
+}
+
 // loadVoice reads the known voice keys. Other voice keys stay in Extra.
 func (v *Values) loadVoice(raw map[string]any) error {
 	section, ok := raw["voice"]
