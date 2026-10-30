@@ -344,4 +344,9 @@ export interface ScopeAccount extends Account {
    * row. Active reports the global row.
    */
   activeHere: boolean;
+  /**
+   * ServesHere reports whether the account's repo limit lets it run in the
+   * scope's repository. Every account serves the global scope.
+   */
+  servesHere: boolean;
 }
