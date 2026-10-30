@@ -93,7 +93,7 @@ type attachmentRow struct {
 }
 
 func (r attachmentRow) orphaned() bool {
-	return !ownerAlive(r.ownerPID, r.ownerStart) && resultClock().Sub(r.saved) <= attachmentTTL
+	return !ownerAlive(r.ownerPID, r.ownerStart)
 }
 
 // saveAttachment records the started checks of a run on a machine, owned by this

@@ -28,9 +28,8 @@ func ParseRunID(s string) (RunID, error) {
 // run is not stale.
 var ErrRunLive = errors.New("local CI run is live")
 
-// ErrRunUnclaimed reports that a kept run's record cannot be taken over: it is
-// past the attachment TTL, or another process claimed it first. Nothing is
-// released for such a run, because its checks may still hold the machine.
+// ErrRunUnclaimed reports that another process claimed the run first. Nothing
+// is released, because its checks may still hold the machine.
 var ErrRunUnclaimed = errors.New("local CI run record cannot be claimed")
 
 // AbandonedRun reports what one teardown did. Node is empty when no kept folder
@@ -81,7 +80,7 @@ func (r Runner) AbandonRun(ctx context.Context, store Store, id RunID, inFlight 
 			return out, fmt.Errorf("%w: run %s on %s, so cancel its trial or pull request instead", ErrRunLive, id, row.Node)
 		}
 		if !row.orphaned() {
-			return out, fmt.Errorf("%w: run %s on %s has a record past the attachment TTL", ErrRunUnclaimed, id, row.Node)
+			return out, fmt.Errorf("%w: run %s on %s is owned by another process", ErrRunUnclaimed, id, row.Node)
 		}
 	}
 	queue := r.queue()
