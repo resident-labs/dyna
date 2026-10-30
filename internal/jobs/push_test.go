@@ -26,7 +26,7 @@ func TestPushCommitCreatesTheNodeCache(t *testing.T) {
 	sha := git("rev-parse", "HEAD")
 	cache := filepath.Join(t.TempDir(), "node", "repo.git")
 	x := Executor{Node: Conn{Name: "here"}}
-	if err := x.PushCommit(t.Context(), repo, cache, sha); err != nil {
+	if err := x.PushCommit(t.Context(), repo, cache, sha, ""); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command("git", "--git-dir="+cache, "rev-parse", "refs/dyna/ci/"+sha).CombinedOutput()
@@ -63,7 +63,37 @@ func TestPushCommitAcceptsRefThatAlreadyHoldsTheCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	x := Executor{Node: Conn{Name: "here"}}
-	if err := x.PushCommit(t.Context(), repo, cache, sha); err != nil {
+	if err := x.PushCommit(t.Context(), repo, cache, sha, ""); err != nil {
 		t.Fatalf("PushCommit = %v; want success when the ref already holds %s", err, sha)
+	}
+}
+
+// A change's base can lie outside the change's own history, as when the base
+// branch moved on after the change was pushed. The ui-guard check diffs against
+// that base on the node, so the node needs the base commit too.
+func TestPushCommitSendsTheBaseCommit(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base")
+	base := git("rev-parse", "HEAD")
+	git("checkout", "-q", "--orphan", "change")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "change")
+	sha := git("rev-parse", "HEAD")
+	cache := filepath.Join(t.TempDir(), "node", "repo.git")
+	x := Executor{Node: Conn{Name: "here"}}
+	if err := x.PushCommit(t.Context(), repo, cache, sha, base); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "--git-dir="+cache, "rev-parse", "refs/dyna/ci/"+base).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != base {
+		t.Fatalf("node base ref = %q, %v; want %s", out, err, base)
 	}
 }
