@@ -1,7 +1,7 @@
 // The Services page's model: the registry's services in the page's sections,
 // and what each row says. The registry decides the groups and their order;
 // this file only words them. Nothing here changes data.
-import type { RegistryGroup, RegistryService } from '../api/service.ts'
+import type { RegistryGroup, RegistryService, RegistryServiceId } from '../api/service.ts'
 import type { Tone } from '../ui/tone.ts'
 import { clock } from '../ui/format.ts'
 
@@ -82,4 +82,54 @@ export function factsOf(s: RegistryService, now: number, canSwitch: boolean): st
     s.nextRun && s.state !== 'off' ? `Next ${when(s.nextRun, now)}` : '',
     s.profile,
   ].filter(Boolean)
+}
+
+// switchHint says where to change a switch the app cannot write.
+export const switchHint: Partial<Record<RegistryServiceId, string>> = {
+  library: 'Turn the librarian on or off with dyna library enable or disable in its repository.',
+}
+
+// setupHint says how to set up a service that has no setting to change here.
+export const setupHint: Partial<Record<RegistryServiceId, string>> = {
+  'issue-watch': 'Run dyna git issue watch <issue> in this room.',
+  updates: 'Run dyna git hooks add --recipe self-update in this repository.',
+}
+
+// settingText names the settings keys the registry lists, in owner words; a
+// key must never show as itself (rule r8).
+const settingText: Record<string, { title: string; description?: string }> = {
+  'pr.outsideComments': { title: 'Comments from outside the room', description: 'Deliver passes them to the author as untrusted text; hold keeps them until you admit them' },
+  'pr.trustedBots': { title: 'Trusted review bots', description: 'GitHub bot logins whose comments are trusted, as a JSON list' },
+  'admission.mode': { title: 'Test run limits' },
+  'admission.maxAgents': { title: 'Most agents at once' },
+  'lane.local.repos': { title: 'Repositories on the local lane', description: 'Absolute paths as a JSON list; Dyna fetches them every five minutes' },
+  'library.enabled': { title: 'Repositories with a librarian', description: 'Absolute paths as a JSON list' },
+  'library.profile': { title: 'Librarian model', description: 'Auto picks from the enabled service profiles' },
+  'library.smellProfile': { title: 'Model for smell checks' },
+  'library.smellsPerDay': { title: 'Most smells filed a day', description: 'Zero means no limit' },
+  'library.readmeMaxLines': { title: 'Longest README, in lines' },
+  'sessions.checkInInterval': { title: 'Check in every', description: 'Zero turns check-ins off' },
+  'voice.agent': { title: 'Let agents use voice', description: 'Their calls spend the voice provider’s quota' },
+  'voice.ducking': { title: 'Lower Voice while I talk' },
+  'voice.provider': { title: 'Voice provider' },
+  'voice.model': { title: 'Voice model', description: 'Empty uses the provider’s default' },
+  'voice.url': { title: 'Voice server address', description: 'Needed for a self-hosted server' },
+  'updater.autoCheck': { title: 'Check for updates', description: 'At most once a day' },
+  'doctor.condition': { title: 'When to examine this computer', description: 'Such as load>2/core for 5m or memory>85%; empty uses the default' },
+  'runs.retention': { title: 'Keep finished runs', description: 'Off keeps them forever' },
+  'worktrees.retention': { title: 'Keep workflow worktrees', description: 'Changed ones, all or none, after an agent ends' },
+  'worktrees.minFreeBytes': { title: 'Clean up below this free space', description: 'Zero turns this check off' },
+  'worktrees.root': { title: 'Folder for new worktrees' },
+}
+
+// settingLabel is a settings key's title and description. An unknown key
+// takes the first sentence of its help.
+export const settingLabel = (key: string, help: string): { title: string; description?: string } =>
+  settingText[key] ?? { title: (help.split(/\.\s/)[0] ?? key).replace(/\.$/, '') }
+
+// minutes reads a time such as 90m, 1h30m or 14d as whole minutes, or null.
+export function minutes(text: string): number | null {
+  const m = /^\s*(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*$/.exec(text)
+  if (!m || !(m[1] || m[2] || m[3])) return null
+  return Number(m[1] ?? 0) * 1440 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0)
 }

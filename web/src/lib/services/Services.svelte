@@ -2,7 +2,8 @@
   // The Services page: everything Dyna runs by itself, in the sections the
   // engine's service registry gives. One page, no tabs. Each row says what the
   // service does and, as muted text, when it ran and runs next; a colored pill
-  // appears only when it needs attention.
+  // appears only when it needs attention. A click opens the service's settings
+  // and recent runs in place.
   import { api } from '../../api.ts'
   import { errorText } from '../errorText.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
@@ -12,15 +13,16 @@
   import StatusPill from '../ui/StatusPill.svelte'
   import Switch from '../ui/Switch.svelte'
   import Skeleton from '../ui/Skeleton.svelte'
-  import { factsOf, pillOf, sections } from './model.ts'
+  import ServiceDetail from './ServiceDetail.svelte'
+  import { factsOf, pillOf, sections, setupHint } from './model.ts'
   import { switchWrite } from './control.ts'
   import { readRegistry } from './read.ts'
   import type { ChangeRow } from './activity.ts'
   import type { Member } from '../api/room.ts'
   import type { RegistryService } from '../api/service.ts'
+  import type { SettingItem } from '../api/settings.ts'
 
-  // members, changes, onopen and onpr feed the service details.
-  let { roomId, repo = '' }: {
+  let { roomId, repo = '', members = [], changes = [], onopen, onpr }: {
     roomId: string
     repo?: string
     members?: Member[]
@@ -32,6 +34,8 @@
   const host = $derived({ room: roomId, repo })
   let registry = $state<RegistryService[] | null>(null)
   let failed = $state('')
+  // Settings need the admin scope; without it the details show no keys.
+  let settings = $state<SettingItem[] | null>(null)
   let now = $state(Date.now())
 
   // The page reads the registry again every minute, so a change made
@@ -42,11 +46,13 @@
   }
   $effect(() => {
     reload()
+    api.settings().then((v) => { settings = v ?? [] }, () => { settings = null })
     const t = setInterval(reload, 60 * 1000)
     return () => clearInterval(t)
   })
 
   const groups = $derived(sections(registry ?? []))
+  let open = $state('') // the service whose detail shows
   let notSetUp = $state(false) // the Not set up group is open
   let saving = $state<string[]>([])
   let errors = $state<Record<string, string>>({})
@@ -60,12 +66,28 @@
     await reload()
     saving = saving.filter((id) => id !== s.id)
   }
+
+  async function saveSetting(key: string, value: string): Promise<void> {
+    const item = await api.setSetting(key, value)
+    settings = settings?.map((x) => (x.key === key ? item : x)) ?? null
+    await reload()
+  }
+
+  const member = (session: string): Member | undefined => (session ? members.find((m) => m.id === session || m.address === session) : undefined)
+  const openSession = (session: string): void => {
+    const m = member(session)
+    if (m && onopen) onopen(m)
+  }
+  const toggle = (id: string): void => { open = open === id ? '' : id }
 </script>
 
 {#snippet serviceRow(s: RegistryService)}
   {@const pill = pillOf(s)}
   {@const write = s.switch ? switchWrite(api, host, s) : null}
-  <SettingRow inline id="service-{s.id}" title={s.label} description={s.description}>
+  {#snippet detail()}
+    <ServiceDetail service={s} {host} {settings} {changes} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
+  {/snippet}
+  <SettingRow inline id="service-{s.id}" title={s.label} description={s.description} expanded={open === s.id} ontoggle={() => toggle(s.id)} children={open === s.id ? detail : undefined}>
     {#snippet status()}
       {#if pill}<StatusPill label={pill.label} tone={pill.tone} />{/if}
       <span>{factsOf(s, now, !!write).join(' · ')}</span>
@@ -74,6 +96,8 @@
     {#snippet control()}
       {#if s.switch && write}
         <Switch on={s.switch.on} label="{s.label} runs" disabled={saving.includes(s.id)} onchange={(on: boolean) => flip(s, write, on)} />
+      {:else if s.state === 'not-set-up' && (s.settingsKeys.length || setupHint[s.id])}
+        <button class="btn quiet" aria-expanded={open === s.id} onclick={() => toggle(s.id)}>Set up</button>
       {/if}
     {/snippet}
   </SettingRow>
