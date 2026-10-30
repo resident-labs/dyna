@@ -61,3 +61,26 @@ func TestMergeRetryRunsGitInALiveCheckout(t *testing.T) {
 		t.Fatalf("checkout dir = %q, want the room repository %q", dir, roomRec.Repo)
 	}
 }
+
+func TestCheckoutDirFallsBackWhenStoredCheckoutIsNotGit(t *testing.T) {
+	e := newEnv(t)
+	e.s.Notify = notify.New(room.DefaultStore(), nil)
+	r := e.track()
+	rec, err := e.s.Store.Get(r.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.RepoPath = t.TempDir()
+	rec.Dir, rec.LookupDir = "", ""
+	rm, err := e.s.Notify.Rooms.Resolve(r.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := e.s.checkoutDir(t.Context(), rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != rm.Repo {
+		t.Fatalf("checkout = %q, want room repository %q", dir, rm.Repo)
+	}
+}
