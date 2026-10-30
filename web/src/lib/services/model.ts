@@ -127,9 +127,9 @@ const settingText: Record<string, { title: string; description?: string }> = {
 export const settingLabel = (key: string, help: string): { title: string; description?: string } =>
   settingText[key] ?? { title: (help.split(/\.\s/)[0] ?? key).replace(/\.$/, '') }
 
-// minutes reads a time such as 90m, 1h30m or 14d as whole minutes, or null.
-export function minutes(text: string): number | null {
-  const m = /^\s*(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*$/.exec(text)
-  if (!m || !(m[1] || m[2] || m[3])) return null
-  return Number(m[1] ?? 0) * 1440 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0)
+// seconds reads a time such as 30s, 90m, 1h30m or 14d as whole seconds, or null.
+export function seconds(text: string): number | null {
+  const m = /^\s*(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?\s*$/.exec(text)
+  if (!m || !(m[1] || m[2] || m[3] || m[4])) return null
+  return Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3] ?? 0) * 60 + Number(m[4] ?? 0)
 }

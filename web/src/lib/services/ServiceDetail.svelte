@@ -33,8 +33,11 @@
   }
   let { service, host, settings, changes, canOpen, onopen, onpr, onchanged, onsetting }: Props = $props()
 
-  // A built-in pass keeps its runs on the machine under its own name.
-  const hook = $derived(service.schedule ? service.id : '')
+  // A built-in pass keeps its runs on the machine under its own name; a
+  // service run by a repository hook, such as Updates, keeps them on the
+  // repository under the hook's name.
+  const repoHook = $derived(service.hook && service.state !== 'not-set-up' ? service.hook : '')
+  const hook = $derived(repoHook || (service.schedule ? service.id : ''))
   const items = $derived((settings ?? []).filter((it) => service.settingsKeys.includes(it.key)))
   let busy = $state(false)
   let error = $state('')
@@ -45,24 +48,27 @@
   let shown = $state('')
 
   // write runs one change, shows a refusal inline, and reads the registry again.
-  async function write(work: () => Promise<unknown>, done = ''): Promise<void> {
+  // It resolves true when the engine took the change.
+  async function write(work: () => Promise<unknown>, done = ''): Promise<boolean> {
     busy = true
     error = ''
     note = ''
-    await work().then(() => { note = done }, (e: unknown) => { error = errorText(e) })
+    const ok = await work().then(() => { note = done; return true }, (e: unknown) => { error = errorText(e); return false })
     // The new registry row reruns loadActivity, so the new run shows.
     await onchanged()
     busy = false
+    return ok
   }
 
+  // A refused value rejects again, so its field keeps the text to correct.
   async function saveSetting(key: string, value: string): Promise<void> {
     errors = { ...errors, [key]: '' }
-    await onsetting(key, value).catch((e: unknown) => { errors = { ...errors, [key]: errorText(e) } })
+    await onsetting(key, value).catch((e: unknown) => { errors = { ...errors, [key]: errorText(e) }; throw e })
   }
 
   // The runs of a hook, with the log reason of each failure among them.
   async function hookActivity(name: string): Promise<Entry[]> {
-    const runs = readHookRuns(await api.globalHookRuns(name)).slice(0, 20)
+    const runs = readHookRuns(await (repoHook ? api.hookRuns(host.repo, name) : api.globalHookRuns(name))).slice(0, 20)
     const reasons: Record<string, RunReason> = {}
     await Promise.all(runs.filter((r) => r.result === 'error' || r.result === 'fail').map(async (r) => {
       const reason = readHookLog(await logOf(r.id))
@@ -71,7 +77,7 @@
     return hookEntries(name, service.label, runs, Date.now(), reasons)
   }
 
-  const logOf = (id: string) => api.globalHookRunLog(hook, id)
+  const logOf = (id: string) => (repoHook ? api.hookRunLog(host.repo, hook, id) : api.globalHookRunLog(hook, id))
 
   function loadActivity(): void {
     const read = service.id === 'merge-queue' ? api.roomMergeHistory(host.room).then((v) => mergeEntries(readHistory(v)))
@@ -108,9 +114,9 @@
   {/if}
   {#if service.state === 'not-set-up' && setupHint[service.id]}<p class="hint">{setupHint[service.id]}</p>{/if}
   {#if switchHint[service.id]}<p class="hint">{switchHint[service.id]}</p>{/if}
-  {#if service.schedule || canOpen(service.session)}
+  {#if hook || canOpen(service.session)}
     <div class="acts">
-      {#if service.schedule}<button class="btn" disabled={busy} onclick={() => write(() => api.runService(service.id), `${service.label} ran.`)}>Run now</button>{/if}
+      {#if hook}<button class="btn" disabled={busy} onclick={() => write(() => (repoHook ? api.runHook(host.repo, repoHook) : api.runService(service.id)), `${service.label} ran.`)}>Run now</button>{/if}
       {#if canOpen(service.session)}<button class="btn quiet" onclick={() => onopen(service.session)}>Open session</button>{/if}
       {#if note}<span class="note" role="status">{note}</span>{/if}
     </div>

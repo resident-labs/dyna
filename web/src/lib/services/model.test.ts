@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { factsOf, minutes, pillOf, sections } from './model.ts'
+import { factsOf, pillOf, seconds, sections } from './model.ts'
 import { minutesText } from '../ui/format.ts'
 import type { RegistryService } from '../api/service.ts'
 
@@ -41,6 +41,6 @@ test('only a failed service gets the coral pill; quiet and working states stay m
 })
 
 test('a schedule time reads and writes the way the settings show a time', () => {
-  assert.deepEqual(['10m', '1h', '1h30m', '1d', '90'].map(minutes), [10, 60, 90, 1440, null])
+  assert.deepEqual(['30s', '10m', '1h', '1h30m', '1d', '90'].map(seconds), [30, 600, 3600, 5400, 86400, null])
   assert.deepEqual([10, 60, 90, 1440].map(minutesText), ['10m', '1h', '1h30m', '1d'])
 })
