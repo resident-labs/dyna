@@ -2,42 +2,32 @@ package archive
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
 )
 
-type fakeRunner struct {
-	args [][]string
+type fakeRemote struct {
+	ref  string
 	hash string
 }
 
-func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
-	r.args = append(r.args, args)
-	if len(args) > 2 && args[2] == "rev-parse" {
-		return []byte(r.hash + "\n"), nil
-	}
-	return nil, nil
+func (r *fakeRemote) Ref(_ context.Context, _ contract.RepoName, ref string) (string, error) {
+	r.ref = ref
+	return r.hash, nil
 }
-func TestVerifyFetchesArchiveRef(t *testing.T) {
-	r := &fakeRunner{hash: "abc"}
-	v := &Verifier{Data: t.TempDir(), Token: "secret", Runner: r}
-	err := v.Verify(context.Background(), "ses_1", contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"})
-	if err != nil || len(r.args) != 3 || r.args[1][len(r.args[1])-1] != "refs/dyna/archive/ses_1" {
-		t.Fatalf("calls %v, error %v", r.args, err)
-	}
-	for _, args := range r.args {
-		if strings.Contains(strings.Join(args, " "), "secret") {
-			t.Fatal("token in command arguments")
-		}
+
+func TestVerifyChecksArchiveRef(t *testing.T) {
+	r := &fakeRemote{hash: "abc"}
+	err := (&Verifier{Remote: r}).Verify(context.Background(), "ses_1", contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"})
+	if err != nil || r.ref != "refs/dyna/archive/ses_1" {
+		t.Fatalf("ref %q, error %v", r.ref, err)
 	}
 }
 func TestVerifyRejectsChangedBranchTip(t *testing.T) {
-	r := &fakeRunner{hash: "different"}
-	v := &Verifier{Data: t.TempDir(), Token: "secret", Runner: r}
-	err := v.Verify(context.Background(), "ses_1", contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc", Skipped: true})
-	if err == nil || r.args[1][len(r.args[1])-1] != "refs/heads/v2/ses_1" {
-		t.Fatalf("calls %v, error %v", r.args, err)
+	r := &fakeRemote{hash: "different"}
+	err := (&Verifier{Remote: r}).Verify(context.Background(), "ses_1", contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc", Skipped: true})
+	if err == nil || r.ref != "refs/heads/v2/ses_1" {
+		t.Fatalf("ref %q, error %v", r.ref, err)
 	}
 }
