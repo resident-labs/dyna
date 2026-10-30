@@ -48,9 +48,8 @@ func Run(ctx context.Context, version string) error {
 	if err != nil {
 		return err
 	}
-	if err := setupRepos(ctx, "/box/work", hello.Repos, runGit); err != nil {
-		return err
-	}
+	setup := func(ctx context.Context) error { return setupRepos(ctx, "/box/work", hello.Repos, runGit) }
+	setupErr := setup(ctx)
 	args, err := modelArgs(hello.Model)
 	if err != nil {
 		return err
@@ -80,7 +79,7 @@ func Run(ctx context.Context, version string) error {
 		return err
 	}
 	defer h.Close()
-	runner := &Runner{Harness: h, Sink: client}
+	runner := &Runner{Harness: h, Sink: client, Setup: setup, setupErr: setupErr}
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
 			if _, ok := message.Body.(contract.Archive); ok {
