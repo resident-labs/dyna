@@ -30,9 +30,9 @@ test('the header holds no author, reviewer or rules line', async () => {
     const h = textOf(head(target)).replace(/\s+/g, ' ')
     assert.doesNotMatch(h, /Author|Reviewer|engine-cpu|reviewer-774|Rules|room rules|sol/)
     assert.match(h, /T #7/)
-    assert.match(h, /Open/)
+    assert.doesNotMatch(h, /\bOpen\b/)
     assert.match(h, /a → b/)
-    assert.equal(head(target).querySelectorAll('.chip').length, 1, 'one status chip')
+    assert.equal(head(target).querySelectorAll('.chip').length, 0, 'no redundant status chip')
     assert.ok(button(head(target), 'GitHub ↗'))
     assert.equal(target.querySelector('.factsline'), null)
     // The description still names the author.
