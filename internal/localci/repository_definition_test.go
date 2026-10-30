@@ -173,6 +173,26 @@ func TestThisRepositoryDefinitionParses(t *testing.T) {
 	}
 }
 
+// next/ is its own Go module, so a change there runs only the next suite.
+// v1 Go files still run the go and cross suites and never the next suite.
+func TestNextModuleSelectsOnlyNextSuite(t *testing.T) {
+	body, err := os.ReadFile("../../.dyna/local-ci.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := ParseDefinition(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := definition.SuitesForFiles([]string{"next/engine/x.go"}); !slices.Equal(got, []Suite{"next"}) {
+		t.Fatalf("next/ change selected %v, want only next", got)
+	}
+	got := definition.SuitesForFiles([]string{"internal/x.go"})
+	if !slices.Contains(got, Suite("go")) || !slices.Contains(got, Suite("cross")) || slices.Contains(got, Suite("next")) {
+		t.Fatalf("internal/ change selected %v, want go and cross without next", got)
+	}
+}
+
 func TestTygoConfigSelectsGoSuite(t *testing.T) {
 	body, err := os.ReadFile("../../.dyna/local-ci.yaml")
 	if err != nil {
