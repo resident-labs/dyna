@@ -9,12 +9,13 @@ import (
 )
 
 type harnessFake struct {
-	mu        sync.Mutex
-	started   chan struct{}
-	release   chan struct{}
-	permit    chan struct{}
-	steers    int
-	delivered map[contract.DeliverySeq]bool
+	mu         sync.Mutex
+	started    chan struct{}
+	release    chan struct{}
+	permit     chan struct{}
+	steers     int
+	recoveries int
+	delivered  map[contract.DeliverySeq]bool
 }
 
 func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
@@ -35,6 +36,9 @@ func (h *harnessFake) Continue(context.Context, contract.TurnID, func()) (contra
 	panic("unexpected continuation")
 }
 func (h *harnessFake) Recover(id contract.TurnID, _ []contract.TurnInput) (contract.TurnEnded, bool, error) {
+	h.mu.Lock()
+	h.recoveries++
+	h.mu.Unlock()
 	return contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed"), Final: "recovered"}, true, nil
 }
 func (h *harnessFake) Steer(_ context.Context, input contract.TurnInput) error {
@@ -56,9 +60,12 @@ func (h *harnessFake) Delivered(_ context.Context, id contract.DeliverySeq) (boo
 func (*harnessFake) Close() error { return nil }
 
 type sinkFake struct {
-	mu    sync.Mutex
-	acked map[contract.DeliverySeq]bool
-	done  chan contract.TurnEnded
+	mu      sync.Mutex
+	acked   map[contract.DeliverySeq]bool
+	done    chan contract.TurnEnded
+	entered chan struct{}
+	release chan struct{}
+	calls   int
 }
 
 func (s *sinkFake) DeliveryDone(_ context.Context, id contract.DeliverySeq) error {
@@ -68,8 +75,37 @@ func (s *sinkFake) DeliveryDone(_ context.Context, id contract.DeliverySeq) erro
 	return nil
 }
 func (s *sinkFake) TurnOutput(_ context.Context, result contract.TurnEnded) error {
+	s.mu.Lock()
+	s.calls++
+	first := s.calls == 1
+	s.mu.Unlock()
+	if first && s.entered != nil {
+		close(s.entered)
+		<-s.release
+	}
 	s.done <- result
 	return nil
+}
+
+func TestRunnerDoesNotRestartWhileOutputIsBlocked(t *testing.T) {
+	h := &harnessFake{started: make(chan struct{}), release: make(chan struct{}), delivered: make(map[contract.DeliverySeq]bool)}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 2), entered: make(chan struct{}), release: make(chan struct{})}
+	runner := &Runner{Harness: h, Sink: sink}
+	start := contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1}}}}
+	if err := runner.Handle(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	close(h.release)
+	<-sink.entered
+	err := runner.Handle(context.Background(), start)
+	h.mu.Lock()
+	recovered := h.recoveries
+	h.mu.Unlock()
+	close(sink.release)
+	<-sink.done
+	if err != nil || recovered != 0 {
+		t.Fatalf("replay error=%v recoveries=%d", err, recovered)
+	}
 }
 
 func TestRunnerRecoversReplayedTurnWithDoneInput(t *testing.T) {
