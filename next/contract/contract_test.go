@@ -96,3 +96,34 @@ func TestGeneratedWireTypes(t *testing.T) {
 		t.Fatal("events must allow null")
 	}
 }
+
+func TestBoxMessageRegistry(t *testing.T) {
+	bodies := []BoxMessageBody{TurnStart{Turn: "turn_a"}, TurnSteer{Queue: QueueSteer}, TurnStop{Reason: "stop"}, Upgrade{Version: "v2"}}
+	want := []BoxMessageType{"turn.start", "turn.steer", "turn.stop", "upgrade"}
+	if len(boxMessageTypes) != len(bodies) {
+		t.Fatalf("registry has %d entries, want %d", len(boxMessageTypes), len(bodies))
+	}
+	seen := map[BoxMessageType]bool{}
+	for i, body := range bodies {
+		kind := body.BoxMessageType()
+		if kind != want[i] || seen[kind] {
+			t.Fatalf("unexpected box message type %q", kind)
+		}
+		seen[kind] = true
+		data, err := json.Marshal(BoxMessage{Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got BoxMessage
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Body, body) {
+			t.Fatalf("round trip: got %#v, want %#v", got.Body, body)
+		}
+	}
+	var got BoxMessage
+	if err := json.Unmarshal([]byte(`{"type":"unknown","body":{}}`), &got); err == nil {
+		t.Fatal("unknown box message accepted")
+	}
+}
