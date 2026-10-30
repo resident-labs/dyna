@@ -339,6 +339,7 @@ export const api = {
   addGlobalHook: (hook: HookInput) => app.AddGlobalHook(hook),
   editGlobalHook: (name: string, patch: Partial<HookInput>) => app.EditGlobalHook(name, patch),
   removeGlobalHook: (name: string) => app.RemoveGlobalHook(name),
+  runService: (name: string) => app.RunService(name),
   editService: (name: string, patch: ServicePatch) => app.EditService(name, patch),
   resetService: (name: string) => app.ResetService(name),
   configProfiles: () => app.ConfigProfiles(),
