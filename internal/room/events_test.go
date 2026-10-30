@@ -899,3 +899,18 @@ func TestLegacyMergeThreadKey(t *testing.T) {
 		t.Fatalf("explicit thread = %q", got)
 	}
 }
+
+func TestInstructionThreadKey(t *testing.T) {
+	event := SessionEvent{Type: SessionInstructions, Session: "room:worker"}
+	if got := event.eventThread(); got != "instructions:room:worker" {
+		t.Fatalf("thread = %q", got)
+	}
+	m := Message{Kind: string(FamilySession), Notice: EventNotice{Kind: string(SessionInstructions)}, Payload: EventPayload{raw: []byte(`{"type":"instructions","session":"room:worker"}`)}}
+	if got := m.ThreadKey(); got != event.eventThread() {
+		t.Fatalf("legacy thread = %q", got)
+	}
+	event.Type = SessionRenamed
+	if got := event.eventThread(); got != "" {
+		t.Fatalf("rename thread = %q", got)
+	}
+}
