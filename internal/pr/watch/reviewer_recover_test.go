@@ -22,6 +22,7 @@ func TestLiveReviewerReassignedAfterHeadChange(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	e.f.Pull.Head.SHA = head
 	e.setPullHead(old.Number, head)
 	st = dispatchReviewPool(t, e)
 	got := st.Records[old.Key]
