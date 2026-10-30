@@ -174,7 +174,7 @@
 <style>
   .requests { flex: 1; min-height: 0; overflow: auto; }
   .list { display: flex; flex-direction: column; gap: var(--s3); padding: 0 var(--s5) var(--s5); }
-  .question { background: var(--raise); border-radius: 8px; padding: var(--s4); width: 100%; max-width: 760px; outline: none; border: 1px solid transparent; }
+  .question { background: var(--raise); border-radius: 8px; padding: var(--s4); width: 100%; max-width: var(--page-reading-width); outline: none; border: 1px solid transparent; }
   .question.focused { border-color: var(--iris-edge); background: var(--iris-wash); }
   .top { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-bottom: 10px; font-size: var(--t-ui); }
   .top strong { font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }
