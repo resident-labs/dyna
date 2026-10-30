@@ -1548,7 +1548,7 @@
       {:else if roomId && room && showPins}
         <Pins {room} {pins} ondetail={openDetail} onjump={(id: string) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} onclose={() => (showPins = false)} />
       {:else if roomId && room && showMembers && !drill}
-        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => controls.run('resume')} onreloadcontrols={() => controls.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) }))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => sessionActions.openMenu(m, x, y, anchor)} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
+        <Members prs={openPRMap} computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => controls.run('resume')} onreloadcontrols={() => controls.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) }))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => sessionActions.openMenu(m, x, y, anchor)} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
       </div>
     </div>
@@ -1630,7 +1630,7 @@
   </div>
 {/if}
 {#if card && room}
-  <ProfileModal {goals} older={listView.pages.goals?.older} loadingOlder={listView.olderLoading} onolder={() => loadOlderLists(['goals'])} ongoal={(id) => { card = null; openGoal(id) }} onpost={jumpTo} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {profile} error={profileError} {room} ondetail={openDetail} onclose={() => (card = null)} onmessage={openSession} onmention={mentionMember} />
+  <ProfileModal {goals} prs={card?.id ? openPRMap[card.id] ?? [] : []} onpr={(n: number) => { card = null; openPR(n) }} older={listView.pages.goals?.older} loadingOlder={listView.olderLoading} onolder={() => loadOlderLists(['goals'])} ongoal={(id) => { card = null; openGoal(id) }} onpost={jumpTo} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {profile} error={profileError} {room} ondetail={openDetail} onclose={() => (card = null)} onmessage={openSession} onmention={mentionMember} />
 {/if}
 
 <style>

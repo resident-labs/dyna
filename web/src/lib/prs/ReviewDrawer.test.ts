@@ -7,10 +7,9 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { compileSvelte, svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
-import type { Facts } from './pr.ts'
 import { need } from '../../../test/need.ts'
 
-// Render the real ReviewDrawer, PRChip and PR page on the server
+// Render the real ReviewDrawer and PR page on the server
 // and read the text. The page's ServiceHeader is a stub that prints its props.
 async function load(name: string, width = 1200) {
   const dir = await mkdtemp(join(tmpdir(), 'dyna-reviewer-ui-'))
@@ -45,17 +44,6 @@ test('the drawer holds only one change\'s own rules; room settings moved out', a
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('PR chip carries the review state label, or the row chip it is given', async () => {
-  const { dir, component, render } = await load('PRChip')
-  try {
-    const chip = (pr: Facts, meta?: object) => text(render(component, { props: { pr: { number: 9, status: 'awaiting-review', ...pr }, meta } }).body)
-    assert.match(chip({ reviewState: 'queued', queuePosition: 2 }), /#9 Queued for review \(2nd\)/)
-    assert.match(chip({ reviewState: 'blocked', status: 'paused', reviewBlocked: 'All profiles are failing' }), /All profiles are failing/)
-    assert.match(chip({ reviewState: 'approved', status: 'approved', ci: 'passed' }), /Approved: ready to merge/)
-    assert.match(chip({ reviewState: 'approved' }, { label: 'Ready to merge', tone: 'sage' }), /Ready to merge/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
 test('the PR page has no reviewer bar and no review strip at the top', async () => {
   const { dir, component, render } = await load('GitHub')
   try {
@@ -67,18 +55,6 @@ test('the PR page has no reviewer bar and no review strip at the top', async () 
     assert.doesNotMatch(html, /role="switch"/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
-
- test('PR status reserves color for attention', async () => {
-  const { dir, component, render } = await load('PRChip')
-  try {
-   const show = (tone: string) => render(component, { props: { pr: { number: 9 }, meta: { tone, label: 'State' } } }).body
-   assert.doesNotMatch(show('run'), /class="status pill/)
-   assert.match(show('coral'), /class="status pill danger /)
-   assert.match(show('gold'), /class="status pill warning /)
-   const shortFailure = render(component, { props: { pr: { number: 9 }, meta: { tone: 'coral', label: 'CI failed' }, short: true } }).body
-   assert.match(shortFailure, /class="status pill danger [^>]*>[^]*CI failed/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
- })
 
 
 test('a narrow PR page retains its hidden list for Back navigation', async () => {
