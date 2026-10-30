@@ -60,13 +60,18 @@ type TurnStarted struct {
 type TurnOutcome string // "completed" | "failed" | "stopped"
 
 type TurnEnded struct {
-	Session SessionID      `json:"session"`
-	Turn    TurnID         `json:"turn"`
-	Outcome TurnOutcome    `json:"outcome"`
-	Final   string         `json:"final,omitempty"`   // the final response
-	Replies []ReplyChannel `json:"replies,omitempty"` // where Final was delivered
-	Usage   Usage          `json:"usage"`
-	Error   string         `json:"error,omitempty"` // failed only
+	Session SessionID    `json:"session"`
+	Turn    TurnID       `json:"turn"`
+	Outcome TurnOutcome  `json:"outcome"`
+	Final   string       `json:"final,omitempty"`   // the final response
+	Replies []FinalReply `json:"replies,omitempty"` // where Final was delivered
+	Usage   Usage        `json:"usage"`
+	Error   string       `json:"error,omitempty"` // failed only
+}
+
+type FinalReply struct {
+	Reply  ReplyChannel `json:"reply"`
+	Posted EventID      `json:"posted,omitempty"`
 }
 
 type Usage struct {
