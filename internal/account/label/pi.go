@@ -1,4 +1,4 @@
-package native
+package label
 
 import (
 	"encoding/json"
@@ -10,7 +10,11 @@ import (
 // PiDefaultLabel uses only an email claim or the last four characters of a
 // key. Tokens and short keys must never become account labels.
 func PiDefaultLabel(provider string, raw json.RawMessage) string {
-	var entry piAuthEntry
+	var entry struct {
+		Type   string `json:"type"`
+		Key    string `json:"key"`
+		Access string `json:"access"`
+	}
 	if json.Unmarshal(raw, &entry) != nil {
 		return provider + " login"
 	}

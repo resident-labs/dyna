@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	accountlabel "dyna-agent/internal/account/label"
 	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/fsutil"
@@ -98,9 +99,9 @@ func (m *nativeFilesManager) Capture(_ context.Context, root string) ([]native.C
 	if m.adapter.Harness == "pi" {
 		var providers map[string]json.RawMessage
 		if json.Unmarshal(files["auth.json"], &providers) == nil && len(providers) == 1 {
-			for id := range providers {
+			for id, entry := range providers {
 				c.Identity = "pi:" + id
-				c.Label = id + " login"
+				c.Label = accountlabel.PiDefaultLabel(id, entry)
 			}
 		}
 	}
