@@ -50,7 +50,7 @@ Root and the owner hold no goals: when only they are left above a session, close
 until each held goal is done, dropped, or transferred with `dyna goal edit <id> --for @agent`
 to an open agent. The refusal names each goal and its commands, and the app offers the same choices.
 A forced close does not move goals to the owner. If only the owner can unblock the work,
-root asks the owner first with `dyna request question`, then resolves the goal.
+root asks the owner first with `dyna request question` for a decision, or files `dyna request terminal --reason "<why>" -- <command>` for a command only the owner can run, then resolves the goal.
 Live workflow runs are canceled because their running coordinator cannot change owners.
 Questions withdraw; non-kept shells stop. Empty children close; other children move to the heir.
 The command and app show what moved or stopped. A failed handoff keeps the session open;
@@ -94,7 +94,7 @@ daemon or supervisor started any other way runs outside the room's limits.
 
 ## Questions
 
-Only root uses `dyna request question` to ask the human owner. Other sessions use `dyna post @parent` for questions.
+Only root uses `dyna request question` to ask the human owner, and only for decisions and outside choices. For a command only the owner can run, root files `dyna request terminal --reason "<why>" -- <command>`. Other sessions use `dyna post @parent` for questions.
 A worker blocked on something only the owner can do, such as a sign-in, a live check on a
 device, a secret, or an outside decision, posts to @root or to its parent root. The post states
 what is needed and why the work stops without it. Root turns that post into one `dyna request question`
