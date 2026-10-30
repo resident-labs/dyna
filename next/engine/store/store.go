@@ -235,18 +235,20 @@ func (s *Store) writeLoop() {
 	defer close(s.done)
 	for r := range s.requests {
 		tx, err := s.writer.BeginTx(r.ctx, nil)
+		writerErr := err
 		if err == nil {
 			err = r.fn(tx)
 			if err != nil {
 				_ = tx.Rollback()
 			} else {
 				err = tx.Commit()
+				writerErr = err
 			}
 		}
-		if err != nil {
+		if writerErr != nil && !errors.Is(writerErr, context.Canceled) && !errors.Is(writerErr, context.DeadlineExceeded) {
 			s.errMu.Lock()
 			if s.first == nil {
-				s.first = err
+				s.first = writerErr
 			}
 			s.errMu.Unlock()
 		}

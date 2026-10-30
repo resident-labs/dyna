@@ -98,17 +98,18 @@ func TestWriteSurvivesClose(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestCloseReturnsWriterError(t *testing.T) {
+func TestCancelledWriteDoesNotFailClose(t *testing.T) {
 	s, err := Open(t.TempDir(), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := errors.New("write failed")
-	if err := s.Write(context.Background(), func(*sql.Tx) error { return want }); !errors.Is(err, want) {
+	ctx, cancel := context.WithCancel(context.Background())
+	err = s.Write(ctx, func(*sql.Tx) error { cancel(); return ctx.Err() })
+	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	if err := s.Close(); !errors.Is(err, want) {
-		t.Fatalf("close: %v", err)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
