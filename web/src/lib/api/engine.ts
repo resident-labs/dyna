@@ -277,6 +277,8 @@ export interface Engine {
   // the hooks the owner added for the whole machine.
   ListGlobalHooks(): Promise<Hook[] | null>
   GlobalHookSummary(): Promise<HookSummary[] | null>
+  UpdateRuns(): Promise<{ id: string; result: 'pending' | 'pass' | 'error'; startedAt: string; finishedAt?: string }[] | null>
+  UpdateRunLog(id: string): Promise<HookRunLog>
   GlobalHookRuns(name: string): Promise<HookRun[] | null>
   GlobalHookRunLog(name: string, id: string): Promise<HookRunLog>
   RunGlobalHook(name: string): Promise<HookRun>

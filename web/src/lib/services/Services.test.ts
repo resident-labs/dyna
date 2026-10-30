@@ -26,14 +26,17 @@ export const api = {
     row('reviewer', 'pull-requests', { switch: { on: true }, profile: 'terra' }),
     row('lane-sync', 'pull-requests', { state: 'not-set-up', settingsKeys: ['lane.local.repos'] }),
     row('library', 'agents', { state: 'idle', switch: { on: true }, profile: 'glm-flash' }),
-    row('updates', 'this-computer', { state: 'error', detail: 'last-run-failed', switch: { on: true }, hook: 'self-update' }),
+    row('updates', 'this-computer', { state: 'error', detail: 'update-source-invalid', switch: { on: true }, schedule: { everyMinutes: 60, timeout: '75m' }, settingsKeys: ['updater.source'] }),
     row('maintenance', 'this-computer', { switch: { on: true }, schedule: { everyMinutes: 60, timeout: '10m0s' } }),
   ]),
-  settings: () => Promise.resolve([]),
+  settings: () => Promise.resolve([{ key: 'updater.source', value: '/missing', kind: 'string', source: 'file', liveVsRestart: '', help: '' }]),
+  setSetting: (key, value) => { record(key + '=' + value); return Promise.resolve({ key, value, kind: 'string', source: 'file', liveVsRestart: '', help: '' }) },
+  updateRuns: () => Promise.resolve([{ id: 'u1', result: 'pass', startedAt: '2026-10-30T02:00:00Z', finishedAt: '2026-10-30T02:01:00Z' }]),
+  updateRunLog: () => Promise.resolve({ tail: '', exitCode: 0 }),
   globalHookRuns: () => Promise.resolve([{ id: 'r1', result: 'error', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }]),
   globalHookRunLog: () => Promise.reject(new Error('log gone')),
   hookRuns: () => Promise.resolve([]),
-  listHooks: () => Promise.resolve([{ name: 'self-update', label: 'Update Dyna', event: 'main-updated', command: 'x' }, { name: 'lint', event: 'schedule', everyMinutes: 60, command: 'make lint' }]),
+  listHooks: () => Promise.resolve([{ name: 'lint', event: 'schedule', everyMinutes: 60, command: 'make lint' }]),
   hookSummary: () => Promise.resolve([]),
   listGlobalHooks: () => Promise.resolve([]),
   globalHookSummary: () => Promise.resolve([]),
@@ -59,11 +62,10 @@ test('the page shows the registry groups in order, Not set up last, then Hooks w
     const rowOf = (label: string): HTMLElement => need([...root.querySelectorAll<HTMLElement>('.setting')].find((r) => r.querySelector('h3')?.textContent === label), label)
     // r16: one danger pill for the failed run; a healthy row says no "On".
     const pills = [...root.querySelectorAll('.status.pill')]
-    assert.deepEqual(pills.map((p) => [p.textContent, p.classList.contains('danger')]), [['Last run failed', true]])
+    assert.deepEqual(pills.map((p) => [p.textContent, p.classList.contains('danger')]), [['Source checkout unavailable', true]])
     assert.ok(rowOf('updates').querySelector('.status.pill.danger'))
     assert.match(rowOf('library').textContent ?? '', /Idle · glm-flash/)
     assert.doesNotMatch(rowOf('maintenance').querySelector('.status')?.textContent ?? '', /\bOn\b/)
-    // The Update Dyna hook does the Updates service's work, so it shows only there.
     const hookRows = [...need(root.querySelector('#hooks')).querySelectorAll('.setting h3')].map((h) => h.textContent)
     assert.deepEqual(hookRows, ['lint'])
     // A click on the row opens its detail in place, where Run now runs the pass.
@@ -75,12 +77,18 @@ test('the page shows the registry groups in order, Not set up last, then Hooks w
     run.click()
     await settle()
     assert.deepEqual(globalThis.__writes, ['run maintenance'])
-    // Updates runs its repository hook.
     need(rowOf('updates').querySelector<HTMLElement>('button.toggle')).click()
     await settle()
-    need([...rowOf('updates').querySelectorAll<HTMLElement>('button')].find((b) => b.textContent === 'Run now')).click()
+    assert.match(rowOf('updates').textContent ?? '', /Not a Git repository/)
+    assert.match(rowOf('updates').textContent ?? '', /updates · passed/)
+    assert.ok([...rowOf('updates').querySelectorAll('button')].some((b) => b.textContent === 'Run now'))
+    const source = need(rowOf('updates').querySelector<HTMLInputElement>('input[aria-label="Source checkout path"]'))
+    source.value = '/valid/checkout'
+    source.dispatchEvent(new window.Event('input', { bubbles: true }))
+    flushSync()
+    source.dispatchEvent(new window.Event('blur'))
     await settle()
-    assert.deepEqual(globalThis.__writes, ['run maintenance', 'hook /repo self-update'])
+    assert.deepEqual(globalThis.__writes, ['run maintenance', 'updater.source=/valid/checkout'])
   } finally {
     unmount(need(app))
     dom.window.close()
@@ -102,6 +110,26 @@ test('a refused setting keeps the typed text so the owner can correct it', async
     input.dispatchEvent(new window.Event('blur'))
     for (let i = 0; i < 3; i++) { await new Promise((r) => setTimeout(r, 0)); flushSync() }
     assert.equal(input.value, '2 weeks')
+  } finally {
+    unmount(need(app))
+    dom.window.close()
+    for (const n of domNames) Reflect.deleteProperty(globalThis, n)
+  }
+})
+
+test('a refused release source keeps the stored checkout selected', async () => {
+  const dom = installDom()
+  const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/SettingControl', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/SettingControl')
+  const root = need(document.getElementById('app'))
+  let app: Mounted | undefined
+  const item = { key: 'updater.source', value: '/checkout', kind: 'string', source: 'file', liveVsRestart: '', help: '' }
+  flushSync(() => { app = mount(C, { target: root, props: { item, label: 'Update source', onsave: () => Promise.reject(new Error('refused')) } }) })
+  try {
+    need([...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Release')).click()
+    await Promise.resolve()
+    flushSync()
+    assert.equal(need([...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Source checkout')).getAttribute('aria-checked'), 'true')
+    assert.equal(need(root.querySelector('input')).value, '/checkout')
   } finally {
     unmount(need(app))
     dom.window.close()
