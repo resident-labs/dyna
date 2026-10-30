@@ -199,7 +199,27 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
     const last = out[out.length - 1]
     const threadPosts = threadRows.get(post.id)
     if (threadPosts) {
-      out.push({ kind: 'post', key: post.id, post, cont, posts: threadPosts })
+      const hook = hookEvent(post)
+      // Other successful hook cards may be between runs in a burst. A live
+      // or failed run, another post, or a gap over an hour breaks the fold.
+      let target: FeedPostRow<P> | undefined
+      if (hook?.state === 'passed') {
+        for (let i = out.length - 1; i >= 0; i--) {
+          const row = out[i]
+          const previous = row?.kind === 'post' ? hookEvent(row.post) : undefined
+          if (row?.kind !== 'post' || previous?.state !== 'passed') break
+          if (previous.repo === hook.repo && previous.hook === hook.hook) {
+            if (post.ts - row.post.ts <= 60 * 60 * 1000) target = row
+            break
+          }
+        }
+      }
+      if (target) {
+        target.posts = [...rowPosts(target), ...threadPosts]
+        target.post = post
+      } else {
+        out.push({ kind: 'post', key: post.id, post, cont, posts: threadPosts })
+      }
       prev = post
       continue
     }

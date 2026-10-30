@@ -7,10 +7,11 @@
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
   import HookIcon from '../ui/HookIcon.svelte'
-  import { durationMs } from '../ui/format.ts'
+  import { clock, durationMs } from '../ui/format.ts'
 
-  let { post, notice = post.notice, surface = 'feed' }: {
+  let { post, posts = [post], notice = post.notice, surface = 'feed' }: {
     post: EventPost
+    posts?: EventPost[]
     notice?: EventNotice
     surface?: EventSurface
   } = $props()
@@ -33,7 +34,8 @@
   let name = $derived(payload?.label || payload?.hook || 'Hook')
   let state = $derived<HookState>(payload?.state ?? 'running')
   let runId = $derived(payload?.runId ?? '')
-  let elapsed = $derived(durationMs(payload?.durationMs ?? 0))
+  let runs = $derived(posts.filter((item) => hookEvent(item)?.state === 'passed'))
+  let elapsed = $derived(state === 'running' ? `started ${clock(post.ts)}` : runs.length > 1 ? `${runs.length} runs · last ${clock(post.ts)}` : durationMs(payload?.durationMs ?? 0))
 
   function viewLog() {
     if (!payload || !runId) return
@@ -51,6 +53,9 @@
 >
   {#snippet icon()}<HookIcon size={15} />{/snippet}
   {#snippet detail()}
+    {#if runs.length > 1}
+      <ul>{#each runs as run}<li>{clock(run.ts)} · {durationMs(hookEvent(run)?.durationMs ?? 0)}</li>{/each}</ul>
+    {/if}
     {#if payload?.detail}<p class="detail-text">{payload.detail}</p>{/if}
     {#if runId}<button class="link" type="button" onclick={viewLog} aria-label={`View the log of ${name}`}>View log</button>{/if}
     {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
