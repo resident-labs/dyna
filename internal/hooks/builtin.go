@@ -11,7 +11,7 @@ import (
 )
 
 // Builtin names one automatic hook. The name is also the hook's name, the name
-// `dyna git hooks run` takes, and the value the engine stores, so one table
+// `dyna services run` takes, and the value the engine stores, so one table
 // entry registers the whole hook.
 type Builtin string
 
@@ -39,7 +39,7 @@ func (s Service) builtinSpec(name Builtin) (BuiltinSpec, bool) {
 
 // command is the by-hand run of the same pass, which the screen shows.
 func (b BuiltinSpec) command() string {
-	return "dyna git hooks run " + string(b.Builtin) + " --global"
+	return "dyna services run " + string(b.Builtin)
 }
 
 // builtin returns the table entry a stored row runs.

@@ -189,7 +189,7 @@ func NewCommand() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
-	cmd.AddCommand(listCmd(), showCmd(), enableCmd(), disableCmd(), profileCmd(), restartCmd(), logCmd())
+	cmd.AddCommand(listCmd(), showCmd(), enableCmd(), disableCmd(), profileCmd(), runCmd(), restartCmd(), logCmd())
 	return cmd
 }
 
@@ -468,6 +468,51 @@ func serviceProfiles(ctx context.Context, call engineCaller, r refs) ([]string, 
 		}
 	}
 	return nil, fmt.Errorf("no profile can run a service; run `dyna profiles set <profile> --use services`")
+}
+
+func runCmd() *cobra.Command {
+	var o options
+	cmd := &cobra.Command{
+		Use:   "run <service>",
+		Short: "Run a background service now and wait for the result",
+		Long: "Run the pass of a background service now: parent-checkins, harness-versions,\n" +
+			"account-usage, doctor, maintenance or updates. It waits for the pass and prints\n" +
+			"the result and the path of its log. The reviewers and the librarian take a turn\n" +
+			"with `dyna services restart`.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			id, err := ParseServiceID(args[0])
+			if err != nil {
+				return err
+			}
+			return runNow(c.Context(), client(), resolveRefs(o.room, o.repo), id, c.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVar(&o.room, "room", "", "room whose service to run (default: the current room)")
+	cmd.Flags().StringVar(&o.repo, "repo", "", "repository path (default: the current one)")
+	return cmd
+}
+
+// runNow runs the hook pass behind a background service and prints its result.
+func runNow(ctx context.Context, call engineCaller, r refs, id ServiceID, out io.Writer) error {
+	var run hooks.Run
+	var err error
+	switch id {
+	case serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
+		err = call.Call(ctx, "RunService", []any{string(id)}, &run)
+	case serviceregistry.IDUpdates:
+		r = resolve(ctx, call, r)
+		if r.Repo == "" {
+			return fmt.Errorf("no repository; run this inside one or pass --repo <path>")
+		}
+		err = call.Call(ctx, "RunHook", []any{r.Repo, updateHook}, &run)
+	default:
+		return fmt.Errorf("%s does not run on request; `dyna services restart` gives the reviewers and the librarian a turn", id)
+	}
+	if run.ID != "" {
+		fmt.Fprintf(out, "%s: %s\nlog: %s\n", id, run.Result, run.LogPath)
+	}
+	return err
 }
 
 func restartCmd() *cobra.Command {

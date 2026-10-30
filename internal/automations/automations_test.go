@@ -14,7 +14,7 @@ func TestDoctorHookIsSeededGlobalAndEnabled(t *testing.T) {
 	if err := s.Seed(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	global, err := s.ListGlobal(t.Context())
+	global, err := s.BuiltinHooks(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -110,7 +110,7 @@ func (s services) hookFacts(ctx context.Context, repo string) map[string]service
 	var runs []hooks.Run
 	var err error
 	if repo == "" {
-		summaries, err = s.hooks.SummariesGlobal(ctx)
+		summaries, err = s.hooks.SummariesBuiltin(ctx)
 	} else {
 		summaries, err = s.hooks.Summaries(ctx, repo)
 	}
