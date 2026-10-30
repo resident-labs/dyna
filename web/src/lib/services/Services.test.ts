@@ -26,10 +26,11 @@ export const api = {
     row('reviewer', 'pull-requests', { switch: { on: true }, profile: 'terra' }),
     row('lane-sync', 'pull-requests', { state: 'not-set-up', settingsKeys: ['lane.local.repos'] }),
     row('library', 'agents', { state: 'idle', switch: { on: true }, profile: 'glm-flash' }),
-    row('updates', 'this-computer', { state: 'error', detail: 'last-run-failed', switch: { on: true }, hook: 'self-update' }),
+    row('updates', 'this-computer', { state: 'error', detail: 'update-source-invalid', switch: { on: true }, settingsKeys: ['updater.source'] }),
     row('maintenance', 'this-computer', { switch: { on: true }, schedule: { everyMinutes: 60, timeout: '10m0s' } }),
   ]),
-  settings: () => Promise.resolve([]),
+  settings: () => Promise.resolve([{ key: 'updater.source', value: '/missing', kind: 'string', source: 'file', liveVsRestart: '', help: '' }]),
+  setSetting: (key, value) => { record(key + '=' + value); return Promise.resolve({ key, value, kind: 'string', source: 'file', liveVsRestart: '', help: '' }) },
   globalHookRuns: () => Promise.resolve([{ id: 'r1', result: 'error', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }]),
   globalHookRunLog: () => Promise.reject(new Error('log gone')),
   hookRuns: () => Promise.resolve([]),
@@ -59,13 +60,12 @@ test('the page shows the registry groups in order, Not set up last, then Hooks w
     const rowOf = (label: string): HTMLElement => need([...root.querySelectorAll<HTMLElement>('.setting')].find((r) => r.querySelector('h3')?.textContent === label), label)
     // r16: one danger pill for the failed run; a healthy row says no "On".
     const pills = [...root.querySelectorAll('.status.pill')]
-    assert.deepEqual(pills.map((p) => [p.textContent, p.classList.contains('danger')]), [['Last run failed', true]])
+    assert.deepEqual(pills.map((p) => [p.textContent, p.classList.contains('danger')]), [['Source checkout unavailable', true]])
     assert.ok(rowOf('updates').querySelector('.status.pill.danger'))
     assert.match(rowOf('library').textContent ?? '', /Idle · glm-flash/)
     assert.doesNotMatch(rowOf('maintenance').querySelector('.status')?.textContent ?? '', /\bOn\b/)
-    // The Update Dyna hook does the Updates service's work, so it shows only there.
     const hookRows = [...need(root.querySelector('#hooks')).querySelectorAll('.setting h3')].map((h) => h.textContent)
-    assert.deepEqual(hookRows, ['lint'])
+    assert.deepEqual(hookRows, ['Update Dyna', 'lint'])
     // A click on the row opens its detail in place, where Run now runs the pass.
     need(rowOf('maintenance').querySelector<HTMLElement>('button.toggle')).click()
     await settle()
@@ -75,12 +75,16 @@ test('the page shows the registry groups in order, Not set up last, then Hooks w
     run.click()
     await settle()
     assert.deepEqual(globalThis.__writes, ['run maintenance'])
-    // Updates runs its repository hook.
     need(rowOf('updates').querySelector<HTMLElement>('button.toggle')).click()
     await settle()
-    need([...rowOf('updates').querySelectorAll<HTMLElement>('button')].find((b) => b.textContent === 'Run now')).click()
+    assert.match(rowOf('updates').textContent ?? '', /source checkout is missing/)
+    const source = need(rowOf('updates').querySelector<HTMLInputElement>('input[aria-label="Source checkout path"]'))
+    source.value = '/valid/checkout'
+    source.dispatchEvent(new window.Event('input', { bubbles: true }))
+    flushSync()
+    source.dispatchEvent(new window.Event('blur'))
     await settle()
-    assert.deepEqual(globalThis.__writes, ['run maintenance', 'hook /repo self-update'])
+    assert.deepEqual(globalThis.__writes, ['run maintenance', 'updater.source=/valid/checkout'])
   } finally {
     unmount(need(app))
     dom.window.close()
