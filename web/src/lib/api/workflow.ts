@@ -111,11 +111,18 @@ export interface RunResultView {
   journal?: RunJournalEntry[]
 }
 
+export interface WorkflowArg {
+  name: string
+  required: boolean
+  description: string
+}
+
 // WorkflowInfo is workflowcatalog.Info.
 export interface WorkflowInfo {
   name: string
   scope: 'project' | 'personal' | 'bundled'
   description: string
+  args: WorkflowArg[]
 }
 
 // StartNamedRunRequest is roomsvc.StartNamedRunRequest.

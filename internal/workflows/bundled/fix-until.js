@@ -1,4 +1,5 @@
-export const meta = { name: 'fix-until', description: 'Fix a failing check in an isolated worktree until it passes or stops progressing' }
+export const meta = { name: 'fix-until', description: 'Fix a failing check in an isolated worktree until it passes or stops progressing', args: [{ name: 'command', required: true, description: 'Check command to run' }, { name: 'maxRounds', required: false, description: 'Maximum fix rounds, a positive integer (default 3)' }] }
+if (typeof args === 'string') args = { command: args }
 if (!args || typeof args.command !== 'string' || !args.command.trim()) throw new Error('command is required')
 if (args.maxRounds !== undefined && (!Number.isInteger(args.maxRounds) || args.maxRounds < 1)) throw new Error('maxRounds must be a positive integer')
 const maxRounds = args.maxRounds === undefined ? 3 : args.maxRounds

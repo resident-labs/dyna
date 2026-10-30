@@ -1,4 +1,5 @@
-export const meta = { name: 'deep-research', description: 'Research a question and independently verify cited claims' }
+export const meta = { name: 'deep-research', description: 'Research a question and independently verify cited claims', args: [{ name: 'question', required: true, description: 'Question to research' }] }
+if (typeof args === 'string') args = { question: args }
 if (!args || typeof args.question !== 'string' || !args.question.trim()) throw new Error('question is required')
 const ranked = [...profiles].filter(p => p.remaining !== 0).sort ( (a, b) => b.diagnostics - a.diagnostics)
 if (ranked.length < 2) throw new Error('deep-research requires two enabled profiles')
