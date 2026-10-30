@@ -16,16 +16,6 @@ import (
 	"dyna-agent/internal/room"
 )
 
-type MergeControlStatus struct {
-	LocalCIChecks   map[string][]CheckSummary `json:"localCIChecks,omitempty"`
-	ExpeditedGoalID string                    `json:"expeditedGoalId,omitempty"`
-	RoomID          string                    `json:"roomId"`
-	Paused          bool                      `json:"paused"`
-	Reason          string                    `json:"reason,omitempty"`
-	Queue           []MergeQueueItem          `json:"queue"`
-	Trials          []MergeTrialStatus        `json:"trials"`
-}
-
 type mergeControlRoom struct{}
 
 func trialHasRoom(st State, b state.MergeTrial, roomID string) bool {

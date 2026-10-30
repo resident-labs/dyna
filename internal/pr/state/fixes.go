@@ -5,20 +5,6 @@ import (
 	"strings"
 )
 
-// IssueKind names the tracker that holds a linked issue number.
-type IssueKind string
-
-const (
-	IssueKindDyna   IssueKind = "dyna"
-	IssueKindGitHub IssueKind = "github"
-)
-
-// IssueRef is one issue that a merge closes automatically.
-type IssueRef struct {
-	Kind   IssueKind `json:"kind"`
-	Number int       `json:"number"`
-}
-
 // Label is the short reference people type: D-5 for a room issue, #207 for GitHub.
 func (r IssueRef) Label() string {
 	if r.Kind == IssueKindDyna {

@@ -12,12 +12,6 @@ import (
 	"dyna-agent/internal/pr/watch"
 )
 
-type PRNoiseList struct {
-	Repositories []string          `json:"repositories"`
-	Rules        []watch.NoiseRule `json:"rules"`
-	Warning      string            `json:"warning,omitempty"`
-}
-
 // prNoiseRepos includes the room's GitHub remote and repositories of PRs
 // tracked in this room, including ended PRs. Host is part of every scope.
 func (s *Service) prNoiseRepos(roomRef string) ([]watch.Ref, string, error) {

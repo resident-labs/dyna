@@ -8,14 +8,6 @@ import (
 	"time"
 )
 
-// RecentReview is one row of a room's recent reviewer results, for status.
-type RecentReview struct {
-	ChangeID string        `json:"changeId,omitempty"`
-	PR       int           `json:"pr"`
-	Verdict  ReviewVerdict `json:"verdict"`
-	At       time.Time     `json:"at"`
-}
-
 // Reviewer stores room settings and provider failure observations, never pool occupancy.
 type Reviewer struct {
 	Key              string               `json:"-"`
@@ -63,22 +55,6 @@ type Notice struct {
 	DoneAt time.Time `json:"doneAt,omitempty"`
 	Error  string    `json:"error,omitempty"`
 }
-type AuthorNotes struct {
-	Intent    string `json:"intent"`
-	Testing   string `json:"testing"`
-	Risks     string `json:"risks"`
-	Questions string `json:"questions"`
-}
-type FindingReply struct {
-	Disposition string    `json:"disposition"`
-	Message     string    `json:"message"`
-	Head        string    `json:"head"`
-	Author      string    `json:"author"`
-	At          time.Time `json:"at"`
-}
-
-// FindingSeverity says how strongly a finding asks for a change.
-type FindingSeverity string
 
 // Finding severities.
 const (
@@ -86,21 +62,6 @@ const (
 	FindingShouldFix FindingSeverity = "should-fix"
 	FindingNit       FindingSeverity = "nit"
 )
-
-type Finding struct {
-	ID       string          `json:"id"`
-	Severity FindingSeverity `json:"severity"`
-	File     string          `json:"file"`
-	Line     int             `json:"line"`
-	Why      string          `json:"why"`
-	Fix      string          `json:"fix"`
-	Patch    string          `json:"patch,omitempty"`
-	Replies  []FindingReply  `json:"replies"`
-}
-
-// ReviewVerdict is the typed result of one reviewer turn. A reviewer turn ends
-// with exactly one of these; the engine rejects any other value.
-type ReviewVerdict string
 
 // Review verdicts.
 const (
@@ -115,9 +76,6 @@ const (
 	VerdictStopEarly ReviewVerdict = "stop-early"
 )
 
-// StopReason is why a reviewer stopped before it judged the change.
-type StopReason string
-
 // Stop reasons, in the order a reviewer usually meets them.
 const (
 	StopSuperseded StopReason = "superseded"
@@ -125,11 +83,6 @@ const (
 	StopEmpty      StopReason = "empty"
 	StopTooLarge   StopReason = "too-large"
 )
-
-// LocalCIConfigState is the local CI configuration a repository has at a head.
-// A view reports one of these known states, so a client words it itself and
-// never shows a Git or YAML message.
-type LocalCIConfigState string
 
 // Local CI configuration states.
 const (
@@ -149,12 +102,6 @@ func (c LocalCIConfigState) known() bool {
 	return c == LocalCIConfigNone || c == LocalCIConfigNotConfigured || c == LocalCIConfigHeadMissing
 }
 
-// FastLand records whether an approve-fast result uses direct publication.
-// The stored Boolean also preserves the meaning of older review events.
-type FastLand struct {
-	LowRisk bool `json:"lowRisk"`
-}
-
 // ReviewResult is one reviewer turn's typed result, as recorded through the
 // engine. Head and ReviewID say which submission it is; the rest is what the
 // review decided.
@@ -166,19 +113,6 @@ type ReviewResult struct {
 	Summary    string        `json:"summary,omitempty"`
 	Head       string        `json:"head,omitempty"`
 	ReviewID   int64         `json:"reviewId,omitempty"`
-}
-
-type ReviewRound struct {
-	Reviewer   string        `json:"reviewer,omitempty"`
-	ReviewID   int64         `json:"reviewId,omitempty"`
-	Round      int           `json:"round"`
-	Head       string        `json:"head"`
-	Verdict    ReviewVerdict `json:"verdict"`
-	Summary    string        `json:"summary"`
-	Findings   []Finding     `json:"findings"`
-	StopReason StopReason    `json:"stopReason,omitempty"`
-	FastLand   *FastLand     `json:"fastLand,omitempty"`
-	At         time.Time     `json:"at"`
 }
 
 // TODO: legacy/shim remove later — reads saved landing history; remove after old records no longer need it.
@@ -410,22 +344,6 @@ type MergeTrialChange struct {
 	Message string `json:"message,omitempty"`
 }
 
-// Overlap is what another open change in the same repository shares with this
-// one. Head and OtherHead identify the compared pair; git runs again only
-// when one of them moves.
-type Overlap struct {
-	ChangeID string `json:"changeId"`
-	// Title names a change that has no PR number, such as a local change.
-	Title     string   `json:"title,omitempty"`
-	Number    int      `json:"number,omitempty"`
-	Files     []string `json:"files,omitempty"`
-	Conflicts []string `json:"conflicts,omitempty"`
-	Head      string   `json:"head"`
-	OtherHead string   `json:"otherHead"`
-	MainHead  string   `json:"mainHead,omitempty"`
-	Error     string   `json:"error,omitempty"`
-}
-
 // SharedOverlaps keeps the overlaps that name a shared or conflicting file.
 func SharedOverlaps(all []Overlap) []Overlap {
 	var out []Overlap
@@ -442,9 +360,6 @@ type MergeTrialFailure struct {
 	Reason string           `json:"reason"`
 	Logs   string           `json:"logs,omitempty"`
 }
-
-// MergeTrialPhase is the persisted execution phase of a batch or prefix.
-type MergeTrialPhase string
 
 // Merge trial phases retain their stored JSON spellings.
 const (
@@ -501,14 +416,6 @@ func legacyMergePause(reason string) MergePause {
 	return MergePause{Cause: cause, Reason: reason}
 }
 
-type MergeTrialStack struct {
-	Branch string          `json:"branch"`
-	Head   string          `json:"head,omitempty"`
-	Count  int             `json:"count"`
-	Phase  MergeTrialPhase `json:"phase"`
-	Reason string          `json:"reason,omitempty"`
-	Logs   string          `json:"logs,omitempty"`
-}
 type MergeTrial struct {
 	// TODO: legacy/shim remove later — retain the session ID from saved advisory reviews until their batches resume or are canceled; remove after all pre-upgrade batches are gone.
 	LegacyReview *struct {
@@ -626,53 +533,7 @@ type RateLimit struct {
 	SecondaryFailures int       `json:"secondaryFailures,omitempty"`
 }
 
-type NoiseRule struct {
-	ID            string    `json:"id"`
-	Host          string    `json:"host"`
-	Repo          string    `json:"repo"`
-	Bot           string    `json:"bot"`
-	Template      string    `json:"template"`
-	Reason        string    `json:"reason"`
-	SourceURL     string    `json:"sourceUrl"`
-	SourceComment string    `json:"sourceComment"`
-	LearnedBy     string    `json:"learnedBy,omitempty"`
-	Created       time.Time `json:"created"`
-	Hits          int       `json:"hits"`
-	LastMatched   time.Time `json:"lastMatched,omitempty"`
-}
-
-// HeldComment is stored in the PR record in SQLite until the owner admits it.
-type HeldComment struct {
-	ID        string `json:"id"`
-	Commenter string `json:"commenter"`
-	Body      string `json:"body"`
-	URL       string `json:"url"`
-	Version   string `json:"version"`
-}
-
 type Decision struct {
 	Action string `json:"action"`
 	Reason string `json:"reason"`
-}
-
-type CheckSummary struct {
-	Node                  string `json:"node,omitempty"`
-	DurationMs            int64  `json:"durationMs,omitempty"`
-	ID                    int64  `json:"id,omitempty"`
-	Completed             string `json:"completed,omitempty"`
-	FailureExcerpt        string `json:"failureExcerpt,omitempty"`
-	FailureExcerptChecked bool   `json:"failureExcerptChecked,omitempty"`
-	Name                  string `json:"name"`
-	State                 string `json:"state"`
-	Status                string `json:"status"`
-	Conclusion            string `json:"conclusion"`
-	URL                   string `json:"url"`
-	CommentURL            string `json:"commentUrl,omitempty"`
-}
-
-type BotReview struct {
-	Bot      string `json:"bot"`
-	State    string `json:"state"`
-	Findings int    `json:"findings"`
-	URL      string `json:"url"`
 }
