@@ -262,6 +262,8 @@ export interface Member {
   computer?: string
   seat?: Seat
   responsibilities?: Responsibilities
+  // shell describes the newest live shell job; responsibilities.shell counts them.
+  shell?: string
   // ownerDisplay marks a session whose own shells use the owner's display.
   ownerDisplay?: boolean
 }
