@@ -193,6 +193,12 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	}
 	errs := []error{fetchErr}
 	for _, e := range events {
+		if e.Event == MainUpdated {
+			fastForwardRoomCheckouts(ctx)
+			break
+		}
+	}
+	for _, e := range events {
 		errs = append(errs, s.Emit(ctx, e))
 	}
 	return errors.Join(errs...)
