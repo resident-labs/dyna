@@ -174,7 +174,7 @@ export const readRegistry = (v: unknown): RegistryService[] | null =>
       const group = groups.find((x) => x === r.group)
       const state = states.find((x) => x === r.state)
       const detail = details.find((x) => x === r.detail)
-      if (!id || !group || !state || !detail) return []
+      if (id === undefined || group === undefined || state === undefined || detail === undefined) return []
       const sw = isRecord(r.switch) && isBoolean(r.switch.on) ? { on: r.switch.on } : undefined
       return [{
         id, group, state, detail, label: str(r.label), description: str(r.description), count: num(r.count),
