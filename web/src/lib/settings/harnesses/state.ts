@@ -164,7 +164,7 @@ export function rowLine(row: Pick<HarnessRow, 'id' | 'installing' | 'needsInstal
 
 // toolEnabledForHarness says whether an MCP server is on for one harness. A
 // skill has one global switch, so it has no per-harness list.
-export function toolEnabledForHarness(entry: { enabledHarnesses?: string[] } | null | undefined, harnessId: string): boolean {
+export function toolEnabledForHarness(entry: { enabledHarnesses?: string[] | null } | null | undefined, harnessId: string): boolean {
   return (entry?.enabledHarnesses ?? []).includes(harnessId)
 }
 
