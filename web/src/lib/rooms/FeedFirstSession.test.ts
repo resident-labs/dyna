@@ -46,3 +46,19 @@ test('turn results and ordinary posts expose the same actions', () => {
     assert.equal((body.match(new RegExp(`aria-label="${label}"`, 'g')) ?? []).length, 2, label)
   }
 })
+
+test('a landed trial renders one card across an unrelated post', () => {
+  const prs = [{ number: 142, title: 'Improve search', url: 'https://github.com/acme/app/pull/142' }]
+  const step = (id: string, type: string, ts: number) => ({
+    id, ts, from: 'dyna', to: ['room'], text: '', kind: 'merge', completion: true,
+    notice: { kind: type, thread: 'merge:trial-1' },
+    payload: { type, trialId: 'trial-1', repo: 'acme/app', base: 'main', prs, ...(type === 'landed' ? { commit: 'abcdef1234567890' } : {}) },
+  })
+  const posts = [step('queued', 'queued', 1000), { id: 'note', ts: 2000, from: 'room:worker', to: ['room'], text: 'Unrelated note' }, step('trial', 'trial', 3000), step('landed', 'landed', 4000)]
+  const body = render(Feed, { props: { room, posts } }).body
+  assert.equal((body.match(/Merged #142 into main/g) ?? []).length, 1)
+  assert.doesNotMatch(body, /Merging #142 into main/)
+  assert.match(body, /Show steps \(3\)/)
+  assert.match(body, /abcdef1/)
+  assert.match(body, /Unrelated note/)
+})
