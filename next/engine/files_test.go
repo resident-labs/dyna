@@ -50,6 +50,7 @@ func TestFileRoomAccess(t *testing.T) {
 		status int
 	}{
 		{owner, "", http.StatusOK},
+		{contract.Principal{Kind: contract.PrincipalSession, Session: "s"}, "a", http.StatusOK},
 		{contract.Principal{Kind: contract.PrincipalSession, Session: "s"}, "b", http.StatusNotFound},
 	} {
 		rec := httptest.NewRecorder()

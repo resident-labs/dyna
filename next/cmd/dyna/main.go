@@ -47,7 +47,7 @@ func newRootCmd() *cobra.Command {
 	var socket string
 	root.PersistentFlags().StringVar(&socket, "socket", defaultSocket(), "Engine socket")
 	addCLI(root, func() client { return newClient(socket) })
-	root.AddCommand(&cobra.Command{Use: "web", Long: "The engine runs on hermeslab. Reach it with ssh -L 7790:127.0.0.1:7790 pip@hermeslab, run dyna web there over ssh, and open the printed URL in the desktop browser.", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	root.AddCommand(&cobra.Command{Use: "web", Long: "If the engine runs on another machine, forward its port first, for example ssh -L 7790:127.0.0.1:7790 <user>@<host>. Run dyna web on that machine and open the printed URL here.", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		r, err := call[contract.WebLoginRequest, contract.WebLoginResponse](cmd.Context(), newClient(socket), contract.MethodWebLogin, contract.WebLoginRequest{})
 		if err != nil {
 			return err
