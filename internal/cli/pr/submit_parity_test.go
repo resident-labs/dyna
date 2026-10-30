@@ -33,7 +33,7 @@ func TestAgentWriteParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	roomfixture.Repository(t, rooms, rec.ID, "github.com", "owner/repo", "read-write")
-	if err := rooms.SetAttribution(rec.ID, "Agent attribution"); err != nil {
+	if err := rooms.SetAttribution(rec.ID, "", room.Attribution{Text: "Agent attribution", Placement: room.AttributionLine}); err != nil {
 		t.Fatal(err)
 	}
 	s := watch.New()
