@@ -46,7 +46,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
-		err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
+		reply := contract.ReplyChannel{Kind: contract.ReplyNone}
+		if parent != "" {
+			reply = contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Home: contract.Conversation{Kind: contract.ConversationFeed}}
+		}
+		err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
 		if err != nil {
 			return err
 		}
@@ -118,12 +122,12 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			return nil
 		}
-		inputs, posts, err := turnReplies(ctx, tx, session, output.Turn)
+		inputs, posts, err := s.turnReplies(ctx, tx, event.Room, session, output.Turn)
 		if err != nil {
 			return err
 		}
 		body := event.Body.(contract.TurnEnded)
-		body.Replies = room.FinalReplies(inputs, posts)
+		body.Replies = room.FinalReplies(inputs, room.PostsForReplies(inputs, posts, session))
 		event.Body = body
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {

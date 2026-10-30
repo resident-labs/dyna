@@ -71,6 +71,33 @@ type Destination struct {
 	Home   contract.Conversation
 }
 
+// PostsForReplies finds the latest post to each final destination in the turn.
+func PostsForReplies(inputs []contract.Delivery, events []contract.Event, session contract.SessionID) map[Destination]contract.EventID {
+	posts := make(map[Destination]contract.EventID)
+	for _, event := range events {
+		if event.From.Kind != contract.PrincipalSession || event.From.Session != session {
+			continue
+		}
+		post := event.Body.(contract.PostCreated)
+		for _, input := range inputs {
+			channel := input.Reply
+			if channel.Kind != contract.ReplyFinal {
+				continue
+			}
+			matched := channel.Target.Kind == contract.PrincipalOwner && channel.Home == post.Home
+			for _, mentioned := range post.Mentions {
+				if mentioned == channel.Target {
+					matched = true
+				}
+			}
+			if matched {
+				posts[Destination{Target: channel.Target, Home: channel.Home}] = event.ID
+			}
+		}
+	}
+	return posts
+}
+
 // FinalReplies returns one response for each distinct final target and home.
 func FinalReplies(inputs []contract.Delivery, posts map[Destination]contract.EventID) []contract.FinalReply {
 	seen := make(map[Destination]bool)
