@@ -4,7 +4,7 @@ import { createConsolidationView, pruneSelection, toggleSelection, selectionKey,
 import type { ConsolidationState } from '../api/session.ts'
 import { need } from '../../../test/need.ts'
 const sessions = [{ id: 'a', name: 'alpha', profile: 'old', model: 'old-model' }, { id: 'b', name: 'beta', profile: 'other' }]
-const saved = (phase = 'waiting', extra: Partial<ConsolidationState> = {}): ConsolidationState => ({ id: 'op', roomId: 'room', target: 'a', sessions: ['a', 'b'], profile: 'old', model: 'old-model', phase, requested: '', deadline: '', sources: [], ...extra })
+const saved = (phase = 'waiting', extra: Partial<ConsolidationState> = {}): ConsolidationState => ({ id: 'op', roomId: 'room', target: 'a', sessions: ['a', 'b'], profile: 'old', model: 'old-model', phase, requested: '', deadline: '', ended: '', sources: [], ...extra })
 function deferred<T = never>() { let resolve: (value: T) => void = () => {}, reject: (error: Error) => void = () => {}; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 function setup(overrides: Partial<ConsolidationApi> = {}, context: Partial<ConsolidationContext> = {}) {
   let value: ConsolidationValue | undefined
