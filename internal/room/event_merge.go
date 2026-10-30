@@ -149,3 +149,16 @@ func (MergeDecisionEvent) eventSubject() string { return "decision" }
 // eventDedupe keys a decision by its own line. Each decision posts as a new
 // event with a fresh ID, so two equal notes stay two decisions.
 func (d MergeDecisionEvent) eventDedupe() string { return d.Note }
+
+// ThreadKey reads a post's display thread, including merge posts saved before
+// event threads were introduced.
+func (m Message) ThreadKey() string {
+	if m.Notice.Thread != "" {
+		return m.Notice.Thread
+	}
+	// TODO: legacy/shim remove only after the upgrade floor excludes old posts.
+	if event, ok := m.Merge(); ok && event.TrialID != "" {
+		return event.eventThread()
+	}
+	return ""
+}
