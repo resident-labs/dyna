@@ -1238,11 +1238,7 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		return err
 	}
 	in.Findings = prepared
-	if paused {
-		return s.savePendingVerdict(r.Key, actor, head, in)
-	}
-	// A paused submission keeps the reviewer's requested result and applies its
-	// publication kind when it replays.
+	// Normalize before saving so immediate recording consumes the exact saved payload.
 	in = s.normalizeReviewResult(r, in)
 	verdict, summary = in.Verdict, in.Summary
 	prepared, err = prepareFindings(r, verdict, in.Findings)
@@ -1250,6 +1246,17 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		return err
 	}
 	in.Findings = prepared
+	if confirmed == nil && changeKind(r) == "github" {
+		// Save before any GitHub read. The watcher replays after a refresh.
+		pendingErr := s.savePendingVerdict(r.Key, actor, head, in)
+		var pending *ErrPendingVerdict
+		if !errors.As(pendingErr, &pending) {
+			return pendingErr
+		}
+		if paused {
+			return pendingErr
+		}
+	}
 	var snap Snapshot
 	if confirmed != nil {
 		snap = *confirmed
@@ -1257,7 +1264,7 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		// Confirm readiness metadata through its single writer before reading fresh CI.
 		// A verdict must not combine current checks with an old draft or mergeability result.
 		if err := s.ConfirmHeads(ctx, r.Key); err != nil {
-			return err
+			return &ErrPendingVerdict{}
 		}
 		r, err = s.Store.Get(key)
 		if err != nil {
@@ -1265,7 +1272,7 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		}
 		snap, err = s.github(r.RoomID).Snapshot(ctx, refRecord(r))
 		if err != nil {
-			return err
+			return &ErrPendingVerdict{}
 		}
 		if err := staleVerdict(r, actor, head, snap.Pull, reviewID, named); err != nil {
 			return err
@@ -1307,6 +1314,9 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 	// A head whose local CI definition this engine cannot parse still gets its
 	// review recorded. Merge gates read the same definition and stay closed.
 	if err != nil && !errors.Is(err, localci.ErrDefinitionInvalid) {
+		if confirmed == nil && changeKind(r) == "github" {
+			return &ErrPendingVerdict{}
+		}
 		return err
 	}
 	if err == nil {
