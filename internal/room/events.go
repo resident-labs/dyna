@@ -367,12 +367,16 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 	if id == "" && !in.FreshID {
 		id = eventID(ev)
 	}
+	var thread string
+	if threaded, ok := ev.(interface{ eventThread() string }); ok {
+		thread = threaded.eventThread()
+	}
 	msg, err := s.post(in.RoomID, PostInput{
 		ID:           id,
 		From:         from,
 		SenderRoomID: in.SenderRoomID,
 		Kind:         string(spec.Family),
-		Notice:       EventNotice{Kind: string(spec.Type), Producer: in.Producer},
+		Notice:       EventNotice{Kind: string(spec.Type), Producer: in.Producer, Thread: thread},
 		payload:      EventPayload{raw: payload},
 		To:           in.To,
 		Via:          in.Via,

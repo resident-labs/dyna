@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { feedRows, feedPRRepos, isShellResult, rowPost, rowPosts, shellJobID } from './feedRows.ts'
 import type { FeedInput, FeedRow } from './feedRows.ts'
 import { hookEvent } from './eventPayloads.ts'
+import { eventSpecs } from './events.gen.ts'
 import { need } from '../../../test/need.ts'
 
 const start = new Date(2026, 9, 17, 12).getTime()
@@ -327,4 +328,30 @@ test('review results fold per PR head', () => {
   assert.equal(rows.length, 2)
   assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['r1', 'r2'])
   assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['r3'])
+})
+
+test('thread posts fold across unrelated posts at the newest position', () => {
+  const a: FeedInput = { id: 'a', ts: start, from: 'dyna', kind: 'merge', notice: { kind: 'queued', thread: 'trial' } }
+  const b: FeedInput = { id: 'b', ts: start + 1, from: 'user' }
+  const c: FeedInput = { ...a, id: 'c', ts: start + 2 }
+  const rows = content(feedRows([a, b, c], a.id))
+  assert.deepEqual(rows.map((row) => row.post.id), ['b', 'c'])
+  assert.deepEqual(rows[1]?.posts?.map((post) => post.id), ['a', 'c'])
+  assert.deepEqual(feedRows([a, b, c], a.id).map((row) => row.kind), ['day', 'new', 'post', 'post'])
+})
+
+
+test('a terminal failure is not folded beneath a later post', () => {
+  const spec = need(eventSpecs.find((entry) => entry.family === 'merge' && entry.type === 'failed'))
+  const previous = spec.threadEnd
+  spec.threadEnd = true
+  try {
+    const post = (id: string, kind: string, ts: number): FeedInput => ({
+      id, ts, from: 'dyna', kind: 'merge', notice: { kind, thread: 'trial' },
+    })
+    const rows = content(feedRows([post('a', 'queued', start), post('b', 'failed', start + 1), post('c', 'queued', start + 2)]))
+    assert.deepEqual(rows.map((row) => row.posts?.map((p) => p.id)), [['a', 'b'], ['c']])
+  } finally {
+    spec.threadEnd = previous
+  }
 })
