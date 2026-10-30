@@ -67,6 +67,72 @@ func awaitAccountCondition(t *testing.T, fn func() bool) {
 	}
 }
 
+func TestRemoveIgnoresTurnsOnOtherAccounts(t *testing.T) {
+	a := testAccounts(t)
+	idle, err := a.Create("claude-code", "idle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy, err := a.Create("claude-code", "busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.setActive("claude-code", busy.ID); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := a.TurnLeaseManaged(context.Background(), "claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Close()
+	if err = lease.BindTurnAccount(busy.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Remove(busy.ID, true); err == nil {
+		t.Fatal("removed the account that a running turn uses")
+	}
+	if err = a.Remove(idle.ID, true); err != nil {
+		t.Fatal("a turn on another account blocked removal:", err)
+	}
+}
+
+func TestRemoveFollowsTheRoomAccountATurnUses(t *testing.T) {
+	a := testAccounts(t)
+	global, err := a.Create("claude-code", "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err := a.Create("claude-code", "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.setActive("claude-code", global.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.SelectInScope(room, "room-1"); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := a.TurnLeaseManaged(context.Background(), "claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Close()
+	// A turn in room-1 runs on the room account, not on the global one.
+	used, err := a.activeFor("claude-code", room.Provider, "room-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = lease.BindTurnAccount(used.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Remove(room.ID, true); err == nil {
+		t.Fatal("removed the room account that a running turn uses")
+	}
+	if err = a.Remove(global.ID, true); err != nil {
+		t.Fatal("the global account is not in use, but removal failed:", err)
+	}
+}
+
 func TestTurnLeaseModesAndSwitchCancellation(t *testing.T) {
 	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
