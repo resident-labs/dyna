@@ -110,7 +110,7 @@ func main() {
 	data, err := os.MkdirTemp("", "dyna-webdev-")
 	fatal(err)
 	defer os.RemoveAll(data)
-	st, err := store.Open(data, time.Now)
+	st, err := store.Open(data)
 	fatal(err)
 	defer st.Close()
 	runtime := filepath.Join(data, "runtime")
