@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { factsOf, minutes, minutesText, pillOf, sections } from './model.ts'
+import { factsOf, minutes, pillOf, sections } from './model.ts'
+import { minutesText } from '../ui/format.ts'
 import type { RegistryService } from '../api/service.ts'
 
 const service = (s: Partial<RegistryService> & Pick<RegistryService, 'id' | 'group'>): RegistryService =>

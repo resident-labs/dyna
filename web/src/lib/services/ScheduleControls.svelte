@@ -5,7 +5,8 @@
   import SettingRow from '../ui/SettingRow.svelte'
   import SettingControl from './SettingControl.svelte'
   import { settingDisplay } from '../settings/display.ts'
-  import { minutes, minutesText } from './model.ts'
+  import { minutes } from './model.ts'
+  import { minutesText } from '../ui/format.ts'
   import type { RegistryService, ServicePatch } from '../api/service.ts'
   import type { SettingItem } from '../api/settings.ts'
 

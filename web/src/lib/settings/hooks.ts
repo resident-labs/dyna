@@ -1,5 +1,6 @@
 // Plain-English labels and run ordering for the hook lists.
 import type { Hook, HookRun } from '../api/settings.ts'
+import { minutesText } from '../ui/format.ts'
 
 const events: Record<string, string> = {
   'worktree-created': 'Worktree created',
@@ -15,7 +16,7 @@ const events: Record<string, string> = {
 
 export function eventLabel(event: string, everyMinutes = 0): string {
   const label = events[event] ?? event
-  return event === 'schedule' && everyMinutes > 0 ? `${label} · every ${everyMinutes} min` : label
+  return event === 'schedule' && everyMinutes > 0 ? `${label} · every ${minutesText(everyMinutes)}` : label
 }
 
 export function failLabel(onFail: string): string {
