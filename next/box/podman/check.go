@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -96,7 +97,14 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		add("host slice", err)
 	}
 	_, err = h.run(ctx, "bash", "-c", `d=$(mktemp -d "$1/.dyna-reflink.XXXXXX") || exit 1; trap 'rm -rf "$d"' EXIT; printf test > "$d/a"; cp --reflink=always "$d/a" "$d/b"`, "probe", o.HostData)
-	result.NoReflink = err != nil
+	if err != nil {
+		var exit remoteExit
+		if errors.As(err, &exit) {
+			result.NoReflink = true
+		} else {
+			add("reflink probe", err)
+		}
+	}
 	add("stream-local forwarding", h.checkForward(ctx, o))
 	return result
 }

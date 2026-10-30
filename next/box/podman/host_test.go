@@ -3,7 +3,6 @@ package podman
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,9 +12,10 @@ import (
 )
 
 type runner struct {
-	calls [][]string
-	dead  bool
-	fail  bool
+	calls        [][]string
+	dead         bool
+	fail         bool
+	missingFrame bool
 }
 
 func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
@@ -35,6 +35,9 @@ func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error
 	if r.fail {
 		return nil, errors.New("lost")
 	}
+	if r.missingFrame {
+		return []byte("partial"), nil
+	}
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
 func newTestHost(t *testing.T, r *runner) *Host {
@@ -51,6 +54,10 @@ func TestTrailerRejectsSuccessfulSSHWithoutFrame(t *testing.T) {
 			t.Fatalf("accepted %q", s)
 		}
 	}
+	h := newTestHost(t, &runner{missingFrame: true})
+	if err := h.StartContainer(context.Background(), "a"); err == nil {
+		t.Fatal("accepted ssh success without a trailer")
+	}
 	out, status, err := parseReply([]byte("okDYNA-END 00000000000000000002 007\n"))
 	if err != nil || string(out) != "ok" || status != 7 {
 		t.Fatalf("reply %q %d %v", out, status, err)
@@ -66,10 +73,16 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 	if err := h.CreateContainer(ctx, box.ContainerSpec{Box: "a", Image: "image", Slice: "dyna-aaa-bbb-ccc.slice", Mounts: []box.Mount{{HostPath: "/data", BoxPath: "/box"}}}); err != nil {
 		t.Fatal(err)
 	}
-	all := fmt.Sprint(r.calls)
-	for _, want := range []string{"'CPUQuota=200%'", "'MemoryHigh=4'", "'MemoryMax=6'", "'TasksMax=8'", "'--cgroup-parent=dyna-aaa-bbb-ccc.slice'", "'--cgroupns=private'", "'dyna.box=a'", "'/data:/box'"} {
-		if !strings.Contains(all, want) {
-			t.Fatalf("missing %s in %s", want, all)
+	for _, tc := range []struct {
+		call   int
+		suffix string
+	}{
+		{3, "'systemctl' '--user' 'set-property' '--runtime' 'dyna-aaa-bbb-ccc.slice' 'CPUQuota=200%' 'MemoryHigh=4' 'MemoryMax=6' 'TasksMax=8'"},
+		{5, "'podman' '--cgroup-manager=systemd' 'create' '--name' 'a' '--label' 'dyna.box=a' '--cgroup-parent=dyna-aaa-bbb-ccc.slice' '--cgroupns=private' '--systemd=always' '--stop-signal' 'SIGTERM' '--entrypoint' '/usr/bin/tini' '--tmpfs' '/run/dyna' '--env' 'HOME=/box/home' '--env' 'PI_CODING_AGENT_DIR=/box/pi' '--volume' '/data:/box' 'image' '--' '/opt/dyna/bin/current/dyna' 'box-agent'"},
+	} {
+		args := r.calls[tc.call]
+		if !strings.HasSuffix(args[len(args)-1], tc.suffix) {
+			t.Fatalf("command %q", args[len(args)-1])
 		}
 	}
 }
