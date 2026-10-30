@@ -27,6 +27,22 @@ type Hook struct {
 	Disabled bool `json:"disabled,omitempty"`
 }
 
+// RunResult is the outcome of one hook run. Every producer and every reader of
+// a run uses these constants, so a renamed value fails to compile instead of
+// misclassifying a run.
+type RunResult string
+
+const (
+	// ResultPending is a run that has started and not yet ended.
+	ResultPending RunResult = "pending"
+	// ResultPass is a run whose hook exited cleanly.
+	ResultPass RunResult = "pass"
+	// ResultError is a run that failed to start, timed out or lost its runner.
+	ResultError RunResult = "error"
+	// ResultFail is a run whose hook exited with a failure status.
+	ResultFail RunResult = "fail"
+)
+
 // Run records one repository hook attempt independently of test evidence.
 type Run struct {
 	RunnerSession string    `json:"runnerSession,omitempty"`
@@ -34,7 +50,7 @@ type Run struct {
 	Repo          string    `json:"repo"`
 	Name          string    `json:"name"`
 	Command       string    `json:"command"`
-	Result        string    `json:"result"`
+	Result        RunResult `json:"result"`
 	LogPath       string    `json:"logPath"`
 	StartedAt     time.Time `json:"startedAt"`
 	FinishedAt    time.Time `json:"finishedAt,omitempty"`
