@@ -22,6 +22,7 @@ import (
 	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/eventloop"
 
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/profile"
@@ -105,8 +106,15 @@ func Execute(ctx context.Context, o Options) (string, error) {
 
 // sharedState owns every limit whose meaning is "per run", including calls
 // made by nested workflows. Each script still gets an isolated JS runtime.
+type stepActivity struct {
+	publisher *activity.Publisher
+	record    activity.Record
+}
+
 type sharedState struct {
-	sem chan struct{}
+	activityMu sync.Mutex
+	activities map[activity.Key]*stepActivity
+	sem        chan struct{}
 	// cmdSem limits the run() commands that execute at once.
 	cmdSem chan struct{}
 
@@ -179,6 +187,9 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 		return "", err
 	}
 	eng := &engine{opts: o, shared: shared, depth: depth, workflowID: workflowID, workflowPlanID: prepared.workflowPlanID}
+	if depth == 0 {
+		defer shared.closeActivities()
+	}
 
 	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
 	eng.done = make(chan outcome, 1)
@@ -376,6 +387,7 @@ func (e *engine) closeAgents() {
 }
 
 func (e *engine) emit(ev runstore.Event) {
+	e.observeActivity(ev)
 	if ev.Workflow == "" {
 		ev.Workflow = e.workflowID
 	}

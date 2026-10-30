@@ -292,6 +292,10 @@ type ProcessRunner func(context.Context, []string, io.Writer, io.Writer) error
 // ExecutionOptions carries per-invocation execution concerns. They are not
 // profile settings and are never persisted on a profile.
 type ExecutionOptions struct {
+	// OutputActivity observes raw stdout before buffering.
+	OutputActivity func()
+	// OutputCoverage reports whether bytes are observed before framing.
+	OutputCoverage func(raw bool)
 	// SessionKey identifies a caller that has no Dyna session or workflow
 	// identity. Reuse it across turns to share one native process.
 	SessionKey string

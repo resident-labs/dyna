@@ -28,11 +28,14 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	if err := validateWorkingDirectory(cwd); err != nil {
 		return finishAttempt(spec, "", "", err, false, ctx.Err() != nil, false, false, nil, nil)
 	}
+	if execution.OutputCoverage != nil {
+		execution.OutputCoverage(false)
+	}
 	if spec.rpc {
 		return runPiTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
 	if execution.ProcessRunner != nil {
-		return runInProcess(ctx, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, state, execution.ProcessRunner)
+		return runInProcess(ctx, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, state, execution.ProcessRunner, execution.OutputActivity, execution.OutputCoverage)
 	}
 	if spec.streamInput {
 		return runClaudeTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
@@ -101,6 +104,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		observeLine(line)
 	}
 	stdout := newObservedBuffer(onLine, liveOutput)
+	stdout.onBytes = execution.OutputActivity
 	defer stdout.FlushPending(func(line string) {
 		record := workeroutput.DecodeLine(output, line)
 		state.observeRecord(record)
@@ -108,7 +112,10 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	})
 	var stderr bytes.Buffer
 	cmd.Stdout = stdout
-	cmd.Stderr = &stderr
+	cmd.Stderr = activityWriter{out: &stderr, notify: execution.OutputActivity}
+	if execution.OutputCoverage != nil {
+		execution.OutputCoverage(true)
+	}
 	startBoundary := normalizedBoundary(normalizer)
 	waitCommand, release, stage, err := startGuarded(ctx, p, cmd, spec.prompt, steering, execution)
 	defer release()
@@ -381,6 +388,9 @@ func runCompaction(ctx context.Context, p profile.Profile, cwd string, spec comm
 }
 
 func runCompactCommand(ctx context.Context, p profile.Profile, cwd string, spec commandSpec, steering *steeringSupervisor, execution ExecutionOptions, admit func(context.Context) error) error {
+	if execution.OutputCoverage != nil {
+		execution.OutputCoverage(false)
+	}
 	if spec.rpc {
 		return runPiCompact(ctx, p, cwd, spec, steering, execution, admit)
 	}
@@ -395,7 +405,7 @@ func runCompactCommand(ctx context.Context, p profile.Profile, cwd string, spec 
 		return err
 	}
 	var compactStderr bytes.Buffer
-	cmd.Stderr = &compactStderr
+	cmd.Stderr = activityWriter{out: &compactStderr, notify: execution.OutputActivity}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -413,7 +423,11 @@ func runCompactCommand(ctx context.Context, p profile.Profile, cwd string, spec 
 			}
 		}
 	}, nil)
+	stdout.onBytes = execution.OutputActivity
 	cmd.Stdout = stdout
+	if execution.OutputCoverage != nil {
+		execution.OutputCoverage(true)
+	}
 	wait, release, _, err := startGuarded(ctx, p, cmd, "", steering, execution)
 	defer release()
 	if err != nil {

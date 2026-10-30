@@ -8,6 +8,7 @@ import (
 	"log"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/harness"
@@ -91,6 +93,11 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	if err != nil {
 		return err
 	}
+	turnActivity := activity.NewPublisher(filepath.Dir(store.root()), activity.Key{Kind: activity.Turn, Owner: id, Number: n}, activity.Record{Signal: activity.Signal{Copier: activity.CopierUnknown, CPU: activity.CPUUnsupported}, Lifecycle: activity.CopierRunning, Reason: activity.ReasonOutputUnobserved})
+	defer func() {
+		turnActivity.End()
+		activity.WaitFinal(turnActivity.Done())
+	}()
 	if turn.StopAsked {
 		cancelTurn()
 	}
@@ -358,6 +365,8 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		mu.Unlock()
 		execution := writes.nativeExecution(meta.Role)
 		execution.ProcessRunner = m.ProcessRunner
+		execution.OutputActivity = turnActivity.Output
+		execution.OutputCoverage = turnActivity.Coverage
 		execution.IdleUnload = settingsValues.HarnessIdleUnload()
 		if turn.Schema == "" {
 			execution.AcceptEmptyOutput = func() bool { return m.turnAcceptsEmptyOutput(id, n) }

@@ -12,7 +12,7 @@ import (
 // runInProcess replaces only the process boundary for recorded attempts. It
 // feeds real protocol records through normalization and the ordinary attempt
 // result, so runJournaledState still owns error classification and recovery.
-func runInProcess(ctx context.Context, spec commandSpec, tracker *sessionTracker, journal *journalSupervisor, steering *steeringSupervisor, outputPath, normalizedOutputPath string, output *workeroutput.Declaration, state *runState, run ProcessRunner) attempt {
+func runInProcess(ctx context.Context, spec commandSpec, tracker *sessionTracker, journal *journalSupervisor, steering *steeringSupervisor, outputPath, normalizedOutputPath string, output *workeroutput.Declaration, state *runState, run ProcessRunner, activity func(), coverage func(bool)) attempt {
 	var raw, normalized *os.File
 	if outputPath != "" {
 		raw, _ = os.OpenFile(outputPath, os.O_APPEND|os.O_WRONLY, 0)
@@ -38,6 +38,7 @@ func runInProcess(ctx context.Context, spec commandSpec, tracker *sessionTracker
 		_ = normalizer.WriteRecord(record)
 	}
 	stdout := newObservedBuffer(observe, raw)
+	stdout.onBytes = activity
 	var stderr bytes.Buffer
 	if steering != nil && steering.opts.BeforeStart != nil {
 		if err := steering.opts.BeforeStart(ctx, spec.prompt); err != nil {
@@ -53,7 +54,10 @@ func runInProcess(ctx context.Context, spec commandSpec, tracker *sessionTracker
 	if steering != nil && steering.opts.OnStart != nil {
 		steering.opts.OnStart()
 	}
-	runErr := run(ctx, append([]string(nil), spec.argv...), stdout, &stderr)
+	if coverage != nil {
+		coverage(true)
+	}
+	runErr := run(ctx, append([]string(nil), spec.argv...), stdout, activityWriter{out: &stderr, notify: activity})
 	stdout.FlushPending(observe)
 	if spec.streamInput && runErr == nil {
 		// The real Claude process supervisor takes this error from its terminal
