@@ -77,6 +77,21 @@ Workflow workers are leaves: they cannot delegate. `parallel` and `pipeline`
 fan work out. A JSON Schema retry resumes the same worker session with only a
 correction.
 
+Automatic replay after an update is off by default. To opt in, declare
+`const meta = { deterministic: true }` at the top level. This promises that the
+same inputs and recorded results produce the same calls in the same order. Do
+not use clocks, random values, mutable external state, or attempt-scoped
+variables to choose calls or compute replayed results. Each attempt has its own
+`DYNA_RUN_ID`; it is not part of the input fingerprint.
+
+Dyna checks the script and nested sources, arguments, profiles, environment, and
+clean worktree head. It reuses recorded `run()`, `agent()`, and `post()` results
+and blocks new effects until earlier calls match. Overlapping asynchronous calls
+are not eligible because their settlement order is not recorded. Missing
+results, unsupported effects such as `job()` and agent worktrees, changed
+inputs, or an uncertain launch also keep the run stopped. Dyna reports why.
+Manual `--resume` uses the older cache and can repeat effects.
+
 ### Goals and parent check-ins
 
 `dyna goal` records an outcome and its done condition for a session. Root holds

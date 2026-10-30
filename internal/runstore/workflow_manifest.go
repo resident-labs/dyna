@@ -52,7 +52,7 @@ func RegisterWorkflowCall(ctx context.Context, runID string, kind WorkflowCallKi
 		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{}, func(c *sql.Conn) error {
-		r, err := c.ExecContext(ctx, `INSERT INTO workflow_manifest_calls(run_id,kind,identity,ordinal) SELECT ?,?,?,? FROM workflow_manifests WHERE run_id=? AND complete=0`, runID, kind, identity, ordinal, runID)
+		r, err := c.ExecContext(ctx, `INSERT INTO workflow_manifest_calls(run_id,kind,identity,ordinal,sequence) SELECT ?,?,?,?,coalesce((SELECT max(sequence)+1 FROM workflow_manifest_calls WHERE run_id=?),1) FROM workflow_manifests WHERE run_id=? AND complete=0`, runID, kind, identity, ordinal, runID, runID)
 		if err != nil {
 			return err
 		}
@@ -147,7 +147,7 @@ func ReadWorkflowManifest(ctx context.Context, runID string) (WorkflowManifest, 
 	if err := db.QueryRowContext(ctx, `SELECT complete,unsafe_reason FROM workflow_manifests WHERE run_id=?`, runID).Scan(&out.Complete, &out.UnsafeReason); err != nil {
 		return out, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT kind,identity,ordinal,external_id,result,error FROM workflow_manifest_calls WHERE run_id=? ORDER BY kind,identity,ordinal`, runID)
+	rows, err := db.QueryContext(ctx, `SELECT kind,identity,ordinal,external_id,result,error FROM workflow_manifest_calls WHERE run_id=? ORDER BY sequence`, runID)
 	if err != nil {
 		return out, err
 	}
@@ -164,4 +164,55 @@ func ReadWorkflowManifest(ctx context.Context, runID string) (WorkflowManifest, 
 		out.Calls = append(out.Calls, call)
 	}
 	return out, rows.Err()
+}
+
+type WorkflowReplayInputs struct {
+	Deterministic bool
+	Fingerprint   string
+	Options       json.RawMessage
+}
+
+func RecordWorkflowReplayInputs(ctx context.Context, runID string, inputs WorkflowReplayInputs) error {
+	db, err := runsDB()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{}, func(c *sql.Conn) error {
+		_, err := c.ExecContext(ctx, `INSERT INTO workflow_replay_inputs(run_id,deterministic,fingerprint,options) VALUES(?,?,?,?)`, runID, inputs.Deterministic, inputs.Fingerprint, string(inputs.Options))
+		return err
+	})
+}
+
+func ReadWorkflowReplayInputs(ctx context.Context, runID string) (WorkflowReplayInputs, error) {
+	var inputs WorkflowReplayInputs
+	db, err := runsDB()
+	if err != nil {
+		return inputs, err
+	}
+	var options string
+	err = state.For(db).Read(ctx, func(q state.Reader) error {
+		return q.QueryRowContext(ctx, `SELECT deterministic,fingerprint,options FROM workflow_replay_inputs WHERE run_id=?`, runID).Scan(&inputs.Deterministic, &inputs.Fingerprint, &options)
+	})
+	inputs.Options = json.RawMessage(options)
+	return inputs, err
+}
+
+// ClaimWorkflowReplay reserves the only automatic launch for a run. A crash
+// after the claim stays claimed because the launch outcome may be unknown.
+func ClaimWorkflowReplay(ctx context.Context, runID string) (bool, error) {
+	db, err := runsDB()
+	if err != nil {
+		return false, err
+	}
+	var claimed bool
+	err = state.For(db).Write(ctx, hub.Event{}, func(c *sql.Conn) error {
+		result, err := c.ExecContext(ctx, `INSERT OR IGNORE INTO workflow_replay_claims(run_id) VALUES(?)`, runID)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		claimed = n == 1
+		return err
+	})
+	return claimed, err
 }

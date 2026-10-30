@@ -8,7 +8,7 @@
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { runEvent } from './eventPayloads.ts'
   import { durationMs } from '../ui/format.ts'
-  import type { RunState } from './events.gen.ts'
+  import type { RunState, WorkflowReplayReason } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
   import RunIcon from '../workflows/RunIcon.svelte'
@@ -17,6 +17,16 @@
 
   const stateWords: Record<RunState, string> = { completed: 'done', failed: 'failed', stopped: 'stopped', interrupted: 'interrupted' }
   const stateTone: Record<RunState, string> = { completed: 'sage', failed: 'coral', stopped: 'gold', interrupted: 'gold' }
+  const replayWords: Record<WorkflowReplayReason, string> = {
+    eligible: 'Dyna started a safe replay.',
+    legacy: 'This run has no replay records.',
+    not_deterministic: 'The workflow author did not enable safe replay.',
+    incomplete: 'The replay record is incomplete.',
+    uncertain: 'A prior call has an unknown result.',
+    unsafe: 'The run contains work that cannot be replayed safely.',
+    input_mismatch: 'The workflow inputs or worktree changed.',
+    launch_uncertain: 'Dyna could not confirm whether replay started.',
+  }
 
   let payload = $derived(runEvent(post))
   let state = $derived<RunState>(payload?.state ?? 'completed')
@@ -31,7 +41,7 @@
     return agents > 1 ? `${call} · ${agents} agents` : call
   })
   let summary = $derived([counts, elapsed].filter(Boolean).join(' · '))
-  let hasBody = $derived(!!payload?.summary)
+  let hasBody = $derived(!!payload?.summary || !!payload?.replayReason)
 </script>
 
 {#snippet icon()}
@@ -40,6 +50,7 @@
 
 {#snippet body()}
   {#if payload?.summary}<p class="text">{payload.summary}</p>{/if}
+  {#if payload?.replayReason}<p class="text">{replayWords[payload.replayReason]}</p>{/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
 {/snippet}
 
