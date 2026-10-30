@@ -6,6 +6,7 @@ const origin = 'http://127.0.0.1:7457';
 let handler;
 let closed;
 let exposed;
+const pageListeners = {};
 let socketsBlocked = false;
 let removingRoutes = false;
 let pendingRoute;
@@ -49,6 +50,7 @@ const context = {
     return {
       async addInitScript() {},
       once(event, callback) { assert.equal(event, 'close'); closed = callback; },
+      on(event, callback) { pageListeners[event] = callback; },
       async exposeFunction(name, callback) {
         assert.equal(name, 'dynaQAReport');
         exposed = callback;
@@ -83,6 +85,7 @@ const context = {
           ['/escape', 'GET', 403],
           ['/missing.js', 'GET', 404],
           ['/asset.js', 'GET', 200],
+          ['/asset.mjs', 'GET', 200],
           ['/', 'GET', 200],
           ['/index.html', 'HEAD', 200],
         ];
@@ -111,11 +114,18 @@ const context = {
               }
               if (method === 'HEAD' && result === 200) assert.equal(response.body.length, 0);
               if (path === '/asset.js') assert.equal(response.body.toString(), 'branch-asset');
+              // Chromium refuses a module worker whose script has a non-JavaScript type.
+              if (path === '/asset.mjs') assert.equal(response.headers['content-type'], 'text/javascript');
             },
           });
           assert.equal(result, expected, method + ' ' + path);
         }
         assert.ok(socketsBlocked);
+        // The page reports one error, one console error, one failed request and one 404.
+        pageListeners.pageerror(new Error('branch bundle threw'));
+        pageListeners.console({ type: () => 'error' });
+        pageListeners.requestfailed({ resourceType: () => 'script' });
+        pageListeners.response({ status: () => 404, url: () => origin + '/missing.js' });
         console.log('QA policy checks passed: ' + checks.length);
         // Ask for the timeout report exactly as an agent does, and end the run
         // whether the report worked or not, so a broken report fails the test
@@ -124,6 +134,8 @@ const context = {
           const report = await exposed();
           assert.ok(report.blocked.some(entry => entry.kind === 'POST API request' && entry.count > 0), 'report names blocked writes');
           assert.ok(report.blocked.some(entry => entry.kind === 'socket'), 'report names the closed sockets');
+          assert.ok(report.failed.some(entry => entry.kind === 'page error' && entry.count === 1), 'report names the page error');
+          assert.ok(report.failed.some(entry => entry.kind === 'HTTP 404 asset request'), 'report names the failed asset');
           for (const entry of report.blocked) assert.doesNotMatch(entry.kind, /http|\/api/, 'report must not name a URL');
           assert.match(report.screenshot, /qa-report-[0-9]+[\\/]page\.png$/, 'report names the picture it saved');
         } finally {
