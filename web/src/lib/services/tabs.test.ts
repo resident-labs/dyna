@@ -51,3 +51,15 @@ test('each tab gets its own one-line state and results', () => {
   assert.match(by('librarian')?.line ?? '', /^On · last passed · next in \d+ m$/)
   assert.equal(by('ci')?.line, '2 tests over 2 s')
 })
+
+// D-556: the run list is oldest first, so the tone must follow the newest run, not the first.
+test('an older failed run does not mark Updates failed once a newer run passed', () => {
+  const update: HookRow = { hook: { ...hook, name: 'self-update', label: 'Update Dyna', event: 'main-updated' }, lastRun: run(5) }
+  const inputs: Inputs = {
+    reviewer: null, queue: [], mergePaused: false, history: [], services: null, notices: null, hooks: [update],
+    runs: { 'self-update': [run(120, 'error'), run(5)] }, reasons: {}, settings: null, budget: null, accounts: null, usage: null, voice: null,
+    changes: [], testHealth: null, laneSync: null, deferred: null, repo: '/repo',
+  }
+  const updates = buildTabs(inputs, buildRows(inputs), now).find((t) => t.id === 'updates')
+  assert.notEqual(updates?.tone, 'error')
+})

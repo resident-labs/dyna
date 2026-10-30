@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	"dyna-agent/internal/serviceregistry"
 )
 
 // fakeCaller answers the engine calls a test needs and records the writes it
@@ -24,8 +27,7 @@ type write struct {
 // readMethods are the engine calls a command only reads. Every other method a
 // test asks for is a write, and is recorded instead of answered.
 var readMethods = map[string]bool{
-	"Rooms": true, "ListServices": true, "ReviewerStatus": true, "Settings": true,
-	"HookSummary": true, "LibrarianDeferred": true, "VoiceStatus": true, "Transcript": true, "TranscriptTurn": true,
+	"Rooms": true, "ListServices": true, "ServiceRegistry": true, "Transcript": true, "TranscriptTurn": true,
 }
 
 func (f *fakeCaller) Call(_ context.Context, method string, args []any, out any) error {
@@ -54,11 +56,6 @@ func (f *fakeCaller) write(method string) (write, bool) {
 	return write{}, false
 }
 
-func factsFrom(t *testing.T, r refs, reader *fakeCaller) facts {
-	t.Helper()
-	return readFacts(context.Background(), reader, r)
-}
-
 func readerWith(t *testing.T, results map[string]any) *fakeCaller {
 	t.Helper()
 	if _, ok := results["Rooms"]; !ok {
@@ -75,83 +72,10 @@ func readerWith(t *testing.T, results map[string]any) *fakeCaller {
 	return f
 }
 
-func TestListShowsEachServiceAndItsOwnState(t *testing.T) {
-	reader := readerWith(t, map[string]any{
-		"ListServices": []map[string]any{{
-			"role": "reviewer", "name": "PR reviewer", "profile": "sonnet", "pinned": "sonnet", "source": "pinned", "profiles": []string{"sonnet", "deepseek"},
-		}},
-		"ReviewerStatus": map[string]any{"enabled": true, "profile": "sonnet", "reviewers": []map[string]any{{"session": map[string]any{"address": "dyna:reviewer-7", "status": "running"}, "current": map[string]any{"pr": 7, "title": "Fix bounds"}}}, "recent": []map[string]any{{"pr": 6, "verdict": "approve", "at": "2026-10-23T09:00:00Z"}}},
-		"Settings": []map[string]any{
-			{"key": "library.enabled", "value": []string{"/repo/dyna"}},
-			{"key": "library.profile", "value": "sonnet"},
-		},
-		"HookSummary": []map[string]any{{
-			"hook":    map[string]any{"name": "librarian-main", "event": "main-updated"},
-			"lastRun": map[string]any{"result": "pass", "startedAt": "2026-10-23T09:50:00Z"},
-		}},
-		"LibrarianDeferred": "2026-10-23T10:20:00Z",
-		"VoiceStatus":       map[string]any{"available": true, "live": false},
-	})
-	rows := Rows(factsFrom(t, refs{Room: "dyna", Repo: "/repo/dyna"}, reader))
-	if len(rows) != 3 {
-		t.Fatalf("rows = %+v", rows)
-	}
-	library, reviewer, voice := rows[0], rows[1], rows[2]
-
-	if library.ID != Library || !library.Enabled || library.Profile != "sonnet" || library.State != "idle" || library.Session != "dyna:library" {
-		t.Fatalf("librarian row = %+v", library)
-	}
-	if library.LastRun == "" || library.NextRun == "" {
-		t.Fatalf("librarian run times = %+v", library)
-	}
-	if reviewer.ID != Reviewer || !reviewer.Enabled || reviewer.State != "running" || reviewer.Session != "dyna:reviewer-7" || !strings.Contains(reviewer.Detail, "#7") {
-		t.Fatalf("reviewer row = %+v", reviewer)
-	}
-	if reviewer.LastRun == "" {
-		t.Fatalf("reviewer last run missing: %+v", reviewer)
-	}
-	if voice.ID != Voice || !voice.Enabled || voice.State != "idle" || voice.Switch != "" {
-		t.Fatalf("voice row = %+v", voice)
-	}
-}
-
-func TestLibrarianShowsNoNextRunWhenNothingIsDeferred(t *testing.T) {
-	reader := readerWith(t, map[string]any{
-		"Settings":          []map[string]any{{"key": "library.enabled", "value": []string{"/repo/dyna"}}},
-		"HookSummary":       []map[string]any{{"hook": map[string]any{"name": "librarian-main", "event": "main-updated"}}},
-		"LibrarianDeferred": nil,
-	})
-	library := Rows(factsFrom(t, refs{Room: "dyna", Repo: "/repo/dyna"}, reader))[0]
-	if library.NextRun != "" {
-		t.Fatalf("librarian next run = %q, want none", library.NextRun)
-	}
-}
-
-func TestLibrarianOffOutsideItsRepositories(t *testing.T) {
-	reader := readerWith(t, map[string]any{
-		"ListServices":   []map[string]any{},
-		"ReviewerStatus": map[string]any{"enabled": false},
-		"Settings":       []map[string]any{{"key": "library.enabled", "value": []string{"/repo/other"}}},
-		"HookSummary":    []map[string]any{},
-		"VoiceStatus":    map[string]any{"available": false, "unavailable": "no account"},
-	})
-	rows := Rows(factsFrom(t, refs{Room: "dyna", Repo: "/repo/dyna"}, reader))
-	if rows[0].Enabled || rows[0].State != "off" {
-		t.Fatalf("librarian row = %+v", rows[0])
-	}
-	if rows[2].Enabled || rows[2].State != "off" || rows[2].Detail != "no account" {
-		t.Fatalf("voice row = %+v", rows[2])
-	}
-}
-
 // Library and reviewer profile writes use the same engine call.
 func TestProfileWritesTheOwningCall(t *testing.T) {
 	reader := readerWith(t, map[string]any{
-		"ListServices":   []map[string]any{{"role": "reviewer", "profiles": []string{"sonnet", "deepseek"}}},
-		"ReviewerStatus": map[string]any{"enabled": true},
-		"Settings":       []map[string]any{},
-		"HookSummary":    []map[string]any{},
-		"VoiceStatus":    map[string]any{"available": true},
+		"ListServices": []map[string]any{{"role": "reviewer", "profiles": []string{"sonnet", "deepseek"}}},
 	})
 	var out bytes.Buffer
 	if err := setProfile(context.Background(), reader, refs{Room: "dyna", Repo: "/repo/dyna"}, Reviewer, "deepseek", &out); err != nil {
@@ -179,11 +103,7 @@ func TestProfileWritesTheOwningCall(t *testing.T) {
 // has no profile of its own.
 func TestProfileRefusesUnusableChoice(t *testing.T) {
 	reader := readerWith(t, map[string]any{
-		"ListServices":   []map[string]any{{"role": "reviewer", "profiles": []string{"sonnet"}}},
-		"ReviewerStatus": map[string]any{"enabled": true},
-		"Settings":       []map[string]any{},
-		"HookSummary":    []map[string]any{},
-		"VoiceStatus":    map[string]any{"available": true},
+		"ListServices": []map[string]any{{"role": "reviewer", "profiles": []string{"sonnet"}}},
 	})
 	var out bytes.Buffer
 	err := setProfile(context.Background(), reader, refs{Room: "dyna"}, Reviewer, "grok", &out)
@@ -208,30 +128,6 @@ func TestEnableRefusesVoice(t *testing.T) {
 	}
 	if len(reader.writes) != 0 {
 		t.Fatalf("voice switch wrote: %+v", reader.writes)
-	}
-}
-
-// A service name is one of the known set, and an alias names the same service.
-// A room given as an ID, or found through the repository, resolves to the name
-// a session address needs.
-func TestRoomResolvesToItsName(t *testing.T) {
-	reader := readerWith(t, map[string]any{
-		"ListServices":   []map[string]any{},
-		"ReviewerStatus": map[string]any{"enabled": true},
-		"Settings":       []map[string]any{{"key": "library.enabled", "value": []string{"/repo/dyna"}}},
-		"HookSummary":    []map[string]any{},
-		"VoiceStatus":    map[string]any{"available": true},
-	})
-	byID := factsFrom(t, refs{Room: "room_1", Repo: "/repo/dyna"}, reader)
-	if byID.refs.Room != "dyna" {
-		t.Fatalf("room from ID = %q; want dyna", byID.refs.Room)
-	}
-	byRepo := factsFrom(t, refs{Repo: "/repo/dyna"}, reader)
-	if byRepo.refs.Room != "dyna" {
-		t.Fatalf("room from repository = %q; want dyna", byRepo.refs.Room)
-	}
-	if rows := Rows(byRepo); rows[0].Session != "dyna:library" {
-		t.Fatalf("librarian session = %q; want dyna:library", rows[0].Session)
 	}
 }
 
@@ -266,13 +162,65 @@ func TestWritesUseTheRoomRepository(t *testing.T) {
 }
 
 func TestParseServiceIDAcceptsAliases(t *testing.T) {
-	for text, want := range map[string]ServiceID{"librarian": Library, "reviewers": Reviewer, "voice": Voice} {
+	for text, want := range map[string]ServiceID{"librarian": Library, "reviewers": Reviewer, "voice": Voice, "merge-queue": serviceregistry.IDMergeQueue} {
 		got, err := ParseServiceID(text)
 		if err != nil || got != want {
 			t.Fatalf("%s = %q, %v; want %q", text, got, err, want)
 		}
 	}
-	if _, err := ParseServiceID("merge"); err == nil {
+	if _, err := ParseServiceID("nonsense"); err == nil {
 		t.Fatal("unknown service accepted")
+	}
+}
+
+// The list and the engine call the Services page reads are one source: the
+// JSON the list prints is the call's answer, and the text lists every service
+// under its group.
+func TestListMatchesTheRegistryCall(t *testing.T) {
+	at := time.Date(2026, 10, 30, 2, 0, 0, 0, time.UTC)
+	hook := serviceregistry.HookFacts{Found: true, Runs: []serviceregistry.HookRun{{Result: "pass", StartedAt: at}}}
+	registry := serviceregistry.Build(serviceregistry.Facts{
+		Reviewer: &serviceregistry.ReviewerFacts{Enabled: true, Profile: "sonnet", Queued: 2},
+		Hooks:    map[serviceregistry.ID]serviceregistry.HookFacts{serviceregistry.IDMaintenance: hook},
+	})
+	reader := readerWith(t, map[string]any{"ServiceRegistry": registry})
+	rows, err := readRegistry(context.Background(), reader, refs{Room: "dyna"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := json.Marshal(rows)
+	want, _ := json.Marshal(registry)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("list rows differ from the call:\n%s\n%s", got, want)
+	}
+	var out bytes.Buffer
+	printRows(&out, rows)
+	text := out.String()
+	for _, part := range []string{"Pull requests", "Agents", "This computer", "reviewer", "2 waiting", "maintenance", "not-set-up"} {
+		if !strings.Contains(text, part) {
+			t.Errorf("list lacks %q:\n%s", part, text)
+		}
+	}
+	for _, id := range serviceregistry.IDs() {
+		if !strings.Contains(text, string(id)) {
+			t.Errorf("list lacks service %s", id)
+		}
+	}
+}
+
+// A built-in service switches through its global hook, and a service that has
+// no switch refuses.
+func TestEnableSwitchesBuiltinHook(t *testing.T) {
+	reader := readerWith(t, map[string]any{})
+	var out bytes.Buffer
+	if err := setEnabled(context.Background(), reader, refs{Room: "dyna"}, serviceregistry.IDMaintenance, false, &out); err != nil {
+		t.Fatal(err)
+	}
+	w, ok := reader.write("EditGlobalHook")
+	if !ok || w.args[0] != "maintenance" {
+		t.Fatalf("switch write = %+v", reader.writes)
+	}
+	if err := setEnabled(context.Background(), reader, refs{Room: "dyna"}, serviceregistry.IDLocalCI, false, &out); err == nil {
+		t.Fatal("a service without a switch accepted one")
 	}
 }
