@@ -16,7 +16,7 @@ func (h fakeHosts) CacheHost(context.Context, contract.HostName) (CacheHost, str
 func TestRepositoriesPrepareOnlySessionCache(t *testing.T) {
 	cache := &fakeCache{}
 	repos := &Repositories{Rooms: fakeAccess{allowed: true}, Hosts: fakeHosts{cache}, Mirror: &Mirror{Data: t.TempDir(), Token: "secret", Runner: &fakeRunner{}}}
-	boxRepos, err := repos.Get(context.Background(), "room", "ses_1", "host", true)
+	boxRepos, err := repos.Get(context.Background(), "ses_1", "host", true)
 	if err != nil || !cache.called || len(boxRepos) != 1 || boxRepos[0].Name != "owner/repo" || boxRepos[0].Branch != "v2/ses_1" || boxRepos[0].Base != "main" {
 		t.Fatalf("repos %+v, cache %+v, error %v", boxRepos, cache, err)
 	}
