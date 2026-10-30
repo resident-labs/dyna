@@ -165,6 +165,43 @@ func TestExpiryAndPendingDedup(t *testing.T) {
 		t.Fatalf("old: %+v %v", old, err)
 	}
 }
+func TestOperationEventsAndWakes(t *testing.T) {
+	f := setup(t)
+	op := f.submit(t, principal("worker"))
+	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, false, "declined"); err != nil {
+		t.Fatal(err)
+	}
+	events, err := f.s.Store.Events(context.Background(), "room", 0, 100, nil)
+	if err != nil || len(events) != 2 || events[0].Body.EventType() != "op.requested" || events[1].Body.EventType() != "op.decided" {
+		t.Fatalf("events %+v, err %v", events, err)
+	}
+	var parent, worker int
+	err = f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries WHERE to_id='lead' AND wake=1").Scan(&parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries WHERE to_id='worker' AND wake=1").Scan(&worker)
+	if err != nil || parent != 1 || worker != 1 {
+		t.Fatalf("parent %d, worker %d, error %v", parent, worker, err)
+	}
+}
+
+func TestWithdrawAuthorization(t *testing.T) {
+	f := setup(t)
+	op := f.submit(t, principal("worker"))
+	if err := f.s.Withdraw(context.Background(), principal("lead"), op.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatal(err)
+	}
+	if err := f.s.Withdraw(context.Background(), principal("worker"), op.ID); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	err := f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries WHERE to_id='worker'").Scan(&count)
+	if err != nil || count != 0 {
+		t.Fatalf("wakes %d, error %v", count, err)
+	}
+}
+
 func TestImmediateSubmitReturnsResultWithoutWake(t *testing.T) {
 	f := setup(t)
 	f.class = contract.ClassAuto
