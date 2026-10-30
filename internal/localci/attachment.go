@@ -104,6 +104,37 @@ ON CONFLICT(repo,sha,node,run_id) DO UPDATE SET payload=excluded.payload, owner_
 	})
 }
 
+// reserveAttachment reserves one fresh run before setup.
+func (s Store) reserveAttachment(ctx context.Context, repo, sha, node string, att attachment) error {
+	raw, err := json.Marshal(att)
+	if err != nil {
+		return err
+	}
+	db, err := s.open()
+	if err != nil {
+		return err
+	}
+	pid, start := attachmentOwner()
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: AttachEventKey(sha).String()}, func(conn *sql.Conn) error {
+		if _, err := conn.ExecContext(ctx, attachmentSchema); err != nil {
+			return err
+		}
+		result, err := conn.ExecContext(ctx, `INSERT INTO local_ci_attachments(repo,sha,node,run_id,payload,owner_pid,owner_start,saved_at)
+SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM local_ci_attachments WHERE repo=? AND sha=?)`, repo, sha, node, att.RunID, raw, pid, start, resultClock().Unix(), repo, sha)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrAttachmentBusy
+		}
+		return nil
+	})
+}
+
 // releaseAttachment hands a run's record over: the checks stay on the machine
 // and the next run of the commit may take the record.
 func (s Store) releaseAttachment(ctx context.Context, repo, sha, node, runID string) error {
@@ -299,10 +330,14 @@ func (s Store) runnerFor(ctx context.Context, node string) (Runner, error) {
 	return Runner{}, fmt.Errorf("node %s: %w", node, os.ErrNotExist)
 }
 
+// ErrAttachmentBusy means a run exists but another process still owns it, or
+// its old record cannot safely be claimed.
+var ErrAttachmentBusy = errors.New("local CI attachment is not claimable")
+
 // claimAttachment takes over the newest record of a commit on a machine whose run
 // has no live process, and returns it. It returns os.ErrNotExist when there is
 // none. A record of a run that another engine or command is executing is not
-// taken. The take-over is one conditional write, so two processes never both
+// taken and returns ErrAttachmentBusy. The take-over is one conditional write, so two processes never both
 // win.
 func (s Store) claimAttachment(ctx context.Context, repo, sha, node string) (attachment, error) {
 	return s.claimAttachmentRun(ctx, repo, sha, node, "")
@@ -320,8 +355,13 @@ func (s Store) claimAttachmentRun(ctx context.Context, repo, sha, node, runID st
 		return attachment{}, err
 	}
 	pid, start := attachmentOwner()
+	matched := false
 	for _, row := range rows {
-		if row.Node != node || runID != "" && row.RunID != runID || !row.orphaned() {
+		if row.Node != node || runID != "" && row.RunID != runID {
+			continue
+		}
+		matched = true
+		if !row.orphaned() {
 			continue
 		}
 		taken := false
@@ -342,22 +382,28 @@ func (s Store) claimAttachmentRun(ctx context.Context, repo, sha, node, runID st
 			return row.attachment, nil
 		}
 	}
+	if matched {
+		return attachment{}, ErrAttachmentBusy
+	}
 	return attachment{}, os.ErrNotExist
 }
 
 // AttachedNode names the machine that still holds checks of an earlier engine for
 // this commit, so the scheduler places the run there. It returns an empty name
-// when there is none. A record whose run another process executes is not a
-// candidate.
+// when there is none. A record whose run another process executes returns
+// ErrAttachmentBusy, so admission waits rather than running it elsewhere.
 func (s Store) AttachedNode(ctx context.Context, repo, sha string) (string, error) {
 	rows, err := s.attachmentRows(ctx, repo, sha)
 	if err != nil {
 		return "", err
 	}
 	for _, row := range rows {
-		if row.orphaned() {
-			return row.Node, nil
+		if !row.orphaned() {
+			return "", ErrAttachmentBusy
 		}
+	}
+	if len(rows) > 0 {
+		return rows[0].Node, nil
 	}
 	return "", nil
 }
@@ -394,6 +440,13 @@ func (r Runner) abandonClaimed(ctx context.Context, store Store, orphan Orphaned
 // A machine that does not answer fails the run with the ssh-drop cause, and the
 // record stays for the next try.
 func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache string, checks []nodeCheck) (*attachment, error) {
+	attachedNode, err := store.AttachedNode(ctx, repo, sha)
+	if err != nil {
+		return nil, err
+	}
+	if attachedNode != "" && attachedNode != r.Node.Name {
+		return nil, ErrAttachmentBusy
+	}
 	att, err := store.claimAttachment(ctx, repo, sha, r.Node.Name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

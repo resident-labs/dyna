@@ -272,6 +272,41 @@ func TestTeardownNeedsAnswersThatNothingSurvives(t *testing.T) {
 	}
 }
 
+// Setup can be recorded before the cache or its parent exists. Teardown must
+// still stop checks, and must not hide a broken existing repository.
+func TestTeardownBeforeCacheSetup(t *testing.T) {
+	dir := t.TempDir()
+	bin := teardownStubs(t)
+	// Use real git so a missing or broken cache is not mistaken for success.
+	if err := os.Remove(filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(dir, "missing", "cache.git")
+	check := nodeCheck{id: "host", host: true}
+	run := func(state string) error {
+		t.Helper()
+		cmd := exec.Command("bash", "-c", teardownScript(Node{Name: "local"}, cache, filepath.Join(dir, "run"), "r1", []nodeCheck{check}))
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "UNIT_STATE="+state)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("teardown: %s", out)
+		}
+		return err
+	}
+	if err := run("inactive"); err != nil {
+		t.Fatalf("missing cache: %v", err)
+	}
+	if err := run("active"); err == nil {
+		t.Fatal("missing cache hid a surviving check")
+	}
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("inactive"); err == nil {
+		t.Fatal("broken cache was accepted")
+	}
+}
+
 // A stop counts only when the user manager says the unit is down: an active unit
 // or a manager that does not answer fails it.
 func TestStopScriptNeedsAConfirmedStop(t *testing.T) {
