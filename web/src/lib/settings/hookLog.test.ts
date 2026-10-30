@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import type { HookRun, HookRunLog } from '../api/settings.ts'
-test('the room Hooks section opens the run of the hook this repository holds', async () => {
-  const pane = readFileSync(new URL('./HooksPane.svelte', import.meta.url), 'utf8')
+test('the repository hook list opens the run of the hook this repository holds', async () => {
+  const pane = readFileSync(new URL('../services/HookList.svelte', import.meta.url), 'utf8')
   const runs: HookRun[] = [{ id: 'r1', repo: '/repo', name: 'verify', command: 'go test ./...', logPath: '', result: 'pass', startedAt: '2026-10-23T10:00:00Z' }]
   const asked: string[][] = []
   const log: HookRunLog = { tail: 'ok\n', exitCode: 0 }

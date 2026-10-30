@@ -22,7 +22,7 @@ test('every settings loading line with an unknown layout is the shared muted Loa
 })
 
 test('empty lists in the settings panes use EmptyState', () => {
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'accounts/AccountsPane', 'accounts/ActivityReport']) {
+  for (const f of ['ProfilesPane', 'DevicesPane', 'accounts/AccountsPane', 'accounts/ActivityReport']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<EmptyState\b/, f)
     assert.doesNotMatch(text, /class="empty"/, f)
@@ -89,7 +89,7 @@ test('settings buttons use the one global .btn', () => {
   const css = read('../../app.css')
   assert.match(css, /\.btn \{[^}]*min-height: 30px/)
   for (const v of ['pri', 'quiet', 'danger', 'fill']) assert.match(css, new RegExp(`\\.btn\\.${v} \\{`), v)
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'HookForm', 'harnesses/HarnessesPane', 'skills/SkillsPane', 'skills/SkillForm', 'mcp/McpPane', 'mcp/McpForm', 'accounts/AccountsPane']) {
+  for (const f of ['ProfilesPane', 'DevicesPane', '../services/HookList', 'HookForm', 'harnesses/HarnessesPane', 'skills/SkillsPane', 'skills/SkillForm', 'mcp/McpPane', 'mcp/McpForm', 'accounts/AccountsPane']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /class="btn\b/, f)
     const style = text.slice(text.indexOf('<style>'))
@@ -115,11 +115,11 @@ test('the catalog panes use the shared Switch, which keeps its size on phones', 
 })
 
 test('lists with a known layout load as skeleton rows', () => {
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane']) assert.match(read(`./${f}.svelte`), /<Skeleton\b/, f)
+  for (const f of ['ProfilesPane', 'DevicesPane', '../services/HookList']) assert.match(read(`./${f}.svelte`), /<Skeleton\b/, f)
 })
 
 test('rows added to or removed from a list slide with the shared motion time', () => {
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane']) {
+  for (const f of ['ProfilesPane', 'DevicesPane', '../services/HookList']) {
     assert.match(read(`./${f}.svelte`), /transition:slide=\{\{ duration: motion\(BASE\) \}\}/, f)
   }
 })
@@ -134,9 +134,9 @@ test('removing one row asks inline, not in a dialog', () => {
   const inline = read('../ui/InlineConfirm.svelte')
   assert.match(inline, /btn danger/)
   assert.match(inline, /btn quiet/)
-  for (const f of ['DevicesPane', 'HooksPane']) assert.match(read(`./${f}.svelte`), /<InlineConfirm\b/, f)
+  for (const f of ['DevicesPane', '../services/HookList']) assert.match(read(`./${f}.svelte`), /<InlineConfirm\b/, f)
   assert.match(catalogPanes(), /<InlineConfirm\b/)
-  assert.doesNotMatch(read('./HooksPane.svelte'), /<Confirm\b/)
+  assert.doesNotMatch(read('../services/HookList.svelte'), /<Confirm\b/)
   assert.doesNotMatch(harnessSections(), /requestRemoveTool/)
   // Harnesses has no local copy of the inline confirm: no coral button or Cancel of its own.
   const harnesses = harnessSections()
@@ -144,7 +144,7 @@ test('removing one row asks inline, not in a dialog', () => {
   assert.doesNotMatch(harnesses, /\(removing = ''\)\}>Cancel</)
   assert.match(harnesses, /ask="Uninstall Dyna’s copy\?"/)
   // Only the confirm button is coral; the row's own button stays quiet.
-  for (const f of ['DevicesPane', 'HooksPane']) assert.doesNotMatch(read(`./${f}.svelte`), /<button class="btn danger"/, f)
+  for (const f of ['DevicesPane', '../services/HookList']) assert.doesNotMatch(read(`./${f}.svelte`), /<button class="btn danger"/, f)
   // Revoke all keeps the dialog because it explains more than one line.
   assert.match(read('./DevicesPane.svelte'), /<Confirm\b/)
 })

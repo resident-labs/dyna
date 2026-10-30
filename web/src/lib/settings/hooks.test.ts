@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Hook, HookRun } from '../api/settings.ts'
-import { authorLabel, eventLabel, exitLabel, failLabel, hookEvents, hookForm, hookOf, hookPatch, isBuiltin, listedHooks, newHook, newestFirst, runByHand, runTone, scopeOf, timeoutLabel } from './hooks.ts'
+import { authorLabel, eventLabel, exitLabel, failLabel, hookEvents, hookForm, hookOf, hookPatch, listedHooks, newHook, newestFirst, runTone, timeoutLabel } from './hooks.ts'
 
 // hook fills the fields the engine stores.
 const hook = (fields: Pick<Hook, 'name' | 'event' | 'command' | 'cwd' | 'timeout' | 'onFail'>): Hook => ({ addedBy: 'owner', addedAt: '', scope: 'repository', ...fields })
@@ -74,14 +74,8 @@ test('the command is saved exactly; a timeout-only edit leaves it alone', () => 
   assert.equal(hookOf({ ...form, name: 'echo' }).command, stored.command)
 })
 
-// A built-in row names its pass, and a card never shows a raw session ID as
-// the author.
-test('built-ins and their author read in words', () => {
-  assert.equal(isBuiltin({ builtin: 'maintenance' }), true)
-  assert.equal(isBuiltin({}), false)
-  assert.equal(runByHand({ name: 'maintenance' }), 'dyna git hooks run maintenance --global')
-  assert.equal(scopeOf({ scope: 'global' }), 'global')
-  assert.equal(scopeOf({}), 'repository')
+// A card never shows a raw session ID as the author.
+test('the author of a hook reads in words', () => {
   assert.equal(authorLabel('owner'), 'you')
   assert.equal(authorLabel('engine'), 'Dyna')
   assert.equal(authorLabel('ses_20261023-1234abcd'), 'a session')

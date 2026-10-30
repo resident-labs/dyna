@@ -3,45 +3,41 @@
   // defaults. Each save writes through the call that owns it and the page then
   // reads the service again.
   import SettingRow from '../ui/SettingRow.svelte'
+  import type { RegistryService, ServicePatch } from '../api/service.ts'
 
   interface Props {
-    service: string
-    everyMinutes: number
-    timeout: string
+    schedule: NonNullable<RegistryService['schedule']>
     busy: boolean
-    onWrite: (id: string, value: string | boolean) => Promise<void>
+    onsave: (patch: ServicePatch) => Promise<void>
+    onreset: () => Promise<void>
   }
-  let { service, everyMinutes, timeout, busy, onWrite }: Props = $props()
+  let { schedule, busy, onsave, onreset }: Props = $props()
 
   let every = $state('')
   let limit = $state('')
-  $effect(() => { every = String(everyMinutes) })
-  $effect(() => { limit = timeout })
+  $effect(() => { every = String(schedule.everyMinutes) })
+  $effect(() => { limit = schedule.timeout })
 </script>
 
-<div class="schedule">
-  <SettingRow title="Runs every" description="Minutes between runs.">
-    {#snippet control()}
-      <input type="number" min="1" bind:value={every} aria-label="Minutes between runs" />
-      <button class="act" disabled={busy || Number(every) === everyMinutes} onclick={() => onWrite(`service.every:${service}`, every)}>Save</button>
-    {/snippet}
-  </SettingRow>
-  <SettingRow title="Time limit" description="Longest one run may take, such as 5m0s.">
-    {#snippet control()}
-      <input type="text" bind:value={limit} aria-label="Time limit of one run" />
-      <button class="act" disabled={busy || limit.trim() === timeout || !limit.trim()} onclick={() => onWrite(`service.timeout:${service}`, limit.trim())}>Save</button>
-    {/snippet}
-  </SettingRow>
-  <SettingRow title="Defaults" description="Restores the switch, the interval and the time limit.">
-    {#snippet control()}
-      <button class="act" disabled={busy} onclick={() => onWrite(`service.reset:${service}`, true)}>Reset</button>
-    {/snippet}
-  </SettingRow>
-</div>
+<SettingRow title="Runs every" description="Minutes between runs.">
+  {#snippet control()}
+    <input class="field" type="number" min="1" bind:value={every} aria-label="Minutes between runs" />
+    <button class="btn" disabled={busy || Number(every) === schedule.everyMinutes} onclick={() => onsave({ everyMinutes: Number(every) })}>Save</button>
+  {/snippet}
+</SettingRow>
+<SettingRow title="Time limit" description="Longest one run may take, such as 5m0s.">
+  {#snippet control()}
+    <input class="field" type="text" bind:value={limit} aria-label="Time limit of one run" />
+    <button class="btn" disabled={busy || limit.trim() === schedule.timeout || !limit.trim()} onclick={() => onsave({ timeout: limit.trim() })}>Save</button>
+  {/snippet}
+</SettingRow>
+<SettingRow title="Defaults" description="Restores the switch, the interval and the time limit.">
+  {#snippet control()}
+    <button class="btn" disabled={busy} onclick={onreset}>Reset</button>
+  {/snippet}
+</SettingRow>
 
 <style>
-  .schedule { margin: var(--s2) 0 var(--s2) 15px; border: 1px solid var(--line-soft); border-radius: var(--r-xs); }
-  input { width: 7rem; background: var(--field); color: var(--ink-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 2px 6px; font: inherit; font-size: var(--t-sm); }
-  .act { color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 1px 8px; font-size: var(--t-sm); }
-  .act:disabled { opacity: 0.6; }
+  .field { width: 6rem; min-height: 30px; padding: 0 var(--s2); background: var(--rail); border: 1px solid var(--border-soft); border-radius: var(--r-xs); color: var(--ink); font-size: var(--t-sm); }
+  .field:focus { border-color: var(--iris-edge); outline: none; }
 </style>
