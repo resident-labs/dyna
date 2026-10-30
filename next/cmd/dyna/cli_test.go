@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,18 +14,20 @@ import (
 )
 
 type fakeClient struct {
-	host     contract.HostAddRequest
-	room     contract.RoomCreateRequest
-	repoAdd  contract.RoomRepoAddRequest
-	repoList contract.RoomReposRequest
-	start    contract.SessionStartRequest
-	close    contract.SessionCloseRequest
-	post     contract.PostRequest
-	events   []contract.Event
-	after    int64
-	opList   contract.OpListRequest
-	opDecide contract.OpDecideRequest
-	ops      []contract.Operation
+	host       contract.HostAddRequest
+	room       contract.RoomCreateRequest
+	repoAdd    contract.RoomRepoAddRequest
+	repoList   contract.RoomReposRequest
+	start      contract.SessionStartRequest
+	close      contract.SessionCloseRequest
+	post       contract.PostRequest
+	events     []contract.Event
+	after      int64
+	opList     contract.OpListRequest
+	opDecide   contract.OpDecideRequest
+	ops        []contract.Operation
+	submit     contract.OpSubmitRequest
+	submitResp contract.OpSubmitResponse
 }
 
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
@@ -70,18 +74,27 @@ func (f *fakeClient) OpDecide(_ context.Context, q contract.OpDecideRequest) (co
 	f.opDecide = q
 	return contract.OpDecideResponse{}, nil
 }
+func (f *fakeClient) OpSubmit(_ context.Context, q contract.OpSubmitRequest) (contract.OpSubmitResponse, error) {
+	f.submit = q
+	return f.submitResp, nil
+}
 func runCLI(t *testing.T, f *fakeClient, args ...string) string {
 	t.Helper()
+	out, err := execCLI(f, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+func execCLI(f *fakeClient, args ...string) (string, error) {
 	root := &cobra.Command{Use: "dyna", SilenceUsage: true, SilenceErrors: true}
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&out)
 	addCLI(root, func() client { return f })
 	root.SetArgs(args)
-	if err := root.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	return out.String()
+	err := root.Execute()
+	return out.String(), err
 }
 func TestHostAddMapsFlags(t *testing.T) {
 	f := &fakeClient{}
@@ -170,5 +183,42 @@ func TestOpDenyMapsReason(t *testing.T) {
 	runCLI(t, f, "op", "deny", "op_1", "--reason", "too broad")
 	if f.opDecide.ID != "op_1" || f.opDecide.Approve || f.opDecide.Reason != "too broad" {
 		t.Fatalf("%+v", f.opDecide)
+	}
+}
+func TestPrOpenMapsFlagsAndBody(t *testing.T) {
+	body := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(body, []byte("## Summary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{Result: &contract.OpResult{Output: "https://example.test/pr/1"}}}}
+	out := runCLI(t, f, "pr", "open", "--title", "Add thing", "--body-file", body, "--base", "dev", "--draft")
+	args, ok := f.submit.Operation.Args.(contract.PrOpenArgs)
+	if !ok || f.submit.Operation.Kind != "pr.open" || args.Title != "Add thing" || args.Body != "## Summary\n" || args.Base != "dev" || !args.Draft {
+		t.Fatalf("%+v", f.submit)
+	}
+	if out != "https://example.test/pr/1\n" {
+		t.Fatalf("output=%q", out)
+	}
+}
+func TestPrOpenDefaultsBaseToMain(t *testing.T) {
+	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{Result: &contract.OpResult{}}}}
+	runCLI(t, f, "pr", "open", "--title", "t")
+	args, ok := f.submit.Operation.Args.(contract.PrOpenArgs)
+	if !ok || args.Base != "main" || args.Draft || args.Body != "" {
+		t.Fatalf("%+v", f.submit)
+	}
+}
+func TestPrOpenReportsFailedResult(t *testing.T) {
+	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{ID: "op_1", State: contract.OpFailed, Result: &contract.OpResult{ExitCode: 1, Error: "gh: not logged in"}}}}
+	_, err := execCLI(f, "pr", "open", "--title", "t")
+	if err == nil || !strings.Contains(err.Error(), "gh: not logged in") {
+		t.Fatalf("err=%v", err)
+	}
+}
+func TestPrOpenReportsMissingResult(t *testing.T) {
+	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{ID: "op_1", State: contract.OpPending}}}
+	_, err := execCLI(f, "pr", "open", "--title", "t")
+	if err == nil || !strings.Contains(err.Error(), "pending") {
+		t.Fatalf("err=%v", err)
 	}
 }

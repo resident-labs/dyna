@@ -12,8 +12,8 @@ import (
 )
 
 func TestEventRegistry(t *testing.T) {
-	bodies := []EventBody{PostCreated{Text: "hello"}, SessionStarted{Name: "agent"}, SessionClosed{Session: "ses_a"}, TurnStarted{Turn: "turn_a"}, TurnEnded{Final: "done"}, BoxChanged{To: BoxReady}, ImageBuilt{Host: "host", Repo: "owner/repo", Seconds: 1.5}, ImageFailed{Host: "host", Repo: "owner/repo", Reason: "failed", LogTail: "log"}, OpRequested{ID: "op_a"}, OpDecided{ID: "op_a", State: OpDenied}, OpRan{ID: "op_a", State: OpDone}, ShellJobEnded{Job: "job_1", ExitCode: 1}, BoxPressure{Box: "box_a", Kind: PressureMax}}
-	want := []EventType{"post.created", "session.started", "session.closed", "turn.started", "turn.ended", "box.changed", "image.built", "image.failed", "op.requested", "op.decided", "op.ran", "shell.job.ended", "box.pressure"}
+	bodies := []EventBody{PostCreated{Text: "hello"}, SessionStarted{Name: "agent"}, SessionClosed{Session: "ses_a"}, TurnStarted{Turn: "turn_a"}, TurnEnded{Final: "done"}, BoxChanged{To: BoxReady}, ImageBuilt{Host: "host", Repo: "owner/repo", Seconds: 1.5}, ImageFailed{Host: "host", Repo: "owner/repo", Reason: "failed", LogTail: "log"}, OpRequested{ID: "op_a"}, OpDecided{ID: "op_a", State: OpDenied}, OpRan{ID: "op_a", State: OpDone}, PrOpened{Repo: "owner/repo", Number: 1}, ShellJobEnded{Job: "job_1", ExitCode: 1}, BoxPressure{Box: "box_a", Kind: PressureMax}}
+	want := []EventType{"post.created", "session.started", "session.closed", "turn.started", "turn.ended", "box.changed", "image.built", "image.failed", "op.requested", "op.decided", "op.ran", "pr.opened", "shell.job.ended", "box.pressure"}
 	if len(eventBodyTypes) != len(bodies) {
 		t.Fatalf("registry has %d entries, want %d", len(eventBodyTypes), len(bodies))
 	}
@@ -66,6 +66,18 @@ func TestGeneratedContractCurrent(t *testing.T) {
 		if string(actual) != string(expected) {
 			t.Fatalf("%s is stale; run go generate ./contract", file)
 		}
+	}
+}
+
+func TestPrOpenArgumentsRoundTrip(t *testing.T) {
+	input := OpSubmitRequest{Operation: Operation{Room: "room", Kind: "pr.open", Args: PrOpenArgs{Title: "Title", Body: "Body", Base: "main", Draft: true}}}
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output OpSubmitRequest
+	if err := json.Unmarshal(data, &output); err != nil || !reflect.DeepEqual(input, output) {
+		t.Fatalf("output %+v error %v", output, err)
 	}
 }
 
