@@ -15,6 +15,7 @@ func TestDeliveryQueueMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldSchema := strings.Replace(schema, ", queue TEXT, PRIMARY KEY(to_kind, to_id, seq)", ", PRIMARY KEY(to_kind, to_id, seq)", 1)
+	oldSchema = strings.Replace(oldSchema, ", repo TEXT NOT NULL DEFAULT ''", "", 1)
 	for _, line := range strings.Split(schema, "\n") {
 		if strings.HasPrefix(line, "CREATE TABLE archives ") || strings.HasPrefix(line, "CREATE TABLE repos ") || strings.HasPrefix(line, "CREATE TABLE room_repos ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX room_repos_default ") {
 			oldSchema = strings.Replace(oldSchema, line+"\n", "", 1)

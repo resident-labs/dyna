@@ -46,7 +46,8 @@ type HostAddRequest struct {
 type HostAddResponse struct{}
 
 type RoomCreateRequest struct {
-	Name string `json:"name"`
+	Name        string      `json:"name"`
+	RootProfile ProfileName `json:"rootProfile"`
 }
 type RoomCreateResponse struct {
 	Room RoomID `json:"room"`
@@ -67,6 +68,7 @@ type SessionStartRequest struct {
 	Room    RoomID      `json:"room"`
 	Name    string      `json:"name"`
 	Parent  SessionID   `json:"parent,omitempty"`
+	Repo    RepoName    `json:"repo,omitempty"`
 	Profile ProfileName `json:"profile"`
 	Goal    string      `json:"goal,omitempty"`
 	Brief   string      `json:"brief,omitempty"`
