@@ -207,6 +207,9 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.SSHConnectTimeoutSeconds != nil {
 		m.SSHConnectTimeout = time.Duration(*patch.SSHConnectTimeoutSeconds) * time.Second
 	}
+	if patch.QuickSlots != nil {
+		m.QuickSlots = *patch.QuickSlots
+	}
 	if patch.MaxIOHeavy != nil {
 		m.MaxIOHeavy = *patch.MaxIOHeavy
 	}
@@ -440,6 +443,7 @@ func machineSummary(m machines.Machine) MachineSummary {
 		Labels:          m.Labels,
 		ProbedLabels:    m.ProbedLabels(),
 		MaxIOHeavy:      &m.MaxIOHeavy,
+		QuickSlots:      &m.QuickSlots,
 		MaxDiskPercent:  &m.MaxDiskPercent,
 		Resources:       m.Resources,
 	}

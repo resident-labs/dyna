@@ -46,9 +46,18 @@ const (
 	WorkCheck WorkKind = "check"
 )
 
+// Lane identifies the admission pool used by a job.
+type Lane string
+
+const (
+	LaneDeclared Lane = "declared"
+	LaneQuick    Lane = "quick"
+)
+
 // WorkItem is one unit of work on a node: running, or waiting for room.
 type WorkItem struct {
 	Kind WorkKind `json:"kind"`
+	Lane Lane     `json:"lane,omitempty"`
 	ID   string   `json:"id"`
 	// Label is a job's command or a check's name. A check whose row kept no
 	// name holds its ID, so a row that predates names still reads.

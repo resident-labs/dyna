@@ -946,7 +946,7 @@ func TestStoreMigrationUpdatesVersionFour(t *testing.T) {
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key='jobs.version'`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != "10" {
-		t.Fatalf("jobs.version = %s, want 10", version)
+	if version != "11" {
+		t.Fatalf("jobs.version = %s, want 11", version)
 	}
 }
