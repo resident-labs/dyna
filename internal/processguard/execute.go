@@ -21,8 +21,11 @@ type Process struct {
 	Args    []string
 	Env     []string
 	Timeout time.Duration
-	Output  io.Writer
-	Stderr  io.Writer
+	// DrainTimeout bounds the wait for Output and Stderr after the child exits.
+	// Zero keeps the one-second default from Command.
+	DrainTimeout time.Duration
+	Output       io.Writer
+	Stderr       io.Writer
 	// Bind commits launch metadata while the existing native gate is closed.
 	Bind func(context.Context, Reference) error
 }
@@ -55,6 +58,9 @@ func Execute(ctx context.Context, p Process) error {
 	cmd.Stdout, cmd.Stderr = p.Output, p.Stderr
 	if cmd.Stderr == nil {
 		cmd.Stderr = p.Output
+	}
+	if p.DrainTimeout > 0 {
+		cmd.WaitDelay = p.DrainTimeout
 	}
 
 	var err error
