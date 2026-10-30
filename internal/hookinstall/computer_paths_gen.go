@@ -8,6 +8,7 @@ package hookinstall
 var computerCodePaths = []string{
 	"go.mod",
 	"go.sum",
+	"internal/activity",
 	"internal/agentslice",
 	"internal/authority",
 	"internal/browserconfig",
