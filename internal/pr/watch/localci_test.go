@@ -138,6 +138,43 @@ func (r *hostedCIRegistry) SaveHostedRuns(_ context.Context, _, _ string, runs l
 	return nil
 }
 
+func TestRegisteredCIRelocationCancelsHostedOnce(t *testing.T) {
+	registry := &hostedCIRegistry{}
+	s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: registry}
+	job := registeredCIJob{record: Record{Kind: "github", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo"}, head: strings.Repeat("a", 40), branch: "feature"}
+	lists, starts := 0, 0
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		lists++
+		return writeFakeJSON(cmd.Stdout, workflowRunsResponse{})
+	}
+	s.RunNodeCI = func(ctx context.Context, node localci.Node, req localci.Request) (localci.Result, error) {
+		starts++
+		if starts == 1 {
+			if err := req.OnStart(ctx); err != nil {
+				t.Fatal(err)
+			}
+			return localci.Result{}, &localci.RelocateError{Node: localci.Node{Name: "second"}}
+		}
+		if node.Name != "second" {
+			t.Fatalf("relocated to %q", node.Name)
+		}
+		if err := req.OnStart(ctx); err != nil {
+			t.Fatal(err)
+		}
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		if err := req.OnStart(cancelled); err != context.Canceled {
+			t.Fatalf("cancelled start returned %v", err)
+		}
+		return localci.Result{Status: "passed"}, nil
+	}
+	run := &registeredCIRun{Cancel: func() {}, Ended: make(chan struct{}), Stopped: make(chan struct{})}
+	s.executeRegisteredCI(context.Background(), job, localCIPlan{execution: watchDynaDefinition(t), suites: []localci.Suite{localci.SuiteGo}}, "repo", localci.Node{Name: "first"}, "key", run, "", false)
+	if starts != 2 || lists != 1 {
+		t.Fatalf("starts = %d, hosted listings = %d; want 2 and 1", starts, lists)
+	}
+}
+
 func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Branch: "feature"}, head: head, branch: "feature"}
