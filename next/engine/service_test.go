@@ -28,7 +28,7 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 	t.Helper()
 	now := func() time.Time { return time.Unix(1000, 0) }
 	dir := t.TempDir()
-	st, err := store.Open(dir, now)
+	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +568,7 @@ func (b cancelOnRemove) Remove(context.Context, contract.BoxID) error  { b.cance
 
 func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 	now := func() time.Time { return time.Unix(1000, 0) }
-	st, err := store.Open(t.TempDir(), now)
+	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

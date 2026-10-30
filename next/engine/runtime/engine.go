@@ -73,7 +73,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(cfg.Data, time.Now)
+	st, err := store.Open(cfg.Data)
 	if err != nil {
 		return err
 	}
