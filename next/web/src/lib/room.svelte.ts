@@ -37,7 +37,10 @@ export class RoomStore {
 
   async open(): Promise<void> {
     const page = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: Number.MAX_SAFE_INTEGER, limit: 200 });
-    for (const event of page.events ?? []) this.insert(decodeEvent(event));
+    for (const value of page.events ?? []) {
+      const event = decodeEvent(value);
+      if (event) this.insert(event);
+    }
     const sessionList = await call("session.list", { room: this.room });
     this.sessionBaseline = this.newest;
     this.initialSessions = new Map((sessionList.sessions ?? []).map(session => [session.id, {
