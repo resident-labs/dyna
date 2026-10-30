@@ -148,10 +148,10 @@ type MainWaitKind string
 
 // Main wait kinds.
 const (
-	MainWaitNoPushCI MainWaitKind = "no-push-ci"
-	MainWaitNoHead   MainWaitKind = "no-head"
-	MainWaitPassed   MainWaitKind = "passed"
-	MainWaitFailed   MainWaitKind = "failed"
-	MainWaitPending  MainWaitKind = "pending"
-	MainWaitPaused   MainWaitKind = "paused"
+	MainWaitKindNoPushCI MainWaitKind = "no-push-ci"
+	MainWaitKindNoHead   MainWaitKind = "no-head"
+	MainWaitKindPassed   MainWaitKind = "passed"
+	MainWaitKindFailed   MainWaitKind = "failed"
+	MainWaitKindPending  MainWaitKind = "pending"
+	MainWaitKindPaused   MainWaitKind = "paused"
 )
