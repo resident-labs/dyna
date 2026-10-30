@@ -74,12 +74,12 @@ function computerOf(id?: string) { return computers?.find((c) => c.session === i
 
 // The floating preview and the phone chip. The preview shows in a
 // session's Messages view only, never opens a stream, and opens the Computer tab on a click.
-const drillComputer = $derived(drill ? computerOf(drill.id) : null)
+const drillComputer = $derived(drill ? computerOf(drill.computer) : null)
 // view is '': a session view is open, so the computers page is not.
 const showPreview = $derived(!!drill && !!drillComputer && previewVisible({ c: drillComputer, tab: computersHost.tab(), view: '', width: computersHost.width(), hidden: null }))
 // The computer the session tab row offers: none until the room's computers
-// load, and none for the root seat, which has no computer of its own.
-const sessionComputer = $derived(computers && drill && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null)
+// load. The engine names each row's computer, root's included.
+const sessionComputer = $derived(computers && drill ? computerOf(drill.computer) ?? { state: 'none' } : null)
 
 // clear leaves the previous room's computers, as a room pick does.
 function clear() {
