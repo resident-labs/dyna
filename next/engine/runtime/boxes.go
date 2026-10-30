@@ -216,21 +216,26 @@ func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
-	if err := h.StopContainer(ctx, id); err != nil {
-		return err
-	}
 	forward := box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
-	if err := h.RemoveForward(ctx, forward); err != nil {
-		return err
-	}
-	if err := h.RemoveContainer(ctx, id); err != nil {
-		return err
-	}
-	if err := h.RemoveVolume(ctx, id); err != nil {
-		return err
-	}
-	if err := h.RemoveSlice(ctx, record.Slice); err != nil {
+	if err := removeHostBox(ctx, h, record, forward); err != nil {
 		return err
 	}
 	return b.Sockets.RemoveBox(id)
+}
+
+// removeHostBox cleans up every host resource, including a partial creation.
+func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forward box.Forward) error {
+	if err := h.StopContainer(ctx, record.ID); err != nil {
+		return err
+	}
+	if err := h.RemoveForward(ctx, forward); err != nil {
+		return err
+	}
+	if err := h.RemoveContainer(ctx, record.ID); err != nil {
+		return err
+	}
+	if err := h.RemoveVolume(ctx, record.ID); err != nil {
+		return err
+	}
+	return h.RemoveSlice(ctx, record.Slice)
 }
