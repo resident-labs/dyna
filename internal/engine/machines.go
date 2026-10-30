@@ -121,9 +121,14 @@ func (s services) machineRunning() []websvc.MachineAgent {
 func (s services) machineLive(ctx context.Context) websvc.MachineLive {
 	out := websvc.MachineLive{}
 	if s.load != nil {
-		if l := s.load.Load(); l.CPUPercent != nil {
+		l := s.load.Load()
+		if l.CPUPercent != nil {
 			cpu := int(math.Round(*l.CPUPercent))
 			out.CPU = &cpu
+		}
+		if l.Memory.Total > 0 {
+			percent := int(math.Round(float64(l.Memory.Used) * 100 / float64(l.Memory.Total)))
+			out.MemoryPercent = &percent
 		}
 	}
 	if s.rooms != nil {
