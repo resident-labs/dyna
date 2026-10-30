@@ -28,17 +28,18 @@ type Service struct {
 	mu      sync.Mutex
 	changes map[string]chan struct{}
 
-	execMu    sync.Mutex
-	executors map[Kind]ExecuteFunc
-	running   map[string]bool
-	runCtx    context.Context
+	execMu     sync.Mutex
+	executors  map[Kind]ExecuteFunc
+	operations map[OperationKind]registeredOperation
+	running    map[string]bool
+	runCtx     context.Context
 	// inflight counts decision-triggered executions, including result delivery.
 	inflight sync.WaitGroup
 }
 
 // New pairs approvals with the room and session stores.
 func New(rooms *room.Store, sessionRoot string) *Service {
-	return &Service{Rooms: rooms, SessionRoot: sessionRoot, changes: map[string]chan struct{}{}, executors: map[Kind]ExecuteFunc{}, running: map[string]bool{}, runCtx: context.Background()}
+	return &Service{Rooms: rooms, SessionRoot: sessionRoot, changes: map[string]chan struct{}{}, executors: map[Kind]ExecuteFunc{}, operations: map[OperationKind]registeredOperation{}, running: map[string]bool{}, runCtx: context.Background()}
 }
 
 // sessionMeta is the stored session ancestry and identity that approvals need.
@@ -85,8 +86,8 @@ func (s *Service) roomFor(actor authority.Actor, ref string) (room.Record, error
 	return rec, nil
 }
 
-// Create files a kind-independent request for an authenticated agent.
-func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateInput) (Request, error) {
+// create files a held request after the operation routes it.
+func (s *Service) create(ctx context.Context, actor authority.Actor, in createInput) (Request, error) {
 	if actor.Role != authority.Session && actor.Role != authority.Root {
 		return Request{}, errors.New("only an agent session can request approval")
 	}
@@ -105,9 +106,13 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		return Request{}, errors.New("the requester belongs to another room")
 	}
 	hash := sha256.Sum256(in.Payload)
+	payloadHash := hex.EncodeToString(hash[:])
+	if in.PayloadHash != "" {
+		payloadHash = in.PayloadHash
+	}
 	r := Request{
 		Room: rec.ID, Requester: requester.ID, Kind: in.Kind, Class: in.Class,
-		Payload: append(json.RawMessage(nil), in.Payload...), PayloadHash: hex.EncodeToString(hash[:]),
+		Payload: append(json.RawMessage(nil), in.Payload...), PayloadHash: payloadHash,
 		Repository: in.Repository, Server: in.Server, Command: in.Command, Tool: in.Tool, Title: in.Title, Body: in.Body,
 		State: StatePending, atID: requester.ParentSession,
 	}
@@ -139,11 +144,6 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		expiry = DefaultExpiry
 	}
 	r.CreatedAt, r.UpdatedAt, r.ExpiresAt = now, now, now.Add(expiry)
-	auto := in.Auto && in.Class == ClassAgent || in.Class == ClassAgent && actor.Role == authority.Root
-	if auto {
-		r.State = StateApproved
-		r.Result = &Result{Actor: requester.Address()}
-	}
 	if existing, err := s.duplicate(r.Room, r.Requester, r.Kind, r.Class, r.PayloadHash); err != nil {
 		return Request{}, err
 	} else if existing.ID != "" {
@@ -156,34 +156,16 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		if err := insertRequest(ctx, conn, &r); err != nil {
 			return err
 		}
-		if auto {
-			reason := "root"
-			if in.Auto {
-				reason = "routine PR write"
-			}
-			return insertDecision(ctx, conn, r.ID, requester.ID, ActionAuto, reason, now)
-		}
 		return nil
 	})
 	if err != nil {
 		return Request{}, err
 	}
-	if auto {
-		reason := "root"
-		if in.Auto {
-			reason = "routine PR write"
-		}
-		err = s.postDecided(r, requester.Address(), ActionAuto, reason, "")
-	} else {
-		err = s.postRequested(r)
-	}
+	err = s.postRequested(r)
 	if err != nil {
 		return Request{}, err
 	}
 	s.changed(r.Room, r.ID)
-	if auto {
-		s.trigger(r)
-	}
 	return s.public(r)
 }
 
