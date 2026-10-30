@@ -223,7 +223,7 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 	return err
 }
 func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
-	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi"}
+	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi"}
 	for _, m := range c.Mounts {
 		v := m.HostPath + ":" + m.BoxPath
 		if m.ReadOnly {
