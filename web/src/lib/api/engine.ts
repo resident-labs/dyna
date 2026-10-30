@@ -262,6 +262,7 @@ export interface Engine {
   // Hooks.
   ListHooks(repo: string): Promise<Hook[] | null>
   HookSummary(repo: string): Promise<HookSummary[] | null>
+  LibrarianLastRun(repo: string): Promise<string | null>
   LibrarianDeferred(repo: string): Promise<string | null>
   HookRuns(repo: string, name: string): Promise<HookRun[] | null>
   HookRunLog(repo: string, name: string, id: string): Promise<HookRunLog>
