@@ -85,7 +85,12 @@ export function waitingWords(reason: WaitingReason): string {
     case 'failed': return 'Default branch CI failed'
     case 'passed': return 'Default branch CI passed'
     case 'paused': return 'Merging is paused'
-    default: return 'Waiting for default branch CI'
+    case 'pending': return 'Waiting for default branch CI'
+    default: {
+      const unhandled: never = reason.kind
+      void unhandled
+      return 'Waiting for default branch CI'
+    }
   }
 }
 

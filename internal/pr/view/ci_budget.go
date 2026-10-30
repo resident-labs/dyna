@@ -27,19 +27,6 @@ func (s *Service) SetRoomCIBudget(ctx context.Context, roomRef string, budget CI
 	return nil
 }
 
-// CIBudgetSettings contains the room's pull request run and test limits.
-// A nil no-JUnit warning setting uses the default, which is true.
-type CIBudgetSettings struct {
-	CITimeBudget     string            `json:"ciTimeBudget"`
-	CIBudgetExempt   []string          `json:"ciBudgetExempt"`
-	CIWarnAfter      string            `json:"ciWarnAfter"`
-	CIFailAfter      string            `json:"ciFailAfter"`
-	CITestMax        string            `json:"ciTestMax"`
-	CITestAllowNotes map[string]string `json:"ciTestAllowNotes"`
-	CITestAllow      []string          `json:"ciTestAllow"`
-	CINoJUnitWarning *bool             `json:"ciNoJUnitWarning"`
-}
-
 func (s *Service) RoomCIBudget(roomID string) (CIBudgetSettings, error) {
 	p, err := s.RoomChangePolicy(roomID)
 	if err != nil {

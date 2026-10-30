@@ -8,7 +8,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/locallane"
@@ -17,46 +16,6 @@ import (
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
 )
-
-// MergeQueueItem is a view of current facts. It is never saved as queue state.
-type MergeQueueItem struct {
-	GoalID                   string            `json:"goalId,omitempty"`
-	Expedited                bool              `json:"expedited,omitempty"`
-	MissingRequiredReviewers []string          `json:"missingRequiredReviewers,omitempty"`
-	Title                    string            `json:"title,omitempty"`
-	Author                   string            `json:"author,omitempty"`
-	RoomID                   string            `json:"roomId"`
-	ChangeID                 string            `json:"changeId"`
-	URL                      string            `json:"url"`
-	Head                     string            `json:"head"`
-	State                    string            `json:"state"`
-	Reason                   string            `json:"reason,omitempty"`
-	ReadyAt                  time.Time         `json:"readyAt,omitempty"`
-	Main                     *MainCI           `json:"main,omitempty"`
-	FailedSuite              string            `json:"failedSuite,omitempty"`
-	Excerpt                  string            `json:"excerpt,omitempty"`
-	Trial                    *MergeTrialStatus `json:"trial,omitempty"`
-	Overlaps                 []state.Overlap   `json:"overlaps,omitempty"`
-	Dependency               *MergeDependency  `json:"dependency,omitempty"`
-}
-
-// MergeDependency identifies a change that blocks this queue row. Clients use
-// its number and title for display; ChangeID remains the stable machine key.
-type MergeDependency struct {
-	ChangeID string `json:"changeId"`
-	Number   int    `json:"number,omitempty"`
-	Title    string `json:"title,omitempty"`
-}
-
-type MergeTrialStatus struct {
-	Branch      string                  `json:"branch"`
-	Head        string                  `json:"head,omitempty"`
-	Phase       state.MergeTrialPhase   `json:"phase"`
-	Reason      string                  `json:"reason,omitempty"`
-	Batch       []string                `json:"batch"`
-	MaxParallel int                     `json:"maxParallel,omitempty"`
-	Stacks      []state.MergeTrialStack `json:"stacks,omitempty"`
-}
 
 func trialStatus(st State, b *state.MergeTrial) *MergeTrialStatus {
 	if b == nil {
@@ -77,35 +36,15 @@ func trialStatus(st State, b *state.MergeTrial) *MergeTrialStatus {
 	return status
 }
 
-// MainWaitKind names why the queue waits on the default branch's CI. The web
-// writes the words from the kind; the service never formats a sentence.
-type MainWaitKind string
-
-// Main wait kinds.
+// Main wait names remain available to existing Go callers.
 const (
-	MainWaitNoPushCI MainWaitKind = "no-push-ci"
-	MainWaitNoHead   MainWaitKind = "no-head"
-	MainWaitPassed   MainWaitKind = "passed"
-	MainWaitFailed   MainWaitKind = "failed"
-	MainWaitPending  MainWaitKind = "pending"
-	MainWaitPaused   MainWaitKind = "paused"
+	MainWaitNoPushCI = MainWaitKindNoPushCI
+	MainWaitNoHead   = MainWaitKindNoHead
+	MainWaitPassed   = MainWaitKindPassed
+	MainWaitFailed   = MainWaitKindFailed
+	MainWaitPending  = MainWaitKindPending
+	MainWaitPaused   = MainWaitKindPaused
 )
-
-// MainWait is why the queue waits on the default branch, as facts. The commit
-// is MainCI.Head; a screen shortens it and words the kind.
-type MainWait struct {
-	Kind MainWaitKind `json:"kind"`
-	// Base is the default branch name, when the probe knows it.
-	Base string `json:"base,omitempty"`
-}
-
-// MainCI is the saved CI result of the repository's default branch. State is
-// passed, failed, pending or paused. Every item carries it, so a screen reads one field.
-type MainCI struct {
-	State string    `json:"state"`
-	Head  string    `json:"head"`
-	Wait  *MainWait `json:"wait,omitempty"`
-}
 
 // MergeQueueSnapshot derives queue facts from a saved PR snapshot without GitHub
 // requests. where says which rooms evaluate their merge trials on local CI, so a
