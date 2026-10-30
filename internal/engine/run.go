@@ -797,25 +797,9 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 			if err := runnerSpoolRecovery.drainAll(ctx); err != nil {
 				return err
 			}
-			if err := reportUpdateNotices(ctx, writer, rooms.Notify); err != nil {
-				return err
-			}
 			return resumeTurnReports(ctx, rooms.Notify, "")
 		})
-		rooms.Notify.Sessions.Workers.Go("workflow update notice retry", func(ctx context.Context) error {
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return nil
-				case <-ticker.C:
-					if err := reportUpdateNotices(ctx, writer, rooms.Notify); err != nil {
-						log.Printf("workflow update notice retry: %v", err)
-					}
-				}
-			}
-		})
+
 	}
 	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, hookService, started, jobsSvc, func(ev roomsvc.Event) {
 		if ev.Kind == "call-requests" {
@@ -878,6 +862,23 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		go func() { errs <- fullServers[2].Serve(listeners.socket) }()
 	}
 	if !readOnly {
+		rooms.Notify.Sessions.Workers.Go("workflow update notice retry", func(ctx context.Context) error {
+			if err := reportUpdateNotices(ctx, writer, rooms.Notify); err != nil {
+				log.Printf("workflow update notice recovery: %v", err)
+			}
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+					if err := reportUpdateNotices(ctx, writer, rooms.Notify); err != nil {
+						log.Printf("workflow update notice retry: %v", err)
+					}
+				}
+			}
+		})
 		startService(func() { maintenance.Loop(ctx, log.Printf, rooms.Notify.Sessions.RetainClosedSession) })
 	}
 

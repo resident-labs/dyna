@@ -270,6 +270,11 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(promise)
 	}
 
+	if err := e.checkReplayCwd(o.cwd); err != nil {
+		reject(err)
+		return vm.ToValue(promise)
+	}
+
 	e.shared.mu.Lock()
 	e.shared.execSeq++
 	id := e.shared.execSeq
@@ -288,6 +293,13 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		label = fmt.Sprintf("command-%d", id)
 	}
 	key := commandKey(argv, o.cwd, cacheLabel, o.parse, o.check, o.env)
+	manifestInput, _ := json.Marshal(struct {
+		Key     string
+		Timeout time.Duration
+		Retries int
+	}{key, o.timeout, o.retries})
+	manifestHash := sha256.Sum256(manifestInput)
+	manifestKey := "command-v2:" + hex.EncodeToString(manifestHash[:])
 	line := commandLine(argv)
 	if len(argv) == 3 && argv[0] == "sh" && argv[1] == "-c" {
 		line = argv[2]
@@ -312,7 +324,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 	}
 	emit(runstore.Event{T: "exec_start", Command: textutil.ClipOneLine(line, 400)})
 	if e.opts.Replay != nil {
-		matched, value, replayErr := e.replayCall(runstore.WorkflowCallCommand, key, id)
+		matched, value, replayErr := e.replayCall(runstore.WorkflowCallCommand, manifestKey, id)
 		if matched || replayErr != nil {
 			if replayErr != nil {
 				reject(replayErr)
@@ -333,7 +345,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(promise)
 	}
 	if e.opts.RecordManifest {
-		if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallCommand, key, id); err != nil {
+		if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallCommand, manifestKey, id); err != nil {
 			e.manifestWriteFailed()
 			e.workers.Done()
 			recordErr := fmt.Errorf("record command manifest intent: %w", err)
@@ -441,7 +453,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			if !o.check && res != nil {
 				resultErr = nil
 			}
-			if err := runstore.CompleteWorkflowCall(context.WithoutCancel(e.ctx), e.runID(), runstore.WorkflowCallCommand, key, id, shell, res, resultErr); err != nil {
+			if err := runstore.CompleteWorkflowCall(context.WithoutCancel(e.ctx), e.runID(), runstore.WorkflowCallCommand, manifestKey, id, shell, res, resultErr); err != nil {
 				e.manifestWriteFailed()
 				res = nil
 				runErr = fmt.Errorf("record command manifest result: %w", err)

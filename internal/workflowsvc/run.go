@@ -3,6 +3,7 @@ package workflowsvc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -33,8 +34,10 @@ type Options struct {
 	WorkDir     string
 	WorkflowDir string
 	ResumeFrom  string
-	MaxConc     int
-	MaxAgents   int
+	// SafeReplay is set only by the automatic interrupted-run recovery path.
+	SafeReplay bool
+	MaxConc    int
+	MaxAgents  int
 	// MaxCommands caps the run() commands that execute at once (0 => 4).
 	MaxCommands int
 	// Demo runs the script on the unsaved mock worker profiles instead of the
@@ -95,8 +98,9 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 			observer.OnWarning(message)
 		}
 	}
+	var replay *workflow.ReplayBarrier
 	var cache *workflow.Cache
-	if opts.ResumeFrom != "" {
+	if opts.ResumeFrom != "" && !opts.SafeReplay {
 		entries, err := runstore.ReadJournal(opts.ResumeFrom)
 		if err != nil {
 			return Result{}, fmt.Errorf("cannot resume %s: %w", opts.ResumeFrom, err)
@@ -132,7 +136,23 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 		_ = run.Finish("error", "", err)
 		return Result{ID: run.Meta.ID, Status: "error"}, fmt.Errorf("start workflow manifest: %w", err)
 	}
-	if opts.ResumeFrom != "" {
+	metadata, metadataErr := plan.ReadMetadata(opts.ScriptSrc)
+	inputs := runstore.WorkflowReplayInputs{Deterministic: metadataErr == nil && metadata.Deterministic}
+	var sources map[string]string
+	if inputs.Deterministic {
+		if head, err := replayWorktreeHead(ctx, opts.WorkDir); err == nil {
+			inputs.Fingerprint, sources, _ = replayFingerprint(opts, store, os.Environ(), head)
+		}
+	}
+	inputs.Options, err = json.Marshal(opts)
+	if err == nil {
+		err = runstore.RecordWorkflowReplayInputs(ctx, run.Meta.ID, inputs)
+	}
+	if err != nil {
+		_ = run.Finish("error", "", err)
+		return Result{ID: run.Meta.ID, Status: "error"}, fmt.Errorf("record workflow replay inputs: %w", err)
+	}
+	if opts.ResumeFrom != "" && !opts.SafeReplay {
 		if err := runstore.MarkWorkflowManifestUnsafe(ctx, run.Meta.ID, "resumed using the legacy journal cache"); err != nil {
 			_ = run.Finish("error", "", err)
 			return Result{ID: run.Meta.ID, Status: "error"}, fmt.Errorf("mark workflow manifest unsafe: %w", err)
@@ -140,9 +160,12 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	}
 	prefix := fmt.Sprintf("%s/%d/%d", run.Meta.ID, os.Getpid(), time.Now().UnixNano())
 	defer installRunWriters(ctx, run, factory(prefix))()
+	if opts.SafeReplay {
+		replay, err = prepareSafeReplay(ctx, opts, store)
+	}
 	if _, planErr := plan.Ensure(run.Dir, opts.ScriptSrc, plan.Options{WriteAncestry: plan.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); planErr != nil {
 		if errors.Is(planErr, plan.ErrAncestry) {
-			err = planErr
+			err = errors.Join(err, planErr)
 		} else {
 			warning("plan persist: " + planErr.Error())
 		}
@@ -153,6 +176,7 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	run.Append(runstore.Event{T: "run_start", Title: opts.Name})
 	start := time.Now()
 	var value string
+	replayRan := false
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -162,12 +186,19 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 		commands, err = CommandRunnerFor(run, opts.ResumeFrom)
 	}
 	if err == nil {
+		replayRan = true
 		value, err = workflow.Execute(ctx, workflow.Options{
 			ScriptSrc: opts.ScriptSrc, ScriptPath: opts.ScriptPath, Args: opts.Args, Store: store, Run: run,
 			OnEvent: observer.OnEvent, OnWarning: warning, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir,
 			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, MaxCommands: opts.MaxCommands, Commands: commands, Cache: cache, ResumeFrom: opts.ResumeFrom, JobNamespace: jobNamespace, Engine: agents,
 			Paused: func() bool { return runstore.IsPaused(run.Meta.ID) }, Poster: ScriptPoster, RecordManifest: true,
+			CheckReplaySources: inputs.Fingerprint != "", ReplaySources: sources, Replay: replay,
 		})
+	}
+	if opts.SafeReplay && err != nil && (!replayRan || errors.Is(err, workflow.ErrReplayMismatch)) {
+		if markErr := runstore.MarkWorkflowManifestUnsafe(context.WithoutCancel(ctx), run.Meta.ID, "safe replay did not match its source"); markErr != nil {
+			err = errors.Join(err, fmt.Errorf("mark failed replay unsafe: %w", markErr), workflow.ErrManifestWrite)
+		}
 	}
 	if manifestErr := sealManifest(ctx, run.Meta.ID, err); manifestErr != nil {
 		err = errors.Join(err, fmt.Errorf("seal workflow manifest: %w", manifestErr))
