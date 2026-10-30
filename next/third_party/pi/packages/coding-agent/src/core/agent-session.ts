@@ -2239,6 +2239,10 @@ export class AgentSession {
 				this.agent.state.messages = [...this.agent.state.messages, result];
 			}
 		}
+		const last = this.agent.state.messages.at(-1);
+		if (!last || last.role === "assistant" || last.role === "system") {
+			throw new Error("Recovered session has no pending input or tool result");
+		}
 		await this._startRun(undefined, onStarted);
 	}
 
