@@ -145,8 +145,8 @@ func TestDraftReviewWaitsForReadyTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, position, reason := reviewState(t, e, st, r)
-	if state != "blocked" || position != nil || reason != "The PR is a draft." {
-		t.Fatalf("draft status = %s %v %q", state, position, reason)
+	if state != "blocked" || position != nil || reason != (ReviewBlock{ReviewBlockKindDraft, "The PR is a draft."}) {
+		t.Fatalf("draft status = %s %v %+v", state, position, reason)
 	}
 	e.f.Draft = false
 	e.tick()

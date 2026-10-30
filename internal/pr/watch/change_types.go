@@ -142,6 +142,20 @@ type MergeHistoryEntry struct {
 	At      time.Time `json:"at"`
 }
 
+// ReviewBlockKind says why review waits, so a view can tell a routine wait
+// (head-refresh, which the watcher clears on its next good refresh) from a
+// block that someone must clear.
+type ReviewBlockKind string
+
+// Review block kinds.
+const (
+	ReviewBlockKindRoomPaused      ReviewBlockKind = "room-paused"
+	ReviewBlockKindDraft           ReviewBlockKind = "draft"
+	ReviewBlockKindHeadRefresh     ReviewBlockKind = "head-refresh"
+	ReviewBlockKindReviewerStopped ReviewBlockKind = "reviewer-stopped"
+	ReviewBlockKindCIFailed        ReviewBlockKind = "ci-failed"
+)
+
 // MainWaitKind names why the queue waits on the default branch's CI. The web
 // writes the words from the kind; the service never formats a sentence.
 type MainWaitKind string
