@@ -340,9 +340,6 @@ func Load(path string) (Values, error) {
 	if err := v.loadBrowser(raw); err != nil {
 		return Values{}, err
 	}
-	if err := v.loadMerge(raw); err != nil {
-		return Values{}, err
-	}
 	if err := v.loadSessions(raw); err != nil {
 		return Values{}, err
 	}
