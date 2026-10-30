@@ -217,6 +217,21 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, invalid(err.Error())
 		}
 	}
+	var repo contract.RepoName
+	if roomName == "" {
+		repos, err := s.store.RoomRepos(ctx, req.Room)
+		if err != nil {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		p, err := s.store.Session(ctx, parent)
+		if err != nil {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		repo, err = room.RepoForSession(repos, req.Repo, p.Repo)
+		if err != nil {
+			return contract.SessionStartResponse{}, invalid(err.Error())
+		}
+	}
 	now := s.now()
 	sid, err := id("ses_", now)
 	if err != nil {
@@ -226,7 +241,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName}
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, Brief: req.Brief})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
