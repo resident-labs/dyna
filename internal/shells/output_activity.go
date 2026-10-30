@@ -22,6 +22,7 @@ type activityReader struct {
 
 func (r *activityReader) start() {
 	r.signal.Copier = activity.CopierRunning
+	r.signal.CPU = activity.CPUUnsupported
 	r.publish(r.signal)
 }
 
@@ -96,8 +97,8 @@ func (s *Store) publishActivity(db *sql.DB, id string, signal activity.Signal) e
 		last = signal.LastOutput.UnixNano()
 	}
 	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `UPDATE shell_jobs SET activity_output=?, activity_lease=?, activity_copier=? WHERE id=?`,
-			last, signal.LeaseUntil.UnixNano(), signal.Copier, id)
+		_, err := conn.ExecContext(ctx, `UPDATE shell_jobs SET activity_output=?, activity_lease=?, activity_copier=?, activity_cpu=? WHERE id=?`,
+			last, signal.LeaseUntil.UnixNano(), signal.Copier, signal.CPU, id)
 		return err
 	})
 }
@@ -114,7 +115,7 @@ func (s *Store) Activity(id string, now time.Time) (activity.Signal, error) {
 	}
 	var last, lease int64
 	var signal activity.Signal
-	err = db.QueryRow(`SELECT activity_output, activity_lease, activity_copier FROM shell_jobs WHERE id=?`, id).Scan(&last, &lease, &signal.Copier)
+	err = db.QueryRow(`SELECT activity_output, activity_lease, activity_copier, activity_cpu FROM shell_jobs WHERE id=?`, id).Scan(&last, &lease, &signal.Copier, &signal.CPU)
 	if err != nil {
 		return activity.Signal{}, err
 	}
