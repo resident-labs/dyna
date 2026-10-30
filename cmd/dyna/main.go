@@ -42,6 +42,7 @@ import (
 	cliservices "dyna-agent/internal/cli/services"
 	clisettings "dyna-agent/internal/cli/settings"
 	"dyna-agent/internal/cli/shell"
+	"dyna-agent/internal/cli/slot"
 	clistate "dyna-agent/internal/cli/state"
 	clisubagent "dyna-agent/internal/cli/subagent"
 	cliupdate "dyna-agent/internal/cli/update"
@@ -161,6 +162,7 @@ func newRootCommand() *cobra.Command {
 		climaintenance.NewCommand(),
 		clisubagent.NewCommand(),
 		shell.NewCommand(),
+		slot.NewCommand(),
 		computer.NewCommand(),
 		node.NewCommand(),
 		clijob.NewCommand(),
