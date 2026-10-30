@@ -378,19 +378,31 @@ func fetchPullHeadRepo(ctx context.Context, cmd *exec.Cmd, r repository, number 
 }
 
 var pullNumber = regexp.MustCompile(`^[0-9]+$`)
+var pullURL = regexp.MustCompile(`^https://([^/]+)/([\w.-]+/[\w.-]+)/pull/([0-9]+)$`)
 
 // editsForkPull reports whether gh pr edit names a pull request on r whose head
-// branch lives in the room's own fork. Only a plain number names one.
+// branch lives in the room's own fork. The pull request is named by its number,
+// or by its URL on r. The fork is the origin of the room's checkout, so a
+// command from any directory gets the same answer.
 func editsForkPull(ctx context.Context, rec room.Record, cmdDir string, r repository, command []string) bool {
 	positional := parseArgs(command[:2], command[2:]).positional
-	if len(positional) != 1 || !pullNumber.MatchString(positional[0]) {
+	if len(positional) != 1 {
 		return false
 	}
-	origin, ok := checkoutOrigin(ctx, rec, cmdDir)
+	number := positional[0]
+	if m := pullURL.FindStringSubmatch(number); m != nil {
+		if !strings.EqualFold(m[1], r.host) || !strings.EqualFold(m[2], r.name) {
+			return false
+		}
+		number = m[3]
+	} else if !pullNumber.MatchString(number) {
+		return false
+	}
+	origin, ok := checkoutOrigin(ctx, rec, rec.Repo)
 	if !ok || !strings.EqualFold(origin.host, r.host) {
 		return false
 	}
-	head, ok := pullHeadRepo(ctx, Command(ctx, "", cmdDir), r, positional[0])
+	head, ok := pullHeadRepo(ctx, Command(ctx, "", cmdDir), r, number)
 	return ok && strings.EqualFold(head, origin.name)
 }
 
