@@ -20,7 +20,7 @@
   let showDot = $derived(variant === 'dot' || (dot && tone !== 'neutral'))
 </script>
 
-<span class="status {variant} {tone}" title={detail || undefined}>{#if showDot}<span class="mark" class:pulse={pulse || tone === 'live'} aria-hidden="true"></span>{/if}{label}{#if value}<span class="num">{value}</span>{/if}</span>
+<span class="status {variant} {tone}" title={detail || undefined}>{#if showDot}<span class="mark" class:pulse={pulse || tone === 'live'} aria-hidden="true"></span>{/if}{label}{#if value}<span class="ui-num">{value}</span>{/if}</span>
 
 <style>
   .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: nowrap; line-height: 1; }
