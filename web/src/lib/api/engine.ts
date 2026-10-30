@@ -23,7 +23,7 @@ import type { MachineDetail, MachinePatch, MachineSummary, MachineWork } from '.
 import type { LibraryView } from './library.ts'
 import type { ProfileCheck, ProfileEdit, ProfileList, ProfileUsageSnapshot, ProfileView } from './profile.ts'
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SetRoomLimitResult, SpawnResult, TerminalVerdict, Visual } from './room.ts'
-import type { ServiceView } from './service.ts'
+import type { RegistryService, ServiceView } from './service.ts'
 import type { BulkSessionOptions, BulkSessionResult, ConsolidationOptions, ConsolidationState, MemberProfile, QueueItem, RoomSessionMutation, RoomSessionState, Session, TransferOptions, TransferState } from './session.ts'
 import type { Device, Hook, HookRun, HookRunLog, HookSummary, Notice, Pairing, SettingItem, UpdateNotice } from './settings.ts'
 import type { ShellJob, ShellLog, ShellLogChunk, TermEvent, TermInfo } from './terminal.ts'
@@ -191,6 +191,7 @@ export interface Engine {
   ReviewerStatus(roomRef: string): Promise<ReviewerStatus>
   SetReviewEnabled(roomRef: string, enabled: boolean): Promise<null>
   ListServices(roomRef: string): Promise<ServiceView[]>
+  ServiceRegistry(roomRef: string, repo: string): Promise<RegistryService[]>
   SetServiceProfile(roomRef: string, role: string, profile: string): Promise<null>
   RestartReviewer(roomRef: string): Promise<null>
   RoomCIBudget(roomId: string): Promise<CIBudgetSettings>

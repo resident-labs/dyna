@@ -1,11 +1,13 @@
 // Loads what the service cards need, each call on its own: one that fails
 // (a caller without admin scope cannot read settings) leaves its part null
 // and the others still show.
+import type { RegistryService } from '../api/service.ts'
 import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, RunReason, ServiceInfo as ServiceRow, SyncInfoByRepo, TestHealth, UsageRow } from './model.ts'
-import { readAccounts, readBudget, readDeferred, readHookLog, readHookRuns, readHookSummary, readMergeState, readNotices, readSync, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
+import { readAccounts, readBudget, readDeferred, readHookLog, readHookRuns, readHookSummary, readMergeState, readNotices, readSync, readTestHealth, readHistory, readReviewer, readRegistry, readServices, readSettings, readUsage, readVoice } from './read.ts'
 
 export interface ServiceApi {
   listServices(room: string): Promise<unknown>
+  serviceRegistry(room: string, repo: string): Promise<unknown>
   reviewerStatus(room: string): Promise<unknown>
   mergeControlStatus(room: string): Promise<unknown>
   roomMergeHistory(room: string): Promise<unknown>
@@ -19,11 +21,13 @@ export interface ServiceApi {
   syncStatus(): Promise<unknown>
 }
 
-export type Part = 'services' | 'reviewer' | 'queue' | 'history' | 'settings' | 'usage' | 'voice' | 'hooks' | 'notices' | 'budget' | 'accounts' | 'tests' | 'sync'
-export const allParts: Part[] = ['services', 'reviewer', 'queue', 'history', 'settings', 'usage', 'voice', 'hooks', 'notices', 'budget', 'accounts', 'tests', 'sync']
+export type Part = 'registry' | 'services' | 'reviewer' | 'queue' | 'history' | 'settings' | 'usage' | 'voice' | 'hooks' | 'notices' | 'budget' | 'accounts' | 'tests' | 'sync'
+export const allParts: Part[] = ['registry', 'services', 'reviewer', 'queue', 'history', 'settings', 'usage', 'voice', 'hooks', 'notices', 'budget', 'accounts', 'tests', 'sync']
 
 export interface ServiceData {
   pending: Part[] // parts whose call has not answered yet; each card shows loading until its part arrives
+  // registry is the engine's one service list; null until it answers or when it fails.
+  registry: RegistryService[] | null
   services: ServiceRow[]
   reviewer: ReviewerInfo | null
   queue: QueueRow[] | null
@@ -45,7 +49,7 @@ export interface ServiceData {
   deferred: string | null
 }
 
-export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, reasons: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null, deferred: null }
+export const emptyData: ServiceData = { pending: allParts, registry: null, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, reasons: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null, deferred: null }
 
 // A call that does not answer in this time counts as failed, so a card shows an error and never loads forever.
 export const CALL_TIMEOUT_MS = 20000
@@ -73,6 +77,8 @@ export async function loadServiceData(
   hookLog: ((name: string, id: string) => Promise<unknown>) | null = null,
   // The librarian's deferred wake, read with the hook calls for the same repository.
   librarianDeferred: (() => Promise<unknown>) | null = null,
+  // The repository whose services the registry reads; empty for the room's own.
+  repo: string = '',
 ): Promise<ServiceData> {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   let data: ServiceData = { ...previous }
@@ -117,6 +123,7 @@ export async function loadServiceData(
     ),
   )))
   await Promise.all([
+    load('registry', () => api.serviceRegistry(room, repo), readRegistry, (d, v) => ({ ...d, registry: v })),
     load('services', () => api.listServices(room), readServices, (d, v) => ({ ...d, services: v })),
     load('reviewer', () => api.reviewerStatus(room), readReviewer, (d, v) => ({ ...d, reviewer: v })),
     load('queue', () => api.mergeControlStatus(room), readMergeState, (d, v) => v ? ({ ...d, ...v }) : d),
