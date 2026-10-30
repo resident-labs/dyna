@@ -2120,6 +2120,7 @@ export class AgentSession {
 		if (expandPromptTemplates && text.startsWith("/")) {
 			const handled = await this._tryExecuteExtensionCommand(text);
 			if (handled) {
+				if (options?.deliveryId) throw new Error("Delivery input was handled by an extension");
 				// Extension command executed, no prompt to send
 				preflightResult?.("handled");
 				return;
@@ -2140,6 +2141,7 @@ export class AgentSession {
 			this.isStreaming ? options?.streamingBehavior : undefined,
 		);
 		if (!processedInput) {
+			if (options?.deliveryId) throw new Error("Delivery input was handled by an extension");
 			preflightResult?.("handled");
 			return;
 		}
@@ -2192,7 +2194,7 @@ export class AgentSession {
 		const additionalInputs: AgentMessage[] = [];
 		for (const input of options?.additionalInputs ?? []) {
 			const processed = await this._runInputHandlers(input.message, undefined, options?.source ?? "interactive");
-			if (!processed) continue;
+			if (!processed) throw new Error("Delivery input was handled by an extension");
 			let text = processed.text;
 			if (expandPromptTemplates) {
 				text = expandPromptTemplate(this._expandSkillCommand(text), [...this.promptTemplates]);
