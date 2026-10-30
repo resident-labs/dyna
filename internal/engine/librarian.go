@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/updaterservice"
 	"dyna-agent/internal/websvc"
 )
 
@@ -64,9 +65,19 @@ func (s services) librarianService() librarian.Service {
 
 // librarianMainUpdates subscribes enabled repositories to the branch observer.
 func (s services) librarianMainUpdates(h hooks.Service) hooks.Service {
-	h.ExtraRepositories = func(context.Context) ([]string, error) {
+	h.ExtraRepositories = func(ctx context.Context) ([]string, error) {
 		v, err := settings.Load(settings.DefaultPath())
-		return v.LibraryEnabled, err
+		if err != nil {
+			return nil, err
+		}
+		cfg, err := (updaterservice.Store{DataDir: store.DataDir()}).Get(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Enabled && cfg.Source != "" {
+			v.LibraryEnabled = append(v.LibraryEnabled, cfg.Source)
+		}
+		return v.LibraryEnabled, nil
 	}
 	h.MainUpdated = func(ctx context.Context, event hooks.Event) error {
 		changed, err := repoid.Resolve(ctx, event.Repo)
@@ -86,6 +97,19 @@ func (s services) librarianMainUpdates(h hooks.Service) hooks.Service {
 			}
 			if r.ID == changed.ID {
 				_, err := s.librarianService().Wake(ctx, path)
+				errs = append(errs, err)
+			}
+		}
+		cfg, err := (updaterservice.Store{DataDir: store.DataDir()}).Get(ctx)
+		if err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		if cfg.Enabled && cfg.Source != "" {
+			source, err := repoid.Resolve(ctx, cfg.Source)
+			if err != nil {
+				errs = append(errs, err)
+			} else if source.ID == changed.ID {
+				_, err := h.StartUpdate(ctx, event, cfg.Source, cfg.ToolPath)
 				errs = append(errs, err)
 			}
 		}

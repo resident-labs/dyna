@@ -436,6 +436,7 @@ func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *w
 				}
 				errs = append(errs, hookService.Tick(ctx, repo, time.Now()))
 			}
+			errs = append(errs, scheduledUpdate(ctx, hookService, time.Now()))
 			// A built-in pass can take minutes, so the global schedule runs on
 			// its own goroutine instead of holding this worker. The next tick
 			// claims nothing until the interval is due again.

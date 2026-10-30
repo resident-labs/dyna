@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,46 +10,15 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hookinstall"
-	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/processguard"
-	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store/storetest"
 )
 
-func TestSelfUpdateAndWorkersResolveThroughGitHooks(t *testing.T) {
+func TestUpdateWorkersResolveThroughGitHooks(t *testing.T) {
 	storetest.DataDir(t)
 	repo := t.TempDir()
-	for _, args := range [][]string{{"init", "-q", repo}, {"-C", repo, "remote", "add", "origin", "https://github.com/resident-labs/dyna.git"}} {
-		if out, err := exec.Command("/usr/bin/git", args...).CombinedOutput(); err != nil {
-			t.Fatalf("git fixture: %s: %v", out, err)
-		}
-	}
-	tools := t.TempDir()
-	for _, name := range []string{"go", "npm", "node"} {
-		if err := os.WriteFile(filepath.Join(tools, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", tools)
-	if err := os.MkdirAll(filepath.Join(repo, "desktop"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	for path, data := range map[string]string{"go.mod": "module dyna-agent\n", "desktop/build.sh": "fixture"} {
-		if err := os.WriteFile(filepath.Join(repo, path), []byte(data), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	const exe = "/fake/dyna with ' quote"
-	recipe, err := hooks.SelfUpdateRecipe(context.Background(), repo, exe, "self-update")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The recipe quotes the executable as one shell word. Only parse its command route.
-	tail, ok := strings.CutPrefix(recipe.Command, shellquote.Quote(exe)+" ")
-	if !ok {
-		t.Fatalf("recipe executable: %s", recipe.Command)
-	}
-	routes := map[string][]string{"recipe": strings.Fields(strings.Split(tail, " --main ")[0])}
+	routes := map[string][]string{}
 	installData := t.TempDir()
 	t.Cleanup(func() { database.Close(installData) })
 	s := hookinstall.Service{Jobs: hookinstall.Store{Root: filepath.Join(installData, "hooks", "install")}}

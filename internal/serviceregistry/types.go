@@ -77,6 +77,10 @@ const (
 	DetailUnavailable Detail = "unavailable"
 	// DetailUnreadable marks a service whose facts could not be read.
 	DetailUnreadable Detail = "unreadable"
+	// DetailUpdateSourceInvalid means the configured checkout cannot be used.
+	DetailUpdateSourceInvalid Detail = "update-source-invalid"
+	// DetailMultipleUpdateHooks asks the owner to choose one source checkout.
+	DetailMultipleUpdateHooks Detail = "multiple-update-hooks"
 )
 
 // Switch is a service's on/off control and its current value.
