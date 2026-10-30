@@ -43,9 +43,10 @@ export interface ServiceData {
   laneSync: SyncInfoByRepo | null
   // deferred is when the engine's librarian wake is due; null when none is deferred.
   deferred: string | null
+  libraryLastRun: string | null
 }
 
-export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, reasons: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null, deferred: null }
+export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, reasons: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null, deferred: null, libraryLastRun: null }
 
 // A call that does not answer in this time counts as failed, so a card shows an error and never loads forever.
 export const CALL_TIMEOUT_MS = 20000
@@ -73,6 +74,7 @@ export async function loadServiceData(
   hookLog: ((name: string, id: string) => Promise<unknown>) | null = null,
   // The librarian's deferred wake, read with the hook calls for the same repository.
   librarianDeferred: (() => Promise<unknown>) | null = null,
+  librarianLastRun: (() => Promise<unknown>) | null = null,
 ): Promise<ServiceData> {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   let data: ServiceData = { ...previous }
@@ -93,6 +95,12 @@ export async function loadServiceData(
   const deferred = librarianDeferred
     ? withTimeout(librarianDeferred, timeoutMs).then(
       (raw) => settle('hooks', (d) => ({ ...d, deferred: readDeferred(raw) })),
+      () => settle('hooks', (d) => d),
+    )
+    : Promise.resolve()
+  const lastRun = librarianLastRun
+    ? withTimeout(librarianLastRun, timeoutMs).then(
+      (raw) => settle('hooks', (d) => ({ ...d, libraryLastRun: readDeferred(raw) })),
       () => settle('hooks', (d) => d),
     )
     : Promise.resolve()
@@ -132,6 +140,7 @@ export async function loadServiceData(
     runs,
     reasons,
     deferred,
+    lastRun,
   ])
   return data
 }

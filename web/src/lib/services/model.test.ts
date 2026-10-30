@@ -28,6 +28,7 @@ test('the librarian next pass is the engine deferred wake and is empty when none
   const hooks = [{ hook: { name: 'librarian-main', label: '', event: 'main-updated', everyMinutes: 0, disabled: false }, lastRun: { id: 'run-1', result: 'pass', startedAt: '2026-10-21T22:49:00Z', finishedAt: '2026-10-21T22:49:36Z' } }]
   const settings = { 'library.enabled': '["/repo"]' }
   assert.equal(row({ hooks, settings, deferred: '2026-10-21T23:19:00Z' }, 'librarian').nextAt, '2026-10-21T23:19:00Z')
+  assert.equal(row({ hooks, settings, deferred: null, libraryLastRun: '2026-10-21T22:00:00Z' }, 'librarian').last, '2026-10-21T22:00:00Z')
   assert.equal(row({ hooks, settings, deferred: null }, 'librarian').nextAt, '')
 })
 

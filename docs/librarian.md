@@ -12,8 +12,8 @@ dyna library enable --repo /path/to/main/checkout --room <room>
 
 Only the owner or root can run `enable` and `disable`. `enable` adds the
 repository to `library.enabled` and records the room that holds the session.
-It adds one repository hook, `librarian-main`, on `main-updated`. The hook
-runs `dyna library wake`. A merge always moves main, so one hook covers it.
+The engine wakes the librarian when the repository's main branch changes.
+No repository hook is needed.
 
 When a wake must wait for the librarian's interval, the engine keeps that
 wake itself. It runs one in-process timer per repository and fires the wake
@@ -22,10 +22,9 @@ it restores that wake for every enabled repository, so a restart keeps the
 pending pass. A deferred wake that fails retries after ten minutes, up to five
 times, so a transient error does not drop the pass.
 
-When the engine starts, it removes the `librarian-merged` and `librarian-batch`
-hooks that earlier releases added. Each one ran `dyna library wake`.
+A one-time migration removes the librarian hooks that earlier releases added.
 
-`dyna library disable` removes the hook and closes the session. The map stays.
+`dyna library disable` closes the session. The map stays.
 
 ## When it runs
 

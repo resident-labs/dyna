@@ -21,7 +21,7 @@ func (s Service) documentsDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.documents", 4, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "hooks.documents", 5, func(conn *sql.Conn, old int) error {
 		if old < 1 {
 			if _, err := conn.ExecContext(context.Background(), documentsSchema); err != nil {
 				return err
@@ -35,7 +35,13 @@ func (s Service) documentsDB() (*sql.DB, error) {
 		if err := migrateDocumentFields(conn); err != nil {
 			return err
 		}
-		return migrateDocumentScope(conn)
+		if err := migrateDocumentScope(conn); err != nil {
+			return err
+		}
+		if old < 5 {
+			return removeLibrarianHooks(conn)
+		}
+		return nil
 	})
 	return db, err
 }
