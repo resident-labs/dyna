@@ -165,6 +165,20 @@ func TestExpiryAndPendingDedup(t *testing.T) {
 		t.Fatalf("old: %+v %v", old, err)
 	}
 }
+func TestImmediateSubmitReturnsResultWithoutWake(t *testing.T) {
+	f := setup(t)
+	f.class = contract.ClassAuto
+	op := f.submit(t, principal("worker"))
+	if op.State != contract.OpDone {
+		t.Fatal(op.State)
+	}
+	var count int
+	err := f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='op.ran'", "worker").Scan(&count)
+	if err != nil || count != 0 {
+		t.Fatalf("wakes %d, error %v", count, err)
+	}
+}
+
 func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
 	f := setup(t)
 	started, release := make(chan struct{}), make(chan struct{})
