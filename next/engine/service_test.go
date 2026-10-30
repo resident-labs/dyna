@@ -500,9 +500,7 @@ func TestBoxLifecycleEmitsTransitions(t *testing.T) {
 	}
 	session := lead.Session
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
-		t.Fatal(e)
-	}
+	connectAgent(ctx, t, s, session)
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
