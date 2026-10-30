@@ -50,7 +50,7 @@
     {#each filtered as p (p.id)}
       <article class="item">
         <div class="head">
-          <Avatar name={who(p)} hue={p.fromHue} owner={p.owner} emoji={p.avatar.emoji} size={32} ring="var(--side)" />
+          <Avatar name={who(p)} hue={p.fromHue} avatar={p.avatar} here={room.name} size={32} dotGap="var(--side)" />
           <span class="who">
             <span class="name hue-{p.fromHue}">{who(p)}</span>
             <time title={new Date(p.ts).toLocaleString()}>{stamp(p.ts)}</time>

@@ -40,7 +40,7 @@ function render(post: Record<string, unknown>) {
   const mounted = web.mount(web.FeedMessage, { target, props: { post: { id: 'msg_1', ts: 1, text: 'Ship it', fromHue: 1, ...post }, room: { name: 'dyna-agent' } } })
   web.flushSync()
   const header = target.querySelector('header')?.textContent ?? ''
-  return { header: header.replace(/\s+/g, ' ').trim(), done: () => { web.unmount(mounted); target.remove() } }
+  return { target, header: header.replace(/\s+/g, ' ').trim(), done: () => { web.unmount(mounted); target.remove() } }
 }
 
 test('an owner post shows "you" and no "human" tag', () => {
@@ -48,4 +48,16 @@ test('an owner post shows "you" and no "human" tag', () => {
   assert.match(view.header, /\byou\b/)
   assert.doesNotMatch(view.header, /human/)
   view.done()
+})
+
+test('only an avatar from another room has a ring and room label', () => {
+  const identity = { kind: 'root', emoji: '🖥️', color: 'blue', room: 'lab' }
+  const visitor = render({ from: 'lab:root', avatar: identity })
+  assert.ok(visitor.target.querySelector('.room-ring'))
+  assert.match(visitor.header, /lab/)
+  visitor.done()
+  const local = render({ from: 'dyna-agent:root', avatar: { ...identity, room: 'dyna-agent' } })
+  assert.equal(local.target.querySelector('.room-ring'), null)
+  assert.doesNotMatch(local.header, /lab/)
+  local.done()
 })

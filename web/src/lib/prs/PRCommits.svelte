@@ -34,7 +34,7 @@
     <Card title="Commits on {day.label}" count={day.commits.length}>
       {#each day.commits as c (c.sha)}
         <Row dense clamp={false} text={c.headline}>
-          {#snippet lead()}<Avatar name={c.author?.login || '?'} size={22} />{/snippet}
+          {#snippet lead()}<Avatar label={c.author?.login || '?'} size={22} />{/snippet}
           {#snippet meta()}<span>{c.author?.name || c.author?.login || 'unknown'}</span><span>{ago(c.date)}</span>{/snippet}
           {#snippet trail()}<span class="commit-actions"><button class="sha" onclick={() => openExternal(commitUrl(url, c.sha))} title="Open this commit on GitHub" aria-label="Open commit {shortSha(c.sha)} on GitHub">{shortSha(c.sha)}</button><button class="copy" onclick={() => copyHash(c.sha)} disabled={copyStates[c.sha] === 'copying'} aria-label="Copy full hash for commit {shortSha(c.sha)}">Copy</button><span class="copy-status" role="status">{copyStates[c.sha] === 'copied' ? 'Copied' : copyStates[c.sha] === 'failed' ? 'Copy failed. Try again.' : ''}</span></span>{/snippet}
         </Row>

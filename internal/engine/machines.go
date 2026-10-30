@@ -114,7 +114,7 @@ func (s services) machineRunning() []websvc.MachineAgent {
 			continue
 		}
 		owner := s.rooms.LoadOwner(info.ID)
-		out = append(out, websvc.MachineAgent{ID: owner.ID, Name: owner.Name, Address: owner.Address, Room: owner.Room, RoomID: owner.RoomID, Hue: owner.Hue})
+		out = append(out, websvc.MachineAgent{Avatar: s.rooms.MemberAvatar(info.ID, info.RoomID, info.Room), ID: owner.ID, Name: owner.Name, Address: owner.Address, Room: owner.Room, RoomID: owner.RoomID, Hue: owner.Hue})
 	}
 	return out
 }

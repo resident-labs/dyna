@@ -117,7 +117,7 @@
       <article class="question" class:focused={focused === q.id} class:compact={q.state !== 'open'} tabindex="-1" data-question={q.id} onfocusin={() => focused = q.id} onclick={(e) => { focused = q.id; const target = e.target instanceof Element ? e.target : null; if (!target?.closest('button, input, a')) e.currentTarget.focus() }}>
         {#if q.state === 'open'}
           <div class="top">
-            <Avatar name={q.askerName} hue={q.askerHue} emoji={q.avatar.emoji} owner={q.asker === 'owner'} size={24} ring="var(--raise)" />
+            <Avatar name={q.askerName} hue={q.askerHue} avatar={q.avatar} size={24} dotGap="var(--raise)" />
             <strong class="hue-{q.askerHue}">{q.askerName}</strong>
             <span class="kind">{q.kind === 'terminal' ? 'terminal' : 'question'}</span>
             <time title={new Date(q.askedAt).toLocaleString()}>{ago(q.askedAt)}</time>
@@ -152,14 +152,14 @@
             </form>
             {@const others = alsoAsked(questions, q)}
             {#if others.length}
-              <div class="group"><span>Also asked by</span>{#each others as other}<Avatar name={other.askerName} hue={other.askerHue} emoji={other.avatar.emoji} size={22} ring="var(--raise)" />{/each}</div>
+              <div class="group"><span>Also asked by</span>{#each others as other}<Avatar name={other.askerName} hue={other.askerHue} avatar={other.avatar} size={22} dotGap="var(--raise)" />{/each}</div>
             {/if}
           {/if}
         {:else}
           <p class="clamp">{q.kind === 'terminal' ? q.terminal?.reason || q.text : q.text}</p>
           <div class="outcome">
             <span class="kind">{q.kind === 'terminal' ? 'terminal' : 'question'}</span>
-            <Avatar name={q.askerName} hue={q.askerHue} emoji={q.avatar.emoji} owner={q.asker === 'owner'} size={16} ring="var(--raise)" />
+            <Avatar name={q.askerName} hue={q.askerHue} avatar={q.avatar} size={16} dotGap="var(--raise)" />
             <span class="asker hue-{q.askerHue}">{q.askerName}</span><span>·</span><span class="mono">{q.id}</span><span>·</span>
             {#if q.kind === 'terminal' && q.terminal}<span class="terminal-outcome {q.terminal.stage}">{terminalOutcome(q)} · {ago(q.answer?.at ?? q.withdrawn?.at ?? q.askedAt)}</span>
             {:else if q.answer}{@const answered = q.answer}<span class="answered"><span aria-hidden="true">✓</span> {answeredLine({ answererName: q.answererName, answer: answered })} · {ago(answered.at)}</span>{#if answered.source === 'card'}<Chip outline title="A card wrote this answer. You confirmed it before it was sent.">card</Chip>{/if}

@@ -66,7 +66,7 @@
         </button>
       </div>
       <div class="ident">
-        <Avatar emoji={m.avatar.emoji} name={m.name} hue={m.hue} size={80} state={m.state} status={m.status} ring="var(--side)" />
+        <Avatar avatar={m.avatar} here={room.name} name={m.name} hue={m.hue} size={80} state={m.state} status={m.status} dotGap="var(--side)" />
       </div>
       <div class="body">
         <h2 class="hue-{m.hue}">{m.name} {#if agentExpedited($expedite, m)}<ExpediteBadge />{/if}</h2>

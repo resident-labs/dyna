@@ -134,6 +134,7 @@ export interface Engine {
   UnarchiveRoom(ref: string): Promise<null>
   RenameRoom(ref: string, name: string): Promise<null>
   SetRoomRootProfile(ref: string, name: string): Promise<null>
+  SetRoomColor(ref: string, value: import('./room.gen.ts').Room['color']): Promise<null>
   SetRoomCheckIn(ref: string, value: string): Promise<null>
   SetRoomLimit(ref: string, field: string, value: string): Promise<SetRoomLimitResult>
   DeleteRoom(ref: string): Promise<null>

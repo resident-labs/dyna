@@ -3,6 +3,7 @@ package websvc
 import (
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/roomsvc"
 	"time"
 )
 
@@ -59,12 +60,13 @@ type MachineCIRun struct {
 
 // MachineAgent is a session that runs on this engine's machine now.
 type MachineAgent struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Address string `json:"address,omitempty"`
-	Room    string `json:"room,omitempty"`
-	RoomID  string `json:"roomId,omitempty"`
-	Hue     int    `json:"hue"`
+	Avatar  roomsvc.Avatar `json:"avatar" tstype:"Avatar"`
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	Address string         `json:"address,omitempty"`
+	Room    string         `json:"room,omitempty"`
+	RoomID  string         `json:"roomId,omitempty"`
+	Hue     int            `json:"hue"`
 }
 
 // MachineSummary is one row of the Machines list. A figure the engine does not
