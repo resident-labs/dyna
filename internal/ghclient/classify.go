@@ -33,6 +33,8 @@ type ItemRef struct {
 
 // ClassifyInput carries what Classify needs besides the arguments.
 type ClassifyInput struct {
+	RoomRepository bool
+	OwnPR          func(context.Context, ItemRef) bool
 	// Host and Repo name the target repository, as checkPolicy resolves it.
 	Host string
 	Repo string
@@ -195,7 +197,23 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 	}
 	p := parseArgs(args[:2], args[2:])
 	switch args[0] + " " + args[1] {
-	case "issue create", "issue edit", "issue comment", "pr create", "pr edit", "pr ready", "pr comment":
+	case "pr create":
+		if in.RoomRepository {
+			return approvals.ClassAuto
+		}
+		return approvals.ClassAgent
+	case "pr edit", "pr ready", "pr comment":
+		if in.RoomRepository && in.OwnPR != nil && len(p.positional) <= 1 {
+			ref := ItemRef{Kind: ItemPR, Host: in.Host, Repo: in.Repo}
+			if len(p.positional) == 1 {
+				ref.Target = p.positional[0]
+			}
+			if in.OwnPR(ctx, ref) {
+				return approvals.ClassAuto
+			}
+		}
+		return approvals.ClassAgent
+	case "issue create", "issue edit", "issue comment":
 		return approvals.ClassAgent
 	case "pr review":
 		if commentOnlyReview(p) {
