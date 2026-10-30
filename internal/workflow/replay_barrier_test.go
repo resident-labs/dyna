@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/workflow/enginefake"
@@ -158,5 +160,136 @@ func TestReplayBarrierChecksSynchronousPostOrderAtNextAsyncCall(t *testing.T) {
 	}
 	if _, _, err := barrier.Match(runstore.WorkflowCallCommand, "first", 1); !errors.Is(err, ErrReplayMismatch) {
 		t.Fatalf("out-of-order calls = %v", err)
+	}
+}
+
+type reversedRaceCommands struct {
+	*fakeCommands
+	mu       sync.Mutex
+	commands map[string]string
+	release  chan struct{}
+}
+
+func (c *reversedRaceCommands) Start(ctx context.Context, spec CommandSpec) (string, error) {
+	id, err := c.fakeCommands.Start(ctx, spec)
+	if err != nil {
+		return id, err
+	}
+	command := spec.Argv[2]
+	c.mu.Lock()
+	c.commands[id] = command
+	c.mu.Unlock()
+	if command == "effect second" {
+		close(c.release)
+	}
+	return id, nil
+}
+
+func (c *reversedRaceCommands) Wait(ctx context.Context, id string) (CommandExit, error) {
+	c.mu.Lock()
+	command := c.commands[id]
+	c.mu.Unlock()
+	if command == "first" {
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return CommandExit{}, ctx.Err()
+		}
+	}
+	return c.fakeCommands.Wait(ctx, id)
+}
+
+func TestConcurrentCommandRaceCannotBeAutomaticallyReplayed(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	script := `const a = run('first'); const b = run('second'); const winner = await Promise.race([a,b]); await run('effect ' + winner.stdout); await Promise.all([a,b]); return winner.stdout;`
+	run, err := runstore.Create("race", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	commands := &reversedRaceCommands{fakeCommands: newFakeCommands(), commands: map[string]string{}, release: make(chan struct{})}
+	commands.next = func(spec CommandSpec) (CommandExit, string) { return CommandExit{}, spec.Argv[2] }
+	result, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: commands, RecordManifest: true})
+	if err != nil || result != `"second"` {
+		t.Fatalf("race = %s, %v", result, err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		t.Fatalf("sealed overlapping commands: %v", err)
+	}
+	manifest, err := runstore.ReadWorkflowManifest(t.Context(), run.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewReplayBarrier(manifest); err == nil {
+		t.Fatal("accepted overlapping calls for automatic replay")
+	}
+}
+
+type immediateAgentEngine struct{}
+
+func (immediateAgentEngine) Call(_ context.Context, method string, _ []any, result any) error {
+	if method == "WaitRunAgent" {
+		*result.(*callspec.RunAgentState) = callspec.RunAgentState{Done: true, OK: true, Status: "ok", Result: json.RawMessage(`"fine"`)}
+	}
+	return nil
+}
+
+func TestConcurrentAgentAndCommandCannotBeAutomaticallyReplayed(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Setenv(runstore.AgentJournalRootEnv, "")
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	script := `const a = run('true'); const b = agent('RESPOND: fine'); await Promise.all([a,b]); return 'done';`
+	run, err := runstore.Create("mixed race", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: newFakeCommands(), Engine: immediateAgentEngine{}, RecordManifest: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		t.Fatalf("sealed overlapping agent and command: %v", err)
+	}
+}
+
+func TestReplayRejectsNewOverlapBeforeStartingEffects(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	run, err := runstore.Create("serial", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	commands := newFakeCommands()
+	opts := Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: commands, RecordManifest: true}
+	if _, err := executeWorkflowTest(t, `await run('first'); await run('second');`, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runstore.ReadWorkflowManifest(t.Context(), run.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Replay, err = NewReplayBarrier(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.RecordManifest = false
+	_, err = executeWorkflowTest(t, `const a = run('first'); const b = run('second'); await Promise.race([a,b]); await run('new effect');`, opts)
+	if !errors.Is(err, ErrReplayMismatch) {
+		t.Fatalf("overlapping replay = %v", err)
+	}
+	if commands.attempts != 2 {
+		t.Fatalf("started %d commands, want only the two original calls", commands.attempts)
 	}
 }

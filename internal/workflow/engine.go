@@ -316,6 +316,9 @@ type engine struct {
 	planStage      int
 	planItem       int
 	planIndexSet   bool
+	// asyncPending is accessed only on this engine's event-loop thread.
+	asyncPending  int
+	overlapMarked bool
 }
 
 type callPlan struct {
@@ -480,11 +483,24 @@ func (e *engine) emitLog(provenance, msg string) {
 func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	vm := e.vm // spawn always runs on the loop thread
 	promise, resolveFn, rejectFn := vm.NewPromise()
+	var release func()
 	resolve := func(v any) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { resolveFn(vm.ToValue(v)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			resolveFn(vm.ToValue(v))
+		})
 	}
 	reject := func(err error) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { rejectFn(vm.NewGoError(err)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			rejectFn(vm.NewGoError(err))
+		})
 	}
 
 	prompt := call.Argument(0).String()
@@ -648,6 +664,11 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		e.emit(ev)
 	}
 	emitA(runstore.Event{T: "agent_start", ID: id, Label: label, Profile: prof.Name, Phase: phase, Preview: textutil.ClipOneLine(prompt, 160)})
+	release, err = e.beginReplayAsync()
+	if err != nil {
+		reject(err)
+		return vm.ToValue(promise)
+	}
 
 	if e.opts.Replay != nil {
 		matched, value, replayErr := e.replayCall(runstore.WorkflowCallAgent, key, id)
@@ -946,11 +967,24 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 func (e *engine) workflow(call goja.FunctionCall) goja.Value {
 	vm := e.vm
 	promise, resolveFn, rejectFn := vm.NewPromise()
+	var release func()
 	resolve := func(v any) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { resolveFn(vm.ToValue(v)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			resolveFn(vm.ToValue(v))
+		})
 	}
 	reject := func(err error) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { rejectFn(vm.NewGoError(err)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			rejectFn(vm.NewGoError(err))
+		})
 	}
 
 	if e.depth >= 1 {
@@ -987,6 +1021,12 @@ func (e *engine) workflow(call goja.FunctionCall) goja.Value {
 	planNodeID := ""
 	if third := call.Argument(2); !goja.IsUndefined(third) && !goja.IsNull(third) {
 		planNodeID = strings.TrimSpace(third.String())
+	}
+
+	release, err = e.beginReplayAsync()
+	if err != nil {
+		reject(err)
+		return vm.ToValue(promise)
 	}
 
 	e.shared.mu.Lock()
