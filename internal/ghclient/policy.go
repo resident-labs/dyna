@@ -395,7 +395,6 @@ func editsForkPull(ctx context.Context, rec room.Record, cmdDir string, r reposi
 
 var mutation = regexp.MustCompile(`\bmutation\b`)
 var errUpstreamEdit = errors.New("gh pr edit on the upstream repository is allowed only for a pull request number whose head branch is in the room's fork")
-var errAgentGitHubWrite = errors.New("GitHub writes are not allowed for agents; post in the room with dyna post instead")
 
 func commandArgs(args []string) []string {
 	for len(args) > 0 {
@@ -664,30 +663,6 @@ func fetchParentRepo(ctx context.Context, cmd *exec.Cmd, r repository) (string, 
 		return "", false
 	}
 	return body.Parent.FullName, true
-}
-
-func checkWorkerPolicy(args []string) error {
-	args = commandArgs(args)
-	if isReadCommand(args) {
-		return nil
-	}
-	if len(args) >= 2 {
-		switch args[0] + " " + args[1] {
-		case "issue create", "issue edit", "issue comment", "pr create", "pr edit", "pr ready", "pr comment":
-			return nil
-		case "pr review":
-			if commentOnlyReview(parseArgs(args[:2], args[2:])) {
-				return nil
-			}
-		}
-	}
-	if isRepoFork(args) {
-		return nil
-	}
-	if _, ok := ownCommentCall(args); ok {
-		return nil
-	}
-	return errAgentGitHubWrite
 }
 
 // isRepoFork admits gh repo fork of one repository, with only the flags that

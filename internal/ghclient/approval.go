@@ -36,18 +36,22 @@ func ClassifyForApproval(ctx context.Context, binary, dir string, args []string)
 // failed read makes Classify choose owner; it never widens the agent class.
 func approvalAuthor(ctx context.Context, binary, dir string, ref ItemRef) (string, error) {
 	var args []string
-	switch ref.Kind {
-	case ItemIssue, ItemPR, ItemRun:
-		args = []string{string(ref.Kind), "view"}
-	default:
-		return "", errors.New("unknown approval item kind")
-	}
-	if ref.Target != "" {
-		args = append(args, ref.Target)
-	}
-	args = append(args, "--repo", ref.Host+"/"+ref.Repo, "--json", "author")
-	if ref.Kind == ItemRun {
-		args[len(args)-1] = "actor"
+	if ref.Kind == ItemComment {
+		args = []string{"api", "--hostname", ref.Host, "repos/" + ref.Repo + "/" + ref.Target}
+	} else {
+		switch ref.Kind {
+		case ItemIssue, ItemPR, ItemRun:
+			args = []string{string(ref.Kind), "view"}
+		default:
+			return "", errors.New("unknown approval item kind")
+		}
+		if ref.Target != "" {
+			args = append(args, ref.Target)
+		}
+		args = append(args, "--repo", ref.Host+"/"+ref.Repo, "--json", "author")
+		if ref.Kind == ItemRun {
+			args[len(args)-1] = "actor"
+		}
 	}
 	cmd := Command(ctx, binary, dir, args...)
 	stdout, stderr := boundedio.New(64*1024), boundedio.New(8192)
@@ -58,6 +62,7 @@ func approvalAuthor(ctx context.Context, binary, dir string, ref ItemRef) (strin
 	var payload struct {
 		Author struct{ Login string } `json:"author"`
 		Actor  struct{ Login string } `json:"actor"`
+		User   struct{ Login string } `json:"user"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		return "", err
@@ -65,6 +70,9 @@ func approvalAuthor(ctx context.Context, binary, dir string, ref ItemRef) (strin
 	login := payload.Author.Login
 	if ref.Kind == ItemRun {
 		login = payload.Actor.Login
+	}
+	if ref.Kind == ItemComment {
+		login = payload.User.Login
 	}
 	if login == "" {
 		return "", fmt.Errorf("%s %q has no author", ref.Kind, ref.Target)

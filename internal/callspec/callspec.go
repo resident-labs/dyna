@@ -44,6 +44,8 @@ const callTimeout = 5 * time.Second
 // Item 8 moves such work out of the call; until then a call stays here with
 // a reason. A test fails when this list grows.
 var LongCalls = map[string]time.Duration{
+	// Approval waits use the room preference; the caller can cancel its context.
+	"ApprovalWait": 25 * time.Hour,
 	// Read-only input waits last 30 seconds and leave time for transport.
 	"RunnerWaitInput": time.Minute,
 	// Run agent and job waits last 25 seconds and leave time for transport.
