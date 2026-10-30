@@ -244,6 +244,8 @@ const (
 	// CauseTimeout is a check or a run that reached its own deadline, or a check
 	// whose command reported the timeout status. A bare SIGKILL is not a timeout.
 	CauseTimeout FailureCause = "timeout"
+	// CauseRecoveryTimeout means the previous run could not be safely recovered.
+	CauseRecoveryTimeout FailureCause = "recovery-timeout"
 	// CauseCancelled is a check or a run that its caller stopped.
 	CauseCancelled FailureCause = "cancelled"
 	// CauseEngineStop is a check or a run that Dyna itself stopped because its
@@ -282,6 +284,8 @@ func (c FailureCause) Label() string {
 		return "SSH connection lost"
 	case CauseTimeout:
 		return "timeout"
+	case CauseRecoveryTimeout:
+		return "local CI recovery timed out"
 	case CauseCancelled:
 		return "cancelled"
 	case CauseEngineStop:

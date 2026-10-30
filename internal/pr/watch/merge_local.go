@@ -161,6 +161,9 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 			}
 			return VerdictPending, "", "local CI could not start a run; trying again", nil
 		}
+		if result.Cause == localci.CauseRecoveryTimeout {
+			return VerdictFailed, logs, "local CI recovery on " + result.Node + " timed out; the previous run remains protected", nil
+		}
 		// A machine fault, including a git push or checkout failure, retries on
 		// another machine. The trial waits for that retry. A spent retry falls
 		// through and fails with the saved git error.
