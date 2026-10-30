@@ -442,6 +442,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ConfigProfiles", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: configsvc.Profiles},
 		{Name: "UpsertProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Local: true, Method: s.config.UpsertProfile},
 		{Name: "SetProfileUses", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Local: true, Method: s.config.SetProfileUses},
+		{Name: "EditProfileField", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Local: true, Method: s.config.EditProfileField},
 		{Name: "SaveProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.config.SaveProfile},
 		{Name: "RemoveProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.config.RemoveProfile},
 		{Name: "SetDefaultProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.config.SetDefaultProfile},
