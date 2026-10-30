@@ -1,4 +1,4 @@
-package admission
+package doctor
 
 import (
 	"context"
@@ -34,25 +34,33 @@ func TestReliefStopsLongestIdleFirstAndSkipsBusyAndRecent(t *testing.T) {
 	}
 }
 
-// Relief runs when memory is short, and not when the machine has room.
-func TestSampleRelievesOnlyWhenMemoryIsShort(t *testing.T) {
-	for name, tc := range map[string]struct {
+func TestMemoryShort(t *testing.T) {
+	for _, tc := range []struct {
 		r    Readings
-		want int
+		want bool
 	}{
-		"short":    {Readings{Cores: 8, MemTotal: 32 * gib, MemAvail: 2 * gib}, 1},
-		"stalls":   {Readings{Cores: 8, MemTotal: 32 * gib, MemAvail: 30 * gib, PressureMem: EnterMemPressure}, 1},
-		"has room": {Readings{Cores: 8, MemTotal: 32 * gib, MemAvail: 30 * gib}, 0},
+		{Readings{MemTotal: 32 << 30, MemAvail: 2 << 30}, true},
+		{Readings{MemTotal: 32 << 30, MemAvail: 30 << 30, PressureMem: 10}, true},
+		{Readings{MemTotal: 32 << 30, MemAvail: 30 << 30}, false},
 	} {
-		o, _ := observerFor(fixedSource{r: tc.r}, 1, &memState{})
-		calls := 0
-		o.Relieve = func(context.Context) int { calls++; return 0 }
-		if err := o.Sample(t.Context()); err != nil || calls != tc.want {
-			t.Errorf("%s: relief ran %d times, err %v", name, calls, err)
+		if got := MemoryShort(tc.r); got != tc.want {
+			t.Errorf("MemoryShort(%+v) = %v", tc.r, got)
 		}
 	}
-	o, _ := observerFor(fixedSource{r: busy}, 1, &memState{})
-	o.Mode = func(context.Context) Mode { return ModeOff }
-	o.Relieve = func(context.Context) int { t.Fatal("relief ran with the watcher off"); return 0 }
-	_ = o.Sample(t.Context())
+}
+
+type fixedMemory Readings
+
+func (f fixedMemory) Read(context.Context) (Readings, error) { return Readings(f), nil }
+func TestReliefCheckOnlyListsIdleWhenMemoryIsShort(t *testing.T) {
+	calls := 0
+	r := Relief[string]{List: func(context.Context) ([]Idle[string], error) { calls++; return nil, nil }}
+	for _, reading := range []Readings{{MemTotal: 32 << 30, MemAvail: 30 << 30}, {MemTotal: 32 << 30, MemAvail: 2 << 30}} {
+		if err := r.Check(t.Context(), fixedMemory(reading)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("idle list called %d times; want once", calls)
+	}
 }
