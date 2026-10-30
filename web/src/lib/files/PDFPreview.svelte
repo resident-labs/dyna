@@ -154,7 +154,7 @@
   .page-jump input { width: 5ch; min-width: 44px; padding: 5px; border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--side); color: var(--ink); text-align: center; font: inherit; }
   .page-jump input:focus { outline-color: var(--iris); }
   .jump-error { margin: var(--s2) var(--s4); }
-  @media (max-width: 760px) { .tools { padding: var(--s2); gap: var(--s1); } .tools button, .page-jump input { min-height: 44px; } .page-jump input { font-size: 16px; } }
+  @media (max-width: 760px) { .tools { padding: var(--s2); gap: var(--s1); } .tools button, .page-jump input { min-height: 44px; } .page-jump input { font-size: var(--t-title); } }
   button { padding: 5px 10px; border-radius: 5px; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     button:hover { background: var(--hover); color: var(--ink); }
@@ -167,5 +167,5 @@
   canvas.hidden { display: none; }
   .status { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
   .error { margin: 20px; color: var(--coral); font-size: 13px; }
-  pre { text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.8 var(--sans); margin: 0 auto; max-width: 760px; color: var(--ink-2); }
+  pre { text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--t-body)/1.8 var(--sans); margin: 0 auto; max-width: var(--page-reading-width); color: var(--ink-2); }
 </style>
