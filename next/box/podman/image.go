@@ -40,6 +40,15 @@ func (h *Host) BuildBase(ctx context.Context, containerfile, piTarball []byte) (
 	return tag, h.Build(ctx, tag, "", contextTar.Bytes())
 }
 
+// BuildError reports that podman build exited non-zero.
+// Tail holds the last 4096 bytes of the build output.
+type BuildError struct{ Tail string }
+
+func (e *BuildError) Error() string { return "podman build failed" }
+
+// BuildLog returns the build output tail.
+func (e *BuildError) BuildLog() string { return e.Tail }
+
 func (h *Host) Build(ctx context.Context, tag, base string, contextTar []byte) error {
 	select {
 	case h.buildGate <- struct{}{}:
@@ -60,6 +69,9 @@ func (h *Host) Build(ctx context.Context, tag, base string, contextTar []byte) e
 		args = append(args, "--build-arg", "DYNA_BASE="+base)
 	}
 	args = append(args, "-")
-	_, err = h.runInput(ctx, contextTar, args...)
+	out, err := h.runInput(ctx, contextTar, args...)
+	if errors.As(err, &exit) {
+		return &BuildError{Tail: string(out[max(0, len(out)-4096):])}
+	}
 	return err
 }
