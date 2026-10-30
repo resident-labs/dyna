@@ -172,6 +172,16 @@ func TestPostAcrossRooms(t *testing.T) {
 	}
 }
 
+func TestUnknownPostAddress(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	for _, address := range []string{"@absent", "@absent:agent"} {
+		_, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: "hello", Mentions: []string{address}})
+		if e == nil || e.Code != contract.ErrInvalid {
+			t.Fatalf("%s: %v", address, e)
+		}
+	}
+}
+
 func TestPostToOwnerDM(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
