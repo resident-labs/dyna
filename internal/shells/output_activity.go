@@ -89,29 +89,36 @@ func (p *activityPublisher) send(s activity.Signal) {
 
 func (p *activityPublisher) run(ticks <-chan time.Time, write func(activity.Signal) error) {
 	var pending activity.Signal
-	var storedLease time.Time
+	var storedLease, storedSince time.Time
 	dirty := false
+	flush := func() {
+		if !dirty {
+			return
+		}
+		if pending.Copier == activity.CopierRunning {
+			proof := pending.LeaseUntil.Add(-activity.Lease)
+			if storedLease.IsZero() || !proof.Before(storedLease) {
+				pending.ObservedSince = proof
+			} else if pending.ObservedSince.Before(storedSince) {
+				pending.ObservedSince = storedSince
+			}
+		}
+		if write(pending) == nil {
+			storedLease = pending.LeaseUntil
+			storedSince = pending.ObservedSince
+		}
+		dirty = false
+	}
 	for {
 		select {
 		case s, ok := <-p.updates:
 			if !ok {
-				if dirty {
-					_ = write(pending)
-				}
+				flush()
 				return
 			}
 			pending, dirty = s, true
 		case <-ticks:
-			if dirty {
-				proof := pending.LeaseUntil.Add(-activity.Lease)
-				if pending.Copier == activity.CopierRunning && (storedLease.IsZero() || !proof.Before(storedLease)) {
-					pending.ObservedSince = proof
-				}
-				if write(pending) == nil {
-					storedLease = pending.LeaseUntil
-				}
-				dirty = false
-			}
+			flush()
 		}
 	}
 }

@@ -144,13 +144,20 @@ func TestPublisherRestartsCoverageAfterFailedWrites(t *testing.T) {
 	<-writes
 	responses <- errors.New("write failed")
 	signal = signal.Prove(start.Add(2 * activity.Lease))
+	// The reader continued proving coverage while database writes failed.
+	signal.ObservedSince = start
 	p.updates <- signal
 	ticks <- start.Add(2 * activity.Lease)
 	resumed := <-writes
 	responses <- nil
+	signal = signal.Prove(start.Add(2*activity.Lease + activity.PublishInterval))
+	p.updates <- signal
+	ticks <- start.Add(2*activity.Lease + activity.PublishInterval)
+	continued := <-writes
+	responses <- nil
 	close(p.updates)
 	<-done
-	if !first.ObservedSince.Equal(start) || !resumed.ObservedSince.Equal(start.Add(2*activity.Lease)) {
-		t.Fatalf("first = %+v, resumed = %+v", first, resumed)
+	if !first.ObservedSince.Equal(start) || !resumed.ObservedSince.Equal(start.Add(2*activity.Lease)) || !continued.ObservedSince.Equal(resumed.ObservedSince) {
+		t.Fatalf("first = %+v, resumed = %+v, continued = %+v", first, resumed, continued)
 	}
 }
