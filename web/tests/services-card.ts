@@ -10,7 +10,6 @@ import { api } from '../src/api.ts'
 import ServicesCard from '../src/lib/rooms/ServicesCard.svelte'
 import { need } from '../test/need.ts'
 import type { Hook, HookSummary } from '../src/lib/api/settings.ts'
-import type { Room } from '../src/lib/api/room.ts'
 
 const healthy = new URLSearchParams(location.search).get('mode') === 'healthy'
 const minutes = (n: number): string => new Date(Date.now() - n * 60000).toISOString()
@@ -25,11 +24,10 @@ const summaries: HookSummary[] = [
   hook('check-ins', 'Parent check-ins', 'pass', 5),
 ]
 api.globalHookSummary = () => Promise.resolve(summaries)
-api.listServices = () => Promise.resolve([
-  { role: 'librarian', name: 'Librarian', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', waiting: false, scope: 'global', sessions: 1, profiles: ['sol'] },
-  { role: 'reviewer', name: 'PR reviewers', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', waiting: false, scope: 'room', sessions: 2, profiles: ['sol'] },
+api.serviceRegistry = () => Promise.resolve([
+  { id: 'doctor', group: 'this-computer', scope: 'global', label: 'Load doctor', description: '', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [] },
+  { id: 'reviewer', group: 'pull-requests', scope: 'room', label: 'Reviews', description: '', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [] },
 ])
 api.globalHookRunLog = () => Promise.resolve({ tail: 'maintenance: pruning worktrees\nerror: disk read failed on /var/lib/dyna\nexit status 1', exitCode: 1 })
 
-const room: Room = { id: 'room-1', name: 'dyna', repo: '/repo', lastActivity: '', unread: 0, running: 0, members: 1, pinned: false, pinOrder: 0, archived: false }
-mount(ServicesCard, { target: need(document.getElementById('app'), 'app'), props: { rooms: [room], onroom: (id: string, view?: string) => { document.body.dataset.opened = `${id}:${view ?? ''}` } } })
+mount(ServicesCard, { target: need(document.getElementById('app'), 'app'), props: { onsettings: (pane: string) => { document.body.dataset.opened = pane } } })
