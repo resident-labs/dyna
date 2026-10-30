@@ -205,8 +205,8 @@ Other agents own all other files; edit only your assigned files.
 Create a worktree with dyna git worktrees new fix/truncated-packets.
 Checks: Add a regression case; run go test ./internal/decoder/...
 Return: At most 1200 characters: cause, files, tests, risks.
-Save long evidence in $DYNA_SCRATCH and return its path.
-Post to @parent only for a blocker or a decision. Send ready work as your final result.
+Attach reader-facing reports, designs, plans and long results with `dyna post --attach`.
+Post to @parent for a blocker, a decision or an attached report. Send ready work as your final result.
 ```
 
 ```bash
