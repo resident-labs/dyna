@@ -33,18 +33,19 @@ func (e apiError) Error() string { return e.status }
 
 // Client owns the box socket and a bounded outgoing buffer.
 type Client struct {
-	http  *http.Client
-	mu    sync.Mutex
-	size  int
-	space chan struct{}
-	queue chan outgoing
+	shellJobs func() int
+	http      *http.Client
+	mu        sync.Mutex
+	size      int
+	space     chan struct{}
+	queue     chan outgoing
 }
 
 func NewClient(socket string) *Client {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
-	return &Client{http: &http.Client{Transport: transport}, space: make(chan struct{}), queue: make(chan outgoing, 128)}
+	return &Client{shellJobs: func() int { return 0 }, http: &http.Client{Transport: transport}, space: make(chan struct{}), queue: make(chan outgoing, 128)}
 }
 
 // Run sends queued requests in order. A disconnect does not end a running turn.
@@ -199,7 +200,7 @@ func (c *Client) TranscriptAppend(ctx context.Context, req contract.TranscriptAp
 }
 
 func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
-	body, err := json.Marshal(contract.TurnOutputRequest{Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Final: result.Final, Model: result.Usage.Model, Usage: result.Usage})
+	body, err := json.Marshal(contract.TurnOutputRequest{ShellJobs: c.shellJobs(), Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Final: result.Final, Model: result.Usage.Model, Usage: result.Usage})
 	if err != nil {
 		return err
 	}
