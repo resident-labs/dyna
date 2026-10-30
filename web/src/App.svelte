@@ -764,7 +764,7 @@
   }
   async function stopJob(job: ShellJob) {
     await api.stopShell(roomId, job.id)
-    say({ tone: 'success', subject: 'Stopped the shell job', text: clipText(job.name || job.command.join(' ')) })
+    say({ tone: 'success', subject: 'Stopped the shell job', text: clipText(job.name || (job.command ?? []).join(' ')) })
     workflowData.loadJobs()
   }
 

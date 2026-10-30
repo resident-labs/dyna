@@ -654,12 +654,6 @@ func terminalOptions(rooms *roomsvc.Service, idle time.Duration) terminalsvc.Opt
 	}
 }
 
-// SystemLoad is the machine load with each top row named.
-type SystemLoad struct {
-	sysload.Load
-	Top []roomsvc.LoadOwnerCores `json:"top"`
-}
-
 func (s services) systemLoad() SystemLoad {
 	l := s.load.Load()
 	out := SystemLoad{Load: l, Top: []roomsvc.LoadOwnerCores{}}
