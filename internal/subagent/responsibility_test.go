@@ -80,6 +80,34 @@ func TestResponsibilityCountsMatchOneSessionReads(t *testing.T) {
 	}
 }
 
+// A member row names its session's newest live shell, so the shell icon's
+// hover says what the agent runs now.
+func TestMemberCountsNameTheNewestShell(t *testing.T) {
+	e := newTestEnv(t)
+	info := Info{Meta: Meta{ID: NewID(), Name: "shells", RoomID: e.room.ID, Room: e.room.Name, Depth: 1}}
+	store := shells.Store{Root: filepath.Join(filepath.Dir(e.m.Store.root()), "shells")}
+	start := time.Now()
+	for _, job := range []struct {
+		id, name string
+		after    time.Duration
+	}{
+		{"sh_20261030-100000-00000001", "Run the web tests", time.Minute},
+		{"sh_20261030-100000-00000002", "Build the app", 2 * time.Minute},
+		{"sh_20261030-100000-00000003", "Watch the logs", 0},
+	} {
+		if err := store.Save(shells.Meta{ID: job.id, Name: job.name, Owner: info.ID, Supervisor: os.Getpid(), Cmd: []string{"true"}, Started: start.Add(job.after)}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := e.m.MemberCounts(e.ctx, []Info{info})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rows[info.ID]; got.ByKind["shell"] != 3 || got.Shell != "Build the app" {
+		t.Fatalf("row = %+v, want 3 shells named by the newest, Build the app", got)
+	}
+}
+
 // A count reads the stores once, and reuses that read while no source changes.
 // A write to each source, including an item written through its own store
 // handle as the CLI does, makes the next count read again.
