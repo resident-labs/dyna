@@ -68,7 +68,7 @@ func ParseWrite(args []string, host, repo string, target Target) Write {
 	w.Ref = ItemRef{Host: host, Repo: repo}
 	switch a[0] + " " + a[1] {
 	case "issue create", "issue edit", "issue comment", "issue close", "issue reopen",
-		"pr create", "pr edit", "pr ready", "pr comment", "pr close", "pr reopen",
+		"pr create", "pr edit", "pr ready", "pr comment", "pr close", "pr reopen", "pr merge",
 		"run cancel", "repo fork":
 		w.Verb = Verb(a[0] + "." + a[1])
 	case "pr review":
@@ -237,6 +237,7 @@ var writeRules = []Rule{
 	{ID: "run-own", Verbs: []Verb{"run.rerun", "run.rerun.failed", "run.cancel"}, Targets: []Target{TargetRoom, TargetUpstream}, Item: ItemRoomAccount, Class: approvals.ClassAgent},
 	{ID: "fork-upstream", Verbs: []Verb{"repo.fork"}, Targets: []Target{TargetUpstream}, Class: approvals.ClassAgent},
 	{ID: "upstream-verb", Targets: []Target{TargetUpstream}, Refusal: ReasonUpstreamVerb},
+	{ID: "pr-merge-room", Verbs: []Verb{"pr.merge"}, Targets: []Target{TargetRoom}, Class: approvals.ClassAgent},
 	{ID: "room-owner", Targets: []Target{TargetRoom}, Class: approvals.ClassOwner},
 }
 
