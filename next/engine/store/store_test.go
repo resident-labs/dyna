@@ -125,7 +125,12 @@ func TestCommitLostToCancelIsNotWriterError(t *testing.T) {
 	defer cancel()
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		cancel()
-		return tx.Rollback()
+		// database/sql may already have rolled back after seeing the cancel. Either way
+		// the transaction is finished here, so Commit reaches ErrTxDone every time.
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			return err
+		}
+		return nil
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled write returned %v, want context.Canceled", err)
