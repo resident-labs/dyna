@@ -1176,6 +1176,8 @@ M0c result: **yes for Claude, with one fix.** Pi 1.4.0-dyna.10 with `claude-opus
 
 Scope: `contract` (3.2 to 3.4, the `Operation` types, `GlobalBundle`, `RoomBundle` and their parts, the M1 methods), `engine/store`, the owner socket and box sockets, the vendored CLIProxyAPI in-process and the model route to it, one host (hermeslab) with admission, `dyna-base`, the box lifecycle without children, the box agent with the Pi adapter, `dyna post` and `dyna room log`.
 
+M1 limits. Only the owner starts and closes sessions, and a session has no children, so close ends one box and the tree rules of 7.4 do not apply yet. A delivery comes only from the start brief and from a post that mentions the session; root, unmentioned posts and the reply channels of 7.5 come in M2.
+
 Acceptance:
 
 1. unit: the store opens fresh from `schema.sql`, refuses a folder with only `dyna.db` with `store_from_v1` and the export step, and publishes events in commit order.
