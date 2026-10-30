@@ -58,7 +58,7 @@ func (s Service) StartUpdate(ctx context.Context, event Event, source, toolPath 
 	}
 	dirs = append(dirs, filepath.SplitList(toolPath)...)
 	config.Path = capturedToolPath(append(dirs, filepath.SplitList(os.Getenv("PATH"))...), s.dataDir())
-	job := hookinstall.Job{ID: run.ID, SHA: event.SHA, Repo: r.ID, Hook: h.Name, Room: event.Room, Session: event.Session, HookLog: run.LogPath, Config: config}
+	job := hookinstall.Job{ID: run.ID, SHA: event.SHA, Repo: r.ID, Hook: h.Name, Force: event.Force, Room: event.Room, Session: event.Session, HookLog: run.LogPath, Config: config}
 	err = s.installer().Start(ctx, job, log)
 	if closeErr := log.Close(); err == nil {
 		err = closeErr
