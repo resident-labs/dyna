@@ -127,6 +127,25 @@ func nodeChecks(definition *Definition, suites []Suite, allowHost bool) ([]nodeC
 	return checks, aggregate, nil
 }
 
+// FirstCheckDemand describes the highest-priority check as this node would run it.
+func FirstCheckDemand(definition *Definition, suites []Suite, node Node, room string, ahead bool) (jobs.Demand, error) {
+	checks, _, err := nodeChecks(definition, suites, node.HostChecksAllowed(room))
+	if err != nil {
+		return jobs.Demand{}, err
+	}
+	if len(checks) == 0 {
+		return jobs.Demand{}, fmt.Errorf("no checks to schedule")
+	}
+	first := checks[0]
+	for _, check := range checks[1:] {
+		if check.priority > first.priority {
+			first = check
+		}
+	}
+	resources := clampCheckResources(first, node)
+	return jobs.Demand{Node: node.Name, Room: room, Ahead: ahead, Heavy: first.heavy, CPUs: resources.CPUs, MemoryMiB: resources.MemoryMiB}, nil
+}
+
 func nodeCacheNames(checks []nodeCheck) []string {
 	var names []string
 	for _, check := range checks {
@@ -503,6 +522,35 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	close(queue)
 	var wg sync.WaitGroup
+	// Serialize the first launch with relocation. Once any worker wins the
+	// gate, every check stays on this node, including checks still waiting.
+	var startMu sync.Mutex
+	started := resume != nil
+	var destination *Node
+	waitForAdmission := func(ctx context.Context, delay time.Duration) error {
+		startMu.Lock()
+		if !started && destination == nil && req.OnQueue != nil && control.Err() == nil {
+			if next := req.OnQueue(control); next != nil && next.Name != node.Name {
+				destination = next
+				cancel()
+			}
+		}
+		startMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if r.wait != nil {
+			return r.wait(ctx, delay)
+		}
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
 	// The node's admission queue bounds what runs at once, so every check of
 	// the run gets its own worker and holds its own place in the queue. A
 	// repository's parallelism limit still bounds its own run.
@@ -566,9 +614,18 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 						port = held
 					}
 				} else {
-					port, runErr = queue.Acquire(checkCtx, demand, r.wait, func(reason string) {
+					port, runErr = queue.Acquire(checkCtx, demand, waitForAdmission, func(reason string) {
 						fmt.Fprintf(writer, "local CI: %s\n", reason)
 					})
+				}
+				if runErr == nil && !spec.Attach {
+					startMu.Lock()
+					if destination != nil {
+						runErr = context.Canceled
+					} else {
+						started = true
+					}
+					startMu.Unlock()
 				}
 				if runErr == nil && !spec.Attach {
 					spec.Script = nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, port, noExpand, req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)])
@@ -642,6 +699,26 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}()
 	}
 	wg.Wait()
+	if destination != nil && ctx.Err() == nil && !EngineStopping() {
+		for _, blob := range logs {
+			if blob != nil {
+				_ = blob.Close()
+			}
+		}
+		// No worker passed the launch gate. Release even admitted rows, then
+		// forget the attachment before another node can claim this head.
+		for _, check := range checks {
+			if e := r.queue().Release(context.WithoutCancel(ctx), node.Name, runID+"-"+string(check.id)); e != nil {
+				return result, fmt.Errorf("release queued check: %w", e)
+			}
+		}
+		if e := localStore.deleteAttachment(context.WithoutCancel(ctx), attachKey, sha, node.Name, runID); e != nil {
+			return result, fmt.Errorf("forget queued attachment: %w", e)
+		}
+		unsettled.Store(false)
+		resumePending.Store(false)
+		return result, &RelocateError{Node: *destination}
+	}
 	// Every worker has seen its check end. An uncertain exit still keeps the run
 	// through unsettled.
 	resumePending.Store(false)
