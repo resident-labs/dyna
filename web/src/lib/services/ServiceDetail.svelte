@@ -70,8 +70,9 @@
   async function hookActivity(name: string): Promise<Entry[]> {
     const runs = readHookRuns(await (repoHook ? api.hookRuns(host.repo, name) : api.globalHookRuns(name))).slice(0, 20)
     const reasons: Record<string, RunReason> = {}
+    // A log that cannot be read leaves only its own run without a reason.
     await Promise.all(runs.filter((r) => r.result === 'error' || r.result === 'fail').map(async (r) => {
-      const reason = readHookLog(await logOf(r.id))
+      const reason = readHookLog(await logOf(r.id).catch(() => null))
       if (reason) reasons[r.id] = reason
     }))
     return hookEntries(name, service.label, runs, Date.now(), reasons)
