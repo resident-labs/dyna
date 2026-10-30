@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,8 +30,27 @@ func (b *retryTimeoutBoxes) Remove(ctx context.Context, id contract.BoxID) error
 	return nil
 }
 
+type blockingTimeoutBoxes struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (*blockingTimeoutBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
+func (b *blockingTimeoutBoxes) Remove(context.Context, contract.BoxID) error {
+	b.once.Do(func() { close(b.started); <-b.release })
+	return nil
+}
+
 func TestHelloTimeoutRetriesCleanupBeforeFailure(t *testing.T) {
-	s, _, session, ctx := setup(t)
+	s, room, session, ctx := setup(t)
+	tree, err := s.store.RoomTree(ctx, room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: tree.Root()}, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	b := &retryTimeoutBoxes{service: s}
 	s.boxes = b
 	s.now = func() time.Time { return time.Unix(1061, 0) }
@@ -47,4 +67,40 @@ func TestHelloTimeoutRetriesCleanupBeforeFailure(t *testing.T) {
 			t.Fatalf("attempt %d: box=%+v calls=%d states=%v err=%v", i, got, b.calls, b.states, err)
 		}
 	}
+	t.Run("close wins", func(t *testing.T) {
+		s, room, session, ctx := setup(t)
+		tree, err := s.store.RoomTree(ctx, room)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: tree.Root()}, contract.BoxHelloRequest{}); e != nil {
+			t.Fatal(e)
+		}
+		b := &blockingTimeoutBoxes{started: make(chan struct{}), release: make(chan struct{})}
+		s.boxes = b
+		s.now = func() time.Time { return time.Unix(1061, 0) }
+		events, cancel := s.store.Subscribe()
+		defer cancel()
+		swept := make(chan error, 1)
+		go func() { swept <- s.FailStaleStarts(ctx) }()
+		<-b.started
+		closed := make(chan *contract.Error, 1)
+		go func() {
+			_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
+			closed <- e
+		}()
+		for event := range events {
+			change, ok := event.Body.(contract.BoxChanged)
+			if ok && change.To == contract.BoxClosing {
+				break
+			}
+		}
+		close(b.release)
+		if err := <-swept; err != nil {
+			t.Fatal(err)
+		}
+		if e := <-closed; e != nil {
+			t.Fatal(e)
+		}
+	})
 }
