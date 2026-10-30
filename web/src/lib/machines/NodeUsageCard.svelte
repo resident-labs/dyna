@@ -29,7 +29,7 @@
   <div class="tiles stat-grid">
     <StatTile label="CPU" value={cpu == null ? '–' : `${Math.round(cpu)}%`} detail={average === undefined || !cpus ? 'No reading' : `load ${average.toFixed(1)} on ${cpus} CPUs`} tone={usageTone(cpu)} />
     <StatTile label="Memory" value={memory == null ? '–' : `${Math.round(memory)}%`} detail={used === undefined || !total ? 'No reading' : `${sizeText(used)} of ${sizeText(total)}`} tone={usageTone(memory)} />
-    <StatTile label="Disk free" value={disk === undefined ? '–' : sizeText(disk)} detail={floor === undefined ? 'No reading' : `floor ${sizeText(floor)}${machine.local ? machine.seenAt ? ` · probed ${ago(machine.seenAt)}` : ' · probe time unavailable' : ''}`} tone={diskTone(disk, floor)} />
+    <div title={machine.local ? machine.seenAt ? `Disk probed ${ago(machine.seenAt)}` : 'Disk probe time unavailable' : undefined}><StatTile label="Disk free" value={disk === undefined ? '–' : sizeText(disk)} detail={floor === undefined ? 'No reading' : `floor ${sizeText(floor)}`} tone={diskTone(disk, floor)} /></div>
     <StatTile label="Held by work" value={capacity?.cpus ? `${capacity.cpusUsed}/${capacity.cpus}` : '–'} detail="CPUs reserved" />
   </div>
   <NodeHistory points={history} />
