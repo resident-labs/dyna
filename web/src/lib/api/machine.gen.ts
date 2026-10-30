@@ -310,6 +310,7 @@ export interface MachineSummary {
    */
   probedLabels?: string[];
   cpu?: number /* int */;
+  memoryPercent?: number /* int */;
   agents?: number /* int */;
   computers?: number /* int */;
   ci?: MachineCIWork;
@@ -404,6 +405,7 @@ export interface MachineCapabilities {
    * probe could not read the disk.
    */
   freeDisk?: number /* int64 */;
+  diskFloor?: number /* uint64 */;
   diskKeeps?: string;
   diskBlock?: string;
 }
