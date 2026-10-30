@@ -9,35 +9,6 @@ import (
 	"dyna-agent/internal/harness/runtime"
 )
 
-// AccountsSnapshot is the account view of the Accounts API, grouped by the
-// provider each account signed in to.
-type AccountsSnapshot struct {
-	// Scope is the room this snapshot was taken for. Empty means the global
-	// selection only.
-	Scope string `json:"scope,omitempty"`
-	// Providers holds one group per provider, in provider order.
-	Providers []ProviderAccounts `json:"providers"`
-	// Problems names each saved row the list skipped.
-	Problems  []runtime.AccountProblem `json:"problems"`
-	CheckedAt time.Time                `json:"checkedAt"`
-	Message   string                   `json:"message,omitempty"`
-}
-
-// ProviderAccounts is every listed account of one provider.
-type ProviderAccounts struct {
-	Provider store.Provider `json:"provider"`
-	Accounts []ScopeAccount `json:"accounts"`
-}
-
-// ScopeAccount is one account with its place in the requested scope.
-type ScopeAccount struct {
-	Account
-	// ActiveHere reports whether the account is the one its provider uses in the
-	// snapshot's scope: the room row when the scope is a room, else the global
-	// row. Active reports the global row.
-	ActiveHere bool `json:"activeHere"`
-}
-
 // Accounts lists the accounts grouped by provider, with the account each
 // provider uses in scope, which is empty for the global row or a room ID.
 // refresh asks the providers for current usage, as the Usage view does.
