@@ -52,6 +52,7 @@ func apiBody(cmd *exec.Cmd, args []string) (rest []string, body string, found bo
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		name, value, attached := strings.Cut(arg, "=")
+		short, shortValue, isShort := shortFlag(arg)
 		switch {
 		case arg == "--input" || name == "--input":
 			return nil, "", false, errInputBody
@@ -63,8 +64,8 @@ func apiBody(cmd *exec.Cmd, args []string) (rest []string, body string, found bo
 			i++
 			name, value = arg, args[i]
 		case attached && (name == "--field" || name == "--raw-field"):
-		case len(arg) > 2 && (strings.HasPrefix(arg, "-f") || strings.HasPrefix(arg, "-F")) && arg[1] != '-':
-			name, value = arg[:2], arg[2:]
+		case isShort && (short == "-f" || short == "-F"):
+			name, value = short, shortValue
 		default:
 			rest = append(rest, arg)
 			continue
