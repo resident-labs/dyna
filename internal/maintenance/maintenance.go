@@ -391,18 +391,35 @@ func discover(ctx context.Context, session string) ([]string, error) {
 	if err != nil {
 		errs = append(errs, err)
 	}
-	listErr := sessionlife.Each(runstore.SessionsDir(), false, func(id string, raw []byte, err error) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+	collect := func(raw []byte) {
 		var rec struct {
 			Dir string `json:"dir"`
 		}
-		if err == nil && (session == "" || id == session) && json.Unmarshal(raw, &rec) == nil && rec.Dir != "" {
+		if json.Unmarshal(raw, &rec) == nil && rec.Dir != "" {
 			candidates[rec.Dir] = true
 		}
-		return nil
-	})
+	}
+	var listErr error
+	if session != "" {
+		// A session cleanup needs only its own record. Reading every record
+		// here cost about 190 MB of database reads for each closed session.
+		raw, _, err := sessionlife.LoadRaw(runstore.SessionsDir(), session)
+		if err == nil {
+			collect(raw)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			listErr = err
+		}
+	} else {
+		listErr = sessionlife.Each(runstore.SessionsDir(), false, func(id string, raw []byte, err error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err == nil {
+				collect(raw)
+			}
+			return nil
+		})
+	}
 	if listErr != nil && !errors.Is(listErr, sessionlife.ErrRecord) && !errors.Is(listErr, ctx.Err()) {
 		errs = append(errs, listErr)
 	}
