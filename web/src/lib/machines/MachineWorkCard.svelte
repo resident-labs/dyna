@@ -33,7 +33,7 @@
   </Row>
 {/snippet}
 
-<Card title="Work" count={work ? work.running.length + work.waiting.length || null : null}>
+<Card title="Work" count={work ? (work.running ?? []).length + (work.waiting ?? []).length || null : null}>
   {#if !work}
     <p class="note">{failed ? 'Could not read this node\'s queue. It will try again on the next change.' : 'Reading the queue…'}</p>
   {:else}
@@ -57,11 +57,11 @@
       </Row>
     {/each}
 
-    <h5>Running <span class="n">{work.running.length}</span></h5>
-    {#each work.running as unit (unit.id)}{@render item(unit)}{:else}<p class="note">Nothing runs on this node.</p>{/each}
+    <h5>Running <span class="n">{(work.running ?? []).length}</span></h5>
+    {#each work.running ?? [] as unit (unit.id)}{@render item(unit)}{:else}<p class="note">Nothing runs on this node.</p>{/each}
 
-    <h5>Waiting <span class="n">{work.waiting.length}</span></h5>
-    {#each work.waiting as unit (unit.id)}{@render item(unit)}{:else}<p class="note">No work waits.</p>{/each}
+    <h5>Waiting <span class="n">{(work.waiting ?? []).length}</span></h5>
+    {#each work.waiting ?? [] as unit (unit.id)}{@render item(unit)}{:else}<p class="note">No work waits.</p>{/each}
   {/if}
 </Card>
 
