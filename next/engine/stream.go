@@ -102,12 +102,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			var start []contract.TurnInput
 			var steer []contract.TurnSteer
 			for _, delivery := range deliveries {
-				events, err := s.store.Events(ctx, session.Room, int64(delivery.Seq)-1, 1, nil)
-				if err != nil || len(events) != 1 || events[0].Seq != int64(delivery.Seq) {
+				event, err := s.store.Event(ctx, int64(delivery.Seq))
+				if err != nil {
 					return
 				}
 				var text string
-				switch body := events[0].Body.(type) {
+				switch body := event.Body.(type) {
 				case contract.PostCreated:
 					text = body.Text
 				case contract.SessionStarted:
