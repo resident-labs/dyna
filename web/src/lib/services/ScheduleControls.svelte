@@ -40,7 +40,7 @@
   }
 </script>
 
-<SettingRow title="Runs every" description="Time between runs">
+<SettingRow title={fixedLimit ? 'Checks every' : 'Runs every'} description={fixedLimit ? 'Time between checks' : 'Time between runs'}>
   {#snippet control()}<SettingControl item={field('every', minutesText(schedule.everyMinutes))} label="Time between runs" onsave={(v: string) => save('every', v, every(v), 'Use whole minutes, such as 10m, 1h or 1d')} />{/snippet}
   {#snippet status()}{#if errors.every}<span class="err" role="alert">{errors.every}</span>{/if}{/snippet}
 </SettingRow>

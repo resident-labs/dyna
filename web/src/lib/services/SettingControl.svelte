@@ -54,9 +54,9 @@
 {/if}
 
 <style>
-  .source { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; }
+  .source { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s2); width: 100%; }
   .source-hint { width: 100%; color: var(--muted); font-size: var(--t-sm); }
   .field { width: 12rem; max-width: 100%; min-height: 30px; padding: 0 var(--s2); background: var(--rail); border: 1px solid var(--border-soft); border-radius: var(--r-xs); color: var(--ink); font-size: var(--t-sm); }
-  @container (max-width: 32rem) { .source { width: 100%; justify-content: flex-start; } .source .field { width: 100%; } }
+  .source .field { width: 100%; }
   .field:focus { border-color: var(--iris-edge); outline: none; }
 </style>
