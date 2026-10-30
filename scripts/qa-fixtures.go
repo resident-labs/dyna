@@ -1,15 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	accountstore "dyna-agent/internal/account/store"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/updaterservice"
 )
@@ -76,6 +79,25 @@ func qaSeedFixtures(dataDir string) error {
 		if err := accounts.SetActive(provider, "pi", "", fmt.Sprintf("%032x", i+1)); err != nil {
 			return err
 		}
+	}
+	if err := watch.Migrate(dataDir); err != nil {
+		return err
+	}
+	db, err := database.Open(dataDir)
+	if err != nil {
+		return err
+	}
+	entry := watch.MergeHistoryEntry{Kind: "publish", Outcome: "published", Repo: "github.com/example/widgets", Branch: "dyna/merge-1", Head: "1234567890abcdef", Changes: []string{"#7 Improve the sample page"}, At: now}
+	body, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	roomIDs, err := json.Marshal([]string{rec.ID})
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(`INSERT INTO merge_history(repo, rooms, kind, outcome, branch, head, body, at) VALUES(?,?,?,?,?,?,?,?)`, entry.Repo, string(roomIDs), entry.Kind, entry.Outcome, entry.Branch, entry.Head, string(body), now.UnixNano()); err != nil {
+		return err
 	}
 	// A finished installer receipt appears in the Updates service activity.
 	// Writing a receipt does not start an installer or a service.
