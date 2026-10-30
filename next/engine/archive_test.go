@@ -1,30 +1,19 @@
 package engine
 
 import (
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
 )
 
-type fakeArchiveVerifier struct {
-	err   error
-	calls int
-}
-
-func (v *fakeArchiveVerifier) Verify(_ context.Context, _ contract.SessionID, _ contract.ArchiveDoneRequest) error {
-	v.calls++
-	return v.err
-}
-
 func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
-	verifier := &fakeArchiveVerifier{}
-	s.SetArchiveVerifier(verifier)
+	verifier := &fakeRepos{}
+	s.SetRepositories(verifier)
 	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
 		t.Fatal(e)
@@ -51,6 +40,10 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	if err != nil || commit != "abc" || verifier.calls != 1 {
 		t.Fatalf("commit %q, verifier %+v, error %v", commit, verifier, err)
 	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
+	if err != nil || len(events) != 1 || events[0].From.Kind != contract.PrincipalEngine {
+		t.Fatalf("close events %+v, error %v", events, err)
+	}
 }
 
 func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
@@ -60,7 +53,7 @@ func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s.SetArchiveVerifier(&fakeArchiveVerifier{})
+	s.SetRepositories(&fakeRepos{commits: map[contract.RepoName]string{"owner/one": "first", "owner/two": "second"}})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	first, e := s.BoxChannel(ctx, caller)
 	if e != nil {
@@ -136,7 +129,7 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
-	s.SetArchiveVerifier(&fakeArchiveVerifier{err: errors.New("archive ref mismatch")})
+	s.SetRepositories(&fakeRepos{err: errors.New("archive ref mismatch")})
 	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
 		t.Fatal(e)
@@ -179,7 +172,7 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
-	restarted.SetArchiveVerifier(&fakeArchiveVerifier{})
+	restarted.SetRepositories(&fakeRepos{})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	channel, e := restarted.BoxChannel(ctx, caller)
 	if e != nil {
