@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 
 	"github.com/resident-labs/dyna/box"
@@ -32,7 +31,7 @@ func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, e
 }
 
 type Host struct {
-	buildMu             sync.Mutex
+	buildGate           chan struct{}
 	gate                chan struct{}
 	destination, socket string
 	runner              Runner
@@ -68,7 +67,7 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{gate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
+	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
 }
 func (h *Host) lock(ctx context.Context) error {
 	select {

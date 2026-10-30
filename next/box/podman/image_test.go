@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -62,6 +63,46 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 		if err != nil || string(data) != file.content {
 			t.Fatalf("content %q: %v", data, err)
 		}
+	}
+}
+
+type blockedImageRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockedImageRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	for _, arg := range args {
+		if arg == "-O" {
+			return nil, nil
+		}
+	}
+	close(r.started)
+	<-r.release
+	return []byte("DYNA-END 00000000000000000000 000\n"), nil
+}
+
+func TestBuildBaseCancellationWhileAnotherBuildRuns(t *testing.T) {
+	r := &blockedImageRunner{started: make(chan struct{}), release: make(chan struct{})}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.BuildBase(context.Background(), []byte("container"), []byte("pi"))
+		done <- err
+	}()
+	<-r.started
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = h.BuildBase(ctx, []byte("container"), []byte("pi"))
+	close(r.release)
+	if firstErr := <-done; firstErr != nil {
+		t.Fatal(firstErr)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
 	}
 }
 
