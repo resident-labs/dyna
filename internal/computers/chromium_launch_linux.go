@@ -163,7 +163,9 @@ func prepareChromiumLaunch(ctx context.Context, id string, supplied []string) (c
 	// A computer's Chromium shares the owner's session bus, which copy-mine and
 	// keyring-encrypted profiles need. Its notifications would then show on the
 	// owner's desktop, so the browser has no Notification or Push API.
-	args = append(args, "--user-data-dir="+computerBrowserProfile(id), "--profile-directory=Default", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--hide-crash-restore-bubble", "--no-first-run", "--no-default-browser-check", "--disable-notifications")
+	// The automation flag hides navigator.webdriver, which strict human checks read.
+	args = append(args, "--user-data-dir="+computerBrowserProfile(id), "--profile-directory=Default", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--disable-blink-features=AutomationControlled", "--hide-crash-restore-bubble", "--no-first-run", "--no-default-browser-check", "--disable-notifications")
+	args = mergeBlinkFeatures(args)
 	if browserconfig.BasicPasswordStore() {
 		args = append(args, "--password-store=basic")
 	}
@@ -274,6 +276,24 @@ func splitBrowserFlags(text string) ([]string, error) {
 	}
 	flush()
 	return out, nil
+}
+
+// Chromium keeps only the last --disable-blink-features switch. Merge every
+// value into one argument so an owner's flags cannot drop the automation flag.
+func mergeBlinkFeatures(args []string) []string {
+	const key = "--disable-blink-features="
+	var features []string
+	var out []string
+	for _, arg := range args {
+		if value, ok := strings.CutPrefix(arg, key); ok {
+			if value != "" {
+				features = append(features, value)
+			}
+			continue
+		}
+		out = append(out, arg)
+	}
+	return append(out, key+strings.Join(features, ","))
 }
 
 func stripBrowserProfileArgs(args []string) []string {
