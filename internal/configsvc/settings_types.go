@@ -12,7 +12,10 @@ type Item struct {
 	Kind         string   `json:"kind"`
 	Options      []string `json:"options,omitempty"`
 	OptionLabels []string `json:"optionLabels,omitempty"`
-	Help         string   `json:"help"`
+	// OptionNotes is a short line for each option, in Options order, shown
+	// under the control when that option is chosen. Empty means no note.
+	OptionNotes []string `json:"optionNotes,omitempty"`
+	Help        string   `json:"help"`
 }
 
 // UpdateNotice is a quiet line about a newer dyna release. It only checks;
