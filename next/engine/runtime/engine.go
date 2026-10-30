@@ -152,6 +152,22 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
+	updates, unsubscribe := st.Subscribe()
+	defer unsubscribe()
+	service.ReconcileDormancy(ctx, true)
+	go func() {
+		for {
+			select {
+			case _, ok := <-updates:
+				if !ok {
+					return
+				}
+				service.ReconcileDormancy(ctx, false)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	if problem := service.ResumeClosures(ctx); problem != nil {
 		return fmt.Errorf("resume close: %s", problem.Message)
 	}
@@ -164,6 +180,7 @@ func Run(ctx context.Context, cfg Config) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			service.ReconcileDormancy(ctx, false)
 			if err := service.ExpireOperations(ctx); err != nil {
 				return fmt.Errorf("operation expiry sweep: %w", err)
 			}
