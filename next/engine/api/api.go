@@ -24,14 +24,19 @@ func New(service Service, model func(Caller) http.Handler) *API {
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
+	call(mux, contract.MethodHostAdd, c, owner, a.service.HostAdd)
 	call(mux, contract.MethodRoomCreate, c, owner, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, owner, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, owner, a.service.RoomRepos)
 	call(mux, contract.MethodSessionStart, c, owner, a.service.SessionStart)
 	call(mux, contract.MethodSessionClose, c, owner, a.service.SessionClose)
 	call(mux, contract.MethodPost, c, user, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
-		if box(c) && req.Room != c.Room {
-			return contract.PostResponse{}, forbidden()
+		if box(c) {
+			if req.Room == "" {
+				req.Room = c.Room
+			} else if req.Room != c.Room {
+				return contract.PostResponse{}, forbidden()
+			}
 		}
 		return a.service.Post(ctx, p, req)
 	})

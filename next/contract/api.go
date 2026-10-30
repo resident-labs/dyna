@@ -5,6 +5,7 @@ type Method string
 const (
 	MethodArchiveDone      Method = "archive.done"
 	MethodDeliveryDone     Method = "delivery.done"
+	MethodHostAdd          Method = "host.add"
 	MethodRoomCreate       Method = "room.create"
 	MethodRoomRepoAdd      Method = "room.repo.add"
 	MethodRoomRepos        Method = "room.repos"
@@ -34,6 +35,13 @@ type Error struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
 }
+
+type HostAddRequest struct {
+	Name           HostName `json:"name"`
+	SSH            string   `json:"ssh"`
+	OwnerOnlyAdmin bool     `json:"ownerOnlyAdmin"`
+}
+type HostAddResponse struct{}
 
 type RoomCreateRequest struct {
 	Name string `json:"name"`
