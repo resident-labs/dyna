@@ -79,4 +79,11 @@ func TestMainUpdatedStartsSourceInstaller(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("installer starts = %d, want 1", calls)
 	}
+	runs, err := updateRuns()
+	if err != nil || len(runs) != 1 || runs[0].Result != UpdatePending {
+		t.Fatalf("update runs = %+v, %v", runs, err)
+	}
+	if err := h.MainUpdated(t.Context(), event); err != nil || calls != 1 {
+		t.Fatalf("duplicate start: calls=%d err=%v", calls, err)
+	}
 }
