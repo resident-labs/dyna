@@ -7,7 +7,7 @@ import { element, need } from '../../../test/need.ts'
 const code = await bundle({ component: '../rooms/Composer',
   format: `export const short = x => x; export const roomLabel = r => r.name; export const ago = () => ''; export const markdown = x => x; export const stamp = () => '';`,
   api: `export const api = {
-    preview: async () => ({mentions: [], wakes: []}),
+    preview: async (_room, text) => globalThis.previewDraft ? globalThis.previewDraft(text) : ({mentions: [], wakes: []}),
     commands: async () => globalThis.loadCommands ? globalThis.loadCommands() : [{ name: 'review', source: 'skill', description: 'Review code', args: [] }],
     runCommand: async (...args) => { globalThis.commandArgs = args; globalThis.commandCalls = (globalThis.commandCalls || 0) + 1; return { kind: 'post', post: { message: { id: 'sent' }, deliveries: [], failed: [{ to: 'lead', error: 'unavailable' }] } } },
     listEntries: async () => ({entries: []}),
@@ -40,6 +40,47 @@ test('model trigger opens only at a token start', async () => {
   } finally {
     await ui.unmount(component)
     dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('removing a model refreshes the preview without editing the draft', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const dom = installDom()
+  Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
+  Reflect.set(globalThis, 'previewDraft', (text: string) => text.startsWith('/sol ')
+    ? { spawn: { name: 'agent', profile: 'sol', dir: '/repo' } }
+    : { mentions: [], wakes: [] })
+  const ui = await importBundle(code, 'Composer')
+  const target = need(document.getElementById('app'))
+  const component = ui.mount(ui.default, { target, props: { room: { id: 'r', name: 'room' }, profiles, onsend: async () => ({}) } })
+  try {
+    await settle()
+    const input = element<HTMLTextAreaElement>(target, 'textarea')
+    input.value = '!sol'
+    input.setSelectionRange(4, 4)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await settle()
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    input.value = 'inspect'
+    input.setSelectionRange(7, 7)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await settle()
+    t.mock.timers.tick(150)
+    await settle()
+    assert.match(target.textContent ?? '', /Enter.*to start/)
+    element<HTMLButtonElement>(target, '[aria-label="Remove selected model"]').click()
+    await settle()
+    t.mock.timers.tick(150)
+    await settle()
+    assert.doesNotMatch(target.textContent ?? '', /Enter.*to start/)
+    assert.match(target.textContent ?? '', /Enter.*to send/)
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    Reflect.deleteProperty(globalThis, 'previewDraft')
     for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
     await rm(ui.dir, { recursive: true, force: true })
   }

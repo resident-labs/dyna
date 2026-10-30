@@ -271,6 +271,7 @@
   // The Go parser decides who a draft goes to; ask it shortly after typing stops.
   $effect(() => {
     const text = draft
+    const profile = selectedProfile
     const prepare = prepareText
     const id = room.id
     const files = $attachments.items.length
@@ -279,7 +280,7 @@
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
-        const prepared = await prepare(selectedProfile ? `/${selectedProfile.name} ${text}` : text)
+        const prepared = await prepare(profile ? `/${profile.name} ${text}` : text)
         const result = await api.preview(id, prepared)
         if (!cancelled) preview = result
       } catch {
