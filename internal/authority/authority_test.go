@@ -19,7 +19,7 @@ func TestRulesRoles(t *testing.T) {
 			if (err == nil) != allowed {
 				t.Errorf("%s %s: %v", rule.Action, role, err)
 			}
-			if err != nil && !strings.HasPrefix(err.Error(), rule.Action+" is ") {
+			if err != nil && !rule.FullRefusal && !strings.HasPrefix(err.Error(), rule.Action+" is ") {
 				t.Errorf("refusal: %v", err)
 			}
 		}
@@ -191,7 +191,7 @@ func TestActorInUsesTheCallersRoom(t *testing.T) {
 
 func TestSessionCannotRunWorkflow(t *testing.T) {
 	err := Check("workflow run", Actor{Role: Session}, nil)
-	if err == nil || !strings.Contains(err.Error(), "dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root.") {
+	if err == nil || err.Error() != "dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root." {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
 }
