@@ -56,7 +56,7 @@ type ownerCache struct {
 
 // Owners visits every session's verified ownership row in ID order. A changed
 // row is verified before it enters the cache; any failure keeps trees safe.
-// A raw edit of meta or digest that keeps the revision is outside the contract.
+// Database triggers invalidate cached revisions after unversioned edits.
 func Owners(sessions string, visit func(OwnerRow) error) error {
 	db, ok, err := readable(sessions)
 	if err != nil || !ok {
