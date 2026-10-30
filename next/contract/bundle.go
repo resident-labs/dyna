@@ -212,13 +212,12 @@ type LibraryEntry struct {
 
 // RepoBundle carries a repository's shared settings and library map.
 type RepoBundle struct {
-	Repo            RepoName          `json:"repo"`
-	DefaultRoom     RoomName          `json:"defaultRoom"`
-	MergePolicy     MergePolicy       `json:"mergePolicy"`
-	CIMode          CIMode            `json:"ciMode"`
-	ReviewerProfile ProfileName       `json:"reviewerProfile,omitempty"`
-	Attribution     []AttributionLine `json:"attribution,omitempty"`
-	Library         []LibraryEntry    `json:"library"`
+	Repo        RepoName          `json:"repo"`
+	DefaultRoom RoomName          `json:"defaultRoom"`
+	MergePolicy MergePolicy       `json:"mergePolicy"`
+	CIMode      CIMode            `json:"ciMode"`
+	Attribution []AttributionLine `json:"attribution,omitempty"`
+	Library     []LibraryEntry    `json:"library"`
 }
 
 // SkillBundle has exactly one of Body (an owner-made SKILL.md) and Package
