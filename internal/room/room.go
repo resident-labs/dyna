@@ -634,16 +634,13 @@ func ValidateAgent(name string) error {
 // @room or @owner. No agent may use one as its name.
 func ReservedName(name string) bool {
 	switch name {
-	case RootAgent, VoiceAgent, "team", "parent", "siblings", "children", "room", "owner":
+	case RootAgent, VoiceAgent, "team", "parent", "siblings", "children", "room", "owner", "global":
 		return true
 	}
 	return false
 }
 
-// TODO: legacy/shim remove later — keeps the removed "global" room readable (its dir and roomId "global" in old session and run metadata); remove after the owner deletes the global room.
-const legacyGlobalID = "global"
-
-func ValidID(id string) bool { return id == legacyGlobalID || idRe.MatchString(id) }
+func ValidID(id string) bool { return idRe.MatchString(id) }
 
 // Store addresses the rooms directory.
 type Store struct {

@@ -1,17 +1,12 @@
 package room
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
-
-	"dyna-agent/internal/store"
 )
 
 func TestCreatePostResolveAndArchive(t *testing.T) {
@@ -65,42 +60,14 @@ func TestResolveRequiresARoom(t *testing.T) {
 	if _, err := s.Resolve(""); err == nil {
 		t.Fatal(`Resolve("") fell back to a default room`)
 	}
-	if _, err := s.Resolve("global"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Resolve("global"); err == nil {
 		t.Fatalf("Resolve(global) created a room: %v", err)
 	}
 	if _, err := s.Create(CreateInput{Name: "global"}); err == nil {
-		t.Fatal("a room name that looks like an ID was accepted")
+		t.Fatal("reserved global room name was accepted")
 	}
-	if addr, err := ParseAddress("global:lead"); err != nil || addr.Room != "global" || addr.Agent != "lead" {
-		t.Fatalf("ParseAddress(global:lead) = %+v, %v", addr, err)
-	}
-}
-
-// The removed global room stays readable, listable and deletable until the
-// owner deletes it.
-func TestLegacyGlobalRoomStaysReadable(t *testing.T) {
-	s := &Store{Root: filepath.Join(t.TempDir(), "rooms")}
-	now := time.Now()
-	if err := os.MkdirAll(filepath.Join(s.Root, "global"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.WriteJSON(filepath.Join(s.Root, "global", "room.json"), Record{ID: "global", Name: "global", CreatedAt: now, LastActivity: now}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(filepath.Dir(s.Root)); err != nil {
-		t.Fatal(err)
-	}
-	if rec, err := s.Resolve("global"); err != nil || rec.ID != "global" {
-		t.Fatalf("Resolve(global) = %#v, %v", rec, err)
-	}
-	if list, err := s.List(true); err != nil || len(list) != 1 {
-		t.Fatalf("List = %#v, %v", list, err)
-	}
-	if _, err := s.Delete("global", nil); err != nil {
-		t.Fatal(err)
-	}
-	if list, err := s.List(true); err != nil || len(list) != 0 {
-		t.Fatalf("List after delete = %#v, %v", list, err)
+	if _, err := ParseAddress("global:lead"); err == nil {
+		t.Fatal("reserved global room address was accepted")
 	}
 }
 

@@ -150,23 +150,6 @@ func TestIssueCommandsUseReadableOutputAndExplicitJSON(t *testing.T) {
 	}
 }
 
-func TestIssueGoalAliasPrintsReplacement(t *testing.T) {
-	f := newIssueFixture(t)
-	f.file(t)
-	out, err := f.run("goal", "D-1")
-	if err != nil || out != "dyna goal --fixes D-1\n" {
-		t.Fatalf("alias output = %q, %v", out, err)
-	}
-	out, err = f.run("goal", "D-1", "--for", "@agent")
-	if err != nil || out != "dyna goal --for @agent --fixes D-1\n" {
-		t.Fatalf("alias holder output = %q, %v", out, err)
-	}
-	rows, err := f.rooms.Issues(f.rec.ID, true)
-	if err != nil || len(rows) != 1 || rows[0].State != "open" || rows[0].GoalID != "" {
-		t.Fatalf("alias changed the issue: %+v, %v", rows, err)
-	}
-}
-
 func TestIssueCloseAcceptsPositionalReason(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
