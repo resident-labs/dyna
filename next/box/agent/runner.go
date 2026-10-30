@@ -21,7 +21,6 @@ type turnSink interface {
 type Runner struct {
 	Harness  harness.Harness
 	Sink     turnSink
-	Upgrade  func() error
 	mu       sync.Mutex
 	active   contract.TurnID
 	settling bool
@@ -53,13 +52,7 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		}
 		return nil
 	case contract.Upgrade:
-		r.mu.Lock()
-		idle := r.active == ""
-		r.mu.Unlock()
-		if !idle {
-			return fmt.Errorf("upgrade received during a turn")
-		}
-		return r.Upgrade()
+		return nil // Release skew is deferred to M2 (spec 5.10).
 	default:
 		return fmt.Errorf("unsupported box message")
 	}
