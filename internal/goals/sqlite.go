@@ -23,8 +23,8 @@ import (
 	"dyna-agent/internal/store"
 )
 
-const revisionCounter database.Counter = "goals.revision"
-const itemsRevisionCounter database.Counter = "goal_items.revision"
+var revisionCounter = database.NewCounter("goals.revision")
+var itemsRevisionCounter = database.NewCounter("goal_items.revision")
 
 // Each goal is one row; open goals read through goals_state.
 // goal_rooms holds the rest of a room's state, and the Global rule set
@@ -412,7 +412,7 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 			return nil
 		}
 		var err error
-		revision, err = revisionCounter.Bump(ctx, conn)
+		revision, err = revisionCounter.Next(ctx, conn)
 		if err == nil {
 			changed = true
 		}

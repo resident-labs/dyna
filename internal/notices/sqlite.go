@@ -26,7 +26,8 @@ const schema = `CREATE TABLE notices (
 );`
 
 const mirrorKey = "notices/list"
-const revisionCounter database.Counter = "notices.revision"
+
+var revisionCounter = database.NewCounter("notices.revision")
 
 // Migrate imports retained notices before the engine serves calls.
 func Migrate(dataDir string) error {
@@ -64,7 +65,7 @@ func (s Store) open() (*sql.DB, error) {
 			return err
 		}
 		if old > 0 {
-			if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT ?,n FROM notices_revision", revisionCounter); err != nil {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT 'notices.revision',n FROM notices_revision"); err != nil {
 				return err
 			}
 			if _, err := conn.ExecContext(ctx, "DROP TABLE notices_revision"); err != nil {
@@ -73,7 +74,7 @@ func (s Store) open() (*sql.DB, error) {
 		}
 		// Rows and committed empty revisions take precedence over retained files.
 		var owned bool
-		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM notices) OR EXISTS(SELECT 1 FROM revisions WHERE name=? AND n>0)", revisionCounter).Scan(&owned); err != nil {
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM notices) OR EXISTS(SELECT 1 FROM revisions WHERE name='notices.revision' AND n>0)").Scan(&owned); err != nil {
 			return err
 		}
 		if owned {
@@ -261,7 +262,7 @@ ON CONFLICT(id) DO UPDATE SET position=excluded.position,key=excluded.key,kind=e
 			return err
 		}
 	}
-	_, err = revisionCounter.Bump(ctx, conn)
+	err = revisionCounter.Bump(ctx, conn)
 	return err
 }
 
