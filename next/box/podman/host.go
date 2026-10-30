@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 
 	"github.com/resident-labs/dyna/box"
@@ -32,7 +31,7 @@ func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, e
 }
 
 type Host struct {
-	mu                  sync.Mutex
+	gate                chan struct{}
 	destination, socket string
 	runner              Runner
 	forwards            map[box.Forward]struct{}
@@ -67,8 +66,17 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
+	return &Host{gate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
 }
+func (h *Host) lock(ctx context.Context) error {
+	select {
+	case h.gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (h *Host) unlock() { <-h.gate }
 func (h *Host) base() []string {
 	return []string{"-S", h.socket, "-o", "ControlMaster=no", "-o", "StreamLocalBindUnlink=yes"}
 }
@@ -106,17 +114,33 @@ func (h *Host) ensure(ctx context.Context) error {
 	h.restored = true
 	return nil
 }
-func (h *Host) AddForward(ctx context.Context, f box.Forward) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+func validateForward(f box.Forward) error {
 	if strings.ContainsAny(f.HostPath+f.EnginePath, ":\n") || !filepath.IsAbs(f.HostPath) || !filepath.IsAbs(f.EnginePath) {
 		return errors.New("invalid forward path")
 	}
+	if f.Box != "" && (filepath.Base(f.HostPath) != "engine.sock" || filepath.Base(filepath.Dir(f.HostPath)) != string(f.Box)) {
+		return errors.New("invalid box socket path")
+	}
+	return nil
+}
+func (h *Host) AddForward(ctx context.Context, f box.Forward) error {
+	if err := validateForward(f); err != nil {
+		return err
+	}
+	if err := h.lock(ctx); err != nil {
+		return err
+	}
+	defer h.unlock()
 	if err := h.ensure(ctx); err != nil {
 		return err
 	}
 	if _, ok := h.forwards[f]; ok {
 		return nil
+	}
+	if f.Box != "" {
+		if _, err := h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1"`, "dyna", filepath.Dir(f.HostPath)); err != nil {
+			return err
+		}
 	}
 	if err := h.control(ctx, "forward", "-R", f.HostPath+":"+f.EnginePath); err != nil {
 		return err
@@ -125,18 +149,26 @@ func (h *Host) AddForward(ctx context.Context, f box.Forward) error {
 	return nil
 }
 func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if _, ok := h.forwards[f]; !ok {
-		return nil
+	if err := validateForward(f); err != nil {
+		return err
 	}
+	if err := h.lock(ctx); err != nil {
+		return err
+	}
+	defer h.unlock()
 	if err := h.ensure(ctx); err != nil {
 		return err
 	}
-	if err := h.control(ctx, "cancel", "-R", f.HostPath+":"+f.EnginePath); err != nil {
+	if _, ok := h.forwards[f]; ok {
+		if err := h.control(ctx, "cancel", "-R", f.HostPath+":"+f.EnginePath); err != nil {
+			return err
+		}
+		delete(h.forwards, f)
+	}
+	if f.Box != "" {
+		_, err := h.execute(ctx, "bash", "-c", `rm -f -- "$1" && rmdir -- "$2"`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
 		return err
 	}
-	delete(h.forwards, f)
 	return nil
 }
 
@@ -188,11 +220,17 @@ type remoteExit int
 func (e remoteExit) Error() string { return fmt.Sprintf("host command exited with status %d", e) }
 
 func (h *Host) run(ctx context.Context, argv ...string) ([]byte, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if err := h.ensure(ctx); err != nil {
+	if err := h.lock(ctx); err != nil {
 		return nil, err
 	}
+	err := h.ensure(ctx)
+	h.unlock()
+	if err != nil {
+		return nil, err
+	}
+	return h.execute(ctx, argv...)
+}
+func (h *Host) execute(ctx context.Context, argv ...string) ([]byte, error) {
 	// Do not retry a mutation after an uncertain reply; reconcile containers instead.
 	parts := []string{"bash", "-c", frameScript, "dyna-frame"}
 	parts = append(parts, argv...)
@@ -232,7 +270,7 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 	return err
 }
 func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
-	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi"}
+	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--userns=keep-id:uid=1000,gid=1000", "--user", "1000:1000", "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi"}
 	for _, m := range c.Mounts {
 		v := m.HostPath + ":" + m.BoxPath
 		if m.ReadOnly {
