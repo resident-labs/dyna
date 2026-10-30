@@ -17,6 +17,9 @@ func TestRawOutputActivityBeforeLineBuffer(t *testing.T) {
 	var got []activity.Signal
 	r := &activityReader{Reader: strings.NewReader("no newline"), now: func() time.Time { return now }, publish: func(s activity.Signal) { got = append(got, s) }}
 	r.start()
+	if got[0].CPU != activity.CPUUnsupported {
+		t.Fatalf("CPU state = %q", got[0].CPU)
+	}
 	b := bufio.NewReaderSize(r, 16)
 	if _, err := b.Peek(1); err != nil {
 		t.Fatal(err)
@@ -57,7 +60,11 @@ func TestActivityStoredWithLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(100, 0)
-	signal := activity.Signal{Copier: activity.CopierRunning, LastOutput: now, LeaseUntil: now.Add(activity.Lease)}
+	initial, err := s.Activity(meta.ID, now)
+	if err != nil || initial.CPU != activity.CPUUnknown {
+		t.Fatalf("unpublished activity = %+v, %v", initial, err)
+	}
+	signal := activity.Signal{Copier: activity.CopierRunning, CPU: activity.CPUUnsupported, LastOutput: now, LeaseUntil: now.Add(activity.Lease)}
 	db, err := s.db()
 	if err != nil {
 		t.Fatal(err)
@@ -69,14 +76,14 @@ func TestActivityStoredWithLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Copier != signal.Copier || !got.LastOutput.Equal(now) {
+	if got.Copier != signal.Copier || got.CPU != activity.CPUUnsupported || !got.LastOutput.Equal(now) {
 		t.Fatalf("got %+v", got)
 	}
 	got, err = s.Activity(meta.ID, signal.LeaseUntil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Copier != activity.CopierUnknown {
+	if got.Copier != activity.CopierUnknown || got.CPU != activity.CPUUnknown {
 		t.Fatalf("expired: %+v", got)
 	}
 }
