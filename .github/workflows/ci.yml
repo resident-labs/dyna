@@ -32,7 +32,6 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       pi: ${{ steps.filter.outputs.pi }}
       next_pi: ${{ steps.filter.outputs.next_pi }}
-      next_web: ${{ steps.filter.outputs.next_web }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -402,28 +401,11 @@ jobs:
       - name: Format, vet and test
         run: bash scripts/ci.sh next
 
-  next-web:
-    needs: changes
-    if: needs.changes.outputs.next_web == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: next/web
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: next/web/package-lock.json
-      - run: npm ci && npm run check && npm test && npm run build
-
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
   test:
     name: go-test
-    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next, next-web]
+    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next]
     if: ${{ always() && needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -433,16 +415,11 @@ jobs:
           WEB: ${{ needs.changes.outputs.web }}
           RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
           FRONTEND_CHECK: ${{ needs.frontend-check.result }}
-          NEXT_WEB: ${{ needs.changes.outputs.next_web }}
-          NEXT_WEB_RESULT: ${{ needs.next-web.result }}
         run: |
           echo "Results: $RESULTS"
           # frontend-check is skipped when no web file changed.
           if [ "$WEB" != true ] && [ "$FRONTEND_CHECK" = skipped ]; then
             RESULTS="${RESULTS% *} success"
-          fi
-          if [ "$NEXT_WEB" = true ] && [ "$NEXT_WEB_RESULT" != success ]; then
-            echo "The v2 web job ended with $NEXT_WEB_RESULT" >&2; exit 1
           fi
           for r in $RESULTS; do
             if [ "$r" != success ]; then echo "A Go job ended with $r" >&2; exit 1; fi
