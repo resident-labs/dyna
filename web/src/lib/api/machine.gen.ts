@@ -110,10 +110,17 @@ export const WorkJob: WorkKind = "job";
  */
 export const WorkCheck: WorkKind = "check";
 /**
+ * Lane identifies the admission pool used by a job.
+ */
+export const LaneDeclared = "declared";
+export const LaneQuick = "quick";
+export type Lane = typeof LaneDeclared | typeof LaneQuick;
+/**
  * WorkItem is one unit of work on a node: running, or waiting for room.
  */
 export interface WorkItem {
   kind: WorkKind;
+  lane?: Lane;
   id: string;
   /**
    * Label is a job's command or a check's name. A check whose row kept no
@@ -298,6 +305,7 @@ export interface MachineSummary {
    * keeps each default.
    */
   maxIOHeavy?: number /* int */;
+  quickSlots?: number /* int */;
   maxDiskPercent?: number /* int */;
   resources?: { [key: string]: number /* int */};
   rooms?: string[];
@@ -456,6 +464,7 @@ export interface MachinePatch {
    * once; zero keeps the default of one per sixteen probed CPUs.
    */
   maxIOHeavy?: number /* int */;
+  quickSlots?: number /* int */;
   /**
    * MaxDiskPercent is the used-disk percent above which this node admits no
    * new work; zero keeps the default of 90.

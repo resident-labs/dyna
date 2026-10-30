@@ -45,6 +45,13 @@ func captureRun(t *testing.T, args ...string) callspec.RunJobInput {
 	return captured
 }
 
+func TestRunQuickFlag(t *testing.T) {
+	request := captureRun(t, "--quick", "--", "true")
+	if request.Lane != string(jobs.LaneQuick) {
+		t.Fatalf("lane = %q", request.Lane)
+	}
+}
+
 func TestRunWithoutImageRunsOnHost(t *testing.T) {
 	request := captureRun(t, "--", "true")
 	if request.Image != "" {

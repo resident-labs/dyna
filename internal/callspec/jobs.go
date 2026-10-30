@@ -17,6 +17,7 @@ type RunJobInput struct {
 	Node        string   `json:"node"`
 	Labels      []string `json:"labels"`
 	Command     []string `json:"command"`
+	Lane        string   `json:"lane,omitempty"`
 	Repo        string   `json:"repo"`
 	Ref         string   `json:"ref"`
 	Host        bool     `json:"host"`
