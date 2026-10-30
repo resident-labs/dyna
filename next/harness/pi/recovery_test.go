@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,6 +30,18 @@ func TestRecoveryAfterToolResultNeedsContinuation(t *testing.T) {
 	_, done, err := h.Recover("turn_a", []contract.TurnInput{{Delivery: 9}})
 	if err != nil || done {
 		t.Fatalf("done=%v err=%v", done, err)
+	}
+}
+
+func TestPartialSessionEntryIsNotAcknowledged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"message","message":{"role":"user","deliveryId":"9"`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := &Harness{session: path}
+	delivered, err := h.Delivered(context.Background(), 9)
+	if err != nil || delivered {
+		t.Fatalf("delivered=%v err=%v", delivered, err)
 	}
 }
 

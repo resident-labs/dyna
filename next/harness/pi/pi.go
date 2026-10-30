@@ -3,6 +3,7 @@ package pi
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -264,6 +265,16 @@ func (h *Harness) Abort(ctx context.Context) error { return h.send(ctx, "abort",
 
 func (h *Harness) SessionFile() string { return h.session }
 
+func completeLines(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), nil, nil
+	}
+	return 0, nil, nil
+}
+
 func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	file, err := os.Open(h.session)
 	if errors.Is(err, os.ErrNotExist) {
@@ -275,6 +286,7 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 4096), 16<<20)
+	scanner.Split(completeLines)
 	for scanner.Scan() {
 		var entry struct {
 			Type    string `json:"type"`
