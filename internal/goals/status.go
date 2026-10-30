@@ -5,16 +5,6 @@ import (
 	"time"
 )
 
-// Status is one goal's mechanical label with a short reason and its item
-// counts. Nothing stores it: every caller computes it from facts.
-type Status struct {
-	Label   string `json:"label"`
-	Reason  string `json:"reason"`
-	Done    int    `json:"done"`
-	Open    int    `json:"open"`
-	Dropped int    `json:"dropped"`
-}
-
 // ItemStatus is one item's mechanical label and reason.
 type ItemStatus struct {
 	Label  string `json:"label"`
