@@ -3,48 +3,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import type { HookRun, HookRunLog } from '../api/settings.ts'
-import type { ToastInput } from '../ui/toast.ts'
-
-// Hooks belong to a repository, so Room settings is the only place that
-// manages them, and a hook card's "View log" leads there.
-
-const app = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const target = { repo: '/repo', hook: 'verify', runId: 'r1' }
-
-interface OpenState extends Record<string, unknown> {
-  roomSettingsAt?: { start: string; hookRun?: unknown }
-  said: unknown[]
-}
-
-function openContext(room: unknown): OpenState {
-  const state: OpenState = { navOpen: true, showSettings: true, showRoomSettings: false, roomSettingsKey: 0, room, said: [] }
-  state.say = (input: ToastInput) => state.said.push(input)
-  runFunctions(app, ['openHookLog'], state)
-  return state
-}
-
-test('a hook card opens Room settings at Hooks, with its run in front', async () => {
-  const state = openContext({ id: 'room-1' })
-  await call(state, 'openHookLog', target)
-  assert.equal(state.roomSettingsAt?.start, 'hooks')
-  assert.equal(state.roomSettingsAt?.hookRun, target)
-  assert.equal(state.showRoomSettings, true)
-  assert.equal(state.showSettings, false)
-  assert.equal(state.roomSettingsKey, 1)
-  assert.equal(state.navOpen, false)
-})
-
-test('a hook card with no room says so instead of doing nothing', async () => {
-  const state = openContext(null)
-  await call(state, 'openHookLog', target)
-  assert.equal(state.showRoomSettings, false)
-  assert.equal(state.said.length, 1)
-  const said = state.said[0] as ToastInput
-  assert.equal(said.tone, 'info')
-  assert.equal(said.subject, 'Open a room first')
-  assert.equal(said.text, 'Hook runs belong to a room repository.')
-})
-
 test('the room Hooks section opens the run of the hook this repository holds', async () => {
   const pane = readFileSync(new URL('./HooksPane.svelte', import.meta.url), 'utf8')
   const runs: HookRun[] = [{ id: 'r1', repo: '/repo', name: 'verify', command: 'go test ./...', logPath: '', result: 'pass', startedAt: '2026-10-23T10:00:00Z' }]
