@@ -73,30 +73,15 @@ func logSlowWrite(wait, body, commit time.Duration) {
 		(body + commit).Round(time.Millisecond), body.Round(time.Millisecond), commit.Round(time.Millisecond), wait.Round(time.Millisecond), holder())
 }
 
-// holder names this process and the first caller outside this package and
-// internal/state. It runs only on the slow path.
+// holder names this process and the store that asked for the transaction. It
+// runs only on the slow path.
 func holder() string {
-	return fmt.Sprintf("%s[%d], caller %s", process(), os.Getpid(), caller())
+	return fmt.Sprintf("%s[%d], caller %s", process(), os.Getpid(), writerCaller())
 }
 
-// caller is the first function on the stack outside this package and
-// internal/state: the store that asked for the transaction.
-func caller() string {
-	pcs := make([]uintptr, 32)
-	frames := runtime.CallersFrames(pcs[:runtime.Callers(3, pcs)])
-	for {
-		frame, more := frames.Next()
-		if !strings.HasPrefix(frame.Function, "dyna-agent/internal/database.") && !strings.HasPrefix(frame.Function, "dyna-agent/internal/state.") {
-			return frame.Function
-		}
-		if !more {
-			return "unknown"
-		}
-	}
-}
-
-// writerCaller names the store that asked for a writer transaction. It runs
-// only when caller detail is on, so the stack walk costs nothing otherwise.
+// writerCaller names the store that asked for a transaction. The slow log and
+// the caller metrics both use it, so one label format covers both. It runs
+// only on the slow path or when caller detail is on.
 func writerCaller() string {
 	pcs := make([]uintptr, 32)
 	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
