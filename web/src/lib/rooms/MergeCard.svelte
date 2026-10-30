@@ -7,12 +7,13 @@
   import EventRow from './EventRow.svelte'
   import EventDetails from './EventDetails.svelte'
   import { mergeDecision, mergeEvent } from './eventPayloads.ts'
+  import { clock } from '../ui/format.ts'
   import { shortSha, commitUrl } from '../prs/pr.ts'
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import type { MergeReasonKind, MergeStep } from './events.gen.ts'
 
-  let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
+  let { post, posts = [post], notice = post.notice, surface = 'feed' }: { post: EventPost; posts?: EventPost[]; notice?: EventNotice; surface?: EventSurface } = $props()
 
   // The four steps the progress bar shows, in order.
   const steps: readonly MergeStep[] = ['queued', 'trial', 'checks', 'landed']
@@ -31,10 +32,10 @@
   // A landed trial is sage, a running one gold, and an ending that needs a
   // person coral.
   const stepTones: Record<MergeStep, '' | 'gold' | 'sage' | 'coral'> = {
-    queued: 'gold',
-    trial: 'gold',
-    checks: 'gold',
-    landed: 'sage',
+    queued: '',
+    trial: '',
+    checks: '',
+    landed: '',
     failed: 'coral',
     returned: 'coral',
     conflict: 'coral',
@@ -120,10 +121,28 @@
   ts={post.ts}
   {surface}
   {title}
+  summaryWrap={type === 'failed' || type === 'landed'}
   chips={[{ label: stepWords[type], tone: stepTones[type], failure: stepTones[type] === 'coral' }]}
-  summary={[decision?.note, subject?.title, payload?.checks && (payload.checks.total ?? 0) > 0 ? `checks ${payload.checks.done}/${payload.checks.total}` : '', payload?.head ? `head ${shortSha(payload.head)}` : '', checkSummary].filter(Boolean).join(' · ')}
 >
+  {#snippet summaryContent()}
+    {#if type === 'failed' && failedChecks.length}
+      {#if subject?.title}{subject.title}{' · '}{/if}{#if reason && reason !== 'Checks failed'}{reason}{' · '}{/if}Failed checks:  {#each failedChecks as check, i}{#if i}, {/if}<span class="check-name">{check}</span>{/each}
+    {:else}
+      {[decision?.note, subject?.title, payload?.commit ? `commit ${shortSha(payload.commit)}` : '', checkSummary, payload?.checks && (payload.checks.total ?? 0) > 0 && type !== 'failed' ? `${payload.checks.done} of ${payload.checks.total} checks ran` : '', payload?.head ? `head ${shortSha(payload.head)}` : ''].filter(Boolean).join(' · ')}
+    {/if}
+  {/snippet}
   {#snippet icon()}⇢{/snippet}
+  {#snippet footer()}
+      {#if posts.length > 1}
+        <details>
+          <summary>Show steps ({posts.length})</summary>
+          {#each posts as step (step.id)}
+            {@const event = mergeEvent(step)}
+            {#if event}<div class="step-note"><time>{clock(step.ts)}</time> · {stepWords[event.type]}</div>{/if}
+          {/each}
+        </details>
+      {/if}
+  {/snippet}
   {#snippet detail()}
   <div class="body">
     {#if decision}<p class="note">{decision.note}</p>{/if}
@@ -140,7 +159,7 @@
       {/if}
       <div class="facts">
         {#if affected && prs.length > 1}<span>batch of {prs.length}</span>{/if}
-        {#if payload.checks && (payload.checks.total ?? 0) > 0}<span>checks <b>{payload.checks.done}/{payload.checks.total}</b></span>{/if}
+        {#if payload.checks && (payload.checks.total ?? 0) > 0}<span><b>{payload.checks.done} of {payload.checks.total}</b> checks ran</span>{/if}
         {#if payload.head}<span>head <b class="mono">{shortSha(payload.head)}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
@@ -157,17 +176,19 @@
 </EventRow>
 
 <style>
+  .check-name { white-space: nowrap; }
+  .step-note { color: var(--muted); }
   .note { margin: 0; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .body { display: grid; gap: 6px; }
   .sub { margin: 0; color: var(--muted); font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; width: 100%; max-width: 360px; }
   .steps i { height: 3px; border-radius: 2px; background: var(--line); }
-  .steps i.done { background: var(--sage); }
-  .steps i.live { background: var(--gold); }
+  .steps i.done { background: var(--muted); }
+  .steps i.live { background: var(--muted); }
   .steps i.bad { background: var(--coral); }
   .legend { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; width: 100%; max-width: 360px; color: var(--faint); font-size: var(--t-cap); }
-  .legend .done { color: var(--sage); }
-  .legend .live { color: var(--gold); }
+  .legend .done { color: var(--muted); }
+  .legend .live { color: var(--muted); }
   .legend .bad { color: var(--coral); }
   .facts { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; color: var(--muted); font-size: var(--t-sm); }
   .facts b { color: var(--ink-2); font-weight: 500; }

@@ -290,7 +290,7 @@ test('the unread marker stays on a hidden first unread start', () => {
 // every step of one trial ID folds into the newest post.
 const mergePost = (id: string, type: 'queued' | 'trial' | 'checks' | 'landed' | 'failed', trialId: string): FeedInput => ({
   id, ts: start, from: 'dyna-merge', kind: 'merge', text: 'merge',
-  notice: { kind: type },
+  notice: { kind: type, thread: `merge:${trialId}` },
   payload: { type, trialId, repo: 'acme/app', base: 'main', prs: [{ number: 242, title: 'Tidy the composer', url: 'https://github.com/acme/app/pull/242' }] },
 })
 
@@ -303,9 +303,23 @@ test('a merge trial folds queued, trial and landed into one card', () => {
     mergePost('m5', 'queued', 'dyna/merge-trial/8'),
   ]
   const rows = content(feedRows(posts))
-  assert.deepEqual(rows.map((row) => row.key), ['m1', 'm5'])
+  assert.deepEqual(rows.map((row) => row.key), ['m4', 'm5'])
   assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['m1', 'm2', 'm3', 'm4'])
   assert.equal(rowPost(rows[0])?.notice?.kind, 'landed')
+})
+
+test('old and mixed merge history fold across unrelated posts', () => {
+  const old = (id: string, type: 'queued' | 'trial' | 'landed', trial: string): FeedInput => {
+    const post = mergePost(id, type, trial)
+    return { ...post, notice: { kind: type } }
+  }
+  const posts = [old('a', 'queued', 'old'), old('b', 'trial', 'old'), old('c', 'landed', 'old'),
+    old('d', 'queued', 'mixed'), { id: 'note', ts: start, from: 'user' },
+    mergePost('e', 'trial', 'mixed'), mergePost('f', 'landed', 'mixed')]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.post.id), ['c', 'note', 'f'])
+  assert.deepEqual(rows[0]?.posts?.map((post) => post.id), ['a', 'b', 'c'])
+  assert.deepEqual(rows[2]?.posts?.map((post) => post.id), ['d', 'e', 'f'])
 })
 
 // A review result is one card per PR head: a re-review of the same head keeps
