@@ -4,6 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	accountservice "dyna-agent/internal/account/service"
+	accountstore "dyna-agent/internal/account/store"
 
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/hookinstall"
@@ -16,6 +20,15 @@ func TestQASeedFixtures(t *testing.T) {
 	dir := t.TempDir()
 	if err := qaSeedFixtures(dir); err != nil {
 		t.Fatal(err)
+	}
+	usage := accountservice.CachedUsage(&accountstore.Store{Root: filepath.Join(dir, "accounts")}, time.Now())
+	if len(usage.Accounts) != 6 {
+		t.Fatalf("usage accounts = %d, want six", len(usage.Accounts))
+	}
+	for _, account := range usage.Accounts {
+		if !account.Active || len(account.Windows) == 0 || account.Windows[0].UsedPercent == nil {
+			t.Fatalf("usage fixture is not active with a reading: %+v", account)
+		}
 	}
 	rooms := &room.Store{Root: filepath.Join(dir, "rooms")}
 	rec, err := rooms.Resolve("qa-demo")
