@@ -28,10 +28,21 @@ const (
 
 // Signal separates output activity from the state of its observer.
 type Signal struct {
-	LastOutput time.Time
-	LeaseUntil time.Time
-	Copier     CopierState
-	CPU        CPUState
+	LastOutput    time.Time
+	ObservedSince time.Time
+	LeaseUntil    time.Time
+	Copier        CopierState
+	CPU           CPUState
+}
+
+// Prove records a live observation and starts a new interval after a gap.
+func (s Signal) Prove(now time.Time) Signal {
+	if s.Copier != CopierRunning || s.LeaseUntil.IsZero() || !now.Before(s.LeaseUntil) {
+		s.ObservedSince = now
+	}
+	s.Copier = CopierRunning
+	s.LeaseUntil = now.Add(Lease)
+	return s
 }
 
 // At returns unknown when the observation's lease is absent or expired.
@@ -39,6 +50,9 @@ func (s Signal) At(now time.Time) Signal {
 	if s.LeaseUntil.IsZero() || !now.Before(s.LeaseUntil) {
 		s.Copier = CopierUnknown
 		s.CPU = CPUUnknown
+	}
+	if s.Copier != CopierRunning {
+		s.ObservedSince = time.Time{}
 	}
 	return s
 }
