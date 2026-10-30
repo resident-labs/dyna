@@ -159,9 +159,7 @@ func (r *shellRunner) Output(shell string, limit int64) (string, error) {
 	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, limit))
-	// A shell without a display prints one hint line before the command; it
-	// is not the command's output.
-	return strings.TrimPrefix(string(b), shells.NoDisplayHint+"\n"), err
+	return string(b), err
 }
 
 func (r *shellRunner) Stop(shell string) error {
