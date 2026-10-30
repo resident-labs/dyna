@@ -180,6 +180,13 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(promise)
 	}
 
+	if e.opts.RecordManifest {
+		if err := runstore.MarkWorkflowManifestUnsafe(e.ctx, e.runID(), "job calls are not in the workflow manifest"); err != nil {
+			e.manifestWriteFailed()
+			reject(fmt.Errorf("mark workflow manifest unsafe: %w", err))
+			return vm.ToValue(promise)
+		}
+	}
 	requestHash := jobRequestHash(spec)
 	positionHash := jobPositionHash(e.workflowID, plan)
 	identity := requestHash + "\n" + positionHash
