@@ -44,7 +44,7 @@ func (m NamedMount) Validate() error {
 	if err := validateRoomList([]string{m.Room}); err != nil {
 		return fmt.Errorf("mount %s: %w", m.Name, err)
 	}
-	if err := cleanAbsolutePath(m.Source); err != nil {
+	if err := ValidateAbsolutePath(m.Source); err != nil {
 		return fmt.Errorf("mount %s source: %w", m.Name, err)
 	}
 	if m.Mode != MountRO && m.Mode != MountRW {
@@ -88,7 +88,7 @@ func ParseDeviceRef(pathValue, room string) (DeviceRef, error) {
 
 // Validate checks a device reference decoded from an external patch.
 func (r DeviceRef) Validate() error {
-	if err := cleanAbsolutePath(r.Path); err != nil {
+	if err := ValidateAbsolutePath(r.Path); err != nil {
 		return fmt.Errorf("device: %w", err)
 	}
 	if err := validateRoomList([]string{r.Room}); err != nil {
@@ -108,7 +108,7 @@ func ParseDeviceGrant(device, room string) (DeviceGrant, error) {
 
 // Validate checks a device grant decoded from an external patch or SQLite.
 func (d DeviceGrant) Validate() error {
-	if err := cleanAbsolutePath(d.Path); err != nil {
+	if err := ValidateAbsolutePath(d.Path); err != nil {
 		return fmt.Errorf("device: %w", err)
 	}
 	if err := validateRoomList([]string{d.Room}); err != nil {
@@ -117,7 +117,10 @@ func (d DeviceGrant) Validate() error {
 	return nil
 }
 
-func cleanAbsolutePath(value string) error {
+// ValidateAbsolutePath checks a container mount source, container mount target
+// or host device path. A colon is refused because Docker reads it as a field
+// separator in --mount and --device arguments.
+func ValidateAbsolutePath(value string) error {
 	if value == "" || !path.IsAbs(value) || path.Clean(value) != value || strings.ContainsAny(value, ":\x00") {
 		return errors.New("path must be a clean absolute path without a colon")
 	}

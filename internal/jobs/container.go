@@ -3,7 +3,6 @@ package jobs
 import (
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 
 	"dyna-agent/internal/machines"
@@ -63,8 +62,8 @@ func ParseMountRequests(values []string) ([]MountRequest, error) {
 }
 
 func validateMountTarget(target string) error {
-	if target == "" || !path.IsAbs(target) || path.Clean(target) != target || strings.ContainsAny(target, ":\x00") {
-		return fmt.Errorf("container mount target %q must be a clean absolute path without a colon", target)
+	if err := machines.ValidateAbsolutePath(target); err != nil {
+		return fmt.Errorf("container mount target %q: %w", target, err)
 	}
 	if target == "/workspace" || strings.HasPrefix(target, "/workspace/") {
 		return errors.New("a named mount cannot replace the job's /workspace")
@@ -120,8 +119,8 @@ func resolveContainer(machine machines.Machine, in Input) (ContainerOptions, err
 		options.Mounts = append(options.Mounts, ContainerMount{Source: registered.Source, Target: request.Target, Mode: mode})
 	}
 	for _, device := range in.Devices {
-		if device == "" || !path.IsAbs(device) || path.Clean(device) != device || strings.ContainsRune(device, 0) {
-			return ContainerOptions{}, fmt.Errorf("device %q must be a clean absolute path", device)
+		if err := machines.ValidateAbsolutePath(device); err != nil {
+			return ContainerOptions{}, fmt.Errorf("device %q: %w", device, err)
 		}
 		allowed := false
 		for _, grant := range machine.Devices {
