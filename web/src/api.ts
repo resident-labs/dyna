@@ -4,7 +4,7 @@ import { createTransport } from './lib/api/transport.ts'
 import { createTerminalTransport } from './lib/api/terminalTransport.ts'
 import { openStream } from './lib/api/stream.ts'
 import type { StreamSource } from './lib/api/stream.ts'
-import { isRecord, isString } from './lib/api/guards.ts'
+import { isPostResult, isRecord, isString } from './lib/api/guards.ts'
 import type { AttachmentRef, Engine, ProfileSave } from './lib/api/engine.ts'
 import type { MachinePatch } from './lib/api/machine.ts'
 import type { ApprovalDecision } from './lib/api/approvals.ts'
@@ -90,7 +90,11 @@ export const api = {
       isString(entry.description) && Array.isArray(entry.args) &&
       entry.args.every((arg: unknown) => isRecord(arg) && isString(arg.name) && typeof arg.required === 'boolean' && isString(arg.description)))
   },
-  runCommand: (room: string, name: string, text: string) => post('/api/rooms/' + encodeURIComponent(room) + '/commands/run', { name, text, target: '' }),
+  runCommand: async (room: string, name: string, text: string) => {
+    const result = await post('/api/rooms/' + encodeURIComponent(room) + '/commands/run', { name, text, target: '' })
+    if (!isPostResult(result)) throw new Error('The command result is invalid.')
+    return result
+  },
 
   accountsView: (scope = '') => app.AccountsView(scope),
   accountsList: (scope = '', refresh = false) => app.AccountsList(scope, refresh),
