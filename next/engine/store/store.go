@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/resident-labs/dyna/contract"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -54,6 +56,10 @@ type Store struct {
 	errMu         sync.Mutex
 	closed        bool
 	first         error
+	currentTx     *sql.Tx
+	pending       []contract.Event
+	subMu         sync.Mutex
+	subs          map[chan contract.Event]struct{}
 }
 
 // Open creates or opens a store in dir. now is injected for deterministic scheduling.
@@ -237,6 +243,8 @@ func (s *Store) writeLoop() {
 		tx, err := s.writer.BeginTx(r.ctx, nil)
 		writerErr := err
 		if err == nil {
+			s.currentTx = tx
+			s.pending = nil
 			err = r.fn(tx)
 			if err != nil {
 				_ = tx.Rollback()
@@ -245,6 +253,11 @@ func (s *Store) writeLoop() {
 				writerErr = err
 			}
 		}
+		s.currentTx = nil
+		if err == nil {
+			s.publish(s.pending)
+		}
+		s.pending = nil
 		if writerErr != nil && !errors.Is(writerErr, context.Canceled) && !errors.Is(writerErr, context.DeadlineExceeded) {
 			s.errMu.Lock()
 			if s.first == nil {
@@ -266,6 +279,12 @@ func (s *Store) Close() error {
 	close(s.requests)
 	s.mu.Unlock()
 	<-s.done
+	s.subMu.Lock()
+	for ch := range s.subs {
+		close(ch)
+		delete(s.subs, ch)
+	}
+	s.subMu.Unlock()
 	close(s.stop)
 	<-s.checkDone
 	err := s.first
