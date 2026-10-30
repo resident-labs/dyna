@@ -420,6 +420,11 @@ func runCompactCommand(ctx context.Context, p profile.Profile, cwd string, spec 
 		return err
 	}
 	_, _ = io.WriteString(stdin, spec.prompt)
+	if spec.finished == nil {
+		// Without a result line to wait for, end of input is how the command
+		// learns its prompt is complete.
+		_ = stdin.Close()
+	}
 	exited := make(chan error, 1)
 	go func() { exited <- wait() }()
 	select {

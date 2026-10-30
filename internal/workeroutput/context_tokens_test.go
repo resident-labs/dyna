@@ -11,6 +11,10 @@ func TestContextTokensComeFromOneModelCall(t *testing.T) {
 	}{
 		{DialectPiJSON, `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input":1200,"output":10,"cacheRead":30000,"cacheWrite":500}}}`, 31700},
 		{DialectPiJSON, `{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`, 0},
+		{DialectClaudeStreamJSON, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":500,"output_tokens":5}}}`, 90510},
+		// A subagent's own call and a whole-turn result say nothing about this session's context.
+		{DialectClaudeStreamJSON, `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":5,"cache_read_input_tokens":7}}}`, 0},
+		{DialectClaudeStreamJSON, `{"type":"result","usage":{"input_tokens":10,"cache_read_input_tokens":90,"output_tokens":5}}`, 0},
 	} {
 		if got := DecodeLine(&Declaration{Dialect: tc.dialect}, tc.line).ContextTokens; got != tc.want {
 			t.Errorf("%s %.40s: ContextTokens = %d, want %d", tc.dialect, tc.line, got, tc.want)
