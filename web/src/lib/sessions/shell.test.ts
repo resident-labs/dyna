@@ -35,6 +35,10 @@ test('the live row lays over the snapshot but keeps a tail the row lacks', () =>
   assert.deepEqual([ended.state, ended.tail, ended.outputBytes], ['exited', 'a\nb', 4])
 })
 
+test('a null shell command displays an empty command', () => {
+  assert.equal(commandOf(job({ command: null })), '')
+})
+
 test('command, size and log chunk guards', () => {
   assert.equal(commandOf(job()), 'go test ./...')
   assert.equal(sizeOf(job({ outputLines: 1204 })), '1,204 lines')
