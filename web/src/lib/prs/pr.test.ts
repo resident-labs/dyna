@@ -176,8 +176,8 @@ test('checkSummary is one rule for how the checks stand', () => {
 test('checkTime formats a suite duration, and shows nothing when the check has none', () => {
   assert.equal(checkTime({}), '')
   assert.equal(checkTime({ durationMs: 0 }), '')
-  assert.equal(checkTime({ durationMs: 340 }), '340ms')
-  assert.equal(checkTime({ durationMs: 14000 }), '14s')
-  assert.equal(checkTime({ durationMs: 4200 }), '4.2s')
+  assert.equal(checkTime({ durationMs: 340 }), '340 ms')
+  assert.equal(checkTime({ durationMs: 14000 }), '14.0 s')
+  assert.equal(checkTime({ durationMs: 4200 }), '4.2 s')
   assert.equal(checkTime({ durationMs: 107000 }), '1m 47s')
 })

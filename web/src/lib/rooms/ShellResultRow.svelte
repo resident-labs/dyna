@@ -10,6 +10,7 @@
   import type { ShellState } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
+  import { durationMs } from '../ui/format.ts'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
@@ -24,11 +25,7 @@
   let shown = $derived(open || jobState === 'failed')
   // A run under a second reads in milliseconds, so a quick command does not
   // look like a clock that failed to move.
-  let elapsed = $derived.by(() => {
-    const ms = payload?.durationMs ?? 0
-    if (ms <= 0) return ''
-    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
-  })
+  let elapsed = $derived(durationMs(payload?.durationMs ?? 0))
 </script>
 
 {#snippet body()}
