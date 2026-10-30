@@ -41,7 +41,84 @@
   --glass-pill: 0.86;
   --glass-composer: 0.93;
   --glass-panel: 0.95;
+
+  /* Foundation layer. New code uses these names; the older names above and
+     in app.css keep their values until each page moves over.
+     Surfaces: canvas, sunken nav, card, and a raised field or popover.
+     Hover and select are washes, so they work on any surface. */
+  --bg: #1c1b1e;
+  --bg-sunk: #161518;
+  --surface: #232225;
+  --surface-2: #2b2a2d;
+  --overlay-hover: rgba(236, 233, 228, 0.04);
+  --overlay-select: rgba(236, 233, 228, 0.07);
+
+  /* One alpha border: soft for row dividers, strong for inputs. */
+  --border: rgba(236, 233, 228, 0.08);
+  --border-soft: rgba(236, 233, 228, 0.05);
+  --border-strong: rgba(236, 233, 228, 0.14);
+
+  /* Tones (lib/ui/tone.ts). The bare tone fills dots and meters, -fg colors
+     text, -wash fills a badge and -edge outlines it. Live is warning. */
+  --tone-success: #97c995;
+  --tone-success-fg: #b4dbb2;
+  --tone-success-wash: color-mix(in srgb, #97c995 14%, transparent);
+  --tone-success-edge: color-mix(in srgb, #97c995 28%, transparent);
+  --tone-warning: #e6c07b;
+  --tone-warning-fg: #f0d29d;
+  --tone-warning-wash: color-mix(in srgb, #e6c07b 14%, transparent);
+  --tone-warning-edge: color-mix(in srgb, #e6c07b 28%, transparent);
+  --tone-danger: #ef8a80;
+  --tone-danger-fg: #f5aaa2;
+  --tone-danger-wash: color-mix(in srgb, #ef8a80 14%, transparent);
+  --tone-danger-edge: color-mix(in srgb, #ef8a80 30%, transparent);
+  --tone-info: #8dc5e3;
+  --tone-info-fg: #b0d8ee;
+  --tone-info-wash: color-mix(in srgb, #8dc5e3 14%, transparent);
+  --tone-info-edge: color-mix(in srgb, #8dc5e3 28%, transparent);
+  --tone-neutral: #9a958c;
+  --tone-neutral-fg: #cfcbc4;
+  --tone-neutral-wash: rgba(236, 233, 228, 0.06);
+  --tone-neutral-edge: rgba(236, 233, 228, 0.12);
+  --tone-live: var(--tone-warning);
+  --tone-live-fg: var(--tone-warning-fg);
+  --tone-live-wash: var(--tone-warning-wash);
+  --tone-live-edge: var(--tone-warning-edge);
+
+  /* Chart and meter series. Iris stays for actions and focus, not data. */
+  --data-1: #cfcbc4;
+  --data-2: #8dc5e3;
+  --data-3: #e6c07b;
+  --data-4: #d7a8f0;
+
+  /* Type: the uppercase label, a stat figure and a hero figure. Titles take
+     the medium weight; headings and figures take the strong one. */
+  --t-micro: 10px;
+  --t-stat: 24px;
+  --t-hero: 32px;
+  --w-medium: 500;
+  --w-strong: 600;
+
+  --r-badge: 4px;
+  --meter-h: 6px;
+  --meter-track: rgba(236, 233, 228, 0.07);
 }
+
+/* The one uppercase label: card titles, stat labels, table heads. */
+.micro-label { font-size: var(--t-micro); font-weight: var(--w-strong); line-height: var(--leading-tight); text-transform: uppercase; letter-spacing: 0.1em; color: color-mix(in srgb, var(--muted) 80%, transparent); }
+/* Figures: mono and tabular, so columns align. The ui- prefix keeps this
+   and .ui-meter clear of page classes named .num and .meter. */
+.ui-num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
+/* A meter: <div class="ui-meter"><span style="width: 40%"></span></div>. The
+   fill is --data-1 unless the page sets a tone color on the span. */
+.ui-meter { display: block; height: var(--meter-h); border-radius: 999px; overflow: hidden; background: var(--meter-track); }
+.ui-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--data-1); transition: width var(--motion) var(--ease); }
+/* StatTiles that share one flush Card. Each tile draws a soft line on its
+   left and top; the grid clips the lines on its outer edge. */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); overflow: hidden; }
+.stat-grid > * { box-shadow: -1px 0 0 var(--border-soft), 0 -1px 0 var(--border-soft); }
+/* A figure that is refreshing: the old value stays in place and dims. */
+.dimmed { opacity: 0.4; transition: opacity var(--motion) var(--ease) var(--motion-fast); }
 
 /* A small-caps state label, such as LIVE or YOU ARE DRIVING. */
 .section-label { font-size: var(--t-cap); font-weight: 500; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: var(--s5) 0 var(--s2); }
