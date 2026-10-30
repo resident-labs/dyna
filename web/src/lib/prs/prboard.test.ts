@@ -111,6 +111,15 @@ test('a PR link opens that PR on its tab beside the list', async () => {
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
+test('the merge headline preserves a conflict alongside failed CI', async () => {
+  const { dir, component, render } = await load('PRDetail')
+  try {
+    const change = open({ ci: 'failed', checks: [{ name: 'build', state: 'failure' }] })
+    const html = render(component, { props: { change, roomId: 'r', merge: { state: 'conflict', reason: 'Rebase onto main' } } }).body
+    assert.match(text(html), /Blocked: CI failed.*build.*Blocked: conflict.*Rebase onto main/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('the PR page puts the merge box after the conversation', async () => {
   const { dir, component, render } = await load('PRDetail')
   try {
