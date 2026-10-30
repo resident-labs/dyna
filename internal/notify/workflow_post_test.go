@@ -47,7 +47,7 @@ func TestWorkflowPostRecoversAfterAppendBeforeCompletion(t *testing.T) {
 	}
 	// The first process stopped after the append and before marking the reservation.
 	result, err := e.svc.Post(e.ctx, PostInput{WorkflowKey: key, Sender: Sender{Kind: SenderScript, Room: rec.Name, RunID: "wf_resumed"}, Mentions: []string{"@" + rec.Name}, Text: "one post"})
-	if err != nil || result.Message.ID != reservation.PostID || len(result.Deliveries) != 0 {
+	if err != nil || result.Message.ID != reservation.PostID || len(result.Deliveries) != 1 || result.Deliveries[0].Delivery != "room" {
 		t.Fatalf("recovery = %+v, %v", result, err)
 	}
 	after, err := e.svc.Rooms.ReserveWorkflowPost(e.ctx, key, rec.ID)
