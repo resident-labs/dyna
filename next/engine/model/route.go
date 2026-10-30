@@ -1,0 +1,115 @@
+// Package model runs the model proxy and enforces session model permissions.
+package model
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strings"
+)
+
+const maxRequestBytes = 32 << 20
+
+// RouteError is a typed model route refusal.
+type RouteError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// Handler returns a route bound to one session and its allowed models.
+// upstream is the proxy's loopback URL; clientKey never leaves the engine.
+func Handler(upstream *url.URL, clientKey, sessionID string, allowedModels []string) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedModels))
+	for _, name := range allowedModels {
+		allowed[name] = struct{}{}
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	proxy.FlushInterval = -1
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/model/v1/messages", "/model/v1/chat/completions", "/model/v1/responses":
+			if r.Method != http.MethodPost {
+				refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST is supported.")
+				return
+			}
+		default:
+			refuse(w, http.StatusNotFound, "unsupported_route", "The model endpoint is not supported.")
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+		if err != nil {
+			refuse(w, http.StatusBadRequest, "invalid_request", "Could not read request.")
+			return
+		}
+		if len(body) > maxRequestBytes {
+			refuse(w, http.StatusRequestEntityTooLarge, "request_too_large", "Model request exceeds 32 MiB.")
+			return
+		}
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		token, err := decoder.Token()
+		if err != nil || token != json.Delim('{') {
+			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+			return
+		}
+		var model string
+		seenModel := false
+		valid := true
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				valid = false
+				break
+			}
+			var value json.RawMessage
+			if decoder.Decode(&value) != nil {
+				valid = false
+				break
+			}
+			if key == "model" {
+				if seenModel || json.Unmarshal(value, &model) != nil {
+					valid = false
+					break
+				}
+				seenModel = true
+			}
+		}
+		if valid {
+			_, err = decoder.Token()
+			valid = err == nil && decoder.Decode(new(json.RawMessage)) == io.EOF
+		}
+		if !valid || model == "" {
+			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+			return
+		}
+		if _, ok := allowed[model]; !ok {
+			refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/model")
+		r.URL.RawPath = ""
+		query := r.URL.Query()
+		for _, name := range []string{"key", "api_key", "access_token"} {
+			query.Del(name)
+		}
+		r.URL.RawQuery = query.Encode()
+		// Do not forward box-controlled credentials or affinity headers.
+		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id"} {
+			r.Header.Del(name)
+		}
+		r.Header.Set("Authorization", "Bearer "+clientKey)
+		r.Header.Set("X-Api-Key", clientKey)
+		r.Header.Set("X-Claude-Code-Session-Id", sessionID)
+		proxy.ServeHTTP(w, r)
+	})
+}
+
+func refuse(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(RouteError{Code: code, Message: message})
+}
