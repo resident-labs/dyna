@@ -24,13 +24,22 @@ func TestDeliveryReplyRoundTrip(t *testing.T) {
 	}
 	reply := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM, Session: "s"}, ReplyTo: "post"}
 	event := contract.Event{ID: "post", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Text: "hello"}}
-	delivery := contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: "s"}, Surface: contract.SurfaceDM, Reply: reply, Wake: true}
+	delivery := contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: "s"}, Surface: contract.SurfaceDM, Reply: reply}
 	if _, err := s.Post(ctx, event, []contract.Delivery{delivery}); err != nil {
 		t.Fatal(err)
 	}
 	start := contract.Event{ID: "started", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
-	_, inputs, err := s.Dispatch(ctx, "s", "turn", start, false)
-	if err != nil || len(inputs) != 1 || inputs[0].Reply != reply || inputs[0].Surface != contract.SurfaceDM {
+	turn, inputs, err := s.Dispatch(ctx, "s", "turn", start, false)
+	if err != nil || turn != "" || len(inputs) != 0 {
+		t.Fatalf("quiet delivery started turn: %q %+v %v", turn, inputs, err)
+	}
+	event.ID = "wake"
+	delivery.Wake = true
+	if _, err := s.Post(ctx, event, []contract.Delivery{delivery}); err != nil {
+		t.Fatal(err)
+	}
+	_, inputs, err = s.Dispatch(ctx, "s", "turn", start, false)
+	if err != nil || len(inputs) != 2 || inputs[0].Reply != reply || inputs[0].Surface != contract.SurfaceDM {
 		t.Fatalf("inputs %+v: %v", inputs, err)
 	}
 }
