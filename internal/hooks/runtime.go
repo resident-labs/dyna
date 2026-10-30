@@ -135,6 +135,9 @@ func (s Service) runtime(id string, fn func(*state) error) error {
 				return err
 			}
 		}
+		if st.Fetched == nil {
+			st.Fetched = map[string]time.Time{}
+		}
 		if st.Due == nil {
 			st.Due = map[string]time.Time{}
 		}
