@@ -1,8 +1,12 @@
 package roomsvc
 
 import (
+	"dyna-agent/internal/room"
 	"hash/fnv"
+	"log"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"dyna-agent/internal/subagent"
@@ -24,9 +28,15 @@ var emojiPool = []string{
 // creation order, closed ones included, and each takes the first free glyph
 // from its own hashed start. Closing a session never moves anyone, and a new
 // session only adds itself, so an avatar stays the same once shown.
+const senderUnknown room.SenderKind = "unknown"
+
+var unknownSenders sync.Map
+
 type avatarBook struct {
-	byID   map[string]string
-	byAddr map[string][]addrAvatar // address -> sessions that held it, oldest first
+	avatars map[string]Avatar
+	rooms   map[string]room.Record
+	byID    map[string]string
+	byAddr  map[string][]addrAvatar // address -> sessions that held it, oldest first
 	// addrByID and openByAddr name sessions of every room, not only this one, so
 	// a reply finds the session that wrote a post after a rename or a move.
 	addrByID   map[string]string // session -> the address it answers at now
@@ -47,7 +57,7 @@ func newAvatarBook(sessions []subagent.Info, roomID string) avatarBook {
 		}
 		return ordered[i].ID < ordered[j].ID
 	})
-	b := avatarBook{byID: map[string]string{}, byAddr: map[string][]addrAvatar{}, addrByID: map[string]string{}, openByAddr: map[string]string{}}
+	b := avatarBook{avatars: map[string]Avatar{}, rooms: map[string]room.Record{}, byID: map[string]string{}, byAddr: map[string][]addrAvatar{}, addrByID: map[string]string{}, openByAddr: map[string]string{}}
 	for _, s := range ordered {
 		b.addrByID[s.ID] = s.Address()
 		// An open session answers to its address, as a mention resolves. In
@@ -57,14 +67,13 @@ func newAvatarBook(sessions []subagent.Info, roomID string) avatarBook {
 			b.openByAddr[s.Address()] = s.ID
 		}
 	}
-	var in []subagent.Info
+	usedByRoom := map[string]map[int]bool{}
 	for _, s := range ordered {
-		if s.RoomID == roomID {
-			in = append(in, s)
+		used := usedByRoom[s.RoomID]
+		if used == nil {
+			used = map[int]bool{}
+			usedByRoom[s.RoomID] = used
 		}
-	}
-	used := map[int]bool{}
-	for _, s := range in {
 		h := fnv.New32a()
 		_, _ = h.Write([]byte(s.ID))
 		start := int(h.Sum32() % uint32(len(emojiPool)))
@@ -76,9 +85,71 @@ func newAvatarBook(sessions []subagent.Info, roomID string) avatarBook {
 		}
 		used[pick] = true
 		b.byID[s.ID] = emojiPool[pick]
+		kind, emoji := room.SenderSession, emojiPool[pick]
+		if s.Role == subagent.RoleRoot {
+			kind, emoji = room.SenderRoot, "🖥️"
+		}
+		b.avatars[s.ID] = Avatar{Kind: kind, Emoji: emoji, Room: s.Room}
 		b.byAddr[s.Address()] = append(b.byAddr[s.Address()], addrAvatar{id: s.ID, created: s.Created, emoji: emojiPool[pick]})
 	}
 	return b
+}
+
+// resolve returns the sender's home-room identity for a post.
+func (b avatarBook) resolve(m room.Message, roomName string) Avatar {
+	kind := m.SenderKindFor(roomName)
+	home := roomName
+	if kind == room.SenderSession || kind == room.SenderRoot {
+		id := m.SessionIDs[m.From]
+		if id == "" {
+			for _, held := range b.byAddr[m.From] {
+				if held.created.UnixMilli() <= m.TS || id == "" {
+					id = held.id
+				}
+			}
+		}
+		if avatar, ok := b.avatars[id]; ok {
+			avatar.Color = b.rooms[avatar.Room].Color
+			return avatar
+		}
+		if kind == room.SenderRoot {
+			if prefix, _, ok := strings.Cut(m.From, ":"); ok {
+				home = prefix
+			}
+			return Avatar{Kind: kind, Emoji: "🖥️", Room: home, Color: b.rooms[home].Color}
+		}
+		if _, loaded := unknownSenders.LoadOrStore(m.From, struct{}{}); !loaded {
+			log.Printf("unknown avatar sender %q", m.From)
+		}
+		return Avatar{Kind: senderUnknown, Room: home, Color: b.rooms[home].Color}
+	}
+	if m.SenderRoomID != "" {
+		for _, rec := range b.rooms {
+			if rec.ID == m.SenderRoomID {
+				home = rec.Name
+				break
+			}
+		}
+	}
+	avatar := Avatar{Kind: kind, Room: home, Color: b.rooms[home].Color}
+	switch kind {
+	case room.SenderEngine:
+		avatar.Emoji = "⚙️"
+	case room.SenderVoice:
+		avatar.Emoji = "🎙️"
+	}
+	return avatar
+}
+
+func (b avatarBook) member(id, roomName string) Avatar {
+	if id == "" {
+		return Avatar{Kind: room.SenderOwner, Room: roomName, Color: b.rooms[roomName].Color}
+	}
+	if a, ok := b.avatars[id]; ok {
+		a.Color = b.rooms[a.Room].Color
+		return a
+	}
+	return Avatar{Kind: senderUnknown, Room: roomName, Color: b.rooms[roomName].Color}
 }
 
 // forPost is the avatar of the session that held addr when the post was
@@ -120,4 +191,9 @@ func (b avatarBook) address(id string) (string, bool) {
 func (s *Service) avatars(roomID string) avatarBook {
 	all, rev := s.snapshot()
 	return s.avatarBook(roomID, all, rev)
+}
+
+// MemberAvatar returns a session's identity from the shared avatar book.
+func (s *Service) MemberAvatar(id, roomID, roomName string) Avatar {
+	return s.avatars(roomID).member(id, roomName)
 }

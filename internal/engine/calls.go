@@ -451,6 +451,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "UnarchiveRoom", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.rooms.UnarchiveRoom},
 		{Name: "RenameRoom", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.rooms.RenameRoom},
 		{Name: "SetRoomRootProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.SetRoomRootProfile},
+		{Name: "SetRoomColor", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.SetRoomColor},
 		{Name: "SetRoomCheckIn", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.SetRoomCheckIn},
 		{Name: "SetRoomAttribution", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.SetRoomAttribution},
 		{Name: "SetRoomUpstream", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.SetRoomUpstream},

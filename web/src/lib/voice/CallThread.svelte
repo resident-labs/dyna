@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ownerIdentity, voiceIdentity } from '../ui/avatar.ts'
   // The call's conversation rows (design option A): who spoke, to whom, and
   // how it reached the call, Voice's requests to root and its room checks as
   // quiet activity lines, then the owner's words as they are heard. A shared
@@ -33,7 +34,7 @@
     <VoiceRelay icon="mic" label="Started" text={r.post?.text ?? ''} state={r.state} />
   {:else if r.post}
     <article class="tp">
-      <div class="gutter"><Avatar name={nameOf(r.who)} hue={hueOf(r.who)} owner={r.who === 'you'} size={28} /></div>
+      <div class="gutter">{#if r.post.avatar}<Avatar avatar={r.post.avatar} name={nameOf(r.who)} hue={hueOf(r.who)} size={28} />{:else if r.who === 'you' || r.who === 'voice'}<Avatar avatar={r.who === 'you' ? ownerIdentity : voiceIdentity} name={nameOf(r.who)} hue={hueOf(r.who)} size={28} />{/if}</div>
       <div>
         <header>
           <span class="name hue-{hueOf(r.who)}">{nameOf(r.who)}</span>
@@ -51,7 +52,7 @@
 {/each}
 {#if partial}
   <article class="tp partial" aria-live="polite">
-    <div class="gutter"><Avatar name="you" hue={4} owner size={28} /></div>
+    <div class="gutter"><Avatar avatar={ownerIdentity} name="you" hue={4} size={28} /></div>
     <div><header><span class="name hue-4">you</span><span class="tag">hearing</span></header><div class="prose">{partial}</div></div>
   </article>
 {/if}

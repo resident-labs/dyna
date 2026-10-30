@@ -37,7 +37,7 @@ test('phone rows expose full room names and actions while the desktop keeps its 
   const dom = installDom()
   const ui = await importBundle(code, '../rooms/RoomRail')
   const rooms: Room[] = [{
-    id: 'room-long', name: 'infra', displayName: 'Infrastructure planning', lastActivity: '', unread: 104,
+    color: 'crimson', id: 'room-long', name: 'infra', displayName: 'Infrastructure planning', lastActivity: '', unread: 104,
     running: 2, members: 3, pinned: false, pinOrder: 0, archived: false,
   }]
   const selected: string[] = []

@@ -31,7 +31,7 @@ const tail = 'This final sentence must remain visible in the session DM.'
 const text = `The first sentence gives the result. ${'The middle adds enough detail to need a preview. '.repeat(8)}${tail}`
 const post = { id: 'msg_long', from: 'room:agent', to: ['room'], ts: 1, text }
 const room = { id: 'room', name: 'room' }
-const member = { id: 'agent', name: 'agent', address: 'room:agent', state: 'idle' }
+const member = { avatar: { kind: 'session', room: 'repo', color: 'crimson' }, id: 'agent', name: 'agent', address: 'room:agent', state: 'idle' }
 
 test('Room chat trims an agent message only on request, and a DM always shows it in full', () => {
   try {
@@ -78,7 +78,7 @@ test('a turn result drops its lead-in and follows the Room chat trim setting', (
     assert.doesNotMatch(trimmed, new RegExp(turnTail))
 
     const dm = dmView({ address: 'dyna:root', posts: [{ ...turnPost, fullResult: false }], turns: [] }, turnRoom)
-    const root = { id: 'root', name: 'root', address: 'dyna:root', state: 'idle' }
+    const root = { avatar: { kind: 'session', room: 'repo', color: 'crimson' }, id: 'root', name: 'root', address: 'dyna:root', state: 'idle' }
     const transcript = render(DmRows, { props: {
       dm, room: turnRoom, member: root, members: [root], onthread() {}, onopenfile() {},
     } }).body

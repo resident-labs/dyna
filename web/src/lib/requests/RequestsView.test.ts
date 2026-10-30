@@ -97,9 +97,9 @@ test('a waiting-owner terminal row runs its command and declines with an optiona
   const terminal = { argv: ['gh', 'auth', 'login', '--scopes', 'workflow'], cwd: '/tmp/work', reason: 'Sign in', stage: 'waiting-owner' }
   const component = ui.mount(ui.default, { target: document.getElementById('app'), props: {
     roomId: 'r', questions: [
-      { id: 'q1', to: 'owner', state: 'open', askerName: 'agent', askerHue: 1, text: 'What should we do?', meanwhile: 'Reviewing', askedAt: '2026-10-22T00:00:00Z', options: [] },
-      { id: 'q2', to: 'owner', state: 'open', kind: 'terminal', terminal, askerName: 'builder', askerHue: 2, text: 'Sign in', askedAt: '2026-10-22T00:01:00Z', options: [] },
-      { id: 'q3', to: 'owner', state: 'open', kind: 'terminal', terminal: { ...terminal, stage: 'waiting-session', reason: 'Held request' }, askerName: 'builder', askerHue: 2, text: 'Held request', askedAt: '2026-10-22T00:02:00Z', options: [] },
+      { id: 'q1', to: 'owner', state: 'open', avatar: { kind: 'session', room: 'repo', color: 'crimson' }, askerName: 'agent', askerHue: 1, text: 'What should we do?', meanwhile: 'Reviewing', askedAt: '2026-10-22T00:00:00Z', options: [] },
+      { id: 'q2', to: 'owner', state: 'open', kind: 'terminal', terminal, avatar: { kind: 'session', room: 'repo', color: 'crimson' }, askerName: 'builder', askerHue: 2, text: 'Sign in', askedAt: '2026-10-22T00:01:00Z', options: [] },
+      { id: 'q3', to: 'owner', state: 'open', kind: 'terminal', terminal: { ...terminal, stage: 'waiting-session', reason: 'Held request' }, avatar: { kind: 'session', room: 'repo', color: 'crimson' }, askerName: 'builder', askerHue: 2, text: 'Held request', askedAt: '2026-10-22T00:02:00Z', options: [] },
     ],
     onanswer: () => {}, onrun: (id: string) => { ran.push(id) }, ondecline: (id: string, reason: string) => { declined.push([id, reason]) },
   } })
@@ -134,7 +134,7 @@ test('free-text Send requires content, submits once, and keeps a failed draft fo
   let fail: (reason: unknown) => void = () => { throw new Error('no pending answer') }
   const sent: unknown[][] = []
   const component = ui.mount(ui.default, { target: document.getElementById('app'), props: {
-    roomId: 'r', questions: [{ id: 'q1', to: 'owner', state: 'open', askerName: 'agent', askerHue: 1, text: 'What should we do?', meanwhile: 'Reviewing', askedAt: '2026-10-22T00:00:00Z', options: [] }],
+    roomId: 'r', questions: [{ id: 'q1', to: 'owner', state: 'open', avatar: { kind: 'session', room: 'repo', color: 'crimson' }, askerName: 'agent', askerHue: 1, text: 'What should we do?', meanwhile: 'Reviewing', askedAt: '2026-10-22T00:00:00Z', options: [] }],
     onanswer: (...args: unknown[]) => { sent.push(args); return new Promise<void>((resolve, reject) => { finish = resolve; fail = reject }) },
     onrun: () => {}, ondecline: () => {},
   } })

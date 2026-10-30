@@ -8,7 +8,7 @@ import type { Room } from '../api/room.ts'
 Object.assign(globalThis, { $state: <T>(value: T) => value })
 
 test('a slash rename targets the current room while the palette stays closed', async (t) => {
-  const room = (id: string): Room => ({ id, name: id, pinned: false, pinOrder: 0, archived: false, lastActivity: '', unread: 0, running: 0, members: 0 })
+  const room = (id: string): Room => ({ id, name: id, color: 'crimson', pinned: false, pinOrder: 0, archived: false, lastActivity: '', unread: 0, running: 0, members: 0 })
   let current = room('a')
   const calls: string[] = []
   t.mock.method(api, 'renameRoom', async (id: string) => { calls.push(id); return null })

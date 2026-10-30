@@ -13,7 +13,7 @@ type Question struct {
 	questions.Question
 	AskerName    string            `json:"askerName"`
 	AskerHue     int               `json:"askerHue"`
-	AskerEmoji   string            `json:"askerEmoji"`
+	Avatar       Avatar            `json:"avatar"`
 	ToName       string            `json:"toName,omitempty"`
 	WithdrawnBy  string            `json:"withdrawnBy,omitempty"`
 	AnswererName string            `json:"answererName,omitempty"`
@@ -102,7 +102,11 @@ func (s *Service) questionRows(rec room.Record, qs []questions.Question, book av
 		if q.Asker != "owner" {
 			addr += ":" + name(q.Asker, q.Human)
 		}
-		row := Question{Question: q, AskerName: name(q.Asker, q.Human), AskerHue: NameHue(addr), AskerEmoji: book.byID[q.Asker], Attachments: []room.Attachment{}}
+		askerID := q.Asker
+		if askerID == "owner" {
+			askerID = ""
+		}
+		row := Question{Question: q, AskerName: name(q.Asker, q.Human), AskerHue: NameHue(addr), Avatar: book.member(askerID, rec.Name), Attachments: []room.Attachment{}}
 		if q.Answer != nil {
 			row.AnswererName = name(q.Answer.By, q.Answer.Human)
 		}

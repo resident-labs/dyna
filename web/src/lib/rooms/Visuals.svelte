@@ -10,10 +10,11 @@
   import { visuals as store } from '../files/visuals.svelte.ts'
   interface Props {
     roomId: string
+    roomName: string
     visuals?: Visual[]
     onopen: (visual: Visual) => void
   }
-  let { roomId, visuals = [], onopen }: Props = $props()
+  let { roomId, roomName, visuals = [], onopen }: Props = $props()
   let filter = $state('all')
   let shown = $derived(filterVisuals(visuals, filter))
   // The store learns the room when its first list arrives.
@@ -53,7 +54,7 @@
           </span>
           <span class="name">{title(v)}</span>
           <span class="by">
-            <Avatar name={v.post.speaker} hue={v.post.fromHue} emoji={v.post.fromEmoji} owner={v.post.owner} size={20} ring="var(--main)" />
+            <Avatar name={v.post.speaker} hue={v.post.fromHue} avatar={v.post.avatar} here={roomName} size={20} dotGap="var(--main)" />
             <span class="pill mono">v{v.attachment.version || 1}</span>
             <span class="who">{v.post.speaker} · {ago(new Date(v.post.ts).toISOString())}</span>
             <span class="dot {status}" title={status === 'none' ? 'No checks' : `Checks: ${status}`}></span>
