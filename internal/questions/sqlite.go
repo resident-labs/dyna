@@ -15,6 +15,8 @@ import (
 	"dyna-agent/internal/state"
 )
 
+const revisionCounter database.Counter = "questions.revision"
+
 const questionsSchema = `CREATE TABLE IF NOT EXISTS questions (
  key TEXT PRIMARY KEY, room TEXT NOT NULL, state TEXT NOT NULL,
  asker TEXT NOT NULL, body TEXT NOT NULL CHECK(json_valid(body))
@@ -46,31 +48,42 @@ func (s *Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := database.Migrate(db, "questions.schema", 3, func(conn *sql.Conn, _ int) error {
+	if err := database.Migrate(db, "questions.schema", 4, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
-		if _, err := conn.ExecContext(ctx, questionsSchema); err != nil {
-			return err
-		}
-		var owned bool
-		if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM questions) OR EXISTS(SELECT 1 FROM question_next) OR EXISTS(SELECT 1 FROM meta WHERE key='questions.imported' OR (key='questions.revision' AND CAST(value AS INTEGER)>0))`).Scan(&owned); err != nil {
-			return err
-		}
-		if !owned {
-			st, err := s.readImportSource()
-			if err != nil {
+		if old < 3 {
+			if _, err := conn.ExecContext(ctx, questionsSchema); err != nil {
 				return err
 			}
-			if err := importQuestionRows(conn, st); err != nil {
+			var owned bool
+			if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM questions) OR EXISTS(SELECT 1 FROM question_next) OR EXISTS(SELECT 1 FROM meta WHERE key='questions.imported' OR (key='questions.revision' AND CAST(value AS INTEGER)>0))`).Scan(&owned); err != nil {
+				return err
+			}
+			if !owned {
+				st, err := s.readImportSource()
+				if err != nil {
+					return err
+				}
+				if err := importQuestionRows(conn, st); err != nil {
+					return err
+				}
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('questions.revision','0')"); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, askerKindBackfill); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='questions.imported'"); err != nil {
 				return err
 			}
 		}
-		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('questions.revision','0')"); err != nil {
+		if err := database.CreateRevisions(ctx, conn); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, askerKindBackfill); err != nil {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT key,CAST(value AS INTEGER) FROM meta WHERE key='questions.revision'"); err != nil {
 			return err
 		}
-		_, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='questions.imported'")
+		_, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='questions.revision'")
 		return err
 	}); err != nil {
 		return nil, err
@@ -306,20 +319,18 @@ func (s *Store) updateTx(fn func(*sql.Conn, *State) error) error {
 		if err != nil || !changed {
 			return err
 		}
-		_, err = conn.ExecContext(context.Background(), "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='questions.revision'")
+		_, err = revisionCounter.Bump(context.Background(), conn)
 		return err
 	})
 }
 
 // Revision changes only when question rows or ID counters change.
-func (s *Store) Revision() (string, error) {
+func (s *Store) Revision() (int64, error) {
 	db, err := s.open()
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	var version string
-	err = db.QueryRow("SELECT value FROM meta WHERE key='questions.revision'").Scan(&version)
-	return version, err
+	return revisionCounter.Read(context.Background(), db)
 }
 
 func (s *Store) listQuestions(where string, locked bool, args ...any) ([]Question, error) {

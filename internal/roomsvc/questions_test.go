@@ -18,7 +18,7 @@ func TestQuestionViewsAndEvents(t *testing.T) {
 	rec := e.room("questions")
 	snd := notify.Sender{Kind: notify.SenderOwner, Room: rec.Name}
 	sig := map[string]string{}
-	var version string
+	var version int64
 	e.svc.scanQuestions(sig, &version, true, func(Event) { t.Fatal("initial event") })
 	q, err := e.svc.Notify.Ask(e.ctx, snd, "", "", "Which region?", "check data", []string{"east", "west"}, []notify.File{{Name: "region.html", Render: room.RenderHTML, Data: []byte("<html><title>Regions</title><body>East and West</body></html>")}})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestQuestionWriteEmitsOneCanonicalEvent(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("question-events")
 	sig := map[string]string{}
-	var version string
+	var version int64
 	e.svc.scanQuestions(sig, &version, true, func(Event) { t.Fatal("initial event") })
 	db, err := database.Open(filepath.Dir(e.svc.Notify.QuestionStore().Root))
 	if err != nil {

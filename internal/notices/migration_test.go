@@ -22,7 +22,7 @@ func TestDismissedNoticeCannotReturnFromRetainedJSON(t *testing.T) {
 		if _, err := conn.ExecContext(context.Background(), schema); err != nil {
 			return err
 		}
-		_, err := conn.ExecContext(context.Background(), "UPDATE notices_revision SET n=4")
+		_, err := conn.ExecContext(context.Background(), "CREATE TABLE notices_revision (n INTEGER NOT NULL); INSERT INTO notices_revision VALUES (4)")
 		return err
 	}); err != nil {
 		t.Fatal(err)
