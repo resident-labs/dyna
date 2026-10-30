@@ -66,6 +66,23 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 	}
 }
 
+func TestBuildPassesBaseTag(t *testing.T) {
+	r := &imageRunner{missing: true}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.commands) != 2 || !strings.HasSuffix(r.commands[1], "'podman' 'build' '-t' 'toolchain:hash' '--build-arg' 'DYNA_BASE=dyna-base:hash' '-'") {
+		t.Fatalf("commands %v", r.commands)
+	}
+	if !bytes.HasSuffix(r.input, []byte("tar")) {
+		t.Fatal("missing tar input")
+	}
+}
+
 type blockedImageRunner struct {
 	started chan struct{}
 	release chan struct{}
