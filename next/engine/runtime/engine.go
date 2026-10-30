@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
 	enginegit "github.com/resident-labs/dyna/engine/git"
+	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -90,6 +91,8 @@ func Run(ctx context.Context, cfg Config) error {
 	service := engine.New(st, boxes, profiles, time.Now)
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
+	boxes.Rooms, boxes.Mirror = st, mirror
+	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes}, func(c api.Caller) http.Handler {
 		session, err := st.Session(ctx, c.Principal.Session)
 		if err != nil {

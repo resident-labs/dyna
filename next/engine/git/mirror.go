@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/images"
 )
 
 // Runner executes git without putting credentials in command arguments.
@@ -106,6 +107,17 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, r
 func (m *Mirror) authEnv() []string {
 	credential := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + m.Token))
 	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}
+}
+
+// ImageContext reads the default-branch toolchain context from the mirror.
+func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (string, images.TreeID, []byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	path, err := m.path(repo)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return images.Context(ctx, m.Runner, path)
 }
 
 // Ref reads one remote reference without fetching its objects.
