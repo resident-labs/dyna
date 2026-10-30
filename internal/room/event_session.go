@@ -126,6 +126,13 @@ func (s SessionEvent) eventType() EventType   { return EventType(s.Type) }
 // eventSubject keeps every note of one session in that session's rows.
 func (s SessionEvent) eventSubject() string { return s.Session }
 
+func (s SessionEvent) eventThread() string {
+	if s.Type == SessionInstructions && s.Session != "" {
+		return "instructions:" + s.Session
+	}
+	return ""
+}
+
 // eventDedupe keys a note by the facts of its change, so a retried note posts
 // once and a second change posts again.
 func (s SessionEvent) eventDedupe() string {

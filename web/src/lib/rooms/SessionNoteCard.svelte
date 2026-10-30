@@ -10,8 +10,9 @@
   import type { InstructionAction, SessionChange } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
+  import { clock } from '../ui/format.ts'
 
-  let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
+  let { post, notice = post.notice, surface = 'feed', posts = [post] }: { post: EventPost; notice?: EventNotice; surface?: EventSurface; posts?: EventPost[] } = $props()
 
   const actionWords: Record<InstructionAction, string> = { items: 'changed', body: 'changed', removed: 'removed' }
   const changeTone: Record<SessionChange, string> = {
@@ -71,6 +72,7 @@
 
   // sections is the instruction change, one row per changed section.
   let sections = $derived(payload?.sections ?? [])
+  let changedParts = $derived([...new Set(posts.flatMap((step) => (sessionEvent(step)?.sections ?? []).map((section) => section.name)))])
 </script>
 
 <EventRow
@@ -78,10 +80,31 @@
   ts={post.ts}
   {surface}
   title={headline}
-  chips={[{ label: kind, tone: changeTone[kind] }]}
-  summary={sections.length ? sections.map((section) => section.name).join(', ') : ''}
+  chips={kind === 'instructions' ? [] : [{ label: kind, tone: changeTone[kind] }]}
+  summary={changedParts.join(' · ')}
 >
   {#snippet icon()}✦{/snippet}
+  {#snippet footer()}
+  {#if posts.length > 1}
+    <details>
+      <summary>Show steps ({posts.length})</summary>
+      {#each posts as step (step.id)}
+        <div class="step"><time>{clock(step.ts)}</time> · {(sessionEvent(step)?.sections ?? []).map((section) => section.name).join(' · ')}</div>
+        <ul class="sections">
+          {#each sessionEvent(step)?.sections ?? [] as section, i (i)}
+            <li>
+              <span class="name">{section.name}</span>
+              <span class="action">{actionWords[section.action]}</span>
+              {#if section.body}<span class="item" title={section.body}>{section.body}</span>{/if}
+              {#each section.added ?? [] as item (item)}<span class="item add" title={item}>+ {item}</span>{/each}
+              {#each section.removed ?? [] as item (item)}<span class="item remove" title={item}>− {item}</span>{/each}
+            </li>
+          {/each}
+        </ul>
+      {/each}
+    </details>
+  {/if}
+  {/snippet}
   {#snippet detail()}
   {#if sections.length}
     <ul class="sections">
@@ -114,6 +137,7 @@
 </EventRow>
 
 <style>
+  .step { color: var(--muted); }
   .sections { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
   .sections li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: var(--t-cap); }
   .name { color: var(--ink-2); font-weight: 600; }
