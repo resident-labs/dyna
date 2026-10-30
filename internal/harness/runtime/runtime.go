@@ -21,11 +21,6 @@ import (
 	"dyna-agent/internal/store"
 )
 
-type Pin struct {
-	Bundle     Bundle `json:"bundle"`
-	AccountID  string `json:"accountId"` // observed active account; never binds resume
-	Generation string `json:"generation"`
-}
 type Doctor struct {
 	Profile       string   `json:"profile"`
 	Harness       string   `json:"harness"`
