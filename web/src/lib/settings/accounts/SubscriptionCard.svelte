@@ -75,7 +75,7 @@
             {#each pool.segments as segment (segment.account.id)}
               {#if accounts.length > 1 && onopen}
                 <button class="segment-link" aria-label="Open details for {accountLabel(segment.account)}" onclick={(event) => onopen?.(segment.account, event)}><UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} /></button>
-              {:else}<UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} showAccount={false} />{/if}
+              {:else}<UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} showAccount={false} showValue={mean === null && segmentRemaining(segment, now()) !== null} />{/if}
             {/each}
           </div>
         </div>

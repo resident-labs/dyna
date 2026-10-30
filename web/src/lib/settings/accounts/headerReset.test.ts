@@ -110,6 +110,12 @@ test('account cards open the selected account and only mark use in a multi-accou
     assert.match(target.querySelector('[role=meter]')?.getAttribute('aria-label') ?? '', /one.*70%/)
     target.querySelector<HTMLButtonElement>('button[aria-label="Open Z.ai account details for one"]')?.click()
     assert.deepEqual(opened, ['two', 'two', 'one'])
+    assert.ok(app)
+    await unmount(app)
+    app = undefined
+    flushSync(() => { app = mount(Card, { target, props: { group: { provider: 'zai', accounts: [{ ...account('one', true), servesHere: false }] } } }) })
+    assert.match(target.textContent ?? '', /Not reported/)
+    assert.match(target.querySelector('[role=meter]')?.textContent ?? '', /70%/)
   } finally {
     if (app) await unmount(app)
     dom.window.close()
