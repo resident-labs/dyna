@@ -310,7 +310,7 @@ test('a wrap-up turn shows a designed divider, not its engine prompt', () => {
 test('the seat DM is its own posts inline; a post of another conversation is one reference row', () => {
   const owner = 'room', root = 'room:root', seat = `dm:seat:${room.id}`
   const posts = [post('ask', owner, [root], 1, { human: true, conversation: seat }), post('answer', root, [owner], 2, { conversation: seat })]
-  const design: SessionReference = { postId: 'report1', from: 'room:lead', speaker: 'lead', fromHue: 0, conversation: 'room', ts: Date.parse(ts(3)), preview: 'The parser is fixed', attachments: 1 }
+  const design: SessionReference = { avatar: { kind: 'session', emoji: '🦊', room: 'room', color: 'crimson' }, postId: 'report1', from: 'room:lead', speaker: 'lead', fromHue: 0, conversation: 'room', ts: Date.parse(ts(3)), preview: 'The parser is fixed', attachments: 1 }
   const view = dmView({ address: root, member: { name: 'root' }, posts, references: [design], turns: [] }, { name: owner })
   const inline = view.rows.filter(isKind('message')).map((r) => r.post?.id)
   assert.deepEqual(inline, ['ask', 'answer'], 'the main stream is the seat DM')
@@ -323,7 +323,7 @@ test('the seat DM is its own posts inline; a post of another conversation is one
 })
 
 test('a reference row replaces the transcript copy of a post that lives elsewhere', () => {
-  const elsewhere: SessionReference = { postId: 'p1', from: 'room:lead', speaker: 'lead', fromHue: 0, conversation: 'room', ts: Date.parse(ts(10)), preview: 'Please review', attachments: 0 }
+  const elsewhere: SessionReference = { avatar: { kind: 'session', emoji: '🦊', room: 'room', color: 'crimson' }, postId: 'p1', from: 'room:lead', speaker: 'lead', fromHue: 0, conversation: 'room', ts: Date.parse(ts(10)), preview: 'Please review', attachments: 0 }
   const view = dmView({
     address, posts: [], references: [elsewhere], turns: [{ n: 1, started: ts(0), items: [{ kind: 'prompt', postId: 'p1', from: 'room:lead', text: 'Please review', ts: ts(10), delivered: true }] }],
   }, room)
