@@ -30,7 +30,7 @@ test('an idle node says nothing runs and no work waits', async () => {
   ui.unmount(component)
 })
 
-test('a check row shows its check name, what it tests and its commit, never its admission ID', async () => {
+test('a check row names its check and PR without raw identifiers', async () => {
   const { ui, component } = await mountCard({
     capacity,
     running: [
@@ -42,8 +42,7 @@ test('a check row shows its check name, what it tests and its commit, never its 
   const text = document.body.textContent ?? ''
   assert.match(text, /frontend-check · PR #924/)
   assert.match(text, /go-test-shard-1 · merge trial/)
-  assert.match(text, /e95ecf2/)
-  assert.match(text, /d5c344a/)
+  assert.doesNotMatch(text, /e95ecf2|d5c344a/)
   assert.doesNotMatch(text, /1793252114266057703|1793252239515981475/)
   ui.unmount(component)
 })
@@ -61,7 +60,7 @@ test('running work shows its holds and waiting work shows the queue words in ord
   assert.match(text, /3 of 8 CPUs/)
   assert.match(text, /3\.0 GiB of 16\.0 GiB/)
   assert.match(text, /Blocked: disk 91% at the 90% limit/)
-  assert.match(text, /display\s*1 of 1 in use/)
+  assert.match(text, /display: 1 of 1 in use/)
   assert.deepEqual(rows().slice(-3), ['make test', 'run-1-lint', 'cargo build'])
   assert.match(text, /builder · fl-rea/)
   assert.match(text, /IO-heavy/)
