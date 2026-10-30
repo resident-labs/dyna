@@ -60,7 +60,7 @@ func TestSuperviseRecordsStopDespiteChildHoldingOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The holder starts its own session, so the stop's group signal misses it.
-	meta, err := s.Create(StartOptions{Cmd: []string{"sh", "-c", "setsid sleep 600 & echo $! > " + fifo + "; wait"}, Cwd: t.TempDir()})
+	meta, err := s.Create(StartOptions{Cmd: []string{"sh", "-c", "setsid sh -c 'echo $$ > " + fifo + "; exec sleep 600' & wait"}, Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestStopRecordsExitDespiteChildHoldingOutput(t *testing.T) {
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	meta, err := s.Create(StartOptions{Cmd: []string{"sh", "-c", "setsid sleep 600 & echo $! > " + fifo + "; wait"}, Cwd: t.TempDir()})
+	meta, err := s.Create(StartOptions{Cmd: []string{"sh", "-c", "setsid sh -c 'echo $$ > " + fifo + "; exec sleep 600' & wait"}, Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
