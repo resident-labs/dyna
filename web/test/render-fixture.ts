@@ -22,7 +22,7 @@ export function loadingSession(): string {
 }
 
 const post = (fields: Partial<Post>): Post => ({
-  id: 'p1', roomId: room.id, kind: 'message', ts: 1, wake: false,
+  avatar: { kind: 'session', room: 'alpha', color: 'crimson' }, id: 'p1', roomId: room.id, kind: 'message', ts: 1, wake: false,
   from: 'alpha:worker', to: ['alpha'], text: 'Plan is ready.',
   owner: false, completion: false, fromHue: 0, speaker: 'worker',
   ...fields,
