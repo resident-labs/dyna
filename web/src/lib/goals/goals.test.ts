@@ -31,6 +31,6 @@ test('computed statuses use attention pills only when action is needed', async (
   const { statusPresentation } = await import('./goals.ts')
   assert.deepEqual(['on_track', 'waiting', 'ready_to_close', 'unowned', 'stuck', 'errored', 'needs_root'].map(statusPresentation), [
     { label: 'On track', tone: null }, { label: 'Waiting', tone: null }, { label: 'Ready to close', tone: null }, { label: 'Unowned', tone: null },
-    { label: 'Stuck', tone: 'danger' }, { label: 'Errored', tone: 'danger' }, { label: 'Needs root', tone: 'warning' },
+    { label: 'Stuck', tone: 'warning' }, { label: 'Errored', tone: 'danger' }, { label: 'Needs root', tone: 'warning' },
   ])
 })

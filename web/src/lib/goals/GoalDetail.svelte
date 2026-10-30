@@ -73,7 +73,7 @@
     if (id) { loadStatus(id, room); loadItems(id, room) }
     return () => { statusRequest++; itemsRequest++ }
   })
-  const TONES: Record<string, string> = { stuck: 'coral', errored: 'coral', needs_root: 'gold' }
+  const TONES: Record<string, string> = { stuck: 'gold', errored: 'coral', needs_root: 'gold' }
   const LABELS: Record<string, string> = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned', needs_root: 'Needs root' }
   const mark = (state: string): string => (state === 'done' ? '✓' : state === 'dropped' ? '×' : '•')
   // The engine appends amendments, so stored order is oldest first.
