@@ -46,6 +46,7 @@ type Job struct {
 	Unit       string    `json:"unit"`
 	Repo       string    `json:"repo"`
 	Hook       string    `json:"hook"`
+	Force      bool      `json:"force,omitempty"`
 	Room       string    `json:"room,omitempty"`
 	Session    string    `json:"session,omitempty"`
 	SHA        string    `json:"sha"`
