@@ -355,11 +355,10 @@ func saveBrowserProfile(ctx context.Context, id string) error {
 // browserSaveBackBudget bounds one save-back: the cleanup lock, the master
 // lock, and every sqlite3 merge run inside them. A save cut off by the budget
 // keeps its lease and profile, so a later cleanup can retry it.
-var browserSaveBackBudget = 60 * time.Second
+const browserSaveBackBudget = 60 * time.Second
 
-func saveBackBrowserProfile(id string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), browserSaveBackBudget)
-	defer cancel()
+// saveBackBrowserProfile saves login state under the caller's context.
+func saveBackBrowserProfile(ctx context.Context, id string) error {
 	return withBrowserCleanup(ctx, id, func() error { return saveBrowserProfile(ctx, id) })
 }
 
