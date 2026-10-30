@@ -230,3 +230,11 @@ func TestSessionCannotClose(t *testing.T) {
 		t.Fatalf("close: %v", e)
 	}
 }
+
+func TestSessionStartRejectsParentInM1(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: session})
+	if e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("expected invalid, got %v", e)
+	}
+}
