@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Run inside the disposable QA sandbox; the shell launcher builds this program.
 package main
 
