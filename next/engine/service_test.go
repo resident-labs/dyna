@@ -117,13 +117,20 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	closeCtx, cancel := context.WithCancel(ctx)
-	s.boxes = cancelOnRemove{cancel: cancel}
-	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: child.Session}); e == nil {
-		t.Fatal("expected canceled child close")
+	connectAgent(ctx, t, s, child.Session)
+	connectAgent(ctx, t, s, parent)
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: child.Session}); e != nil {
+		t.Fatal(e)
 	}
-	s.boxes = fakeBoxes{}
+	childAck := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	if _, e := s.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
+		t.Fatal(e)
+	}
+	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
+	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	if _, err := s.store.Session(ctx, child.Session); !errors.Is(err, sql.ErrNoRows) {
@@ -493,10 +500,11 @@ func TestBoxLifecycleEmitsTransitions(t *testing.T) {
 	}
 	session := lead.Session
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
+	connectAgent(ctx, t, s, session)
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	list, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
@@ -602,6 +610,93 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 		t.Fatalf("unexpected box change: %+v", changed)
 	}
 }
+func TestClosePendingRepositoryFreeChildWithoutArchiveAck(t *testing.T) {
+	now := func() time.Time { return time.Unix(1000, 0) }
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	ctx := context.Background()
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	worker, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	record, err := st.Session(ctx, worker.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current, err := st.Box(ctx, record.Box); err != nil || current.State != contract.BoxPending {
+		t.Fatalf("box %+v, error %v, want pending before close", current, err)
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker.Session}); e != nil {
+		t.Fatal(e)
+	}
+	current, err := st.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxDeleted {
+		t.Fatalf("box %+v, error %v, want deleted without an archive ack", current, err)
+	}
+	if _, err := st.Session(ctx, worker.Session); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("session remains open: %v", err)
+	}
+}
+
+func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
+	now := func() time.Time { return time.Unix(1000, 0) }
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	ctx := context.Background()
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	worker, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	record, err := st.Session(ctx, worker.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := st.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A restart after the close marked the pending box and before it finished leaves this state behind.
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, ""); err != nil {
+		t.Fatal(err)
+	}
+	if e := s.ResumeClosures(ctx); e != nil {
+		t.Fatal(e)
+	}
+	current, err = st.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxDeleted {
+		t.Fatalf("box %+v, error %v, want deleted without an archive ack", current, err)
+	}
+	if _, err := st.Session(ctx, worker.Session); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("session remains open: %v", err)
+	}
+}
+
 func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
@@ -610,16 +705,12 @@ func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	}
 	session := lead.Session
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
+	connectAgent(ctx, t, s, session)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
-	closeCtx, cancel := context.WithCancel(ctx)
-	s.boxes = cancelOnRemove{cancel: cancel}
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: session}); e == nil {
-		t.Fatal("expected canceled close")
-	}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
@@ -753,11 +844,23 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 		t.Fatalf("close while child starts: %v", e)
 	}
 	close(adapter.unblock)
+	connectAgent(ctx, t, s, parent.Session)
 	for _, id := range []contract.SessionID{a.Session, b.Session} {
 		unlock := s.lockBox(id)
 		unlock()
+		connectAgent(ctx, t, s, id)
 	}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e != nil {
+		t.Fatal(e)
+	}
+	for _, id := range []contract.SessionID{a.Session, b.Session} {
+		ack := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+		if _, e := s.ArchiveDone(ctx, ack, contract.ArchiveDoneRequest{}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent.Session}
+	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	for _, id := range []contract.SessionID{a.Session, b.Session, parent.Session} {
@@ -853,16 +956,22 @@ func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	connectAgent(ctx, t, s, lead.Session)
 	adapter := heldRemoveBox{started: make(chan struct{}, 2), release: make(chan struct{}), removed: make(chan struct{}, 2)}
 	s.boxes = adapter
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: lead.Session}); e != nil {
+		t.Fatal(e)
+	}
+	ack := contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}
 	result := make(chan *contract.Error, 2)
-	closeLead := func() {
-		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: lead.Session})
+	ackLead := func() {
+		_, e := s.ArchiveDone(ctx, ack, contract.ArchiveDoneRequest{})
 		result <- e
 	}
-	go closeLead()
+	go ackLead()
 	<-adapter.started
-	go closeLead()
+	go ackLead()
 	close(adapter.release)
 	<-result
 	<-result
@@ -912,5 +1021,27 @@ func TestPostRejectsMissingAttachment(t *testing.T) {
 	})
 	if e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("got %v", e)
+	}
+}
+
+// connectAgent marks the session's box as connected, as a box hello does, and records a turn, so its close waits for an archive ack.
+func connectAgent(ctx context.Context, t *testing.T, s *Service, session contract.SessionID) {
+	t.Helper()
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) SELECT 'turn_'||?,?,0,'','',0,0,0,0 WHERE NOT EXISTS (SELECT 1 FROM turns WHERE session=?)", session, session, session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
