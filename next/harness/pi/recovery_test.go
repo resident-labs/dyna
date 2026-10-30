@@ -45,6 +45,18 @@ func TestPartialSessionEntryIsNotAcknowledged(t *testing.T) {
 	}
 }
 
+func TestDeliveryAfterInterruptedWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := "{broken\n" + `{"type":"message","message":{"role":"user","deliveryId":"9"}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := (&Harness{session: path}).Delivered(context.Background(), 9)
+	if err != nil || !delivered {
+		t.Fatalf("delivered=%v err=%v", delivered, err)
+	}
+}
+
 func recoveryFixture(t *testing.T, tail string) *Harness {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "session.jsonl")

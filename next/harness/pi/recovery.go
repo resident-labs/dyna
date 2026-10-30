@@ -51,7 +51,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 			} `json:"message"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			return result, false, err
+			continue // Match Pi when an interrupted write left a malformed line.
 		}
 		if entry.Type != "message" {
 			continue
