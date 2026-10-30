@@ -214,7 +214,7 @@
     const n = ++wseq
     try {
       const res = await api.trackedIssues(roomId)
-      if (n === wseq) { watched = res.items; watchFailed = res.unread > 0 }
+      if (n === wseq) { watched = res.items ?? []; watchFailed = res.unread > 0 }
     } catch {
       if (n === wseq) watchFailed = true
     }
