@@ -2,7 +2,7 @@
   import Card from '../../ui/Card.svelte'
   import InlineConfirm from '../../ui/InlineConfirm.svelte'
   import UsageMeter from './UsageMeter.svelte'
-  import { accountKindLabel, accountLabel, accountStatus, needsSignIn, observation, parseRepoList, providerName, repoChips, reposLabel, remainingPercent, selectionText, usageUnavailableText } from './state.ts'
+  import { accountKindLabel, accountLabel, accountStatus, needsSignIn, observation, parseRepoList, providerColor, providerName, repoChips, reposLabel, remainingPercent, selectionText, usageUnavailableText } from './state.ts'
   import { blockUntil } from './reset.ts'
   import { deadlineClock } from './clock.svelte.ts'
   import type { ProviderAccounts, ScopeAccount } from '../../api/account.ts'
@@ -47,6 +47,7 @@
 </script>
 
 <Card title={providerName(group.provider)}>
+  {#snippet leading()}<span class="provider-dot" style:background={providerColor(group.provider)}></span>{/snippet}
   {#each group.accounts ?? [] as account (account.id)}
     {@const status = [accountStatus(account, '', now()), accountKindLabel(account.kind)].filter(Boolean).join(' · ')}
     <div class="account" class:compact>
@@ -59,7 +60,7 @@
         {:else if roomScope && account.active}<span class="inherited">{selectionText(account, roomScope)}</span>{/if}
       </div>
       {#if account.windows?.length}
-        <div class="windows">{#each account.windows as window (window.id || window.label)}<UsageMeter {window} observedAt={account.observedAt} compact={compact && remainingPercent(window) !== null} />{/each}</div>
+        <div class="windows">{#each account.windows as window (window.id || window.label)}<UsageMeter {window} provider={group.provider} observedAt={account.observedAt} compact={compact && remainingPercent(window) !== null} />{/each}</div>
       {:else}<p class="note">{usageUnavailableText(account)}</p>{/if}
       {#if repoChips(account).length}<div class="chips">{#each repoChips(account) as repo (repo)}<span class="chip">{repo}</span>{/each}</div>{/if}
       {#if !compact && observation(account)}<p class="note">{observation(account)}</p>{/if}
@@ -97,6 +98,7 @@
 </Card>
 
 <style>
+  .provider-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .account { min-width: 0; padding-top: var(--s2); }
   .account + .account { border-top: 1px solid var(--line); margin-top: var(--s2); }
   .heading { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
