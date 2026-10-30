@@ -12,6 +12,7 @@ import (
 
 // MigrateUpdateRecipe imports one unmodified recipe atomically. Multiple
 // recipes remain hooks, because one source setting cannot represent them.
+// TODO: legacy/shim remove only after the supported upgrade floor passes this migration.
 func MigrateUpdateRecipe(dataDir string) error {
 	db, err := database.Open(dataDir)
 	if err != nil {
