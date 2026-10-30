@@ -202,10 +202,39 @@ test('older pages still load when the filter hides every loaded row', async () =
   const calls: number[] = []
   await screen(async ({ open, observers, text }) => {
     const t = await open()
-    assert.match(text(t), /No pull requests/)
+    assert.match(text(t), /No tracked pull requests/)
     const end = t.querySelector('.end')
     assert.ok(end, 'the empty list still watches for older pages')
     need(observers.at(-1)).see()
     assert.equal(calls.length, 1)
   }, { props: { changes: [], older: true, onolder: () => calls.push(1) } })
+})
+
+// A busy upstream room opens on what it tracks. All on GitHub brings back
+// every open PR, the search filters the current view, and each room keeps
+// its own choice.
+test('the PR list shows tracked PRs first and remembers All on GitHub per room', async () => {
+  const github = [41, 42].map((number) => ({ number, title: `Upstream ${number}`, state: 'OPEN', author: { login: 'x' }, labels: [], workingSessionLive: false, createdAt: '', updatedAt: '', url: `https://github.com/o/r/pull/${number}` }))
+  await screen(async ({ open, text, flushSync, settle }) => {
+    let t = await open()
+    assert.deepEqual(elements(t, '.rows .row-title').map((r) => text(r).trim()), ['PR 3', 'PR 2', 'PR 1'])
+    assert.match(text(t), /3 tracked/)
+    const search = element<HTMLInputElement>(t, 'input.search')
+    search.value = 'PR 2'
+    search.dispatchEvent(new window.Event('input'))
+    flushSync()
+    assert.deepEqual(elements(t, '.rows .row-title').map((r) => text(r).trim()), ['PR 2'])
+    need(elements(t, '[aria-label="Show"] button').find((b) => b.textContent === 'All on GitHub')).click()
+    await settle()
+    flushSync()
+    search.value = ''
+    search.dispatchEvent(new window.Event('input'))
+    flushSync()
+    assert.match(text(t), /Upstream 42.*Upstream 41/)
+    assert.match(text(t), /5 open/)
+    t = await open()
+    assert.match(text(t), /Upstream 42/, 'the room remembers All on GitHub')
+    t = await open('other')
+    assert.doesNotMatch(text(t), /Upstream/, 'another room keeps its own choice')
+  }, { answers: { githubList: { repo: 'o/r', items: github, more: false } } })
 })
