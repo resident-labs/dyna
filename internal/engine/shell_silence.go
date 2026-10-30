@@ -26,7 +26,7 @@ func checkShellSilence(ctx context.Context, n *notify.Service) error {
 		if label == "" {
 			label = "shell"
 		}
-		_, err := n.ShellSilence(ctx, job.RoomID, job.ID, label, v.ShellSilenceMinutes)
+		_, err := n.ShellSilence(ctx, job.RoomID, job.ID, label, job.Owner, v.ShellSilenceMinutes)
 		if err != nil {
 			errs = append(errs, err)
 		}
