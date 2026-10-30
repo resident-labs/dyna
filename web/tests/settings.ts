@@ -176,7 +176,7 @@ const settingItems: SettingItem[] = [
   item({ key: 'updater.autoCheck', kind: 'bool', value: true, source: 'default', help: 'Check for a new Dyna version in the background.' }),
 ]
 api.settings = () => later(empty ? [] : settingItems)
-api.listServices = () => later([{ role: 'reviewer', name: 'PR reviewers', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', scope: 'room', sessions: 0, profiles: ['sol', 'mimo'] }])
+api.listServices = () => later([{ role: 'reviewer', name: 'PR reviewers', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', waiting: false, scope: 'room', sessions: 0, profiles: ['sol', 'mimo'] }])
 api.setServiceProfile = () => later(null)
 api.setSetting = (key: string, value: string) => {
   const it = need(settingItems.find((x) => x.key === key))
