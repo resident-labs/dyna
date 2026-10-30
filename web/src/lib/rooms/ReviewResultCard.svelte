@@ -6,6 +6,7 @@
   import { openExternal } from '../../api.ts'
   import StatusPill from '../ui/StatusPill.svelte'
   import EventRow from './EventRow.svelte'
+  import EventSteps from './EventSteps.svelte'
   import ReviewIcon from '../ui/ReviewIcon.svelte'
   import EventDetails from './EventDetails.svelte'
   import { prEvent, reviewEvent } from './eventPayloads.ts'
@@ -53,11 +54,11 @@
 >
   {#snippet icon()}<ReviewIcon size={15} />{/snippet}
   {#snippet footer()}
-    {#if posts.length > 1}
-      <details><summary>Show steps ({posts.length})</summary>
-        {#each posts as step (step.id)}{@const pr = prEvent(step)}{@const review = reviewEvent(step)}<div class="step-note">{stamp(step.ts)} · {pr ? chipOf(pr).label : review ? stateWords[review.kind] : 'Update'}</div>{/each}
-      </details>
-    {/if}
+    <EventSteps steps={posts.map((step) => {
+      const pr = prEvent(step)
+      const review = reviewEvent(step)
+      return { id: step.id, time: stamp(step.ts), label: pr ? chipOf(pr).label : review ? stateWords[review.kind] : 'Update' }
+    })} />
   {/snippet}
   {#snippet detail()}
   <div class="body">
@@ -93,7 +94,6 @@
 
 <style>
   .quiet { color: var(--muted); font-size: var(--t-sm); }
-  .step-note { color: var(--muted); }
   .reason { margin: 0 0 var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s2); }
   .findings { list-style: none; margin: 0 0 var(--s2); padding: 0; display: grid; gap: 6px; }
