@@ -7,6 +7,7 @@ package notify
 import (
 	"context"
 	"crypto/sha256"
+	"dyna-agent/internal/replayreason"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1551,6 +1552,10 @@ func (s *Service) boundSessionReport(id string, turn int, text string) (string, 
 // it. The card, the agent text and the row's state all come from the typed
 // run event.
 func (s *Service) CompleteRun(ctx context.Context, runID string) (Result, error) {
+	return s.CompleteRunWithReplay(ctx, runID, "", "")
+}
+
+func (s *Service) CompleteRunWithReplay(ctx context.Context, runID string, reason replayreason.WorkflowReplayReason, replayRun string) (Result, error) {
 	meta, err := runstore.ReadMeta(runID)
 	if err != nil {
 		return Result{}, err
@@ -1569,8 +1574,16 @@ func (s *Service) CompleteRun(ctx context.Context, runID string) (Result, error)
 	ev.Steps, ev.Agents = runCounts(runID)
 	ev.Summary, ev.Detail = runResult(meta)
 	if meta.Status == runstore.StatusInterrupted {
+		ev.ReplayReason, ev.ReplayRun = reason, replayRun
 		ev.Summary = "A Dyna update stopped this workflow. Review its work before restarting it."
 		ev.Detail = fmt.Sprintf("Restart: dyna workflow run <script.js> --resume %s. Resume can repeat steps. Full output: dyna workflow runs show %s", meta.ID, meta.ID)
+		if explanation := reason.Description(); explanation != "" {
+			ev.Detail = explanation + " " + ev.Detail
+		}
+		if reason == replayreason.Eligible && replayRun != "" {
+			ev.Summary = "Dyna started a safe replay. It will check prior calls before new work."
+			ev.Detail = fmt.Sprintf("Safe replay: dyna workflow runs show %s", replayRun)
+		}
 	}
 	plan, err := s.prepareEventCompletionWithFallback(meta.RoomID, ev, s.parentTargets(meta.Room, meta.ParentSession), 0, meta.ParentSession == "", meta.Status == runstore.StatusInterrupted)
 	if err != nil || plan == nil {

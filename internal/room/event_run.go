@@ -1,5 +1,7 @@
 package room
 
+import "dyna-agent/internal/replayreason"
+
 // RunState is how a workflow run ended.
 type RunState string
 
@@ -33,6 +35,9 @@ type RunEvent struct {
 	// Parent is the session that started the run, empty when an external
 	// orchestrator or the owner did.
 	Parent string `json:"parent,omitempty"`
+	// ReplayReason is the automatic replay decision for an interrupted run.
+	ReplayReason replayreason.WorkflowReplayReason `json:"replayReason,omitempty"`
+	ReplayRun    string                            `json:"replayRun,omitempty"`
 	// Detail is the rest of the line an agent reads: where the full output
 	// lives, or the error the summary cuts short.
 	Detail string `json:"detail,omitempty"`

@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/mode"
-	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runsvc"
 	"dyna-agent/internal/workflowcatalog"
@@ -140,18 +138,7 @@ func (s *Service) startRun(ctx context.Context, ref string, source RunSource, in
 // session's work. A session caller gets subagent mode, as its own shell would
 // pass it, so the runner keeps the role that may start work.
 func runEnv(actor authority.Actor, rec room.Record) []string {
-	env := make([]string, 0, len(os.Environ())+4)
-	for _, item := range os.Environ() {
-		key, _, _ := strings.Cut(item, "=")
-		if !strings.HasPrefix(key, "DYNA_") && !processguard.SecretName(key) {
-			env = append(env, item)
-		}
-	}
-	env = append(env, mode.EnvRoomID+"="+rec.ID, mode.EnvRoom+"="+rec.Name)
-	if actor.Role == authority.Session && actor.Session != "" {
-		env = append(env, mode.EnvMode+"="+mode.Subagent, mode.EnvSession+"="+actor.Session)
-	}
-	return env
+	return workflowsvc.RoomRunEnvironment(actor, rec)
 }
 
 func (s *Service) CancelRun(ctx context.Context, id string) error {

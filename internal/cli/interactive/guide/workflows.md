@@ -44,6 +44,10 @@ Copies require `.js`, reject symlinks, and require `--overwrite` to replace file
 - `research-design`: discovery, verification, and design.
 
 
+## Safe automatic replay
+
+Automatic replay is off unless the author declares `const meta = { deterministic: true }`. The workflow must make the same calls in the same order for the same inputs and recorded results. Never use clocks, randomness, mutable external state, or attempt-scoped variables such as `DYNA_RUN_ID` for call choices or replayed results. Overlapping asynchronous calls cannot be replayed safely. Dyna checks inputs and the manifest before replay. It reports why it stopped when checks fail. Manual `--resume` uses the older cache and can repeat effects. See the README for details.
+
 ## JavaScript API
 
 ### `agent(prompt, opts?)`

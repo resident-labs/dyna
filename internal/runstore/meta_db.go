@@ -132,6 +132,18 @@ CREATE TABLE workflow_manifest_calls (run_id TEXT NOT NULL, kind TEXT NOT NULL, 
 	}); err != nil {
 		return db, err
 	}
+	if err := database.Migrate(db, "runs.workflow-manifest-order", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `ALTER TABLE workflow_manifest_calls ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0; UPDATE workflow_manifest_calls SET sequence=rowid; CREATE UNIQUE INDEX workflow_manifest_call_order ON workflow_manifest_calls(run_id,sequence)`)
+		return err
+	}); err != nil {
+		return db, err
+	}
+	if err := database.Migrate(db, "runs.workflow-replay-inputs", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `CREATE TABLE workflow_replay_inputs (run_id TEXT PRIMARY KEY, deterministic INTEGER NOT NULL, fingerprint TEXT NOT NULL, options TEXT NOT NULL CHECK(json_valid(options))); CREATE TABLE workflow_replay_claims (run_id TEXT PRIMARY KEY)`)
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 
@@ -683,6 +695,12 @@ func deleteMeta(db *sql.DB, id string) error {
 			return err
 		}
 		if err := activity.DeleteOwner(ctx, conn, activity.CommandStep, id); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_replay_claims WHERE run_id=?", id); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_replay_inputs WHERE run_id=?", id); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_manifest_calls WHERE run_id=?", id); err != nil {
