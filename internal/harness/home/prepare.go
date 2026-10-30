@@ -591,20 +591,33 @@ func syncNewerToolSettings(path, published string, read os.FileInfo) error {
 	if err != nil {
 		return err
 	}
-	// Git holds path.lock while it writes the file. A file that changed since read
-	// was written by a tool, so its settings stay and this launch skips the sync.
-	if _, err := os.Lstat(path + ".lock"); err == nil {
+	// Git creates path.lock exclusively before it writes path. Taking the same lock
+	// keeps tool writes out until the rename. A lock that is already held means a
+	// tool is writing now, so this launch skips the sync and the next one retries.
+	lock, err := os.OpenFile(path+".lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if os.IsExist(err) {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
+	lock.Close()
+	defer os.Remove(path + ".lock")
+	syncLockHeld()
 	now, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
+	// A tool write that finished before the lock was taken changed the file.
 	if !now.ModTime().Equal(read.ModTime()) || now.Size() != read.Size() {
 		return nil
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// syncLockHeld runs while a sync holds a Git config lock. Tests replace it to
+// check that a tool cannot take the same lock during the sync.
+var syncLockHeld = func() {}
 
 // AgentGitName and AgentGitEmail are the Git identity of agent commits. The
 // address is reserved and never delivers mail.

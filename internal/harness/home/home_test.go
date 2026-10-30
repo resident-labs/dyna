@@ -675,3 +675,36 @@ func TestGitWriteOverridesAndRemovesInAnOlderPublication(t *testing.T) {
 		t.Fatalf("a removed setting came back: %q", out)
 	}
 }
+
+// D-292: a tool that writes the Git config must not land between the sync's check
+// and its rename. The sync holds the same lock Git takes, so a tool cannot take it.
+func TestGitConfigSyncHoldsGitLockDuringRename(t *testing.T) {
+	scope, _, env := fixture(t)
+	older, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := older["GIT_CONFIG_GLOBAL"]
+	if err := os.WriteFile(newer["GIT_CONFIG_GLOBAL"], []byte(gitConfigHeader(newer["GIT_CONFIG_GLOBAL"])+"[core]\n\tpager = new\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var toolErr error
+	syncLockHeld = func() {
+		lock, err := os.OpenFile(path+".lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
+			lock.Close()
+		}
+		toolErr = err
+	}
+	t.Cleanup(func() { syncLockHeld = func() {} })
+	if _, err := Prepare(scope, "", env); err != nil {
+		t.Fatal(err)
+	}
+	if !os.IsExist(toolErr) {
+		t.Fatalf("a tool took the Git config lock during the sync: %v", toolErr)
+	}
+}
