@@ -38,7 +38,7 @@
           <div class="cap">
             <span class="n">{computerLabel(c)}</span>
             <span class="meta">
-              {#if c.state === 'running'}<Chip tone="sage">Running</Chip>{:else}<Chip tone="gold">Starting…</Chip>{/if}
+              {#if c.state === 'running'}<Chip tone="success">Running</Chip>{:else}<Chip tone="live">Starting…</Chip>{/if}
               <span class="s">{uptimeText(c.startedAt, clock.now)}</span>
             </span>
           </div>

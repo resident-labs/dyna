@@ -59,19 +59,19 @@
     {#if it.workingSession}
       <div class="link">
         {#if onsession}<button class="name" onclick={onsession}>Session {it.workingSessionName || it.workingSession}</button>{:else}<span class="name">Session {it.workingSessionName || it.workingSession}</span>{/if}
-        <Chip tone={it.workingSessionLive ? 'iris' : ''} outline={!it.workingSessionLive} dot={it.workingSessionLive}>{it.workingSessionLive ? 'Working' : 'Not running'}</Chip>
+        <Chip tone={it.workingSessionLive ? 'info' : 'neutral'} outline={!it.workingSessionLive} dot={it.workingSessionLive}>{it.workingSessionLive ? 'Working' : 'Not running'}</Chip>
       </div>
     {/if}
     {#each prs as p (p.number)}
       <div class="link">
         <button class="name" onclick={() => onpr(p.number)}>PR #{p.number}</button>
-        <Chip tone={p.state === 'MERGED' ? 'iris' : p.state === 'OPEN' ? 'sage' : ''} outline={p.state === 'CLOSED'}>{p.isDraft ? 'Draft' : p.state[0] + p.state.slice(1).toLowerCase()}</Chip>
+        <Chip tone={p.state === 'MERGED' ? 'info' : p.state === 'OPEN' ? 'success' : 'neutral'} outline={p.state === 'CLOSED'}>{p.isDraft ? 'Draft' : p.state[0] + p.state.slice(1).toLowerCase()}</Chip>
       </div>
     {/each}
     {#if it.fixPR}
       <div class="link">
         <button class="name" onclick={() => onpr(it.fixPR ?? 0)}>Fix in #{it.fixPR}</button>
-        <Chip tone="sage">Open</Chip>
+        <Chip tone="success">Open</Chip>
       </div>
     {/if}
     {#if !it.workingSession && !prs.length && !it.fixPR}<p class="quiet">No agent is working on this yet.</p>{/if}
