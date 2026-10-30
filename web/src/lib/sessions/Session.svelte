@@ -267,8 +267,11 @@
         sendError = ''
         try {
           const result = await api.runCommand(room.id, command.item.name, command.text, target)
-          if (result.failed?.length) sendError = result.failed.map((f) => f.error || 'delivery failed').join(' · ')
-          if (result.message.id) { draft = ''; stuck = true }
+          if (result.kind === 'run') { draft = ''; stuck = true }
+          else {
+            if (result.post.failed?.length) sendError = result.post.failed.map((f) => f.error || 'delivery failed').join(' · ')
+            if (result.post.message.id) { draft = ''; stuck = true }
+          }
         } catch (e) { sendError = errorText(e) }
         finally { busy = false; await tick(); field?.focus() }
         return

@@ -92,8 +92,9 @@ export const api = {
   },
   runCommand: async (room: string, name: string, text: string, target = '') => {
     const result = await post('/api/rooms/' + encodeURIComponent(room) + '/commands/run', { name, text, target })
+    if (isRecord(result) && isRecord(result.run) && isString(result.run.id)) return { kind: 'run' as const, id: result.run.id }
     if (!isPostResult(result)) throw new Error('The command result is invalid.')
-    return result
+    return { kind: 'post' as const, post: result }
   },
 
   accountsView: (scope = '') => app.AccountsView(scope),
