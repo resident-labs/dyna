@@ -12,28 +12,6 @@ import (
 	"dyna-agent/internal/repoid"
 )
 
-// Run records one repository hook attempt independently of test evidence.
-type Run struct {
-	RunnerSession string    `json:"runnerSession,omitempty"`
-	ID            string    `json:"id"`
-	Repo          string    `json:"repo"`
-	Name          string    `json:"name"`
-	Command       string    `json:"command"`
-	Result        string    `json:"result"`
-	LogPath       string    `json:"logPath"`
-	StartedAt     time.Time `json:"startedAt"`
-	FinishedAt    time.Time `json:"finishedAt,omitempty"`
-	// Event is the event that started the run, and Main is the repository's
-	// main checkout at that moment. A run that an engine leaves pending has no
-	// hook left to ask, so it keeps what its result card needs: the event, the
-	// label, the checkout to post to and the room the event belongs to. Room is
-	// empty when the repository's own room is the place to post.
-	Event string `json:"event,omitempty"`
-	Label string `json:"label,omitempty"`
-	Main  string `json:"main,omitempty"`
-	Room  string `json:"room,omitempty"`
-}
-
 func (s Service) execute() processguard.Executor {
 	if s.Exec != nil {
 		return s.Exec

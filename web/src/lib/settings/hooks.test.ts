@@ -4,7 +4,7 @@ import type { Hook, HookRun } from '../api/settings.ts'
 import { authorLabel, eventLabel, exitLabel, failLabel, hookEvents, hookForm, hookOf, hookPatch, isBuiltin, listedHooks, newHook, newestFirst, runByHand, runTone, scopeOf, timeoutLabel } from './hooks.ts'
 
 // hook fills the fields the engine stores.
-const hook = (fields: Pick<Hook, 'name' | 'event' | 'command' | 'cwd' | 'timeout' | 'onFail'>): Hook => ({ addedBy: 'owner', addedAt: '', ...fields })
+const hook = (fields: Pick<Hook, 'name' | 'event' | 'command' | 'cwd' | 'timeout' | 'onFail'>): Hook => ({ addedBy: 'owner', addedAt: '', scope: 'repository', ...fields })
 
 test('events read as plain labels', () => {
   assert.equal(eventLabel('before-land'), 'Before land')

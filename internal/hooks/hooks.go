@@ -37,31 +37,6 @@ const (
 	SessionTurnEnded = "session-turn-ended"
 )
 
-type Hook struct {
-	Name    string `json:"name"`
-	Label   string `json:"label,omitempty"`
-	Event   string `json:"event"`
-	Command string `json:"command"`
-	Cwd     string `json:"cwd"`
-	Timeout string `json:"timeout"`
-	OnFail  string `json:"onFail"`
-	// Scope says where the hook belongs: one repository, or the machine. A
-	// hook stored before scope existed belongs to its repository.
-	Scope Scope `json:"scope"`
-	// Builtin names the table entry a hook the engine seeded runs, and is empty
-	// for a hook the owner added. The engine fixes its command and cannot
-	// remove it.
-	Builtin      Builtin    `json:"builtin,omitempty"`
-	AddedBy      string     `json:"addedBy"`
-	AddedAt      time.Time  `json:"addedAt"`
-	EditedBy     string     `json:"editedBy,omitempty"`
-	EditedAt     *time.Time `json:"editedAt,omitempty"`
-	EveryMinutes int        `json:"everyMinutes,omitempty"`
-	// Disabled keeps the hook's settings and stops automatic runs. It is
-	// absent in older hook documents, where the hook runs.
-	Disabled bool `json:"disabled,omitempty"`
-}
-
 type Event struct {
 	Event    string `json:"event"`
 	Repo     string `json:"repo"`
