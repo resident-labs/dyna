@@ -396,7 +396,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
 		}
 		output.Reset()
-		if err := r.exec().PushCommit(control, repo, cache, sha); err != nil {
+		if err := r.exec().PushCommit(control, repo, cache, sha, req.Base); err != nil {
 			// No check has started, so the git error would otherwise be an empty
 			// result and the trial would report an unknown job.
 			cause := runCause(node, control, err)

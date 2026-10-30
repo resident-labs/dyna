@@ -65,7 +65,7 @@ func TestPushCommitToNodeUsesNodeConnectTimeout(t *testing.T) {
 		}
 		return nil
 	}
-	if err := r.exec().PushCommit(t.Context(), "/repo", "/var/tmp/cache", "abc123"); err != nil {
+	if err := r.exec().PushCommit(t.Context(), "/repo", "/var/tmp/cache", "abc123", ""); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"env", "GIT_LFS_SKIP_PUSH=1", "git", "-c", "core.sshCommand=ssh -o BatchMode=yes -o ConnectTimeout=60", "push", "--no-verify", "fl-rea-pve:/var/tmp/cache", "abc123:refs/dyna/ci/abc123"}
