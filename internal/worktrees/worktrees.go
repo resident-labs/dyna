@@ -496,6 +496,13 @@ func ModifiedSinceRetentionError(rec Record) error {
 // Remove safely removes a registry-backed worktree. Unless force is true, its
 // retention-time HEAD and status must still match exactly.
 func Remove(rec Record, force bool) error {
+	protected, err := trackedPRProtection(context.Background(), rec.Path)
+	if err != nil {
+		return err
+	}
+	if protected {
+		return fmt.Errorf("worktree %s is used by an open tracked PR", rec.Path)
+	}
 	registered, err := Get(rec.Path)
 	if err != nil {
 		return err
