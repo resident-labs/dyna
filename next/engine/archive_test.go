@@ -199,6 +199,7 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
+	connectAgent(ctx, t, s, session)
 	_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
 	if e != nil {
 		t.Fatal(e)
@@ -304,6 +305,11 @@ func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectAgent(ctx, t, s, session)
+	current, err = s.store.Box(ctx, record.Box)
 	if err != nil {
 		t.Fatal(err)
 	}
