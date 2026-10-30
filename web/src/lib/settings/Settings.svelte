@@ -62,7 +62,7 @@
 
 {#snippet foot()}{#if pane === 'settings'}Display preferences apply at once in this browser. Other changes save{:else}Changes save{/if} at once and apply to new sessions and runs. The <span class="mono">dyna</span> CLI sees the same values.{/snippet}
 
-<SettingsShell label="Settings" title="Configuration" nav={nav.map((n) => (n.id === 'about' && update?.text ? { ...n, dot: 'Update available' } : n))} {pane} onselect={selectPane} {busy} wide={pane === 'harnesses' || pane === 'mcp'} {onclose} foot={['harnesses', 'accounts'].includes(pane) ? null : foot}>
+<SettingsShell label="Settings" title="Configuration" nav={nav.map((n) => (n.id === 'about' && update?.text ? { ...n, dot: 'Update available' } : n))} {pane} onselect={selectPane} {busy} wide {onclose} foot={['harnesses', 'accounts'].includes(pane) ? null : foot}>
   {#if pane === 'profiles'}
     <ProfilesPane initialSelection={profileSelection} initialProfile={profileToOpen} {roomId} onusage={viewAccount} onmodal={(open) => (busy = open)} />
   {:else if pane === 'harnesses'}
