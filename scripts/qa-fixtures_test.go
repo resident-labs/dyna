@@ -19,7 +19,8 @@ import (
 
 func TestQASeedFixtures(t *testing.T) {
 	dir := t.TempDir()
-	if err := qaSeedFixtures(dir); err != nil {
+	config := t.TempDir()
+	if err := qaSeedFixtures(dir, config); err != nil {
 		t.Fatal(err)
 	}
 	usage := accountservice.CachedUsage(&accountstore.Store{Root: filepath.Join(dir, "accounts")}, time.Now())
@@ -61,7 +62,7 @@ func TestQASeedFixtures(t *testing.T) {
 	if log, err := os.ReadFile(runs[0].HookLog); err != nil || string(log) != "Sample update completed.\n" {
 		t.Fatalf("update log = %q, %v", log, err)
 	}
-	if err := qaSeedFixtures(dir); err == nil {
+	if err := qaSeedFixtures(dir, config); err == nil {
 		t.Fatal("accepted a nonempty directory")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "dyna.db")); err != nil {
