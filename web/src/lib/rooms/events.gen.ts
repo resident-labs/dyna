@@ -559,7 +559,7 @@ export interface ShellEvent {
 export interface ShellSilenceEvent {
   shellId: string
   label: string
-  session: string
+  session?: string
   minutes: number
 }
 
@@ -2041,7 +2041,7 @@ export function isShellSilenceEvent(v: unknown): v is ShellSilenceEvent {
   return isRecord(v) &&
     typeof v.shellId === "string" &&
     typeof v.label === "string" &&
-    typeof v.session === "string" &&
+    (v.session === undefined || typeof v.session === "string") &&
     Number.isInteger(v.minutes)
 }
 
