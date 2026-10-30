@@ -4,7 +4,7 @@
   import { errorText } from '../errorText.ts'
   import { onMount } from 'svelte'
   import { api } from '../../api.ts'
-  import { settingDisplay } from './display.ts'
+  import { settingDisplay, usesSelect, choiceNote } from './display.ts'
   import { fade } from 'svelte/transition'
   import Switch from '../ui/Switch.svelte'
   import Segmented from '../ui/Segmented.svelte'
@@ -196,8 +196,8 @@
             <div class="ctl">
               {#if it.kind === 'bool'}
                 <Switch on={!!it.value} label={titles[key]} disabled={it.source === 'env'} onchange={(v: boolean) => set(key, v)} />
-              {:else if it.kind === 'select'}
-                <select class="field profile" aria-label={titles[key]} value={it.value} onchange={(e) => set(key, e.currentTarget.value)}>{#if !it.options?.some((o) => o === it.value)}<option value={it.value} disabled>{missingLabel(it)}</option>{/if}{#each it.options ?? [] as value, i}<option {value}>{it.optionLabels?.[i] ?? value}</option>{/each}</select>
+              {:else if usesSelect(it)}
+                <select class="field profile" aria-label={titles[key]} value={it.value} onchange={async (e) => { const s = e.currentTarget; await set(key, s.value); if (errors[key]) s.value = String(it.value) }}>{#if !it.options?.some((o) => o === it.value)}<option value={it.value} disabled>{missingLabel(it)}</option>{/if}{#each it.options ?? [] as value, i}<option {value}>{it.optionLabels?.[i] ?? value}</option>{/each}</select>
               {:else if it.kind === 'enum'}
                 <Segmented options={(it.options ?? []).map((o) => [o, o])} value={String(it.value)} label={titles[key]} onchange={(o: string) => set(key, o)} />
               {:else}
@@ -212,6 +212,7 @@
                   aria-label={titles[key]}
                 />
               {/if}
+              {#if choiceNote(it)}<p class="choice-note">{choiceNote(it)}</p>{/if}
             </div>
           </div>
         {/if}
@@ -231,6 +232,7 @@
   .ok { font-size: var(--t-sm); color: var(--sage); font-weight: 500; }
   .help { margin: var(--s1) 0 0; font-size: var(--t-ui); color: var(--muted); line-height: 1.45; }
   .key { margin: var(--s1) 0 0; font-size: var(--t-cap); color: var(--faint); }
+  .choice-note { margin: var(--s1) 0 0; max-width: 22rem; font-size: var(--t-cap); color: var(--muted); text-align: right; }
   .err { color: var(--coral); }
   .small { font-size: var(--t-sm); margin: 6px 0 0; }
   .ctl { flex: none; }
