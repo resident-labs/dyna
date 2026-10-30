@@ -1,7 +1,12 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,6 +40,48 @@ func TestTickFastForwardsRoomCheckoutWithoutHooks(t *testing.T) {
 	}
 	if got := git(t, checkout, "rev-parse", "HEAD"); got != want {
 		t.Fatalf("checkout HEAD = %s, want origin/main %s", got, want)
+	}
+}
+
+// A room checkout that cannot move logs its skip once for one reason. Ticks of
+// other repositories and later fetches with the same reason stay quiet.
+func TestTickLogsCheckoutSkipOnceForSameReason(t *testing.T) {
+	s, dirty := setup(t)
+	ctx := context.Background()
+	origin := t.TempDir()
+	git(t, origin, "init", "-b", "main")
+	git(t, origin, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "first")
+	git(t, dirty, "remote", "add", "origin", origin)
+	git(t, dirty, "fetch", "-q", "origin")
+	git(t, dirty, "reset", "-q", "--hard", "origin/main")
+	git(t, dirty, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	if err := os.WriteFile(filepath.Join(dirty, "local.txt"), []byte("edit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clean := t.TempDir()
+	git(t, clean, "clone", "-q", origin, ".")
+	s.Checkouts = func(context.Context) ([]string, error) { return []string{dirty, clean}, nil }
+	s.Fetch = func(_ context.Context, repo string) error {
+		git(t, repo, "fetch", "-q", "origin")
+		return nil
+	}
+	var logs bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	now := time.Now()
+	for _, tick := range []struct {
+		repo string
+		at   time.Time
+	}{{dirty, now}, {clean, now}, {dirty, now.Add(5 * time.Minute)}} {
+		if err := s.Tick(ctx, tick.repo, tick.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const skip = "skipped, its tree has local changes"
+	if got := strings.Count(logs.String(), skip); got != 1 {
+		t.Fatalf("skip logged %d times, want 1:\n%s", got, logs.String())
 	}
 }
 

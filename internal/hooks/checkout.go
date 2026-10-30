@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log"
+	"slices"
 	"strings"
+	"sync"
 
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
@@ -49,21 +51,36 @@ func (s Service) roomCheckouts(ctx context.Context) ([]string, error) {
 	return paths, nil
 }
 
-// fastForwardRoomCheckouts moves each room checkout to origin's default branch.
-// A checkout it cannot move safely is skipped, and one log line says why.
-func (s Service) fastForwardRoomCheckouts(ctx context.Context) {
+// lastSkipMu guards lastSkip, the reason each room checkout last gave for not
+// moving. An empty reason means the checkout was current or moved.
+var (
+	lastSkipMu sync.Mutex
+	lastSkip   = map[string]string{}
+)
+
+// fastForwardRoomCheckout moves path to origin's default branch when path is a
+// room checkout. The engine calls it right after path's fetch. A checkout it
+// cannot move safely is skipped, and one log line says why, once per reason.
+func (s Service) fastForwardRoomCheckout(ctx context.Context, path string) {
 	paths, err := s.roomCheckouts(ctx)
 	if err != nil {
 		log.Printf("room checkouts: cannot list rooms: %v", err)
 		return
 	}
-	for _, path := range paths {
-		reason, err := fastForwardCheckout(ctx, path)
-		if err != nil {
-			log.Printf("room checkout %s: cannot fast-forward: %v", path, err)
-		} else if reason != "" {
-			log.Printf("room checkout %s: skipped, %s", path, reason)
-		}
+	if !slices.Contains(paths, path) {
+		return
+	}
+	reason, err := fastForwardCheckout(ctx, path)
+	if err != nil {
+		log.Printf("room checkout %s: cannot fast-forward: %v", path, err)
+		return
+	}
+	lastSkipMu.Lock()
+	changed := lastSkip[path] != reason
+	lastSkip[path] = reason
+	lastSkipMu.Unlock()
+	if changed && reason != "" {
+		log.Printf("room checkout %s: skipped, %s", path, reason)
 	}
 }
 
