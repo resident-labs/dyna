@@ -9,7 +9,21 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/fakehost"
 	"github.com/resident-labs/dyna/box/podman"
+	"github.com/resident-labs/dyna/contract"
 )
+
+type pendingStore struct{ boxStore }
+
+func (pendingStore) Box(_ context.Context, id contract.BoxID) (box.Box, error) {
+	return box.Box{ID: id, State: contract.BoxPending}, nil
+}
+
+func TestRemoveUnplacedBox(t *testing.T) {
+	b := &Boxes{Store: pendingStore{}}
+	if err := b.Remove(context.Background(), "box_1"); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type missingContainerRunner struct{ stopSeen bool }
 
