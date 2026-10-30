@@ -79,7 +79,7 @@ func TestSessionCloseHandsGoalsBackAndGoalsEmitEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	var events []Event
-	version := ""
+	version := int64(-1)
 	work := map[string]string{}
 	emit := func(ev Event) { events = append(events, ev) }
 	goalRows := map[string]string{}
