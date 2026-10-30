@@ -166,7 +166,7 @@ func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
 		delete(h.forwards, f)
 	}
 	if f.Box != "" {
-		_, err := h.execute(ctx, "bash", "-c", `rm -f -- "$1" && rmdir -- "$2"`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
+		_, err := h.execute(ctx, "bash", "-c", `rm -f -- "$1" && { [ ! -d "$2" ] || rmdir -- "$2"; }`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
 		return err
 	}
 	return nil
@@ -263,10 +263,10 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 	if filepath.Base(name) != name || !strings.HasSuffix(name, ".slice") {
 		return errors.New("invalid slice name")
 	}
-	if _, err := h.run(ctx, "systemctl", "--user", "stop", name); err != nil {
+	if _, err := h.run(ctx, "bash", "-c", `systemctl --user stop "$1" || [ "$(systemctl --user show "$1" -p LoadState --value)" = not-found ]`, "dyna", name); err != nil {
 		return err
 	}
-	_, err := h.run(ctx, "bash", "-c", `rm -rf -- "$XDG_RUNTIME_DIR/systemd/user.control/$1.d"; systemctl --user daemon-reload`, "dyna", name)
+	_, err := h.run(ctx, "bash", "-c", `test -n "$XDG_RUNTIME_DIR" && rm -rf -- "$XDG_RUNTIME_DIR/systemd/user.control/$1.d" && systemctl --user daemon-reload`, "dyna", name)
 	return err
 }
 func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
@@ -297,10 +297,16 @@ func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
 	return err
 }
 func (h *Host) RemoveContainer(ctx context.Context, id contract.BoxID) error {
-	if _, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--ignore", string(id)); err != nil {
-		return err
+	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--ignore", string(id))
+	return err
+}
+func (h *Host) RemoveVolume(ctx context.Context, id contract.BoxID) error {
+	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "volume", "rm", "dyna-box-"+string(id))
+	// Podman documents status 1 as a missing volume, and 2 or 125 as errors.
+	var exit remoteExit
+	if errors.As(err, &exit) && exit == 1 {
+		return nil
 	}
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "volume", "rm", "-f", "dyna-box-"+string(id))
 	return err
 }
 func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error) {
