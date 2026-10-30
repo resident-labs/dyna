@@ -16,12 +16,14 @@ func (h *Host) InstallBinary(ctx context.Context, hostData, version string, bina
 dir="$1/bin/$2"
 mkdir -p -- "$dir"
 tmp=$(mktemp "$dir/.dyna.XXXXXX")
-trap 'rm -f -- "$tmp"' EXIT
+linkdir=
+trap 'rm -f -- "$tmp"; if [ -n "$linkdir" ]; then rm -rf -- "$linkdir"; fi' EXIT
 cat > "$tmp"
 chmod 0755 "$tmp"
 if ! test -f "$dir/dyna" || [ "$(sha256sum < "$tmp")" != "$(sha256sum < "$dir/dyna")" ]; then mv -f -- "$tmp" "$dir/dyna"; fi
 cd -- "$1/bin"
-ln -sfn -- "$2" current.tmp
-mv -Tf -- current.tmp current`, "dyna-install", hostData, version)
+linkdir=$(mktemp -d .current.XXXXXX)
+ln -s -- "$2" "$linkdir/current"
+mv -Tf -- "$linkdir/current" current`, "dyna-install", hostData, version)
 	return err
 }

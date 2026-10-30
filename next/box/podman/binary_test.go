@@ -46,6 +46,46 @@ func TestInstallBinarySendsFramedBytes(t *testing.T) {
 	}
 }
 
+type concurrentInstallRunner struct {
+	commands chan string
+	release  chan struct{}
+}
+
+func (r *concurrentInstallRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	for _, arg := range args {
+		if arg == "-O" {
+			return nil, nil
+		}
+	}
+	r.commands <- args[len(args)-1]
+	<-r.release
+	return []byte("DYNA-END 00000000000000000000 000\n"), nil
+}
+
+func TestConcurrentInstallsUsePrivateTemporaryLinks(t *testing.T) {
+	r := &concurrentInstallRunner{commands: make(chan string, 2), release: make(chan struct{})}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 2)
+	for _, version := range []string{"v1", "v2"} {
+		go func() { done <- h.InstallBinary(context.Background(), "/data", version, []byte("binary")) }()
+	}
+	for range 2 {
+		command := <-r.commands
+		if !strings.Contains(command, "mktemp -d .current.XXXXXX") || !strings.Contains(command, `"$linkdir/current" current`) || !strings.Contains(command, `rm -rf -- "$linkdir"`) {
+			t.Errorf("unsafe temporary link: %s", command)
+		}
+	}
+	close(r.release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestHostArchitectureCheck(t *testing.T) {
 	machine := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[runtime.GOARCH]
 	r := &binaryRunner{output: machine + "\n"}
