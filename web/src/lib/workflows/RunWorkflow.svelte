@@ -1,15 +1,11 @@
 <script lang="ts">
-  import Segmented from '../ui/Segmented.svelte'
-  import { dialog } from '../ui/dialog.ts'
-  // Start a workflow run in the room: pick a template (or give a script
-  // path on the host) and an input. The input goes as JSON when it parses
-  // as JSON, else as a plain string; a chip says which.
   import { onMount, tick } from 'svelte'
   import type { Room } from '../api/room.ts'
-  import type { TemplateInfo } from '../api/workflow.ts'
+  import type { WorkflowInfo } from '../api/workflow.ts'
   import { errorText } from '../errorText.ts'
   import { api } from '../../api.ts'
   import { roomLabel } from '../ui/format.ts'
+  import { dialog } from '../ui/dialog.ts'
 
   interface Props {
     room: Room
@@ -17,143 +13,103 @@
     oncancel: () => void
   }
   let { room, onstarted, oncancel }: Props = $props()
-
-  let templates = $state<TemplateInfo[] | null>(null)
+  let workflows = $state<WorkflowInfo[] | null>(null)
   let error = $state('')
   let filter = $state('')
-  let pick = $state('') // a template name, or '' with mode 'script'
-  let mode = $state<'template' | 'script'>('template')
-  let script = $state('')
+  let pick = $state('')
   let input = $state('')
   let busy = $state(false)
   let card = $state<HTMLElement>()
   let search = $state<HTMLInputElement>()
-
-  // The source tag helps only when templates come from more than one place.
-  let mixed = $derived(new Set((templates ?? []).map((t) => t.source)).size > 1)
-  let shown = $derived((templates ?? []).filter((t) => !filter || `${t.name} ${t.description ?? ''}`.toLowerCase().includes(filter.toLowerCase())))
-  let parsed = $derived.by((): { kind: string; value: unknown } => {
-    const s = input.trim()
-    if (!s) return { kind: 'none', value: null }
-    try {
-      return { kind: 'json', value: JSON.parse(s) }
-    } catch {
-      return { kind: 'text', value: input }
-    }
-  })
-  let ready = $derived(!busy && (mode === 'script' ? script.trim() !== '' : shown.some((t) => t.name === pick)))
+  // The resolver uses project, then personal, then bundled for duplicate names.
+  let available = $derived((workflows ?? []).filter((w, i, all) => all.findIndex((other) => other.name === w.name) === i))
+  let shown = $derived(available.filter((w) => `${w.name} ${w.description}`.toLowerCase().includes(filter.toLowerCase())))
+  let selected = $derived(available.find((w) => w.name === pick))
+  const hints: Record<string, string> = {
+    audit: '{"what": "", "paths": [""]}',
+    'deep-research': '{"question": ""}',
+    'fix-until': '{"command": "", "maxRounds": 3}',
+    migrate: '{"instruction": "", "glob": ""}',
+  }
+  let hint = $derived(selected?.scope === 'bundled' ? hints[selected.name] : undefined)
+  let ready = $derived(!busy && !!selected)
 
   onMount(async () => {
     try {
-      const found: TemplateInfo[] = (await api.listTemplates()) ?? []
-      templates = found
-      const first = found[0]
-      if (first) pick = first.name
-      else mode = 'script'
+      workflows = (await api.listWorkflows(room.id)) ?? []
+      pick = workflows[0]?.name ?? ''
     } catch (e) {
       error = errorText(e)
-      templates = []
+      workflows = []
     }
     await tick()
     if (search?.isConnected) search.focus()
   })
-
   async function start() {
     if (!ready) return
+    let value: unknown = null
+    if (input.trim()) {
+      try { value = JSON.parse(input) } catch {
+        error = 'Enter valid JSON for the workflow arguments.'
+        return
+      }
+    }
     busy = true
     error = ''
     try {
-      const spec = mode === 'script' ? { script: script.trim() } : { template: pick }
-      const res = await api.startRun(room.id, spec, parsed.value)
-      onstarted(res?.id)
+      const res = await api.startNamedRun(room.id, pick, value)
+      onstarted(res.id)
     } catch (e) {
       error = errorText(e)
       busy = false
     }
   }
-
   function keydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      start()
-    }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); start() }
   }
-
-  // Up and Down move the choice while the search box has focus.
   function searchKey(e: KeyboardEvent) {
-    const i = shown.findIndex((t) => t.name === pick)
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault()
-      const t = shown[Math.max(0, Math.min(shown.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]
-      if (t) {
-        pick = t.name
-        mode = 'template'
-        card?.querySelector(`[data-name="${CSS.escape(t.name)}"]`)?.scrollIntoView({ block: 'nearest' })
-      }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    const i = shown.findIndex((w) => w.name === pick)
+    const w = shown[Math.max(0, Math.min(shown.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]
+    if (w) {
+      pick = w.name
+      card?.querySelector(`[data-name="${CSS.escape(w.name)}"]`)?.scrollIntoView({ block: 'nearest' })
     }
   }
-  const sourceText: Record<string, string> = { builtin: 'built in', repo: 'this repo', user: 'yours', project: 'this repo' }
 </script>
 
-
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="backdrop">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="card" bind:this={card} use:dialog={{ close: oncancel, busy, initial: () => search }} role="dialog" onkeydown={keydown} tabindex="-1" aria-modal="true" aria-label="Run a workflow" onclick={(e) => e.stopPropagation()}>
     <header>
       <h2>Run a workflow</h2>
       <p>It runs in <strong>#{roomLabel(room)}</strong>, from the room's repo folder.</p>
-      <button class="x" onclick={oncancel} aria-label="Close">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-      </button>
+      <button class="x" onclick={oncancel} aria-label="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
     </header>
-
     <div class="body">
-      <div class="mode"><Segmented label="What to run" options={[['template', 'Template'], ['script', 'Script file']]} value={mode} onchange={(v: 'template' | 'script') => (mode = v)} /></div>
-
-      {#if mode === 'template'}
-        <input class="search" bind:this={search} bind:value={filter} onkeydown={searchKey} placeholder="Filter templates" aria-label="Filter templates" autocomplete="off" spellcheck="false" />
-        <div class="list" role="radiogroup" aria-label="Templates">
-          {#if !templates}
-            <p class="quiet">Loading templates…</p>
-          {:else if !shown.length}
-            <p class="quiet">{templates.length ? 'No template matches.' : 'No templates found. Use a script file instead.'}</p>
-          {:else}
-            {#each shown as t (t.name)}
-              <button class="tpl" role="radio" aria-checked={pick === t.name} class:sel={pick === t.name} data-name={t.name} onclick={() => (pick = t.name)} ondblclick={start}>
-                <span class="radio" aria-hidden="true"></span>
-                <span class="tt">
-                  <span class="name">{t.name}{#if mixed}<span class="src">{sourceText[t.source] ?? t.source}</span>{/if}</span>
-                  {#if t.description}<span class="desc">{t.description}</span>{/if}
-                </span>
-              </button>
-            {/each}
-          {/if}
-        </div>
-      {:else}
-        <label class="field">
-          <span class="lab">Script path on the host</span>
-          <input bind:value={script} placeholder="~/workflows/review.js" class="mono" autocomplete="off" autocapitalize="off" spellcheck="false" />
-        </label>
+      <input class="search" bind:this={search} bind:value={filter} onkeydown={searchKey} placeholder="Filter workflows" aria-label="Filter workflows" autocomplete="off" spellcheck="false" />
+      <div class="list" role="radiogroup" aria-label="Workflows">
+        {#if !workflows}<p class="quiet">Loading workflows…</p>
+        {:else if !shown.length}<p class="quiet">{workflows.length ? 'No workflow matches.' : 'No workflows found.'}</p>
+        {:else}
+          {#each shown as w (w.name)}
+            <button class="tpl" role="radio" aria-checked={pick === w.name} class:sel={pick === w.name} data-name={w.name} onclick={() => (pick = w.name)}>
+              <span class="radio" aria-hidden="true"></span><span class="tt"><span class="name">{w.name}<span class="src">{w.scope}</span></span>{#if w.description}<span class="desc">{w.description}</span>{/if}</span>
+            </button>
+          {/each}
+        {/if}
+      </div>
+      {#if selected}
+        <label class="field"><span class="lab">Arguments (JSON)</span><textarea bind:value={input} rows="4" placeholder={hint ?? 'Optional JSON arguments'}></textarea></label>
       {/if}
-
-      <label class="field">
-        <span class="lab">Input <span class="chip {parsed.kind}">{parsed.kind === 'json' ? 'JSON' : parsed.kind === 'text' ? 'Text' : 'None'}</span></span>
-        <textarea bind:value={input} rows="4" placeholder={'What the workflow should work on. Plain text, or JSON such as {"files": ["a.go"]}'}></textarea>
-      </label>
-      {#if error}<p class="err">{error}</p>{/if}
+      {#if error}<p class="err" role="alert">{error}</p>{/if}
     </div>
-
-    <footer>
-      <span class="hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to start</span>
-      <button class="ghost" onclick={oncancel} disabled={busy}>Cancel</button>
-      <button class="go" onclick={start} disabled={!ready}>{busy ? 'Starting…' : 'Start run'}</button>
-    </footer>
+    <footer><span class="hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to run</span><button class="ghost" onclick={oncancel} disabled={busy}>Cancel</button><button class="go" onclick={start} disabled={!ready}>{busy ? 'Starting…' : 'Run'}</button></footer>
   </div>
 </div>
 
 <style>
-  .mode { align-self: flex-start; }
   .backdrop { position: fixed; inset: 0; background: rgba(8, 8, 10, 0.62); display: grid; place-items: center; z-index: 60; padding: 32px; }
   .card { width: min(560px, 100%); max-height: min(720px, 100%); display: flex; flex-direction: column; background: var(--side); border-radius: 12px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5); }
   header { position: relative; padding: 18px 52px 6px 20px; }
@@ -167,7 +123,6 @@
   .body { padding: 10px 20px 4px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
   input, textarea { width: 100%; background: var(--rail); border: 1px solid var(--line); border-radius: 7px; color: var(--ink); font: inherit; font-size: 15px; padding: 8px 11px; outline: none; }
   input:focus, textarea:focus { border-color: var(--iris-edge); }
-  input.mono { font-family: var(--mono); font-size: 14px; }
   textarea { resize: vertical; font-size: 14px; line-height: 1.45; }
   .list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; margin: -4px -4px 0; padding: 4px; }
   .tpl { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border-radius: 8px; text-align: left; border: 1px solid transparent; transition: background-color var(--motion-fast) var(--ease); }
@@ -184,9 +139,6 @@
   .desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
   .field { display: flex; flex-direction: column; gap: 6px; }
   .lab { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; display: flex; align-items: center; gap: 8px; }
-  .chip { text-transform: none; letter-spacing: 0; font-size: 11px; font-weight: 600; border-radius: 4px; padding: 0 6px; background: var(--raise); color: var(--faint); }
-  .chip.json { color: var(--iris); background: var(--iris-wash); }
-  .chip.text { color: var(--ink-2); }
   .quiet { color: var(--faint); font-size: 13.5px; margin: 6px 4px; }
   .err { color: var(--coral); font-size: 14px; margin: 0; }
   footer { display: flex; align-items: center; gap: 8px; padding: 14px 20px 16px; }
