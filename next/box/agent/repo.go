@@ -37,19 +37,26 @@ func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, git 
 		if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
 			return err
 		}
-		if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir); err != nil {
+		tmp := filepath.Join(filepath.Dir(dir), "."+filepath.Base(dir)+".setup")
+		if err := os.RemoveAll(tmp); err != nil {
 			return err
 		}
-		if _, err := git(ctx, dir, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
+		if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, tmp); err != nil {
 			return err
 		}
-		_, err := git(ctx, dir, "", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+repo.Branch)
+		if _, err := git(ctx, tmp, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
+			return err
+		}
+		_, err := git(ctx, tmp, "", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+repo.Branch)
 		if err == nil {
-			_, err = git(ctx, dir, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Branch)
+			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Branch)
 		} else {
-			_, err = git(ctx, dir, "", "checkout", "-b", repo.Branch, repo.Base)
+			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, repo.Base)
 		}
 		if err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, dir); err != nil {
 			return err
 		}
 	}

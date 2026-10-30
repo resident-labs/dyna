@@ -20,6 +20,9 @@ func TestSetupRepos(t *testing.T) {
 			var calls [][]string
 			git := func(_ context.Context, _, _ string, args ...string) (string, error) {
 				calls = append(calls, append([]string(nil), args...))
+				if args[0] == "clone" {
+					return "", os.MkdirAll(args[len(args)-1], 0755)
+				}
 				if args[0] == "show-ref" && !existingBranch {
 					return "", errors.New("not found")
 				}
@@ -29,7 +32,7 @@ func TestSetupRepos(t *testing.T) {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(root, "owner/repo")
-			if !reflect.DeepEqual(calls[0], []string{"clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir}) {
+			if !reflect.DeepEqual(calls[0], []string{"clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, filepath.Join(root, "owner/.repo.setup")}) {
 				t.Fatal(calls[0])
 			}
 			base := "main"
@@ -39,7 +42,7 @@ func TestSetupRepos(t *testing.T) {
 			if !reflect.DeepEqual(calls[3], []string{"checkout", "-b", "v2/s", base}) {
 				t.Fatal(calls[3])
 			}
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if _, err := os.Stat(dir); err != nil {
 				t.Fatal(err)
 			}
 			calls = nil
