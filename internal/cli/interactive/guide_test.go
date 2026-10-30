@@ -172,8 +172,8 @@ func TestGuideIndexAndTopicRoutes(t *testing.T) {
 		}
 	}
 	for internal, wants := range map[bool][]string{
-		false: {"**You are root,**", "Do not pass these decisions to the owner", "ask it with `dyna request question`", `dyna room create --repo "$PWD"`, "`dyna root attach --room <room> --harness <name>`", "`dyna root detach --room <room>`", "`--claude`", "`--other`"},
-		true:  {"**You are root,**", "Do not pass these decisions to the owner", "ask it with `dyna request question`", "internal root", "Never run `dyna room watch`", "`dyna rules list`", "`dyna rules list --global`", "`dyna root attach`", "`dyna root detach`"},
+		false: {"**You are root,**", "Promptly decide everything reaching root", "ask it with `dyna request question`", `dyna room create --repo "$PWD"`, "`dyna root attach --room <room> --harness <name>`", "`dyna root detach --room <room>`", "`--claude`", "`--other`"},
+		true:  {"**You are root,**", "Promptly decide everything reaching root", "ask it with `dyna request question`", "internal root", "Rely on these inputs instead of `dyna room watch`", "`dyna rules list`", "`dyna rules list --global`", "`dyna root attach`", "`dyna root detach`"},
 	} {
 		for _, want := range wants {
 			if !strings.Contains(guidance.RootBlock(internal), want) {
