@@ -1,14 +1,25 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
 )
 
+func setupArchive(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context.Context) {
+	t.Helper()
+	s, room, root, ctx := setup(t)
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	return s, room, child.Session, ctx
+}
+
 func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
@@ -19,20 +30,15 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 		t.Fatal(e)
 	}
 	<-channel // the initial turn
-	done := make(chan *contract.Error, 1)
-	go func() {
-		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
-		done <- e
-	}()
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
 	msg := <-channel
 	if _, ok := msg.Body.(contract.Archive); !ok {
 		t.Fatalf("expected archive, got %+v", msg.Body)
 	}
 	_, e = s.ArchiveDone(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"})
 	if e != nil {
-		t.Fatal(e)
-	}
-	if e := <-done; e != nil {
 		t.Fatal(e)
 	}
 	var commit string
@@ -47,7 +53,7 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 }
 
 func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, session, ctx := setupArchive(t)
 	for _, name := range []contract.RepoName{"owner/one", "owner/two"} {
 		if err := s.store.AddRoomRepo(ctx, room, name, false); err != nil {
 			t.Fatal(err)
@@ -60,11 +66,9 @@ func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
 		t.Fatal(e)
 	}
 	<-first
-	done := make(chan *contract.Error, 1)
-	go func() {
-		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
-		done <- e
-	}()
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
 	if _, ok := (<-first).Body.(contract.Archive); !ok {
 		t.Fatal("expected archive")
 	}
@@ -87,16 +91,13 @@ func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e := <-done; e != nil {
-		t.Fatal(e)
-	}
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM archives").Scan(&count); err != nil || count != 2 {
 		t.Fatalf("archive rows: %d, %v", count, err)
 	}
 }
 
 func TestCloseRetryResendsArchiveOnLiveChannel(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestCloseRetryResendsArchiveOnLiveChannel(t *testing.T) {
 }
 
 func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
@@ -135,17 +136,12 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 		t.Fatal(e)
 	}
 	<-channel
-	done := make(chan *contract.Error, 1)
-	go func() {
-		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
-		done <- e
-	}()
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
 	<-channel
 	_, e = s.ArchiveDone(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"})
 	if e != nil {
-		t.Fatal(e)
-	}
-	if e := <-done; e != nil {
 		t.Fatal(e)
 	}
 	record, err := s.store.Session(ctx, session)
@@ -159,7 +155,7 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 }
 
 func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +188,7 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 }
 
 func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
-	s, _, session, ctx := setup(t)
+	s, _, session, ctx := setupArchive(t)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +213,7 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 }
 
 func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
-	s, _, session, ctx := setup(t)
+	s, _, session, ctx := setupArchive(t)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +235,7 @@ func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
 }
 
 func TestDiscardSkipsArchive(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, session, ctx := setupArchive(t)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
