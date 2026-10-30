@@ -7,7 +7,8 @@
   import TabHeader from '../rooms/TabHeader.svelte'
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import { goalTree, goalStatus, goalTone, goalFilter, itemCountLabel } from './goals.ts'
+  import { goalTree, goalFilter, itemCountLabel, statusPresentation } from './goals.ts'
+  import StatusPill from '../ui/StatusPill.svelte'
   import GoalJournal from './GoalJournal.svelte'
   import { createGoalEvents } from './goalEvents.ts'
   import type { GoalEvent } from './goalEvents.ts'
@@ -28,11 +29,18 @@
   }
   let { older = false, loadingOlder = false, onolder = () => {}, roomId, goals = [], members = [], selected = '', onselect = () => {}, ongoal = null, onexpedite = null }: Props = $props()
   let filter = $state('active')
-  let now = $state(Date.now())
-  $effect(() => { const timer = setInterval(() => (now = Date.now()), 60000); return () => clearInterval(timer) })
+  let statuses = $state<Record<string, string>>({})
+  $effect(() => {
+    let current = true
+    const active = goals.filter((g) => g.state === 'active')
+    const refresh = () => Promise.all(active.map(async (g) => [g.id, await api.goalStatus(roomId, g.id).then((s) => s.label, () => '')] as const)).then((entries) => { if (current) statuses = Object.fromEntries(entries) })
+    refresh()
+    const timer = setInterval(refresh, 60000)
+    return () => { current = false; clearInterval(timer) }
+  })
   let rows = $derived(goalTree(goals, filter))
   const member = (id: string) => members.find((m) => m.id === id || m.address === id)
-  const name = (id: string): string => member(id)?.name ?? id
+  const name = (id: string): string => member(id)?.name ?? 'unknown session'
   // The Journal tab loads the room's goal events when it opens.
   interface JournalState {
     items: GoalEvent[]
@@ -59,12 +67,12 @@
     {#if rows.length === 0}<EmptyState title={filter === 'done' ? 'No done goals' : 'No active goals'}>Root and agents add goals with <code>dyna goal</code>.</EmptyState>{/if}
     {#each rows as { goal: g, depth, context } (g.id)}
       {@const count = counts[g.id]}
-      {@const status = goalStatus(g, now)}
+      {@const status = statusPresentation(statuses[g.id] ?? '')}
       {@const held = g.shared ? [] : (g.holders ?? []).map(member).filter((m): m is Member => !!m)}
       <div class="branch" class:child={depth > 0} style="margin-left: {depth * 24}px">
         <Row text={g.text} selected={selected === g.id} {context} onclick={() => onselect(g.id)}>
           {#snippet lead()}<GoalGlyph goal={g} />{/snippet}
-          {#snippet meta()}{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<span class="avatars">{#if g.shared}<span>Room</span>{:else}{#each held.slice(0, 4) as m}<Avatar name={m.name} hue={m.hue} emoji={m.emoji} size={18} />{/each}{#if held.length}<span>{held.at(0)?.name}{held.length > 1 ? ` +${held.length - 1}` : ''}</span>{/if}{/if}</span><span>· from {name(g.setter)}</span><span class="status {g.state === 'active' ? '' : goalTone(g)}">{status}</span>{/snippet}
+          {#snippet meta()}{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<span class="avatars">{#if g.shared}<span>Room</span>{:else}{#each held.slice(0, 4) as m}<Avatar name={m.name} hue={m.hue} emoji={m.emoji} size={18} />{/each}{#if g.holders?.length}<span>{name(g.holders[0] ?? '')}{g.holders.length > 1 ? ` +${g.holders.length - 1}` : ''}</span>{/if}{/if}</span><span>from {name(g.setter)}</span>{#if filter === 'active' && g.state === 'active' && status.label}{#if status.tone}<StatusPill tone={status.tone} label={status.label} />{:else}<span>{status.label}</span>{/if}{/if}{/snippet}
           {#snippet trail()}{#if count?.[1]}<span class="count">{itemCountLabel(count)}</span>{/if}{/snippet}
         </Row>
         {#if g.state === 'active' && onexpedite}<button class="xp" onclick={() => onexpedite(g)}>{goalExpedited($expedite, g) ? 'Stop expediting' : 'Expedite'}</button>{/if}
@@ -86,7 +94,6 @@
   @media (hover: none) { .xp { opacity: 1; } }
   .avatars { display: flex; align-items: center; gap: 3px; }
   .avatars :global(.avatar) + :global(.avatar) { margin-left: -6px; }
-  .status { overflow-wrap: anywhere; } .coral { color: var(--coral); } .faint { color: var(--faint); } .sage { color: var(--sage); }
   .count { color: var(--faint); font-size: var(--t-sm); white-space: nowrap; padding-top: 3px; }
   @media (max-width: 760px) {
     .list { padding: 0 var(--s2) var(--s4); }
