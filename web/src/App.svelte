@@ -314,7 +314,6 @@
     const safe = bundleReloadSafe({ drafts, composerPending, voicePhase: $voiceCall.phase, visible: pageVisible })
     if (bundleReloadPending && bundleReload.retry(safe)) bundleReloadPending = false
   })
-  let dataDir = $state('')
   let loadError = $state('')
   let health = $state('')
   let engineStatus = $state<EngineStatus>('') // why the event stream is down, see engineWatch
@@ -1369,7 +1368,7 @@
     narrowQuery: NARROW,
     needPair: () => needPair, unauthorized: () => { needPair = true }, setHalt: (value) => { halt = value },
     setNarrow: (value) => { narrow = value; navOpen = false; if (narrow) { showMembers = false; showPins = false } },
-    setDataDir: (value) => { dataDir = value }, setHealth: (value) => { health = value },
+    setHealth: (value) => { health = value },
     setUpdate: (value) => { update = value }, setRoute: (value) => { route = value }, setEngine: (value) => { engineStatus = value },
     loadProfiles, openFirst,
     // A global rule change sends a goals event with no room; Settings reloads on it.
@@ -1406,7 +1405,7 @@
 <ComputerPopout room={pop.room} session={pop.session} />
 {:else}
 <div class="app" class:narrow>
-  <NavPane open={navOpen} {narrow} suspended={phonePanelOpen} {showSide} {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onclose={() => (navOpen = false)} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} sidebar={{ machines, machinesOpen: machinesNav, machineId, onmachine: openMachine, selected: drill?.address ?? '', onroom: (id: string) => selectRoom(id), computers, viewUnread: feed?.viewUnread ?? {}, room: current ?? room, prs: openPRMap, onroommenu: (x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }, view: view as typeof GENERAL, requests: ownerRequestCount(questions), live, runs, dataDir, ownerHue, route, onview: openView, onmember: openAgent }} />
+  <NavPane open={navOpen} {narrow} suspended={phonePanelOpen} {showSide} {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onclose={() => (navOpen = false)} update={!!update} onsettings={() => openSettings()} onlogout={signOut} {ownerHue} {route} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} sidebar={{ machines, machinesOpen: machinesNav, machineId, onmachine: openMachine, selected: drill?.address ?? '', onroom: (id: string) => selectRoom(id), computers, viewUnread: feed?.viewUnread ?? {}, room: current ?? room, prs: openPRMap, onroommenu: (x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }, view: view as typeof GENERAL, requests: ownerRequestCount(questions), live, runs, onview: openView, onmember: openAgent }} />
   {#if narrow && navOpen && !phonePanelOpen}
     <button class="scrim" aria-label="Close the room list" onclick={() => (navOpen = false)}></button>
   {/if}

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { postHref, postAttachment, speaker } from './posts.ts'
+import { setOwnerProfile } from '../settings/owner.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 
 const room = 'room_20261017-123456-abcdef12'
@@ -87,4 +88,10 @@ test('speaker tells the human owner from root and keeps server labels', () => {
   assert.equal(speaker({ from: 'alpha' }, 'alpha'), 'root')
   assert.equal(speaker({ from: 'alpha:lead' }, 'alpha'), 'lead')
   assert.equal(speaker({ from: 'alpha', speaker: 'workflow review' }, 'alpha'), 'workflow review')
+})
+test('the owner chosen name replaces "you" only on posts the owner typed', () => {
+  setOwnerProfile({ name: 'Ari', avatar: '🦊' })
+  assert.equal(speaker({ from: 'alpha', human: true, speaker: 'you' }, 'alpha'), 'Ari')
+  assert.equal(speaker({ from: 'alpha', speaker: 'root' }, 'alpha'), 'root')
+  setOwnerProfile({ name: '', avatar: '' })
 })

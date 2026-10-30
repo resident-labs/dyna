@@ -10,6 +10,7 @@
   import { icons } from './icons.ts'
   import { NAMES, shareTitle, shareWhat } from './conversation.ts'
   import type { CallRow, SharedItem, Speaker } from './conversation.ts'
+  import { ownerName } from '../settings/owner.ts'
 
   let { rows, partial = '', onopen }: {
     rows: CallRow[]
@@ -18,7 +19,7 @@
   } = $props()
   const HUES: Record<Speaker, number> = { you: 4, voice: 3, root: 7 }
   // nameOf names who spoke; a row that names no speaker shows no name.
-  const nameOf = (who: Speaker | undefined) => (who ? NAMES[who] : '')
+  const nameOf = (who: Speaker | undefined) => (who === 'you' ? ownerName() : who ? NAMES[who] : '')
   // hueOf is the speaker's colour; a row that names none takes the default.
   const hueOf = (who: Speaker | undefined) => (who ? HUES[who] : undefined)
   const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -52,8 +53,8 @@
 {/each}
 {#if partial}
   <article class="tp partial" aria-live="polite">
-    <div class="gutter"><Avatar avatar={ownerIdentity} name="you" hue={4} size={28} /></div>
-    <div><header><span class="name hue-4">you</span><span class="tag">hearing</span></header><div class="prose">{partial}</div></div>
+    <div class="gutter"><Avatar avatar={ownerIdentity} name={ownerName()} hue={4} size={28} /></div>
+    <div><header><span class="name hue-4">{ownerName()}</span><span class="tag">hearing</span></header><div class="prose">{partial}</div></div>
   </article>
 {/if}
 <style>

@@ -145,9 +145,12 @@ type Values struct {
 	VoiceDucking bool
 	// VoiceAgent lets agents use voice (dyna voice say and session).
 	VoiceAgent bool
-	Extra      map[string]any
-	path       string
-	fromFile   map[string]bool
+	// OwnerName and OwnerAvatar are how front ends show the owner.
+	OwnerName   string
+	OwnerAvatar string
+	Extra       map[string]any
+	path        string
+	fromFile    map[string]bool
 }
 
 func DefaultPath() string {
@@ -323,6 +326,9 @@ func Load(path string) (Values, error) {
 		return Values{}, err
 	}
 	if err := v.loadDoctor(raw); err != nil {
+		return Values{}, err
+	}
+	if err := v.loadOwner(raw); err != nil {
 		return Values{}, err
 	}
 	if err := v.loadLibrary(raw); err != nil {
@@ -556,6 +562,8 @@ func (v *Values) Set(key, value string) error {
 		return v.setSession(key, value)
 	case KeyDoctorCondition:
 		return v.setDoctor(key, value)
+	case KeyOwnerName, KeyOwnerAvatar:
+		return v.setOwner(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking, KeyVoiceAgent:
 		return v.setVoice(key, value)
 	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibrarySmellProfile, KeyLibraryReadmeMaxLines, KeyLibrarySmellsPerDay:
@@ -700,6 +708,7 @@ func (v Values) Save() error {
 	v.saveSessions(raw)
 	v.saveVoice(raw)
 	v.saveDoctor(raw)
+	v.saveOwner(raw)
 	v.saveLibrary(raw)
 	content := nested(raw, "content")
 	content["maxCardBytes"] = v.MaxCardBytes

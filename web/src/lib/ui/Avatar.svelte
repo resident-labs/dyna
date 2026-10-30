@@ -2,6 +2,7 @@
   import type { Avatar } from '../api/session.gen.ts'
   import { sessionStatus } from '../sessions/status.ts'
   import { initials } from './format.ts'
+  import { ownerAvatar } from '../settings/owner.ts'
 
   interface Props {
     name?: string
@@ -17,15 +18,18 @@
     here?: string
   }
   let { name = '', hue = 0, size = 40, state = '', status = '', dotGap = 'var(--main)', avatar, label = '', here = '' }: Props = $props()
+  // The owner's avatar is the emoji they chose on the owner bar, else their
+  // name: in full when it fits, as initials when it does not.
+  let emoji = $derived(avatar?.kind === 'owner' ? ownerAvatar() : avatar?.emoji)
 </script>
 
 <span class="avatar bg-{hue}" class:room-ring={!!avatar?.room && !!avatar.color && avatar.room !== here} class:owner={avatar?.kind === 'owner'} class:workflow={avatar?.kind === 'workflow'} style="--s:{size}px; --gap:{dotGap}; --room:var(--room-{avatar?.color ?? 'crimson'})">
   {#if avatar?.kind === 'workflow'}
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6.5 14 10M6 13.5 14 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="5.5" cy="6" r="2.2" fill="currentColor" /><circle cx="5.5" cy="14" r="2.2" fill="currentColor" /><circle cx="14.5" cy="10" r="2.6" fill="currentColor" /></svg>
-  {:else if avatar?.emoji}
-    <span class="glyph" aria-hidden="true">{avatar.emoji}</span>
+  {:else if emoji}
+    <span class="glyph" aria-hidden="true">{emoji}</span>
   {:else if !avatar || avatar.kind === 'unknown' || avatar.kind === 'owner'}
-    <span class="letters">{avatar?.kind === 'owner' ? name : initials(label || name)}</span>
+    <span class="letters">{avatar?.kind === 'owner' && name.length <= 4 ? name : initials(label || name)}</span>
   {/if}
   {#if state}
     <span class="dot {state}" title={sessionStatus({ state, status })}></span>
