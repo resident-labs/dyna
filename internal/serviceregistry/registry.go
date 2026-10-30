@@ -135,7 +135,11 @@ func IDs() []ID {
 func Build(f Facts) []Service {
 	out := make([]Service, 0, len(definitions))
 	for _, d := range definitions {
-		s := Service{ID: d.id, Group: d.group, Label: d.label, Description: d.describe, SettingsKeys: d.keys}
+		scope := ScopeRoom
+		if d.group == GroupThisComputer || d.id == IDVoice {
+			scope = ScopeGlobal
+		}
+		s := Service{ID: d.id, Group: d.group, Scope: scope, Label: d.label, Description: d.describe, SettingsKeys: d.keys}
 		if s.SettingsKeys == nil {
 			s.SettingsKeys = []string{}
 		}
