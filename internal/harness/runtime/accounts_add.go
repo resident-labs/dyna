@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"dyna-agent/internal/account/native"
 	"errors"
 
 	"dyna-agent/internal/account/store"
@@ -29,7 +30,7 @@ func (r *Runtime) addPiProviderKey(ctx context.Context, provider store.Provider,
 	}
 	edit := piAPIKeyEdit(piID, key)
 	if label == "" {
-		label = string(provider) + " key"
+		label = native.PiKeyLabel(string(provider), key)
 	}
 	piKeysMu.Lock()
 	defer piKeysMu.Unlock()
