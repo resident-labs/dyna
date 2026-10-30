@@ -178,13 +178,18 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	}
 	var events []Event
 	var due []string
+	var pendingMain string
 	err = s.runtime(r.ID, func(st *state) error {
 		if head != "" {
 			if st.Main != "" && st.Main != head {
 				events = append(events, Event{Event: MainUpdated, Repo: r.Root, Worktree: r.Main, Branch: branch.Name, SHA: head})
+				if s.MainUpdated != nil {
+					st.PendingMain = head
+				}
 			}
 			st.Main = head
 		}
+		pendingMain = st.PendingMain
 		due = claimSchedule(st, hooks, now)
 		return nil
 	})
@@ -198,6 +203,18 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 		s.fastForwardRoomCheckout(ctx, r.Root)
 	}
 	errs := []error{fetchErr}
+	if pendingMain != "" && s.MainUpdated != nil {
+		err := s.MainUpdated(ctx, Event{Event: MainUpdated, Repo: r.Root, Worktree: r.Main, Branch: branch.Name, SHA: pendingMain})
+		if err == nil {
+			err = s.runtime(r.ID, func(st *state) error {
+				if st.PendingMain == pendingMain {
+					st.PendingMain = ""
+				}
+				return nil
+			})
+		}
+		errs = append(errs, err)
+	}
 	for _, e := range events {
 		errs = append(errs, s.Emit(ctx, e))
 	}

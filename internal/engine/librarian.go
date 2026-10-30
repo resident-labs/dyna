@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -45,8 +46,7 @@ func (s services) librarianService() librarian.Service {
 	return librarian.Service{
 		DataDir:  store.DataDir(),
 		Sessions: librarian.Live{Manager: n.Sessions, Rooms: n.Rooms}, Issues: n.Rooms,
-		Rooms:     n.Rooms,
-		ListHooks: s.hooks.List, AddHook: s.addHook, RemoveHook: s.hooks.Remove,
+		Rooms: n.Rooms,
 		Defer: s.deferLibrarianWake,
 		Notice: func(ctx context.Context, roomID string, ev room.Event) error {
 			rec, err := n.Rooms.Resolve(roomID)
@@ -62,6 +62,38 @@ func (s services) librarianService() librarian.Service {
 	}
 }
 
+// librarianMainUpdates subscribes enabled repositories to the branch observer.
+func (s services) librarianMainUpdates(h hooks.Service) hooks.Service {
+	h.ExtraRepositories = func(context.Context) ([]string, error) {
+		v, err := settings.Load(settings.DefaultPath())
+		return v.LibraryEnabled, err
+	}
+	h.MainUpdated = func(ctx context.Context, event hooks.Event) error {
+		changed, err := repoid.Resolve(ctx, event.Repo)
+		if err != nil {
+			return err
+		}
+		v, err := settings.Load(settings.DefaultPath())
+		if err != nil {
+			return err
+		}
+		var errs []error
+		for _, path := range v.LibraryEnabled {
+			r, err := repoid.Resolve(ctx, path)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("resolve enabled library %s: %w", path, err))
+				continue
+			}
+			if r.ID == changed.ID {
+				_, err := s.librarianService().Wake(ctx, path)
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
+	}
+	return h
+}
+
 // deferLibrarianWake keeps one deadline per repository. A later deferral for the
 // same repository replaces the earlier one.
 func (s services) deferLibrarianWake(repo string, at time.Time, wake func()) {
@@ -69,6 +101,25 @@ func (s services) deferLibrarianWake(repo string, at time.Time, wake func()) {
 		return
 	}
 	s.timers.at(librarianWakeKey(repo), at, wake)
+}
+
+// librarianLastRun returns the last feature-map pass, if one has started.
+func (s services) librarianLastRun(ctx context.Context, repo string) (*time.Time, error) {
+	r, err := repoid.Resolve(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	st, err := (librarianstate.Store{DataDir: store.DataDir()}).Get(r.ID)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if st.LastRun.IsZero() {
+		return nil, nil
+	}
+	return &st.LastRun, nil
 }
 
 // librarianDeferred reports when the deferred wake of a repository is due. It is

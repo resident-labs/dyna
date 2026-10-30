@@ -35,7 +35,7 @@
   {#if status}<p class="status">{status}</p>{/if}
   {#if needsSignIn(account)}<div class="actions"><button class="btn pri" onclick={() => onsignin(account)}>Sign in</button></div>{/if}
   <section><h3>Account limits</h3>
-    {#if account.windows?.length}<div class="windows">{#each account.windows as window (window.id || window.label)}<UsageMeter {window} observedAt={account.observedAt} />{/each}</div>
+    {#if account.windows?.length}<div class="windows">{#each account.windows as window (window.id || window.label)}<UsageMeter {window} provider={account.provider} observedAt={account.observedAt} />{/each}</div>
     {:else}<p class="muted">{usageUnavailableText(account)}</p>{/if}
   </section>
   <section><h3>Connection</h3><dl>
