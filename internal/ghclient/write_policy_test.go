@@ -45,7 +45,8 @@ func TestWritePolicy(t *testing.T) {
 		{name: "foreign head", args: []string{"pr", "edit", "3"}, target: TargetUpstream, rule: "upstream-edit-head", reason: ReasonForeignHead},
 		{name: "own head", args: []string{"pr", "edit", "3"}, target: TargetUpstream, head: true, rule: "pr-collaborate", class: approvals.ClassAgent},
 		{name: "unknown upstream", args: []string{"pr", "merge", "3"}, target: TargetUpstream, rule: "upstream-verb", reason: ReasonUpstreamVerb},
-		{name: "unknown room", args: []string{"pr", "merge", "3"}, target: TargetRoom, rule: "room-owner", class: approvals.ClassOwner},
+		{name: "root room merge", args: []string{"pr", "merge", "123", "--admin", "--merge"}, target: TargetRoom, rule: "pr-merge-room", class: approvals.ClassAgent},
+		{name: "unknown room", args: []string{"pr", "unknown", "3"}, target: TargetRoom, rule: "room-owner", class: approvals.ClassOwner},
 		{name: "api close", args: []string{"api", "repos/o/r/issues/3", "-X", "PATCH", "-f", "state=closed"}, target: TargetUpstream, author: "bot", rule: "item-own", class: approvals.ClassAgent},
 	}
 	for _, tc := range cases {
