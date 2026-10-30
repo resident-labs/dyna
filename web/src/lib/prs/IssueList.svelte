@@ -10,7 +10,6 @@
   //   onpick    opens an issue; onmention adds it to the composer
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
-  import { toneOf } from '../ui/tone.ts'
   import PRGlyph from './PRGlyph.svelte'
   import { openExternal } from '../../api.ts'
   import { ago } from '../ui/format.ts'
@@ -65,7 +64,7 @@
           <div class="facts">
             <Chip outline>{it.source || 'GitHub'}</Chip>
             {#if it.local && location(it.local)}<span>{location(it.local)}</span>{/if}
-            {#if chip}<Chip tone={toneOf(chip.tone)} outline={!chip.tone}>{chip.label}</Chip>{/if}
+            {#if chip}<span class="state">{chip.label}</span>{/if}
             {#if it.local?.goalShared}<span>Held by the room</span>{:else if it.local?.goalHolder}<span>Held by {it.local.goalHolder}</span>{/if}
             {#each (it.labels ?? []).slice(0, 3) as l}<span class="label" style={labelStyle(l.color)}>{l.name}</span>{/each}
             {#if open && g.id !== 'has-pr'}<span class="pr">PR #{open.number}{open.isDraft ? ' draft' : ''}</span>{:else if it.fixPR}<span class="pr">Fix in #{it.fixPR}</span>{:else if work === 'in-progress'}<span class="pr">no PR yet</span>{/if}
@@ -89,6 +88,7 @@
   .identity { margin-top: var(--s1); color: var(--muted); font-size: var(--t-sm); display: flex; gap: var(--s2); flex-wrap: wrap; }
   .facts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
   .facts:empty { display: none; }
+  .state { color: var(--muted); font-size: var(--t-sm); }
   .pr { margin-left: auto; color: var(--muted); font-size: var(--t-sm); }
   .label { font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 9px; line-height: 17px; }
   @media (max-width: 760px) { .rows { padding-left: var(--s4); padding-right: var(--s4); } .pr { margin-left: 0; } }
