@@ -1,6 +1,9 @@
 package plan
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestMetadataUsesTopLevelDeclaration(t *testing.T) {
 	for _, tail := range []string{"", "return await agent('task')"} {
@@ -50,5 +53,17 @@ func TestReadMetadataDeterministicOptIn(t *testing.T) {
 		if m.Deterministic != tc.want {
 			t.Fatalf("%s: deterministic = %v", tc.src, m.Deterministic)
 		}
+	}
+}
+
+func TestReadMetadataArgs(t *testing.T) {
+	m, err := ReadMetadata(`export const meta = { args: [{name: 'question', required: true, description: 'Ask'}, {name: 'limit', required: false, description: 'Bound'}] }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []WorkflowArg{{Name: "question", Required: true, Description: "Ask"}, {Name: "limit", Description: "Bound"}}
+	if !reflect.DeepEqual(m.Args, want) {
+		t.Fatalf("args = %#v, want %#v", m.Args, want)
+
 	}
 }
