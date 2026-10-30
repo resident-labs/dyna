@@ -472,7 +472,7 @@ type Error struct {
 }
 ```
 
-M1 methods: `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`. Each later milestone adds its methods in the same way.
+M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`. Each later milestone adds its methods in the same way.
 
 ## 4. Store
 
