@@ -39,7 +39,7 @@ func qaSeedFixtures(dataDir string) error {
 		return err
 	}
 	for _, post := range []room.PostInput{
-		{From: "owner", Human: true, To: []string{rec.Name}, Text: "Please check the sample change."},
+		{From: rec.Name, SenderKind: room.SenderOwner, Human: true, To: []string{rec.Name}, Text: "Please check the sample change."},
 		{From: rec.Name + ":root", To: []string{rec.Name}, Text: "The sample change is ready for review."},
 		{From: other.Name + ":root", To: []string{rec.Name}, Text: "The lab build of the sample change passed."},
 	} {

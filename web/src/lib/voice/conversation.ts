@@ -6,6 +6,7 @@ import { VOICE } from '../rooms/feedViews.ts'
 import { rootToVoice } from './attention.ts'
 import { postParts } from '../ui/postParts.ts'
 import { isRecord } from '../api/guards.ts'
+import type { Avatar } from '../api/session.gen.ts'
 import type { Attachment } from '../api/room.ts'
 import type { ManifestItem } from '../sessions/userText.ts'
 import type { VoiceTool } from './callState.ts'
@@ -18,6 +19,7 @@ export type Speaker = 'you' | 'voice' | 'root'
 
 // CallPost is the part of a room post the call reads.
 export interface CallPost {
+  avatar?: Avatar
   id: string
   ts: number
   from?: string
