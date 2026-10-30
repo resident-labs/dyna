@@ -137,7 +137,25 @@ func (s *Service) trackWithSource(ctx context.Context, actor authority.Actor, re
 				return Record{}, false, err
 			}
 			for _, tree := range trees {
-				if tree.Session == author.ID && tree.Branch == old.Branch && (filepath.Clean(tree.Repo) == filepath.Clean(old.RepoPath) || filepath.Clean(tree.Path) == filepath.Clean(old.RepoPath)) && matchingCheckout(ctx, *old, lookupDir) == filepath.Clean(tree.Path) {
+				if tree.Branch != old.Branch || (filepath.Clean(tree.Repo) != filepath.Clean(old.RepoPath) && filepath.Clean(tree.Path) != filepath.Clean(old.RepoPath)) || matchingCheckout(ctx, *old, lookupDir) != filepath.Clean(tree.Path) {
+					continue
+				}
+				eligible := tree.Session == author.ID
+				if !eligible && s.Notify != nil {
+					sessions, err := s.Notify.Sessions.Store.ListSnapshot(false)
+					if err != nil {
+						return Record{}, false, err
+					}
+					for _, info := range sessions {
+						if info.ID != author.ID || info.RoomID != old.RoomID || (info.Status != subagent.StatusRunning && info.Status != subagent.StatusQueued && info.Status != subagent.StatusIdle) || info.Dir == "" {
+							continue
+						}
+						rel, err := filepath.Rel(tree.Path, info.Dir)
+						eligible = err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+						break
+					}
+				}
+				if eligible {
 					if _, err := s.transfer(ctx, old.Key, "author", author, lookupDir, transferOptions{expectAuthor: old.Author, expectSource: state.AuthorSourceDiscovery, source: state.AuthorSourceExplicit}); err != nil {
 						return Record{}, false, err
 					}
