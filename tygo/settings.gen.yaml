@@ -1,0 +1,30 @@
+packages:
+  - path: dyna-agent/internal/configsvc
+    output_path: web/src/lib/api/settings.gen.ts
+    include_files: [settings_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      import type { NoticeKind, NoticeSeverity } from './settings.ts'
+
+  - path: dyna-agent/internal/hooks
+    output_path: web/src/lib/api/settings.gen.ts
+    include_files: [settings_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/devicesvc
+    output_path: web/src/lib/api/settings.gen.ts
+    include_files: [settings_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/notices
+    output_path: web/src/lib/api/settings.gen.ts
+    include_files: [settings_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

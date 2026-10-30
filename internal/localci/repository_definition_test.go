@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -169,5 +170,21 @@ func TestThisRepositoryDefinitionParses(t *testing.T) {
 	}
 	if desktop != 1 {
 		t.Fatalf("the go suite has %d checks named desktop, want one", desktop)
+	}
+}
+
+func TestTygoConfigSelectsGoSuite(t *testing.T) {
+	body, err := os.ReadFile("../../.dyna/local-ci.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := ParseDefinition(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"tygo.yaml", "tygo/session.gen.yaml"} {
+		if !slices.Contains(definition.SuitesForFiles([]string{path}), Suite("go")) {
+			t.Errorf("%s does not select the go suite", path)
+		}
 	}
 }

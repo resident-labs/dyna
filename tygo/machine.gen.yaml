@@ -1,0 +1,23 @@
+packages:
+  - path: dyna-agent/internal/machines
+    output_path: web/src/lib/api/machine.gen.ts
+    include_files: [container_types.go]
+    frontmatter: |
+      export type MachineLoadAvg = [number, number, number]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/jobs
+    output_path: web/src/lib/api/machine.gen.ts
+    include_files: [work_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/websvc
+    output_path: web/src/lib/api/machine.gen.ts
+    include_files: [machine_types.go, node_history.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

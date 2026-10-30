@@ -1,0 +1,35 @@
+packages:
+  - path: dyna-agent/internal/account/store
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [api_types.go, renewal_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/harness/runtime
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [account_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/profile
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [compact_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/account/service/adapters
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [effort_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/account/service
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [api_types.go, snapshot_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

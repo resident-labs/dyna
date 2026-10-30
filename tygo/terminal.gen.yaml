@@ -1,0 +1,7 @@
+packages:
+  - path: dyna-agent/internal/terminalsvc
+    output_path: web/src/lib/api/terminal.gen.ts
+    include_files: [terminal_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
