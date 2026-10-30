@@ -74,6 +74,16 @@ var bodyCommands = map[string]bool{
 	"issue edit": false, "pr edit": false, "issue comment": false, "pr comment": false, "pr review": false,
 }
 
+// shortFlag splits a short flag that carries its value, such as -bTEXT or
+// -b=TEXT. It returns the flag, the raw text after it, and whether arg is such
+// a flag. Callers decide whether a leading equals sign is part of the value.
+func shortFlag(arg string) (flag, rest string, ok bool) {
+	if len(arg) > 2 && arg[0] == '-' && arg[1] != '-' {
+		return arg[:2], arg[2:], true
+	}
+	return "", "", false
+}
+
 var errUninspectableText = errors.New("this command builds its title or body from commits, a template, an editor or the browser, so Dyna cannot check it; pass --title and --body-file instead")
 
 // publicText returns the title and body that a create or edit command would
@@ -101,9 +111,8 @@ func publicText(cmd *exec.Cmd) (string, error) {
 			break
 		}
 		name, value, attached := strings.Cut(args[i], "=")
-		if len(args[i]) > 2 && args[i][0] == '-' && args[i][1] != '-' {
-			// A short flag may carry its value: -bTEXT or -b=TEXT.
-			name, value, attached = args[i][:2], strings.TrimPrefix(args[i][2:], "="), true
+		if flag, rest, ok := shortFlag(args[i]); ok {
+			name, value, attached = flag, strings.TrimPrefix(rest, "="), true
 		}
 		if generatedTextFlags[name] {
 			return "", errUninspectableText
@@ -236,8 +245,8 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 	found := false
 	for i := start; i < len(args); i++ {
 		name, value, attached := strings.Cut(args[i], "=")
-		if len(args[i]) > 2 && args[i][0] == '-' && args[i][1] != '-' {
-			name, value, attached = args[i][:2], strings.TrimPrefix(args[i][2:], "="), true
+		if flag, rest, ok := shortFlag(args[i]); ok {
+			name, value, attached = flag, strings.TrimPrefix(rest, "="), true
 		}
 		isFile, text := textFlags[name]
 		if !text || name == "--title" || name == "-t" {
