@@ -13,7 +13,7 @@ Both commands use the owner's voice provider account and quota. Neither one post
   stdin and reads reply audio, transcripts and tool calls from stdout. At most one session runs at a time;
   a second one fails as busy.
 
-If you do not need to listen, use `say`. A session costs much more quota.
+For output without listening, use `say`. A session costs much more quota.
 
 ## Session protocol
 
@@ -68,7 +68,7 @@ Rules to design for:
   example "started". A `later` tool keeps that word as context and does not speak. Tell the model the real
   result later with `{"type":"text","text":"…","respond":true}` or `say`.
 - **Images.** Write the file, send `{"type":"image","path":…}`, then ask about it with `text` or let the person ask.
-- **`ready` first.** Do not send audio before `ready`; a start failure prints the error and exits non-zero.
+- **`ready` first.** Send audio after `ready`; a start failure prints the error and exits non-zero.
 
 ## Speaker mode: a stream of lines
 
@@ -196,7 +196,7 @@ writeFileSync(dst, Buffer.concat([h, pcm]));
 
 ## Connect an audio source
 
-Pick `--rate` to match your source when you can, so you do not resample. Send chunks of 10 to 40 ms.
+Pick `--rate` to match your source when you can, so you preserve its sample rate. Send chunks of 10 to 40 ms.
 Keep a jitter buffer for output and play it at the sample rate. Clear that buffer on `speech_started`.
 
 - **Game voice chat plugin** (a server or client mod). Voice chat mods usually give 48 kHz mono PCM16 per speaker,
@@ -227,10 +227,10 @@ For a test of your app without a person, pipe a WAV file as above, or use `say` 
 - **Privacy.** All voices you send go to the voice provider under the owner's account. A project that lets other
   people talk to a session must tell them before they speak, for example with a sign or a chat message.
 - **Quota.** A session uses the owner's voice quota. Keep it short: set `--max-minutes`, end the session when
-  nobody speaks for a while, and do not leave one open. The ChatGPT sign-in is not an official Realtime
+  nobody speaks for a while, and close it when finished. The ChatGPT sign-in is not an official Realtime
   credential and could stop working.
 - **Owner control.** The owner can turn off agent voice for both commands (**Let agents use voice** in Settings >
-  Voice). Then they fail with "the owner turned off agent voice in Settings > Voice". Do not work around it.
+  Voice). Then they fail with "the owner turned off agent voice in Settings > Voice". Respect that setting.
 - **Room notices.** When a session starts and ends, its room gets a quiet notice with the provider, time used and
   reason. These notices wake nobody and show the owner how much agents use voice.
 - A session never posts, never joins the owner's call and keeps no transcript. Save transcripts yourself if you need them.

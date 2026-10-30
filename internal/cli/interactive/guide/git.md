@@ -9,7 +9,7 @@ Run `eval "$(dyna git worktrees env)"` to set `DYNA_PORT`, `DYNA_PORTS` and `POR
 
 Always write the PR body to a file in `$DYNA_SCRATCH` and run `gh pr create --body-file FILE`. Never use an inline `--body`, and never put PR body text in backticks on a shell command line.
 After `gh pr create`, run `dyna git pr track <number|url>` from the matching checkout.
-Elsewhere, add `--repo <path>`. Fix CI failures and push. The engine merges automatically when approved and green; agents never run merge commands.
+Elsewhere, add `--repo <path>`. Fix CI failures and push. The engine handles merging when approved and green; agents leave merging to the engine.
 Use `dyna git pr edit <number|url> [--title TEXT] [--body-file PATH]` to fix a PR title or body. At least one flag is required, and `--body-file -` reads stdin.
 
 Pass `--fixes D-5,#207` when the PR fixes issues. Merging the PR closes each
@@ -61,7 +61,7 @@ Only the assigned reviewer records an agent verdict. Reviewers may use up to
 ## Open and review a change
 
 A change is a committed branch with a base and an exact head. It needs no PR.
-Create its checkout with `dyna git worktrees new <branch>`, never a `~` path.
+Create its checkout with `dyna git worktrees new <branch>` in the managed worktree location.
 From that checkout, run:
 
 ```sh
@@ -94,7 +94,7 @@ A reviewer starts on each needed verified head, in parallel with CI.
 Draft PRs get no automatic review, even with required reviewers. Open a PR
 ready for review, or run `gh pr ready <number>` when it should be reviewed.
 Known failed CI blocks review until a rerun starts or passes.
-Reviewers never run the test suite; CI is the test oracle. They read the diff
+Reviewers use CI as the test oracle and focus on the review. They read the diff
 and may run cheap static checks on changed files (go vet, gofmt, tsc, linters).
 Read the assigned head and review input. Confirm or reject every bot finding
 with a reason after checking its file and line.
@@ -138,7 +138,7 @@ Include findings, paths, lines, and fixes. `--body-file -` reads stdin.
 Reviews must be at most 12000 bytes. Local verdicts require no GitHub review ID.
 The owner can publish with `dyna git pr comment` or `dyna git pr review`.
 Only the owner can select `publishing github`; agent assignments still stay local.
-Never add HTML markers or agent attribution to comments.
+Keep comments free of HTML markers and agent attribution.
 Comments from the owner, repository owners, members, collaborators, and
 configured trusted bots pass the trust gate. Default bots are `coderabbitai`
 and `copilot-pull-request-reviewer`; configure `pr.trustedBots` as a JSON list.
@@ -351,7 +351,7 @@ Release removes the draft hold. The PR must still pass review and CI before it c
 
 Dyna merges tracked pull requests automatically when the current head has
 a Dyna reviewer approval and passing CI. The engine runs one merge
-at a time. Authors do not run a landing command or a merge command.
+at a time. Authors leave landing and merging to the engine.
 Root controls failed batches with `dyna git merge`; see Root merge controls.
 
 Read `dyna git pr merge-status` for the queue and saved outcomes.
@@ -444,7 +444,7 @@ use `--room <name-or-id>` when they have no current stamped room.
 
 Hooks run trusted shell commands. Worktrees share settings and logs outside the repo.
 Read hooks before changing repository automation. Agents may change hooks; tell the owner with
-`dyna post @parent "..."`, explaining the command and purpose. Avoid one-off hooks.
+`dyna post @parent "..."`, explaining the command and purpose. Use reusable hooks.
 
 Events: `worktree-created`, `before-land`, `after-land`, `pr-merged`, `main-updated`,
 `session-finish`, `session-turn-ended`, and `schedule`. `session-turn-ended` fires
