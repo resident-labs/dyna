@@ -15,6 +15,13 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func (f *fakeService) RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error) {
+	return contract.RoomListResponse{}, nil
+}
+func (f *fakeService) SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error) {
+	return contract.SessionListResponse{}, nil
+}
+
 type fakeService struct {
 	Service
 	caller  contract.Principal
@@ -243,4 +250,28 @@ func TestRuntimeLockProtectsLiveSockets(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = c.Close()
+}
+
+type streamService struct {
+	Service
+	after int64
+}
+
+func (s *streamService) Events(_ context.Context, _ contract.Principal, _ contract.RoomID, after int64) (<-chan contract.Event, *contract.Error) {
+	s.after = after
+	ch := make(chan contract.Event)
+	close(ch)
+	return ch, nil
+}
+
+func TestEventsReconnectUsesLastEventID(t *testing.T) {
+	s := &streamService{}
+	h := New(s, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}})
+	r := httptest.NewRequest("GET", "/v1/events?room=room-a&after=2", nil)
+	r.Header.Set("Last-Event-ID", "9")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || s.after != 9 {
+		t.Fatalf("status %d after %d", w.Code, s.after)
+	}
 }

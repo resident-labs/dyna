@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/web"
 )
 
 type hostRegistrar interface {
@@ -55,6 +57,7 @@ func loadPi(executable string) ([]byte, error) {
 type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
 	ApprovalsExpiry                            time.Duration
+	WebListen                                  string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -94,6 +97,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
+	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	boxes.Mirror = mirror
@@ -113,9 +117,25 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		return proxy.Handler(string(session.ID), allowed)
 	})
+	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
 	})
+	if cfg.WebListen != "" {
+		app, err := fs.Sub(web.Dist, "dist")
+		if err != nil {
+			return err
+		}
+		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now)
+		if err != nil {
+			return err
+		}
+		listener, err := webServer.Listen()
+		if err != nil {
+			return err
+		}
+		defer listener.Close()
+	}
 	sockets := api.NewSockets(apiServer, cfg.Runtime, uint32(os.Getuid()), nil)
 	boxes.Sockets = sockets
 	if err := sockets.OpenOwner(); err != nil {
