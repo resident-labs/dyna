@@ -342,8 +342,22 @@ func mergeReportSafePath(name string) bool {
 // output that the hosted read never sees, and it stays available after the
 // trial branch is gone.
 func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, logs string) (lines, files []string) {
-	suites := s.localCIFailedSuites(ctx, s.ciRegistry(), r, head)
-	for _, suite := range suites {
+	result := s.localCIFailureResult(ctx, s.ciRegistry(), r, head)
+	if result.Status == localci.OutcomeError && result.Cause != "" {
+		line := "local CI"
+		if result.Node != "" {
+			line += " on " + result.Node
+		}
+		line += " (" + result.Cause.Label() + ")"
+		if result.Error != "" {
+			line += ": " + result.Error
+		}
+		lines = append(lines, boundedTestName(line))
+	}
+	for _, suite := range result.Checks {
+		if suite.Status != localci.OutcomeFailed && suite.Status != localci.OutcomeError {
+			continue
+		}
 		text := suite.Error + "\n" + strings.Join(suite.Failures, "\n") + "\n" + suite.FailureText()
 		evidence, named := localCFirstEvidence(text)
 		line := string(suite.Name())
@@ -369,30 +383,24 @@ func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, lo
 	return lines, files
 }
 
-// localCIFailedSuites loads the failed suites of the saved local result.
-func (s *Service) localCIFailedSuites(ctx context.Context, registry localCIRegistry, r Record, head string) []localci.SuiteResult {
+// localCIFailureResult loads the saved result, including run-level failures.
+func (s *Service) localCIFailureResult(ctx context.Context, registry localCIRegistry, r Record, head string) localci.Result {
 	if head == "" {
-		return nil
+		return localci.Result{}
 	}
 	dir, dirErr := s.checkoutDir(ctx, r)
 	if dirErr != nil {
-		return nil
+		return localci.Result{}
 	}
 	repo, err := localci.CanonicalRepo(ctx, dir)
 	if err != nil {
-		return nil
+		return localci.Result{}
 	}
 	result, err := registry.LoadResult(ctx, repo, head)
 	if err != nil {
-		return nil
+		return localci.Result{}
 	}
-	var failed []localci.SuiteResult
-	for _, suite := range result.Checks {
-		if suite.Status == localci.OutcomeFailed || suite.Status == localci.OutcomeError {
-			failed = append(failed, suite)
-		}
-	}
-	return failed
+	return result
 }
 
 // localCFirstEvidence is the first line of a local suite's output that names a

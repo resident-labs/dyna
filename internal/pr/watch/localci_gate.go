@@ -422,7 +422,7 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	// here would never end. The trial fails and names the cause instead. A run
 	// Dyna stopped is retried first, and its replacement is the one that decides.
 	localFailure := ""
-	if trial && !hostedFallback && cisched.LocalInfrastructureError(result) && cisched.SavedResultActionFor(result) == cisched.SettleSavedResult {
+	if trial && !hostedFallback && localState != VerdictFailed && cisched.LocalInfrastructureError(result) && cisched.SavedResultActionFor(result) == cisched.SettleSavedResult {
 		localState, localJobs, logs = VerdictFailed, localFailedChecks(result), localFailureNote(result)
 		localFailure = localFailureNote(result)
 	}
