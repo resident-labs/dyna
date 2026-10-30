@@ -139,7 +139,7 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		expiry = DefaultExpiry
 	}
 	r.CreatedAt, r.UpdatedAt, r.ExpiresAt = now, now, now.Add(expiry)
-	auto := in.Auto && in.Class == ClassAgent || in.Class == ClassAgent && actor.Role == authority.Root
+	auto := !in.RequireReview && in.Class == ClassAgent && (in.Auto || actor.Role == authority.Root)
 	if auto {
 		r.State = StateApproved
 		r.Result = &Result{Actor: requester.Address()}
