@@ -126,7 +126,7 @@ func TestAdmissionWaiterReadsWithoutDrivingPass(t *testing.T) {
 	}
 }
 
-func TestAdmissionStandaloneFallback(t *testing.T) {
+func TestAdmissionStandaloneImmediatePass(t *testing.T) {
 	now := time.Unix(1000, 0)
 	node := machines.Machine{Name: "node", Enabled: true}
 	queue := Admission{DataDir: t.TempDir(), Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, clock: func() time.Time { return now }}
@@ -136,6 +136,25 @@ func TestAdmissionStandaloneFallback(t *testing.T) {
 		if ticks > int(standalonePassEvery/time.Second) {
 			return errors.New("fallback did not admit the check")
 		}
+		now = now.Add(time.Second)
+		return nil
+	}, nil)
+	if err != nil || port < 0 || ticks != 0 {
+		t.Fatalf("port=%d ticks=%d error=%v", port, ticks, err)
+	}
+}
+
+func TestAdmissionStandaloneRetries(t *testing.T) {
+	now := time.Unix(1000, 0)
+	nodes := map[string]machines.Machine{}
+	queue := Admission{DataDir: t.TempDir(), Machines: fakeMachines{byName: nodes}, clock: func() time.Time { return now }}
+	ticks := 0
+	port, err := queue.Acquire(context.Background(), Demand{ID: "check", Node: "node"}, func(context.Context, time.Duration) error {
+		ticks++
+		if ticks > int(standalonePassEvery/time.Second) {
+			return errors.New("fallback did not admit the check")
+		}
+		nodes["node"] = machines.Machine{Name: "node", Enabled: true}
 		now = now.Add(time.Second)
 		return nil
 	}, nil)

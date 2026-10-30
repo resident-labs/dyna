@@ -249,7 +249,7 @@ func (a Admission) Acquire(ctx context.Context, d Demand, wait func(context.Cont
 		wait = sleepContext
 	}
 	lastReason := ""
-	nextPass := a.now().Add(standalonePassEvery)
+	nextPass := a.now()
 	for {
 		row, err := a.get(ctx, d.ID)
 		if errors.Is(err, os.ErrNotExist) {
