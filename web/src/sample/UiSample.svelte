@@ -82,7 +82,7 @@
     </div>
   </Section>
 
-  <Section title="Chip" description="The typed tone on the existing chip; colors are unchanged.">
+  <Section title="Chip" description="The typed tone on the existing chip. Info uses the info tone; iris stays for actions and focus.">
     <Card>
       <div class="chips">
         {#each tones as tone (tone)}<Chip {tone}>{tone}</Chip>{/each}

@@ -19,7 +19,7 @@
   .warning, .live { color: var(--gold); background: rgba(230, 192, 123, 0.13); }
   .success { color: var(--sage); background: rgba(151, 201, 149, 0.13); }
   .danger { color: var(--coral); background: rgba(239, 138, 128, 0.14); }
-  .info { color: var(--iris); background: var(--iris-wash); }
+  .info { color: var(--tone-info); background: var(--tone-info-wash); }
   .outline { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent); }
   .outline.neutral { color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); animation: pulse 1.6s ease-in-out infinite; flex: none; }
