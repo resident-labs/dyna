@@ -21,6 +21,7 @@ import (
 // Proxy owns the in-process CLIProxyAPI service and its private client key.
 type Proxy struct {
 	service   *cliproxy.Service
+	listener  net.Listener
 	upstream  *url.URL
 	clientKey string
 }
@@ -52,9 +53,12 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	if err := listener.Close(); err != nil {
-		return nil, err
-	}
+	owned := true
+	defer func() {
+		if owned {
+			_ = listener.Close()
+		}
+	}()
 	cfg, err := config.ParseConfigBytes([]byte("{}"))
 	if err != nil {
 		return nil, err
@@ -85,18 +89,26 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	service, err := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).Build()
+	service, err := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(listener).Build()
 	if err != nil {
 		return nil, err
 	}
-	return &Proxy{service: service, upstream: &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}, clientKey: key}, nil
+	owned = false
+	return &Proxy{service: service, listener: listener, upstream: &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}, clientKey: key}, nil
 }
 
 // Run runs until ctx is cancelled or the proxy stops.
-func (p *Proxy) Run(ctx context.Context) error { return p.service.Run(ctx) }
+func (p *Proxy) Run(ctx context.Context) error {
+	defer p.listener.Close()
+	return p.service.Run(ctx)
+}
 
 // Shutdown stops the proxy.
-func (p *Proxy) Shutdown(ctx context.Context) error { return p.service.Shutdown(ctx) }
+func (p *Proxy) Shutdown(ctx context.Context) error {
+	err := p.service.Shutdown(ctx)
+	_ = p.listener.Close()
+	return err
+}
 
 // Handler binds a route to a session and its permitted models.
 func (p *Proxy) Handler(sessionID string, allowedModels []string) http.Handler {
