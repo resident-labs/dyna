@@ -49,9 +49,11 @@ func (m *Mirror) path(repo contract.RepoName) (string, error) {
 	return filepath.Join(m.Data, "git", parts[0], parts[1]+".git"), nil
 }
 
-// Prepare fetches before pushing all branches to the host cache.
-func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, repo contract.RepoName, session contract.SessionID) (contract.BoxRepo, error) {
-	if m.Token == "" {
+const SessionBranchPrefix = "v2/"
+
+// Prepare optionally fetches and pushes branches before returning the box setup.
+func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, repo contract.RepoName, session contract.SessionID, fetch bool) (contract.BoxRepo, error) {
+	if fetch && m.Token == "" {
 		return contract.BoxRepo{}, MissingTokenError{}
 	}
 	m.mu.Lock()
@@ -60,28 +62,30 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, r
 	if err != nil {
 		return contract.BoxRepo{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return contract.BoxRepo{}, err
+	if fetch {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return contract.BoxRepo{}, err
+		}
+		env := m.authEnv()
+		remote := "https://github.com/" + string(repo) + ".git"
+		_, err = os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			_, err = m.Runner.Run(ctx, env, "clone", "--bare", remote, path)
+		} else if err == nil {
+			_, err = m.Runner.Run(ctx, env, "--git-dir", path, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+		}
+		if err != nil {
+			return contract.BoxRepo{}, err
+		}
+		if err := host.PushCache(ctx, path, hostData, string(repo), []string{"+refs/heads/*:refs/heads/*"}); err != nil {
+			return contract.BoxRepo{}, err
+		}
 	}
-	env := m.authEnv()
-	remote := "https://github.com/" + string(repo) + ".git"
-	_, err = os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		_, err = m.Runner.Run(ctx, env, "clone", "--mirror", remote, path)
-	} else if err == nil {
-		_, err = m.Runner.Run(ctx, env, "--git-dir", path, "fetch", "origin")
-	}
+	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return contract.BoxRepo{}, err
 	}
-	result, err := m.repo(ctx, path, hostData, repo, session)
-	if err != nil {
-		return contract.BoxRepo{}, err
-	}
-	if err := host.PushCache(ctx, path, hostData, string(repo), []string{"+refs/heads/*:refs/heads/*"}); err != nil {
-		return contract.BoxRepo{}, err
-	}
-	return result, nil
+	return contract.BoxRepo{Name: repo, Cache: filepath.Join(hostData, "git", string(repo)+".git"), Branch: SessionBranchPrefix + string(session), Base: strings.TrimSpace(string(out))}, nil
 }
 
 func (m *Mirror) authEnv() []string {
@@ -91,9 +95,6 @@ func (m *Mirror) authEnv() []string {
 
 // Ref reads one remote reference without fetching its objects.
 func (m *Mirror) Ref(ctx context.Context, repo contract.RepoName, ref string) (string, error) {
-	if m.Token == "" {
-		return "", MissingTokenError{}
-	}
 	out, err := m.Runner.Run(ctx, m.authEnv(), "ls-remote", "https://github.com/"+string(repo)+".git", ref)
 	if err != nil {
 		return "", err
@@ -103,21 +104,4 @@ func (m *Mirror) Ref(ctx context.Context, repo contract.RepoName, ref string) (s
 		return "", errors.New("remote ref not found")
 	}
 	return fields[0], nil
-}
-
-// Repo reconstructs the box setup from the mirror after a reconnect.
-func (m *Mirror) Repo(ctx context.Context, hostData string, repo contract.RepoName, session contract.SessionID) (contract.BoxRepo, error) {
-	path, err := m.path(repo)
-	if err != nil {
-		return contract.BoxRepo{}, err
-	}
-	return m.repo(ctx, path, hostData, repo, session)
-}
-
-func (m *Mirror) repo(ctx context.Context, path, hostData string, repo contract.RepoName, session contract.SessionID) (contract.BoxRepo, error) {
-	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "--short", "HEAD")
-	if err != nil {
-		return contract.BoxRepo{}, err
-	}
-	return contract.BoxRepo{Name: repo, Cache: filepath.Join(hostData, "git", string(repo)+".git"), Branch: "v2/" + string(session), Base: strings.TrimSpace(string(out))}, nil
 }

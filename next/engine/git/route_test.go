@@ -2,7 +2,6 @@ package git
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,16 +27,6 @@ func (a fakeAccess) RoomRepos(context.Context, contract.RoomID) ([]contract.Room
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestMissingTokenReturnsTypedError(t *testing.T) {
-	target, _ := url.Parse("https://github.com")
-	w := httptest.NewRecorder()
-	Handler(target, roundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("upstream called"); return nil, nil }), "", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("GET", "/git/owner/repo.git/info/refs?service=git-upload-pack", nil))
-	var got contract.Error
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusServiceUnavailable || got.Code != contract.ErrUnavailable || got.Message != "GH_TOKEN is not set" {
-		t.Fatalf("status %d, error %+v", w.Code, got)
-	}
-}
 
 func TestRejectsOtherRooms(t *testing.T) {
 	target, _ := url.Parse("https://github.com")

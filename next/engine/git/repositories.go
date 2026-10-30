@@ -22,30 +22,7 @@ type Repositories struct {
 	Mirror *Mirror
 }
 
-func (r *Repositories) List(ctx context.Context, room contract.RoomID, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, error) {
-	repos, err := r.Rooms.RoomRepos(ctx, room)
-	if err != nil {
-		return nil, err
-	}
-	if len(repos) == 0 {
-		return nil, nil
-	}
-	_, hostData, err := r.Hosts.CacheHost(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]contract.BoxRepo, 0, len(repos))
-	for _, repo := range repos {
-		item, err := r.Mirror.Repo(ctx, hostData, repo.Repo, session)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
-	return result, nil
-}
-
-func (r *Repositories) Prepare(ctx context.Context, room contract.RoomID, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, error) {
+func (r *Repositories) Get(ctx context.Context, room contract.RoomID, session contract.SessionID, host contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
 	repos, err := r.Rooms.RoomRepos(ctx, room)
 	if err != nil {
 		return nil, err
@@ -59,7 +36,7 @@ func (r *Repositories) Prepare(ctx context.Context, room contract.RoomID, sessio
 	}
 	result := make([]contract.BoxRepo, 0, len(repos))
 	for _, repo := range repos {
-		item, err := r.Mirror.Prepare(ctx, cache, hostData, repo.Repo, session)
+		item, err := r.Mirror.Prepare(ctx, cache, hostData, repo.Repo, session, fetch)
 		if err != nil {
 			return nil, err
 		}
