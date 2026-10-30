@@ -128,15 +128,17 @@
 <style>
   .card-wrap { position: relative; min-width: 0; }
   .card-wrap :global([data-ui-card]) { height: 100%; }
-  .card-link { position: absolute; inset: 0; z-index: 1; width: 100%; border: 0; border-radius: var(--r-card); background: transparent; cursor: pointer; }
-  .card-link:hover { background: var(--hover); }
+  .card-link { position: absolute; inset: 0; z-index: 1; width: 100%; border: 0; border-radius: var(--r-card); background: transparent; cursor: pointer; transition: background-color var(--motion-fast) var(--ease); }
   .card-link:focus-visible { outline: 2px solid var(--iris); outline-offset: 2px; }
   .actions, .repos { position: relative; z-index: 2; }
-  .identity-link { position: absolute; inset: 0; border: 0; border-radius: var(--r-xs); background: transparent; cursor: pointer; }
-  .identity-link:hover { background: var(--hover); }
+  .identity-link { position: absolute; inset: 0; border: 0; border-radius: var(--r-xs); background: transparent; cursor: pointer; transition: background-color var(--motion-fast) var(--ease); }
   .identity-link:focus-visible, .segment-link:focus-visible { outline: 2px solid var(--iris); outline-offset: 2px; }
   .segment-link { min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
-  .segment-link:hover { filter: brightness(1.2); }
+  @media (hover: hover) {
+    .card-link:hover, .identity-link:hover { background: var(--hover); }
+    .segment-link:hover { filter: brightness(1.2); }
+  }
+  .card-link:active, .identity-link:active { background: var(--select); }
   .provider-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
   .pools { container-type: inline-size; display: grid; gap: var(--s3); margin-top: var(--s1); }
   .pool { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: var(--s2) var(--s4); align-items: center; }
