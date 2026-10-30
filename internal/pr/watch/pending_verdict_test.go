@@ -3,6 +3,9 @@ package watch
 import (
 	"context"
 	"encoding/json"
+	"errors"
+
+	"dyna-agent/internal/pr/state"
 	"os"
 	"strings"
 	"testing"
@@ -197,5 +200,56 @@ func TestGitHubFailureSavesVerdictForReplay(t *testing.T) {
 	e.tick()
 	if got := e.record(); got.PendingVerdict != nil || got.Verdict != "approve" {
 		t.Fatalf("replay failed: %+v", got)
+	}
+}
+
+type failingVerdictCI struct{ hostedCIRegistry }
+
+func (*failingVerdictCI) Mode(context.Context, string) (string, error) {
+	return "", errors.New("CI unavailable")
+}
+
+func TestPendingVerdictRetriesRegisteredCIFailure(t *testing.T) {
+	e := newEnv(t)
+	e.setCI("success", 1)
+	e.track()
+	e.tick()
+	r := e.record()
+	e.f.Pull.Head.Repo.FullName = r.Repo
+	e.write()
+	in := ReviewResult{Head: r.Head, Verdict: state.VerdictApprove, Summary: "Reviewed"}
+	if _, ok := VerdictNotice(e.s.savePendingVerdict(r.Key, r.Reviewer, r.Head, in)); !ok {
+		t.Fatal("save failed")
+	}
+	e.s.LocalCIRegistry = &failingVerdictCI{}
+	heads := map[string]headProbe{r.Key: {Pull: e.f.Pull}}
+	_ = e.s.replayPendingVerdicts(t.Context(), heads)
+	if e.record().PendingVerdict == nil {
+		t.Fatal("transient CI failure discarded the verdict")
+	}
+	e.s.LocalCIRegistry = &hostedCIRegistry{}
+	if err := e.s.replayPendingVerdicts(t.Context(), heads); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.record(); got.PendingVerdict != nil || got.Verdict != state.VerdictApprove {
+		t.Fatalf("replay failed: %+v", got)
+	}
+}
+
+func TestInvalidReviewIDDoesNotBlockCorrection(t *testing.T) {
+	e := newEnv(t)
+	e.setCI("success", 1)
+	e.track()
+	e.tick()
+	r := e.record()
+	err := e.s.Verdict(t.Context(), r.Key, r.Reviewer, r.Head, "approve", "Reviewed", 987654)
+	if err == nil || !strings.Contains(err.Error(), "review ID was not found") {
+		t.Fatalf("invalid review ID: %v", err)
+	}
+	if e.record().PendingVerdict != nil {
+		t.Fatal("invalid review ID left a pending verdict")
+	}
+	if err := e.s.Verdict(t.Context(), r.Key, r.Reviewer, r.Head, "approve", "Reviewed", 0); err != nil {
+		t.Fatalf("corrected verdict: %v", err)
 	}
 }

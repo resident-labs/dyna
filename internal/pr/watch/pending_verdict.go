@@ -144,6 +144,17 @@ func (s *Service) savePendingVerdict(key, actor, head string, in ReviewResult) e
 	return &ErrPendingVerdict{}
 }
 
+// discardPendingResult removes only the submission that failed validation.
+func (s *Service) discardPendingResult(key, actor string, in ReviewResult) error {
+	pending := &state.PendingVerdict{Actor: actor, Head: in.Head, Verdict: in.Verdict, Summary: in.Summary, ReviewID: in.ReviewID, Findings: in.Findings, StopReason: in.StopReason, FastLand: in.FastLand}
+	return s.Store.update(func(st *State) error {
+		if r := st.Records[key]; r != nil {
+			removePendingVerdict(r, pending)
+		}
+		return nil
+	})
+}
+
 func (s *Service) replayPendingVerdicts(ctx context.Context, heads map[string]headProbe) error {
 	st, err := s.readTickState(ctx)
 	if err != nil {
@@ -175,7 +186,8 @@ func (s *Service) replayPendingVerdicts(ctx context.Context, heads map[string]he
 				snap = &value
 			}
 			e := s.reviewResult(recordCtx, key, pending.Actor, ReviewResult{Verdict: pending.Verdict, Findings: pending.Findings, StopReason: pending.StopReason, FastLand: pending.FastLand, Summary: pending.Summary, Head: pending.Head, ReviewID: pending.ReviewID}, snap)
-			if e != nil && recordCtx.Err() == nil {
+			var retry *ErrPendingVerdict
+			if e != nil && recordCtx.Err() == nil && !errors.As(e, &retry) {
 				// Delivery can fail after commit; reject only a still-saved matching review.
 				fresh, readErr := s.Store.Get(key)
 				if readErr == nil {
