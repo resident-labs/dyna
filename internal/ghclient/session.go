@@ -108,8 +108,10 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	if err := os.MkdirAll(bin, 0700); err != nil {
 		return SessionEnv{}, err
 	}
+	if err := removeStaleShims(bin); err != nil {
+		return SessionEnv{}, err
+	}
 	next := filepath.Join(bin, "gh.next")
-	_ = os.Remove(next)
 	if err := os.Symlink(dynaBinary, next); err != nil {
 		return SessionEnv{}, err
 	}
@@ -133,6 +135,24 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 		return SessionEnv{}, err
 	}
 	return SessionEnv{Env: out, Notice: notice}, nil
+}
+
+// removeStaleShims deletes every entry in the session's shim directory except
+// the gh shim and its config folder. An earlier build also linked git there, and
+// that link would stay on PATH ahead of the real git after an upgrade.
+func removeStaleShims(bin string) error {
+	entries, err := os.ReadDir(bin)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if name := entry.Name(); name != "gh" && name != "config" {
+			if err := os.RemoveAll(filepath.Join(bin, name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // tokenEnvNames returns the environment token names the GitHub CLI reads for a
