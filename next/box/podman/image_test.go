@@ -83,6 +83,35 @@ func TestBuildPassesBaseTag(t *testing.T) {
 	}
 }
 
+type buildFailureRunner struct {
+	imageRunner
+	output []byte
+}
+
+func (r *buildFailureRunner) Run(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+	if !strings.Contains(args[len(args)-1], "'podman' 'build'") {
+		return r.imageRunner.Run(ctx, input, args...)
+	}
+	return append(append([]byte(nil), r.output...), fmt.Sprintf("DYNA-END %020d 001\n", len(r.output))...), nil
+}
+
+func TestBuildFailureReturnsOutputTail(t *testing.T) {
+	output := []byte(strings.Repeat("a", 5000) + strings.Repeat("b", 4096))
+	r := &buildFailureRunner{imageRunner: imageRunner{missing: true}, output: output}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = h.Build(context.Background(), "toolchain:hash", "", []byte("tar"))
+	var buildErr *BuildError
+	if !errors.As(err, &buildErr) {
+		t.Fatalf("expected BuildError, got %v", err)
+	}
+	if want := strings.Repeat("b", 4096); buildErr.Tail != want || buildErr.BuildLog() != want {
+		t.Fatalf("tail has %d bytes, want the last 4096", len(buildErr.Tail))
+	}
+}
+
 type blockedImageRunner struct {
 	started chan struct{}
 	release chan struct{}
