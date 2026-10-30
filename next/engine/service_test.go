@@ -20,6 +20,24 @@ func (fakeBoxes) Remove(context.Context, contract.BoxID) error    { return nil }
 func (fakeBoxes) Start(context.Context, contract.BoxID) error     { return nil }
 func (fakeBoxes) Stop(context.Context, contract.BoxID) error      { return nil }
 
+func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
+	t.Helper()
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.State == contract.BoxStarting {
+		if _, problem := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	return s.BoxChannel(ctx, caller)
+}
+
 type fakeProfiles struct{}
 
 func (fakeProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
@@ -222,7 +240,7 @@ func TestSessionStartCreatesWake(t *testing.T) {
 	if body.Brief != "brief" || body.Goal != "goal" {
 		t.Fatalf("unexpected start: %+v", body)
 	}
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -234,7 +252,7 @@ func TestSessionStartCreatesWake(t *testing.T) {
 func TestMentionSteersRunningTurn(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := s.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -254,7 +272,7 @@ func TestReconnectResendsTurnStartAndUnreadSteers(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	firstCtx, cancel := context.WithCancel(ctx)
-	channel, e := s.BoxChannel(firstCtx, caller)
+	channel, e := testChannel(t, s, firstCtx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -269,7 +287,7 @@ func TestReconnectResendsTurnStartAndUnreadSteers(t *testing.T) {
 	}
 	steer := (<-channel).Body.(contract.TurnSteer)
 	cancel()
-	reconnect, e := s.BoxChannel(ctx, caller)
+	reconnect, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -284,7 +302,7 @@ func TestReconnectResendsTurnStartAndUnreadSteers(t *testing.T) {
 }
 func TestFailedResultReachesParent(t *testing.T) {
 	s, room, parent, ctx := setup(t)
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -307,7 +325,7 @@ func TestFailedTurnConsumesInputs(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	channelCtx, cancel := context.WithCancel(ctx)
-	channel, e := s.BoxChannel(channelCtx, caller)
+	channel, e := testChannel(t, s, channelCtx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -339,7 +357,7 @@ func TestFailedTurnConsumesInputs(t *testing.T) {
 func TestFailedTurnRecordsError(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := s.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -371,7 +389,7 @@ func TestPostAcrossRooms(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: target.Session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: target.Session})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -437,7 +455,7 @@ func TestOwnPostDoesNotWake(t *testing.T) {
 func TestTurnOutputRetryIsIdempotent(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := s.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -985,7 +1003,7 @@ func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
 func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 	s, _, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := s.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
