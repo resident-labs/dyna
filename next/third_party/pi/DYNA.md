@@ -1,5 +1,9 @@
 # Dyna's Pi fork
 
+This is v2's fork from v1 at commit `8b26ffbd25e4bd804f71acd2fc994d76cd9eb57d`. It evolves independently from this copy onward.
+
+The v2 effort fix sends the active mapped effort in the top-level `output_config` for managed models. Mid-conversation markers remain unchanged. The pack level is `1.4.0-dyna.11` with `dynaFork: 11`. This removes no Dyna code.
+
 Dyna modified this vendored source. The upstream repository is `https://github.com/earendil-works/pi.git`. This subtree starts at tag `v1.4.0`, commit `4a080252f06caf63a525d7873c5d94d3c23887e0`. The upstream MIT license and all package license notices remain unchanged.
 
 ## Dyna changes

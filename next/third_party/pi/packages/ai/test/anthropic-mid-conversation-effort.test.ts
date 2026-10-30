@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type AnthropicOptions, stream } from "../src/api/anthropic-messages.ts";
+import { type AnthropicOptions, stream, streamSimple } from "../src/api/anthropic-messages.ts";
 import { getModel, normalizeContext } from "../src/compat.ts";
 import type { AssistantMessage, Context, Model } from "../src/types.ts";
 
@@ -89,6 +89,23 @@ function effortMessages(payload: CapturedPayload): WireMessage[] {
 }
 
 describe("Anthropic mid-conversation effort", () => {
+	it.each([["xhigh", "xhigh"], ["low", "low"]] as const)(
+		"sends %s as top-level effort for Opus 5.5",
+		async (reasoning, effort) => {
+			let payload: CapturedPayload | undefined;
+			const result = streamSimple(getModel("anthropic", "claude-opus-5-5"), normalizeContext({ messages: [user("one", 1)] }), {
+				apiKey: "test-key",
+				reasoning,
+				onPayload: (value) => {
+					payload = value as CapturedPayload;
+					throw new Error("payload captured");
+				},
+			});
+			await result.result();
+			expect(payload?.output_config?.effort).toBe(effort);
+		},
+	);
+
 	it("reconstructs an exact historical marker prefix and appends the current marker", async () => {
 		const model = managedModel();
 		const first = await capture(model, { messages: [user("one", 1)] }, { effort: "low" });
@@ -108,7 +125,7 @@ describe("Anthropic mid-conversation effort", () => {
 			content: [],
 			output_config: { effort: "high" },
 		});
-		expect(first.payload.output_config).toEqual({ effort: "high" });
+		expect(first.payload.output_config).toEqual({ effort: "low" });
 		expect(second.payload.output_config).toEqual({ effort: "high" });
 		expect(second.payload.thinking).toEqual({
 			type: "adaptive",
