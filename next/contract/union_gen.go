@@ -111,5 +111,8 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 	return nil
 }
 func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
-	return nil, fmt.Errorf("unknown operation kind %q", k)
+	switch k {
+	default:
+		return nil, fmt.Errorf("unknown operation kind %q", k)
+	}
 }
