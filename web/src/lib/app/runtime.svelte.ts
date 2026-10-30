@@ -1,6 +1,7 @@
 import { api, engineCheck, onEvent, onUnauthorized, openExternal } from '../../api.ts'
 import { browserEngine, engineWatch } from '../engineStatus.ts'
 import { boot, registerWorker, watch } from '../settings/link.ts'
+import { setOwnerProfile } from '../settings/owner.ts'
 import { HOOK_LOG_EVENT, hookLogFrom } from '../settings/hookLog.ts'
 import { parseDetailHref } from '../ui/details.ts'
 import { followInternalLink, internalLinkHash } from '../ui/format.ts'
@@ -17,7 +18,6 @@ export interface RuntimeHost {
   unauthorized(): void
   setHalt(value: BootResult): void
   setNarrow(value: boolean): void
-  setDataDir(value: string): void
   setHealth(value: string): void
   setUpdate(value: UpdateNotice | null): void
   setRoute(value: RouteNotice): void
@@ -68,7 +68,7 @@ export function createRuntime(host: RuntimeHost, env: RuntimeEnvironment = {
     const mq = env.window.matchMedia(host.narrowQuery)
     const resize = () => host.setNarrow(mq.matches)
     mq.addEventListener('change', resize)
-    api.dataDir().then(host.setDataDir)
+    api.ownerProfile().then(setOwnerProfile).catch(() => {})
     api.health().then((h) => host.setHealth(h?.status ?? ''))
     host.loadProfiles()
     api.updateNotice().then((n) => host.setUpdate(n?.text ? n : null)).catch(() => {})

@@ -149,7 +149,6 @@ export const api = {
   gitBlame: (roomRef: string, sessionRef = '', path = '') => app.GitBlame(roomRef, sessionRef, path),
   gitDiff: (roomRef: string, sessionRef = '', path = '', staged = false) => app.GitDiff(roomRef, sessionRef, path, staged),
   // The server reports its data directory.
-  dataDir: () => app.DataDir(),
   health: () => app.Health(),
   systemLoad: () => app.SystemLoad(),
   // machines is the registry behind the Nodes list and the Node page.
@@ -378,6 +377,7 @@ export const api = {
  harnessConfig: () => app.HarnessConfig(),
   settings: () => app.Settings(),
   setSetting: (key: string, value: string) => app.SetSetting(key, value),
+  ownerProfile: () => app.OwnerProfile(),
   updateNotice: () => app.UpdateNotice(),
   updateDyna: () => app.UpdateDyna(),
   // Dyna alerts: machine notices such as low disk space and hook or provider
