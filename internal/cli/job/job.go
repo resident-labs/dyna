@@ -105,11 +105,19 @@ func runCmd() *cobra.Command {
 				return fmt.Errorf("io must be heavy or light, not %q", ioWeight)
 			}
 			repo := ""
+			subdir := ""
 			if commit != "" {
 				repo, _ = os.Getwd()
 			}
+			if commit == "tree" {
+				var err error
+				repo, commit, subdir, err = jobs.SnapshotTree(c.Context(), repo)
+				if err != nil {
+					return err
+				}
+			}
 			request := callspec.RunJobInput{
-				Node: node, Labels: labels, Command: args, Repo: repo, Ref: commit,
+				Node: node, Labels: labels, Command: args, Repo: repo, Ref: commit, Subdir: subdir,
 				Image: image, Network: network, Mounts: mounts, Devices: devices,
 				CPUs: cpus, Memory: memory,
 				Timeout: int(timeout / time.Second), IO: ioWeight, Artifacts: artifacts,
@@ -132,7 +140,7 @@ func runCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&node, "node", "", "node to run on (empty: this node, or the roomiest node with --label)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "run on the roomiest node with every label, such as arch=x86_64 (repeatable)")
-	c.Flags().StringVar(&commit, "commit", "", "push this commit of the current repository and check it out (empty: no source)")
+	c.Flags().StringVar(&commit, "commit", "", "push this commit, or tree for the current working tree (empty: no source)")
 	c.Flags().IntVar(&cpus, "cpus", 0, "CPUs the job may use")
 	c.Flags().StringVar(&memory, "memory", "", "memory the job may use, such as 16g or 512m")
 	c.Flags().DurationVar(&timeout, "timeout", 0, "deadline of the job (default 30m)")
