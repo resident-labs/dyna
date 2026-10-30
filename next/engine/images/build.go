@@ -14,7 +14,7 @@ type Host interface {
 	Build(context.Context, string, string, []byte) error
 }
 type Recorder interface {
-	Record(context.Context, contract.EventBody) error
+	Record(context.Context, contract.RoomID, contract.EventBody) error
 }
 type buildLog interface {
 	error
@@ -29,7 +29,7 @@ type Builder struct {
 }
 
 // Build serializes a host's build checks and records their outcome.
-func (b *Builder) Build(ctx context.Context, host Host, hostName contract.HostName, repo contract.RepoName, name, base string, tree TreeID, data []byte) (string, error) {
+func (b *Builder) Build(ctx context.Context, host Host, room contract.RoomID, hostName contract.HostName, repo contract.RepoName, name, base string, tree TreeID, data []byte) (string, error) {
 	tag := Tag(name, base, tree)
 	b.mu.Lock()
 	if b.locks == nil {
@@ -58,7 +58,7 @@ func (b *Builder) Build(ctx context.Context, host Host, hostName contract.HostNa
 		body = contract.ImageFailed{Host: hostName, Repo: repo, Name: name, Tag: tag, Reason: reason, LogTail: tail}
 		err = errors.New(reason)
 	}
-	if recordErr := b.Recorder.Record(context.WithoutCancel(ctx), body); recordErr != nil {
+	if recordErr := b.Recorder.Record(context.WithoutCancel(ctx), room, body); recordErr != nil {
 		return "", recordErr
 	}
 	return tag, err
