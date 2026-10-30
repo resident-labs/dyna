@@ -25,6 +25,7 @@ const (
 	ErrNotFound    ErrorCode = "not_found"
 	ErrForbidden   ErrorCode = "forbidden"
 	ErrConflict    ErrorCode = "conflict"
+	ErrHasChildren ErrorCode = "has_children"
 	ErrStale       ErrorCode = "stale"
 	ErrUnavailable ErrorCode = "unavailable"
 	ErrStoreFromV1 ErrorCode = "store_from_v1"
