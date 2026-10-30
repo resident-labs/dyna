@@ -44,6 +44,7 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roommcp"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/servicewait"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/state"
@@ -98,6 +99,7 @@ var migrations = []func(dataDir string) error{
 	// The jobs node queue lives next to the jobs table and migrates with it.
 	func(dir string) error { return jobs.Admission{DataDir: dir}.Migrate() },
 	librarianstate.Migrate,
+	servicewait.Migrate,
 	library.Migrate,
 	localci.Migrate,
 	// machines reads the old local_ci_nodes table, so it runs after localci.

@@ -479,3 +479,32 @@ func TestPinnedReviewerDoesNotLaunch(t *testing.T) {
 		t.Fatalf("wait notices = %d, want one ServiceWaitEvent for sonnet", waits)
 	}
 }
+
+func TestNoReviewerProfilePostsOneTypedNotice(t *testing.T) {
+	e := newEnv(t)
+	e.s.Notify = notify.New(room.DefaultStore(), &subagent.Manager{Store: subagent.DefaultStore()})
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return nil, nil }
+	e.setCI("success", 1)
+	r := e.track()
+	if err := e.s.process(context.Background(), r.Key, Snapshot{Pull: e.f.Pull}, "passed", "pass", nil, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := e.s.dispatchAll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msgs, err := room.DefaultStore().Messages(r.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var waits int
+	for _, m := range msgs {
+		if ev, ok := m.ServiceWait(); ok && ev.Service == room.ServiceReviewer && ev.Profile == "" && ev.Reason != "" {
+			waits++
+		}
+	}
+	if waits != 1 || len(e.launches) != 0 {
+		t.Fatalf("waits = %d, launches = %d", waits, len(e.launches))
+	}
+}

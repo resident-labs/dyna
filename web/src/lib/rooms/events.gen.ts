@@ -54,6 +54,9 @@ export type AlertSeverity = "warning" | "critical"
 // ServiceRole is a named string type of an event payload.
 export type ServiceRole = "librarian" | "reviewer" | "helper"
 
+// ServicePass is a named string type of an event payload.
+export type ServicePass = "map" | "smell"
+
 // HelperOutcomeReason is a named string type of an event payload.
 export type HelperOutcomeReason = "parent-unavailable" | "no-artifact"
 
@@ -480,7 +483,9 @@ export interface ServiceFailedEvent {
 // ServiceWaitEvent is the payload of the service/waiting events.
 export interface ServiceWaitEvent {
   service: ServiceRole
-  profile: string
+  profile?: string
+  pass?: ServicePass
+  transition?: string
   reason: string
 }
 
@@ -1461,7 +1466,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     threadEnd: false,
     audience: "room",
-    text: "The {service} service is waiting. Its pinned profile {profile} cannot run: {reason}",
+    text: "The {service} service is waiting: {reason}",
   },
   {
     family: "service",
@@ -1681,6 +1686,7 @@ const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "remo
 const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine", "consolidation", "shell"])
 const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
+const SERVICE_PASS: ReadonlySet<unknown> = new Set(["map", "smell"])
 const HELPER_OUTCOME_REASON: ReadonlySet<unknown> = new Set(["parent-unavailable", "no-artifact"])
 const TERMINAL_VERDICT: ReadonlySet<unknown> = new Set(["done", "failed", "declined", "denied", "withdrawn"])
 const APPROVAL_CLASS: ReadonlySet<unknown> = new Set(["agent", "owner"])
@@ -2094,7 +2100,9 @@ export function isServiceFailedEvent(v: unknown): v is ServiceFailedEvent {
 export function isServiceWaitEvent(v: unknown): v is ServiceWaitEvent {
   return isRecord(v) &&
     SERVICE_ROLE.has(v.service) &&
-    typeof v.profile === "string" &&
+    (v.profile === undefined || typeof v.profile === "string") &&
+    (v.pass === undefined || SERVICE_PASS.has(v.pass)) &&
+    (v.transition === undefined || typeof v.transition === "string") &&
     typeof v.reason === "string"
 }
 

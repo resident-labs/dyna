@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/servicewait"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
 )
@@ -188,16 +189,34 @@ func (s Service) WakeSmellsNow(ctx context.Context, actor authority.Actor, calle
 	return res, s.deferWake(ctx, repoDir, res)
 }
 
-// pinnedWait reports that the librarian pin cannot run. The service waits
-// and does not start on another profile. An empty pin is auto and is not a wait.
-func (s Service) pinnedWait(ctx context.Context, roomID, pin string, choice rolesession.Choice) (Result, bool) {
-	if pin == "" || choice.Cause == "" {
-		return Result{}, false
+// profileWait records availability independently for each repository pass.
+func (s Service) profileWait(ctx context.Context, roomID, repo string, pass room.ServicePass, pin string, choice rolesession.Choice, chooseErr error) (Result, bool, error) {
+	var unavailable *rolesession.NoProfileError
+	if chooseErr != nil && !errors.As(chooseErr, &unavailable) {
+		return Result{}, false, chooseErr
+	}
+	reason := choice.Reason
+	waiting := chooseErr != nil || (pin != "" && choice.Cause != "")
+	if chooseErr != nil {
+		reason = chooseErr.Error()
+	}
+	state := ""
+	if waiting {
+		state = pin + "\x00" + reason
+	}
+	token, err := servicewait.Observe(s.DataDir, "librarian\x00"+roomID+"\x00"+repo+"\x00"+string(pass), state)
+	if err != nil {
+		return Result{}, false, err
+	}
+	if !waiting {
+		return Result{}, false, nil
 	}
 	if s.Notice != nil {
-		_ = s.Notice(ctx, roomID, room.ServiceWaitEvent{Service: room.ServiceLibrarian, Profile: pin, Reason: choice.Reason})
+		if err := s.Notice(ctx, roomID, room.ServiceWaitEvent{Service: room.ServiceLibrarian, Profile: pin, Pass: pass, Reason: reason, Transition: token}); err != nil {
+			return Result{}, false, err
+		}
 	}
-	return Result{Action: "waiting", Reason: choice.Reason}, true
+	return Result{Action: "waiting", Reason: reason}, true, nil
 }
 
 // wakePass points at one pass's fields in a librarianstate.State. The feature
@@ -337,10 +356,9 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	repo := harnessruntime.RepoIdentity(ctx, r.Main)
 	pin := s.libraryProfile(st.RoomID, v.LibraryProfile)
 	choice, err := rolesession.ChooseProfile(profiles, pin, repo, failed, s.now(), subagent.RoleLibrarian)
-	if err != nil {
-		return Result{}, err
-	}
-	if waited, ok := s.pinnedWait(ctx, st.RoomID, pin, choice); ok {
+	if waited, ok, waitErr := s.profileWait(ctx, st.RoomID, r.ID, room.ServicePassMap, pin, choice, err); waitErr != nil {
+		return Result{}, waitErr
+	} else if ok {
 		waited.Head = st.Head
 		return waited, nil
 	}
@@ -444,10 +462,9 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string, now bool) (Resu
 	// map. An empty pin ranks by taste, not by reviewer diagnostics.
 	pin := s.libraryProfile(st.RoomID, v.LibraryProfile)
 	choice, err := rolesession.ChooseProfile(profiles, pin, repo, failed, s.now(), subagent.RoleLibrarian)
-	if err != nil {
-		return Result{}, err
-	}
-	if waited, ok := s.pinnedWait(ctx, st.RoomID, pin, choice); ok {
+	if waited, ok, waitErr := s.profileWait(ctx, st.RoomID, r.ID, room.ServicePassSmell, pin, choice, err); waitErr != nil {
+		return Result{}, waitErr
+	} else if ok {
 		waited.Head = st.SmellHead
 		return waited, nil
 	}

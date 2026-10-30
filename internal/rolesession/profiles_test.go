@@ -49,7 +49,7 @@ func TestProfileSelection(t *testing.T) {
 	if profiles[0].Name != "disabled" {
 		t.Fatal("ranking mutated source")
 	}
-	if _, err := ChooseProfile(nil, "", "", nil, now, "keeper"); err == nil || !strings.Contains(err.Error(), "no enabled keeper profile") {
+	if _, err := ChooseProfile(nil, "", "", nil, now, "keeper"); err == nil || !strings.Contains(err.Error(), "no keeper profile is available for services") {
 		t.Fatalf("unavailable: %v", err)
 	}
 }
