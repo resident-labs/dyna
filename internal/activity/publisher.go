@@ -69,28 +69,31 @@ func (p *Publisher) run(dataDir string, key Key) {
 	}
 	ticker := time.NewTicker(PublishInterval)
 	defer ticker.Stop()
-	dirty := false
+	p.publishLoop(ticker.C, func(r Record) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = Put(ctx, db, key, r)
+	})
+}
+
+// publishLoop renews the observer lease even when no new output arrives.
+func (p *Publisher) publishLoop(ticks <-chan time.Time, write func(Record)) {
 	for {
-		flush := false
+		var tick time.Time
 		select {
 		case <-p.pending:
-			dirty = true
-		case <-ticker.C:
-			flush = true
+		case tick = <-ticks:
 		}
 		p.mu.Lock()
 		closed := p.closed
 		r := p.record
-		if closed {
-			dirty = true
-		}
 		p.mu.Unlock()
-		if dirty && (flush || closed) {
-			r.Signal.LeaseUntil = time.Now().Add(Lease)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = Put(ctx, db, key, r)
-			cancel()
-			dirty = false
+		if closed || !tick.IsZero() {
+			if tick.IsZero() {
+				tick = time.Now()
+			}
+			r.Signal.LeaseUntil = tick.Add(Lease)
+			write(r)
 		}
 		if closed {
 			return
