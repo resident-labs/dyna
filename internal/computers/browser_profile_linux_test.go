@@ -349,6 +349,39 @@ func TestBrowserLaunchReadsSettingsAndForcesBasicStore(t *testing.T) {
 	}
 }
 
+func TestBrowserLaunchMergesBlinkFeatures(t *testing.T) {
+	browserTestEnvironment(t)
+	if err := prepareChromium("blink"); err != nil {
+		t.Fatal(err)
+	}
+	v := settings.Defaults()
+	v.BrowserUseFlagsFile = false
+	v.BrowserExtraFlags = "--disable-blink-features=Foo"
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := prepareChromiumLaunch(context.Background(), "blink", []string{"--disable-blink-features=Bar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Chromium keeps only the last --disable-blink-features switch, so the
+	// owner's values and the automation flag must share one argument.
+	var switches []string
+	for _, arg := range plan.Args {
+		if strings.HasPrefix(arg, "--disable-blink-features=") {
+			switches = append(switches, arg)
+		}
+	}
+	if len(switches) != 1 {
+		t.Fatal("want one --disable-blink-features argument:", plan.Args)
+	}
+	values := strings.Split(strings.TrimPrefix(switches[0], "--disable-blink-features="), ",")
+	slices.Sort(values)
+	if !reflect.DeepEqual(values, []string{"AutomationControlled", "Bar", "Foo"}) {
+		t.Fatal("merged features:", values)
+	}
+}
+
 func TestLaunchSuppressesCrashRestoreBubble(t *testing.T) {
 	browserTestEnvironment(t)
 	id := "clean-exit"
