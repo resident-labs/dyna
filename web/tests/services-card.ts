@@ -26,8 +26,8 @@ const summaries: HookSummary[] = [
 ]
 api.globalHookSummary = () => Promise.resolve(summaries)
 api.listServices = () => Promise.resolve([
-  { role: 'librarian', name: 'Librarian', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', scope: 'global', sessions: 1, profiles: ['sol'] },
-  { role: 'reviewer', name: 'PR reviewers', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', scope: 'room', sessions: 2, profiles: ['sol'] },
+  { role: 'librarian', name: 'Librarian', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', waiting: false, scope: 'global', sessions: 1, profiles: ['sol'] },
+  { role: 'reviewer', name: 'PR reviewers', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', waiting: false, scope: 'room', sessions: 2, profiles: ['sol'] },
 ])
 api.globalHookRunLog = () => Promise.resolve({ tail: 'maintenance: pruning worktrees\nerror: disk read failed on /var/lib/dyna\nexit status 1', exitCode: 1 })
 

@@ -8,6 +8,7 @@ export interface ServiceView {
   pinned: string
   source: string
   reason: string
+  waiting: boolean
   scope: string
   sessions: number
   profiles: string[]
