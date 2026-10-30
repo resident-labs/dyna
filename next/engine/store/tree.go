@@ -36,6 +36,12 @@ func (s *Store) ClosingParent(ctx context.Context, child contract.SessionID) (co
 	return parent, err
 }
 
+func (s *Store) ClosingLeaf(ctx context.Context, id contract.SessionID) (bool, error) {
+	var leaf bool
+	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sessions s WHERE s.id=? AND s.state='closing' AND s.closed_at IS NULL AND NOT EXISTS (SELECT 1 FROM sessions c WHERE c.parent=s.id AND c.closed_at IS NULL))", id).Scan(&leaf)
+	return leaf, err
+}
+
 // MarkClosing blocks child starts across the subtree in one write.
 func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
