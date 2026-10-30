@@ -15,6 +15,7 @@ import (
 
 	"dyna-agent/internal/cihealth"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 )
 
 type budgetStep struct {
@@ -306,7 +307,7 @@ func applyBudgetVerdict(live *Record, snap Snapshot, token, reason, text string,
 	// Format this notice for that head without changing the old review head.
 	view := *live
 	view.Head = snap.Pull.Head.SHA
-	notice(&view, live.Author, text, "ci-budget:"+snap.Pull.Head.SHA+":"+token+":"+reason)
+	noticeTyped(&view, live.Author, text, "ci-budget:"+snap.Pull.Head.SHA+":"+token+":"+reason, noticeFacts{Type: room.PRUpdate, Outcome: room.PROutcomeFailed})
 	live.Notices = view.Notices
 }
 

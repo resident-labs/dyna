@@ -39,12 +39,23 @@ var prTypes = []PRType{
 	PRReturned, PRMerged, PRClosed, PRComment, PRHeldComment, PRReviewAssigned, PRUpdate,
 }
 
+type PROutcome string
+
+const (
+	PROutcomeOK     PROutcome = "ok"
+	PROutcomeFailed PROutcome = "failed"
+	PROutcomeInfo   PROutcome = "info"
+)
+
+var prOutcomes = []PROutcome{PROutcomeOK, PROutcomeFailed, PROutcomeInfo}
+
 // PREvent tells one fact about a tracked change: a CI result, a reviewer
 // verdict, a comment, or the end of the change. The watcher posts it to the
 // change's author. Every field is typed, so the web card draws the same facts
 // the agent text carries and never reads the text.
 type PREvent struct {
-	Type PRType `json:"type"`
+	Type    PRType    `json:"type"`
+	Outcome PROutcome `json:"outcome,omitempty"`
 	// Label names the change in the agent text, as "PR #12" or "Change <key>".
 	Label string `json:"label"`
 	// Location is where the change lives: its URL, or the watcher's key of a
@@ -97,7 +108,7 @@ func (p PREvent) eventDedupe() string {
 // eventThread groups only lifecycle facts. Comments and other actionable facts stay separate.
 func (p PREvent) eventThread() string {
 	switch p.Type {
-	case PRUpdate, PRReady, PRCIFailed, PRMerged, PRClosed:
+	case PRUpdate, PRReady, PRCIFailed, PRCIPassed, PRMerged, PRClosed:
 		if p.ChangeID != "" {
 			return "pr:" + p.ChangeID
 		}

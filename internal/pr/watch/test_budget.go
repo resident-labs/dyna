@@ -22,6 +22,7 @@ import (
 
 	"dyna-agent/internal/boundedio"
 	"dyna-agent/internal/cibudget"
+	"dyna-agent/internal/room"
 )
 
 const maxTestArtifact = 20 * 1024 * 1024
@@ -560,10 +561,12 @@ func (s *Service) inspectBudgetRun(ctx context.Context, gh GitHub, r Record, sna
 			view := *live
 			view.Head = snap.Pull.Head.SHA
 			prefix := "test-budget:"
+			outcome := room.PROutcomeFailed
 			if !policy.EnforceCITimeBudget() {
 				prefix = "informational:" + prefix
+				outcome = room.PROutcomeInfo
 			}
-			notice(&view, live.Author, text, prefix+snap.Pull.Head.SHA+":"+token)
+			noticeTyped(&view, live.Author, text, prefix+snap.Pull.Head.SHA+":"+token, noticeFacts{Type: room.PRUpdate, Outcome: outcome})
 			live.Notices = view.Notices
 		}
 		return nil

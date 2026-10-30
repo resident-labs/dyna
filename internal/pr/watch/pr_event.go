@@ -20,6 +20,7 @@ func prEventOf(r Record, n Notice) room.PREvent {
 	body, tail := noticeParts(r, n.Text)
 	ev := room.PREvent{
 		Type:      typ,
+		Outcome:   n.Outcome,
 		Label:     changeLabel(r),
 		Location:  changeLocation(r),
 		Number:    r.Number,

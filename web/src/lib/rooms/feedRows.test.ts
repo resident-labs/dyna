@@ -90,6 +90,15 @@ const prPost = (id: string, number = 542, repo = 'acme/app', extra: Partial<Feed
   text: `https://github.com/${repo}/pull/${number}\nHead: 3bc9bc0b55e28c82dd4eacd8ba063315c223ea0e\n\nPR merged.`, ...extra,
 })
 
+test('PR update outcomes close threads only on failure', () => {
+  const update = (id: string, outcome: 'ok' | 'info' | 'failed'): FeedInput => ({
+    ...prPost(id), notice: { kind: 'update', thread: 'pr:7' },
+    payload: { type: 'update', label: 'PR #7', location: 'url', changeId: '7', outcome },
+  })
+  const rows = content(feedRows([update('p1', 'ok'), update('p2', 'info'), update('p3', 'failed'), update('p4', 'ok')]))
+  assert.deepEqual(rows.map((row) => rowPosts(row).map((post) => post.id)), [['p1', 'p2', 'p3'], ['p4']])
+})
+
 test('old PR posts stay separate without thread keys', () => {
   assert.equal(content(feedRows([prPost('p1'), prPost('p2')])).length, 2)
 })

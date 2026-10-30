@@ -276,6 +276,7 @@ func legacyCINotice(text string) bool {
 // web card reads them instead of the agent text.
 type noticeFacts struct {
 	Type      room.PRType
+	Outcome   room.PROutcome
 	Summary   string
 	Commenter string
 	Verdict   string
@@ -326,7 +327,10 @@ func noticeTyped(r *Record, target, text, token string, facts noticeFacts, drops
 	if facts.Type == "" {
 		facts.Type = typeOfToken(*r, token)
 	}
-	r.Notices = append(r.Notices, Notice{ID: id, Kind: noticeKind(token), Type: facts.Type, Summary: facts.Summary, Commenter: facts.Commenter, Verdict: facts.Verdict, Target: target, Other: pairOther(token), Text: boundNotice(changeLocation(*r) + "\nHead: " + r.Head + "\n\n" + text)})
+	if facts.Type == room.PRUpdate && facts.Outcome == "" {
+		facts.Outcome = room.PROutcomeInfo
+	}
+	r.Notices = append(r.Notices, Notice{ID: id, Kind: noticeKind(token), Type: facts.Type, Outcome: facts.Outcome, Summary: facts.Summary, Commenter: facts.Commenter, Verdict: facts.Verdict, Target: target, Other: pairOther(token), Text: boundNotice(changeLocation(*r) + "\nHead: " + r.Head + "\n\n" + text)})
 }
 
 // reviewNotice queues one typed review result post. The event is the fact the

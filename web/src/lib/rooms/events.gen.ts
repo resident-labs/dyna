@@ -9,6 +9,9 @@ export type JobState = "queued" | "running" | "passed" | "failed" | "cancelled" 
 // PRType is a named string type of an event payload.
 export type PRType = "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "returned" | "merged" | "closed" | "comment" | "held-comment" | "review-assigned" | "update"
 
+// PROutcome is a named string type of an event payload.
+export type PROutcome = "ok" | "failed" | "info"
+
 // MergeStep is a named string type of an event payload.
 export type MergeStep = "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested"
 
@@ -402,6 +405,7 @@ export interface IssueWatchEvent {
 // PREvent is the payload of the pr/opened and pr/ready and pr/approved and pr/changes and pr/ci-failed and pr/ci-paused and pr/ci-passed and pr/returned and pr/merged and pr/closed and pr/comment and pr/held-comment and pr/review-assigned and pr/update events.
 export interface PREvent {
   type: PRType
+  outcome?: PROutcome
   label: string
   location: string
   number?: number
@@ -1279,7 +1283,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    threadEnd: true,
+    threadEnd: false,
     audience: "room",
     text: "{location}\nHead: {head}",
   },
@@ -1662,6 +1666,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
 const M_C_P_OUTCOME: ReadonlySet<unknown> = new Set(["ok", "server-error", "not-allowed", "not-granted", "flagged", "rate-limited", "detached"])
 const JOB_STATE: ReadonlySet<unknown> = new Set(["queued", "running", "passed", "failed", "cancelled", "lost", "timed_out"])
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
+const P_R_OUTCOME: ReadonlySet<unknown> = new Set(["ok", "failed", "info"])
 const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision", "fix-requested"])
 const ISSUE_CHANGE: ReadonlySet<unknown> = new Set(["filed", "updated", "closed", "noted"])
 const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "closed"])
@@ -2014,6 +2019,7 @@ export function isIssueWatchEvent(v: unknown): v is IssueWatchEvent {
 export function isPREvent(v: unknown): v is PREvent {
   return isRecord(v) &&
     P_R_TYPE.has(v.type) &&
+    (v.outcome === undefined || P_R_OUTCOME.has(v.outcome)) &&
     typeof v.label === "string" &&
     typeof v.location === "string" &&
     (v.number === undefined || Number.isInteger(v.number)) &&
