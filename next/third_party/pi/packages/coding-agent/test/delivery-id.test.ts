@@ -11,7 +11,7 @@ import { SettingsManager } from "../src/core/settings-manager.ts";
 import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
-it("persists the delivery ID on the consumed user message", async () => {
+it("persists a batch of delivery IDs before the first model call", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-delivery-"));
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
 	const response: AssistantMessage = {
@@ -21,10 +21,12 @@ it("persists the delivery ID on the consumed user message", async () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
 		stopReason: "stop", timestamp: 0,
 	};
+	let firstModelUsers: number | undefined;
 	const agent = new Agent({
 		getApiKey: () => "test-key",
 		initialState: { model, systemPrompt: "test", tools: [] },
-		streamFn: () => {
+		streamFn: (_model, context) => {
+			firstModelUsers ??= context.messages.filter((message) => message.role === "user").length;
 			const stream = createAssistantMessageEventStream();
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: response });
@@ -43,11 +45,12 @@ it("persists the delivery ID on the consumed user message", async () => {
 		cwd: dir, modelRuntime: getModelRuntime(registry), resourceLoader: createTestResourceLoader(),
 	});
 	try {
-		await session.prompt("hello", { deliveryId: "42" });
+		await session.prompt("hello", { deliveryId: "42", additionalInputs: [{ message: "second", deliveryId: "43" }] });
 		const entries: { type: string; message?: { role: string; deliveryId?: string } }[] =
 			readFileSync(manager.getSessionFile()!, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-		const entry = entries.find((item) => item.type === "message" && item.message?.role === "user");
-		expect(entry?.message?.deliveryId).toBe("42");
+		const users = entries.filter((item) => item.type === "message" && item.message?.role === "user");
+		expect(users.map((entry) => entry.message?.deliveryId)).toEqual(["42", "43"]);
+		expect(firstModelUsers).toBe(2);
 	} finally {
 		session.dispose();
 		rmSync(dir, { recursive: true, force: true });
