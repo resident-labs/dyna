@@ -35,7 +35,7 @@
       </SettingRow>
       <SettingRow title="Rooms that can use it" description="None chosen means every room.">
         {#snippet status()}<StatusPill label="Default" />{/snippet}
-        {#snippet control()}<span class="num muted">cozycraft, dyna, horizon</span>{/snippet}
+        {#snippet control()}<span class="ui-num muted">cozycraft, dyna, horizon</span>{/snippet}
       </SettingRow>
       <SettingRow title="Health probe" description="Dyna probes the node every 5 minutes.">
         {#snippet status()}<StatusPill tone="danger" dot label="Last probe failed" />{/snippet}
@@ -95,12 +95,12 @@
 
   <Section title="Utilities">
     <Card>
-      <div class="line"><span class="micro-label">micro-label</span><span class="num">1,024.50</span><span class="num dimmed">dimmed 88%</span></div>
+      <div class="line"><span class="micro-label">micro-label</span><span class="ui-num">1,024.50</span><span class="ui-num dimmed">dimmed 88%</span></div>
       <div class="line meters">
-        <div class="meter"><span style:width="30%"></span></div>
-        <div class="meter"><span style:width="55%" style:background="var(--data-2)"></span></div>
-        <div class="meter"><span style:width="70%" style:background="var(--data-3)"></span></div>
-        <div class="meter"><span style:width="85%" style:background="var(--data-4)"></span></div>
+        <div class="ui-meter"><span style:width="30%"></span></div>
+        <div class="ui-meter"><span style:width="55%" style:background="var(--data-2)"></span></div>
+        <div class="ui-meter"><span style:width="70%" style:background="var(--data-3)"></span></div>
+        <div class="ui-meter"><span style:width="85%" style:background="var(--data-4)"></span></div>
       </div>
     </Card>
   </Section>
