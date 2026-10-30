@@ -91,12 +91,12 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 		}
 	}
 	job := registeredCIJob{record: r, head: head, branch: branch, trial: true}
-	s.registeredRuns = &registeredCIRuns{runs: map[string]*registeredCIRun{registeredJobKey(job): {node: "worker", cancel: func() {}}}}
+	s.registeredRuns = &registeredCIRuns{Runs: map[string]*registeredCIRun{registeredJobKey(job): {Node: "worker", Cancel: func() {}}}}
 	got, err := s.mergeTrialCI(ctx, r, branch, head)
 	if err != nil || got.Status != "pending" || got.Reason != "running local CI on worker" {
 		t.Fatalf("local execution: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
-	s.registeredRuns.runs = map[string]*registeredCIRun{}
+	s.registeredRuns.Runs = map[string]*registeredCIRun{}
 	got, err = s.mergeTrialCI(ctx, r, branch, head)
 	if err != nil || got.Status != "pending" || got.Reason != "waiting for local CI" {
 		t.Fatalf("local queue: ci=%s reason=%q err=%v", got.Status, got.Reason, err)

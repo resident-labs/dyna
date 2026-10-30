@@ -10,6 +10,7 @@ import (
 
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
+	cisched "dyna-agent/internal/pr/watch/ci"
 	"dyna-agent/internal/room"
 )
 
@@ -63,7 +64,7 @@ func (s *Service) watchTrialLocalCIStart(ctx context.Context, repo string, r Rec
 	// A complete result whose action is still a retry has not decided the
 	// head: its replacement is the run this wait is for, so the wait survives
 	// until that replacement starts, decides, or the alert names it.
-	if err == nil && savedResultActionFor(result) == settleSavedResult && s.registeredJobResultComplete(ctx, job, result) {
+	if err == nil && cisched.SavedResultActionFor(result) == cisched.SettleSavedResult && s.registeredJobResultComplete(ctx, job, result) {
 		return s.clearTrialLocalCIWait(repo, b)
 	}
 	plan, err := s.planRegisteredCI(ctx, job)
