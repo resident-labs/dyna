@@ -764,7 +764,7 @@ func (m *Manager) advanceConsolidation(ctx context.Context, c ConsolidationState
 // including startup retries. A saved charter is never replacement evidence.
 func (m *Manager) consolidationCharter(c ConsolidationState) string {
 	var b strings.Builder
-	b.WriteString("[DYNA SESSION CONSOLIDATION]\nContinue the selected tasks as one agent in this stable session. Review every source before acting. Original histories and worktrees remain readable. Do not merge or delete source worktrees. Absorbed agents no longer work in parallel. Inherited reviewer tasks do not authorize self-review; use an independent reviewer when roles collapse. Your kept session owns these tasks; source identities describe their old roles.\n")
+	b.WriteString("[DYNA SESSION CONSOLIDATION]\nContinue the selected tasks as one agent in this stable session. Review every source before acting. Original histories and worktrees remain readable. Never merge or delete source worktrees. Absorbed agents no longer work in parallel. Use an independent reviewer when inherited reviewer roles collapse. Your kept session owns these tasks; source identities describe their old roles.\n")
 	fmt.Fprintf(&b, "Saved source context and worktree paths: `dyna subagent consolidate status %s --json`.\n", c.ID)
 	for _, source := range c.Sources {
 		meta, err := m.store().ReadMeta(source.Session)
