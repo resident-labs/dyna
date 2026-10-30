@@ -26,7 +26,7 @@ func NewTemplatesCommand() *cobra.Command {
 			"registry (default $XDG_CONFIG_HOME/dyna/templates). The filename is the\n" +
 			"stable identity. Listing, saving, showing, copying, and seeding never\n" +
 			"execute source and never inspect <work-dir>/examples. Copy writes an\n" +
-			"ordinary .js file that you edit and launch with `dyna run <file>`.\n" +
+			"ordinary .js file that you edit and launch with `dyna workflow run <file>`.\n" +
 			"Templates are not runnable by name.",
 		PersistentPreRunE: func(c *cobra.Command, _ []string) error {
 			if strings.TrimSpace(templatesDir) != "" || c.Name() == "seed" {
@@ -136,7 +136,7 @@ func NewTemplatesCommand() *cobra.Command {
 		Use:   "copy <name>",
 		Short: "Copy a starter template into an editable .js file",
 		Long: "Copy a selected starter into --to PATH as an ordinary JavaScript file.\n" +
-			"Edit that file, then launch it with `dyna run <file>`. Copy does not\n" +
+			"Edit that file, then launch it with `dyna workflow run <file>`. Copy does not\n" +
 			"run the template, commit, or push. Refuse overwrite unless --overwrite\n" +
 			"is set.",
 		Args: cobra.ExactArgs(1),

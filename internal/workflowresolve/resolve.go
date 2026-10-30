@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"dyna-agent/internal/workflows/bundled"
 )
 
 type Error struct {
@@ -15,14 +17,10 @@ type Error struct {
 
 func (e *Error) Error() string {
 	if e.Path != "" {
-		return fmt.Sprintf("read nested workflow %s: %v", e.Path, e.Cause)
+		return fmt.Sprintf("read workflow %s: %v", e.Path, e.Cause)
 	}
-	if strings.TrimSpace(e.Ref) == "" {
-		return "workflow reference must not be empty"
-	}
-	return fmt.Sprintf("workflow %q was not found as a script path or in %s or %s", e.Ref, e.Registry, e.Examples)
+	return fmt.Sprintf("workflow %q was not found", e.Ref)
 }
-
 func (e *Error) Unwrap() error {
 	if e.Cause != nil {
 		return e.Cause
@@ -30,7 +28,7 @@ func (e *Error) Unwrap() error {
 	return os.ErrNotExist
 }
 
-func registryDir(dir string) string {
+func PersonalDir(dir string) string {
 	if dir != "" {
 		return dir
 	}
@@ -41,51 +39,66 @@ func registryDir(dir string) string {
 	return filepath.Join(dir, "dyna", "workflows")
 }
 
-// Resolve searches script directory, work directory, registry, then examples.
+// Resolve accepts explicit paths and otherwise searches project, personal and bundled names.
 func Resolve(ref, scriptPath, workDir, workflowDir string) (string, string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", "", &Error{Ref: ref, Registry: registryDir(workflowDir), Examples: filepath.Join(workDir, "examples")}
+		return "", "", &Error{Ref: ref}
 	}
-	var candidates []string
-	seen := map[string]bool{}
-	add := func(base string) {
-		if base == "" {
-			return
-		}
-		for _, candidate := range []string{base, base + ".js"} {
-			if filepath.Ext(base) == ".js" && candidate != base {
-				continue
-			}
-			abs, err := filepath.Abs(candidate)
-			if err == nil && !seen[abs] {
-				seen[abs] = true
-				candidates = append(candidates, abs)
-			}
-		}
-	}
+	candidates := []string{}
 	if filepath.IsAbs(ref) {
-		add(ref)
+		candidates = append(candidates, ref)
 	} else {
 		if scriptPath != "" {
-			add(filepath.Join(filepath.Dir(scriptPath), ref))
+			candidates = append(candidates, filepath.Join(filepath.Dir(scriptPath), ref))
 		}
-		add(filepath.Join(workDir, ref))
-		if filepath.Base(ref) == ref {
-			registry := registryDir(workflowDir)
-			add(filepath.Join(registry, ref))
-			add(filepath.Join(workDir, "examples", ref))
+		candidates = append(candidates, filepath.Join(workDir, ref))
+	}
+	for _, path := range candidates {
+		info, err := os.Stat(path)
+		if err == nil && info.Mode().IsRegular() {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return "", "", &Error{Ref: ref, Path: path, Cause: err}
+			}
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				return "", "", err
+			}
+			return abs, string(b), nil
 		}
 	}
-	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		b, err := os.ReadFile(candidate)
-		if err != nil {
-			return "", "", &Error{Ref: ref, Path: candidate, Cause: err}
-		}
-		return candidate, string(b), nil
+	if filepath.Base(ref) != ref || strings.ContainsAny(ref, `/\\`) {
+		return "", "", &Error{Ref: ref}
 	}
-	return "", "", &Error{Ref: ref, Registry: registryDir(workflowDir), Examples: filepath.Join(workDir, "examples")}
+	name := strings.TrimSuffix(ref, ".js")
+	if !ValidName(name) {
+		return "", "", &Error{Ref: ref}
+	}
+	for _, dir := range []string{filepath.Join(workDir, ".dyna", "workflows"), PersonalDir(workflowDir)} {
+		path := filepath.Join(dir, name+".js")
+		b, err := os.ReadFile(path)
+		if err == nil {
+			return path, string(b), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", "", &Error{Ref: ref, Path: path, Cause: err}
+		}
+	}
+	b, err := bundled.FS.ReadFile(name + ".js")
+	if err == nil {
+		return "bundled:" + name + ".js", string(b), nil
+	}
+	return "", "", &Error{Ref: ref}
+}
+
+func ValidName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
 }

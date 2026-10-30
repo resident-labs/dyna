@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"dyna-agent/internal/authority"
@@ -14,6 +13,8 @@ import (
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runsvc"
+	"dyna-agent/internal/workflowcatalog"
+	"dyna-agent/internal/workflowresolve"
 	"dyna-agent/internal/workflowsvc"
 	"dyna-agent/internal/workflowtemplate"
 )
@@ -26,12 +27,42 @@ type StartedRun struct {
 	ID string `json:"id"`
 }
 
+func (s *Service) ListWorkflows(ref string) ([]workflowcatalog.Info, error) {
+	rec, err := s.rooms().Resolve(ref)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := roomDir(rec)
+	if err != nil {
+		return nil, err
+	}
+	return workflowcatalog.List(dir, "")
+}
+
 func (s *Service) ListTemplates() ([]workflowtemplate.Info, error) {
 	return workflowtemplate.New("").List()
 }
 
+type StartNamedRunRequest struct {
+	Room     string          `json:"room"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
+	ResultTo string          `json:"resultTo,omitempty"`
+}
+
+func (s *Service) StartNamedRun(ctx context.Context, req StartNamedRunRequest) (StartedRun, error) {
+	if !workflowresolve.ValidName(req.Name) {
+		return StartedRun{}, fmt.Errorf("invalid workflow name %q", req.Name)
+	}
+	return s.startRun(ctx, req.Room, RunSource{Script: req.Name}, req.Input, req.ResultTo)
+}
+
 func (s *Service) StartRun(ctx context.Context, ref string, source RunSource, input any) (StartedRun, error) {
-	if err := authority.Check("run", authority.Of(ctx), nil); err != nil {
+	return s.startRun(ctx, ref, source, input, "")
+}
+
+func (s *Service) startRun(ctx context.Context, ref string, source RunSource, input any, resultTo string) (StartedRun, error) {
+	if err := authority.Check("workflow run", authority.Of(ctx), nil); err != nil {
 		return StartedRun{}, err
 	}
 	rec, err := s.rooms().Resolve(ref)
@@ -57,8 +88,9 @@ func (s *Service) StartRun(ctx context.Context, ref string, source RunSource, in
 		}
 		script = info.Path
 	}
-	if !filepath.IsAbs(script) {
-		script = filepath.Join(dir, script)
+	script, src, err := workflowresolve.Resolve(script, "", dir, "")
+	if err != nil {
+		return StartedRun{}, err
 	}
 	b, err := json.Marshal(input)
 	if err != nil {
@@ -67,11 +99,17 @@ func (s *Service) StartRun(ctx context.Context, ref string, source RunSource, in
 	if len(b) > 256*1024 {
 		return StartedRun{}, fmt.Errorf("workflow input exceeds 256 KiB")
 	}
-	src, err := os.ReadFile(script)
-	if err != nil {
-		return StartedRun{}, err
-	}
 	env := runEnv(actor, rec)
+	if resultTo != "" {
+		target, err := s.Notify.Sessions.Store.Resolve(resultTo)
+		if err != nil {
+			return StartedRun{}, err
+		}
+		if target.RoomID != rec.ID {
+			return StartedRun{}, fmt.Errorf("result target must belong to the workflow room")
+		}
+		env = append(env, "DYNA_RUN_RESULT_TO="+target.ID)
+	}
 	if s.Notify.Sessions.Executable == "" {
 		return StartedRun{}, fmt.Errorf("dyna executable is unavailable")
 	}
