@@ -164,6 +164,20 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 			}
 		})
 	}
+	for name, tt := range map[string]struct{ body, want string }{
+		"slash command":      {"/claim", "/claim\n\n> 🤖 Posted by an agent"},
+		"leading blank line": {"\n/claim\n", "\n/claim\n\n> 🤖 Posted by an agent"},
+		"agent command":      {"🤖 Agent: /claim", "🤖 Agent: /claim"},
+		"quoted marker":      {"> 🤖 Opened by the swarm", "> 🤖 Opened by the swarm"},
+		"ordinary":           {"Hello", "> 🤖 Posted by an agent\n\nHello"},
+		"not a command":      {"/123", "> 🤖 Posted by an agent\n\n/123"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := withAttributionFirst(tt.body, "> 🤖 Posted by an agent"); got != tt.want {
+				t.Fatalf("body = %q, want %q", got, tt.want)
+			}
+		})
+	}
 	// A marker such as "> 🤖" spans the leading punctuation and the first word.
 	if got := withAttributionFirst("> 🤖 Opened by the swarm\n\nHi", "> 🤖 Opened by an agent."); got != "> 🤖 Opened by the swarm\n\nHi" {
 		t.Fatalf("a variant of the line was doubled: %q", got)
