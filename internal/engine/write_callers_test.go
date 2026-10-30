@@ -80,7 +80,6 @@ var handlerCallerChecks = map[string]string{
 	"StampPlanAncestry":           "Checks authority.Of(ctx) and confines workers to their own run.",
 	"StopShell":                   "Checks that authority.Of(ctx) is the owner, and that the shell belongs to the room.",
 	"SyncFetch":                   "Checks git sync fetch with authority.Of(ctx).",
-	"TemplateSeed":                "Requires a recognized authority.Of(ctx) role.",
 	"TestHook":                    "actor(ctx) applies recordedCaller before running the hook.",
 	"UpdateLibraryEntry":          "libraryStore passes mutationActor to library authority checks.",
 	"VoiceSay":                    "voiceSay requires a recognized authority.Of(ctx) role.",

@@ -14,12 +14,10 @@ import (
 	"dyna-agent/internal/workflowcatalog"
 	"dyna-agent/internal/workflowresolve"
 	"dyna-agent/internal/workflowsvc"
-	"dyna-agent/internal/workflowtemplate"
 )
 
 type RunSource struct {
-	Template string `json:"template,omitempty"`
-	Script   string `json:"script,omitempty"`
+	Script string `json:"script,omitempty"`
 }
 type StartedRun struct {
 	ID string `json:"id"`
@@ -35,10 +33,6 @@ func (s *Service) ListWorkflows(ref string) ([]workflowcatalog.Info, error) {
 		return nil, err
 	}
 	return workflowcatalog.List(dir, "")
-}
-
-func (s *Service) ListTemplates() ([]workflowtemplate.Info, error) {
-	return workflowtemplate.New("").List()
 }
 
 type StartNamedRunRequest struct {
@@ -75,17 +69,7 @@ func (s *Service) startRun(ctx context.Context, ref string, source RunSource, in
 	if err != nil {
 		return StartedRun{}, err
 	}
-	if (source.Template == "") == (source.Script == "") {
-		return StartedRun{}, fmt.Errorf("choose exactly one template or script")
-	}
 	script := source.Script
-	if source.Template != "" {
-		info, _, err := workflowtemplate.New("").ResolveName(source.Template)
-		if err != nil {
-			return StartedRun{}, err
-		}
-		script = info.Path
-	}
 	var src string
 	if named {
 		script, src, err = workflowresolve.ResolveName(script, dir, "")

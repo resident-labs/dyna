@@ -230,7 +230,6 @@ var WriteCalls = map[string]bool{
 	"SyncFetch":                   true,
 	"SyncPrivateRuntime":          true,
 	"SyncRefresh":                 true,
-	"TemplateSeed":                true,
 	"TermClose":                   true,
 	"TermOpen":                    true,
 	"TermRequestPreview":          true,

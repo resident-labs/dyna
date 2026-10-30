@@ -15,7 +15,6 @@ import (
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/workflowsvc"
-	"dyna-agent/internal/workflowtemplate"
 )
 
 func TestRoomPreferencesAndEvents(t *testing.T) {
@@ -112,16 +111,11 @@ func TestWorkflowControlsUseService(t *testing.T) {
 	// This executable exits immediately. It starts no workflow workers.
 	e.mgr.Executable = "/bin/true"
 	t.Setenv("DYNA_SESSION", "parent-stamp")
-	cat := workflowtemplate.New("")
-	if _, err = cat.Save("demo", []byte("return args"), false); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "demo.js"), []byte("return args"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	templates, err := e.svc.ListTemplates()
-	if err != nil || len(templates) != 1 {
-		t.Fatalf("templates: %+v %v", templates, err)
-	}
 	input := map[string]any{"task": "a; $(do-not-execute)"}
-	res, err := e.svc.StartRun(e.ctx, rec.ID, RunSource{Template: "demo"}, input)
+	res, err := e.svc.StartRun(e.ctx, rec.ID, RunSource{Script: "demo.js"}, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +135,7 @@ func TestWorkflowControlsUseService(t *testing.T) {
 		return opts
 	}
 	opts := readOptions(res.ID)
-	if opts.ScriptPath != templates[0].Path || opts.WorkDir != dir || opts.Args.(map[string]any)["task"] != input["task"] {
+	if opts.ScriptPath != filepath.Join(dir, "demo.js") || opts.WorkDir != dir || opts.Args.(map[string]any)["task"] != input["task"] {
 		t.Fatalf("options: %+v", opts)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "custom.js"), []byte("return 1"), 0600); err != nil {
@@ -156,9 +150,6 @@ func TestWorkflowControlsUseService(t *testing.T) {
 	}
 	if _, err = e.svc.StartRun(e.ctx, rec.ID, RunSource{}, nil); err == nil {
 		t.Fatal("missing source accepted")
-	}
-	if _, err = e.svc.StartRun(e.ctx, rec.ID, RunSource{Template: "demo", Script: "x"}, nil); err == nil {
-		t.Fatal("two sources accepted")
 	}
 	meta := runstore.Meta{ID: res.ID, Status: "running", Pid: -1}
 	b, _ := json.Marshal(meta)
