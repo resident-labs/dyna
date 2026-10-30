@@ -304,7 +304,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, invalid("post text is required")
 	}
 	var mentions []contract.Principal
-	var recipients []contract.SessionID
+	var recipients []contract.Delivery
 	seen := make(map[contract.SessionID]bool)
 	for _, name := range req.Mentions {
 		session, err := s.store.SessionByName(ctx, req.Room, strings.TrimPrefix(name, "@"))
@@ -317,7 +317,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		seen[session.ID] = true
 		mentions = append(mentions, contract.Principal{Kind: contract.PrincipalSession, Session: session.ID})
 		if caller.Kind != contract.PrincipalSession || caller.Session != session.ID {
-			recipients = append(recipients, session.ID)
+			recipients = append(recipients, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 		}
 	}
 	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: contract.Conversation{Kind: contract.ConversationFeed}})
