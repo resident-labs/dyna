@@ -173,6 +173,26 @@ func showCommand() *cobra.Command {
 			}
 			fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
 			fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
+			changes, err := store().LatestFieldChanges(c.Context(), m.ID)
+			if err != nil {
+				return err
+			}
+			if len(changes) == 0 {
+				fmt.Fprintln(out, "Setting changes: unknown (no recorded changes)")
+			}
+			for _, change := range changes {
+				actor := string(change.Actor.Role)
+				if change.Actor.Session != "" {
+					actor += " " + change.Actor.Session
+				}
+				if change.Actor.Room != "" {
+					actor += " (room " + roomName(change.Actor.Room) + ")"
+				}
+				if actor == "" {
+					actor = "unknown"
+				}
+				fmt.Fprintf(out, "Changed %s: %s by %s\n", change.Field, change.Changed.Format(time.RFC3339), actor)
+			}
 			fmt.Fprintf(out, "Owner labels:  %s\n", labelList(m.Labels))
 			fmt.Fprintf(out, "Probed labels: %s\n", joinOr(m.ProbedLabels(), "none"))
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
