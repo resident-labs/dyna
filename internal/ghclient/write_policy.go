@@ -29,12 +29,13 @@ const (
 )
 
 const (
-	ReasonReadOnly     Reason = "read-only-room"
-	ReasonOther        Reason = "not-room-repository"
-	ReasonBranchDelete Reason = "upstream-branch-delete"
-	ReasonForeignItem  Reason = "not-room-account-item"
-	ReasonForeignHead  Reason = "upstream-edit-foreign-head"
-	ReasonUpstreamVerb Reason = "upstream-verb-not-allowed"
+	ReasonReadOnly       Reason = "read-only-room"
+	ReasonOther          Reason = "not-room-repository"
+	ReasonBranchDelete   Reason = "upstream-branch-delete"
+	ReasonForeignItem    Reason = "not-room-account-item"
+	ReasonForeignComment Reason = "foreign-comment"
+	ReasonForeignHead    Reason = "upstream-edit-foreign-head"
+	ReasonUpstreamVerb   Reason = "upstream-verb-not-allowed"
 )
 
 // Write is the parsed command and its repository scope.
@@ -222,6 +223,7 @@ var writeRules = []Rule{
 	{ID: "other-repository", Targets: []Target{TargetOther}, Refusal: ReasonOther},
 	{ID: "upstream-branch-delete", Verbs: []Verb{"pr.close"}, Targets: []Target{TargetUpstream}, condition: conditionDeleteBranch, Refusal: ReasonBranchDelete},
 	{ID: "upstream-edit-head", Verbs: []Verb{"pr.edit"}, Targets: []Target{TargetUpstream}, condition: conditionForeignHead, Refusal: ReasonForeignHead},
+	{ID: "comment-foreign", Verbs: []Verb{"comment.edit", "comment.delete"}, Targets: []Target{TargetRoom, TargetUpstream}, Item: ItemForeign, Refusal: ReasonForeignComment},
 	{ID: "item-foreign-upstream", Verbs: []Verb{"issue.close", "issue.reopen", "pr.close", "pr.reopen"}, Targets: []Target{TargetUpstream}, Item: ItemForeign, Refusal: ReasonForeignItem},
 	{ID: "pr-create-api", Verbs: []Verb{"pr.create"}, Targets: []Target{TargetRoom}, condition: conditionREST, Class: approvals.ClassAgent},
 	{ID: "pr-create-room", Verbs: []Verb{"pr.create"}, Targets: []Target{TargetRoom}, Class: approvals.ClassAuto},
@@ -234,7 +236,6 @@ var writeRules = []Rule{
 	{ID: "item-own", Verbs: []Verb{"issue.close", "issue.reopen", "pr.close", "pr.reopen"}, Targets: []Target{TargetRoom, TargetUpstream}, Item: ItemRoomAccount, Class: approvals.ClassAgent},
 	{ID: "item-foreign-room", Verbs: []Verb{"issue.close", "issue.reopen", "pr.close", "pr.reopen"}, Targets: []Target{TargetRoom}, Item: ItemForeign, Class: approvals.ClassOwner},
 	{ID: "comment-own", Verbs: []Verb{"comment.edit", "comment.delete"}, Targets: []Target{TargetRoom, TargetUpstream}, Item: ItemRoomAccount, Class: approvals.ClassAgent},
-	{ID: "comment-foreign", Verbs: []Verb{"comment.edit", "comment.delete"}, Targets: []Target{TargetRoom, TargetUpstream}, Item: ItemForeign, Class: approvals.ClassOwner},
 	{ID: "rerun-failed", Verbs: []Verb{"run.rerun.failed"}, Targets: []Target{TargetRoom}, Class: approvals.ClassAgent},
 	{ID: "run-own", Verbs: []Verb{"run.rerun", "run.rerun.failed", "run.cancel"}, Targets: []Target{TargetRoom, TargetUpstream}, Item: ItemRoomAccount, Class: approvals.ClassAgent},
 	{ID: "fork-upstream", Verbs: []Verb{"repo.fork"}, Targets: []Target{TargetUpstream}, Class: approvals.ClassAgent},
@@ -269,6 +270,8 @@ func (e *RefusalError) Error() string {
 		action = "choose a repository registered to the room"
 	case ReasonBranchDelete:
 		action = "remove --delete-branch or -d"
+	case ReasonForeignComment:
+		action = "edit or delete only comments authored by the room account; the owner may edit other comments directly on GitHub"
 	case ReasonForeignItem:
 		action = "choose an item authored by the room account"
 	case ReasonForeignHead:
