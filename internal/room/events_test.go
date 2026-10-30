@@ -888,3 +888,14 @@ func jsonString(value string) string {
 	}
 	return string(b)
 }
+
+func TestLegacyMergeThreadKey(t *testing.T) {
+	m := Message{Kind: string(FamilyMerge), Notice: EventNotice{Kind: string(MergeTrial)}, Payload: EventPayload{raw: []byte(`{"type":"trial","trialId":"trial-1"}`)}}
+	if got := m.ThreadKey(); got != "merge:trial-1" {
+		t.Fatalf("legacy thread = %q", got)
+	}
+	m.Notice.Thread = "explicit"
+	if got := m.ThreadKey(); got != "explicit" {
+		t.Fatalf("explicit thread = %q", got)
+	}
+}
