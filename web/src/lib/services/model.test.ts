@@ -24,6 +24,13 @@ test('only enabled schedule hooks with a valid run have a next time', () => {
   assert.equal(nextAt({ hook, lastRun: null }), '')
 })
 
+test('the librarian next pass is the engine deferred wake and is empty when none is deferred', () => {
+  const hooks = [{ hook: { name: 'librarian-main', label: '', event: 'main-updated', everyMinutes: 0, disabled: false }, lastRun: { id: 'run-1', result: 'pass', startedAt: '2026-10-21T22:49:00Z', finishedAt: '2026-10-21T22:49:36Z' } }]
+  const settings = { 'library.enabled': '["/repo"]' }
+  assert.equal(row({ hooks, settings, deferred: '2026-10-21T23:19:00Z' }, 'librarian').nextAt, '2026-10-21T23:19:00Z')
+  assert.equal(row({ hooks, settings, deferred: null }, 'librarian').nextAt, '')
+})
+
 test('durations keep zero retention off and test health hides at zero', () => {
   assert.equal(readableDuration('336h0m0s'), '14 days')
   assert.equal(readableDuration('0s'), 'off')
@@ -36,7 +43,7 @@ test('durations keep zero retention off and test health hides at zero', () => {
 const inputs = (over: Partial<Inputs> = {}): Inputs => ({
   reviewer: null, queue: null, mergePaused: null, history: [], services: null, notices: null,
   hooks: null, runs: {}, reasons: {}, settings: null, budget: null, accounts: null, usage: null, voice: null,
-  changes: [], testHealth: null, laneSync: null, repo: '/repo', ...over,
+  changes: [], testHealth: null, laneSync: null, deferred: null, repo: '/repo', ...over,
 })
 const row = (over: Partial<Inputs>, id: string) => {
   const found = buildRows(inputs(over)).find((r) => r.id === id)

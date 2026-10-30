@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
@@ -88,6 +89,45 @@ func TestLibrarianSharedHooks(t *testing.T) {
 	var result librarian.Result
 	if err := client.Call(ctx, "WakeLibrarian", []any{repo}, &result); err != nil || result.Action != "off" {
 		t.Fatalf("wake = %+v, %v", result, err)
+	}
+}
+
+// TestLibrarianRestartKeepsBatchedWake starts an engine whose last librarian run
+// is now, with main moved. The wake must defer to the interval's end after a
+// restart, because the deferred timer does not survive one.
+func TestLibrarianRestartKeepsBatchedWake(t *testing.T) {
+	storetest.Isolate(t)
+	s := testServices(t, false)
+	repo := librarianRepo(t)
+	owner := localCallerContext(t, websvc.Caller{Kind: websvc.Owner}, authority.Actor{Role: authority.Owner})
+	enabled, err := s.enableLibrarian(owner, repo, "", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	states := librarianstate.Store{DataDir: store.DataDir()}
+	if _, err := states.Update(enabled.Repo.ID, false, func(st *librarianstate.State) error {
+		st.LastRun = now
+		st.Head = ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The fake clock fires nothing by itself. The test calls each recorded deadline.
+	var fired []func()
+	after := func(_ time.Duration, fn func()) func() bool {
+		fired = append(fired, fn)
+		return func() bool { return true }
+	}
+	s.timers = newTimers(t.Context(), func() time.Time { return now }, after)
+	s.restoreLibrarianWakes(t.Context())
+	if len(fired) != 1 {
+		t.Fatalf("restore scheduled %d wakes, want 1", len(fired))
+	}
+	fired[0]()
+	at, err := s.librarianDeferred(t.Context(), repo)
+	if err != nil || at == nil || !at.Equal(now.Add(librarian.Interval)) {
+		t.Fatalf("deferred = %v, %v", at, err)
 	}
 }
 

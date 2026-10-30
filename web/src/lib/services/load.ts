@@ -2,7 +2,7 @@
 // (a caller without admin scope cannot read settings) leaves its part null
 // and the others still show.
 import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, RunReason, ServiceInfo as ServiceRow, SyncInfoByRepo, TestHealth, UsageRow } from './model.ts'
-import { readAccounts, readBudget, readHookLog, readHookRuns, readHookSummary, readMergeState, readNotices, readSync, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
+import { readAccounts, readBudget, readDeferred, readHookLog, readHookRuns, readHookSummary, readMergeState, readNotices, readSync, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
 
 export interface ServiceApi {
   listServices(room: string): Promise<unknown>
@@ -41,9 +41,11 @@ export interface ServiceData {
   accounts: AccountsInfo | null
   testHealth: TestHealth | null
   laneSync: SyncInfoByRepo | null
+  // deferred is when the engine's librarian wake is due; null when none is deferred.
+  deferred: string | null
 }
 
-export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, reasons: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null }
+export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, reasons: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null, deferred: null }
 
 // A call that does not answer in this time counts as failed, so a card shows an error and never loads forever.
 export const CALL_TIMEOUT_MS = 20000
@@ -69,6 +71,8 @@ export async function loadServiceData(
   hookRuns: ((name: string) => Promise<unknown>) | null = null,
   // One run's log, which carries the reason a failed run gives.
   hookLog: ((name: string, id: string) => Promise<unknown>) | null = null,
+  // The librarian's deferred wake, read with the hook calls for the same repository.
+  librarianDeferred: (() => Promise<unknown>) | null = null,
 ): Promise<ServiceData> {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   let data: ServiceData = { ...previous }
@@ -86,6 +90,12 @@ export async function loadServiceData(
   const hooks = hookSummary
     ? load('hooks', hookSummary, readHookSummary, (d, v) => ({ ...d, hooks: v }))
     : Promise.resolve(settle('hooks', (d) => ({ ...d, hooks: [] })))
+  const deferred = librarianDeferred
+    ? withTimeout(librarianDeferred, timeoutMs).then(
+      (raw) => settle('hooks', (d) => ({ ...d, deferred: readDeferred(raw) })),
+      () => settle('hooks', (d) => d),
+    )
+    : Promise.resolve()
   // Each hook's recent runs follow the summary, which names the hooks. A failed
   // list keeps that hook's previous runs.
   const runs = hooks.then(() => Promise.all((hookRuns ? data.hooks ?? [] : []).map((h) =>
@@ -121,6 +131,7 @@ export async function loadServiceData(
     load('sync', () => api.syncStatus(), readSync, (d, v) => ({ ...d, laneSync: v })),
     runs,
     reasons,
+    deferred,
   ])
   return data
 }
