@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -256,6 +257,23 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test"})
 	if e != nil {
 		t.Fatal(e)
+	}
+	record, err := s.store.Session(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.transition(ctx, room, current, contract.BoxClosing, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET id='000' WHERE session=?", child.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.store.MarkClosing(ctx, parent); err != nil {
 		t.Fatal(err)
