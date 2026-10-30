@@ -48,7 +48,7 @@ func TestRunAgentSessionStartsOnceAndAsksAgainUntilDone(t *testing.T) {
 		states: []callspec.RunAgentState{{}, {}, {Done: true, Status: "ok", Result: json.RawMessage(`"fine"`)}},
 		errs:   []error{nil, callspec.Late("WaitRunAgent", time.Minute), nil},
 	}
-	state, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1", Agent: 2})
+	state, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1", Agent: 2}, "")
 	if err != nil || string(state.Result) != `"fine"` {
 		t.Fatalf("state = %+v, %v; want the result", state, err)
 	}
@@ -66,7 +66,7 @@ func TestRunAgentSessionStartsOnceAndAsksAgainUntilDone(t *testing.T) {
 func TestRunAgentSessionStopsOnAnEngineRefusal(t *testing.T) {
 	refused := errors.New("refused")
 	engine := &fakeEngine{states: []callspec.RunAgentState{{}}, errs: []error{refused}}
-	if _, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1"}); !errors.Is(err, refused) {
+	if _, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1"}, ""); !errors.Is(err, refused) {
 		t.Fatalf("err = %v; want the refusal", err)
 	}
 }
@@ -155,7 +155,7 @@ func TestRunAgentSessionRetriesCallsAnEngineRestartCutsOff(t *testing.T) {
 		states:    []callspec.RunAgentState{{}, {Done: true, OK: true, Result: json.RawMessage(`"fine"`)}},
 		errs:      []error{io.EOF, nil},
 	}
-	state, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1", Agent: 1})
+	state, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1", Agent: 1}, "")
 	if err != nil || !state.Done {
 		t.Fatalf("state = %+v, %v; want the result after the restart", state, err)
 	}
@@ -167,7 +167,7 @@ func TestRunAgentSessionRetriesCallsAnEngineRestartCutsOff(t *testing.T) {
 func TestRunAgentSessionKeepsARefusalTerminal(t *testing.T) {
 	refusal := &engineclient.RemoteError{Status: 403, Message: "run agents need the run's verified coordinator"}
 	engine := &fakeEngine{startErrs: []error{refusal}}
-	if _, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1"}); !errors.Is(err, refusal) && err != error(refusal) {
+	if _, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1"}, ""); !errors.Is(err, refusal) && err != error(refusal) {
 		t.Fatalf("err = %v; want the refusal", err)
 	}
 	if len(engine.calls) != 1 {
