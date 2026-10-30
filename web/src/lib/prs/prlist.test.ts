@@ -303,7 +303,7 @@ test('the merge box has a checks, a review and a merge row', () => {
   const red = open({ ci: 'failed', checks: chk('success', 'failure') })
   assert.deepEqual(mergeBox(red, { state: mergeState(red, { state: 'ci-failed', reason: 'CI failed: c1' }) }).rows[0], { id: 'checks', icon: 'bad', title: '1 check failed', note: 'c1', link: 'checks' })
   const r = ready({ checks: chk('success') })
-  assert.deepEqual(rows(r, { state: mergeState(r, { state: 'ready' }, 2) })[2], ['merge', 'ok', 'Ready · 2nd'])
+  assert.deepEqual(rows(r, { state: mergeState(r, { state: 'ready' }, 2) })[2], ['merge', 'ok', 'Ready to merge'])
   assert.equal(need(mergeBox(r, { state: mergeState(r, { state: 'ready' }, 1) }).rows[2]).note, 'The merge service will test this PR in the next batch.')
   // Changes requested and a review in progress.
   assert.deepEqual(rows(open({ verdict: 'changes', reviewState: 'changes', checks: [] }), {})[1], ['review', 'bad', 'Changes requested'])
