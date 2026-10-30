@@ -445,7 +445,7 @@ func (m *Manager) runOwned(byID map[string]Info) ([]owned, error) {
 			owner = job.Session
 		}
 		if info, ok := byID[owner]; ok {
-			out = append(out, owned{info: info, r: Responsibility{Kind: "workflow", ID: job.ID, Text: "owns live workflow run " + job.ID + "; cancel it: dyna runs cancel " + job.ID}})
+			out = append(out, owned{info: info, r: Responsibility{Kind: "workflow", ID: job.ID, Text: "owns live workflow run " + job.ID + "; cancel it: dyna workflow runs cancel " + job.ID}})
 		}
 	}
 	return out, nil
