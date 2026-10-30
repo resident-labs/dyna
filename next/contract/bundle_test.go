@@ -75,11 +75,9 @@ func filledRoomBundle() RoomBundle {
 			Fixes: []string{"D-584"}, Dependencies: []string{"1288"}, Hold: &PRHold{Reason: "wait", By: root, At: bundleTime},
 		}},
 		Questions: []QuestionBundle{{
-			Label: "q33", Kind: QuestionTerminal, Asker: root, Text: "mount the drive", Options: []string{"yes"},
-			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Asked: bundleTime,
+			Label: "q33", Asker: root, Text: "mount the drive?", Options: []string{"yes"},
+			Meanwhile: "waiting", Asked: bundleTime,
 		}},
-		MCPServers:   []RoomMCPServer{{Name: "docs", URL: "https://mcp.example", AllowedTools: []string{"search"}}},
-		IssueWatches: []IssueWatch{{Host: "github.com", Repo: "x/y", Number: 7, Title: "upstream bug"}},
 		Subscriptions: []Subscription{{
 			ID: "sub_2", Scope: ScopeRoom, On: []EventType{"pr.merged"}, Run: &RunSpec{Command: []string{"true"}, Image: "dyna-base", Size: "small"},
 		}},
