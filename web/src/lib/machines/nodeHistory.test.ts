@@ -11,6 +11,6 @@ test('history leaves gaps for missed probes and missing readings', () => {
     { at: at(-5), cpuPercent: 60, memoryPercent: 60 },
   ], now)
   assert.equal(lines.length, 1)
-  assert.notEqual(lines[0]?.cpu, '')
+  assert.equal(lines[0]?.cpu, '0,60 20,50')
   assert.equal(lines[0]?.memory, '')
 })
