@@ -156,7 +156,6 @@ func newRootCommand() *cobra.Command {
 		cliservices.NewCommand(),
 		profiles.NewCommand(),
 		workflows.NewRunWorkerCommand(),
-		workflows.NewTemplatesCommand(),
 		workflows.NewWorkflowsCommand(),
 		journal.NewCommand(),
 		climaintenance.NewCommand(),

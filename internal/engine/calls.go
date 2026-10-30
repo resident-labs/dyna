@@ -399,8 +399,6 @@ func bindings(s services) []websvc.Binding {
 		{Name: "GitHistory", Access: websvc.Read, Scope: websvc.ScopeFiles, Method: s.git.GitHistory},
 		{Name: "GitBlame", Access: websvc.Read, Scope: websvc.ScopeFiles, Method: s.git.GitBlame},
 		{Name: "GitDiff", Access: websvc.Read, Scope: websvc.ScopeFiles, Method: s.git.GitDiff},
-		{Name: "TemplateSeed", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.templateSeed, Local: true},
-		{Name: "ListTemplates", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ListTemplates},
 		{Name: "ListWorkflows", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ListWorkflows},
 		{Name: "StartRun", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.StartRun},
 		{Name: "StartNamedRun", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.StartNamedRun},

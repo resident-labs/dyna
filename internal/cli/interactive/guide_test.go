@@ -23,7 +23,7 @@ func topicDocument(t *testing.T, name string) string {
 func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 	guideMD := topicDocument(t, "workflows")
 	required := []string{
-		"## JavaScript API", "### `agent(prompt, opts?)`", "### `run(command, opts?)`", "### `job(spec)`", "### `parallel(thunks)`", "### `pipeline(items, ...stages)`", "### `post(to, text, data?)`", "### `workflow(nameOrRef, args?)`", "### Globals", "### Workflow templates", "dyna templates copy", "maxCallsPerRun", "--max-concurrent", "--max-agents", "--max-commands", "Handle `null` results", "worktrees()", "Workers are leaf sessions", "Children cannot call `workflow()`",
+		"## JavaScript API", "### `agent(prompt, opts?)`", "### `run(command, opts?)`", "### `job(spec)`", "### `parallel(thunks)`", "### `pipeline(items, ...stages)`", "### `post(to, text, data?)`", "### `workflow(nameOrRef, args?)`", "### Globals", "maxCallsPerRun", "--max-concurrent", "--max-agents", "--max-commands", "Handle `null` results", "worktrees()", "Workers are leaf sessions", "Children cannot call `workflow()`",
 	}
 	if words := len(strings.Fields(guideMD)); words > 900 {
 		t.Fatalf("workflow guide is %d words; want at most 900", words)
