@@ -240,11 +240,11 @@ func TestDetachedCancelStopsTheUnitButEngineStopDoesNot(t *testing.T) {
 func TestOnePollCoversEveryCheck(t *testing.T) {
 	var calls [][]string
 	runner := Executor{Node: Conn{Name: "pve", SSH: "pip@pve"}}
-	runner.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
+	runner.Command = Command(jobstest.FrameCommand(func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
 		_, positional, _ := jobstest.DecodeNodeScript(name, args)
 		calls = append(calls, positional)
 		return nil
-	}
+	}))
 	batch := []*watch{{spec: testSpec("a")}, {spec: testSpec("b")}, {spec: testSpec("c")}}
 	if _, err := runner.pollNode(t.Context(), batch); err != nil {
 		t.Fatal(err)
@@ -267,13 +267,13 @@ func TestPollReplyCutShortAdvancesNothing(t *testing.T) {
 func TestEveryNodeCallAttemptHasADeadline(t *testing.T) {
 	var withDeadline, calls int
 	runner := Executor{Node: Conn{Name: "pve", SSH: "pip@pve"}}
-	runner.Command = func(ctx context.Context, _ string, _ io.Reader, _, _ io.Writer, _ string, _ ...string) error {
+	runner.Command = Command(jobstest.FrameCommand(func(ctx context.Context, _ string, _ io.Reader, _, _ io.Writer, _ string, _ ...string) error {
 		calls++
 		if _, ok := ctx.Deadline(); ok {
 			withDeadline++
 		}
 		return nil
-	}
+	}))
 	if err := runner.StartDetached(t.Context(), testSpec("a")); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestStopDuringLaunchKeepsTheCheckOnlyForAnEngineStop(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			stops := 0
 			runner := Executor{Node: Conn{Name: "pve", SSH: "pip@pve"}}
-			runner.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
+			runner.Command = Command(jobstest.FrameCommand(func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
 				script, _, _ := jobstest.DecodeNodeScript(name, args)
 				switch script {
 				case StartScript:
@@ -317,7 +317,7 @@ func TestStopDuringLaunchKeepsTheCheckOnlyForAnEngineStop(t *testing.T) {
 					stops++
 				}
 				return nil
-			}
+			}))
 			poller, stop := runner.NewPoller(t.Context())
 			defer stop()
 			recorded := 0
