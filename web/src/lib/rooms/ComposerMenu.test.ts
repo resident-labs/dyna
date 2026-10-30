@@ -7,7 +7,7 @@ import { element, need } from '../../../test/need.ts'
 const code = await bundle({ component: '../rooms/Composer',
   format: `export const short = x => x; export const roomLabel = r => r.name; export const ago = () => ''; export const markdown = x => x; export const stamp = () => '';`,
   api: `export const api = {
-    preview: async () => ({mentions: [], wakes: []}),
+    preview: async (_room, text) => globalThis.previewDraft ? globalThis.previewDraft(text) : ({mentions: [], wakes: []}),
     commands: async () => globalThis.loadCommands ? globalThis.loadCommands() : [{ name: 'review', source: 'skill', description: 'Review code', args: [] }],
     runCommand: async (...args) => { globalThis.commandArgs = args; globalThis.commandCalls = (globalThis.commandCalls || 0) + 1; return { kind: 'post', post: { message: { id: 'sent' }, deliveries: [], failed: [{ to: 'lead', error: 'unavailable' }] } } },
     listEntries: async () => ({entries: []}),
@@ -21,7 +21,72 @@ const profiles = [
   { name: 'sol-ultrafast', harness: 'pi', model: 'gpt-6.1-sol', default: true },
 ]
 
-test('the slash menu names each profile and explains an empty result', async () => {
+test('model trigger opens only at a token start', async () => {
+  const dom = installDom()
+  Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
+  const ui = await importBundle(code, 'Composer')
+  const target = need(document.getElementById('app'))
+  const component = ui.mount(ui.default, { target, props: { room: { id: 'r', name: 'room' }, profiles, onsend: async () => ({}) } })
+  try {
+    await settle()
+    const input = element<HTMLTextAreaElement>(target, 'textarea')
+    for (const [value, count] of [['hello!', 0], ['https://example.org/!sol', 0], ['hello !', 2]] as const) {
+      input.value = value
+      input.setSelectionRange(value.length, value.length)
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      await settle()
+      assert.equal(target.querySelectorAll('[role="option"]').length, count, value)
+    }
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('removing a model refreshes the preview without editing the draft', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const dom = installDom()
+  Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
+  Reflect.set(globalThis, 'previewDraft', (text: string) => text.startsWith('/sol ')
+    ? { spawn: { name: 'agent', profile: 'sol', dir: '/repo' } }
+    : { mentions: [], wakes: [] })
+  const ui = await importBundle(code, 'Composer')
+  const target = need(document.getElementById('app'))
+  const component = ui.mount(ui.default, { target, props: { room: { id: 'r', name: 'room' }, profiles, onsend: async () => ({}) } })
+  try {
+    await settle()
+    const input = element<HTMLTextAreaElement>(target, 'textarea')
+    input.value = '!sol'
+    input.setSelectionRange(4, 4)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await settle()
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    input.value = 'inspect'
+    input.setSelectionRange(7, 7)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await settle()
+    t.mock.timers.tick(150)
+    await settle()
+    assert.match(target.textContent ?? '', /Enter.*to start/)
+    element<HTMLButtonElement>(target, '[aria-label="Remove selected model"]').click()
+    await settle()
+    t.mock.timers.tick(150)
+    await settle()
+    assert.doesNotMatch(target.textContent ?? '', /Enter.*to start/)
+    assert.match(target.textContent ?? '', /Enter.*to send/)
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    Reflect.deleteProperty(globalThis, 'previewDraft')
+    for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('model picker names profiles and slash menu lists commands', async () => {
   const dom = installDom()
   Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
   const ui = await importBundle(code, 'Composer')
@@ -36,16 +101,18 @@ test('the slash menu names each profile and explains an empty result', async () 
       input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       await settle()
     }
-    await type('/')
+    await type('!')
     const hints = [...target.querySelectorAll('[role="option"]')].map((row) => row.getAttribute('title'))
-    assert.deepEqual(hints, ['Pi · GPT 6.1 Sol', 'Pi · GPT 6.1 Sol · Ultrafast · default', 'Review code'])
+    assert.deepEqual(hints, ['Pi · GPT 6.1 Sol', 'Pi · GPT 6.1 Sol · Ultrafast · default'])
+    await type('/')
+    assert.deepEqual([...target.querySelectorAll('[role="option"]')].map((row) => row.getAttribute('title')), ['Review code'])
     await type('/review check this')
     input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await settle()
     assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'review', '@lead check this'])
     assert.match(target.textContent ?? '', /lead: unavailable/)
     await type('/zz')
-    assert.equal(target.querySelector('.pop.status')?.textContent, 'No session or command matches “/zz”.')
+    assert.equal(target.querySelector('.pop.status')?.textContent, 'No command matches “/zz”.')
   } finally {
     await ui.unmount(component)
     dom.window.close()
@@ -163,8 +230,14 @@ test('known profiles and app commands work while discovery is unavailable', asyn
       input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
       await settle()
     }
-    await submit('/sol inspect')
+    await submit('!sol')
+    input.value = 'inspect'
+    input.setSelectionRange(7, 7)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
     assert.deepEqual(sent, ['/sol inspect'])
+    element<HTMLButtonElement>(target, '[aria-label="Remove selected model"]').click()
     await submit('/help')
     assert.deepEqual(commands, ['help'])
   } finally {
