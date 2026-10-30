@@ -1035,6 +1035,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(GoalChange("")), Values: enumValues(goalChanges)},
 	{Type: reflect.TypeOf(GoalState("")), Values: enumValues(goalStates)},
 	{Type: reflect.TypeOf(CheckinState("")), Values: enumValues(checkinStates)},
+	{Type: reflect.TypeOf(CheckinAttention("")), Values: enumValues(checkinAttentions)},
 	{Type: reflect.TypeOf(SessionChange("")), Values: enumValues(sessionChanges)},
 	{Type: reflect.TypeOf(AccountReason("")), Values: enumValues(accountReasons)},
 	{Type: reflect.TypeOf(InstructionAction("")), Values: enumValues(instructionActions)},
