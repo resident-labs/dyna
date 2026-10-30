@@ -23,26 +23,10 @@ func topicDocument(t *testing.T, name string) string {
 func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 	guideMD := topicDocument(t, "workflows")
 	required := []string{
-		"## Public JavaScript API",
-		"### `agent(prompt, opts?)`", "### `parallel(thunks)`",
-		"### `pipeline(items, ...stages)`", "### `post(to, text, data?)`",
-		"### `workflow(nameOrRef, args?)`",
-		"post('@root',", "### Workflow templates", "dyna templates copy",
-		"dyna run /tmp/my-review.js", "adversarial-review", "judge-panel", "research-design",
-		"meta` is a convention, not a validated runtime schema",
-		"three attempts total", "no stage barrier",
-		"(previousResult, originalItem, index)", "Handle `null` results",
-		"## Workflow shape: parallel by default", "Name the work list before writing the script",
-		"engine-verified path from `worktrees()`", "rather than a worker-reported path",
-		"Parallel writers need disjoint scopes or worktrees",
-		"Call `workflow()` from the parent", "share parent concurrency and lifetime limits",
-		"regular agent session that cannot start subagents or runs",
-		"maxCallsPerRun", "--max-concurrent", "--max-agents", "### `run(command, opts?)`", "--max-commands", "reattaches to a shell still running", "### `job(spec)`", "waits for the original job ID", "labels: ['os=linux']",
-		"`phase(title)`", "`log(message)`", "`sleep(ms)`", "`args`", "`process`", "`profiles`", "`worktrees()`",
-		`provenance: "workflow"`, `provenance: "system"`,
+		"## JavaScript API", "### `agent(prompt, opts?)`", "### `run(command, opts?)`", "### `job(spec)`", "### `parallel(thunks)`", "### `pipeline(items, ...stages)`", "### `post(to, text, data?)`", "### `workflow(nameOrRef, args?)`", "### Globals", "### Workflow templates", "dyna templates copy", "maxCallsPerRun", "--max-concurrent", "--max-agents", "--max-commands", "Handle `null` results", "worktrees()", "Workers are leaf sessions", "Children cannot call `workflow()`",
 	}
-	if words := len(strings.Fields(guideMD)); words > 1700 {
-		t.Fatalf("workflow guide is %d words; want at most 1700", words)
+	if words := len(strings.Fields(guideMD)); words > 900 {
+		t.Fatalf("workflow guide is %d words; want at most 900", words)
 	}
 	for _, contract := range required {
 		if !strings.Contains(guideMD, contract) {
@@ -266,7 +250,7 @@ func TestGuideLinksAndSharedContracts(t *testing.T) {
 
 func TestWorkflowGuideSaysHowToWatchAndSteerAnAgent(t *testing.T) {
 	doc := topicDocument(t, "workflows")
-	for _, want := range []string{"open its session from its row on the run page", "dyna post @run:<id>/agent:<n>", "shows only the journal and the final result"} {
+	for _, want := range []string{"Open a worker from the run page", "dyna post @run:<id>/agent:<n>"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("workflow guide misses %q", want)
 		}
@@ -276,7 +260,7 @@ func TestWorkflowGuideSaysHowToWatchAndSteerAnAgent(t *testing.T) {
 func TestWorkflowGuideStartsWithStructuredParallelExample(t *testing.T) {
 	doc := topicDocument(t, "workflows")
 	first := strings.SplitN(doc, "## Profiles", 2)[0]
-	for _, want := range []string{"const schema =", "await parallel([", "() => agent(", "{ schema }", "dyna run check.js", "Without `schema`"} {
+	for _, want := range []string{"A workflow is a JavaScript program", "Use a subagent for one check", "await parallel([", "() => agent(", "dyna run check.js"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("workflow opening misses %q", want)
 		}

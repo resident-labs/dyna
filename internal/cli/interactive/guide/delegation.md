@@ -1,8 +1,8 @@
 # Dyna delegation
 
-Use a workflow for independent tasks with a join; read `dyna guide workflows` before writing one.
-Use a subagent for work that needs memory across turns. Delegate through Dyna subagents.
-Workflow agents are leaf sessions; their parent handles delegation and starts runs and subagents.
+Delegate with subagents. Workflows are root's tool for large parallel jobs. If your task needs one, post the job to @root.
+Use a subagent for work that needs memory across turns. Delegate only through Dyna, never through harness subagents.
+Workflow agents are leaf sessions: they cannot delegate or start runs or subagents.
 Keep small or tightly coupled changes yourself. Run read-only scouts in parallel. Give each set of files one writer.
 
 For a replication or port project, build and verify one small end-to-end vertical slice before fanning out implementation. Trace a representative input through every integration seam to a visible output. Use what it reveals to define the parallel work; passing unit tests alone cannot show that the parts are wired together.
@@ -217,7 +217,7 @@ dyna subagent start --name decoder --profile sol --dir /src/app-decoder \
 
 ## Finishing
 
-Never poll for children. Use a foreground workflow for a join; otherwise end your turn.
+Do not wait or poll for children. Root can use a foreground workflow for a join.
 Read `dyna guide steering` for reports and handoffs.
 Close accepted children unless a follow-up is likely.
 When an assigned item is done, run `dyna goal item done <goal> <item>`.
