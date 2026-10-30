@@ -68,3 +68,10 @@ func Merge(base, overrides []string, term string) []string {
 	}
 	return out
 }
+
+// NoEditor returns the variables that make git and other tools which open an
+// editor return at once. Agent shells, harness turns and job commands have no
+// terminal to edit in, so an editor would wait until someone killed it.
+func NoEditor() []string {
+	return []string{"EDITOR=true", "GIT_EDITOR=true", "VISUAL=true"}
+}
