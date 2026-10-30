@@ -12,7 +12,11 @@ import (
 )
 
 func TestUnchangedSaveKeepsRevisionAndRequest(t *testing.T) {
-	sessions := filepath.Join(t.TempDir(), "sessions")
+	dataDir := t.TempDir()
+	sessions := filepath.Join(dataDir, "sessions")
+	if err := state.MigrateRequests(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	id := "ses_20261020-000000-abcdef12"
 	db, err := records(sessions)
 	if err != nil {
