@@ -76,10 +76,35 @@ type EventsListResponse struct {
 type BoxHelloRequest struct {
 	Version string `json:"version"`
 }
+type ModelProvider string
+
+const (
+	ProviderAnthropic ModelProvider = "anthropic"
+	ProviderOpenAI    ModelProvider = "openai"
+)
+
+type ThinkingLevel string
+
+const (
+	ThinkingOff     ThinkingLevel = "off"
+	ThinkingMinimal ThinkingLevel = "minimal"
+	ThinkingLow     ThinkingLevel = "low"
+	ThinkingMedium  ThinkingLevel = "medium"
+	ThinkingHigh    ThinkingLevel = "high"
+	ThinkingXHigh   ThinkingLevel = "xhigh"
+)
+
+type ModelChoice struct {
+	Provider ModelProvider `json:"provider"`
+	ID       string        `json:"id"`
+	Thinking ThinkingLevel `json:"thinking"`
+}
+
 type BoxHelloResponse struct {
-	Session SessionID `json:"session"`
-	Box     BoxID     `json:"box"`
-	Upgrade string    `json:"upgrade,omitempty"`
+	Session SessionID   `json:"session"`
+	Box     BoxID       `json:"box"`
+	Model   ModelChoice `json:"model"`
+	Upgrade string      `json:"upgrade,omitempty"`
 }
 type TurnOutputRequest struct {
 	Error   string      `json:"error,omitempty"`
