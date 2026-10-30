@@ -144,6 +144,32 @@ export function saveFilters(f: { state: string }): void {
   } catch {}
 }
 
+// ListScope is what the PRs and Issues tabs list: what the room tracks, or
+// everything open on GitHub. Each room remembers its own choice per tab, so a
+// busy upstream room can stay on Tracked while a small room shows all.
+export type ListScope = 'tracked' | 'all'
+export type ListKind = 'pr' | 'issue'
+const SCOPE_KEY = 'dyna.github.scope'
+function savedScopes(): Record<string, unknown> {
+  try {
+    const s: unknown = JSON.parse(localStorage.getItem(SCOPE_KEY) || '{}')
+    return isRecord(s) ? s : {}
+  } catch {
+    return {}
+  }
+}
+export function loadScope(roomId: string, kind: ListKind): ListScope {
+  const room = savedScopes()[roomId]
+  return isRecord(room) && room[kind] === 'all' ? 'all' : 'tracked'
+}
+export function saveScope(roomId: string, kind: ListKind, scope: ListScope): void {
+  const all = savedScopes()
+  const room = all[roomId]
+  try {
+    localStorage.setItem(SCOPE_KEY, JSON.stringify({ ...all, [roomId]: { ...(isRecord(room) ? room : {}), [kind]: scope } }))
+  } catch {}
+}
+
 // commitDays groups a PR's commits by local day for the Commits tab: the
 // newest day first, and the newest commit first in a day. Ancestry does not
 // order author dates, so it sorts by date rather than trusting the input.

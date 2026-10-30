@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/pr/state"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -181,4 +184,103 @@ func (s *Service) githubIssueView(ctx context.Context, root, roomRef string, num
 	err = s.issueWork(roomRef, items)
 	out.GitHubItem = items[0]
 	return out, err
+}
+
+// githubName is a safe GitHub owner or repository name, so it can sit
+// inside a GraphQL string.
+var githubName = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// workedIssueQueries builds one GraphQL query per GitHub host that reads every
+// worked issue by number: repository r<i>, issue i<n>. Work records hold
+// lowercased host/owner/repo names, which GitHub matches without case.
+func workedIssueQueries(work []state.IssueWork) map[string]string {
+	byRepo := map[string][]int{}
+	for _, w := range work {
+		byRepo[w.Repo] = append(byRepo[w.Repo], w.Number)
+	}
+	repos := make([]string, 0, len(byRepo))
+	for repo := range byRepo {
+		repos = append(repos, repo)
+	}
+	slices.Sort(repos)
+	bodies := map[string]*strings.Builder{}
+	i := 0
+	for _, repo := range repos {
+		parts := strings.Split(repo, "/")
+		if len(parts) != 3 || !githubName.MatchString(parts[1]) || !githubName.MatchString(parts[2]) {
+			continue
+		}
+		b := bodies[parts[0]]
+		if b == nil {
+			b = &strings.Builder{}
+			bodies[parts[0]] = b
+		}
+		fmt.Fprintf(b, " r%d: repository(owner:%q,name:%q) {", i, parts[1], parts[2])
+		numbers := byRepo[repo]
+		slices.Sort(numbers)
+		for _, n := range slices.Compact(numbers) {
+			fmt.Fprintf(b, " i%d: issue(number:%d) { %s }", n, n, issueFields)
+		}
+		b.WriteString(" }")
+		i++
+	}
+	out := make(map[string]string, len(bodies))
+	for host, b := range bodies {
+		out[host] = "query {" + b.String() + " }"
+	}
+	return out
+}
+
+// parseWorkedIssues reads a workedIssueQueries answer. A missing issue, such
+// as a deleted one, is left out.
+func parseWorkedIssues(b []byte) ([]GitHubItem, error) {
+	var result struct {
+		Data map[string]map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(b, &result); err != nil {
+		return nil, fmt.Errorf("read GitHub worked issues: %w", err)
+	}
+	var items []GitHubItem
+	for _, repo := range result.Data {
+		for _, raw := range repo {
+			if string(raw) == "null" {
+				continue
+			}
+			flat, err := flattenIssue(raw)
+			if err != nil {
+				return nil, err
+			}
+			var item ghItem
+			if err := json.Unmarshal(flat, &item); err != nil {
+				return nil, err
+			}
+			items = append(items, item.item())
+		}
+	}
+	slices.SortFunc(items, func(a, b GitHubItem) int { return strings.Compare(a.URL, b.URL) })
+	return items, nil
+}
+
+// workedIssues reads the GitHub facts of issues with live room work.
+func (s *Service) workedIssues(roomRef string, work []state.IssueWork) ([]GitHubItem, error) {
+	root, err := s.WorkspaceRoot(roomRef, "")
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
+	defer cancel()
+	ctx = ghclient.WithRoom(ghclient.WithRooms(ctx, s.Notify.Rooms), roomRef)
+	var items []GitHubItem
+	for host, query := range workedIssueQueries(work) {
+		b, err := runGH(ctx, root, "api", "graphql", "--hostname", host, "-f", "query="+query)
+		if err != nil {
+			return items, err
+		}
+		found, err := parseWorkedIssues(b)
+		if err != nil {
+			return items, err
+		}
+		items = append(items, found...)
+	}
+	return items, nil
 }

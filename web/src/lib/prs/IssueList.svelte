@@ -51,7 +51,7 @@
 
 <div class="rows">
   {#each groups as g (g.id)}
-    {#each g.rows as it (it.number || it.local?.id)}
+    {#each g.rows as it (it.url || it.local?.id)}
       {@const unresolvedExport = it.state === 'UNKNOWN' && !!it.local?.githubUrl}
       {@const chip = unresolvedExport ? { tone: '', label: 'Promoted' } : it.local?.inProgress ? { tone: 'iris', label: 'In progress' } : issueChip(it)}
       {@const work = issueWork(it)}

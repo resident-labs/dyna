@@ -50,6 +50,13 @@ export interface GitHubItem {
   deletions?: number
 }
 
+// TrackedIssues is view.TrackedIssues: the watched issues and the issues live
+// room sessions work on. unread counts worked issues GitHub did not describe.
+export interface TrackedIssues {
+  items: GitHubItem[]
+  unread: number
+}
+
 // GitHubListResult is view.GitHubListResult.
 export interface GitHubListResult {
   account?: string
