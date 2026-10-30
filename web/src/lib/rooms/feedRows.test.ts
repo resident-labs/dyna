@@ -337,7 +337,7 @@ test('thread posts fold across unrelated posts at the newest position', () => {
   const rows = content(feedRows([a, b, c], a.id))
   assert.deepEqual(rows.map((row) => row.post.id), ['b', 'c'])
   assert.deepEqual(rows[1]?.posts?.map((post) => post.id), ['a', 'c'])
-  assert.deepEqual(feedRows([a, b, c], a.id).map((row) => row.kind), ['day', 'post', 'new', 'post'])
+  assert.deepEqual(feedRows([a, b, c], a.id).map((row) => row.kind), ['day', 'new', 'post', 'post'])
 })
 
 
