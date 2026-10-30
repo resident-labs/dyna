@@ -87,6 +87,8 @@ type ExecutableCheck struct {
 type Definition struct {
 	revision   string
 	trial      []Suite
+	pr         []Suite
+	prSet      bool
 	suites     []definitionSuite
 	bySuite    map[Suite]definitionSuite
 	aliases    map[Suite]Suite
@@ -108,6 +110,7 @@ type definitionSuite struct {
 type definitionFile struct {
 	Version int         `yaml:"version"`
 	Trial   []Suite     `yaml:"trial"`
+	PR      *[]Suite    `yaml:"pr"`
 	Caches  []cacheFile `yaml:"caches"`
 	Act     *actFile    `yaml:"act"`
 	Warm    *warmFile   `yaml:"warm"`
@@ -527,7 +530,38 @@ func ParseDefinition(body []byte) (*Definition, error) {
 		seenTrials[id] = true
 		definition.trial = append(definition.trial, id)
 	}
+	if file.PR != nil {
+		definition.prSet = true
+		definition.pr = make([]Suite, 0, len(*file.PR))
+		seen := map[Suite]bool{}
+		for _, id := range *file.PR {
+			if _, exists := definition.bySuite[id]; !exists {
+				return nil, fmt.Errorf("pr references unknown suite %q", id)
+			}
+			if seen[id] {
+				return nil, fmt.Errorf("pr repeats suite %q", id)
+			}
+			seen[id] = true
+			definition.pr = append(definition.pr, id)
+		}
+	}
 	return definition, nil
+}
+
+// ExplicitPRSuites reports the configured head suites and whether pr is set.
+func (d *Definition) ExplicitPRSuites() ([]Suite, bool) {
+	if !d.prSet {
+		return nil, false
+	}
+	return append([]Suite{}, d.pr...), true
+}
+
+// PRSuites selects head suites, preserving the file-based default.
+func (d *Definition) PRSuites(files []string) []Suite {
+	if suites, set := d.ExplicitPRSuites(); set {
+		return suites
+	}
+	return d.SuitesForFiles(files)
 }
 
 func validateDefinitionName(name CheckName) error {

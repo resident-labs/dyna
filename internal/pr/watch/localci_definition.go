@@ -104,10 +104,14 @@ func (s *Service) planRegisteredCI(ctx context.Context, job registeredCIJob) (lo
 		plan.suites = required.WorkflowSuites()
 		return plan, nil
 	}
+	if suites, set := required.ExplicitPRSuites(); set {
+		plan.suites = suites
+		return plan, nil
+	}
 	files, err := gitRead(ctx, job.record.RepoPath, "diff", "--name-only", base+"..."+job.head)
 	if err != nil {
 		return plan, err
 	}
-	plan.suites = required.SuitesForFiles(strings.Split(files, "\n"))
+	plan.suites = required.PRSuites(strings.Split(files, "\n"))
 	return plan, nil
 }

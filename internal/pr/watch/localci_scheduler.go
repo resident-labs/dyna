@@ -527,6 +527,11 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if !plan.runnable() {
 		return false, nil
 	}
+	if !job.trial && !job.sync {
+		if suites, set := plan.required.ExplicitPRSuites(); set && len(suites) == 0 {
+			return false, nil
+		}
+	}
 	// A local change has no hosted provider, so only a hosted job can already
 	// hold conclusive evidence for its head.
 	if job.hosted() {
