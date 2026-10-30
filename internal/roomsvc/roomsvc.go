@@ -1004,11 +1004,14 @@ type Member struct {
 	// Responsibilities counts, by kind, what stops an open session from
 	// finishing on its own (subagent.Responsibility.Kind). Empty when the
 	// session owns nothing, is closed, or its lists cannot be read.
-	Responsibilities map[string]int         `json:"responsibilities,omitempty"`
-	CloseSummary     []sessionclose.Outcome `json:"closeSummary,omitempty"`
-	Closed           bool                   `json:"closed,omitempty"`
-	Hue              int                    `json:"hue"`
-	Avatar           Avatar                 `json:"avatar"`
+	Responsibilities map[string]int `json:"responsibilities,omitempty"`
+	// Shell describes the session's newest live shell job, as its agent
+	// wrote it; Responsibilities["shell"] counts them.
+	Shell        string                 `json:"shell,omitempty"`
+	CloseSummary []sessionclose.Outcome `json:"closeSummary,omitempty"`
+	Closed       bool                   `json:"closed,omitempty"`
+	Hue          int                    `json:"hue"`
+	Avatar       Avatar                 `json:"avatar"`
 	// Computer is the ID of the computer this row uses (computers.ActorID), so
 	// the Computer tab reads the right computer without guessing from the row.
 	Computer string `json:"computer,omitempty"`
@@ -1047,7 +1050,7 @@ func (s *Service) Members(ref string, withClosed bool) ([]Member, error) {
 }
 
 // Tests count responsibility store passes through this function.
-var responsibilityCounts = (*subagent.Manager).ResponsibilityCounts
+var responsibilityCounts = (*subagent.Manager).MemberCounts
 
 // countResponsibilities fills each open session's responsibility counts from
 // one read of every store, so a member list costs the same as one close
@@ -1082,8 +1085,9 @@ func (s *Service) countResponsibilities(members []Member, all []subagent.Info) {
 		log.Printf("member responsibility counts: %v", err)
 	}
 	for _, i := range rows {
-		if byKind := counts[members[i].ID]; len(byKind) > 0 {
-			members[i].Responsibilities = byKind
+		if row := counts[members[i].ID]; len(row.ByKind) > 0 {
+			members[i].Responsibilities = row.ByKind
+			members[i].Shell = row.Shell
 		}
 	}
 }

@@ -15,6 +15,7 @@
   import { goalAgo, goalParts } from '../goals/goals.ts'
   import { ago, markdown, stamp, tokens, roomLabel } from '../ui/format.ts'
   import StatusPill from '../ui/StatusPill.svelte'
+  import { summaryOf } from '../rooms/responsibilities.ts'
   import { changeName, changeTitle, prAttention, prStory, prTracks, type Facts } from '../prs/pr.ts'
 
   import type { Attachment, Member, PostDetail, Room } from '../api/room.ts'
@@ -87,6 +88,8 @@
           <div><dt>Tokens</dt><dd>{tokens((profile.usage?.inputTokens || 0) + (profile.usage?.outputTokens || 0))}</dd></div>
           <div><dt>Parent</dt><dd>{profile.parent || 'root'}</dd></div>
           <div><dt>Started</dt><dd>{stamp(m.created)}</dd></div>
+          <div class="wide"><dt>Open work</dt><dd>{summaryOf(m.responsibilities) || 'None'}</dd></div>
+          {#if m.shell}<div class="wide"><dt>Newest shell</dt><dd>{m.shell}</dd></div>{/if}
         </dl>
 
         {#if prs.length}
@@ -228,6 +231,8 @@
     background: #18171a;
     border-radius: 8px;
   }
+  /* A sentence-length fact takes the full width. */
+  .facts .wide { grid-column: 1 / -1; }
   .more { color: var(--muted); font-size: var(--t-sm); transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .more:hover { color: var(--ink); }
