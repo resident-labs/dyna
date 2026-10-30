@@ -241,6 +241,17 @@ async function* createToolCallsWithoutOutputIndexEvents(): AsyncIterable<Respons
 }
 
 describe("OpenAI Responses terminal event handling", () => {
+	it("records the model reported by the upstream response", async () => {
+		const model = createModel();
+		const output = createOutput(model);
+		async function* events(): AsyncIterable<ResponseStreamEvent> {
+			yield { type: "response.created", response: { id: "resp", model: "served-model" } } as ResponseStreamEvent;
+			yield* createCompletedEvents();
+		}
+		await processResponsesStream(events(), output, new AssistantMessageEventStream(), model);
+		expect(output.responseModel).toBe("served-model");
+	});
+
 	it("rejects streams that end before a terminal response event", async () => {
 		const model = createModel();
 		const output = createOutput(model);

@@ -571,6 +571,8 @@ export interface SystemMessage {
 
 export interface UserMessage {
 	role: "user";
+	/** Dyna delivery identity, persisted only when this message is consumed. */
+	deliveryId?: string;
 	content: string | (TextContent | ImageContent)[];
 	timestamp: number; // Unix timestamp in milliseconds
 }
