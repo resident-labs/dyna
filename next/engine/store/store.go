@@ -1,0 +1,256 @@
+// Package store owns the v2 SQLite database.
+package store
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	_ "embed"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+//go:embed schema.sql
+var schema string
+
+type ErrorCode string
+
+const (
+	StoreFromV1 ErrorCode = "store_from_v1"
+	StoreTooOld ErrorCode = "store_too_old"
+)
+
+type Error struct {
+	Code    ErrorCode
+	Message string
+}
+
+func (e *Error) Error() string { return e.Message }
+
+type request struct {
+	ctx  context.Context
+	fn   func(*sql.Tx) error
+	done chan error
+}
+type Store struct {
+	writer        *sql.DB
+	read          *sql.DB
+	checkpoint    *sql.DB
+	checkpointRun func() error
+	requests      chan request
+	stop          chan struct{}
+	done          chan struct{}
+	checkDone     chan struct{}
+	mu            sync.Mutex
+	errMu         sync.Mutex
+	closed        bool
+	first         error
+}
+
+// Open creates or opens a store in dir. now is injected for deterministic scheduling.
+func Open(dir string, now func() time.Time) (*Store, error) {
+	return open(dir, now, floorVersion, floorCommit, nil)
+}
+func open(dir string, now func() time.Time, floor int, commit string, checkpointRun func() error) (*Store, error) {
+	path := filepath.Join(dir, "store.db")
+	_, err := os.Stat(path)
+	fresh := errors.Is(err, os.ErrNotExist)
+	if err != nil && !fresh {
+		return nil, err
+	}
+	if fresh {
+		old := filepath.Join(dir, "dyna.db")
+		if _, err := os.Stat(old); err == nil {
+			return nil, &Error{Code: StoreFromV1, Message: fmt.Sprintf("This folder holds a Dyna v1 store (%s). Dyna v2 cannot open it, and there is no way back to v1 after you import. To move your data: (1) stop the v1 engine; (2) build the exporter from tag `v1-final`: `git clone --branch v1-final https://github.com/resident-labs/dyna && cd dyna && go build ./cmd/dyna-export`; (3) run `./dyna-export --out ~/dyna-bundle`; (4) run `dyna import ~/dyna-bundle`. See docs/migrate.md.", old)}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+		if err != nil {
+			return nil, err
+		}
+		if err := f.Close(); err != nil {
+			return nil, err
+		}
+	}
+	dsn := "file:" + url.PathEscape(path) + "?_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_pragma=wal_autocheckpoint(0)&_pragma=journal_size_limit(67108864)"
+	writer, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	writer.SetMaxOpenConns(1)
+	fail := func(err error) (*Store, error) { writer.Close(); return nil, err }
+	if fresh {
+		if _, err = writer.Exec("PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_mode=WAL"); err != nil {
+			return fail(err)
+		}
+		tx, err := writer.Begin()
+		if err != nil {
+			return fail(err)
+		}
+		if _, err = tx.Exec(schema); err == nil {
+			var id [16]byte
+			_, err = rand.Read(id[:])
+			if err == nil {
+				_, err = tx.Exec("INSERT INTO meta(key,value) VALUES ('format','dyna-v2'),('schema_version',?),('store_id',?),('created_commit','')", strconv.Itoa(schemaVersion), hex.EncodeToString(id[:]))
+			}
+		}
+		if err != nil {
+			tx.Rollback()
+			return fail(err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fail(err)
+		}
+	} else {
+		var format string
+		if err := writer.QueryRow("SELECT value FROM meta WHERE key='format'").Scan(&format); err != nil {
+			return fail(fmt.Errorf("invalid store format: %w", err))
+		}
+		if format != "dyna-v2" {
+			return fail(fmt.Errorf("invalid store format %q", format))
+		}
+		if err := upgrade(writer, floor, commit); err != nil {
+			return fail(err)
+		}
+		if err := compareSchema(writer); err != nil {
+			return fail(err)
+		}
+	}
+	read, err := sql.Open("sqlite", dsn+"&mode=ro")
+	if err != nil {
+		return fail(err)
+	}
+	checkpoint, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		read.Close()
+		return fail(err)
+	}
+	checkpoint.SetMaxOpenConns(1)
+	s := &Store{writer: writer, read: read, checkpoint: checkpoint, requests: make(chan request), stop: make(chan struct{}), done: make(chan struct{}), checkDone: make(chan struct{})}
+	if checkpointRun == nil {
+		checkpointRun = func() error { _, err := s.checkpoint.Exec("PRAGMA wal_checkpoint(PASSIVE)"); return err }
+	}
+	s.checkpointRun = checkpointRun
+	go s.writeLoop()
+	go s.checkLoop(path, now)
+	return s, nil
+}
+
+func compareSchema(db *sql.DB) error {
+	expected, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return err
+	}
+	defer expected.Close()
+	if _, err = expected.Exec(schema); err != nil {
+		return err
+	}
+	query := "SELECT type, name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+	readSchema := func(db *sql.DB) ([]string, error) {
+		rows, err := db.Query(query)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var t, n, s string
+			if err := rows.Scan(&t, &n, &s); err != nil {
+				return nil, err
+			}
+			out = append(out, t+"\x00"+n+"\x00"+s)
+		}
+		return out, rows.Err()
+	}
+	a, err := readSchema(db)
+	if err != nil {
+		return err
+	}
+	b, err := readSchema(expected)
+	if err != nil {
+		return err
+	}
+	if len(a) != len(b) {
+		return errors.New("store schema differs from schema.sql")
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return errors.New("store schema differs from schema.sql")
+		}
+	}
+	return nil
+}
+
+// Write submits one atomic transaction to the single writer.
+func (s *Store) Write(ctx context.Context, fn func(*sql.Tx) error) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return errors.New("store closed")
+	}
+	r := request{ctx: ctx, fn: fn, done: make(chan error, 1)}
+	select {
+	case s.requests <- r:
+		s.mu.Unlock()
+	case <-ctx.Done():
+		s.mu.Unlock()
+		return ctx.Err()
+	}
+	return <-r.done
+}
+func (s *Store) writeLoop() {
+	defer close(s.done)
+	for r := range s.requests {
+		tx, err := s.writer.BeginTx(r.ctx, nil)
+		if err == nil {
+			err = r.fn(tx)
+			if err != nil {
+				_ = tx.Rollback()
+			} else {
+				err = tx.Commit()
+			}
+		}
+		if err != nil {
+			s.errMu.Lock()
+			if s.first == nil {
+				s.first = err
+			}
+			s.errMu.Unlock()
+		}
+		r.done <- err
+	}
+}
+func (s *Store) Read() *sql.DB { return s.read }
+func (s *Store) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return errors.New("store closed")
+	}
+	s.closed = true
+	close(s.requests)
+	s.mu.Unlock()
+	<-s.done
+	close(s.stop)
+	<-s.checkDone
+	err := s.first
+	for _, db := range []*sql.DB{s.read, s.checkpoint, s.writer} {
+		if e := db.Close(); err == nil {
+			err = e
+		}
+	}
+	return err
+}
