@@ -191,7 +191,7 @@
     // Prefer the longest match when one name is a prefix of another.
     const item = availableRoomCommands.reduce<typeof availableRoomCommands[number] | undefined>((best, c) => {
       const prefix = '/' + c.name
-      if (!draft.startsWith(prefix) || (draft.length > prefix.length && !/\s/.test(draft[prefix.length]))) return best
+      if (!draft.startsWith(prefix) || (draft.length > prefix.length && !/\s/.test(draft.charAt(prefix.length)))) return best
       return !best || c.name.length > best.name.length ? c : best
     }, undefined)
     return item ? { item, text: draft.slice(item.name.length + 1).trim() } : null
