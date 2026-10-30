@@ -216,6 +216,21 @@ func TestWaitWakesOnFinalDecision(t *testing.T) {
 	}
 }
 
+func TestRequestNoticeFallsBackToCommand(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.service.Create(context.Background(), f.actor(f.child), CreateInput{Kind: Kind("fake"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"edit"}`), Command: "gh pr edit 1060 --body-file body.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := f.rooms.Messages(f.rec.ID)
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("messages = %+v, %v", messages, err)
+	}
+	if !strings.Contains(messages[0].Text, "gh pr edit 1060 --body-file body.md") {
+		t.Fatalf("notice omits command: %q", messages[0].Text)
+	}
+}
+
 func TestRequestNoticeNamesTheDecidingCommands(t *testing.T) {
 	f := newFixture(t)
 	r := f.create(t, ClassAgent)
@@ -278,7 +293,11 @@ func TestSettingsAreOwnerOnlyAndPersist(t *testing.T) {
 func TestApprovalListUsesDisplayHolder(t *testing.T) {
 	f := newFixture(t)
 	r := f.create(t, ClassAgent)
-	list, err := f.service.List(f.owner(), f.rec.ID)
+	if err := database.Close(filepath.Dir(f.service.SessionRoot)); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(f.rooms, f.service.SessionRoot)
+	list, err := restarted.List(f.owner(), f.rec.ID)
 	if err != nil || len(list) != 1 || list[0] != (Summary{ID: r.ID, State: StatePending, At: "parent"}) {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
