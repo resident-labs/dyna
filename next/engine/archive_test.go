@@ -169,6 +169,31 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	}
 }
 
+func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
+	s, _, session, ctx := setup(t)
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err = s.transition(ctx, record.Room, current, contract.BoxClosing, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.transition(ctx, record.Room, current, contract.BoxDeleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResumeClosures(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.Session(ctx, session); err == nil {
+		t.Fatal("session remained open")
+	}
+}
+
 func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
 	s, _, session, ctx := setup(t)
 	record, err := s.store.Session(ctx, session)
