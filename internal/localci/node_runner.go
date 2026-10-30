@@ -298,8 +298,17 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	// The run takes over only a record whose run has no live process, so it never
 	// touches the record of a run that another engine or command is executing.
-	resume, err := r.resumeRun(ctx, localStore, attachKey, sha, cache, checks)
+	// Bound the whole probe and stale-run teardown, not just each node call.
+	// A trial must report an infrastructure failure rather than wait forever.
+	recoveryCtx, stopRecovery := context.WithTimeout(ctx, 5*time.Minute)
+	resume, err := r.resumeRun(recoveryCtx, localStore, attachKey, sha, cache, checks)
+	recoveryTimedOut := errors.Is(recoveryCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+	stopRecovery()
 	if err != nil {
+		if recoveryTimedOut {
+			result.Cause = CauseRecoveryTimeout
+			err = fmt.Errorf("local CI recovery on %s exceeded its deadline: %w", node.Name, err)
+		}
 		_ = os.Remove(reportRoot) // not-state: the folder is still empty.
 		return result, err
 	}
