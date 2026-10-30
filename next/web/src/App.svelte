@@ -1,9 +1,13 @@
 <script lang="ts">
   import { RoomStore } from "./lib/room.svelte.ts";
-  import { call } from "./lib/client.ts";
-  import type { RoomSummary } from "./lib/contract.gen.ts";
+  import { APIError, call } from "./lib/client.ts";
+  import type { Conversation, Principal, RoomSummary } from "./lib/contract.gen.ts";
   let rooms: RoomSummary[] = $state([]);
-  void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }).catch(() => {});
+  let roomsError = $state("");
+  void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }).catch((error: unknown) => {
+    roomsError = error instanceof APIError && error.detail.code === "forbidden"
+      ? "Your sign-in ended. Run dyna web to sign in again." : "Rooms are not available.";
+  });
   let path = $state(window.location.pathname);
   window.addEventListener("popstate", () => { path = window.location.pathname; });
   const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
@@ -25,17 +29,25 @@
     history.pushState(null, "", event.currentTarget.href);
     path = window.location.pathname;
   }
-  let draft = $state("");
-  let sendError = $state("");
+  let home: Conversation = $derived(session ? { kind: "dm", session } : { kind: "feed" });
+  let posts = $derived(store?.posts(home) ?? []);
   let pending = $derived([...(store?.pendingPosts ?? [])].filter(post => post.home.session === session));
+  const author = (from: Principal) => from.kind === "owner" ? "You" : from.kind === "engine" ? "Dyna"
+    : store?.sessions.get(from.session ?? "")?.name ?? "Agent";
+  const sameAuthor = (a: Principal, b: Principal | undefined) => a.kind === b?.kind && a.session === b.session;
+  // Drafts and send errors belong to one conversation, keyed by room and session.
+  let drafts: Record<string, string> = $state({});
+  let failed: string | undefined = $state();
+  let key = $derived(`${room}/${session ?? ""}`);
   function send(event: KeyboardEvent) {
-    if (event.key !== "Enter" || event.shiftKey || event.isComposing || !store || !room || !draft.trim()) return;
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || !store || !room) return;
     event.preventDefault();
-    const text = draft;
-    draft = "";
-    sendError = "";
-    store.post({ room, text, home: session ? { kind: "dm", session } : undefined })
-      .catch(() => { draft = text; sendError = "Your message was not sent. Press Enter to try again."; });
+    const sent = key;
+    const text = drafts[sent] ?? "";
+    if (!text.trim()) return;
+    drafts[sent] = "";
+    failed = undefined;
+    store.post({ room, text, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
   }
   let rail: HTMLElement;
   let feed: HTMLElement;
@@ -62,18 +74,24 @@
       <nav>{#each rooms as item (item.id)}
         <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}>{item.name}</a>
       {/each}</nav>
-    {:else}<p class="hint">Your rooms will appear here.</p>{/if}
+    {:else}<p class="hint">{roomsError || "Your rooms will appear here."}</p>{/if}
   </aside>
   <main>
     <header><span>{title}</span></header>
     <section class="feed" aria-label="Feed" tabindex="-1" bind:this={feed}>
-      {#each pending as post}<p class="pending">{post.text}</p>
-      {:else}<p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>{/each}
+      {#each posts as post, index (post.seq)}
+        {#if !sameAuthor(post.from, posts[index - 1]?.from)}<p class="author">{author(post.from)}</p>{/if}
+        <p class="post">{post.body.text}</p>
+      {/each}
+      {#each pending as post}<p class="post pending">{post.text}</p>{/each}
+      {#if !posts.length && !pending.length}
+        <p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>
+      {/if}
     </section>
     {#if room && !unavailable}
-      <textarea class="composer" rows="1" aria-label="Message" bind:this={composer} bind:value={draft} onkeydown={send}
+      <textarea class="composer" rows="1" aria-label="Message" bind:this={composer} bind:value={drafts[key]} onkeydown={send}
         placeholder={"Message " + title}></textarea>
-      {#if sendError}<p class="hint">{sendError}</p>{/if}
+      {#if failed === key}<p class="hint" role="alert">Your message was not sent. Press Enter to try again.</p>{/if}
     {/if}
   </main>
   {#if room}
