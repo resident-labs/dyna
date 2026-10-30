@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -35,6 +36,8 @@ import (
 
 // errNoRoom refuses to route a stored record that has no room. Such records
 // come from an older dyna and are never sent to a default room.
+var workflowPostKey = regexp.MustCompile(`^[a-f0-9]{64}-[0-9]+$`)
+
 var errNoRoom = errors.New("record has no room (created by an older dyna); refusing to route it")
 
 // ErrDelivery marks a post that was stored but not delivered to every
@@ -191,6 +194,8 @@ type PostInput struct {
 	NeedsRoot bool
 	// ID is a stable post ID for a retrying integration; empty generates one.
 	ID string
+	// WorkflowKey names one workflow post across a resume chain.
+	WorkflowKey string
 	// Event is a typed system event. The registry then decides the post kind,
 	// its text, its quiet flag and its wake rule, so the caller passes no Kind,
 	// Notice or Text with it. A sealed family needs this field: Store.Post
@@ -399,6 +404,41 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if in.WorkflowKey != "" {
+		if in.Sender.Kind != SenderScript || !workflowPostKey.MatchString(in.WorkflowKey) {
+			return Result{}, errors.New("invalid workflow post identity")
+		}
+		lockPath := filepath.Join(filepath.Dir(s.Rooms.Root), "workflow-post-locks", in.WorkflowKey[:2]+".lock")
+		if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
+			return Result{}, err
+		}
+		unlock, err := store.Lock(lockPath)
+		if err != nil {
+			return Result{}, err
+		}
+		defer unlock()
+		reservation, err := s.Rooms.ReserveWorkflowPost(ctx, in.WorkflowKey, res.rec.ID)
+		if err != nil {
+			return Result{}, err
+		}
+		msg, err := s.Rooms.Message(reservation.RoomID, reservation.PostID)
+		if err == nil {
+			if err := s.Rooms.CompleteWorkflowPost(context.WithoutCancel(ctx), in.WorkflowKey); err != nil {
+				return Result{Message: msg}, err
+			}
+			return Result{Message: msg}, nil
+		}
+		if !errors.Is(err, room.ErrPostNotFound) {
+			return Result{}, err
+		}
+		if reservation.Delivered {
+			return Result{}, errors.New("delivered workflow post is missing")
+		}
+		if reservation.RoomID != res.rec.ID {
+			return Result{}, errors.New("workflow post destination changed after reservation")
+		}
+		in.ID = reservation.PostID
+	}
 	if err := s.servicePost(in, res); err != nil {
 		return Result{}, err
 	}
@@ -561,6 +601,11 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		out.Deliveries = append(out.Deliveries, d)
 	}
 	out.EngineDown = s.engineDown(out)
+	if in.WorkflowKey != "" {
+		if err := s.Rooms.CompleteWorkflowPost(context.WithoutCancel(ctx), in.WorkflowKey); err != nil {
+			return out, err
+		}
+	}
 	return out, DeliveryError(out)
 }
 
