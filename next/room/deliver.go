@@ -66,29 +66,24 @@ func (t Tree) reply(in DeliveryInput, r Recipient) contract.ReplyChannel {
 	return reply
 }
 
-type FinalReply struct {
-	Channel contract.ReplyChannel
-	Wake    bool
-	Posted  contract.EventID
+type Destination struct {
+	Target contract.Principal
+	Home   contract.Conversation
 }
 
 // FinalReplies returns one response for each distinct final target and home.
-func FinalReplies(inputs []contract.Delivery, posts map[contract.Principal]contract.EventID) []FinalReply {
-	type destination struct {
-		target contract.Principal
-		home   contract.Conversation
-	}
-	seen := make(map[destination]bool)
-	var replies []FinalReply
+func FinalReplies(inputs []contract.Delivery, posts map[Destination]contract.EventID) []contract.FinalReply {
+	seen := make(map[Destination]bool)
+	var replies []contract.FinalReply
 	for _, input := range inputs {
 		channel := input.Reply
-		key := destination{target: channel.Target, home: channel.Home}
+		key := Destination{Target: channel.Target, Home: channel.Home}
 		if channel.Kind != contract.ReplyFinal || seen[key] {
 			continue
 		}
 		seen[key] = true
-		post := posts[channel.Target]
-		replies = append(replies, FinalReply{Channel: channel, Wake: post == "", Posted: post})
+		post := posts[key]
+		replies = append(replies, contract.FinalReply{Reply: channel, Posted: post})
 	}
 	return replies
 }
