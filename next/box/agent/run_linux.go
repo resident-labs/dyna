@@ -86,7 +86,7 @@ func Run(ctx context.Context, version string) error {
 		return err
 	}
 	defer h.Close()
-	runner := &Runner{Harness: h, Sink: client, Upgrade: func(string) error {
+	runner := &Runner{Harness: h, Sink: client, Upgrade: func() error {
 		if err := h.Close(); err != nil {
 			return err
 		}
