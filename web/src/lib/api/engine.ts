@@ -23,7 +23,7 @@ import type { MachineDetail, MachinePatch, MachineSummary, MachineWork } from '.
 import type { LibraryView } from './library.ts'
 import type { ProfileCheck, ProfileEdit, ProfileList, ProfileUsageSnapshot, ProfileView } from './profile.ts'
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SetRoomLimitResult, SpawnResult, TerminalVerdict, Visual } from './room.ts'
-import type { RegistryService, ServiceView } from './service.ts'
+import type { RegistryService, ServicePatch, ServiceView } from './service.ts'
 import type { BulkSessionOptions, BulkSessionResult, ConsolidationOptions, ConsolidationState, MemberProfile, QueueItem, RoomSessionMutation, RoomSessionState, Session, TransferOptions, TransferState } from './session.ts'
 import type { Device, Hook, HookRun, HookRunLog, HookSummary, Notice, Pairing, SettingItem, UpdateNotice } from './settings.ts'
 import type { ShellJob, ShellLog, ShellLogChunk, TermEvent, TermInfo } from './terminal.ts'
@@ -281,7 +281,8 @@ export interface Engine {
   AddGlobalHook(hook: HookInput): Promise<null>
   EditGlobalHook(name: string, patch: Partial<HookInput>): Promise<null>
   RemoveGlobalHook(name: string): Promise<null>
-  ResetHook(name: string): Promise<null>
+  EditService(name: string, patch: ServicePatch): Promise<null>
+  ResetService(name: string): Promise<null>
 
   // Profiles, settings and private runtimes.
   ConfigProfiles(): Promise<ProfileList>
