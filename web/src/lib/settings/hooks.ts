@@ -1,5 +1,6 @@
-// Plain-English labels and run ordering for the Hooks pane.
+// Plain-English labels and run ordering for the hook lists.
 import type { Hook, HookRun } from '../api/settings.ts'
+import { minutesText } from '../ui/format.ts'
 
 const events: Record<string, string> = {
   'worktree-created': 'Worktree created',
@@ -15,7 +16,7 @@ const events: Record<string, string> = {
 
 export function eventLabel(event: string, everyMinutes = 0): string {
   const label = events[event] ?? event
-  return event === 'schedule' && everyMinutes > 0 ? `${label} · every ${everyMinutes} min` : label
+  return event === 'schedule' && everyMinutes > 0 ? `${label} · every ${minutesText(everyMinutes)}` : label
 }
 
 export function failLabel(onFail: string): string {
@@ -32,25 +33,7 @@ const serviceTriggerBuiltins: readonly string[] = ['doctor']
 export const listedHooks = <H extends Pick<Hook, 'builtin'>>(hooks: H[], scope: HookScope): H[] =>
   scope === 'global' ? hooks.filter((h) => !h.builtin || !serviceTriggerBuiltins.includes(h.builtin)) : hooks
 
-// isBuiltin is true for a hook the engine seeds and runs in its own process.
-// Its command is fixed, it cannot be removed, and the owner changes only its
-// interval, timeout and switch.
-export function isBuiltin(h: Pick<Hook, 'builtin'>): boolean {
-  return !!h.builtin
-}
-
-// runByHand is the command that runs a global hook now, built-in or not.
-export function runByHand(h: Pick<Hook, 'name'>): string {
-  return `dyna git hooks run ${h.name} --global`
-}
-
-// scopeOf reads a stored hook's scope. A hook stored before scope existed
-// belongs to its repository.
-export function scopeOf(h: Partial<Pick<Hook, 'scope'>>): 'repository' | 'global' {
-  return h.scope === 'global' ? 'global' : 'repository'
-}
-
-// The two screens of the Hooks pane: one repository's hooks, or the machine's.
+// The two hook lists: one repository's hooks, or this computer's.
 export type HookScope = 'repository' | 'global'
 
 // authorLabel names who added a hook. A stored hook may record the owner, the

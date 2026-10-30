@@ -74,12 +74,6 @@ test('each section shows its moved controls in one shared layout', async () => {
     assert.doesNotMatch(review, /Review starts after/) // the room policy loads after mount
     assert.doesNotMatch(text(show('review')), /Automatic review/)
 
-    // The room's repo is fixed, so the hooks list has no repo picker.
-    const hooks = show('hooks')
-    assert.match(text(hooks), /Hooks Shell commands/)
-    assert.match(text(hooks), /Shared by every room on this repository\./)
-    assert.doesNotMatch(hooks, /aria-label="Repo"/)
-    assert.match(text(show('hooks', { room: { ...room, repo: '' } })), /This room has no repository\./)
     assert.match(text(show('noise')), /Bot noise rules .*Learned bot noise rules/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
@@ -317,42 +311,6 @@ test('Esc in a rule edit cancels the edit, and leaving Rules mid-edit frees Esc 
   cleanup(); sync() // select General: Rules unmounts
   assert.equal(rules.editing, false)
   escape(node)
-  assert.equal(closed, 1)
-  action.destroy()
-  Reflect.deleteProperty(globalThis, 'window')
-  Reflect.deleteProperty(globalThis, 'document')
-})
-
-// HooksPane's real onmodal effect with Room settings' real onmodal handler.
-test('leaving Hooks with a hook editor open frees Esc for the modal', async () => {
-  const hooksSource = readFileSync(new URL('../settings/HooksPane.svelte', import.meta.url), 'utf8')
-  const effect = /\$effect\((\(\) => \{ onmodal\?\.\(!!editor\);.*?\})\)\n/.exec(hooksSource)?.[1]
-  assert.ok(effect, 'HooksPane reacts to its editor')
-  const handler = /<HooksPane [^>]*onmodal=\{(\(open\) => \(hooksBusy = open\))\}/.exec(source)?.[1]
-  assert.ok(handler, 'RoomSettings wires the HooksPane modal state')
-  const state = vm.createContext({ hooksBusy: false })
-  const pane = vm.createContext({ editor: { form: {} }, onmodal: vm.runInContext(stripTypes(handler), state) })
-  const cleanup = (vm.runInContext(stripTypes(effect), pane) as () => () => void)()
-  assert.equal(state.hooksBusy, true) // Add hook: the editor is open
-
-  const { dialog } = await import('../ui/dialog.ts')
-  interface EscapeEvent {
-    key: string
-    target?: unknown
-    preventDefault(): void
-    stopImmediatePropagation(): void
-  }
-  const listeners = new Set<(event: EscapeEvent) => void>()
-  Reflect.set(globalThis, 'window', { addEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.add(fn), removeEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.delete(fn) })
-  Reflect.set(globalThis, 'document', { activeElement: null })
-  // dialog reads only these members of its card, so the fake names them.
-  const fake: object = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: (el: unknown) => el === node, querySelectorAll: () => [], querySelector: () => null }
-  const node = fake as HTMLElement
-  let closed = 0
-  const action = dialog(node, { close: () => closed++, busy: state.hooksBusy })
-  cleanup() // select General: HooksPane unmounts
-  action.update({ close: () => closed++, busy: state.hooksBusy })
-  for (const fn of listeners) fn({ key: 'Escape', target: node, preventDefault() {}, stopImmediatePropagation() {} })
   assert.equal(closed, 1)
   action.destroy()
   Reflect.deleteProperty(globalThis, 'window')
