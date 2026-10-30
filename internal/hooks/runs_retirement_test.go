@@ -3,7 +3,6 @@ package hooks
 import (
 	"database/sql"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +10,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/database"
-	statewrite "dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 func TestRunReceiptStaysCanonicalAfterImport(t *testing.T) {
@@ -48,7 +47,14 @@ func TestRunReceiptStaysCanonicalAfterImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := filepath.Base(s.dir(run.Repo))
-	if err := statewrite.For(db).Mirror(t.Context(), runMirrorKey(key, ownedID), ownedPath, func(out io.Writer) error { _, err := out.Write(ownedRaw); return err }); err != nil {
+	if err := os.WriteFile(ownedPath, ownedRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(ownedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO state_mirrors(key, version) VALUES (?, ?)", runMirrorKey(key, ownedID), store.VersionOf(info).Key()); err != nil {
 		t.Fatal(err)
 	}
 	var stamp string

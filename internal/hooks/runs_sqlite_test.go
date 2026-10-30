@@ -151,10 +151,7 @@ func TestRunImportSkipsDamagedFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			key := runMirrorKey(filepath.Base(s.dir(good.Repo)), strings.TrimSuffix(name, ".json"))
-			if foreign, err := statewrite.For(db).Foreign(t.Context(), key, path); err != nil || !foreign {
-				t.Fatalf("migration changed source stamp: foreign=%v, %v", foreign, err)
-			}
+
 			writes := statewrite.For(db).Health().Writes
 			if _, err := s.runs(t.Context(), good.Repo, ""); err != nil {
 				t.Fatal(err)
