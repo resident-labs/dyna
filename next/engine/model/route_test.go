@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
@@ -86,10 +88,11 @@ func TestRouteRejectsAmbiguousModel(t *testing.T) {
 
 func TestProxyConfig(t *testing.T) {
 	dir := t.TempDir()
-	_, err := NewProxy(dir, "management-key")
+	proxy, err := NewProxy(dir, "management-key")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = proxy.Shutdown(context.Background()) })
 	path := filepath.Join(dir, "cliproxy", "config.yaml")
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -101,6 +104,9 @@ func TestProxyConfig(t *testing.T) {
 	}
 	if cfg.Host != "127.0.0.1" || cfg.Port == 0 || cfg.RequestRetry != 0 || cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || len(cfg.ClaudeKey) != 0 {
 		t.Fatal("proxy config violates the loopback, retry, management, or affinity policy")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(cfg.RemoteManagement.SecretKey), []byte("management-key")) != nil {
+		t.Fatal("management key does not authenticate")
 	}
 	info, err = os.Stat(filepath.Join(dir, "cliproxy", "auth"))
 	if err != nil || info.Mode().Perm() != 0700 {
