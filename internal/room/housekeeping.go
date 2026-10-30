@@ -63,6 +63,7 @@ type AttributionPlacement string
 
 const (
 	AttributionLine   AttributionPlacement = "line"
+	AttributionEnd    AttributionPlacement = "end"
 	AttributionPrefix AttributionPlacement = "prefix"
 )
 
@@ -70,20 +71,48 @@ func ParseAttributionPlacement(value string) (AttributionPlacement, error) {
 	switch AttributionPlacement(value) {
 	case "", AttributionLine:
 		return AttributionLine, nil
-	case AttributionPrefix:
-		return AttributionPrefix, nil
+	case AttributionPrefix, AttributionEnd:
+		return AttributionPlacement(value), nil
 	default:
-		return "", fmt.Errorf("attribution placement must be line or prefix")
+		return "", fmt.Errorf("attribution placement must be line, end or prefix")
 	}
 }
 
-// SetAttribution stores the line that agent-written GitHub text ends with.
-// The caller passes a value from ParseAttribution.
-func (s *Store) SetAttribution(ref, line string, placement ...AttributionPlacement) error {
+type AttributionKind string
+
+const (
+	AttributionPR      AttributionKind = "pr"
+	AttributionIssue   AttributionKind = "issue"
+	AttributionReview  AttributionKind = "review"
+	AttributionComment AttributionKind = "comment"
+)
+
+type Attribution struct {
+	Text      string               `json:"text"`
+	Placement AttributionPlacement `json:"placement"`
+}
+
+func ParseAttributionKind(value string) (AttributionKind, error) {
+	switch AttributionKind(value) {
+	case "", AttributionPR, AttributionIssue, AttributionReview, AttributionComment:
+		return AttributionKind(value), nil
+	default:
+		return "", fmt.Errorf("attribution kind must be pr, issue, review or comment")
+	}
+}
+
+// SetAttribution updates the default or a kind override. Empty text removes an override.
+func (s *Store) SetAttribution(ref string, kind AttributionKind, a Attribution) error {
 	return s.UpdatePreferences(ref, func(r *Record) error {
-		r.Attribution = line
-		if len(placement) > 0 {
-			r.AttributionPlacement = placement[0]
+		if kind == "" {
+			r.Attribution, r.AttributionPlacement = a.Text, a.Placement
+		} else if a.Text == "" {
+			delete(r.AttributionKinds, kind)
+		} else {
+			if r.AttributionKinds == nil {
+				r.AttributionKinds = make(map[AttributionKind]Attribution)
+			}
+			r.AttributionKinds[kind] = a
 		}
 		return nil
 	})

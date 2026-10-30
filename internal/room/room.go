@@ -66,8 +66,9 @@ type Record struct {
 	Upstream string `json:"upstream,omitempty"`
 	// Attribution is the line that agent-created pull request and issue bodies
 	// end with. Empty means the room sets none.
-	Attribution          string               `json:"attribution,omitempty"`
-	AttributionPlacement AttributionPlacement `json:"attributionPlacement,omitempty"`
+	Attribution          string                          `json:"attribution,omitempty"`
+	AttributionPlacement AttributionPlacement            `json:"attributionPlacement,omitempty"`
+	AttributionKinds     map[AttributionKind]Attribution `json:"attributionKinds,omitempty"`
 	// LibraryPinSet is true when this room has its own librarian profile.
 	// LibraryPin is that profile; empty means auto for this room only.
 	// When LibraryPinSet is false, the room uses the global library.profile.
