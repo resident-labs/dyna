@@ -12,34 +12,6 @@ import (
 
 const MaxBulkSessions = 512
 
-// BulkSessionOptions applies one shared choice to each selected session.
-// Close hands work to an ancestor; Force permits failed handoffs. Adopt
-// moves each session under Parent.
-type BulkSessionOptions struct {
-	Sessions []string `json:"sessions"`
-	Action   string   `json:"action"`
-	Profile  string   `json:"profile,omitempty"`
-	Model    string   `json:"model,omitempty"`
-	Force    bool     `json:"force,omitempty"`
-	Parent   string   `json:"parent,omitempty"`
-}
-
-type BulkSessionItem struct {
-	Session  string                  `json:"session"`
-	OK       bool                    `json:"ok"`
-	Error    string                  `json:"error,omitempty"`
-	Close    *subagent.CloseRecovery `json:"close,omitempty"`
-	Member   *Member                 `json:"member,omitempty"`
-	Transfer *subagent.TransferState `json:"transfer,omitempty"`
-}
-
-type BulkSessionResult struct {
-	Action    string            `json:"action"`
-	Results   []BulkSessionItem `json:"results"`
-	Succeeded int               `json:"succeeded"`
-	Failed    int               `json:"failed"`
-}
-
 // BulkSessionAction retains input order and reports independent failures.
 // Resolve the whole selection first so aliases cannot act on one session twice.
 // Existing single-session methods remain authoritative for write guards.

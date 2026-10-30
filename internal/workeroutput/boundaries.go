@@ -104,14 +104,6 @@ func (t *ToolTracker) InFlight() int {
 	return len(t.inFlight)
 }
 
-// Usage is token accounting reported by a harness for one turn.
-type Usage struct {
-	InputTokens  int64   `json:"inputTokens,omitempty"`
-	CachedTokens int64   `json:"cachedTokens,omitempty"`
-	OutputTokens int64   `json:"outputTokens,omitempty"`
-	CostUSD      float64 `json:"costUsd,omitempty"`
-}
-
 func (u Usage) Total() int64 { return u.InputTokens + u.OutputTokens }
 
 func (u *Usage) Add(o Usage) {

@@ -184,7 +184,7 @@ async function runConfirm() {
     const msg = errorText(e)
     const recovery = closeRecoveryOf(e)
     // Force is offered only when the server allows that recovery.
-    if (kind === 'close' && recovery && allowsForceClose(e)) confirm = { kind: 'forceclose', m, items: recovery.items, detail: msg }
+    if (kind === 'close' && recovery && allowsForceClose(e)) confirm = { kind: 'forceclose', m, items: recovery.items ?? [], detail: msg }
     else confirm = { ...request, busy: false, error: msg }
   }
 }
