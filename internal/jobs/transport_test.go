@@ -50,7 +50,7 @@ func TestTransportFullTrailerCarriesStatus(t *testing.T) {
 }
 
 func TestTransportSSHUsesPrivateMaster(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	x := Executor{Node: Conn{Name: "node", SSH: "node"}}
 	_, argv := x.NodeProgram("true", nil)
 	joined := strings.Join(argv, " ")
@@ -64,14 +64,24 @@ func TestTransportFallsBackWhenRuntimeUnavailable(t *testing.T) {
 	if err := os.WriteFile(runtime, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_RUNTIME_DIR", runtime)
+	dir := testsafe.ShortTempDir(t)
+	fallback := filepath.Join(dir, "private")
 	x := Executor{Node: Conn{Name: "node", SSH: "node"}}
-	_, args := x.NodeProgram("true", nil)
-	joined := strings.Join(args, " ")
-	for _, option := range []string{"ControlMaster=no", "ControlPath=none", "BatchMode=yes", "ServerAliveInterval=15"} {
-		if !strings.Contains(joined, option) {
-			t.Fatalf("ssh options %q lack %s", joined, option)
-		}
+	joined := strings.Join(x.sshOptionsIn(runtime, fallback), " ")
+	if !strings.Contains(joined, "ControlMaster=auto") || !strings.Contains(joined, "ControlPath="+fallback+"/") {
+		t.Fatalf("ssh options = %q, want private fallback", joined)
+	}
+	info, err := os.Stat(fallback)
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("fallback mode: %v, %v", info, err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(fallback, link); err != nil {
+		t.Fatal(err)
+	}
+	joined = strings.Join(x.sshOptionsIn(runtime, link), " ")
+	if !strings.Contains(joined, "ControlMaster=no") || !strings.Contains(joined, "ControlPath=none") {
+		t.Fatalf("ssh options = %q, want no sharing for a symlink", joined)
 	}
 }
 
