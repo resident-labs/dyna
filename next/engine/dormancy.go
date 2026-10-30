@@ -32,17 +32,39 @@ func (s *Service) ReconcileDormancy(ctx context.Context, startup bool) {
 			case contract.BoxStopped:
 				s.dormancy.unconfirmed[b.ID] = true
 			case contract.BoxStarting:
-				if err := s.boxes.Start(ctx, b.ID); err != nil {
+				unlock := s.lockBox(b.Session)
+				current, err := s.store.Box(ctx, b.ID)
+				if err == nil && current.State == contract.BoxStarting {
+					if err = s.boxes.Start(ctx, b.ID); err != nil {
+						if session, e := s.store.Session(ctx, b.Session); e == nil {
+							_, e = s.dormancyTransition(ctx, session.Room, current, contract.BoxStopped, "")
+							if e != nil {
+								log.Printf("dormancy: %v", e)
+							}
+						}
+					}
+				}
+				unlock()
+				if err != nil {
 					log.Printf("dormancy start: %v", err)
 				}
 			}
 		}
 	}
-	for id := range s.dormancy.unconfirmed {
-		if err := s.boxes.Stop(ctx, id); err != nil {
+	for _, b := range boxes {
+		if !s.dormancy.unconfirmed[b.ID] {
+			continue
+		}
+		unlock := s.lockBox(b.Session)
+		current, err := s.store.Box(ctx, b.ID)
+		if err == nil && current.State == contract.BoxStopped {
+			err = s.boxes.Stop(ctx, b.ID)
+		}
+		unlock()
+		if err != nil {
 			log.Printf("dormancy stop: %v", err)
 		} else {
-			delete(s.dormancy.unconfirmed, id)
+			delete(s.dormancy.unconfirmed, b.ID)
 		}
 	}
 	ids, err := s.store.DormancyCandidates(ctx, s.now().Add(-quietPeriod))
