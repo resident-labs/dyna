@@ -20,11 +20,12 @@
     expanded?: boolean
     ontoggle?: () => void
     inline?: boolean
+    stacked?: boolean
   }
-  let { title, description = '', status, control, children, disabled = false, id, expanded = false, ontoggle, inline = false }: Props = $props()
+  let { title, description = '', status, control, children, disabled = false, id, expanded = false, ontoggle, inline = false, stacked = false }: Props = $props()
 </script>
 
-<div class="setting" class:disabled class:inline class:toggles={!!ontoggle} aria-disabled={disabled || undefined} {id}>
+<div class="setting" class:disabled class:inline class:stacked class:toggles={!!ontoggle} aria-disabled={disabled || undefined} {id}>
   <div class="grid">
     <div class="text">
       <h3>{#if ontoggle}<button class="toggle" aria-expanded={expanded} onclick={ontoggle}>{title}</button>{:else}{title}{/if}</h3>
@@ -64,5 +65,7 @@
   @container (min-width: 32rem) {
     .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(10rem, auto); align-items: center; gap: var(--s6); }
     .control { justify-content: flex-end; }
+    .stacked > .grid { display: flex; align-items: stretch; }
+    .stacked > .grid > .control { justify-content: flex-start; }
   }
 </style>

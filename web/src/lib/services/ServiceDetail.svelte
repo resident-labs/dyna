@@ -105,7 +105,7 @@
       {/if}
       {#each items as it (it.key)}
         {@const text = settingLabel(it.key, it.help)}
-        <SettingRow title={text.title} description={text.description}>
+        <SettingRow title={text.title} description={text.description} stacked={it.key === 'updater.source'}>
           {#snippet control()}<SettingControl item={it} label={text.title} sourceInvalid={it.key === 'updater.source' && service.detail === 'update-source-invalid'} onsave={(value: string) => saveSetting(it.key, value)} />{/snippet}
           {#snippet status()}{#if errors[it.key]}<span class="err" role="alert">{errors[it.key]}</span>{/if}{/snippet}
         </SettingRow>
