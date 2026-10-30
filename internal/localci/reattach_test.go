@@ -594,3 +594,21 @@ func TestRunRecordsAttachmentBeforeRemoteSetup(t *testing.T) {
 		t.Fatalf("setup attachment = %+v, %v", rows, readErr)
 	}
 }
+
+// Two engines that both observed no attachment must not both reserve the head.
+func TestConcurrentFreshRunsReserveHeadOnce(t *testing.T) {
+	store := Store{DataDir: t.TempDir()}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, node := range []string{"first", "second"} {
+		go func() {
+			<-start
+			results <- store.reserveAttachment(t.Context(), "/repo", strings.Repeat("a", 40), node, attachment{RunID: node})
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if !((first == nil && errors.Is(second, ErrAttachmentBusy)) || (second == nil && errors.Is(first, ErrAttachmentBusy))) {
+		t.Fatalf("reservations: %v, %v; want exactly one winner", first, second)
+	}
+}
