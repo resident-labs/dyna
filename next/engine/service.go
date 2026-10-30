@@ -24,8 +24,7 @@ type Profiles interface {
 
 // Repositories reads room repositories and prepares their host caches.
 type Repositories interface {
-	List(context.Context, contract.RoomID, contract.SessionID, contract.HostName) ([]contract.BoxRepo, error)
-	Prepare(context.Context, contract.RoomID, contract.SessionID, contract.HostName) ([]contract.BoxRepo, error)
+	Get(context.Context, contract.RoomID, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 }
 
 type Service struct {
@@ -272,7 +271,7 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	var repos []contract.BoxRepo
 	var createErr error
 	if s.repos != nil {
-		repos, createErr = s.repos.Prepare(createCtx, session.Room, session.ID, current.Host)
+		repos, createErr = s.repos.Get(createCtx, session.Room, session.ID, current.Host, true)
 	}
 	var image string
 	if createErr == nil {
@@ -487,7 +486,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
-		repos, err = s.repos.List(ctx, session.Room, session.ID, current.Host)
+		repos, err = s.repos.Get(ctx, session.Room, session.ID, current.Host, false)
 		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}

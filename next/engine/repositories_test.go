@@ -9,11 +9,10 @@ import (
 
 type fakeRepos struct{ prepared bool }
 
-func (r *fakeRepos) Prepare(context.Context, contract.RoomID, contract.SessionID, contract.HostName) ([]contract.BoxRepo, error) {
-	r.prepared = true
-	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git"}}, nil
-}
-func (r *fakeRepos) List(context.Context, contract.RoomID, contract.SessionID, contract.HostName) ([]contract.BoxRepo, error) {
+func (r *fakeRepos) Get(_ context.Context, _ contract.RoomID, _ contract.SessionID, _ contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
+	if fetch {
+		r.prepared = true
+	}
 	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git"}}, nil
 }
 
