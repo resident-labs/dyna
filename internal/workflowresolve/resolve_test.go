@@ -47,3 +47,14 @@ func TestResolvePrecedence(t *testing.T) {
 		t.Fatalf("bundled: %q %v", path, err)
 	}
 }
+
+func TestResolveNameIgnoresRootFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "deep-research"), []byte("wrong"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	path, _, err := ResolveName("deep-research", root, t.TempDir())
+	if err != nil || path != "bundled:deep-research.js" {
+		t.Fatalf("got %q, %v", path, err)
+	}
+}
