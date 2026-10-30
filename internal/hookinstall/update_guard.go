@@ -2,7 +2,6 @@ package hookinstall
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"dyna-agent/internal/localci"
@@ -31,7 +30,7 @@ func updateBusy(ctx context.Context) (bool, error) {
 
 // updateGuard keeps a machine-wide cooldown and one notice per busy period.
 // The installer is serialized by its existing lock.
-func (s Service) updateGuard(ctx context.Context, now time.Time) (bool, error) {
+func (s Service) updateGuard(ctx context.Context, now time.Time, source string) (bool, error) {
 	busy, err := updateBusy(ctx)
 	if err != nil {
 		return false, err
@@ -62,7 +61,11 @@ id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since IN
 			}
 		}
 		if !noticed && now.Sub(time.Unix(since, 0)) >= 3*time.Hour {
-			if err = noticeUpdateWait(); err != nil {
+			notify := s.UpdateNotice
+			if notify == nil {
+				notify = noticeUpdateWait
+			}
+			if err = notify(source); err != nil {
 				return false, err
 			}
 			if _, err = db.ExecContext(ctx, "UPDATE update_restart_guard SET noticed=1 WHERE id=1"); err != nil {
@@ -77,25 +80,17 @@ id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since IN
 	return true, nil
 }
 
-func noticeUpdateWait() error {
+func noticeUpdateWait(source string) error {
 	rooms := room.DefaultStore()
-	records, err := rooms.List(false)
+	rec, err := rooms.EnsureRepoRoom(source, "")
 	if err != nil {
 		return err
 	}
-	for _, rec := range records {
-		_, err := rooms.PostEventInput(room.PostEventInput{
-			RoomID: rec.ID, Producer: room.ProducerEngine, NeedsRoot: true,
-			To: []string{rec.Name},
-			Event: room.AlertEvent{Source: room.AlertEngine,
-				Summary: "An update has waited 3 hours for CI to finish.",
-				Detail:  "Active merge trials or local CI keep the engine update waiting. Choose a quiet time or run Updates manually."},
-		})
-		if err != nil {
-			return fmt.Errorf("notify %s: %w", rec.Name, err)
-		}
-	}
-	return nil
+	_, err = rooms.PostEventInput(room.PostEventInput{
+		RoomID: rec.ID, Producer: room.ProducerEngine, NeedsRoot: true, To: []string{rec.Name},
+		Event: room.AlertEvent{Source: room.AlertEngine, Summary: "An update has waited 3 hours for CI to finish.", Detail: "Active merge trials or local CI keep the engine update waiting. Choose a quiet time or run Updates manually."},
+	})
+	return err
 }
 
 func (s Service) recordUpdateRestart(ctx context.Context, now time.Time) error {
