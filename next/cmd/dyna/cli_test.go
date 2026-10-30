@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -20,6 +21,9 @@ type fakeClient struct {
 	post     contract.PostRequest
 	events   []contract.Event
 	after    int64
+	opList   contract.OpListRequest
+	opDecide contract.OpDecideRequest
+	ops      []contract.Operation
 }
 
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
@@ -57,6 +61,14 @@ func (f *fakeClient) EventsList(_ context.Context, q contract.EventsListRequest)
 func (f *fakeClient) Events(_ context.Context, _ contract.RoomID, after int64, emit func(contract.Event) error) error {
 	f.after = after
 	return emit(contract.Event{Seq: 3, Body: contract.PostCreated{Text: "third"}})
+}
+func (f *fakeClient) OpList(_ context.Context, q contract.OpListRequest) (contract.OpListResponse, error) {
+	f.opList = q
+	return contract.OpListResponse{Operations: f.ops}, nil
+}
+func (f *fakeClient) OpDecide(_ context.Context, q contract.OpDecideRequest) (contract.OpDecideResponse, error) {
+	f.opDecide = q
+	return contract.OpDecideResponse{}, nil
 }
 func runCLI(t *testing.T, f *fakeClient, args ...string) string {
 	t.Helper()
@@ -130,5 +142,30 @@ func TestRoomLogFollowsInOrder(t *testing.T) {
 	out := runCLI(t, f, "room", "log", "r", "--follow")
 	if f.after != 2 || !(strings.Index(out, "first") < strings.Index(out, "second") && strings.Index(out, "second") < strings.Index(out, "third")) {
 		t.Fatalf("after=%d output=%s", f.after, out)
+	}
+}
+func TestOpListPrintsOperationsAsJSON(t *testing.T) {
+	f := &fakeClient{ops: []contract.Operation{{ID: "op_1", Room: "r", State: contract.OpState("pending")}}}
+	out := runCLI(t, f, "op", "list", "r")
+	var got []contract.Operation
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output is not JSON: %v: %s", err, out)
+	}
+	if f.opList.Room != "r" || len(got) != 1 || got[0].ID != "op_1" || got[0].State != "pending" {
+		t.Fatalf("%+v: %s", f.opList, out)
+	}
+}
+func TestOpApproveMapsID(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "op", "approve", "op_1")
+	if f.opDecide.ID != "op_1" || !f.opDecide.Approve {
+		t.Fatalf("%+v", f.opDecide)
+	}
+}
+func TestOpDenyMapsReason(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "op", "deny", "op_1", "--reason", "too broad")
+	if f.opDecide.ID != "op_1" || f.opDecide.Approve || f.opDecide.Reason != "too broad" {
+		t.Fatalf("%+v", f.opDecide)
 	}
 }
