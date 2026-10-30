@@ -1300,7 +1300,11 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 			}
 		}
 		if registered == nil {
-			return fmt.Errorf("review ID was not found")
+			err := fmt.Errorf("review ID was not found")
+			if confirmed == nil && changeKind(r) == "github" {
+				return errors.Join(err, s.discardPendingResult(key, actor, in))
+			}
+			return err
 		}
 	}
 
@@ -1314,7 +1318,7 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 	// A head whose local CI definition this engine cannot parse still gets its
 	// review recorded. Merge gates read the same definition and stay closed.
 	if err != nil && !errors.Is(err, localci.ErrDefinitionInvalid) {
-		if confirmed == nil && changeKind(r) == "github" {
+		if changeKind(r) == "github" {
 			return &ErrPendingVerdict{}
 		}
 		return err
@@ -1335,6 +1339,9 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 
 	err = s.recordReviewResult(key, actor, in, snap, pull, registered, noQueue, confirmed != nil)
 	if err != nil {
+		if confirmed == nil && changeKind(r) == "github" {
+			return errors.Join(err, s.discardPendingResult(key, actor, in))
+		}
 		return err
 	}
 	return s.flush(ctx, key)
