@@ -132,9 +132,9 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	out["DYNA_BIN"] = filepath.Join(bin, "dyna")
 	// Tools write the global Git config (gh auth setup-git, git config --global),
 	// so GIT_CONFIG_GLOBAL is a writable file that includes the immutable one.
-	// One file per publication, created once. Tool writes from newer publications
-	// are appended, never rewritten: a running session keeps its settings, and a
-	// tool's write is never lost to a rewrite.
+	// One file per publication. Tool writes from a newer publication replace this
+	// file's tool settings by rename, so a key a newer publication changed or
+	// unset stays right. A tool write that lands during the sync is never lost.
 	writable := filepath.Join(Home(nativeScope), ".dyna-gitconfig-"+filepath.Base(publication))
 	if err := createWritableGitConfig(writable, filepath.Join(publication, "gitconfig")); err != nil {
 		return nil, err
@@ -488,7 +488,8 @@ func gitConfigHeader(published string) string {
 
 // earlierToolSettings returns what tools wrote to the newest other writable
 // config in dir after since: its text after the include lines that Prepare put first.
-func earlierToolSettings(dir, self string, since time.Time) string {
+// The bool reports whether such a config exists, even when it holds no settings.
+func earlierToolSettings(dir, self string, since time.Time) (string, bool) {
 	matches, _ := filepath.Glob(filepath.Join(dir, ".dyna-gitconfig-*"))
 	newest, newestTime := "", time.Time{}
 	for _, match := range matches {
@@ -501,29 +502,28 @@ func earlierToolSettings(dir, self string, since time.Time) string {
 		}
 	}
 	if newest == "" {
-		return ""
+		return "", false
 	}
 	data, err := os.ReadFile(newest)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	text := string(data)
 	if !strings.HasPrefix(text, "[include]\n\tpath = ") {
-		return text
+		return text, true
 	}
 	_, rest, _ := strings.Cut(text, "\n")
 	_, rest, _ = strings.Cut(rest, "\n")
-	return rest
+	return rest, true
 }
 
 // createWritableGitConfig creates path as a Git config that includes the
-// published, immutable one. An existing file keeps its content, and tool writes
-// newer than it are appended, so a running session keeps reading the same file.
-// The new file appears whole or not at all, so a concurrent launch never reads
-// half of it.
+// published, immutable one. An existing file gets the newer tool settings of
+// other publications. A new file appears whole or not at all, so a concurrent
+// launch never reads half of it.
 func createWritableGitConfig(path, published string) error {
 	if info, err := os.Lstat(path); err == nil {
-		return appendNewerToolSettings(path, info.ModTime())
+		return syncNewerToolSettings(path, published, info)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -539,7 +539,8 @@ func createWritableGitConfig(path, published string) error {
 	// A tool's earlier writes carry over from the most recently written config of
 	// another publication, so a changed PATH does not drop `gh auth setup-git`.
 	// They are copied, not included: includes nest at most ten deep.
-	_, err = tmp.WriteString(gitConfigHeader(published) + earlierToolSettings(dir, path, time.Time{}))
+	earlier, _ := earlierToolSettings(dir, path, time.Time{})
+	_, err = tmp.WriteString(gitConfigHeader(published) + earlier)
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
@@ -556,30 +557,53 @@ func createWritableGitConfig(path, published string) error {
 	return nil
 }
 
-// appendNewerToolSettings appends the tool writes made after path was last
-// written. Git reads later sections last, so the newer values win. Appending
-// never rewrites what a tool or a running session already reads.
-func appendNewerToolSettings(path string, modified time.Time) error {
-	newer := earlierToolSettings(filepath.Dir(path), path, modified)
-	if newer == "" {
+// syncNewerToolSettings makes path hold the tool settings of the newest other
+// publication. Git reads one value per key, so a newer value replaces the old
+// one and an unset key stays unset; appending would repeat keys and keep them.
+// The file is replaced by rename, so a running session reads the old file or
+// the new one. When a tool writes during the sync, the sync stops and the next
+// launch retries.
+func syncNewerToolSettings(path, published string, read os.FileInfo) error {
+	newer, found := earlierToolSettings(filepath.Dir(path), path, read.ModTime())
+	if !found {
 		return nil
 	}
+	want := gitConfigHeader(published) + newer
 	current, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	if strings.Contains(string(current), newer) {
+	if string(current) == want {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".harnesshome-*")
 	if err != nil {
 		return err
 	}
-	_, err = f.WriteString(newer)
-	if closeErr := f.Close(); err == nil {
+	defer os.Remove(tmp.Name())
+	_, err = tmp.WriteString(want)
+	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
-	return err
+	if err == nil {
+		err = os.Chmod(tmp.Name(), 0600)
+	}
+	if err != nil {
+		return err
+	}
+	// Git holds path.lock while it writes the file. A file that changed since read
+	// was written by a tool, so its settings stay and this launch skips the sync.
+	if _, err := os.Lstat(path + ".lock"); err == nil {
+		return nil
+	}
+	now, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !now.ModTime().Equal(read.ModTime()) || now.Size() != read.Size() {
+		return nil
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // AgentGitName and AgentGitEmail are the Git identity of agent commits. The

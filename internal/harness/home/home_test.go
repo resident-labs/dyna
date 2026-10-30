@@ -631,3 +631,47 @@ func TestGitWriteFromANewerPublicationReachesAnOlderOne(t *testing.T) {
 		t.Fatalf("the newer write is missing from the older publication: %q %v", out, err)
 	}
 }
+
+// D-292: when the newer publication changes or removes a Git setting, returning to
+// the older publication must show that change, with no stale or duplicate value.
+func TestGitWriteOverridesAndRemovesInAnOlderPublication(t *testing.T) {
+	scope, _, env := fixture(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	older, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitWrite := func(launch map[string]string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(git, append([]string{"config", "--global"}, args...)...)
+		cmd.Env = merged(env, launch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config --global %v: %s %v", args, out, err)
+		}
+	}
+	gitWrite(older, "credential.helper", "old")
+	gitWrite(older, "user.name", "Old Name")
+	newer, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitWrite(newer, "credential.helper", "new")
+	gitWrite(newer, "--unset", "user.name")
+	back, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := exec.Command(git, "config", "--global", "--includes", "--get-all", "credential.helper")
+	values.Env = merged(env, back)
+	if out, err := values.Output(); err != nil || strings.TrimSpace(string(out)) != "new" {
+		t.Fatalf("older publication has stale or duplicate helpers: %q %v", out, err)
+	}
+	name := exec.Command(git, "config", "--global", "--includes", "--get", "user.name")
+	name.Env = merged(env, back)
+	if out, _ := name.Output(); strings.TrimSpace(string(out)) == "Old Name" {
+		t.Fatalf("a removed setting came back: %q", out)
+	}
+}
