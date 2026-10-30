@@ -15,15 +15,12 @@ import (
 	"dyna-agent/internal/userservices"
 )
 
-func TestInstallScriptSeedsTemplatesAndNeverTouchesPersonalSkills(t *testing.T) {
+func TestInstallScriptNeverTouchesPersonalSkills(t *testing.T) {
 	body, err := os.ReadFile("../../install.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(body)
-	if !strings.Contains(script, `"$BIN" templates seed`) {
-		t.Fatal("install.sh does not seed workflow templates")
-	}
 	if strings.Contains(script, "skill install") {
 		t.Fatal("install.sh must not write skills into personal harness folders")
 	}

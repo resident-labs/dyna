@@ -28,22 +28,6 @@ Scripts support top-level `await` and `return`; the return becomes the JSON resu
 
 Workers are leaf sessions. Dyna closes each when its call resolves. Open a worker from the run page to watch it, or steer it with `dyna post @run:<id>/agent:<n> "<message>"`. Workers record progress with `dyna journal`. Read `dyna guide recovery` after provider failure.
 
-### Workflow templates
-
-```bash
-dyna templates list --json
-dyna templates copy adversarial-review --to /tmp/my-review.js --json
-dyna workflow run /tmp/my-review.js --args '{"target":"src/"}'
-```
-
-Run `dyna templates --help` for save, show, seed, and overwrite options. Templates live under `--templates-dir` (default `$XDG_CONFIG_HOME/dyna/templates`). Install and update seed missing starters and update unchanged seeded copies; they preserve user edits. `dyna templates` reads the registry without executing source.
-Copies require `.js`, reject symlinks, and require `--overwrite` to replace files. Templates cannot run by name or resolve through `workflow()`.
-
-- `adversarial-review`: independent review lenses, then synthesis.
-- `judge-panel`: independent judgments, then a decision.
-- `research-design`: discovery, verification, and design.
-
-
 ## Safe automatic replay
 
 Automatic replay is off unless the author declares `const meta = { deterministic: true }`. The workflow must make the same calls in the same order for the same inputs and recorded results. Never use clocks, randomness, mutable external state, or attempt-scoped variables such as `DYNA_RUN_ID` for call choices or replayed results. Overlapping asynchronous calls cannot be replayed safely. Dyna checks inputs and the manifest before replay. It reports why it stopped when checks fail. Manual `--resume` uses the older cache and can repeat effects. See the README for details.

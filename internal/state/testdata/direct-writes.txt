@@ -241,7 +241,6 @@ not-state internal/workeroutput/projection/pack.go Pack.Abort 1 # removes unpubl
 not-state internal/workeroutput/projection/pack.go Pack.open 1 # unlinks the temporary mapping spool while its file descriptor remains open
 not-state internal/workeroutput/projection/pack.go publish 1 # removes the staging name after publishing an immutable content-addressed output blob
 not-state internal/workflowsvc/launch.go Launch 3 # immutable script and launch input snapshots plus the runner raw daemon log; blobs stay files (item 20)
-not-state internal/workflowtemplate/catalog.go replaceRegularFile 1 # only editable .js source blobs; seed metadata is written to SQLite through internal/state
 not-state internal/worktrees/lifecycle.go CreateForRun 2 # Removes failed git worktree allocations; registry records stay in SQLite.
 not-state internal/worktrees/worktrees.go Remove 1 # Removes an orphaned git worktree directory; MarkRemoved deletes its SQLite registry record through state.Write.
 not-state internal/goals/sqlite.go Store.convertJournals 2 # one-time schema-2 migration rewrites the room's append-only journal JSONL in place; the file is a log, not shared SQLite state (r10)
