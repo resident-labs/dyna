@@ -832,13 +832,15 @@ func (s *Service) waitForRef(ctx context.Context, attempt int) error {
 // Cancellation of a still-current head restores the hosted work we removed.
 // Superseded heads stay cancelled. A timeout also saves an infrastructure error.
 func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob, repo string, node localci.Node, result localci.Result) error {
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
+	defer cancel()
 	st, err := s.Store.Read()
 	if err != nil {
 		return err
 	}
 	current := false
 	candidates := registeredCIJobs(st)
-	headJobs, err := s.localOnlyPRHeadJobs(ctx, st)
+	headJobs, err := s.localOnlyPRHeadJobs(recoveryCtx, st)
 	if err != nil {
 		return err
 	}
@@ -857,8 +859,6 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 	if !current {
 		return nil
 	}
-	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
-	defer cancel()
 	var saveErr error
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
