@@ -16,9 +16,11 @@ import (
 )
 
 // serviceRegistry lists every service for a room. The CLI and the Services
-// page both read this call, so they show the same rows. A part the engine
+// page both read this call, so they show the same rows. A caller that names a
+// repository gets that repository's rows; otherwise the room's own repository
+// applies. A part the engine
 // cannot read leaves its service unreadable and does not hide the others.
-func (s services) serviceRegistry(ctx context.Context, roomRef string) ([]serviceregistry.Service, error) {
+func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]serviceregistry.Service, error) {
 	rec, err := s.rooms.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return nil, err
@@ -90,10 +92,13 @@ func (s services) serviceRegistry(ctx context.Context, roomRef string) ([]servic
 	for id, h := range global {
 		f.Hooks[serviceregistry.ID(id)] = h
 	}
-	if rec.Repo != "" {
-		repoHooks := s.hookFacts(ctx, rec.Repo)
+	if repo == "" {
+		repo = rec.Repo
+	}
+	if repo != "" {
+		repoHooks := s.hookFacts(ctx, repo)
 		f.Hooks[serviceregistry.IDUpdates] = repoHooks["self-update"]
-		f.Library = s.libraryFacts(ctx, rec.Repo, rec.Name, view)
+		f.Library = s.libraryFacts(ctx, repo, rec.Name, view)
 	}
 	return serviceregistry.Build(f), nil
 }
@@ -139,6 +144,7 @@ func (s services) libraryFacts(ctx context.Context, repo, roomName string, view 
 	if r, err := repoid.Resolve(ctx, repo); err == nil {
 		if st, err := (librarianstate.Store{DataDir: store.DataDir()}).Get(r.ID); err == nil {
 			l.LastRun = st.LastRun
+			l.Running = st.Pending != ""
 		}
 	}
 	l.NextRun, _ = s.librarianDeferred(ctx, repo)
