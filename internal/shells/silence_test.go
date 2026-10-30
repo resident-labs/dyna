@@ -9,7 +9,7 @@ import (
 func TestQuietPeriodRequiresContinuousFreshCoverage(t *testing.T) {
 	now := time.Unix(3600, 0)
 	threshold := 30 * time.Minute
-	signal := activity.Signal{Copier: activity.CopierRunning, CPU: activity.CPUUnsupported, ObservedSince: now.Add(-time.Hour), LastOutput: now.Add(-threshold), LeaseUntil: now.Add(time.Second)}
+	signal := activity.Signal{Copier: activity.CopierRunning, CPU: activity.CPUUnsupported, ObservedSince: now.Add(-time.Hour), LastOutput: now.Add(-threshold), LeaseUntil: now.Add(activity.Lease)}
 	if !quietPeriod(signal, now, threshold) {
 		t.Fatal("continuous quiet observation should be reported")
 	}
@@ -22,6 +22,13 @@ func TestQuietPeriodRequiresContinuousFreshCoverage(t *testing.T) {
 		if quietPeriod(s, now, threshold) {
 			t.Fatalf("unproven quiet period: %+v", s)
 		}
+	}
+	// Output can be pending after the last proof. Crossing the threshold
+	// since that proof is not evidence of a complete quiet period.
+	pending := signal
+	pending.LeaseUntil = now.Add(activity.Lease - time.Second)
+	if quietPeriod(pending, now, threshold) {
+		t.Fatal("unpublished output could be pending")
 	}
 	if quietPeriod(signal, now, 0) {
 		t.Fatal("disabled threshold reported")
