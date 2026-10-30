@@ -8,15 +8,24 @@ type Usage struct {
 	CostUSD      float64 `json:"costUsd,omitempty"`
 }
 
+// Coverage says how fully a usage metric was observed in one turn.
+type Coverage string
+
+const (
+	CoverageComplete Coverage = "complete"
+	CoveragePartial  Coverage = "partial"
+	CoverageUnknown  Coverage = "unknown"
+)
+
 // UsageNormalization describes observed coverage, not billing verification.
 // Absent metadata identifies legacy records whose counters have not been normalized.
 type UsageNormalization struct {
-	Version     int    `json:"version"`
-	Source      string `json:"source"`
-	Input       string `json:"input"`
-	CachedInput string `json:"cachedInput"`
-	Output      string `json:"output"`
-	Cost        string `json:"cost"`
+	Version     int      `json:"version"`
+	Source      string   `json:"source"`
+	Input       Coverage `json:"input"`
+	CachedInput Coverage `json:"cachedInput"`
+	Output      Coverage `json:"output"`
+	Cost        Coverage `json:"cost"`
 	// CostBasis is CostBasisTurn when Cost holds this turn's own spend. Claude
 	// turns saved before it was set hold the session's cumulative total.
 	CostBasis string `json:"costBasis,omitempty"`
