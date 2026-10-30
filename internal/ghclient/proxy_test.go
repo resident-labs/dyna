@@ -121,7 +121,7 @@ func TestPinnedReviewArgsPinAndClassifyAsAgent(t *testing.T) {
 	}
 }
 
-func TestPublishThroughApprovalHoldsPRComment(t *testing.T) {
+func TestSubmitHoldsPRComment(t *testing.T) {
 	records := setupRooms(t, "owner/project")
 	originalRequest, originalWait := requestApproval, waitApproval
 	t.Cleanup(func() { requestApproval, waitApproval = originalRequest, originalWait })
@@ -134,7 +134,7 @@ func TestPublishThroughApprovalHoldsPRComment(t *testing.T) {
 		return approvals.Request{ID: id, State: approvals.StatePending, At: "room:parent"}, nil
 	}
 	args := []string{"pr", "comment", "https://github.com/owner/project/pull/7", "--body", "feedback"}
-	err := PublishThroughApproval(context.Background(), records[0].ID, t.TempDir(), args)
+	err := Submit(context.Background(), records[0].ID, t.TempDir(), args)
 	if SessionExitCode(err) != 75 {
 		t.Fatalf("error = %v", err)
 	}
