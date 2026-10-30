@@ -19,8 +19,8 @@
   import RowItem from '../ui/Row.svelte'
   import PRGlyph from './PRGlyph.svelte'
   import Chip from '../ui/Chip.svelte'
-  import { toneOf } from '../ui/tone.ts'
-  import { ciLabel, reviewLabel, mergePosition } from './roomPRs.ts'
+  import StatusPill from '../ui/StatusPill.svelte'
+  import { nextAction } from './nextAction.ts'
   import MergingStrip from './MergingStrip.svelte'
   import { openPRs } from './roomPRs.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
@@ -36,7 +36,7 @@
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
   import { changeTitle, isLocal, withoutReviewers } from './pr.ts'
-  import { authorName, mergeState, listView, rowsFromGitHub, moveKey, reviewerRef, type Names, type Row, type SessionRef } from './prlist.ts'
+  import { authorName, listView, rowsFromGitHub, moveKey, reviewerRef, type Names, type Row, type SessionRef } from './prlist.ts'
   import { neighbor } from './prboard.ts'
   import { prHash, parsePRHash, prRef, findPR, lookupNumber, issueHash, parseIssueHash, type Link } from './prlink.ts'
   import { roomHash, routeHash } from '../ui/route.ts'
@@ -500,22 +500,19 @@
   {#if inPRs}
       <div class="list prlist" hidden={narrow && !!chg}>
         <TabHeader title="Pull requests" usage={`${listRows.length} ${tracked ? 'tracked' : 'open'}`} />
-        <MergingStrip status={mergeStatus} failed={mergeFailed} onretry={loadMerge} onpick={openMerge} onresume={resumeMerging} {resuming} {resumeError} />
+        <MergingStrip status={mergeStatus} rows={allRows} failed={mergeFailed} onretry={loadMerge} onpick={openMerge} onresume={resumeMerging} {resuming} {resumeError} />
         {@render filters()}
         {#if !tracked && failed}<LoadFailed title="GitHub did not answer" hint="The open pull requests on GitHub could not be listed." onretry={load} />{:else if !tracked && list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {#if anyRows}
           <div class="rows">
             {#each listRows as row (row.changeId)}
-              {@const ci = ciLabel(row)}{@const review = reviewLabel(row)}
               {@const item = merge?.find((entry) => entry.changeId === row.changeId)}
-              {@const state = mergeState(row, item)}
+              {@const action = nextAction(row, item)}
               <div class="item">
                 <RowItem selected={row.changeId === selId} onclick={() => openRow(row)}>
                   {#snippet lead()}<PRGlyph it={row} />{/snippet}
-                  <div class="row-title">{changeTitle(row)} {#if row.isDraft}<Chip>Draft</Chip>{/if} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
-                  <div class="row-author">#{row.number}{#if authorName(row, names)}{` by ${authorName(row, names)}`}{/if}</div>
-                  <div class="row-facts"><Chip tone={toneOf(ci.tone)}>{ci.label}</Chip><Chip tone={toneOf(review.tone)} title={row.reviewBlocked}>{review.label}</Chip>{#if row.fixes?.length}<Chip outline title="Merging this PR closes these issues">Fixes {fixesLabel(row.fixes)}</Chip>{/if}{#if row.upstreamPr}<Chip outline title="Dyna tracks CI, reviews, labels and comments. Maintainers merge this PR.">Maintainers merge</Chip>{:else}<span>{mergePosition(row.changeId ?? '', merge ?? [])}</span>{/if}</div>
-                  {#if item && !item.trial && item.state !== 'ready'}<div class="row-author">{state.reason || state.label}</div>{/if}
+                  <div class="row-title">{changeTitle(row)} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
+                  <div class="row-facts"><span>#{row.number}{#if authorName(row, names)}{` by ${authorName(row, names)}`}{/if} · {#if action.tone}<StatusPill tone={action.tone} label={action.label} />{:else}{action.label}{/if}{#if action.others.length}{' '}<span title={action.others.join(', ')}>+{action.others.length}</span>{/if}</span>{#if row.fixes?.length}<Chip outline title="Merging this PR closes these issues">Fixes {fixesLabel(row.fixes)}</Chip>{/if}{#if row.upstreamPr}<Chip outline title="Dyna tracks CI, reviews, labels and comments. Maintainers merge this PR.">Maintainers merge</Chip>{/if}</div>
                 </RowItem>
                 <RowActions name={rowName(row)} onmention={onmention ? () => mentionRow(row) : null} items={rowMenu(row)} />
               </div>
