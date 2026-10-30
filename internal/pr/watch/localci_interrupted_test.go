@@ -323,4 +323,11 @@ func TestTrialInfrastructureRetryIsSpentAcrossDifferentCauses(t *testing.T) {
 	if err != nil || verdict != VerdictFailed || cisched.SavedResultActionFor(second) != cisched.SettleSavedResult {
 		t.Fatalf("replacement failure: verdict=%s action=%v err=%v", verdict, cisched.SavedResultActionFor(second), err)
 	}
+	mixed := first
+	mixed.Cause = localci.CauseEngineStop
+	mixed.Checks = []localci.SuiteResult{{CheckName: "test", Status: localci.OutcomeFailed, Cause: localci.CauseTestFailure}}
+	verdict, _, _, err = localCIStatus(mixed, "repo", "head", nil, nil)
+	if err != nil || verdict != VerdictFailed || cisched.SavedResultActionFor(mixed) != cisched.SettleSavedResult {
+		t.Fatalf("test failure beside interruption: verdict=%s action=%v err=%v", verdict, cisched.SavedResultActionFor(mixed), err)
+	}
 }
