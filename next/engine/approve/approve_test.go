@@ -31,7 +31,7 @@ type fixture struct {
 func setup(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{now: time.Unix(1000, 0), class: contract.ClassAgent}
-	st, err := store.Open(t.TempDir(), func() time.Time { return f.now })
+	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
