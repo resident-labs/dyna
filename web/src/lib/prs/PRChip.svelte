@@ -16,7 +16,7 @@
 <span class="pr-chip" title="{pr.kind === 'local' ? 'Local change' : `PR #${pr.number}`}{pr.title ? ': ' + pr.title : ''} · {meta.label}{more ? ` · ${more} more` : ''}">
   {#if badge && prExpedited($expedite, pr)}<span title="Expedited" aria-label="Expedited">⚡</span>{/if}
   {#if number}<span class="num">{changeName(pr)}</span>{/if}
-  {#if !short}{#key meta.label}<span class="label" in:fade={{ duration: motion(FAST) }}>{#if attention}<StatusPill tone={attention} label={meta.label} />{:else}{meta.label}{/if}</span>{/key}{/if}
+  {#if !short || attention}{#key meta.label}<span class="label" in:fade={{ duration: motion(FAST) }}>{#if attention}<StatusPill tone={attention} label={meta.label} />{:else}{meta.label}{/if}</span>{/key}{/if}
   {#if more}<span class="more">+{more}</span>{/if}
 </span>
 
