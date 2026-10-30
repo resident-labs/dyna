@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -116,6 +117,28 @@ func TestWaitTimeoutUsesOneNotice(t *testing.T) {
 	}
 	if got := strings.Count(notice.String(), "\n"); got != 1 {
 		t.Fatalf("notice lines = %d", got)
+	}
+}
+
+func TestSlotDirectoryWithoutRuntimeDir(t *testing.T) {
+	root := t.TempDir()
+	first, err := slotDirectory("", root, os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := slotDirectory("", root, os.Getuid())
+	if err != nil || first != second {
+		t.Fatalf("fallback not shared: %q %q, %v", first, second, err)
+	}
+	info, err := os.Stat(filepath.Dir(first))
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("fallback permissions: %v, %v", info, err)
+	}
+	if err := os.Chmod(filepath.Dir(first), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := slotDirectory("", root, os.Getuid()); err == nil {
+		t.Fatal("accepted a public fallback directory")
 	}
 }
 
