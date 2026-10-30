@@ -1,12 +1,14 @@
 package websvc
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/nodehistory"
+	"dyna-agent/internal/sysload"
 )
 
 func TestNodeHistoryAndLatestDiagnosis(t *testing.T) {
@@ -38,5 +40,29 @@ func TestNodeHistoryAndLatestDiagnosis(t *testing.T) {
 	diagnosis, err := api.NodeLastDiagnosis(t.Context(), node.ID)
 	if err != nil || diagnosis == nil || !diagnosis.Healthy || diagnosis.Summary != "Healthy" {
 		t.Fatalf("diagnosis = %+v, %v", diagnosis, err)
+	}
+}
+
+func TestLocalNodeHistoryUsesSamplerHostname(t *testing.T) {
+	api := machineAPI(t)
+	if err := doctor.Migrate(api.Store.DataDir); err != nil {
+		t.Fatal(err)
+	}
+	local, err := api.Store.GetLocal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cpu := 42.0
+	sample := sysload.Load{At: time.Now(), CPUs: 4, CPUPercent: &cpu, Memory: sysload.Memory{Total: 100, Used: 30}, Groups: []sysload.Group{{Name: "machine", Memory: 30}}}
+	if err := (doctor.Samples{DataDir: api.Store.DataDir}).Record(host, sample); err != nil {
+		t.Fatal(err)
+	}
+	points, err := api.NodeHistory(t.Context(), local.ID)
+	if err != nil || len(points) != 1 || points[0].CPUPercent == nil || *points[0].CPUPercent != cpu {
+		t.Fatalf("local history = %+v, %v", points, err)
 	}
 }
