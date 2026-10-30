@@ -139,10 +139,8 @@ func initialize(dir, path string) error {
 	}
 	temp := f.Name()
 	defer os.Remove(temp)
-	if err := f.Close(); err != nil {
-		return err
-	}
-	db, err := sql.Open("sqlite", "file:"+url.PathEscape(temp))
+	defer f.Close()
+	db, err := sql.Open("sqlite", "file:"+url.PathEscape(temp)+"?_pragma=synchronous(OFF)&_pragma=journal_mode(OFF)")
 	if err != nil {
 		return err
 	}
@@ -171,6 +169,9 @@ func initialize(dir, path string) error {
 	}
 	if closeErr != nil {
 		return closeErr
+	}
+	if err := f.Sync(); err != nil {
+		return err
 	}
 	return os.Link(temp, path)
 }
