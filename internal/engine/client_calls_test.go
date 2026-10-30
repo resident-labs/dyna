@@ -8,34 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/roomsvc"
 )
 
-// TestClientCallsAreServedByTheEngine guards the oldest contract Dyna has: a
-// session can outlive an engine self-update, so the dyna build it still runs
-// must reach every call it sends. PR #345 renamed RecordPRVerdict and a live
-// reviewer could not record its verdict afterwards ("engine dev+af9744a has no
-// RecordPRVerdict method"). This test fails when a client names a call that the
-// engine does not serve, so the rename lands with a shim instead.
-//
-// The test reads the client source, because the method name is a string at each
-// call site. An engine request replayed from the outbox (engineclient) is not
-// visible here: it was saved by an older build, and callspec.LegacyCalls is
-// what keeps such a request working.
+// TestClientCallsAreServedByTheEngine checks each current client call.
 func TestClientCallsAreServedByTheEngine(t *testing.T) {
 	served := map[string]bool{}
 	for _, binding := range bindings(services{rooms: &roomsvc.Service{}}) {
 		served[binding.Name] = true
-	}
-	// Every legacy name stays served, and so does the call it forwards to.
-	for name, legacy := range callspec.LegacyCalls {
-		if !served[name] {
-			t.Errorf("legacy call %s is not served; keep its shim until the release in callspec.LegacyCalls", name)
-		}
-		if !served[legacy.Replacement] {
-			t.Errorf("legacy call %s forwards to %s, which is not served", name, legacy.Replacement)
-		}
 	}
 	sites, err := clientCallSites("../../internal", "../../cmd")
 	if err != nil {
@@ -78,7 +58,7 @@ func TestClientCallsAreServedByTheEngine(t *testing.T) {
 		t.Fatal("the walk found no call of RecordReviewResult; the client folders moved, so this guard would pass without checking anything")
 	}
 	for problem := range missing {
-		t.Errorf("%s, which the engine does not serve; keep a legacy shim (callspec.LegacyCalls) or change the client", problem)
+		t.Errorf("%s, which the engine does not serve; change the client or serve the call", problem)
 	}
 }
 

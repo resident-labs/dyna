@@ -132,7 +132,6 @@ var WriteCalls = map[string]bool{
 	"PromoteSession":              true,
 	"PruneWorktrees":              true,
 	"ReconcileHookInstall":        true,
-	"RecordPRVerdict":             true,
 	"RecordReviewResult":          true,
 	"ReleasePRReviewers":          true,
 	"RemoveCatalogEntry":          true,

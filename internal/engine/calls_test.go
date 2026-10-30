@@ -373,7 +373,7 @@ func TestEveryCallHasOneScope(t *testing.T) {
 	}{
 		{websvc.ScopeRead, `RunnerWaitInput WaitRunAgent Health SystemLoad Nodes Node NodeWork NodeHistory NodeLastDiagnosis Rooms FeedTail FeedAfter FeedAround SearchFeed OpenRoom Members MentionChoices Preview Commands Transcript TranscriptMore RootSession HeldPRComments TranscriptPage TranscriptAfter TranscriptTurn Profile Profiles RoomSessionControls SessionTransfer SessionConsolidations RoomCIBudget CIHealth CIHealthRun CIHealthTest RoomChangePolicy Changes ChangeDetail PRHold MergeStatus MergeControlStatus RoomMergeStatus RoomMergeHistory ReviewerStatus ListServices ServiceRegistry GitHubList GitHubView TrackedIssues GitHubDiff Runs RunDetail RunResult AttachmentText Pins Issues Library CallRequests Questions Visuals Rules Goals Goal GoalJournal GoalItems GoalItemCounts GoalStatus GoalEvents ListWorkflows SessionQueue Notices OwnerProfile AccountsView UsageRollup ProfileUsage VoiceStatus PRSettings PRNoiseRules SyncStatus JobShow WaitJob JobList JobLogs RoomMCPList`},
 		{websvc.ScopeOperate, "StampPlanAncestry AdmitNativeAttempt AddRunDirectories FinishRun ObserveClaudeUsage WebSearch VoiceSay RoomMCPAccess RoomMCPAgentTools RoomMCPCall"},
-		{websvc.ScopeOperate, `StartRunAgent CloseRunAgent CloseRunAgents WakeLibrarian WakeLibrarianSmellsNow FileLibrarySmell AddLibraryEntry UpdateLibraryEntry LinkLibraryEntry RetireLibraryEntry NewWorktree GCWorktrees RemoveWorktrees PruneWorktrees ApplyRunWorktreeDisposition MarkRead MarkReadMany MarkRoomRead RunCommand SendToSession SendWithReferences SendToSessionWithReferences Send SendFromCard AnswerQuestionFromCard Post StopSession BulkSessionAction SetSenderMute PauseRoomSessions ResumeRoomSessions ClearDormantSessions DismissSession ReturnSeat CloseSession CloseSessionOptions ReopenSession ForceCloseSession PromoteSession TransferSession CancelSessionTransfer SubmitTransferHandoff ConsolidateSessions ResumeSessionConsolidation CancelSessionConsolidation ReplyToFinding SendDiffComments SendWorktreeComments RestartReviewer StartIssueWork DismissPRComment AdmitPRComment CommentPR EditPR PostPRReview LearnPRNoise UntrackPR ResumePR TrackPR TrackPRRef TransferPR SetPRDraft ClosePR RequirePRReviewers ReleasePRReviewers CloseChange OpenChange RecordReviewResult RecordPRVerdict Attach Pin Unpin CloseIssue IssueGoal RequestCall WithdrawCall CallRequestShown DeclineCallRequest ApprovalRequest ApprovalList ApprovalHeld ApprovalDecide ApprovalCancel ApprovalWait ApprovalLog AskQuestion WithdrawQuestion AnswerQuestion FileTerminalRequest ApproveRequest DenyRequest WithdrawRequest AddGoal AddGoalItem MoveGoalItem EditGoalSelectors EditGoalItem EditGoal AmendGoalBrief FinishGoal ExpediteGoal SetPRGoal SetGoalItemState NoteGoal RunnerSetPid RunnerSetRuntimePin RunnerSetInstructionsStale RunnerSetHarnessSession RunnerSetDMCursor RunnerFinish RunnerTurnStart RunnerTurnNote RunnerTurnEnd RunnerCompleteTurn RunnerReturnDormant RunnerInstructions RunnerClaimInput CancelRun PauseRun TransferRun RemoveRun ClearRuns ArchiveRun UnarchiveRun DeletePendingSteer DismissPendingPost DismissNotice VoiceStart VoiceResume VoiceStop AttachSeat AdoptSession RenameSession StartSubagent RunJob CancelJob`},
+		{websvc.ScopeOperate, `StartRunAgent CloseRunAgent CloseRunAgents WakeLibrarian WakeLibrarianSmellsNow FileLibrarySmell AddLibraryEntry UpdateLibraryEntry LinkLibraryEntry RetireLibraryEntry NewWorktree GCWorktrees RemoveWorktrees PruneWorktrees ApplyRunWorktreeDisposition MarkRead MarkReadMany MarkRoomRead RunCommand SendToSession SendWithReferences SendToSessionWithReferences Send SendFromCard AnswerQuestionFromCard Post StopSession BulkSessionAction SetSenderMute PauseRoomSessions ResumeRoomSessions ClearDormantSessions DismissSession ReturnSeat CloseSession CloseSessionOptions ReopenSession ForceCloseSession PromoteSession TransferSession CancelSessionTransfer SubmitTransferHandoff ConsolidateSessions ResumeSessionConsolidation CancelSessionConsolidation ReplyToFinding SendDiffComments SendWorktreeComments RestartReviewer StartIssueWork DismissPRComment AdmitPRComment CommentPR EditPR PostPRReview LearnPRNoise UntrackPR ResumePR TrackPR TrackPRRef TransferPR SetPRDraft ClosePR RequirePRReviewers ReleasePRReviewers CloseChange OpenChange RecordReviewResult Attach Pin Unpin CloseIssue IssueGoal RequestCall WithdrawCall CallRequestShown DeclineCallRequest ApprovalRequest ApprovalList ApprovalHeld ApprovalDecide ApprovalCancel ApprovalWait ApprovalLog AskQuestion WithdrawQuestion AnswerQuestion FileTerminalRequest ApproveRequest DenyRequest WithdrawRequest AddGoal AddGoalItem MoveGoalItem EditGoalSelectors EditGoalItem EditGoal AmendGoalBrief FinishGoal ExpediteGoal SetPRGoal SetGoalItemState NoteGoal RunnerSetPid RunnerSetRuntimePin RunnerSetInstructionsStale RunnerSetHarnessSession RunnerSetDMCursor RunnerFinish RunnerTurnStart RunnerTurnNote RunnerTurnEnd RunnerCompleteTurn RunnerReturnDormant RunnerInstructions RunnerClaimInput CancelRun PauseRun TransferRun RemoveRun ClearRuns ArchiveRun UnarchiveRun DeletePendingSteer DismissPendingPost DismissNotice VoiceStart VoiceResume VoiceStop AttachSeat AdoptSession RenameSession StartSubagent RunJob CancelJob`},
 		{websvc.ScopeFiles, `ListEntries ReadFile SyncFetch SyncRefresh GitExport GitStatus GitLastCommits GitReadFile GitHistory GitBlame GitDiff BrowseInfo BrowseDirs InspectPath`},
 		{websvc.ScopeTerminal, `TermOpen TermRequestRun TermRequestPreview TermRequestReport Terms TermAttach TermWrite TermResize TermClose ShellJobs ShellLog ShellLogRange StopShell`},
 		{websvc.ScopeComputers, `Computers Computer ComputerControl`},
@@ -489,8 +489,8 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 	if callspec.Deadline("VoiceSay") <= voice.SayTimeout {
 		t.Errorf("VoiceSay deadline %v must exceed SayTimeout %v", callspec.Deadline("VoiceSay"), voice.SayTimeout)
 	}
-	if n := len(callspec.LongCalls); n != 107 {
-		t.Fatalf("LongCalls has %d calls, want 107;a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 106 {
+		t.Fatalf("LongCalls has %d calls, want 106; a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }
 
@@ -512,24 +512,6 @@ func TestWriteCallsMatchBindings(t *testing.T) {
 		if !writes[name] {
 			t.Errorf("callspec.WriteCalls names %s, which is not a write binding", name)
 		}
-	}
-}
-
-// A dyna build from before PR #345 sends seven positional arguments to
-// RecordPRVerdict and reads its notice. The shim keeps that request shape, so
-// an older CLI never sees "takes 3 arguments, got 7" after an engine update.
-func TestLegacyReviewVerdictCallKeepsItsOldRequestShape(t *testing.T) {
-	calls := testCalls(t, false)
-	args := []json.RawMessage{
-		json.RawMessage(`"room"`), json.RawMessage(`"key"`), json.RawMessage(`"head"`),
-		json.RawMessage(`"approve"`), json.RawMessage(`"Reviewed"`), json.RawMessage(`0`),
-		json.RawMessage(`[{"severity":"nit","file":"a.go","line":4,"why":"Unclear","fix":"Rename it","replies":[]}]`),
-	}
-	_, err := calls["RecordPRVerdict"](t.Context(), args)
-	// The call itself fails: the room in this fake request does not exist. What
-	// must not fail is decoding the old request.
-	if err == nil || strings.Contains(err.Error(), "arguments") || strings.Contains(err.Error(), "argument ") {
-		t.Fatalf("the legacy review verdict request shape changed: %v", err)
 	}
 }
 
