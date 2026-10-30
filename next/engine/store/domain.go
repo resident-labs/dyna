@@ -19,6 +19,7 @@ type Session struct {
 	ID          contract.SessionID
 	Room        contract.RoomID
 	Name        string
+	Repo        contract.RepoName
 	Profile     contract.ProfileName
 	Box         contract.BoxID
 	NewRoomName string // nonempty only for a new room root
@@ -51,7 +52,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if parent != "" {
 			parentID = &parent
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES(?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Profile, "pending", goal, event.Time.UnixMilli())
+		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,repo,profile,state,goal,created_at) VALUES(?,?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Repo, session.Profile, "pending", goal, event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -172,7 +173,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Profile, &session.Box)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box)
 	return session, err
 }
 
@@ -184,7 +185,7 @@ func (s *Store) RoomByName(ctx context.Context, name contract.RoomName) (contrac
 
 func (s *Store) SessionByName(ctx context.Context, room contract.RoomID, name string) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.name=? AND s.closed_at IS NULL", room, name).Scan(&session.ID, &session.Room, &session.Name, &session.Profile, &session.Box)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.name=? AND s.closed_at IS NULL", room, name).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box)
 	return session, err
 }
 
