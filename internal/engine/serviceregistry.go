@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/pr/issuewatch"
@@ -13,6 +14,7 @@ import (
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/updaterservice"
 )
 
 // serviceRegistry lists every service for a room. The CLI and the Services
@@ -86,6 +88,7 @@ func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]
 	}
 	voice := s.voice.Status()
 	f.Voice = &serviceregistry.VoiceFacts{Available: voice.Available, Live: voice.Live}
+	f.Updates = updateFacts(ctx)
 
 	f.Hooks = map[serviceregistry.ID]serviceregistry.HookFacts{}
 	global := s.hookFacts(ctx, "")
@@ -96,11 +99,33 @@ func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]
 		repo = rec.Repo
 	}
 	if repo != "" {
-		repoHooks := s.hookFacts(ctx, repo)
-		f.Hooks[serviceregistry.IDUpdates] = repoHooks[serviceregistry.UpdatesHook]
 		f.Library = s.libraryFacts(ctx, repo, rec.Name, view)
 	}
 	return serviceregistry.Build(f), nil
+}
+
+func updateFacts(ctx context.Context) *serviceregistry.UpdateFacts {
+	cfg, err := (updaterservice.Store{DataDir: store.DataDir()}).Get(ctx)
+	if err != nil {
+		return nil
+	}
+	u := &serviceregistry.UpdateFacts{Source: cfg.Source, Enabled: cfg.Enabled, EveryMinutes: cfg.EveryMinutes, MultipleHooks: cfg.MultipleHooks}
+	if cfg.Source != "" {
+		_, err := repoid.Resolve(ctx, cfg.Source)
+		u.SourceInvalid = err != nil
+	}
+	jobs, err := hookinstall.DefaultStore().Recent(updaterservice.RunName)
+	if err != nil {
+		return nil
+	}
+	for _, job := range jobs {
+		result := job.Result
+		if job.Status != "finished" {
+			result = "pending"
+		}
+		u.Runs = append(u.Runs, serviceregistry.HookRun{Result: result, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt})
+	}
+	return u
 }
 
 // hookFacts reads every hook of one scope (the machine when repo is empty)

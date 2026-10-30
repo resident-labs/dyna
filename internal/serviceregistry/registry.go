@@ -56,6 +56,16 @@ type LibraryFacts struct {
 	Session        string
 }
 
+// UpdateFacts describes the source updater and its latest installer run.
+type UpdateFacts struct {
+	Source        string
+	Enabled       bool
+	SourceInvalid bool
+	MultipleHooks bool
+	EveryMinutes  int
+	Runs          []HookRun
+}
+
 // VoiceFacts are the voice service's facts.
 type VoiceFacts struct {
 	Available bool
@@ -76,6 +86,7 @@ type Facts struct {
 	IssueWatches int
 	Library      *LibraryFacts
 	Voice        *VoiceFacts
+	Updates      *UpdateFacts
 	// Hooks holds the hook behind each hook-backed service.
 	Hooks map[ID]HookFacts
 }
@@ -102,7 +113,7 @@ var definitions = []definition{
 	{IDLibrary, GroupAgents, "Library", "An agent keeps the feature map and docs current.", []string{"library.enabled", "library.profile", "library.smellProfile", "library.smellsPerDay", "library.readmeMaxLines"}},
 	{IDParentCheckIns, GroupAgents, "Parent check-ins", "Each parent hears how its children are doing.", []string{"sessions.checkInInterval"}},
 	{IDVoice, GroupAgents, "Voice", "Talk to Dyna in a call; it hands work to the room's root.", []string{"voice.agent", "voice.ducking", "voice.model", "voice.provider", "voice.url"}},
-	{IDUpdates, GroupThisComputer, "Updates", "Installs a new Dyna build when main changes.", []string{"updater.autoCheck"}},
+	{IDUpdates, GroupThisComputer, "Updates", "Installs a new Dyna build when main changes.", []string{"updater.source", "updater.autoCheck"}},
 	{IDLoadDoctor, GroupThisComputer, "Load doctor", "Watches this computer's load and tells the rooms that cause it.", []string{"doctor.condition"}},
 	{IDMaintenance, GroupThisComputer, "Maintenance", "Frees disk space and removes old worktrees and runs.", []string{"runs.retention", "worktrees.retention", "worktrees.minFreeBytes", "worktrees.root"}},
 	{IDAccountUsage, GroupThisComputer, "Account usage", "Keeps the usage readings of your saved accounts fresh.", nil},
@@ -154,14 +165,32 @@ func Build(f Facts) []Service {
 		case IDVoice:
 			voice(&s, f.Voice)
 		case IDUpdates:
-			s.Hook = UpdatesHook
-			hookService(&s, f.Hooks[d.id])
+			updates(&s, f.Updates)
 		default:
 			hookService(&s, f.Hooks[d.id])
 		}
 		out = append(out, s)
 	}
 	return out
+}
+
+func updates(s *Service, u *UpdateFacts) {
+	if u == nil {
+		s.State, s.Detail = StateOff, DetailUnreadable
+		return
+	}
+	if u.MultipleHooks {
+		s.State, s.Detail = StateError, DetailMultipleUpdateHooks
+		return
+	}
+	if u.Source == "" {
+		s.State = StateNotSetUp
+		return
+	}
+	hookService(s, HookFacts{Found: true, Disabled: !u.Enabled, Schedule: &Schedule{EveryMinutes: u.EveryMinutes}, Runs: u.Runs})
+	if u.SourceInvalid {
+		s.State, s.Detail = StateError, DetailUpdateSourceInvalid
+	}
 }
 
 func reviews(s *Service, r *ReviewerFacts) {
