@@ -61,8 +61,8 @@ func TestOwnerHeldMigrationMarksGoalsLeftWithTheOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after != "8" {
-		t.Fatalf("revision after the migration = %s; want one move", after)
+	if after != 8 {
+		t.Fatalf("revision after the migration = %d; want one move", after)
 	}
 	if err := s.migrate(db); err != nil {
 		t.Fatal(err)

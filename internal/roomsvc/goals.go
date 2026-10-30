@@ -562,10 +562,10 @@ func (s *Service) NoteGoal(ctx context.Context, roomRef, goal, text string) (goa
 	}
 	return s.goalService().Store.AddEvent(r.ID, goals.Event{Goal: goal, By: author.ID, Event: "note", Text: strings.TrimSpace(text)})
 }
-func (s *Service) scanGoals(signatures, work map[string]string, version *string, first bool, emit func(Event)) {
+func (s *Service) scanGoals(signatures, work map[string]string, version *int64, first bool, emit func(Event)) {
 	s.scanGoalsAt(time.Now(), signatures, work, version, first, emit)
 }
 
-func (s *Service) scanGoalsAt(now time.Time, signatures, work map[string]string, version *string, first bool, emit func(Event)) {
+func (s *Service) scanGoalsAt(now time.Time, signatures, work map[string]string, version *int64, first bool, emit func(Event)) {
 	goalScan{service: s.goalService()}.run(now, signatures, work, version, first, emit)
 }

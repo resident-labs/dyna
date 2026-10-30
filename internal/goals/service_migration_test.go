@@ -50,7 +50,7 @@ func TestSchemaThreeRetiresOnlyExplicitServiceGoals(t *testing.T) {
 		t.Fatal(st)
 	}
 	after, _ := s.Revision()
-	if after != "8" {
+	if after != 8 {
 		t.Fatal("revision", after)
 	}
 	if err := s.migrate(db); err != nil {

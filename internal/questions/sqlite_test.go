@@ -61,7 +61,7 @@ func migratedQuestions(t *testing.T, root string) {
 	}
 	defer db.Close()
 	var value int
-	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'questions.schema'").Scan(&value); err != nil || value != 3 {
+	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'questions.schema'").Scan(&value); err != nil || value != 4 {
 		t.Fatalf("schema version: %d, %v", value, err)
 	}
 }
@@ -193,7 +193,7 @@ func TestQuestionRollbackAndNoopKeepRevision(t *testing.T) {
 	}
 	after, err := s.Revision()
 	if err != nil || after != revision {
-		t.Fatalf("revision changed on rollback/noop: %s -> %s, %v", revision, after, err)
+		t.Fatalf("revision changed on rollback/noop: %d -> %d, %v", revision, after, err)
 	}
 	st, err := s.Read()
 	if err != nil || st.Next[q.Room] != 1 || st.Questions[key(q.Room, q.ID)].Text != q.Text {
@@ -269,7 +269,7 @@ func TestInterruptedQuestionImportRetriesUnchangedSource(t *testing.T) {
 	}
 	defer database.Close(filepath.Dir(root))
 	if _, err := db.Exec(`CREATE TRIGGER interrupt_import BEFORE INSERT ON meta
-WHEN NEW.key='questions.schema' AND NEW.value='3' BEGIN SELECT RAISE(ABORT,'interrupted import'); END`); err != nil {
+WHEN NEW.key='questions.schema' AND NEW.value='4' BEGIN SELECT RAISE(ABORT,'interrupted import'); END`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Read(); err == nil || !strings.Contains(err.Error(), "interrupted import") {
@@ -407,11 +407,11 @@ func TestQuestionImportPreservesRawSourceAndCanonicalState(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.wantError {
-				if version == 3 || rows != 0 || counters != 0 {
+				if version == 4 || rows != 0 || counters != 0 {
 					t.Fatalf("failed import committed: version=%d rows=%d counters=%d", version, rows, counters)
 				}
 			} else {
-				if version != 3 || markers != 0 {
+				if version != 4 || markers != 0 {
 					t.Fatalf("migration: version=%d markers=%d", version, markers)
 				}
 				if tc.canonical == "" && tc.name != "empty" {
@@ -434,12 +434,12 @@ func TestQuestionImportPreservesRawSourceAndCanonicalState(t *testing.T) {
 						t.Fatalf("canonical state replaced: %+v", st)
 					}
 					revision, err := s.Revision()
-					want := "0"
+					want := int64(0)
 					if tc.name == "revision" {
-						want = "17"
+						want = 17
 					}
 					if err != nil || revision != want {
-						t.Fatalf("revision %s, %v; want %s", revision, err, want)
+						t.Fatalf("revision %d, %v; want %d", revision, err, want)
 					}
 				}
 				if err := s.update(func(st *State) error { st.Next = map[string]int{}; st.Questions = map[string]Question{}; return nil }); err != nil {

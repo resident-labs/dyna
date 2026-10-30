@@ -46,7 +46,7 @@ func TestRestingMigrationPreservesStoredGoalAndReplaysOnce(t *testing.T) {
 	}
 
 	after, _ := s.Revision()
-	if after != "42" {
+	if after != 42 {
 		t.Fatal("normalization did not advance revision")
 	}
 	if err := db.QueryRow("SELECT state,body FROM goals WHERE id='g1'").Scan(&state, &body); err != nil {

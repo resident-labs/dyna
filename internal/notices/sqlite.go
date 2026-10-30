@@ -23,11 +23,10 @@ const schema = `CREATE TABLE notices (
  command TEXT NOT NULL,
  facts TEXT NOT NULL DEFAULT '',
  at TEXT NOT NULL
-);
-CREATE TABLE notices_revision (n INTEGER NOT NULL);
-INSERT INTO notices_revision(n) VALUES (0);`
+);`
 
 const mirrorKey = "notices/list"
+const revisionCounter database.Counter = "notices.revision"
 
 // Migrate imports retained notices before the engine serves calls.
 func Migrate(dataDir string) error {
@@ -40,7 +39,7 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "notices.schema", 3, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "notices.schema", 4, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old == 0 {
 			if _, err := conn.ExecContext(ctx, schema); err != nil {
@@ -61,9 +60,20 @@ func (s Store) open() (*sql.DB, error) {
 				}
 			}
 		}
+		if err := database.CreateRevisions(ctx, conn); err != nil {
+			return err
+		}
+		if old > 0 {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT ?,n FROM notices_revision", revisionCounter); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "DROP TABLE notices_revision"); err != nil {
+				return err
+			}
+		}
 		// Rows and committed empty revisions take precedence over retained files.
 		var owned bool
-		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM notices) OR EXISTS(SELECT 1 FROM notices_revision WHERE n>0)").Scan(&owned); err != nil {
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM notices) OR EXISTS(SELECT 1 FROM revisions WHERE name=? AND n>0)", revisionCounter).Scan(&owned); err != nil {
 			return err
 		}
 		if owned {
@@ -210,7 +220,9 @@ func (s Store) Revision() (int64, error) {
 	}
 	var rev int64
 	err = state.For(db).Read(context.Background(), func(q state.Reader) error {
-		return q.QueryRowContext(context.Background(), "SELECT n FROM notices_revision").Scan(&rev)
+		var err error
+		rev, err = revisionCounter.Read(context.Background(), q)
+		return err
 	})
 	return rev, err
 }
@@ -249,7 +261,7 @@ ON CONFLICT(id) DO UPDATE SET position=excluded.position,key=excluded.key,kind=e
 			return err
 		}
 	}
-	_, err = conn.ExecContext(ctx, "UPDATE notices_revision SET n=n+1")
+	_, err = revisionCounter.Bump(ctx, conn)
 	return err
 }
 
