@@ -61,6 +61,7 @@ test('every sidebar tab renders its own page, not the feed', () => {
   for (const [view, name] of Object.entries(expected)) assert.ok(rendered(view).includes(name), `${view} renders ${rendered(view)}`)
   for (const tab of rows.flatMap((r) => r.tabs)) assert.ok(!rendered(tab.id).includes('Feed'), `${tab.id} falls through to the feed`)
   assert.ok(rendered('general').includes('Feed'))
-  // Rules and Room settings live in the Room settings modal, not in a view.
-  for (const view of ['settings', 'rules', 'room-general', 'room-hooks']) assert.deepEqual(rendered(view).filter((name) => name === 'Rules' || name === 'RoomSettings'), [], view)
+  // Room settings is a modal, not a view. Room rules are a view.
+  for (const view of ['settings', 'room-general', 'room-hooks']) assert.deepEqual(rendered(view).filter((name) => name === 'Rules' || name === 'RoomSettings'), [], view)
+  assert.ok(rendered('rules').includes('Rules'))
 })

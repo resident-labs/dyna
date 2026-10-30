@@ -9,7 +9,7 @@
   import ComposerBox from '../ui/ComposerBox.svelte'
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime, scopeLabels } from './rules.ts'
+  import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime } from './rules.ts'
   import type { RoomRule } from './rules.ts'
 
   // A rule set as the Rules API returns it. Its fields are optional because a
@@ -21,22 +21,22 @@
     max?: number
   }
 
-  // view is {room, global, hash}: the Rules API response {rules, used, max,
-  // hash} for this room and for all rooms. editing is true while an inline
-  // edit is open; App holds new lists back until it closes.
+  // One rule set: this room's rules (the room's Rules view) or the rules for
+  // all rooms (the Settings Rules pane). view is the Rules API response for
+  // that scope. roomId is empty for global rules with no room open. editing
+  // is true while an inline edit is open; the host holds new lists back until
+  // it closes.
   interface Props {
     roomId: string
-    view?: { room: RulesPane; global: RulesPane } | null
+    scope: 'room' | 'global'
+    view?: RulesPane | null
     members?: Member[]
-    ownerHue?: number
     editing?: boolean
     onchanged?: () => unknown
   }
-  let { roomId, view = null, members = [], ownerHue = 0, editing = $bindable(false), onchanged = () => {} }: Props = $props()
-  const SCOPES = ['room', 'global'] as const
-  type Scope = (typeof SCOPES)[number]
+  let { roomId, scope, view = null, members = [], editing = $bindable(false), onchanged = () => {} }: Props = $props()
+  let global = $derived(scope === 'global')
   let filter = $state('all')
-  let scope = $state<Scope>('room')
   let text = $state('')
   let busy = $state(false)
   let error = $state('')
@@ -45,19 +45,17 @@
   let removing = $state<RoomRule | null>(null)
   let now = $state(Date.now())
   $effect(() => { const timer = setInterval(() => (now = Date.now()), 60000); return () => clearInterval(timer) })
-  // Unmounting with an edit open (another Room settings section) ends the edit.
+  // Unmounting with an edit open (another view or Settings pane) ends the edit.
   $effect(() => { editing = !!edit; return () => { editing = false } })
-  let sections = $derived([
-    { id: 'global', title: scopeLabels.global, blurb: 'Every agent in every room gets these when its harness next starts.', rules: view?.global?.rules ?? [] },
-    { id: 'room', title: scopeLabels.room, blurb: 'Every agent in this room gets these on its next turn. They win over rules for all rooms.', rules: view?.room?.rules ?? [] },
-  ])
-  let agents = $derived(sections.reduce((n, s) => n + s.rules.filter(agentRule).length, 0))
-  let usage = $derived(view?.[scope] ? `${ruleUsage(view[scope])} characters` : '')
+  let all = $derived(view?.rules ?? [])
+  let rows = $derived(ruleFilter(all, filter))
+  let agents = $derived(all.filter(agentRule).length)
+  let usage = $derived(view ? `${ruleUsage(view)} characters` : '')
   const member = (id: string) => members.find((m) => m.id === id || m.address === id)
   const say = (e: unknown) => (error = errorText(e))
   async function add() {
     busy = true
-    try { await api.addRule(roomId, scope === 'global', text); text = ''; error = ''; await onchanged() }
+    try { await api.addRule(roomId, global, text); text = ''; error = ''; await onchanged() }
     catch (e) { say(e) } finally { busy = false }
   }
   async function startEdit(r: RoomRule) {
@@ -105,35 +103,29 @@
     catch (e) { say(e); removing = null } finally { busy = false }
   }
 </script>
-<section class="rules" aria-label="Rules">
-  <TabHeader title="Rules" blurb="Standing rules for agents. Owner rules win over agent rules." filters={[{ id: 'all', label: 'All' }, { id: 'owner', label: 'Owner' }, { id: 'agents', label: `Agents (${agents})` }]} bind:filter {usage} />
-  <div class="add-rule"><ComposerBox label="Rule text" placeholder="Write a standing rule in plain English…" submitLabel="Add rule" maxlength={500} bind:draft={text} {busy} canSend={!!text.trim()} bad={!!error} onsend={add} mode="" expand>
-    {#snippet tools()}<span class="scope" role="radiogroup" aria-label="Rule scope">{#each SCOPES as id}<button type="button" role="radio" aria-checked={scope === id} class:sel={scope === id} onclick={() => (scope = id)}>{scopeLabels[id]}</button>{/each}</span>{/snippet}
-  </ComposerBox>{#if error}<p class="error" role="alert">{error}</p>{/if}</div>
+<!-- Global rules live in a Settings pane, which has its own padding. -->
+<section class="rules" class:flush={global} aria-label="{global ? 'Global' : 'Room'} rules">
+  <TabHeader flush={global} title={global ? 'Global rules' : 'Room rules'} blurb={global ? 'Every agent in every room gets these when its harness next starts. Room rules win over them. Owner rules win over agent rules.' : 'Every agent in this room gets these on its next turn. They win over global rules in Settings. Owner rules win over agent rules.'} filters={[{ id: 'all', label: 'All' }, { id: 'owner', label: 'Owner' }, { id: 'agents', label: `Agents (${agents})` }]} bind:filter {usage} />
+  <div class="add-rule"><ComposerBox label="Rule text" placeholder="Write a standing rule in plain English…" submitLabel="Add rule" maxlength={500} bind:draft={text} {busy} canSend={!!text.trim()} bad={!!error} onsend={add} mode="" expand />{#if error}<p class="error" role="alert">{error}</p>{/if}</div>
   <div class="list">
-    {#each sections as sec (sec.id)}
-      {@const rows = ruleFilter(sec.rules, filter)}
-      <h2>{sec.title}</h2>
-      <p class="blurb">{sec.blurb}</p>
-      {#if sec.rules.length === 0}<EmptyState title="No rules yet">Add one above, or an agent can run <code>dyna rules{sec.id === 'global' ? ' --global' : ''} add</code>.</EmptyState>
-      {:else if rows.length === 0}<EmptyState title="No {filter === 'owner' ? 'owner' : 'agent'} rules" />{/if}
-      {#each rows as r (r.id)}
-        {@const agent = agentRule(r)}
-        {@const m = agent ? member(r.setter) : null}
-        {#snippet lead()}<span class="id mono">{r.id}</span>{/snippet}
-        {#if edit?.id === r.id}
-          <Row {lead}>
-            <textarea id="rule-edit-{r.id}" class="edit" aria-label="Edit rule {r.id}" maxlength="500" rows="3" bind:value={edit.text} aria-describedby="rule-shortcuts-{r.id}" onkeydown={editKey}></textarea>
-            <p class="shortcuts" id="rule-shortcuts-{r.id}">Enter saves · Shift+Enter adds a line · Esc cancels</p>
-            <span class="edittools"><button class="ghost" onclick={cancelEdit}>Cancel</button><button class="save" disabled={busy || !edit.text.trim()} onclick={save}>Save</button></span>
-          </Row>
-        {:else}
-          <Row text={r.text} clamp={false} {lead}>
-            {#snippet meta()}{#if agent}<Avatar name={m?.name ?? r.setterName} hue={m?.hue ?? 0} emoji={m?.emoji} size={18} /><span>{m?.name ?? r.setterName ?? r.setter}</span><span class="tag">agent</span>{:else}<Avatar owner hue={ownerHue} size={18} /><span>owner</span>{/if}<span>· {ruleTime(r, now)}</span>{/snippet}
-            {#snippet actions()}<button id="rule-control-{r.id}" onclick={() => startEdit(r)}>Edit</button><button aria-label="Remove rule {r.id}" onclick={() => (agent ? remove(r) : (removing = r))}>Remove ×</button>{/snippet}
-          </Row>
-        {/if}
-      {/each}
+    {#if all.length === 0}<EmptyState title="No rules yet">Add one above, or an agent can run <code>dyna rules{global ? ' --global' : ''} add</code>.</EmptyState>
+    {:else if rows.length === 0}<EmptyState title="No {filter === 'owner' ? 'owner' : 'agent'} rules" />{/if}
+    {#each rows as r (r.id)}
+      {@const agent = agentRule(r)}
+      {@const m = agent ? member(r.setter) : null}
+      {#snippet lead()}<span class="id mono">{r.id}</span>{/snippet}
+      {#if edit?.id === r.id}
+        <Row {lead}>
+          <textarea id="rule-edit-{r.id}" class="edit" aria-label="Edit rule {r.id}" maxlength="500" rows="3" bind:value={edit.text} aria-describedby="rule-shortcuts-{r.id}" onkeydown={editKey}></textarea>
+          <p class="shortcuts" id="rule-shortcuts-{r.id}">Enter saves · Shift+Enter adds a line · Esc cancels</p>
+          <span class="edittools"><button class="ghost" onclick={cancelEdit}>Cancel</button><button class="save" disabled={busy || !edit.text.trim()} onclick={save}>Save</button></span>
+        </Row>
+      {:else}
+        <Row text={r.text} clamp={false} {lead}>
+          {#snippet meta()}{#if agent}<Avatar name={m?.name ?? r.setterName} hue={m?.hue ?? 0} emoji={m?.emoji} size={18} /><span>{m?.name ?? r.setterName ?? r.setter}</span>{:else}<span>owner</span>{/if}<span>· {ruleTime(r, now)}</span>{/snippet}
+          {#snippet actions()}<button id="rule-control-{r.id}" onclick={() => startEdit(r)}>Edit</button><button aria-label="Remove rule {r.id}" onclick={() => (agent ? remove(r) : (removing = r))}>Remove ×</button>{/snippet}
+        </Row>
+      {/if}
     {/each}
   </div>
 </section>
@@ -141,20 +133,11 @@
 <style>
   .add-rule { margin: 0 var(--s4) 18px; }
   .error { color: var(--coral); font-size: var(--t-ui); margin: var(--s2) 0; }
-  .rules { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .rules { display: flex; flex-direction: column; min-height: 0; flex: 1; max-width: var(--page-reading-width); }
   .list { overflow-y: auto; padding: 0 var(--s4) var(--s5); flex: 1; }
-  h2 { font-size: var(--t-ui); font-weight: 600; margin: 14px var(--s2) 2px; }
-  h2:first-child { margin-top: 0; }
-  .blurb { font-size: var(--t-sm); color: var(--faint); margin: 0 var(--s2) 6px; }
-  .scope { display: flex; gap: 2px; margin-right: auto; }
-  .scope button { border-radius: 12px; padding: 3px 10px; font-size: var(--t-sm); color: var(--muted); transition: background-color var(--motion-fast) var(--ease); }
-  @media (hover: hover) {
-    .scope button:hover { background: var(--hover); }
-  }
-  .scope button:active { background: var(--select); }
-  .scope button.sel { background: var(--select); color: var(--ink); }
+  .flush .add-rule { margin: 0 0 18px; }
+  .flush .list { padding: 0; }
   .id { display: block; width: 24px; color: var(--faint); font-size: var(--t-sm); }
-  .tag { color: var(--coral); border: 1px solid color-mix(in srgb, var(--coral) 35%, transparent); border-radius: 4px; padding: 0 5px; font-size: var(--t-cap); }
   .list button { font-size: var(--t-sm); color: var(--faint); padding: 2px 6px; border-radius: 4px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .list button:hover { color: var(--ink); background: var(--hover); }

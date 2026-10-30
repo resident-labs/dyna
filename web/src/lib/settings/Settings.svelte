@@ -7,6 +7,7 @@
   import ProfilesPane from './ProfilesPane.svelte'
   import HarnessesPane from './harnesses/HarnessesPane.svelte'
   import SkillsPane from './skills/SkillsPane.svelte'
+  import RulesPane from './RulesPane.svelte'
   import McpPane from './mcp/McpPane.svelte'
   import AccountsPane from './accounts/AccountsPane.svelte'
   import SettingsPane from './SettingsPane.svelte'
@@ -19,6 +20,8 @@
     pairNow?: boolean
     roomId?: string
     accountId?: string
+    // rulesVersion changes when a rule may have changed; the Rules pane reloads.
+    rulesVersion?: number
     profile?: string
     initialSelection?: ModelSelection | null
     oncreateprofile?: (selection: ModelSelection) => void
@@ -26,7 +29,7 @@
     repo?: string
     onclose: () => void
   }
-  let { start = 'profiles', pairNow = false, roomId = '', repo = '', accountId = '', profile = '', initialSelection = null, oncreateprofile = () => {}, onclose }: Props = $props()
+  let { start = 'profiles', pairNow = false, roomId = '', repo = '', accountId = '', rulesVersion = 0, profile = '', initialSelection = null, oncreateprofile = () => {}, onclose }: Props = $props()
 
   let pane = $state(untrack(() => start)) // the pane to open first
   let accountToOpen = $state(untrack(() => accountId))
@@ -38,6 +41,7 @@
     { id: 'profiles', label: 'Profiles', hint: 'Who does the work' },
     { id: 'harnesses', label: 'Harnesses', hint: 'Install and maintain coding agents' },
     { id: 'skills', label: 'Skills', hint: 'Skills every session can read' },
+    { id: 'rules', label: 'Rules', hint: 'Standing rules for every room' },
     { id: 'mcp', label: 'MCP', hint: 'MCP servers Dyna manages' },
     { id: 'accounts', label: 'Accounts', hint: 'Sign-ins, usage and active account' },
     { id: 'services', label: 'Services', hint: 'What Dyna runs by itself, and hooks' },
@@ -62,6 +66,8 @@
     <HarnessesPane onmodal={(open) => (busy = open)} />
   {:else if pane === 'skills'}
     <SkillsPane />
+  {:else if pane === 'rules'}
+    <RulesPane {roomId} version={rulesVersion} onmodal={(open) => (busy = open)} />
   {:else if pane === 'mcp'}
     <McpPane />
   {:else if pane === 'accounts'}

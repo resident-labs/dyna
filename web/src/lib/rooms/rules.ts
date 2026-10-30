@@ -1,9 +1,6 @@
 // A rule an agent wrote. The owner's rules have the setter "owner".
 export const agentRule = (r: RoomRule) => r.setter !== 'owner'
 
-// The words for a scope. Rules and service pages both use them.
-export const scopeLabels: Record<string, string> = { global: 'All rooms', room: 'This room' }
-
 // A rule for all rooms. Global rule IDs start with "u", room rule IDs with "r".
 export const globalRule = (r: { id: string }) => r.id.startsWith('u')
 
@@ -18,10 +15,9 @@ export interface RoomRule {
   edits?: unknown[] | null
 }
 
-// The list a rules event carries: its hash and the rules themselves.
+// A rule list as nextRules reads it: only its hash.
 export interface RuleList {
   hash?: string
-  rules?: unknown[]
 }
 
 export function ruleFilter<R extends RoomRule>(rules: R[] = [], filter = 'all'): R[] {
