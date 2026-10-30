@@ -608,13 +608,12 @@ var eventSpecs = []EventSpec{
 		Text:     "{location}\nHead: {head}",
 	},
 	{
-		Family:    FamilyPR,
-		Type:      EventType(PRUpdate),
-		ThreadEnd: true,
-		Renderer:  "PRCard",
-		Payload:   reflect.TypeOf(PREvent{}),
-		Wake:      WakeTarget,
-		Text:      "{location}\nHead: {head}",
+		Family:   FamilyPR,
+		Type:     EventType(PRUpdate),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{location}\nHead: {head}",
 	},
 	// A session note tells a parent or the session itself what changed about
 	// it. Every note is quiet: no note asks anyone to act now.
@@ -1028,6 +1027,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(MCPOutcome("")), Values: enumValues(mcpOutcomes)},
 	{Type: reflect.TypeOf(JobState("")), Values: enumValues(jobStates)},
 	{Type: reflect.TypeOf(PRType("")), Values: enumValues(prTypes)},
+	{Type: reflect.TypeOf(PROutcome("")), Values: enumValues(prOutcomes)},
 	{Type: reflect.TypeOf(MergeStep("")), Values: enumValues(mergeSteps)},
 	{Type: reflect.TypeOf(IssueChange("")), Values: enumValues(issueChanges)},
 	{Type: reflect.TypeOf(IssueState("")), Values: enumValues(issueStates)},
@@ -1117,6 +1117,10 @@ func eventSpecFor(family, typ string) (EventSpec, bool) {
 
 // ThreadEnded reports whether this event closes its display thread.
 func ThreadEnded(m Message) bool {
+	if ev, ok := m.PR(); ok && ev.Type == PRUpdate {
+		// Legacy updates lack an outcome; keep their original boundaries.
+		return ev.Outcome == "" || ev.Outcome == PROutcomeFailed
+	}
 	spec, ok := eventSpecFor(m.Kind, m.Notice.Kind)
 	return ok && spec.ThreadEnd
 }
