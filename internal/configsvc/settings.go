@@ -21,21 +21,6 @@ import (
 	"dyna-agent/internal/store"
 )
 
-// Item is one settings key with its effective value and where it came from.
-// Kind, Options and Help describe how a client edits it.
-type Item struct {
-	Key           string `json:"key"`
-	Value         any    `json:"value"`
-	Source        string `json:"source"`
-	LiveVsRestart string `json:"liveVsRestart"`
-	// Kind is bool, enum, select, int, bytes or duration.
-	Display      string   `json:"display,omitempty"`
-	Kind         string   `json:"kind"`
-	Options      []string `json:"options,omitempty"`
-	OptionLabels []string `json:"optionLabels,omitempty"`
-	Help         string   `json:"help"`
-}
-
 var help = map[string]string{
 	settings.KeyVoiceDucking:           "Lower Voice by 10 dB after sustained speech above the microphone noise floor. Off by default. Applies to the next call; server speech detection still controls interruption.",
 	settings.KeyVoiceAgent:             "Let agents use voice: dyna voice say and dyna voice session. On by default. Both spend the voice provider's quota, such as the ChatGPT sign-in's. Turn it off to stop them; owner calls are not affected. Applies to the next say or session.",
