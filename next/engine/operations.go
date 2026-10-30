@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Service) ConfigureOperations(ctx context.Context, kinds map[contract.OpKind]approve.Entry, expiry time.Duration) error {
-	s.approvals = &approve.Service{Store: s.store, Kinds: kinds, Context: ctx, Now: s.now, Expiry: expiry, ID: func(prefix string) (string, error) { return id(prefix, s.now()) }}
+	s.approvals = approve.New(s.store, ctx, kinds, s.now, expiry, func(prefix string) (string, error) { return id(prefix, s.now()) })
 	return s.approvals.Recover(ctx)
 }
 func (s *Service) ExpireOperations(ctx context.Context) error { return s.approvals.Expire(ctx) }
@@ -21,14 +21,18 @@ func (s *Service) OpSubmit(ctx context.Context, caller contract.Principal, req c
 	return contract.OpSubmitResponse{Operation: op}, nil
 }
 func (s *Service) OpDecide(ctx context.Context, caller contract.Principal, req contract.OpDecideRequest) (contract.OpDecideResponse, *contract.Error) {
-	err := s.approvals.Decide(ctx, caller, req.ID, req.Approve, req.Reason)
+	state := contract.OpDenied
+	if req.Approve {
+		state = contract.OpApproved
+	}
+	err := s.approvals.Decide(ctx, caller, req.ID, state, req.Reason)
 	if err != nil {
 		return contract.OpDecideResponse{}, failure(err)
 	}
 	return contract.OpDecideResponse{}, nil
 }
 func (s *Service) OpWithdraw(ctx context.Context, caller contract.Principal, req contract.OpWithdrawRequest) (contract.OpWithdrawResponse, *contract.Error) {
-	err := s.approvals.Withdraw(ctx, caller, req.ID)
+	err := s.approvals.Decide(ctx, caller, req.ID, contract.OpWithdrawn, "")
 	if err != nil {
 		return contract.OpWithdrawResponse{}, failure(err)
 	}

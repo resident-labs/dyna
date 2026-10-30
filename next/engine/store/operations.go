@@ -54,12 +54,12 @@ func (s *Store) Operation(ctx context.Context, id contract.OpID) (StoredOperatio
 }
 
 // Operations lists records in a state. A nonzero due time limits expiry to that time.
-func (s *Store) Operations(ctx context.Context, state contract.OpState, due time.Time) ([]StoredOperation, error) {
+func (s *Store) Operations(ctx context.Context, room contract.RoomID, state contract.OpState, due time.Time) ([]StoredOperation, error) {
 	query := "SELECT " + operationColumns + " FROM operations"
 	var rows *sql.Rows
 	var err error
-	if state == "" {
-		rows, err = s.read.QueryContext(ctx, query+" ORDER BY created_at,id")
+	if room != "" {
+		rows, err = s.read.QueryContext(ctx, query+" WHERE room=? AND state=? ORDER BY created_at,id", room, state)
 	} else if due.IsZero() {
 		rows, err = s.read.QueryContext(ctx, query+" WHERE state=? ORDER BY created_at,id", state)
 	} else {

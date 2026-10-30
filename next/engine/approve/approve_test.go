@@ -14,6 +14,12 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+type fakeArgs struct {
+	contract.OpArgs `json:"-"`
+}
+
+func (fakeArgs) OpKind() contract.OpKind { return "test.run" }
+
 type fixture struct {
 	s     *Service
 	now   time.Time
@@ -52,7 +58,7 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	var ids atomic.Int32
-	f.s = &Service{Store: st, Context: ctx, Now: func() time.Time { return f.now }, ID: func(prefix string) (string, error) { return fmt.Sprintf("%s%d", prefix, ids.Add(1)), nil }}
+	f.s = New(st, ctx, nil, func() time.Time { return f.now }, 0, func(prefix string) (string, error) { return fmt.Sprintf("%s%d", prefix, ids.Add(1)), nil })
 	f.s.Kinds = map[contract.OpKind]Entry{"test.run": {
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return f.class },
 		Card:  func(contract.OpArgs, contract.Principal) contract.Card { return contract.Card{Title: "Run"} },
@@ -66,7 +72,7 @@ func setup(t *testing.T) *fixture {
 			f.runs.Add(1)
 			return contract.OpResult{}
 		},
-		Decode: func(json.RawMessage) (contract.OpArgs, error) { return nil, nil },
+		Decode: func(json.RawMessage) (contract.OpArgs, error) { return fakeArgs{}, nil },
 	}}
 	return f
 }
@@ -75,7 +81,7 @@ func principal(id string) contract.Principal {
 }
 func (f *fixture) submit(t *testing.T, who contract.Principal) contract.Operation {
 	t.Helper()
-	op, err := f.s.Submit(context.Background(), who, contract.Operation{Room: "room", Kind: "test.run"})
+	op, err := f.s.Submit(context.Background(), who, contract.Operation{Room: "room", Args: fakeArgs{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +112,10 @@ func TestAgentAncestry(t *testing.T) {
 	if op.State != contract.OpPending {
 		t.Fatal(op.State)
 	}
-	if err := f.s.Decide(context.Background(), principal("sibling"), op.ID, true, ""); !errors.Is(err, ErrForbidden) {
+	if err := f.s.Decide(context.Background(), principal("sibling"), op.ID, contract.OpApproved, ""); !errors.Is(err, ErrForbidden) {
 		t.Fatal(err)
 	}
-	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, false, "no"); err != nil {
+	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, contract.OpDenied, "no"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -120,7 +126,7 @@ func TestOwnerClassWaits(t *testing.T) {
 	if op.State != contract.OpPending {
 		t.Fatal(op.State)
 	}
-	if err := f.s.Decide(context.Background(), principal("root"), op.ID, true, ""); !errors.Is(err, ErrForbidden) {
+	if err := f.s.Decide(context.Background(), principal("root"), op.ID, contract.OpApproved, ""); !errors.Is(err, ErrForbidden) {
 		t.Fatal(err)
 	}
 }
@@ -128,7 +134,7 @@ func TestStaleCheckPreventsExecution(t *testing.T) {
 	f := setup(t)
 	op := f.submit(t, principal("worker"))
 	f.stale = true
-	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, true, ""); err != nil {
+	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, contract.OpApproved, ""); err != nil {
 		t.Fatal(err)
 	}
 	// A caller waits on the notification, not on a timer or polling.
@@ -168,7 +174,7 @@ func TestExpiryAndPendingDedup(t *testing.T) {
 func TestOperationEventsAndWakes(t *testing.T) {
 	f := setup(t)
 	op := f.submit(t, principal("worker"))
-	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, false, "declined"); err != nil {
+	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, contract.OpDenied, "declined"); err != nil {
 		t.Fatal(err)
 	}
 	events, err := f.s.Store.Events(context.Background(), "room", 0, 100, nil)
@@ -189,10 +195,10 @@ func TestOperationEventsAndWakes(t *testing.T) {
 func TestWithdrawAuthorization(t *testing.T) {
 	f := setup(t)
 	op := f.submit(t, principal("worker"))
-	if err := f.s.Withdraw(context.Background(), principal("lead"), op.ID); !errors.Is(err, ErrForbidden) {
+	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, contract.OpWithdrawn, ""); !errors.Is(err, ErrForbidden) {
 		t.Fatal(err)
 	}
-	if err := f.s.Withdraw(context.Background(), principal("worker"), op.ID); err != nil {
+	if err := f.s.Decide(context.Background(), principal("worker"), op.ID, contract.OpWithdrawn, ""); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -233,7 +239,7 @@ func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
 	sub, cancel := f.s.Store.Subscribe()
 	defer cancel()
 	ctx, stop := context.WithCancel(context.Background())
-	if err := f.s.Decide(ctx, principal("lead"), op.ID, true, ""); err != nil {
+	if err := f.s.Decide(ctx, principal("lead"), op.ID, contract.OpApproved, ""); err != nil {
 		t.Fatal(err)
 	}
 	stop()
