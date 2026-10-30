@@ -88,7 +88,7 @@ func normalizeRetainedUsage(conn *sql.Conn, _ int) error {
 
 func legacyClaudeCost(t Turn) bool {
 	n := t.UsageNormalization
-	return t.OutputDialect == workeroutput.DialectClaudeStreamJSON && n.Version == 1 && n.Cost == "complete" && n.CostBasis != workeroutput.CostBasisTurn && t.Usage.CostUSD >= 0
+	return t.OutputDialect == workeroutput.DialectClaudeStreamJSON && n.Version == 1 && n.Cost == workeroutput.CoverageComplete && n.CostBasis != workeroutput.CostBasisTurn && t.Usage.CostUSD >= 0
 }
 
 func normalizedUsageRow(raw []byte, n int, prev *Turn, t Turn) ([]byte, error) {
@@ -112,10 +112,10 @@ func normalizedUsageRow(raw []byte, n int, prev *Turn, t Turn) ([]byte, error) {
 	put := func(key string, value any) { coverage[key], _ = json.Marshal(value) }
 	if unsupported {
 		put("version", 1)
-		put("input", "unknown")
-		put("cachedInput", "unknown")
-		put("output", "unknown")
-		put("cost", "unknown")
+		put("input", workeroutput.CoverageUnknown)
+		put("cachedInput", workeroutput.CoverageUnknown)
+		put("output", workeroutput.CoverageUnknown)
+		put("cost", workeroutput.CoverageUnknown)
 		put("reason", "retained usage normalization unavailable")
 	} else if cumulative {
 		known := legacyClaudeCost(t) && (n == 1 || prev != nil && legacyClaudeCost(*prev) && t.HarnessSession != "" && t.HarnessSession == prev.HarnessSession && t.Usage.CostUSD >= prev.Usage.CostUSD)
@@ -132,7 +132,7 @@ func normalizedUsageRow(raw []byte, n int, prev *Turn, t Turn) ([]byte, error) {
 			fields["usage"], _ = json.Marshal(usage)
 			put("costBasis", workeroutput.CostBasisTurn)
 		} else {
-			put("cost", "unknown")
+			put("cost", workeroutput.CoverageUnknown)
 			put("reason", "retained cumulative cost baseline unavailable")
 		}
 	}

@@ -16,11 +16,11 @@ func (n *UsageNormalization) Merge(other UsageNormalization) {
 		*n = other
 		return
 	}
-	merge := func(a, b string) string {
+	merge := func(a, b Coverage) Coverage {
 		if a == b {
 			return a
 		}
-		return "partial"
+		return CoveragePartial
 	}
 	n.Input = merge(n.Input, other.Input)
 	n.CachedInput = merge(n.CachedInput, other.CachedInput)
@@ -42,9 +42,9 @@ func (n *UsageNormalization) Merge(other UsageNormalization) {
 
 // MarkPartial records an unobserved tail after an invocation fails.
 func (n *UsageNormalization) MarkPartial(reason string) {
-	for _, field := range []*string{&n.Input, &n.CachedInput, &n.Output, &n.Cost} {
-		if *field == "complete" {
-			*field = "partial"
+	for _, field := range []*Coverage{&n.Input, &n.CachedInput, &n.Output, &n.Cost} {
+		if *field == CoverageComplete {
+			*field = CoveragePartial
 		}
 	}
 	if n.Reason != "" {
@@ -64,14 +64,14 @@ type UsageBaseline struct {
 
 type metricCoverage struct{ observed, missing bool }
 
-func (m metricCoverage) state() string {
+func (m metricCoverage) state() Coverage {
 	if !m.observed {
-		return "unknown"
+		return CoverageUnknown
 	}
 	if m.missing {
-		return "partial"
+		return CoveragePartial
 	}
-	return "complete"
+	return CoverageComplete
 }
 
 // UsageNormalizer converts native usage reports to additive call deltas. It

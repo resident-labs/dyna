@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/workeroutput"
 )
 
 // The usage rollup keeps one row per day, session, profile and model in
@@ -101,11 +102,11 @@ type usageMetric struct {
 	complete, partial, unknown int
 }
 
-func newUsageMetric(value int64, state string) usageMetric {
+func newUsageMetric(value int64, state workeroutput.Coverage) usageMetric {
 	switch {
-	case value >= 0 && state == "complete":
+	case value >= 0 && state == workeroutput.CoverageComplete:
 		return usageMetric{value: value, complete: 1}
-	case value >= 0 && state == "partial":
+	case value >= 0 && state == workeroutput.CoveragePartial:
 		return usageMetric{value: value, partial: 1}
 	}
 	return usageMetric{unknown: 1}
