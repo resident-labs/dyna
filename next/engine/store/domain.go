@@ -26,7 +26,7 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, goal string, event contract.Event) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, goal string, event, boxEvent contract.Event, reason string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var parentID *contract.SessionID
 		if parent != "" {
@@ -36,7 +36,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", contract.BoxSizeSmall, contract.BoxPending, "", "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -45,24 +45,10 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", contract.PrincipalSession, session.ID, seq, contract.SurfaceSession, contract.ReplyNone, "", "", "", "", 1, "pending")
-		return err
-	})
-}
-
-func (s *Store) SetBoxState(ctx context.Context, id contract.BoxID, state contract.BoxState, reason string, event contract.Event) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET state=?,reason=?,updated_at=? WHERE id=?", state, reason, event.Time.UnixMilli(), id)
 		if err != nil {
 			return err
 		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return sql.ErrNoRows
-		}
-		_, err = s.AppendEvent(tx, event)
+		_, err = s.AppendEvent(tx, boxEvent)
 		return err
 	})
 }
@@ -79,9 +65,6 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		}
 		if n != 1 {
 			return sql.ErrNoRows
-		}
-		if _, err = tx.ExecContext(ctx, "UPDATE boxes SET state=?,updated_at=? WHERE session=?", contract.BoxDeleted, event.Time.UnixMilli(), id); err != nil {
-			return err
 		}
 		_, err = s.AppendEvent(tx, event)
 		return err
