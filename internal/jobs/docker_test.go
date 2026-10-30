@@ -50,9 +50,14 @@ func TestJobScriptFallsBackToSudoDockerOnSSHNode(t *testing.T) {
 
 // A job command has no terminal, so git must not open an editor and hang. The
 // script exports the editor variables as true, so git keeps the message it has.
+// A container does not inherit the host environment, so it gets them as flags.
 func TestJobScriptSetsNoEditor(t *testing.T) {
 	script := jobScript(machines.Machine{SSH: "aria@arch"}, Job{Command: []string{"true"}}, Resources{CPUs: 1, MemoryMiB: 512}, "")
 	if want := "export EDITOR=true GIT_EDITOR=true VISUAL=true; "; !strings.Contains(script, want) {
 		t.Fatalf("job script lacks %q:\n%s", want, script)
+	}
+	image := jobScript(machines.Machine{SSH: "aria@arch"}, Job{Image: "alpine", Command: []string{"true"}}, Resources{CPUs: 1, MemoryMiB: 512}, "")
+	if want := " -e EDITOR=true -e GIT_EDITOR=true -e VISUAL=true "; !strings.Contains(image, want) {
+		t.Fatalf("image job script lacks %q:\n%s", want, image)
 	}
 }
