@@ -96,9 +96,9 @@
 {#snippet value(text: string)}{#if text === 'unknown'}<span class="unk">unknown</span>{:else}{text}{/if}{/snippet}
 
 <style>
-  /* Categorical slots from the dataviz dark palette; a model keeps its slot. */
-  .c0 { background: #8a857c; } .c1 { background: #3987e5; } .c2 { background: #d95926; } .c3 { background: #199e70; } .c4 { background: #c98500; } .c5 { background: #d55181; }
-  svg .c0 { fill: #8a857c; } svg .c1 { fill: #3987e5; } svg .c2 { fill: #d95926; } svg .c3 { fill: #199e70; } svg .c4 { fill: #c98500; } svg .c5 { fill: #d55181; }
+  /* Model families share the color of their provider; MiMo has no account provider. */
+  .c0, .c4 { background: var(--provider-unknown); } .c1, .c2 { background: var(--provider-anthropic); } .c3 { background: var(--provider-chatgpt); } .c5 { background: var(--provider-xai); }
+  svg .c0, svg .c4 { fill: var(--provider-unknown); } svg .c1, svg .c2 { fill: var(--provider-anthropic); } svg .c3 { fill: var(--provider-chatgpt); } svg .c5 { fill: var(--provider-xai); }
   rect { stroke: var(--main); stroke-width: 2px; vector-effect: non-scaling-stroke; }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
   .hatch { background: repeating-linear-gradient(135deg, var(--faint) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--faint); }
