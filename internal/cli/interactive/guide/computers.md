@@ -54,6 +54,7 @@ The random debug port binds only to `127.0.0.1`. Processes under the same Unix a
 can still reach it; computers do not provide a security boundary between those processes.
 
 Use `dyna computer act` for non-web apps, things Playwright cannot reach, and quick looks.
+To click a human-check box (Cloudflare Turnstile and similar), use `dyna computer act` too, because Playwright and CDP clicks are synthetic and fail these checks.
 
 A computer shares the owner's files and Unix account. It is not a sandbox.
 Identity comes only from the DYNA_* stamp. No stamp means root.
