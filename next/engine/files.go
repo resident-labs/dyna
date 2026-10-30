@@ -73,20 +73,8 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 			http.NotFound(w, r)
 			return
 		}
-		query := "SELECT f.media FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?"
-		args := []string{hash}
-		if caller.Kind != contract.PrincipalOwner {
-			query += " AND e.room=?"
-			args = append(args, string(room))
-		}
-		query += " ORDER BY f.seq DESC LIMIT 1"
 		var media string
-		var err error
-		if len(args) == 1 {
-			err = s.store.Read().QueryRowContext(r.Context(), query, args[0]).Scan(&media)
-		} else {
-			err = s.store.Read().QueryRowContext(r.Context(), query, args[0], args[1]).Scan(&media)
-		}
+		err := s.store.Read().QueryRowContext(r.Context(), "SELECT f.media FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=? AND (? OR e.room=?) ORDER BY f.seq DESC LIMIT 1", hash, caller.Kind == contract.PrincipalOwner, room).Scan(&media)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return

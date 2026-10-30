@@ -33,9 +33,12 @@ func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
-	if a.web != nil {
-		call(mux, contract.MethodWebLogin, c, owner, a.web.login)
-	}
+	call(mux, contract.MethodWebLogin, c, func(c Caller) bool { return owner(c) && !c.Web }, func(ctx context.Context, p contract.Principal, req contract.WebLoginRequest) (contract.WebLoginResponse, *contract.Error) {
+		if a.web == nil {
+			return contract.WebLoginResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the engine was started without --web.listen"}
+		}
+		return a.web.login(ctx, p, req)
+	})
 	call(mux, contract.MethodRoomList, c, owner, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, user, a.service.SessionList)
 	call(mux, contract.MethodOpSubmit, c, user, a.service.OpSubmit)
@@ -85,7 +88,11 @@ func (a *API) handler(c Caller) http.Handler {
 			return
 		}
 		var after int64
-		if s := r.URL.Query().Get("after"); s != "" {
+		s := r.URL.Query().Get("after")
+		if r.Header.Get("Last-Event-ID") != "" {
+			s = r.Header.Get("Last-Event-ID")
+		}
+		if s != "" {
 			n, err := strconv.ParseInt(s, 10, 64)
 			if err != nil || n < 0 {
 				writeError(w, invalid())

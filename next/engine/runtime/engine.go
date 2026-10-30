@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -123,15 +122,15 @@ func Run(ctx context.Context, cfg Config) error {
 		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
 	})
 	if cfg.WebListen != "" {
-		_, port, err := net.SplitHostPort(cfg.WebListen)
-		if err != nil {
-			return err
-		}
 		app, err := fs.Sub(web.Dist, "dist")
 		if err != nil {
 			return err
 		}
-		listener, err := api.NewWeb(apiServer, port, app, time.Now).Listen(cfg.WebListen)
+		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now)
+		if err != nil {
+			return err
+		}
+		listener, err := webServer.Listen()
 		if err != nil {
 			return err
 		}
