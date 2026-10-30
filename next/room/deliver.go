@@ -10,16 +10,17 @@ type Recipient struct {
 }
 
 type DeliveryInput struct {
-	Event      contract.Event
-	Surface    contract.Surface
-	Recipients []Recipient
-	Home       contract.Conversation
-	ReplyTo    contract.EventID
+	Event       contract.Event
+	Surface     contract.Surface
+	Recipients  []Recipient
+	HasMentions bool
+	Home        contract.Conversation
+	ReplyTo     contract.EventID
 }
 
 func (t Tree) Deliveries(in DeliveryInput) []contract.Delivery {
 	recipients := in.Recipients
-	if len(recipients) == 0 && in.Surface == contract.SurfaceFeed && in.Event.From.Kind == contract.PrincipalOwner {
+	if !in.HasMentions && len(recipients) == 0 && in.Surface == contract.SurfaceFeed && in.Event.From.Kind == contract.PrincipalOwner {
 		recipients = []Recipient{{Session: t.root, Explicit: true}}
 	}
 	var out []contract.Delivery
