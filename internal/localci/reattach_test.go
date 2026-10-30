@@ -28,6 +28,7 @@ type reattachFixture struct {
 	removed atomic.Int32
 	// onReports runs when the node copies the reports, after every check ended.
 	onReports func()
+	onSetup   func()
 }
 
 func newReattachFixture(t *testing.T) *reattachFixture {
@@ -49,6 +50,9 @@ func newReattachFixture(t *testing.T) *reattachFixture {
 			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
 		case strings.Contains(script, "init.lock"):
 			f.setups.Add(1)
+			if f.onSetup != nil {
+				f.onSetup()
+			}
 		case strings.Contains(script, "tar -C"):
 			if f.onReports != nil {
 				f.onReports()
@@ -257,35 +261,24 @@ func TestRestartedEngineStartsAgainWhenTheCheckIsGone(t *testing.T) {
 // must not take over the first run's record or touch its workspace.
 func TestConcurrentRunOfTheSameCommitLeavesTheLiveRunAlone(t *testing.T) {
 	f := newReattachFixture(t)
-	done := make(chan Result, 2)
-	for range 2 {
-		go func() {
-			result, _ := f.runner.Run(t.Context(), f.request)
-			done <- result
-		}()
+	done := make(chan Result, 1)
+	go func() { result, _ := f.runner.Run(t.Context(), f.request); done <- result }()
+	<-f.started
+	defer func() { close(f.release); <-done }()
+	if _, err := f.runner.Run(t.Context(), f.request); !errors.Is(err, ErrAttachmentBusy) {
+		t.Fatalf("second run error = %v, want attachment busy", err)
 	}
-	<-f.started
-	<-f.started
 	store := Store{DataDir: f.runner.DataDir}
 	key, err := canonicalKey(f.request.Repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40))
-	if err != nil || len(rows) != 2 || len(rows[0].Checks) != 1 || len(rows[1].Checks) != 1 {
-		t.Fatalf("records = %+v, %v, want one untouched record for each live run", rows, err)
-	}
-	if rows[0].RunID == rows[1].RunID || rows[0].orphaned() || rows[1].orphaned() {
-		t.Fatalf("the runs share a record or lost their owner: %+v", rows)
+	if err != nil || len(rows) != 1 || len(rows[0].Checks) != 1 || rows[0].orphaned() {
+		t.Fatalf("live record = %+v, %v", rows, err)
 	}
 	if got := f.machine.StopCount(); got != 0 {
 		t.Fatalf("the second run stopped %d checks of the first", got)
-	}
-	close(f.release)
-	for range 2 {
-		if result := <-done; result.Status != OutcomePassed {
-			t.Fatalf("result = %+v", result)
-		}
 	}
 }
 
@@ -317,7 +310,7 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The run's own process is alive, so no other run may take its record.
-	if att, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks); err != nil || att != nil {
+	if att, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks); !errors.Is(err, ErrAttachmentBusy) || att != nil {
 		t.Fatalf("a live run's record was taken: %+v, %v", att, err)
 	}
 	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
@@ -413,8 +406,8 @@ func TestAttachedNodeNamesTheMachineThatHoldsTheChecks(t *testing.T) {
 	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{SuiteGoStatic}}); err != nil {
 		t.Fatal(err)
 	}
-	// A record whose run is alive is not a candidate: that run is executing.
-	if node, err := store.AttachedNode(t.Context(), repo, sha); err != nil || node != "" {
+	// A live run blocks admission until its owner hands the record back.
+	if node, err := store.AttachedNode(t.Context(), repo, sha); !errors.Is(err, ErrAttachmentBusy) || node != "" {
 		t.Fatalf("with a live run: %q %v", node, err)
 	}
 	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
@@ -440,7 +433,7 @@ func TestAttachmentIsTakenOnlyFromADeadOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	attachmentOwner = func() (int, uint64) { return 22, 1 }
-	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, ErrAttachmentBusy) {
 		t.Fatalf("a command took the record of a live engine: %v", err)
 	}
 	live[11] = false
@@ -451,7 +444,7 @@ func TestAttachmentIsTakenOnlyFromADeadOwner(t *testing.T) {
 	// A third process finds the record owned by a live one.
 	attachmentOwner = func() (int, uint64) { return 33, 1 }
 	live[33] = true
-	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, ErrAttachmentBusy) {
 		t.Fatalf("a record was taken twice: %v", err)
 	}
 }
@@ -553,5 +546,58 @@ func TestCancelledRecoveryDoesNotStartFresh(t *testing.T) {
 	_, err := f.runner.resumeRun(ctx, Store{DataDir: f.runner.DataDir}, f.request.Repo, strings.Repeat("a", 40), "cache", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("recovery error = %v, want cancellation", err)
+	}
+}
+
+// Another live engine owns this run. A restart must wait rather than launch
+// another run when it cannot claim that attachment.
+func TestResumeWaitsForLiveAttachment(t *testing.T) {
+	store := Store{DataDir: t.TempDir()}
+	repo, sha := "/repo", strings.Repeat("a", 40)
+	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{SuiteGoStatic}}); err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{DataDir: store.DataDir, Node: &Node{Name: "pve"}}
+	if _, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", nil); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("live attachment was treated as absent: %v", err)
+	}
+}
+
+// A restart during remote setup must leave a record of its keeper so the next
+// engine can tear it down before starting the same head again.
+func TestRunRecordsAttachmentBeforeRemoteSetup(t *testing.T) {
+	f := newReattachFixture(t)
+	store := Store{DataDir: f.runner.DataDir}
+	repo, err := canonicalKey(f.request.Repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []attachmentRow
+	var readErr error
+	f.onSetup = func() { rows, readErr = store.attachmentRows(t.Context(), repo, strings.Repeat("a", 40)) }
+	close(f.release)
+	if _, err := f.runner.Run(t.Context(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if readErr != nil || len(rows) != 1 || rows[0].RunID == "" {
+		t.Fatalf("setup attachment = %+v, %v", rows, readErr)
+	}
+}
+
+// Two engines that both observed no attachment must not both reserve the head.
+func TestConcurrentFreshRunsReserveHeadOnce(t *testing.T) {
+	store := Store{DataDir: t.TempDir()}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, node := range []string{"first", "second"} {
+		go func() {
+			<-start
+			results <- store.reserveAttachment(t.Context(), "/repo", strings.Repeat("a", 40), node, attachment{RunID: node})
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if !((first == nil && errors.Is(second, ErrAttachmentBusy)) || (second == nil && errors.Is(first, ErrAttachmentBusy))) {
+		t.Fatalf("reservations: %v, %v; want exactly one winner", first, second)
 	}
 }
