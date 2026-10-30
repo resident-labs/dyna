@@ -68,6 +68,28 @@ export interface Hook {
   disabled?: boolean;
 }
 /**
+ * RunResult is the outcome of one hook run. Every producer and every reader of
+ * a run uses these constants, so a renamed value fails to compile instead of
+ * misclassifying a run.
+ */
+export type RunResult = string;
+/**
+ * ResultPending is a run that has started and not yet ended.
+ */
+export const ResultPending: RunResult = "pending";
+/**
+ * ResultPass is a run whose hook exited cleanly.
+ */
+export const ResultPass: RunResult = "pass";
+/**
+ * ResultError is a run that failed to start, timed out or lost its runner.
+ */
+export const ResultError: RunResult = "error";
+/**
+ * ResultFail is a run whose hook exited with a failure status.
+ */
+export const ResultFail: RunResult = "fail";
+/**
  * Run records one repository hook attempt independently of test evidence.
  */
 export interface Run {
@@ -76,7 +98,7 @@ export interface Run {
   repo: string;
   name: string;
   command: string;
-  result: string;
+  result: RunResult;
   logPath: string;
   startedAt: string;
   finishedAt?: string;
