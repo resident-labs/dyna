@@ -202,6 +202,7 @@ type PostInput struct {
 	Sender   Sender
 	Mentions []string
 	Text     string
+	Skill    *room.SkillRef
 	// Script is the run behind a workflow script's post, kept on the stored post.
 	Script  *room.ScriptRef
 	ReplyTo string
@@ -524,7 +525,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs, SenderRoomID: senderRoomID,
 			ID: in.ID, NeedsRoot: in.NeedsRoot, Conversation: in.Conversation,
 			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), Script: in.Script, To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
-			Attachments: atts, References: in.References,
+			Attachments: atts, References: in.References, Skill: in.Skill,
 		})
 	}
 	if err != nil {
@@ -549,7 +550,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		// ID, so a reply to the post answers it in the sender's room too. It
 		// wakes nobody: the recipients read the post in their own room.
 		if _, err := s.Rooms.Post(origin.ID, room.PostInput{ID: msg.ID, From: res.from, Human: in.Sender.Human, SessionIDs: copyIDs, To: res.addrs(), Via: res.via, ReplyTo: originReply,
-			Text: text, Attachments: copyAtts, References: in.References, Forward: fwd}); err != nil {
+			Text: text, Attachments: copyAtts, References: in.References, Forward: fwd, Skill: in.Skill}); err != nil {
 			out.Deliveries = append(out.Deliveries, Delivery{To: origin.Name, Delivery: "failed", Error: "the post was sent, but its copy in " + origin.Name + " was not saved: " + err.Error()})
 		}
 	}
