@@ -148,7 +148,8 @@ export function isMessage(v: unknown): v is Message {
 function isAvatar(v: unknown): boolean {
   return isRecord(v) && isString(v.kind) && ['session', 'root', 'owner', 'engine', 'voice', 'workflow', 'unknown'].includes(v.kind) &&
     optional(v.emoji, isString) && isString(v.room) && isString(v.color) &&
-    ['crimson', 'blue', 'violet', 'teal', 'orange', 'magenta', 'sky', 'olive'].includes(v.color)
+    // A deleted sender room has no remaining color record.
+    ['', 'crimson', 'blue', 'violet', 'teal', 'orange', 'magenta', 'sky', 'olive'].includes(v.color)
 }
 
 export function isPost(v: unknown): v is Post {
