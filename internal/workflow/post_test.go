@@ -36,7 +36,7 @@ func TestWorkflowPostUsesPoster(t *testing.T) {
 	result, err := executeTest(context.Background(), Options{
 		ScriptSrc: `const a = post("@parent", "Morning brief"); const b = post(["@decoder", "@parser"], "Both"); return [a, b];`,
 		Store:     postTestStore(), Run: run, WorkDir: t.TempDir(),
-		Poster: func(_ context.Context, runID string, mentions []string, text string) (PostResult, error) {
+		Poster: func(_ context.Context, runID, _ string, mentions []string, text string) (PostResult, error) {
 			calls = append(calls, call{runID, mentions, text})
 			return PostResult{ID: "msg_123", Deliveries: []map[string]any{{"to": "r", "delivery": "room"}}}, nil
 		},
@@ -73,7 +73,7 @@ func TestWorkflowPostDataFormsAppendFencedJSON(t *testing.T) {
 	_, err = executeTest(context.Background(), Options{
 		ScriptSrc: `post("@a", "Land it", {unit: "CH", head: "abc"}); post("@a", {text: "Again", data: [1, 2]}); post("@a", {text: "Plain"}); post("@a", "Null", null);`,
 		Store:     postTestStore(), Run: run, WorkDir: t.TempDir(),
-		Poster: func(_ context.Context, _ string, _ []string, text string) (PostResult, error) {
+		Poster: func(_ context.Context, _, _ string, _ []string, text string) (PostResult, error) {
 			texts = append(texts, text)
 			return PostResult{ID: "msg_1"}, nil
 		},
@@ -98,7 +98,7 @@ func TestWorkflowPostDataFormsAppendFencedJSON(t *testing.T) {
 	} {
 		got, err := executeTest(context.Background(), Options{
 			ScriptSrc: script, Store: postTestStore(), Run: run, WorkDir: t.TempDir(),
-			Poster: func(context.Context, string, []string, string) (PostResult, error) {
+			Poster: func(context.Context, string, string, []string, string) (PostResult, error) {
 				posted = true
 				return PostResult{ID: "m"}, nil
 			},
