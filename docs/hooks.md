@@ -67,7 +67,7 @@ checkout path and turn on the service:
 
 ```sh
 dyna settings set updater.source /home/user/dyna-agent
-dyna services on updates
+dyna services enable updates
 dyna services set updates --interval 60m
 ```
 
