@@ -26,6 +26,7 @@ import (
 	"dyna-agent/internal/harness/runtime/genstate"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/librarianstate"
@@ -75,6 +76,7 @@ var migrations = []func(dataDir string) error{
 	doctor.Migrate,
 	doctoralert.Migrate,
 	escalate.Migrate,
+	instructionqueue.Migrate,
 	goals.Migrate,
 	harnesshealth.Migrate,
 	// Model cooldowns are read by detached turn runners, which cannot migrate.
