@@ -51,8 +51,7 @@
   import Members from './lib/rooms/Members.svelte'
   import Toast from './lib/ui/Toast.svelte'
   import { clipText } from './lib/ui/toast.ts'
-  import { createRoomSessionControls, roomControlLabels, roomControlSummary } from './lib/rooms/roomSessionControls.ts'
-  import type { RoomControlValue } from './lib/rooms/roomSessionControls.ts'
+  import { createRoomControls } from './lib/app/roomControls.svelte.ts'
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/lanesync/SyncBadge.svelte'
@@ -154,10 +153,6 @@
   import type { AgentRef } from './lib/app/agentRef.ts'
 
   // A member the open view drills into. The root conversation is one made from the seat.
-  interface RoomContext {
-    roomId: string
-    visit: number
-  }
   interface MenuItem {
     label: string
     run: () => unknown
@@ -418,13 +413,18 @@
   const { askConfirm, dismiss, runConfirm } = confirmView
   // The goal the room expedites now, which the replace text names.
   const expeditedGoalId = $derived($expedite.goalId)
-  let roomSessionController: ReturnType<typeof createRoomSessionControls> | null = null
-  let roomControls = $state<RoomControlValue | null>(null)
-  let controlsReported = ''
-  let roomControlsMenu = $state<(RoomContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
-  let clearDormantConfirm = $state<(RoomContext & { count: number }) | null>(null)
-  let roomControlsVisit = 0
   let consolidationAlive = true
+  const controls = createRoomControls({
+    api, room: () => roomId, request: () => roomRequest,
+    alive: () => consolidationAlive, visible: () => visibleList('roomControls'),
+    hierarchy: () => hierarchy, refresh: () => { loadMembers(); loadChanges() },
+    error: (subject, text) => say({ tone: 'error', subject, text }), details: sayDetails,
+  })
+  const roomControls = $derived(controls.value)
+  const roomControlsMenu = $derived(controls.menu)
+  const clearDormantConfirm = $derived(controls.confirm)
+  const { visit: visitRoomControls, openMenu: roomSessionActions, closeMenu: closeRoomSessionMenu, items: roomSessionItems, askClear: askClearDormant, clear: clearRoomDormant } = controls
+  $effect(() => { controls.report() })
   // The member selection, its bulk panels and the consolidation screen live in
   // lib/app/selection.svelte.ts. The page reads them through these aliases, so
   // the template and the code below name them as they always have.
@@ -720,60 +720,6 @@
     workflowData.loadJobs()
     loadQuestions()
   }
-  function visitRoomControls(id: string) {
-    roomSessionController?.destroy()
-    roomSessionController = null
-    roomControls = null
-    roomControlsMenu = null
-    clearDormantConfirm = null
-    const visit = ++roomControlsVisit, request = roomRequest
-    if (!id) return
-    roomSessionController = createRoomSessionControls(api, id, (value: NonNullable<typeof roomControls>) => {
-      if (!consolidationAlive || id !== roomId || request !== roomRequest || visit !== roomControlsVisit) return
-      const finished = roomControls?.busy && !value.busy
-      roomControls = value
-      if (finished) { loadMembers(); loadChanges() }
-    }, () => visibleList('roomControls'))
-  }
-  function roomSessionActions(x: number, y: number, anchor?: HTMLElement) {
-    roomControlsMenu = { x, y, anchor, roomId, visit: roomControlsVisit }
-  }
-  // A finished room control reports once, as one short line. The per-session
-  // list stays behind Details, so it never pushes the member rows out of view.
-  $effect(() => {
-    const value = roomControls
-    if (!value) return
-    if (value.busy) { controlsReported = ''; return }
-    if (value.loading || !value.action) return
-    const signature = `${roomControlsVisit}|${value.action}|${value.error}|${value.results.map((r) => `${r.session}:${r.ok}:${r.reason ?? ''}`).join(',')}`
-    if (signature === controlsReported) return
-    controlsReported = signature
-    if (value.error) { say({ tone: 'error', subject: `${roomControlLabels[value.action] ?? 'The action'} failed`, text: value.error }); return }
-    sayDetails(roomControlSummary(value, hierarchy))
-  })
-  function closeRoomSessionMenu() { const anchor = roomControlsMenu?.anchor; roomControlsMenu = null; anchor?.focus?.() }
-  function currentRoomControls(context: RoomContext | null | undefined) { return consolidationAlive && context?.roomId === roomId && context.visit === roomControlsVisit }
-  function askClearDormant(count?: number) {
-    if (!consolidationAlive || !roomId || roomControls?.busy) return
-    const n = count || roomControls?.state?.dormant || 0
-    if (!n) return
-    clearDormantConfirm = { roomId, visit: roomControlsVisit, count: n }
-  }
-  function roomSessionItems(context: RoomContext) {
-    const busy = !roomControls?.state || roomControls.busy
-    const dormant = roomControls?.state?.dormant || 0
-    return [
-      { label: 'Pause all', hint: 'let running turns finish', disabled: busy || roomControls?.state?.paused, run: () => { if (currentRoomControls(context)) roomSessionController?.run('pause') } },
-      { label: 'Resume all', disabled: busy, run: () => { if (currentRoomControls(context)) roomSessionController?.run('resume') } },
-      { label: 'Clear dormant sessions…', gap: true, disabled: busy || !dormant, run: () => { if (currentRoomControls(context)) askClearDormant(dormant) } },
-    ]
-  }
-  function clearRoomDormant(context: RoomContext) {
-    if (!currentRoomControls(context) || clearDormantConfirm?.visit !== context.visit) return
-    clearDormantConfirm = null
-    roomSessionController?.run('clearDormant')
-  }
-
   // Profiles change from the CLI or the Settings view; the composer asks
   // again each time "/" opens its list.
   function loadProfiles() {
@@ -912,7 +858,7 @@
   let canLoadMentions = $derived(visibleList('mentions'))
   $effect(() => {
     roomId; canLoadControls
-    untrack(() => { if (canLoadControls) roomSessionController?.load() })
+    untrack(() => { if (canLoadControls) controls.load() })
   })
   $effect(() => {
     roomId; canLoadComputers
@@ -1234,7 +1180,7 @@
       roomRefreshes.clear()
       if (pending.has('rooms')) loadRooms()
       if (pending.has('feed') && roomId) roomData.loadUnread()
-      if (pending.has('controls')) roomSessionController?.load()
+      if (pending.has('controls')) controls.load()
       // A member row's responsibility count changes with goals, questions,
       // PRs, shells and runs, not with the member itself.
       if (pending.has('members') && roomId) loadMembers()
@@ -1261,7 +1207,7 @@
     if (!roomId) return
     // Keep loaded history on screen when the event stream reconnects.
     if (!await roomData.open(Math.max(feed?.posts?.length ?? 0, 50) + 20)) return
-    roomSessionController?.load()
+    controls.load()
     if (drill) { loadSession(); router.reviewVersion++ } // events may have been missed while the stream was down
     if (openRun) loadRun()
     loadChanges()
@@ -1385,14 +1331,14 @@
     if (reloadsUnread(ev, roomId, item)) soonRooms('feed')
     if (ev.kind === 'posts' && evRoom === roomId) {
       if (changesVisuals(ev)) loadVisuals()
-      if (roomSessionController && (roomControls?.loading || roomControls?.state?.paused !== false)) roomSessionController.load()
+      if (roomControls?.loading || roomControls?.state?.paused !== false) controls.load()
     }
     if (ev.kind === 'posts' && feed && evRoom === feed.room.id) roomData.applyPosts(ev)
     if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules(); loadIssues(); loadIssues(true) }
     if (ev.kind === 'machines') machineView.changed()
     if (ev.kind === 'pins' && evRoom === roomId) loadPins()
     if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); loadIssues(true); issuesVersion++ }
-    if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) roomSessionController?.load()
+    if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) controls.load()
     // A prs event without a row says the room's PR settings changed.
     if ((ev.kind === 'prs' || ev.kind === 'changes') && (!evRoom || evRoom === roomId)) {
       changeView.bumpVersion()
@@ -1754,8 +1700,7 @@
       document.removeEventListener('visibilitychange', visibility)
       clearInterval(computerPoll)
       clearInterval(syncPoll)
-      roomSessionController?.destroy()
-      roomControlsVisit++
+      controls.destroy()
       selectionView.destroy()
       consolidationAlive = false
       clearInterval(transferPoll)
@@ -1919,7 +1864,7 @@
       {:else if roomId && room && showPins}
         <Pins {room} {pins} ondetail={openDetail} onjump={(id: string) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} onclose={() => (showPins = false)} />
       {:else if roomId && room && showMembers && !drill}
-        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) }))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
+        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => controls.run('resume')} onreloadcontrols={() => controls.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) }))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
       </div>
     </div>
@@ -1945,7 +1890,7 @@
 {#if settingsPanel.showRoomSettings && room}
   {#key settingsPanel.roomSettingsKey}
   {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} start={settingsPanel.roomSettingsAt.start} hookRun={settingsPanel.roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { settingsPanel.closeRoomSettings(); openSettings('hooks') }} onclose={() => (settingsPanel.closeRoomSettings())} />
+  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} start={settingsPanel.roomSettingsAt.start} hookRun={settingsPanel.roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { settingsPanel.closeRoomSettings(); openSettings('hooks') }} onclose={() => (settingsPanel.closeRoomSettings())} />
   {/key}
 {/if}
 {#if roomMenu}
@@ -1957,7 +1902,7 @@
 {/if}
 {#if clearDormantConfirm}
   {@const context = { ...clearDormantConfirm }}
-  <Confirm title="Clear dormant sessions?" lines={[`Close ${context.count} dormant session${context.count === 1 ? '' : 's'}?`, 'Dormant sessions finished with no open work. A session that gained work since then stays open. Transcripts stay available under closed sessions. Clean merged worktrees are removed; unmerged or dirty worktrees are kept and reported.']} action="Clear dormant sessions" onconfirm={() => clearRoomDormant(context)} oncancel={() => (clearDormantConfirm = null)} />
+  <Confirm title="Clear dormant sessions?" lines={[`Close ${context.count} dormant session${context.count === 1 ? '' : 's'}?`, 'Dormant sessions finished with no open work. A session that gained work since then stays open. Transcripts stay available under closed sessions. Clean merged worktrees are removed; unmerged or dirty worktrees are kept and reported.']} action="Clear dormant sessions" onconfirm={() => clearRoomDormant(context)} oncancel={controls.dismiss} />
 {/if}
 {#if selectionMenu}
   {@const context = selectionMenu}
