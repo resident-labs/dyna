@@ -287,7 +287,7 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	}
 }
 
-func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
+func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	s, _, session, ctx := setup(t)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
@@ -304,8 +304,43 @@ func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err = s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxClosing {
+		t.Fatalf("box %+v, error %v, want closing until the box acknowledges the archive", current, err)
+	}
+}
+
+func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
+	s, room, root, ctx := setup(t)
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session})
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel // the initial turn
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: child.Session}); e != nil {
+		t.Fatal(e)
+	}
+	msg := <-channel
+	if _, ok := msg.Body.(contract.Archive); !ok {
+		t.Fatalf("expected archive, got %+v", msg.Body)
+	}
+	record, err := s.store.Session(ctx, child.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxClosing {
+		t.Fatalf("box %+v, error %v, want closing before the archive ack", current, err)
+	}
+	if _, e := s.ArchiveDone(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	current, err = s.store.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxDeleted {
-		t.Fatalf("box %+v, error %v", current, err)
+		t.Fatalf("box %+v, error %v, want deleted after the archive ack", current, err)
 	}
 }
 
