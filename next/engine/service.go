@@ -124,6 +124,9 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 }
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.SessionStartResponse{}, forbidden()
+	}
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.SessionStartResponse{}, e
 	}
@@ -161,19 +164,22 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	}
 	placement, err := s.boxes.Start(ctx, session.ID, session.Box, contract.BoxSizeSmall)
 	if err != nil {
-		return contract.SessionStartResponse{}, failure(err)
+		placement = Placement{State: contract.BoxPending, Reason: err.Error()}
 	}
 	change, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, From: contract.BoxPending, To: placement.State, Reason: placement.Reason})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err = s.store.SetBoxState(ctx, session.Box, placement.State, placement.Reason, change); err != nil {
+	if err = s.store.SetBoxState(context.WithoutCancel(ctx), session.Box, placement.State, placement.Reason, change); err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	return contract.SessionStartResponse{Session: session.ID, Box: session.Box}, nil
 }
 
 func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, req contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.SessionCloseResponse{}, forbidden()
+	}
 	session, err := s.store.Session(ctx, req.Session)
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
