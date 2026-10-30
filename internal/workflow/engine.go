@@ -88,6 +88,8 @@ type Options struct {
 	// ResumeFrom is the prior run id when this execution is a --resume.
 	// Recorded on plan.json as resumedFrom; it does not change cache keys.
 	ResumeFrom string
+	// RecordManifest records the calls accepted by this run for later safe replay.
+	RecordManifest bool
 	// JobNamespace is the stable identity shared by every run in a resume
 	// chain. The workflow service sets it for durable job idempotency keys.
 	JobNamespace string
@@ -111,6 +113,8 @@ type stepActivity struct {
 	record    activity.Record
 }
 
+var ErrManifestWrite = errors.New("workflow manifest write failed")
+
 type sharedState struct {
 	activityMu sync.Mutex
 	activities map[activity.Key]*stepActivity
@@ -121,6 +125,7 @@ type sharedState struct {
 	mu                sync.Mutex
 	scratchID         string
 	scratchWarning    sync.Once
+	manifestFailed    bool
 	agentSeq          int
 	execSeq           int // run() and job() steps; counted apart from agents and their cap
 	jobNamespace      string
@@ -140,7 +145,7 @@ type preparedScript struct {
 	source, workflowPlanID string
 }
 
-func execute(ctx context.Context, o Options, shared *sharedState, depth int, workflowID string, prepared *preparedScript) (string, error) {
+func execute(ctx context.Context, o Options, shared *sharedState, depth int, workflowID string, prepared *preparedScript) (result string, resultErr error) {
 	maxConc := o.MaxConc
 	if maxConc <= 0 {
 		maxConc = runtime.NumCPU() - 2
@@ -172,8 +177,28 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 			profSems: map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
 		}
 	}
-	if warning := resumeNondeterminismWarning(o.ScriptSrc); warning != "" && o.OnWarning != nil {
-		o.OnWarning(warning)
+	if depth == 0 && o.RecordManifest {
+		defer func() {
+			shared.mu.Lock()
+			failed := shared.manifestFailed
+			shared.mu.Unlock()
+			if failed {
+				resultErr = errors.Join(resultErr, ErrManifestWrite)
+			}
+		}()
+	}
+	if warning := resumeNondeterminismWarning(o.ScriptSrc); warning != "" {
+		if o.RecordManifest {
+			if err := runstore.MarkWorkflowManifestUnsafe(ctx, o.Run.Meta.ID, warning); err != nil {
+				shared.mu.Lock()
+				shared.manifestFailed = true
+				shared.mu.Unlock()
+				return "", fmt.Errorf("mark workflow manifest unsafe: %w", err)
+			}
+		}
+		if o.OnWarning != nil {
+			o.OnWarning(warning)
+		}
 	}
 	if prepared == nil {
 		source, id, err := prepareScript(o, workflowID)
@@ -288,6 +313,12 @@ type engine struct {
 type callPlan struct {
 	nodeID, groupID, wfPlanID string
 	stage, item               *int
+}
+
+func (e *engine) manifestWriteFailed() {
+	e.shared.mu.Lock()
+	e.shared.manifestFailed = true
+	e.shared.mu.Unlock()
 }
 
 // settle delivers the run's single outcome (first caller wins).
@@ -736,6 +767,13 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		worktreeRepo := ""
 		var cleanupWT func() bool
 		if isolation == "worktree" {
+			if e.opts.RecordManifest {
+				if err := runstore.MarkWorkflowManifestUnsafe(actx, e.runID(), "agent worktree effects are not in the workflow manifest"); err != nil {
+					e.manifestWriteFailed()
+					failBeforeRun(fmt.Errorf("mark workflow manifest unsafe: %w", err))
+					return
+				}
+			}
 			worktreeRepo, _ = filepath.Abs(cwd)
 			if root, rootErr := worktrees.RepositoryRoot(actx, cwd); rootErr == nil {
 				worktreeRepo, _ = filepath.Abs(root)
@@ -782,6 +820,16 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		if e.opts.Run != nil {
 			stepKey = key
 		}
+		if e.opts.RecordManifest {
+			if err := runstore.RegisterWorkflowCall(actx, e.runID(), runstore.WorkflowCallAgent, key, id); err != nil {
+				e.manifestWriteFailed()
+				failBeforeRun(fmt.Errorf("record agent manifest intent: %w", err))
+				if cleanupWT != nil {
+					cleanupWT()
+				}
+				return
+			}
+		}
 		state, err := runAgentSession(actx, e.opts.Engine, agentStart, stepKey)
 		if err != nil {
 			// The call ended without a result (canceled, timed out, or failed):
@@ -798,6 +846,12 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		rawOut := ""
 		if err == nil {
 			resultAny, rawOut, err = agentResult(state)
+		}
+		if e.opts.RecordManifest && state.Done {
+			if recordErr := runstore.CompleteWorkflowCall(context.WithoutCancel(actx), e.runID(), runstore.WorkflowCallAgent, key, id, runstore.AgentSessionID(e.runID(), id), resultAny, err); recordErr != nil {
+				e.manifestWriteFailed()
+				err = fmt.Errorf("record agent manifest result: %w", recordErr)
+			}
 		}
 		dur := time.Since(start)
 
