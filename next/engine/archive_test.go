@@ -136,6 +136,39 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	}
 }
 
+func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
+		t.Fatal(err)
+	}
+	_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
+	if e != nil {
+		t.Fatal(e)
+	}
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	restarted.SetArchiveVerifier(&fakeArchiveVerifier{})
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := restarted.BoxChannel(ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := (<-channel).Body.(contract.Archive); !ok {
+		t.Fatal("expected archive after restart")
+	}
+	_, e = restarted.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxDeleted {
+		t.Fatalf("box %+v, error %v", current, err)
+	}
+}
+
 func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
 	s, _, session, ctx := setup(t)
 	record, err := s.store.Session(ctx, session)
