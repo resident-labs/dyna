@@ -10,6 +10,20 @@ import (
 
 type testPayload struct{ Class Class }
 
+func TestInlineExecutionErrorOverridesZeroExit(t *testing.T) {
+	f := newFixture(t)
+	Register(f.service, Operation[testPayload]{Kind: "test.failure", Decide: func(context.Context, authority.Actor, testPayload) (Decision, error) {
+		return Decision{Class: ClassAuto}, nil
+	}, Card: func(testPayload) Card { return Card{} }, Check: func(context.Context, authority.Actor, testPayload) error { return nil }, Execute: func(context.Context, authority.Actor, testPayload) (Result, error) {
+		code := 0
+		return Result{ExitCode: &code}, errors.New("claim failed")
+	}})
+	out, err := Submit(context.Background(), f.service, f.actor(f.root), "test.failure", testPayload{})
+	if err != nil || out.Result == nil || out.Result.ExitCode == nil || *out.Result.ExitCode == 0 || out.Result.Reason != "claim failed" {
+		t.Fatalf("failure = %+v, %v", out, err)
+	}
+}
+
 func TestSubmitRoutesAndAudits(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
