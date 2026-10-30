@@ -216,7 +216,7 @@ func (s *Sockets) RemoveBox(id contract.BoxID) error {
 	defer s.mu.Unlock()
 	entry, ok := s.boxes[id]
 	if !ok {
-		return fmt.Errorf("unknown box")
+		return nil
 	}
 	delete(s.boxes, id)
 	return closeSocket(entry)

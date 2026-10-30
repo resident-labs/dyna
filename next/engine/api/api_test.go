@@ -19,11 +19,16 @@ type fakeService struct {
 	Service
 	caller  contract.Principal
 	request contract.SessionCloseRequest
+	post contract.PostRequest
 }
 
 func (f *fakeService) SessionClose(_ context.Context, c contract.Principal, r contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
 	f.caller, f.request = c, r
 	return contract.SessionCloseResponse{}, nil
+}
+func (f *fakeService) Post(_ context.Context, _ contract.Principal, r contract.PostRequest) (contract.PostResponse, *contract.Error) {
+	f.post = r
+	return contract.PostResponse{}, nil
 }
 func (f *fakeService) TurnOutput(_ context.Context, c contract.Principal, _ contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error) {
 	f.caller = c
@@ -71,6 +76,14 @@ func TestBoxCallerIsListenerIdentity(t *testing.T) {
 	}
 }
 
+func TestHostAddRejectsBox(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	rec := request(a.handler(boxCaller()), "/v1/host.add", `{"name":"host","ssh":"u@host","ownerOnlyAdmin":true}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want forbidden", rec.Code)
+	}
+}
+
 func TestOwnerOnlyMethodRejectsBox(t *testing.T) {
 	w := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/session.close", `{"session":"session-b"}`)
 	if w.Code != http.StatusForbidden {
@@ -83,6 +96,14 @@ func TestMalformedBodyGetsTypedError(t *testing.T) {
 	var e contract.Error
 	if w.Code != http.StatusBadRequest || json.Unmarshal(w.Body.Bytes(), &e) != nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("status %d, body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBoxPostDefaultsToListenerRoom(t *testing.T) {
+	f := &fakeService{}
+	w := request(New(f, nil).handler(boxCaller()), "/v1/post", `{"text":"x"}`)
+	if w.Code != http.StatusOK || f.post.Room != "room-a" {
+		t.Fatalf("status %d, room %s", w.Code, f.post.Room)
 	}
 }
 
