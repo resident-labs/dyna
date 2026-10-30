@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/database"
 )
@@ -105,7 +106,8 @@ func MigrateUpdateRecipe(dataDir string) error {
 var updateRecipeCommand = regexp.MustCompile(`^('(?:[^']|'\\'')*') git hooks _install --main ('(?:[^']|'\\'')*') --name ('(?:[^']|'\\'')*') --tool-path ('(?:[^']|'\\'')*')$`)
 
 func updateRecipeSource(h Hook) (string, string, bool) {
-	if h.Label != "Update Dyna" {
+	timeout, err := time.ParseDuration(h.Timeout)
+	if h.Label != "Update Dyna" || h.Event != MainUpdated || h.Cwd != "main" || h.OnFail != "alert" || h.Builtin != "" || (h.Scope != "" && h.Scope != ScopeRepository) || err != nil || timeout != time.Minute {
 		return "", "", false
 	}
 	words := updateRecipeCommand.FindStringSubmatch(strings.TrimSpace(h.Command))
