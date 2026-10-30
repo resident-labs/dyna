@@ -14,6 +14,8 @@ import (
 type transferOptions struct {
 	// expectAuthor skips the move when another session now holds the author role.
 	expectAuthor string
+	expectSource state.AuthorSource
+	source       state.AuthorSource
 	// inheritUnread re-sends delivered notices that the old author never read.
 	inheritUnread bool
 }
@@ -90,6 +92,9 @@ func (s *Service) transfer(ctx context.Context, key, role string, to subagent.In
 			// An explicit transfer won the race; its author keeps the PR.
 			return nil
 		}
+		if opts.expectSource != "" && r.AuthorSource != opts.expectSource {
+			return nil
+		}
 		if to.ID == "" || to.RoomID != r.RoomID {
 			return fmt.Errorf("target must be an open session in the PR's room")
 		}
@@ -100,6 +105,11 @@ func (s *Service) transfer(ctx context.Context, key, role string, to subagent.In
 			r.RepoPath = path
 		}
 		old := r.Author
+		if opts.source == "" {
+			r.AuthorSource = state.AuthorSourceTransfer
+		} else {
+			r.AuthorSource = opts.source
+		}
 		if old == to.ID {
 			return nil
 		}
