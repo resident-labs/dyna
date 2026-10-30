@@ -18,6 +18,13 @@ type Item struct {
 	Help        string   `json:"help"`
 }
 
+// Owner is how front ends show the owner: owner.name and owner.avatar.
+// Empty fields use the defaults, "you" and the name's initials.
+type Owner struct {
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
+}
+
 // UpdateNotice is a quiet line about a newer dyna release. It only checks;
 // installing stays an explicit `dyna update`, so a window never replaces
 // the binary its sessions run under.

@@ -23,14 +23,14 @@ interface AuthModule {
   authenticatedFetch: (path: string, options?: RequestInit) => Promise<Response>
   onRenewed: (fn: () => void) => void
   onUnauthorized: (fn: () => void) => void
-  api: { dataDir: () => Promise<string> }
+  api: { ownerProfile: () => Promise<{ name: string; avatar: string }> }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 const hasFunctions = (value: Record<string, unknown>, keys: readonly string[]): boolean => keys.every((key) => typeof value[key] === 'function')
 // Each test loads its own copy, so the loaded module is checked before use.
 const isAuthModule = (value: unknown): value is AuthModule =>
-  isRecord(value) && hasFunctions(value, ['authenticatedFetch', 'onRenewed', 'onUnauthorized']) && isRecord(value.api) && hasFunctions(value.api, ['dataDir'])
+  isRecord(value) && hasFunctions(value, ['authenticatedFetch', 'onRenewed', 'onUnauthorized']) && isRecord(value.api) && hasFunctions(value.api, ['ownerProfile'])
 
 async function loadAuth(tag: string): Promise<AuthModule> {
   const module: unknown = await import(`./api.ts?${tag}`)
@@ -114,14 +114,14 @@ test('ordinary 401 and non-JSON failures keep the body readable', async () => {
   assert.equal(refused, 1)
 })
 
-test('the data folder comes from the server for every client', async () => {
-  const { api } = await loadAuth('data-folder')
+test('the owner profile comes from the server for every client', async () => {
+  const { api } = await loadAuth('owner-profile')
   globalThis.fetch = async (input, init) => {
-    assert.equal(String(input), '/api/DataDir')
+    assert.equal(String(input), '/api/OwnerProfile')
     assert.deepEqual(JSON.parse(String(init?.body)), [])
-    return json('/home/test/.local/share/dyna')
+    return json({ name: 'Ari', avatar: '🦊' })
   }
-  assert.equal(await api.dataDir(), '/home/test/.local/share/dyna')
+  assert.deepEqual(await api.ownerProfile(), { name: 'Ari', avatar: '🦊' })
 })
 
 test('a refused renewal (403) reports unauthorized instead of looping silently', async () => {
