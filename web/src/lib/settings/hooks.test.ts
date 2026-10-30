@@ -11,7 +11,8 @@ test('events read as plain labels', () => {
   assert.equal(eventLabel('main-updated'), 'Main updated')
   assert.equal(eventLabel('main-moved'), 'Main updated')
   assert.equal(eventLabel('pr-merged'), 'PR merged')
-  assert.equal(eventLabel('schedule', 30), 'Schedule · every 30 min')
+  assert.equal(eventLabel('schedule', 30), 'Schedule · every 30m')
+  assert.equal(eventLabel('schedule', 720), 'Schedule · every 12h')
   assert.equal(eventLabel('later'), 'later')
 })
 

@@ -133,10 +133,3 @@ export function minutes(text: string): number | null {
   if (!m || !(m[1] || m[2] || m[3])) return null
   return Number(m[1] ?? 0) * 1440 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0)
 }
-
-// minutesText writes minutes the way the settings show a time: 10m, 1h, 1h30m, 14d.
-export function minutesText(n: number): string {
-  if (n > 0 && n % 1440 === 0) return `${n / 1440}d`
-  const h = Math.floor(n / 60)
-  return h ? `${h}h${n % 60 ? `${n % 60}m` : ''}` : `${n}m`
-}
