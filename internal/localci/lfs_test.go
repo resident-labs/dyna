@@ -25,7 +25,7 @@ func TestPushSkipsLFSUploadAndRepoHooks(t *testing.T) {
 		}
 		return nil
 	}
-	if err := r.exec().PushCommit(t.Context(), "/repo", "/var/tmp/cache", "abc123"); err != nil {
+	if err := r.exec().PushCommit(t.Context(), "/repo", "/var/tmp/cache", "abc123", ""); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(args, " ")
