@@ -1098,7 +1098,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | questions | M3 | `ask-owner` and card answers |
 | prs | M3, thin and stateless (decision 13) | Dyna stores only which session owns which PR and its approval flag, and reads the rest from GitHub |
 | reviewer-pool, review-workspace | dropped | a lead approves with `dyna pr approve`, or starts its own reviewer session (decision 13) |
-| pr-merge-queue | M3 as GitHub's merge queue, or auto-merge on green where a repository has none | no merge trials of our own |
+| pr-merge-queue | M3: Dyna merges when the approval flag matches the head and CI is green, through GitHub's merge queue where the repository has one (decision 13) | no merge trials of our own |
 | local-ci | M3 as GitHub Actions with self-hosted runners in boxes; act dropped | merges need a CI result |
 | local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
