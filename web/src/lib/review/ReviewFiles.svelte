@@ -18,7 +18,6 @@
   import { routeHash } from '../ui/route.ts'
   import { ago } from '../ui/format.ts'
   import Chip from '../ui/Chip.svelte'
-  import { toneOf } from '../ui/tone.ts'
   import Document from '../files/Document.svelte'
   import History from '../files/History.svelte'
   import { markdownDocument } from '../files/preview.ts'
@@ -349,7 +348,7 @@
           <span class="sync">{status.ahead} ahead · {status.behind} behind</span>
         {/if}
         <span class="spacer"></span>
-        <button class="count" aria-pressed={repoHistory} onclick={() => (repoHistory = !repoHistory)} title="Show the commits of the whole repository">{status.commitCount} commits</button>
+        <button class="count" aria-pressed={repoHistory} onclick={() => (repoHistory = !repoHistory)} title="Show the commits of the whole repository">{status.commitCount} {status.commitCount === 1 ? 'commit' : 'commits'}</button>
       </div>
       {#if latest}
         {@const prNumber = latest.prNumber}
@@ -379,7 +378,7 @@
   <span class="marker">
     {#if change}
       {@const letter = statusLetter(change)}
-      <Chip tone={toneOf(STATUS[letter].tone)} outline title={STATUS[letter].word}>{letter === '?' ? 'U' : letter}</Chip>
+      <span class="file-status" title={STATUS[letter].word}>{letter === '?' ? 'U' : letter}</span>
     {/if}
   </span>
 {/snippet}
@@ -527,6 +526,7 @@
 {/if}
 
 <style>
+  .file-status { color: var(--muted); font-size: var(--t-sm); }
   .filter { display: flex; align-items: center; gap: 8px; margin: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); }
   .filter:focus-within { border-color: var(--iris-edge); }
   .filter input { flex: 1; min-width: 0; width: 100%; padding: 10px; color: var(--ink); font: inherit; font-size: var(--t-body); border: 0; outline: 0; background: transparent; }
