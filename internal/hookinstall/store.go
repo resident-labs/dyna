@@ -185,6 +185,32 @@ func (s Store) Archive(id string) error {
 }
 
 // List returns active jobs in ID order.
+// Recent returns the newest installer receipts, including archived jobs.
+func (s Store) Recent(hook string) ([]Job, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT body FROM hook_install_jobs WHERE json_extract(body, '$.hook')=? ORDER BY json_extract(body, '$.startedAt') DESC LIMIT 100`, hook)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jobs []Job
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		job, err := decodeJob(body)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 func (s Store) List() ([]Job, error) {
 	db, err := s.db()
 	if err != nil {

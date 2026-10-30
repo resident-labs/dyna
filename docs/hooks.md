@@ -8,13 +8,12 @@ from a terminal with `dyna git hooks`.
 
 See `dyna guide git`.
 
-A hook contains `name`, `event`, `command`, `cwd`, `slot`, `timeout`, `onFail`,
+A hook contains `name`, `event`, `command`, `cwd`, `timeout`, `onFail`,
 `addedBy`, and `addedAt`. Edits change only the supplied fields, preserve the
 creation records, and record `editedBy` and `editedAt`. Schedule hooks also contain `everyMinutes`.
 Timeouts use duration strings, such as `30s` or `5m`.
 `cwd` accepts `worktree`, `main`, or an absolute directory path.
-`slot` accepts `light` or `heavy`. Heavy hooks share the checks runner's slots.
-The timeout includes the slot wait and command run.
+The timeout includes the command run.
 
 Events are `worktree-created`, `before-land`, `after-land`, `pr-merged`,
 `main-updated`, `session-finish`, `session-turn-ended`, and `schedule`.
@@ -56,61 +55,34 @@ Later SHA changes emit `main-updated`, including changes made outside Dyna.
 The maintenance loop finds configured hooks even when no session remains.
 It also wakes the librarian on main updates for each enabled library, without a hook.
 
-The self-update recipe below is opt-in. It changes no existing timer.
-
 If a before-land worker is killed, its temporary worktree can remain registered.
 Remove that tree with `git worktree remove --force <path>` when no hook uses it.
 If the temporary directory is already gone, `git worktree prune` clears its entry.
 
 
-## Update Dyna
+## Update Dyna from source
 
-The `self-update` recipe has the label **Update Dyna**. It only accepts a Dyna
-source repository. Enable it with this command:
+The Updates service can install Dyna from a source checkout. Set an absolute
+checkout path and turn on the service:
 
 ```sh
-dyna git hooks add --recipe self-update --repo /home/user/dyna-agent
+dyna settings set updater.source /home/user/dyna-agent
+dyna services on updates
+dyna services set updates --interval 60m
 ```
 
-Dyna does not add this hook automatically. The existing timer remains active.
-The hook uses `main-updated`, which fires after origin/main gets new commits,
-regardless of who merged them. Stored `main-moved` events are migrated to
-`main-updated`; CLI input accepts only `main-updated`.
+The service runs when the configured checkout's default branch changes and at
+its interval. The first branch observation sets a baseline. It uses the same
+detached installer, logs and durable receipts as the former update hook. The
+installer fetches the default branch, builds in a separate autoinstall checkout,
+and restarts the engine after a successful install. Its 75-minute limit includes
+the shared slot and install lock waits. The Services page shows its runs.
 
-The recipe starts a detached user service named `dyna-install-<sha>`. Its work
-continues when it restarts `dyna-engine`. The unit gets a shared heavy check slot
-and waits for `hooks/install/install.lock` in Dyna's data directory.
-After taking the lock, it fetches and re-reads origin/main. A queued older unit
-therefore cannot install an older commit after a newer unit finishes.
-
-The worker fast-forwards the main checkout only when it is on main and has no
-tracked edits. A different branch, tracked edits, or local commits cause one
-owner notice per cause. It stores the last warning cause in SQLite.
-These checkout warnings do not stop a build in the separate autoinstall tree.
-
-The worker uses `/home/user/dyna-agent-autoinstall` for this checkout. It runs
-frontend `npm ci` and `npm run build`, Go build, and `desktop/build.sh` in order.
-At add time, the recipe resolves Go, npm, and Node on PATH and captures the build
-tool search path, without duplicates or temporary agent-computer bins under
-Dyna's data directory `computers/` folder. It fails if a tool is missing. It backs up each
-installed binary as `.bak-<time>`, keeps five backups, and replaces `dyna` and
-`dyna-desktop` in `~/.local/bin`. The shared service installer writes both engine and computer units. The engine
-restarts after each update. The computer service restarts only when the fixed
-computer-code paths in `internal/hookinstall/computer_paths_gen.go` changed since the installed
-commit. An active transient computer service is preserved until it stops and is
-collected. A computer-service restart ends its desktops and apps.
-After a successful service restart, it saves the installed commit in the
-`hook_install_state` table in `dyna.db`.
-
-The hook log records the unit name. Its result stays `pending` while the unit
-runs. Durable receipts live in the `hook_install_jobs` table in `dyna.db`.
-Output logs remain under `hooks/install` in Dyna's data directory.
-The maintenance loop and `dyna git hooks log` copy the worker output and final unit
-result into the original hook log. This also recovers a result after a server
-restart. Completed units are stopped and cleared after that result is recorded. Finished
-receipts are marked as archived in SQLite so each minute checks only active jobs.
-
-The recipe builds origin/main, as the timer does.
-The independent unit has a 75-minute limit, including slot and lock waits.
-A second run for the same SHA fails fast while its earlier unit is still loaded.
-Run `dyna git hooks log self-update` to reconcile and clear a completed unit.
+Release installations without a source setting keep the existing release update
+path. A release installation with an existing source recipe keeps that explicit
+source-update choice after migration. The migration leaves custom commands in
+Hooks. To switch a custom update hook to the service, set `updater.source`,
+disable the old hook with `dyna git hooks edit <name> --disabled`, and turn on
+Updates. If several unmodified update recipes exist, Dyna leaves them all in
+Hooks and asks the owner to choose a source. Disable the unwanted hooks before
+turning on the service.

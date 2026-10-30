@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,39 +13,8 @@ import (
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/shellquote"
-	"dyna-agent/internal/store"
+	"dyna-agent/internal/updaterservice"
 )
-
-// SelfUpdateRecipe only builds configuration. The owner enables it with hooks add.
-func SelfUpdateRecipe(ctx context.Context, repo, exe, name string) (Hook, error) {
-	r, err := repoid.Resolve(ctx, repo)
-	if err != nil {
-		return Hook{}, err
-	}
-	module, err := os.ReadFile(filepath.Join(r.Main, "go.mod"))
-	if err != nil || !strings.HasPrefix(string(module), "module dyna-agent\n") {
-		return Hook{}, fmt.Errorf("the self-update recipe requires the Dyna source repository")
-	}
-	if _, err := os.Stat(filepath.Join(r.Main, "desktop", "build.sh")); err != nil {
-		return Hook{}, fmt.Errorf("the self-update recipe requires desktop/build.sh: %w", err)
-	}
-	var dirs []string
-	for _, tool := range []string{"go", "npm", "node"} {
-		path, err := exec.LookPath(tool)
-		if err != nil {
-			return Hook{}, fmt.Errorf("self-update requires %s on PATH: %w", tool, err)
-		}
-		path, err = filepath.Abs(path)
-		if err != nil {
-			return Hook{}, err
-		}
-		dirs = append(dirs, filepath.Dir(path))
-	}
-	toolPath := capturedToolPath(append(dirs, filepath.SplitList(os.Getenv("PATH"))...), store.DataDir())
-	h := Hook{Name: name, Label: "Update Dyna", Event: MainUpdated, Command: shellquote.Quote(exe) + " git hooks _install --main " + shellquote.Quote(r.Main) + " --name " + shellquote.Quote(name) + " --tool-path " + shellquote.Quote(toolPath), Cwd: "main", Timeout: "1m", OnFail: "alert"}
-	return h, Validate(h)
-}
 
 // capturedToolPath excludes temporary agent-computer tools from saved recipes.
 func capturedToolPath(entries []string, dataDir string) string {
@@ -168,19 +136,41 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 			if _, err := s.saveRun(ctx, ev); err != nil {
 				return err
 			}
-			hs, err := s.List(ctx, j.Config.Main)
-			if err != nil {
-				return err
+			var hs []Hook
+			if j.Hook == updaterservice.RunName {
+				hs = []Hook{{Name: updaterservice.RunName, Label: "Updates"}}
+			} else {
+				hs, err = s.List(ctx, j.Config.Main)
+				if err != nil {
+					return err
+				}
+				found := false
+				for _, h := range hs {
+					if h.Name == j.Hook {
+						found = true
+						break
+					}
+				}
+				if !found {
+					hs = append(hs, Hook{Name: j.Hook, Label: ev.Label})
+				}
 			}
 			for _, h := range hs {
 				if h.Name != j.Hook {
 					continue
 				}
-				r, err := repoid.Resolve(ctx, j.Config.Main)
-				if err != nil {
-					return err
+				r := repoid.Repo{ID: j.Repo, Root: j.Config.Main, Main: j.Config.Main}
+				if j.Hook != updaterservice.RunName {
+					r, err = repoid.Resolve(ctx, j.Config.Main)
+					if err != nil {
+						return err
+					}
 				}
-				event := Event{Event: MainUpdated, Repo: j.Config.Main, Room: j.Room, Session: j.Session, SHA: j.SHA}
+				eventName := ev.Event
+				if eventName == "" {
+					eventName = MainUpdated
+				}
+				event := Event{Event: eventName, Repo: j.Config.Main, Room: j.Room, Session: j.Session, SHA: j.SHA}
 				// The unit's result always ends the run the hook started, passing or
 				// not. Warnings from the checkout stay on the same card, and the
 				// run's log holds them too.
