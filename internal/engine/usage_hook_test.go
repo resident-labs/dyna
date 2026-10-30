@@ -42,7 +42,7 @@ func TestDisabledAccountUsageHookStopsUsageButNotRenewal(t *testing.T) {
 	// the network or the disk: the version hook reads vendor metadata, and the
 	// maintenance hook walks the data folder. Seeded and left on, they make this
 	// test wait for work it never asks about.
-	global, err := service.ListGlobal(ctx)
+	global, err := service.BuiltinHooks(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
