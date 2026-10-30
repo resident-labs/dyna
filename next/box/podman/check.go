@@ -16,8 +16,21 @@ import (
 	"github.com/resident-labs/dyna/box"
 )
 
+type CheckName string
+
+const (
+	CheckAdmin     CheckName = "owner-only administration"
+	CheckPaths     CheckName = "paths"
+	CheckCgroup    CheckName = "cgroup v2 and delegated controllers"
+	CheckPodman    CheckName = "rootless Podman 5 with systemd"
+	CheckCapacity  CheckName = "capacity"
+	CheckHostSlice CheckName = "host slice"
+	CheckReflink   CheckName = "reflink probe"
+	CheckForward   CheckName = "stream-local forwarding"
+)
+
 type CheckItem struct {
-	Name   string
+	Name   CheckName
 	OK     bool
 	Reason string
 }
@@ -53,7 +66,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	if o.DiskFloor == 0 {
 		o.DiskFloor = 20 << 30
 	}
-	add := func(name string, err error) {
+	add := func(name CheckName, err error) {
 		item := CheckItem{Name: name, OK: err == nil}
 		if err != nil {
 			item.Reason = err.Error()
@@ -61,18 +74,18 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		result.Items = append(result.Items, item)
 	}
 	if !o.AdminOnly {
-		add("owner-only administration", fmt.Errorf("owner did not confirm exclusive administration"))
+		add(CheckAdmin, fmt.Errorf("owner did not confirm exclusive administration"))
 	} else {
-		add("owner-only administration", nil)
+		add(CheckAdmin, nil)
 	}
 	if !filepath.IsAbs(o.HostData) || !filepath.IsAbs(o.Runtime) {
-		add("paths", fmt.Errorf("host data and runtime paths must be absolute"))
+		add(CheckPaths, fmt.Errorf("host data and runtime paths must be absolute"))
 		return result
 	}
 	_, err := h.run(ctx, "bash", "-c", `test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs && test "$(systemctl show "user@$(id -u).service" -p Delegate --value)" = yes && cg=$(systemctl show "user@$(id -u).service" -p ControlGroup --value) && for c in cpu memory io pids; do grep -qw "$c" "/sys/fs/cgroup$cg/cgroup.controllers" || exit 1; done`)
-	add("cgroup v2 and delegated controllers", err)
+	add(CheckCgroup, err)
 	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
-	add("rootless Podman 5 with systemd", err)
+	add(CheckPodman, err)
 	output, err := h.run(ctx, "bash", "-c", `nproc; awk '/MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
 	if err == nil {
 		fields := strings.Fields(string(output))
@@ -91,10 +104,10 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	if err == nil && (result.CPUs <= 0 || result.MemBytes < o.MemoryFloor || result.DiskBytes < o.DiskFloor) {
 		err = fmt.Errorf("host capacity below floor")
 	}
-	add("capacity", err)
+	add(CheckCapacity, err)
 	if err == nil {
 		_, err = h.run(ctx, "systemctl", "--user", "set-property", "--runtime", "dyna.slice", fmt.Sprintf("MemoryMax=%d", result.MemBytes))
-		add("host slice", err)
+		add(CheckHostSlice, err)
 	}
 	_, err = h.run(ctx, "bash", "-c", `d=$(mktemp -d "$1/.dyna-reflink.XXXXXX") || exit 1; trap 'rm -rf "$d"' EXIT; printf test > "$d/a"; cp --reflink=always "$d/a" "$d/b"`, "probe", o.HostData)
 	if err != nil {
@@ -102,10 +115,10 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		if errors.As(err, &exit) {
 			result.NoReflink = true
 		} else {
-			add("reflink probe", err)
+			add(CheckReflink, err)
 		}
 	}
-	add("stream-local forwarding", h.checkForward(ctx, o))
+	add(CheckForward, h.checkForward(ctx, o))
 	return result
 }
 
