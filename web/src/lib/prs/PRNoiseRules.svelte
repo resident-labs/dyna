@@ -34,7 +34,7 @@
     try {
       await api.removePRNoiseRule(roomId, rule.id)
       if (active) {
-        if (data) data = { ...data, rules: data.rules.filter((r) => r.id !== rule.id) }
+        if (data) data = { ...data, rules: (data.rules ?? []).filter((r) => r.id !== rule.id) }
         message = `Removed the rule for ${rule.bot}.`
       }
     } catch (e) {
@@ -61,7 +61,7 @@
   {#if data?.warning}<p class="err" role="status">{data.warning}</p>{/if}
   {#if message}<p class="success" role="status">{message}</p>{/if}
   {#if data}
-    {#if data.rules.length}
+    {#if (data.rules ?? []).length}
       <ul class="rules">
         {#each data.rules as rule (rule.id)}
           <li>
@@ -85,7 +85,7 @@
         {/each}
       </ul>
     {:else if !loading}
-      <p class="quiet">{data.repositories.length ? 'No learned rules for this room’s repositories.' : 'This room has no GitHub repository or tracked PR repository.'}</p>
+      <p class="quiet">{(data.repositories ?? []).length ? 'No learned rules for this room’s repositories.' : 'This room has no GitHub repository or tracked PR repository.'}</p>
     {/if}
   {/if}
 </section>

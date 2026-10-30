@@ -21,59 +21,6 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-type ReviewerSession struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
-	Status  string `json:"status"`
-}
-type ReviewerHelper struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
-	Profile string `json:"profile"`
-	Status  string `json:"status"`
-}
-type ReviewCurrent struct {
-	ChangeID  string    `json:"changeId,omitempty"`
-	Kind      string    `json:"kind,omitempty"`
-	PR        int       `json:"pr"`
-	Title     string    `json:"title"`
-	Head      string    `json:"head"`
-	StartedAt time.Time `json:"startedAt"`
-}
-type ReviewQueued struct {
-	GoalID    string `json:"goalId,omitempty"`
-	Expedited bool   `json:"expedited,omitempty"`
-	ChangeID  string `json:"changeId,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	PR        int    `json:"pr"`
-	Title     string `json:"title"`
-	Head      string `json:"head"`
-}
-type ReviewerSlotStatus struct {
-	Session   *ReviewerSession `json:"session"`
-	Profile   string           `json:"profile"`
-	Current   *ReviewCurrent   `json:"current"`
-	Status    string           `json:"status"`
-	LastError string           `json:"lastError"`
-}
-type ReviewerStatus struct {
-	ExpeditedGoalID string               `json:"expeditedGoalId,omitempty"`
-	Reviewers       []ReviewerSlotStatus `json:"reviewers"`
-	Helpers         []ReviewerHelper     `json:"helpers"`
-
-	Enabled bool `json:"enabled"`
-	// Profile is the profile the pool uses. ProfileCause is the typed reason the
-	// pinned profile could not be used, and stays empty when the pool runs the
-	// pin or chooses automatically. ProfileReason gives the same cause in words.
-	Profile       string               `json:"profile"`
-	ProfileSource string               `json:"profileSource"`
-	ProfileCause  rolesession.Cause    `json:"profileCause,omitempty"`
-	ProfileReason string               `json:"profileReason"`
-	Queue         []ReviewQueued       `json:"queue"`
-	LastError     string               `json:"lastError"`
-	Recent        []state.RecentReview `json:"recent"`
-}
-
 func (s *Service) profiles() ([]profile.Profile, error) {
 	if s.ReviewerProfiles != nil {
 		return s.ReviewerProfiles()
