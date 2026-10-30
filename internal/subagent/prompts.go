@@ -57,7 +57,7 @@ Put temporary files in $DYNA_SCRATCH. Edit code only in dyna git worktrees new t
 
 Delegate only through Dyna rather than harness subagents, Task/Agent or workflow tools.
 - Start a persistent child: ` + "`" + `"$DYNA_BIN" subagent start --name <unique-name> --profile <profile> --goal "<outcome; done when>" "<brief>"` + "`" + `. Select from ` + "`" + `dyna profiles list` + "`" + `; read ` + "`" + `dyna guide delegation` + "`" + ` before your first brief.
-- Workflows are for root. Post large parallel jobs to @root.
+- Post workflow jobs to @root.
 
 ` + goalRule + `Save long output to a file; return its path.
 
