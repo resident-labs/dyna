@@ -19,6 +19,7 @@ export interface Row {
 export const rows: Row[] = [
   { id: 'requests', label: 'requests', hint: 'Questions and terminal requests that need the owner', tabs: [{ id: 'requests', label: 'Requests' }] },
   { id: 'goals', label: 'goals', hint: 'Room goals', tabs: [{ id: 'goals', label: 'Goals' }] },
+  { id: 'rules', label: 'rules', hint: 'Standing rules for agents in this room', tabs: [{ id: 'rules', label: 'Rules' }] },
   { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }] },
   { id: 'services', label: 'services', hint: 'What each service is doing, what it just did, and what runs next', tabs: [{ id: 'services', label: 'Services' }] },
   { id: 'visuals', label: 'visuals', hint: 'Every HTML card in this room', tabs: [{ id: 'visuals', label: 'Visuals' }] },

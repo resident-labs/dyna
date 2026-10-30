@@ -77,7 +77,7 @@ export function listVisible(name: string, { view, drill, showRoomSettings, membe
   // Cards in chat, a session's media and the Visuals view all show the
   // newest version of their visual.
   if (name === 'visuals') return !!drill || view === 'visuals' || isFeedView(view)
-  if (name === 'rules') return !!showRoomSettings
+  if (name === 'rules') return !drill && view === 'rules'
   // Members, questions, pins, computers and job counts also feed the chrome.
   return true
 }

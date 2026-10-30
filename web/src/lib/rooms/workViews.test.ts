@@ -2,25 +2,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rows, rowOf, shown, runningWork, visibleTabs } from './workViews.ts'
 
-test('the sidebar is one list of seven rows ending in Computers; Room settings is a modal, not a row', () => {
-  assert.deepEqual(rows.map((r) => r.id), ['requests', 'goals', 'runs', 'services', 'visuals', 'library', 'computers'])
+test('the sidebar is one list of eight rows ending in Computers; Room settings is a modal, not a row', () => {
+  assert.deepEqual(rows.map((r) => r.id), ['requests', 'goals', 'rules', 'runs', 'services', 'visuals', 'library', 'computers'])
 })
 
 test('work views resolve to their sidebar rows; PRs and Issues belong to the room', () => {
-  const byView = Object.fromEntries(['requests', 'questions', 'goals', 'runs', 'services', 'visuals', 'files', 'github', 'issues', 'library', 'terminal', 'computers'].map((v) => [v, rowOf(v)?.id]))
-  assert.deepEqual(byView, { requests: 'requests', questions: 'requests', goals: 'goals', runs: 'runs', services: 'services', visuals: 'visuals', files: undefined, github: undefined, issues: undefined, library: 'library', terminal: undefined, computers: 'computers' })
+  const byView = Object.fromEntries(['requests', 'questions', 'goals', 'rules', 'runs', 'services', 'visuals', 'files', 'github', 'issues', 'library', 'terminal', 'computers'].map((v) => [v, rowOf(v)?.id]))
+  assert.deepEqual(byView, { requests: 'requests', questions: 'requests', goals: 'goals', rules: 'rules', runs: 'runs', services: 'services', visuals: 'visuals', files: undefined, github: undefined, issues: undefined, library: 'library', terminal: undefined, computers: 'computers' })
   assert.equal(rowOf('jobs'), undefined)
   assert.equal(rowOf('files'), undefined)
   assert.equal(rowOf('changes'), undefined)
-  for (const view of ['settings', 'rules', 'room-general', 'room-hooks']) assert.equal(rowOf(view), undefined, view)
+  for (const view of ['settings', 'room-general', 'room-hooks']) assert.equal(rowOf(view), undefined, view)
   assert.equal(rowOf('general'), undefined)
   assert.equal(rowOf('channel:ses_a'), undefined)
 })
 
 test('rows that need a repo or computers hide without them', () => {
   const ids = (have: { repo?: boolean; computers?: boolean }) => shown(rows, have).map((r) => r.id)
-  assert.deepEqual(ids({}), ['requests', 'goals', 'runs', 'services', 'visuals'])
-  assert.deepEqual(ids({ repo: true, computers: true }), ['requests', 'goals', 'runs', 'services', 'visuals', 'library', 'computers'])
+  assert.deepEqual(ids({}), ['requests', 'goals', 'rules', 'runs', 'services', 'visuals'])
+  assert.deepEqual(ids({ repo: true, computers: true }), ['requests', 'goals', 'rules', 'runs', 'services', 'visuals', 'library', 'computers'])
 })
 
 test('the runs count is running workflows only, never a total and never shell jobs', () => {
