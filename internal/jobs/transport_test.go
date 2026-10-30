@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/testsafe"
 )
 
 func TestTransportRetriesTruncatedTrailer(t *testing.T) {
@@ -54,6 +56,22 @@ func TestTransportSSHUsesPrivateMaster(t *testing.T) {
 	joined := strings.Join(argv, " ")
 	if !strings.Contains(joined, "ControlMaster=auto") || !strings.Contains(joined, "ControlPersist=10m") || !strings.Contains(joined, "ControlPath=") || strings.Contains(joined, "ControlPath=none") {
 		t.Fatalf("ssh options = %q", joined)
+	}
+}
+
+func TestTransportFallsBackWhenRuntimeUnavailable(t *testing.T) {
+	runtime := filepath.Join(testsafe.ShortTempDir(t), "not-a-directory")
+	if err := os.WriteFile(runtime, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtime)
+	x := Executor{Node: Conn{Name: "node", SSH: "node"}}
+	_, args := x.NodeProgram("true", nil)
+	joined := strings.Join(args, " ")
+	for _, option := range []string{"ControlMaster=no", "ControlPath=none", "BatchMode=yes", "ServerAliveInterval=15"} {
+		if !strings.Contains(joined, option) {
+			t.Fatalf("ssh options %q lack %s", joined, option)
+		}
 	}
 }
 

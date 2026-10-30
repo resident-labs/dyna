@@ -220,11 +220,19 @@ func (x Executor) sshOptions() []string {
 		dir = filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "dyna", "ssh")
 		socket = filepath.Join(dir, fmt.Sprintf("%x.sock", key[:8]))
 	}
-	// SSH reports a connection failure if this private directory cannot be made.
-	if os.MkdirAll(dir, 0700) == nil {
-		_ = os.Chmod(dir, 0700)
+	options := []string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(x.Node.SSHConnectTimeout)}
+	// A host without a usable runtime folder must still be able to use SSH.
+	// Explicitly disable sharing there, independent of the owner's config.
+	err := os.MkdirAll(dir, 0700)
+	if err == nil {
+		err = os.Chmod(dir, 0700)
 	}
-	return []string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(x.Node.SSHConnectTimeout), "-o", "ControlMaster=auto", "-o", "ControlPath=" + socket, "-o", "ControlPersist=10m", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}
+	if err != nil {
+		options = append(options, "-o", "ControlMaster=no", "-o", "ControlPath=none")
+	} else {
+		options = append(options, "-o", "ControlMaster=auto", "-o", "ControlPath="+socket, "-o", "ControlPersist=10m")
+	}
+	return append(options, "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3")
 }
 
 const trailerLen = len("DYNA-END ") + 20 + 1 + 3 + 1
