@@ -1,3 +1,6 @@
+import { createRuntime } from '../app/runtime.svelte.ts'
+import { runtimeFixture } from '../../../test/runtime.ts'
+import { need } from '../../../test/need.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -226,27 +229,20 @@ test('the remaining timer refreshes bulk transfers only while the page is visibl
   installSelection(c)
   installRouterShim(c)
   vm.createContext(c)
-  const mounted = functions.find((n): n is Extract<typeof n, { type: 'ExpressionStatement' }> => n.type === 'ExpressionStatement' && n.expression.type === 'CallExpression' && n.expression.callee.type === 'Identifier' && n.expression.callee.name === 'onMount')
-  assert.ok(mounted, 'App mounts onMount')
-  const mountCall = mounted.expression
-  assert.ok(mountCall.type === 'CallExpression')
-  const callback = mountCall.arguments[0]
-  assert.ok(callback && callback.type === 'ArrowFunctionExpression' && callback.body.type === 'BlockStatement', 'onMount takes a callback')
-  const binding = callback.body.body.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === 'transferPoll'))
-  assert.ok(binding && binding.type === 'VariableDeclaration', 'App declares transferPoll')
-  const declaration = binding.declarations.find((d) => d.id.type === 'Identifier' && d.id.name === 'transferPoll')
-  assert.ok(declaration?.init, 'transferPoll is initialised')
-  assert.ok(declaration.init.type === 'CallExpression', 'transferPoll starts a timer')
-  const polling = declaration.init.arguments[0]
-  assert.ok(polling, 'the timer takes a callback')
-  const { start, end } = sourceRange(polling)
-  const poll = vm.runInContext(stripTypes(source.slice(start, end)), c) as () => void
+  const runtime = runtimeFixture({
+    needPair: () => c.needPair, visible: () => c.pageVisible,
+    refreshTransfers: () => { vm.runInContext('selectionView.refreshTransfers()', c) },
+  })
+  runtime.env.boot = () => new Promise(() => {})
+  const stop = createRuntime(runtime.host, runtime.env).start()
+  const poll = need([...runtime.timers.values()].find((entry) => entry.ms === 5000)).fn
   poll()
   assert.deepEqual(calls, ['transfer'])
   calls.length = 0
   c.pageVisible = false
   poll()
   assert.deepEqual(calls, [])
+  stop()
 })
 
 test('room summary changes skip controls, while explicit pause changes refresh them', async () => {
