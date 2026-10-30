@@ -539,3 +539,42 @@ func TestEditsForkPullRequiresTheOriginHost(t *testing.T) {
 		}
 	}
 }
+
+// The upstream pull request may be named by its URL, but only on that upstream.
+// A registered extra checkout uses its own origin as the fork.
+func TestEditsForkPullAcceptsUpstreamURLAndExtraCheckout(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	extra := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", extra}, {"-C", extra, "remote", "add", "origin", "https://github.com/extra/project.git"}} {
+		if out, err := exec.Command("/usr/bin/git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git: %v: %s", err, out)
+		}
+	}
+	records[0].ExtraRepos = []string{extra}
+	previous := pullHeadRepo
+	pullHeadRepo = func(_ context.Context, _ *exec.Cmd, _ repository, number string) (string, bool) {
+		return map[string]string{"7": "fork/project", "8": "someone/project", "9": "extra/project"}[number], true
+	}
+	t.Cleanup(func() { pullHeadRepo = previous })
+	upstream := repository{"github.com", "upstream/project"}
+	outside := t.TempDir()
+	for _, tt := range []struct {
+		name string
+		dir  string
+		arg  string
+		want bool
+	}{
+		{"number", outside, "7", true},
+		{"upstream URL", outside, "https://github.com/upstream/project/pull/7", true},
+		{"URL of another head", outside, "https://github.com/upstream/project/pull/8", false},
+		{"URL on another repository", outside, "https://github.com/other/project/pull/7", false},
+		{"URL on another host", outside, "https://ghe.example/upstream/project/pull/7", false},
+		{"extra checkout head", extra, "9", true},
+		{"extra head from primary checkout", records[0].Repo, "9", false},
+	} {
+		got := editsForkPull(context.Background(), records[0], tt.dir, upstream, []string{"pr", "edit", tt.arg})
+		if got != tt.want {
+			t.Errorf("%s: editsForkPull = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
