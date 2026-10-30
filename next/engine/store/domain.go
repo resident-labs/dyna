@@ -44,7 +44,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", contract.PrincipalSession, session.ID, seq, contract.SurfaceSession, contract.ReplyNone, "", "", "", "", 1, "pending")
+		err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 		if err != nil {
 			return err
 		}
@@ -133,7 +133,16 @@ func (s *Store) SessionByName(ctx context.Context, room contract.RoomID, name st
 	return session, err
 }
 
-func (s *Store) Post(ctx context.Context, event contract.Event, recipients []contract.SessionID) (int64, error) {
+func insertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d contract.Delivery) error {
+	home, err := json.Marshal(d.Reply.Home)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", d.To.Kind, d.To.Session, seq, d.Surface, d.Reply.Kind, d.Reply.Target.Kind, d.Reply.Target.Session, string(home), d.Reply.ReplyTo, d.Wake, "pending")
+	return err
+}
+
+func (s *Store) Post(ctx context.Context, event contract.Event, deliveries []contract.Delivery) (int64, error) {
 	var seq int64
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -141,9 +150,8 @@ func (s *Store) Post(ctx context.Context, event contract.Event, recipients []con
 		if err != nil {
 			return err
 		}
-		for _, recipient := range recipients {
-			_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", contract.PrincipalSession, recipient, seq, contract.SurfaceFeed, contract.ReplyNone, "", "", "", "", 1, "pending")
-			if err != nil {
+		for _, delivery := range deliveries {
+			if err := insertDelivery(ctx, tx, seq, delivery); err != nil {
 				return err
 			}
 		}
@@ -156,6 +164,7 @@ func (s *Store) Post(ctx context.Context, event contract.Event, recipients []con
 type FeedInput struct {
 	Seq     contract.DeliverySeq
 	Surface contract.Surface
+	Reply   contract.ReplyChannel
 	Queue   *contract.TurnQueue
 }
 
@@ -169,7 +178,7 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
+		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,CASE WHEN d.reply_home='' THEN '{}' ELSE d.reply_home END,d.reply_to FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND d.wake=1 AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
 		if err != nil {
 			return err
 		}
@@ -179,11 +188,16 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 			queue sql.NullString
 			event contract.EventID
 			turn  sql.NullString
+			home  string
 		}
 		var items []item
 		for rows.Next() {
 			var v item
-			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn); err != nil {
+			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn, &v.input.Reply.Kind, &v.input.Reply.Target.Kind, &v.input.Reply.Target.Session, &v.home, &v.input.Reply.ReplyTo); err != nil {
+				rows.Close()
+				return err
+			}
+			if err := json.Unmarshal([]byte(v.home), &v.input.Reply.Home); err != nil {
 				rows.Close()
 				return err
 			}
