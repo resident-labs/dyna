@@ -1,0 +1,150 @@
+package podman
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/resident-labs/dyna/box"
+)
+
+type CheckItem struct {
+	Name   string
+	OK     bool
+	Reason string
+}
+type CheckResult struct {
+	Items               []CheckItem
+	CPUs                int
+	MemBytes, DiskBytes int64
+	NoReflink           bool
+}
+
+func (r CheckResult) Ready() bool {
+	for _, i := range r.Items {
+		if !i.OK {
+			return false
+		}
+	}
+	return true
+}
+
+// Check performs the registration probes. AdminOnly is the owner's assertion,
+// not a claim that SSH can verify.
+type CheckOptions struct {
+	HostData, Runtime      string
+	AdminOnly              bool
+	MemoryFloor, DiskFloor int64
+}
+
+func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
+	var result CheckResult
+	if o.MemoryFloor == 0 {
+		o.MemoryFloor = 4 << 30
+	}
+	if o.DiskFloor == 0 {
+		o.DiskFloor = 20 << 30
+	}
+	add := func(name string, err error) {
+		item := CheckItem{Name: name, OK: err == nil}
+		if err != nil {
+			item.Reason = err.Error()
+		}
+		result.Items = append(result.Items, item)
+	}
+	if !o.AdminOnly {
+		add("owner-only administration", fmt.Errorf("owner did not confirm exclusive administration"))
+	} else {
+		add("owner-only administration", nil)
+	}
+	if !filepath.IsAbs(o.HostData) || !filepath.IsAbs(o.Runtime) {
+		add("paths", fmt.Errorf("host data and runtime paths must be absolute"))
+		return result
+	}
+	_, err := h.run(ctx, "bash", "-c", `test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs && test "$(systemctl show "user@$(id -u).service" -p Delegate --value)" = yes && cg=$(systemctl show "user@$(id -u).service" -p ControlGroup --value) && for c in cpu memory io pids; do grep -qw "$c" "/sys/fs/cgroup$cg/cgroup.controllers" || exit 1; done`)
+	add("cgroup v2 and delegated controllers", err)
+	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
+	add("rootless Podman 5 with systemd", err)
+	output, err := h.run(ctx, "bash", "-c", `nproc; awk '/MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
+	if err == nil {
+		fields := strings.Fields(string(output))
+		if len(fields) != 3 {
+			err = fmt.Errorf("invalid capacity probe")
+		} else {
+			result.CPUs, err = strconv.Atoi(fields[0])
+			if err == nil {
+				result.MemBytes, err = strconv.ParseInt(fields[1], 10, 64)
+			}
+			if err == nil {
+				result.DiskBytes, err = strconv.ParseInt(fields[2], 10, 64)
+			}
+		}
+	}
+	if err == nil && (result.CPUs <= 0 || result.MemBytes < o.MemoryFloor || result.DiskBytes < o.DiskFloor) {
+		err = fmt.Errorf("host capacity below floor")
+	}
+	add("capacity", err)
+	if err == nil {
+		_, err = h.run(ctx, "systemctl", "--user", "set-property", "--runtime", "dyna.slice", fmt.Sprintf("MemoryMax=%d", result.MemBytes))
+		add("host slice", err)
+	}
+	_, err = h.run(ctx, "bash", "-c", `d=$(mktemp -d "$1/.dyna-reflink.XXXXXX") || exit 1; trap 'rm -rf "$d"' EXIT; printf test > "$d/a"; cp --reflink=always "$d/a" "$d/b"`, "probe", o.HostData)
+	result.NoReflink = err != nil
+	add("stream-local forwarding", h.checkForward(ctx, o))
+	return result
+}
+
+func (h *Host) checkForward(ctx context.Context, o CheckOptions) error {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return err
+	}
+	token := hex.EncodeToString(raw[:])
+	dir, err := os.MkdirTemp(filepath.Dir(h.socket), "p-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	local := filepath.Join(dir, "s")
+	listener, err := net.Listen("unix", local)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/probe" {
+			fmt.Fprint(w, token)
+			return
+		}
+		http.NotFound(w, r)
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+	remote := filepath.Join(o.HostData, "sock", "probe-"+token+".sock")
+	if _, err = h.run(ctx, "mkdir", "-p", filepath.Dir(remote)); err != nil {
+		return err
+	}
+	f := box.Forward{HostPath: remote, EnginePath: local}
+	if err = h.AddForward(ctx, f); err != nil {
+		return err
+	}
+	output, err := h.run(ctx, "curl", "--fail", "--silent", "--unix-socket", remote, "http://probe/probe")
+	cancelErr := h.RemoveForward(ctx, f)
+	if err != nil {
+		return fmt.Errorf("curl 7.40 or later and stream-local forwarding are required: %w", err)
+	}
+	if cancelErr != nil {
+		return fmt.Errorf("cancel probe forward: %w", cancelErr)
+	}
+	if string(output) != token {
+		return fmt.Errorf("forward returned the wrong token")
+	}
+	return nil
+}
