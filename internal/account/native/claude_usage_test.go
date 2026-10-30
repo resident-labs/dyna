@@ -75,3 +75,17 @@ func TestFetchClaudeUsageErrorsHideResponseBody(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeClaudeUsageReportsFixedWindowStarts(t *testing.T) {
+	windows, err := DecodeClaudeUsage([]byte(`{"five_hour":{"utilization":40,"resets_at":"2026-10-30T05:00:00Z"},"seven_day":{"utilization":20,"resets_at":"2026-11-05T00:00:00Z"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts := map[string]string{}
+	for _, w := range windows {
+		starts[w.ID] = w.PeriodStart
+	}
+	if starts["five_hour"] != "2026-10-30T00:00:00Z" || starts["seven_day"] != "2026-10-29T00:00:00Z" {
+		t.Fatalf("periodStart = %v, want five_hour 2026-10-30T00:00:00Z and seven_day 2026-10-29T00:00:00Z", starts)
+	}
+}
