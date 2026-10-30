@@ -11,38 +11,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
 // MaxWorkspaceBytes bounds file previews and unified diffs for quick remote reads.
 const MaxWorkspaceBytes = 2 << 20
-
-type DirectoryEntry struct {
-	Name    string    `json:"name"`
-	Path    string    `json:"path"`
-	Kind    string    `json:"kind"`
-	Size    int64     `json:"size"`
-	ModTime time.Time `json:"modTime"`
-	IsGit   bool      `json:"isGit"`
-}
-
-type DirectoryEntries struct {
-	Root    string           `json:"root"`
-	Path    string           `json:"path"`
-	Entries []DirectoryEntry `json:"entries"`
-}
-
-type WorkspaceFile struct {
-	Path      string `json:"path"`
-	Name      string `json:"name"`
-	Size      int64  `json:"size"`
-	Language  string `json:"language"`
-	Binary    bool   `json:"binary"`
-	Text      string `json:"text"`
-	URL       string `json:"url"`
-	Truncated bool   `json:"truncated"`
-}
 
 // WorkspaceRoot uses a room's repo or a session's actual working directory.
 // Devices have the owner's shell access: absolute paths, parent paths and
