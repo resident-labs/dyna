@@ -4,6 +4,7 @@
 import type { ChangePolicy, ChangeView, CheckSummary, Finding, PolicyOverride } from '../api/change.ts'
 import type { EventNotice } from '../api/room.ts'
 import { durationMs } from '../ui/format.ts'
+import type { Tone } from '../ui/tone.ts'
 
 // A check as a row shows it. A GitHub check carries only a name, a state and a link.
 export type CheckRow = Pick<CheckSummary, 'name'> & Partial<CheckSummary>
@@ -35,6 +36,40 @@ export function statusMeta(pr?: Facts | null): Meta {
     case 'untracked': return { label: 'Not tracked', tone: 'faint' }
     default: return { label: pr?.status || 'Tracked', tone: 'quiet' }
   }
+}
+
+// prAttention gives the row dot for a PR that needs someone to act: danger
+// for a failure, warning for requested changes, a question or a block. Other
+// states return null, so a row shows no dot.
+export function prAttention(pr?: Facts | null): { tone: Tone; label: string } | null {
+  if (!pr) return null
+  const meta = statusMeta(pr)
+  const tone: Tone | null = meta.tone === 'coral' ? 'danger' : meta.tone === 'gold' ? 'warning' : null
+  return tone && { tone, label: `${changeName(pr)}: ${meta.label}` }
+}
+
+// prStory says in plain sentences where a PR stands, for the session
+// profile: one sentence for review and one for CI. The profile labels each.
+export function prStory(pr: Facts): { review: string; ci: string } {
+  const tracks = prTracks(pr)
+  const end = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`)
+  const review = pr.isDraft ? 'The PR is a draft, so review waits.'
+    : pr.status === 'paused' && pr.pauseReason ? end(`Paused: ${pr.pauseReason}`)
+    : pr.reviewState === 'queued' ? (pr.queuePosition ? `Waiting for a reviewer, ${ordinal(pr.queuePosition)} in line.` : 'Waiting for a reviewer.')
+    : pr.reviewState === 'reviewing' ? 'A reviewer is reading it now.'
+    : pr.reviewState === 'approved' ? (tracks.ready ? 'Approved and ready to merge.' : 'Approved. It merges when CI passes.')
+    : pr.reviewState === 'changes' ? (pr.verdict === 'question' ? 'The reviewer asked the author a question.' : 'The reviewer asked for changes.')
+    : pr.reviewState === 'off' ? 'Automatic review is off.'
+    : pr.reviewState === 'blocked' ? end(pr.reviewBlocked || 'Review is blocked')
+    : end(statusMeta(pr).label)
+  // The profile labels this line CI, so the sentence does not repeat it.
+  const ci = tracks.ci === 'passed' ? 'Passed.'
+    : tracks.ci === 'failed' ? end(pr.ciReason ? `Failed: ${pr.ciReason}` : 'Failed')
+    : tracks.ci === 'running' ? 'Running.'
+    : tracks.ci === 'absent' ? 'This repository has none.'
+    : tracks.ci === 'local' ? 'Local CI checks this change.'
+    : 'No result yet.'
+  return { review, ci }
 }
 
 const ORDINALS = ['th', 'st', 'nd', 'rd']

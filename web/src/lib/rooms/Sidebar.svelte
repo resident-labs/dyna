@@ -12,7 +12,8 @@
   import { GENERAL } from './feedViews.ts'
   import Avatar from '../ui/Avatar.svelte'
   import { ago, roomLabel } from '../ui/format.ts'
-  import PRChip from '../prs/PRChip.svelte'
+  import StatusPill from '../ui/StatusPill.svelte'
+  import { changeName, prAttention } from '../prs/pr.ts'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, agentExpedited } from './expedite.ts'
   import GoalGlyph from '../goals/GoalGlyph.svelte'
@@ -70,11 +71,14 @@
 
 {#snippet person(m: Member, sel: boolean, onclick: () => void)}
   {@const pr = prs[m.id ?? '']?.[0]}
+  {@const attention = prAttention(pr)}
+  <!-- A row is the name, one muted fact and at most one dot. The profile says why. -->
   <button class="chan person" class:sel style="--depth: 0" {onclick}>
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
     <span class="label hue-{m.hue}">{m.name}</span>
     {#if agentExpedited($expedite, m)}<ExpediteBadge short />{/if}
-    {#if pr}<PRChip {pr} short />{:else}<span class="turn">{m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span>{/if}
+    <span class="turn">{pr ? changeName(pr) : m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span>
+    {#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}
   </button>
 {/snippet}
 
@@ -232,7 +236,7 @@
   .person .label { font-weight: 600; }
   .sub { margin: 3px 0 0; font-size: var(--t-cap); color: var(--faint); }
   .empty { margin: var(--s2); font-size: var(--t-ui); color: var(--faint); }
-  .turn { font-size: var(--t-sm); color: var(--faint); }
+  .turn { flex: none; font-size: var(--t-sm); color: var(--faint); }
   .me {
     height: 56px;
     flex: none;

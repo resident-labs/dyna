@@ -19,6 +19,8 @@
   import MonitorGlyph from '../computers/MonitorGlyph.svelte'
   import { isLive, hasComputer, appName, ageText } from '../computers/computers.ts'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.ts'
+  import StatusPill from '../ui/StatusPill.svelte'
+  import { changeName, prAttention, type Facts } from '../prs/pr.ts'
 
   // sessionRow draws one folded row. The root row has no fold state, so the
   // fold fields stay optional for it.
@@ -31,6 +33,8 @@
 
   interface Props {
     members?: Member[]
+    // prs maps a session id to its open PRs, newest first.
+    prs?: Record<string, Facts[]>
     focus?: string
     scope?: string
     selected?: string
@@ -56,7 +60,7 @@
     ontakeseat?: (() => void) | null
   }
 
-  let { members = [], focus = '', scope = '', selected = '', fresh = '', closed = false, computers = [], onopencomputer = () => {}, onselect, onclosed, onmenu, selecting = false, picked = [], onselection = () => {}, onpick = () => {}, onactions = () => {}, roomControls = null, onroomactions = () => {}, onresumeroom = () => {}, onreloadcontrols = () => {}, oncleardormant = null, ondismiss = null, dismissing = '', ontakeseat = null }: Props = $props()
+  let { members = [], prs = {}, focus = '', scope = '', selected = '', fresh = '', closed = false, computers = [], onopencomputer = () => {}, onselect, onclosed, onmenu, selecting = false, picked = [], onselection = () => {}, onpick = () => {}, onactions = () => {}, roomControls = null, onroomactions = () => {}, onresumeroom = () => {}, onreloadcontrols = () => {}, oncleardormant = null, ondismiss = null, dismissing = '', ontakeseat = null }: Props = $props()
 
   // The session menu opens by right click, the Menu key or Shift+F10 on a
   // focused row, or the ⋯ button. Keyboard opens anchor it under the row.
@@ -139,6 +143,8 @@
   {@const pc = computerOf(m.id)}
   {@const offSeat = external && m.id === rootSession?.id}
   {@const status = sessionStatus(m)}
+  {@const pr = prs[m.id ?? '']?.[0]}
+  {@const attention = prAttention(pr)}
   <div class="item" style="--depth:{m.depth}">
   {#if row.hasChildren && !selecting}
     <button class="fold" aria-expanded={!row.folded} aria-label="{row.folded ? 'Show' : 'Hide'} subagents of {m.name}" title={row.folded ? 'Show subagents' : 'Hide subagents'} onclick={() => toggleFold(m.id)}>
@@ -151,7 +157,7 @@
     {/if}
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
     <span class="text">
-      <span class="name hue-{m.hue}"><span class="nm">{offSeat ? 'root (internal)' : m.name}</span>{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if m.ownerDisplay}<span class="display" title="This session's own shells use your display">uses your display</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}</span>
+      <span class="name hue-{m.hue}"><span class="nm">{offSeat ? 'root (internal)' : m.name}</span>{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if m.ownerDisplay}<span class="display" title="This session's own shells use your display">uses your display</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}{#if pr}<span class="pr">{changeName(pr)}</span>{/if}{#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}</span>
       <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}{#if status}<span class="now" class:working={status === 'working'}>{status}</span> · {/if}{#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
       <ResponsibilityCount counts={m.responsibilities} />
     </span>
@@ -414,6 +420,7 @@
   }
   .sub { font-size: var(--t-sm); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* The owner-display grant is quiet plain text: it names a capability, not a state. */
+  .pr { flex: none; font-size: var(--t-sm); font-weight: 400; color: var(--faint); }
   .display { font-size: var(--t-cap); font-weight: 500; color: var(--faint); white-space: nowrap; }
   /* The status reads as the DM header does: gold only while working. */
   .sub .now.working { color: var(--gold); }
