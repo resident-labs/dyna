@@ -19,7 +19,7 @@ func (fakeBoxes) Remove(context.Context, contract.BoxID) error    { return nil }
 type fakeProfiles struct{}
 
 func (fakeProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
-	return contract.ModelChoice{Provider: contract.ProviderAnthropic, ID: "model", Thinking: contract.ThinkingLow}, []string{"model"}, nil
+	return contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "model", Thinking: contract.ThinkingLow}, []string{"model"}, nil
 }
 
 func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context.Context) {
