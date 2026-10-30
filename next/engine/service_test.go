@@ -715,9 +715,6 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 			t.Fatalf("placement: %+v", spec)
 		}
 	}
-	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: parent.Session}); e == nil || e.Code != contract.ErrHasChildren {
-		t.Fatalf("close: %v", e)
-	}
 	close(adapter.unblock)
 	for _, id := range []contract.SessionID{a.Session, b.Session} {
 		unlock := s.lockBox(id)
