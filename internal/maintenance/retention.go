@@ -112,6 +112,8 @@ const (
 	// localCIResultRetention keeps a local CI result after it was last saved,
 	// unless its commit is an open PR's head or part of a pending merge trial.
 	localCIResultRetention = 14 * 24 * time.Hour
+	// Keep diagnostic text for three days, but preserve live commit evidence.
+	localCIResultLogRetention = 3 * 24 * time.Hour
 )
 
 // sweepClosedSessionLogs shares the scheduled maintenance pass with archived runs.
@@ -420,7 +422,11 @@ func pruneLocalCIResults(ctx context.Context, dataDir string, now time.Time) (in
 		return 0, err
 	}
 	store := localci.Store{DataDir: dataDir}
-	results, err := store.PruneResults(ctx, now.Add(-localCIResultRetention), liveCommits(st))
+	keep := liveCommits(st)
+	if _, err := store.PruneResultLogs(ctx, now.Add(-localCIResultLogRetention), keep); err != nil {
+		return 0, err
+	}
+	results, err := store.PruneResults(ctx, now.Add(-localCIResultRetention), keep)
 	if err != nil {
 		return 0, err
 	}
