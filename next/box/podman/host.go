@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/resident-labs/dyna/box"
@@ -31,6 +32,7 @@ func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, e
 }
 
 type Host struct {
+	buildMu             sync.Mutex
 	gate                chan struct{}
 	destination, socket string
 	runner              Runner
@@ -220,6 +222,9 @@ type remoteExit int
 func (e remoteExit) Error() string { return fmt.Sprintf("host command exited with status %d", e) }
 
 func (h *Host) run(ctx context.Context, argv ...string) ([]byte, error) {
+	return h.runInput(ctx, nil, argv...)
+}
+func (h *Host) runInput(ctx context.Context, input []byte, argv ...string) ([]byte, error) {
 	if err := h.lock(ctx); err != nil {
 		return nil, err
 	}
@@ -228,9 +233,12 @@ func (h *Host) run(ctx context.Context, argv ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return h.execute(ctx, argv...)
+	return h.executeInput(ctx, input, argv...)
 }
 func (h *Host) execute(ctx context.Context, argv ...string) ([]byte, error) {
+	return h.executeInput(ctx, nil, argv...)
+}
+func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) ([]byte, error) {
 	// Do not retry a mutation after an uncertain reply; reconcile containers instead.
 	parts := []string{"bash", "-c", frameScript, "dyna-frame"}
 	parts = append(parts, argv...)
@@ -238,7 +246,8 @@ func (h *Host) execute(ctx context.Context, argv ...string) ([]byte, error) {
 		parts[i] = quote(parts[i])
 	}
 	args := append(h.base(), h.destination, strings.Join(parts, " "))
-	out, sshErr := h.runner.Run(ctx, []byte("DYNA-IN 00000000000000000000\n"), args...)
+	frame := append([]byte(fmt.Sprintf("DYNA-IN %020d\n", len(input))), input...)
+	out, sshErr := h.runner.Run(ctx, frame, args...)
 	body, status, err := parseReply(out)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", err, sshErr)
