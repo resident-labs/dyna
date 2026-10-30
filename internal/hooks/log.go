@@ -44,7 +44,7 @@ func (s Service) HookRunLog(repo, name, id string) (HookRunLog, error) {
 			return HookRunLog{}, err
 		}
 		out := HookRunLog{ExitCode: -1}
-		if r.Result == "pass" {
+		if r.Result == ResultPass {
 			out.ExitCode = 0
 		} else if m := hookExit.FindSubmatch(bytes.TrimSpace(b)); m != nil {
 			out.ExitCode, _ = strconv.Atoi(string(m[1]))

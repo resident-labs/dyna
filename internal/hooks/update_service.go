@@ -30,7 +30,7 @@ func (s Service) StartUpdate(ctx context.Context, event Event, source, toolPath 
 	}
 	for _, job := range jobs {
 		if job.Hook == updaterservice.RunName && job.Repo == r.ID && job.SHA == event.SHA && job.Status != "finished" {
-			return Run{ID: job.ID, Result: "pending", LogPath: job.HookLog}, nil
+			return Run{ID: job.ID, Result: ResultPending, LogPath: job.HookLog}, nil
 		}
 	}
 	h := Hook{Name: updaterservice.RunName, Label: "Updates"}
@@ -55,7 +55,7 @@ func (s Service) StartUpdate(ctx context.Context, event Event, source, toolPath 
 		err = closeErr
 	}
 	if err != nil {
-		run.Result = "error"
+		run.Result = ResultError
 		run.FinishedAt = time.Now().UTC()
 		if _, saveErr := s.saveRun(ctx, run); saveErr != nil {
 			return run, fmt.Errorf("start update: %v; save result: %w", err, saveErr)
