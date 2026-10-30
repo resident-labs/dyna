@@ -14,4 +14,6 @@ CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NUL
 CREATE TABLE host_labels (host TEXT NOT NULL REFERENCES hosts(name), label TEXT NOT NULL, PRIMARY KEY(host, label));
 CREATE TABLE boxes (id TEXT PRIMARY KEY, session TEXT NOT NULL UNIQUE REFERENCES sessions(id), parent TEXT REFERENCES boxes(id), host TEXT REFERENCES hosts(name), image TEXT NOT NULL, size TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL, slice TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX boxes_host_state ON boxes(host, state);
+CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);
+CREATE UNIQUE INDEX operations_pending_dedup ON operations(room, by_kind, by_id, kind, args_sha256) WHERE state = 'pending';
 CREATE TABLE archives (session TEXT NOT NULL REFERENCES sessions(id), repo TEXT NOT NULL REFERENCES repos(repo), ref TEXT NOT NULL, commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(session, repo));
