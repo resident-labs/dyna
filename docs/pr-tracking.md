@@ -216,7 +216,9 @@ appear in the normal session lists. The change view can open a live reviewer.
 
 A reviewer can work while CI is pending and record a verdict before CI ends.
 Known failed CI blocks new review work until a rerun starts or passes.
-A new head gets a fresh reviewer with the earlier findings and delta context.
+A new head starts a new round that reuses the PR's previous reviewer session
+when it can and launches a fresh reviewer otherwise, with the earlier findings
+and delta context.
 New comments reach a live reviewer as steering. Reviewers never run the test
 suite; CI supplies test results. They can run cheap static checks.
 Dyna reports ready only when the verified head has approval and fresh green CI,
