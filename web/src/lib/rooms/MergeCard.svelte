@@ -5,6 +5,7 @@
   // reads the typed payload, never the text, and keeps no feed-only state.
   import { openExternal } from '../../api.ts'
   import EventRow from './EventRow.svelte'
+  import EventSteps from './EventSteps.svelte'
   import EventDetails from './EventDetails.svelte'
   import { mergeDecision, mergeEvent } from './eventPayloads.ts'
   import { clock } from '../ui/format.ts'
@@ -133,15 +134,10 @@
   {/snippet}
   {#snippet icon()}⇢{/snippet}
   {#snippet footer()}
-      {#if posts.length > 1}
-        <details>
-          <summary>Show steps ({posts.length})</summary>
-          {#each posts as step (step.id)}
-            {@const event = mergeEvent(step)}
-            {#if event}<div class="step-note"><time>{clock(step.ts)}</time> · {stepWords[event.type]}</div>{/if}
-          {/each}
-        </details>
-      {/if}
+    <EventSteps steps={posts.flatMap((step) => {
+      const event = mergeEvent(step)
+      return event ? [{ id: step.id, time: clock(step.ts), label: stepWords[event.type] }] : []
+    })} />
   {/snippet}
   {#snippet detail()}
   <div class="body">
@@ -177,7 +173,6 @@
 
 <style>
   .check-name { white-space: nowrap; }
-  .step-note { color: var(--muted); }
   .note { margin: 0; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .body { display: grid; gap: 6px; }
   .sub { margin: 0; color: var(--muted); font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -9,6 +9,7 @@
   import { commitUrl, refName, shortSha } from './pr.ts'
   import { chipOf, prView } from './prCard.ts'
   import EventRow from '../rooms/EventRow.svelte'
+  import EventSteps from '../rooms/EventSteps.svelte'
   import PostActions from '../ui/PostActions.svelte'
   import PinIcon from '../ui/PinIcon.svelte'
   import HeldCommentNotice from './HeldCommentNotice.svelte'
@@ -60,11 +61,10 @@
 >
   {#snippet icon()}↑{/snippet}
   {#snippet footer()}
-    {#if folded.length > 1}
-      <details><summary>Show steps ({folded.length})</summary>
-        {#each folded as step (step.id)}{@const event = prEvent(step)}<div class="step-note">{stamp(step.ts)} · {event ? chipOf(event).label : 'Update'}</div>{/each}
-      </details>
-    {/if}
+    <EventSteps steps={folded.map((step) => {
+      const event = prEvent(step)
+      return { id: step.id, time: stamp(step.ts), label: event ? chipOf(event).label : 'Update' }
+    })} />
   {/snippet}
   {#snippet detail()}
     <div class="details">
@@ -95,7 +95,6 @@
 </EventRow>
 
 <style>
-  .step-note { color: var(--muted); }
   .notice-head { display: flex; align-items: center; gap: var(--s2); }
   .notice-pin { display: inline-flex; color: var(--muted); }
   .notice:focus-visible { outline: 2px solid var(--iris); outline-offset: var(--s1); }
