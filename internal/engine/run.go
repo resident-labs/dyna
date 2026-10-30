@@ -666,7 +666,12 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		if err := hookService.Seed(ctx); err != nil {
 			log.Printf("seed built-in hooks: %v", err)
 		}
+		if err := hookService.RemoveLegacyLibrarianHooks(ctx); err != nil {
+			log.Printf("remove legacy librarian hooks: %v", err)
+		}
 	}
+	// The engine's one timer set: one-shot deadlines in place of clock ticks.
+	engineTimers := newTimers(ctx, time.Now, afterFunc)
 	jobsSvc := newJobsService(rooms)
 	var mcpRooms *roommcp.Service
 	if !readOnly {
@@ -680,7 +685,11 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 			return err
 		}
 	}
-	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, roommcp: mcpRooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc, events: events}, readOnly)
+	svc := services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, roommcp: mcpRooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, timers: engineTimers, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc, events: events}
+	if !readOnly {
+		svc.restoreLibrarianWakes(ctx)
+	}
+	calls, callScopes, err := callsFor(svc, readOnly)
 	if err != nil {
 		return err
 	}
@@ -717,8 +726,6 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		applyOnce(calls, writer, log.Printf)
 	}
 	notify := push.Notifier(pushMayRead(cstore))
-	// The engine's one timer set: one-shot deadlines in place of clock ticks.
-	engineTimers := newTimers(ctx, time.Now, afterFunc)
 	retryMigration := make(chan struct{})
 	recoverStores(engineTimers, migrateCause, callerid.ProcessOf, func() { close(retryMigration) }, func(cause error) {
 		migrationAlert(rooms.Notify.Rooms, cause, func(roomID string) {

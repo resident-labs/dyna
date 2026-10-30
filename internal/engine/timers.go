@@ -20,6 +20,7 @@ const (
 	timerQuestions           = "questions"
 	timerHooks               = "hooks"
 	timerHookSchedule        = "hook-schedule"
+	timerLibrarianWake       = "librarian-wake"
 	timerRootFlush           = "root-flush"
 	timerPRs                 = "prs"
 	timerMerges              = "merges"
@@ -48,6 +49,7 @@ type timers struct {
 
 type timerEntry struct {
 	gen  uint64
+	when time.Time
 	stop func() bool
 }
 
@@ -87,7 +89,15 @@ func (t *timers) at(key string, when time.Time, fn func()) {
 			fn()
 		}
 	})
-	t.m[key] = timerEntry{gen: gen, stop: stop}
+	t.m[key] = timerEntry{gen: gen, when: when, stop: stop}
+}
+
+// due reports when key's deadline fires, and false when none is set.
+func (t *timers) due(key string) (time.Time, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.m[key]
+	return e.when, ok
 }
 
 // stop drops key's deadline.
