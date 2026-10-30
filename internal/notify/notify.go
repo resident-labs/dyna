@@ -1399,15 +1399,18 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 		// room's own (notify resolver). The completion target still names the root
 		// session, so both spellings are the same recipient here.
 		posted := []string{postedAddress}
+		quiet := true
 		if parent, err := store.DeliveryTarget(postedAddress); err == nil {
+			quiet = parent.Status == subagent.StatusIdle || parent.Status == subagent.StatusDormant
 			postedAddress = parent.Address()
 			posted = []string{postedAddress}
 			if parent.Role == subagent.RoleRoot && parent.RoomID == meta.RoomID {
 				posted = append(posted, meta.Room)
 			}
 		}
-		// Keep a final result as quiet context when this turn already posted to
-		// the recipient. Without a final result, the post is the whole report.
+		// Keep a final result as quiet context for an idle recipient. An active
+		// recipient needs the result during its current turn. Without a final
+		// result, the post is the whole report.
 		alreadyPosted := slices.ContainsFunc(posted, func(addr string) bool { return slices.Contains(turn.PostedTo, addr) })
 		if alreadyPosted && !turnHasResult(turn) {
 			return nil, nil
@@ -1422,7 +1425,7 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 		if result == nil && err == nil {
 			result, err = s.prepareEventCompletion(meta.RoomID, ev, []string{meta.Room}, turn.N, false)
 		}
-		if result != nil && alreadyPosted {
+		if result != nil && alreadyPosted && quiet {
 			result.Post.Wake = false
 		}
 		return result, err
