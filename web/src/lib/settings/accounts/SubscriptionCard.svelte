@@ -5,7 +5,7 @@
   import UsageSegment from './UsageSegment.svelte'
   import { accountKindLabel, accountLabel, accountStatus, amountWindow, blockedNow, dateTime, needsSignIn, parseRepoList, percent, poolMean, poolsHere, poolWindows, providerColor, providerName, repoChips, reposLabel, segmentRemaining, usageUnavailableText } from './state.ts'
   import { blockUntil } from './reset.ts'
-  import { meterWake, poolPace, type PaceStatus } from './pace.ts'
+  import { meterWake, paceWords, poolPace } from './pace.ts'
   import { deadlineClock } from './clock.svelte.ts'
   import type { ProviderAccounts, ScopeAccount } from '../../api/account.ts'
 
@@ -36,7 +36,6 @@
     const deadlines = accounts.flatMap((account) => [blockUntil(account, at), ...(account.windows ?? []).map((window) => meterWake(window.resetsAt, at))]).filter((deadline) => Number.isFinite(deadline))
     return deadlines.length ? Math.min(...deadlines) : Number.NaN
   })
-  const paceWords: Record<PaceStatus, string> = { ahead: '▲ ahead of pace', on: '● on pace', under: '▼ under pace' }
   // The row whose repo list is open, and the list being edited.
   let scoping = $state('')
   let scopeText = $state('')
@@ -66,16 +65,15 @@
         {@const mean = poolMean(pool, now())}
         {@const pace = poolPace(pool.segments.filter((segment) => poolsHere(segment.account) && segmentRemaining(segment, now()) !== null).map((segment) => segment.window), now())}
         <div class="pool">
-          <div class="headline">
-            <span class="micro-label">{pool.label}</span>
-            {#if mean === null}<span class="none">Not reported</span>{:else}<strong class="ui-num" class:low={mean < 20}>{percent(mean)}</strong>{/if}
-            {#if pace}<span class="pace" class:ahead={pace === 'ahead'}>{paceWords[pace]}</span>{/if}
+          <div class="pool-head">
+            <span class="micro-label" title={pool.segments[0]?.window.label}>{pool.label}</span>
+            {#if pool.segments.length > 1 && mean !== null}<span class="average" class:low={mean < 20} title={pace ? paceWords[pace] : undefined}>Average {percent(mean)}</span>{/if}
           </div>
           <div class="segments">
             {#each pool.segments as segment (segment.account.id)}
               {#if accounts.length > 1 && onopen}
                 <button class="segment-link" aria-label="Open details for {accountLabel(segment.account)}" onclick={(event) => onopen?.(segment.account, event)}><UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} /></button>
-              {:else}<UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} showAccount={false} showValue={mean === null && segmentRemaining(segment, now()) !== null} />{/if}
+              {:else}<UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} showAccount={false} />{/if}
             {/each}
           </div>
         </div>
@@ -140,19 +138,13 @@
   }
   .card-link:active, .identity-link:active { background: var(--select); }
   .provider-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
-  .pools { container-type: inline-size; display: grid; gap: var(--s3); margin-top: var(--s1); }
-  .pool { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: var(--s2) var(--s4); align-items: center; }
-  .headline { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .headline strong { font-size: var(--t-stat); font-weight: var(--w-strong); line-height: var(--leading-tight); color: var(--ink); }
-  .headline strong.low { color: var(--tone-warning-fg); }
-  .none { font-size: var(--t-sm); color: var(--muted); }
-  .pace { font-size: var(--t-cap); color: var(--muted); white-space: nowrap; }
-  .pace.ahead { color: var(--tone-warning-fg); }
+  .pools { display: grid; gap: var(--s3); margin-top: var(--s1); }
+  .pool { display: grid; gap: var(--s1); min-width: 0; }
+  .pool-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); min-width: 0; }
+  .pool-head .micro-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .average { flex: none; font-size: var(--t-cap); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .average.low { color: var(--tone-warning-fg); }
   .segments { display: grid; gap: var(--s1); min-width: 0; }
-  @container (max-width: 30rem) {
-    .pool { grid-template-columns: minmax(0, 1fr); }
-    .headline { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s2); }
-  }
   .accounts { display: flex; flex-direction: column; margin-top: var(--s2); border-top: 1px solid var(--border-soft); }
   .accounts:first-child { margin-top: 0; border-top: 0; }
   .account { min-width: 0; padding: var(--s2) 0; }
