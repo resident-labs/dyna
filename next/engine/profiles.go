@@ -39,7 +39,7 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 			return nil, fmt.Errorf("profile %q: model must be allowed", name)
 		}
 		switch p.Provider {
-		case contract.ProviderAnthropic, contract.ProviderOpenAI:
+		case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
 		default:
 			return nil, fmt.Errorf("profile %q: invalid provider", name)
 		}
