@@ -300,18 +300,25 @@ func matchesUpstream(rec room.Record, r repository) bool {
 	})
 }
 
-// checkoutOrigin returns the origin repository of the room's checkout that
-// cmdDir uses: the room's repository, or a registered extra one.
-func checkoutOrigin(ctx context.Context, rec room.Record, cmdDir string) (repository, bool) {
-	if rec.Repo == "" {
-		return repository{}, false
-	}
+// checkoutFor returns the checkout that cmdDir uses: the room's repository, or
+// a registered extra one.
+func checkoutFor(rec room.Record, cmdDir string) string {
 	checkout := rec.Repo
 	for _, path := range rec.ExtraRepos {
 		if sameCheckout(cmdDir, path) {
 			checkout = path
 		}
 	}
+	return checkout
+}
+
+// checkoutOrigin returns the origin repository of the checkout that cmdDir
+// uses. See checkoutFor.
+func checkoutOrigin(ctx context.Context, rec room.Record, cmdDir string) (repository, bool) {
+	if rec.Repo == "" {
+		return repository{}, false
+	}
+	checkout := checkoutFor(rec, cmdDir)
 	remote, err := repoid.Git(ctx, checkout, "remote", "get-url", "origin")
 	if err != nil {
 		return repository{}, false
@@ -334,13 +341,7 @@ func matchesForkParent(ctx context.Context, rec room.Record, cmdDir string, r re
 	if !ok || r.name == "" || !strings.EqualFold(r.host, origin.host) {
 		return false
 	}
-	checkout := rec.Repo
-	for _, path := range rec.ExtraRepos {
-		if sameCheckout(cmdDir, path) {
-			checkout = path
-		}
-	}
-	parent, ok := parentRepo(ctx, Command(ctx, "", checkout), origin)
+	parent, ok := parentRepo(ctx, Command(ctx, "", checkoutFor(rec, cmdDir)), origin)
 	return ok && strings.EqualFold(r.name, parent)
 }
 
@@ -830,13 +831,7 @@ func refuseImplicitForkPR(rec room.Record, cmdDir string, r repository, args []s
 	if cmdDir == "" {
 		cmdDir, _ = os.Getwd()
 	}
-	checkout := rec.Repo
-	for _, path := range rec.ExtraRepos {
-		if sameCheckout(cmdDir, path) {
-			checkout = path
-		}
-	}
-	upstream := rec.UpstreamOf(checkout)
+	upstream := rec.UpstreamOf(checkoutFor(rec, cmdDir))
 	if upstream == "" {
 		return nil
 	}
