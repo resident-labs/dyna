@@ -57,5 +57,18 @@ func TestFileRoomAccess(t *testing.T) {
 		if rec.Code != tc.status {
 			t.Fatalf("room %s: %d", tc.room, rec.Code)
 		}
+		if tc.status == http.StatusOK && rec.Header().Get("Content-Security-Policy") != "sandbox" {
+			t.Fatal(rec.Header())
+		}
+	}
+	file.Media = "text/html"
+	_, err = st.Post(context.Background(), contract.Event{ID: "e2", Room: "a", Time: time.Now(), From: owner, Body: contract.PostCreated{Text: "hi", Attachments: []contract.Attachment{file}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	s.Files(owner, "").ServeHTTP(rec, httptest.NewRequest("GET", "/v1/files/"+file.SHA256, nil))
+	if rec.Header().Get("Content-Type") != "text/html" || rec.Header().Get("Content-Security-Policy") != "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal(rec.Header())
 	}
 }
