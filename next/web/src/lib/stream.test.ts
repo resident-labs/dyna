@@ -4,10 +4,10 @@ import { stream, type EventConnection } from "./stream.ts";
 import { decodeEvent } from "./event.ts";
 
 test("rejects malformed event bodies at the stream boundary", () => {
-  assert.throws(() => decodeEvent(JSON.stringify({
+  assert.throws(() => decodeEvent({
     seq: 1, id: "e", at: "", from: { kind: "owner" },
     type: "session.started", body: { session: "s" },
-  })));
+  }));
 });
 
 test("reconnects after the last applied event", () => {

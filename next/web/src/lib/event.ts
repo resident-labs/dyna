@@ -43,8 +43,8 @@ const bodies: Record<string, Check> = {
   "image.failed": object({ host: string, repo: string, name: string, tag: string, reason: string, logTail: string }),
 };
 
-export function decodeEvent(data: string): Event {
-  const value: unknown = JSON.parse(data);
+// Every event from events.list and the stream passes here once.
+export function decodeEvent(value: unknown): Event {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid event");
   // JSON objects have string keys; the checks below validate the generated event shape.
   const record = value as Record<string, unknown>;
