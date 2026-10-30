@@ -39,6 +39,14 @@ export function paceOf(window: PaceWindow, now: number): Pace | null {
   return { status, expectedRemaining: 100 - elapsed }
 }
 
+// meterWake is the next time a meter's countdown or pace can change: the next whole minute, or the reset when it comes first.
+// It returns NaN once the reset has passed or when no reset is known.
+export function meterWake(resetsAt: string | undefined, now: number): number {
+  const end = Date.parse(resetsAt ?? '')
+  if (!Number.isFinite(end) || end <= now) return NaN
+  return Math.min(end, (Math.floor(now / MINUTE) + 1) * MINUTE)
+}
+
 // resetsIn words the time left before a reset, such as "1h 40m". It returns '' once the reset has passed.
 export function resetsIn(resetsAt: string | undefined, now: number): string {
   const end = Date.parse(resetsAt ?? '')
