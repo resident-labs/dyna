@@ -129,7 +129,7 @@
   .none { font-size: var(--t-sm); color: var(--muted); }
   .pace { font-size: var(--t-cap); color: var(--muted); white-space: nowrap; }
   .pace.ahead { color: var(--tone-warning-fg); }
-  .segments { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--s1); min-width: 0; }
+  .segments { display: grid; gap: var(--s1); min-width: 0; }
   @container (max-width: 30rem) {
     .pool { grid-template-columns: minmax(0, 1fr); }
     .headline { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s2); }
