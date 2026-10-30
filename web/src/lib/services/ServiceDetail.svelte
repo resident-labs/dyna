@@ -39,10 +39,8 @@
   let { service, host, settings, changes, focus = null, canOpen, onopen, onpr, onchanged, onsetting }: Props = $props()
 
   // A built-in pass keeps its runs on the machine under its own name; a
-  // service run by a repository hook, such as Updates, keeps them on the
-  // repository under the hook's name.
-  const repoHook = $derived(service.hook && service.state !== 'not-set-up' ? service.hook : '')
-  const hook = $derived(repoHook || (service.schedule ? service.id : ''))
+  // service run by a repository hook shows that hook's own list instead.
+  const hook = $derived(service.schedule ? service.id : '')
   const items = $derived((settings ?? []).filter((it) => service.settingsKeys.includes(it.key)))
   let busy = $state(false)
   let error = $state('')
@@ -73,7 +71,7 @@
 
   // The runs of a hook, with the log reason of each failure among them.
   async function hookActivity(name: string): Promise<Entry[]> {
-    const runs = readHookRuns(await (repoHook ? api.hookRuns(host.repo, name) : api.globalHookRuns(name))).slice(0, 20)
+    const runs = readHookRuns(await api.globalHookRuns(name)).slice(0, 20)
     const reasons: Record<string, RunReason> = {}
     // A log that cannot be read leaves only its own run without a reason.
     await Promise.all(runs.filter((r) => r.result === 'error' || r.result === 'fail').map(async (r) => {
@@ -83,7 +81,7 @@
     return hookEntries(name, service.label, runs, Date.now(), reasons)
   }
 
-  const logOf = (id: string) => (repoHook ? api.hookRunLog(host.repo, hook, id) : api.globalHookRunLog(hook, id))
+  const logOf = (id: string) => api.globalHookRunLog(hook, id)
 
   function loadActivity(): void {
     const read = service.id === 'merge-queue' ? api.roomMergeHistory(host.room).then((v) => mergeEntries(readHistory(v)))
@@ -122,7 +120,7 @@
   {#if switchHint[service.id]}<p class="hint">{switchHint[service.id]}</p>{/if}
   {#if hook || canOpen(service.session)}
     <div class="acts">
-      {#if hook}<button class="btn" disabled={busy} onclick={() => write(() => (repoHook ? api.runHook(host.repo, repoHook) : api.runService(service.id)), `${service.label} ran.`)}>Run now</button>{/if}
+      {#if hook}<button class="btn" disabled={busy} onclick={() => write(() => api.runService(service.id), `${service.label} ran.`)}>Run now</button>{/if}
       {#if canOpen(service.session)}<button class="btn quiet" onclick={() => onopen(service.session)}>Open session</button>{/if}
       {#if note}<span class="note" role="status">{note}</span>{/if}
     </div>
@@ -131,7 +129,8 @@
   {#if service.id === 'local-ci'}
     <CIHealth roomId={host.room} {changes} {onpr} />
   {:else if service.hook && service.state !== 'not-set-up'}
-    <HookList title={service.label} repo={host.repo} only={service.hook} {focus} />
+    <!-- Each feed card's request is a new focus, so the list opens that run again. -->
+    {#key focus}<HookList title={service.label} repo={host.repo} only={service.hook} {focus} />{/key}
   {:else if entries === null || entries.length || hook}
     <h4 class="micro-label">Recent runs</h4>
     {#if entries === null}

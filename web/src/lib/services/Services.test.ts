@@ -77,7 +77,7 @@ test('the page shows the registry groups in order, Not set up last, then Hooks w
     assert.deepEqual(globalThis.__writes, ['run maintenance'])
     // Updates runs its repository hook.
     need(rowOf('updates').querySelector<HTMLElement>('button.toggle')).click()
-    flushSync()
+    await settle()
     need([...rowOf('updates').querySelectorAll<HTMLElement>('button')].find((b) => b.textContent === 'Run now')).click()
     await settle()
     assert.deepEqual(globalThis.__writes, ['run maintenance', 'hook /repo self-update'])
