@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const css = readFileSync(new URL('../../app.css', import.meta.url), 'utf8')
+const css = readFileSync(new URL('../../app.css', import.meta.url), 'utf8') + readFileSync(new URL('./tokens.css', import.meta.url), 'utf8')
 const colors: Record<string, string> = {}
 for (const [, name, hex] of css.matchAll(/--([\w-]+):\s*(#[\da-f]{6})\s*;/gi)) {
   assert.ok(name !== undefined && hex !== undefined)
@@ -22,11 +22,19 @@ const luminance = (hex: string): number =>
   linearChannel(hex, 1) * 0.2126 + linearChannel(hex, 3) * 0.7152 + linearChannel(hex, 5) * 0.0722
 const contrast = (a: number, b: number): number => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
 
-for (const surface of ['side', 'main']) {
+for (const surface of ['bg-sunk', 'bg', 'surface']) {
   test(`small faint text has at least 4.5:1 contrast on ${surface}`, () => {
     const ratio = contrast(luminance(colorOf('faint')), luminance(colorOf(surface)))
     assert.ok(ratio >= 4.5, `${colorOf('faint')} on ${colorOf(surface)} is ${ratio.toFixed(2)}:1`)
   })
+}
+for (const surface of ['bg-sunk', 'bg', 'surface', 'surface-2']) {
+  for (const [color, minimum] of [['ink', 4.5], ['muted', 4.5], ['faint', 3]] as const) {
+    test(`${color} has at least ${minimum}:1 contrast on ${surface}`, () => {
+      const ratio = contrast(luminance(colorOf(color)), luminance(colorOf(surface)))
+      assert.ok(ratio >= minimum, `${colorOf(color)} on ${colorOf(surface)} is ${ratio.toFixed(2)}:1`)
+    })
+  }
 }
 test('faint text stays quieter than muted text', () => {
   assert.ok(luminance(colorOf('faint')) < luminance(colorOf('muted')))
