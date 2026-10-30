@@ -1,0 +1,97 @@
+package model
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
+)
+
+func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("X-Api-Key") != "secret" || r.Header.Get("X-Claude-Code-Session-Id") != "session" {
+			t.Errorf("wrong request: %s %v", r.URL.Path, r.Header)
+		}
+		w.WriteHeader(204)
+	}))
+	defer up.Close()
+	target, _ := url.Parse(up.URL)
+	req := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`))
+	req.Header.Set("X-Api-Key", "box")
+	req.Header.Set("Authorization", "Bearer box")
+	w := httptest.NewRecorder()
+	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, req)
+	if w.Code != 204 {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestRouteRefusesForbiddenModel(t *testing.T) {
+	called := false
+	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer up.Close()
+	target, _ := url.Parse(up.URL)
+	w := httptest.NewRecorder()
+	Handler(target, "secret", "session", nil).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
+	if w.Code != 403 || called {
+		t.Fatalf("status %d, called %v", w.Code, called)
+	}
+}
+
+func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(503)
+		io.WriteString(w, "data: one\n\n")
+		w.(http.Flusher).Flush()
+		io.WriteString(w, "data: two\n\n")
+	}))
+	defer up.Close()
+	target, _ := url.Parse(up.URL)
+	w := httptest.NewRecorder()
+	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
+	if calls != 1 || w.Code != 503 || w.Body.String() != "data: one\n\ndata: two\n\n" || !w.Flushed {
+		t.Fatalf("calls %d status %d body %q flushed %v", calls, w.Code, w.Body.String(), w.Flushed)
+	}
+}
+
+func TestRouteRejectsAmbiguousModel(t *testing.T) {
+	target, _ := url.Parse("http://127.0.0.1")
+	w := httptest.NewRecorder()
+	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestProxyConfig(t *testing.T) {
+	dir := t.TempDir()
+	_, err := NewProxy(dir, "management-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "cliproxy", "config.yaml")
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("config mode: %v, %v", info, err)
+	}
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Host != "127.0.0.1" || cfg.Port == 0 || cfg.RequestRetry != 0 || cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || len(cfg.ClaudeKey) != 0 {
+		t.Fatal("proxy config violates the loopback, retry, management, or affinity policy")
+	}
+	info, err = os.Stat(filepath.Join(dir, "cliproxy", "auth"))
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("auth mode: %v, %v", info, err)
+	}
+}
