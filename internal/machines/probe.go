@@ -249,19 +249,20 @@ func (p Prober) ProbeAndSave(ctx context.Context, m Machine) (Machine, error) {
 	if err != nil {
 		return Machine{}, err
 	}
+	var recordErr, alertErr error
 	if !m.Local && result.Health == HealthOnline && p.Record != nil {
 		if err := p.Record(after, result); err != nil {
-			return after, fmt.Errorf("record node history: %w", err)
+			recordErr = fmt.Errorf("record node history: %w", err)
 		}
 	}
 	if !blocked && p.Alerter != nil {
 		if block := after.DiskBlock(); block != "" {
 			if err := p.Alerter.MachineLowDisk(ctx, after.Name, block, after.Capabilities.Disk.Free); err != nil {
-				return after, fmt.Errorf("alert low disk on %s: %w", after.Name, err)
+				alertErr = fmt.Errorf("alert low disk on %s: %w", after.Name, err)
 			}
 		}
 	}
-	return after, nil
+	return after, errors.Join(recordErr, alertErr)
 }
 
 // probeBudgetFor is the longest one probe of this machine may take: the time
