@@ -296,3 +296,38 @@ func TestCloseCancelsCreatingBox(t *testing.T) {
 		t.Fatalf("box: %+v, %v", b, err)
 	}
 }
+
+type cancelOnRemove struct{ cancel context.CancelFunc }
+
+func (cancelOnRemove) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
+func (b cancelOnRemove) Remove(context.Context, contract.BoxID) error  { b.cancel(); return nil }
+
+func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	closeCtx, cancel := context.WithCancel(ctx)
+	s.boxes = cancelOnRemove{cancel: cancel}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: session}); e == nil {
+		t.Fatal("expected canceled close")
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	count := 0
+	for _, event := range events.Events {
+		if event.Body.(contract.BoxChanged).To == contract.BoxDeleted {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("got %d deleted events", count)
+	}
+}
