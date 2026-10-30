@@ -142,7 +142,7 @@ func TestStopEarlyEndsReviewUntilANewHeadOrARestart(t *testing.T) {
 	if prfacts.NeedsReview(got) {
 		t.Fatal("a stopped review still asks for another reviewer")
 	}
-	if review, _, reason := (ReviewFacts{}).ReviewState(got); review != "blocked" || !strings.Contains(reason, "too-large") {
+	if review, _, reason := (ReviewFacts{}).ReviewState(got); review != "blocked" || !strings.Contains(reason.Reason, "too-large") {
 		t.Fatalf("stopped state = %q, %q", review, reason)
 	}
 	// A new head is the normal recovery.

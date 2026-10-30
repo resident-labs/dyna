@@ -9,15 +9,13 @@
   import LoadOlder from '../ui/LoadOlder.svelte'
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
-  import Chip from '../ui/Chip.svelte'
-  import { toneOf } from '../ui/tone.ts'
   import GoalGlyph from '../goals/GoalGlyph.svelte'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, agentExpedited, goalExpedited } from '../rooms/expedite.ts'
-  import { goalAgo, goalParts, goalTone } from '../goals/goals.ts'
+  import { goalAgo, goalParts } from '../goals/goals.ts'
   import { ago, markdown, stamp, tokens, roomLabel } from '../ui/format.ts'
   import StatusPill from '../ui/StatusPill.svelte'
-  import { changeName, changeTitle, prAttention, prStory, type Facts } from '../prs/pr.ts'
+  import { changeName, changeTitle, prAttention, prStory, prTracks, type Facts } from '../prs/pr.ts'
 
   import type { Attachment, Member, PostDetail, Room } from '../api/room.ts'
   import type { Goal } from '../api/goal.ts'
@@ -102,8 +100,9 @@
                 <Row text={changeTitle(pr)} onclick={onpr && n ? () => onpr(n) : null}>
                   {#snippet lead()}<span class="num mono">{changeName(pr)}</span>{/snippet}
                   {#snippet detail()}
-                    <span class="story"><b>Review</b><span>{#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}{story.review}</span></span>
-                    <span class="story"><b>CI</b><span>{story.ci}</span></span>
+                    {@const mark = attention && prTracks(pr).ci === 'failed' ? 'ci' : 'review'}
+                    <span class="story" class:routine={story.routine}><b>Review</b><span>{#if attention && mark === 'review'}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}{story.review}</span></span>
+                    <span class="story"><b>CI</b><span>{#if attention && mark === 'ci'}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}{story.ci}</span></span>
                   {/snippet}
                 </Row>
               {/each}
@@ -123,7 +122,7 @@
               {@const active = g.state === 'active'}
               <Row text={parts.aim} clamp={!active} context={!active} onclick={ongoal && (() => ongoal(g.id))}>
                 {#snippet lead()}<GoalGlyph goal={g} />{/snippet}
-                {#snippet meta()}{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<Chip tone={toneOf(goalTone(g))} outline={!active}>{g.state}</Chip><span>{active ? `opened ${goalAgo(g.createdAt)}` : goalAgo(g.done?.at ?? g.updatedAt)}</span>{/snippet}
+                {#snippet meta()}{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<span>{g.state}</span><span>{active ? `opened ${goalAgo(g.createdAt)}` : goalAgo(g.done?.at ?? g.updatedAt)}</span>{/snippet}
                 {#snippet detail()}
                   {#if !active}{#if g.done?.summary}<span class="when clamp">{g.done.summary}</span>{/if}
                   {:else}{#if parts.done}<span class="when"><b>Done when</b> {parts.done}</span>{/if}{/if}
@@ -240,6 +239,7 @@
   /* A label column keeps wrapped sentences aligned on a phone. */
   .story { display: grid; grid-template-columns: 56px 1fr; margin-top: var(--s1); color: var(--ink-2); font-size: var(--t-ui); line-height: var(--leading); overflow-wrap: anywhere; }
   .story b { color: var(--muted); font-weight: 600; }
+  .story.routine { color: var(--muted); }
   .story :global(.mark-only) { vertical-align: -2px; margin-left: -3px; }
   .none { margin: 0; color: var(--faint); font-size: var(--t-body); }
   .post { padding: 10px 0; border-top: 1px solid var(--line-soft); }

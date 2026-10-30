@@ -48,19 +48,35 @@ export function prAttention(pr?: Facts | null): { tone: Tone; label: string } | 
   return tone && { tone, label: `${changeName(pr)}: ${meta.label}` }
 }
 
+// approvedStory names what an approved PR still waits for. Only Dyna merges a
+// PR into its own repository; maintainers merge an upstream one.
+function approvedStory(pr: Facts, tracks: Tracks): string {
+  if (pr.upstreamPr) return 'Approved. Maintainers of the upstream repository merge it.'
+  if (pr.reviewHead && pr.head && pr.reviewHead !== pr.head) return 'An earlier push was approved; the latest push needs review.'
+  if (tracks.missing.length) return `Approved. It still needs a review from ${tracks.missing.join(', ')}.`
+  if (tracks.ready) return 'Approved and ready to merge.'
+  if (tracks.ci === 'failed') return 'Approved, but CI failed.'
+  if (tracks.ci === 'running') return 'Approved. It merges when CI passes.'
+  return 'Approved.'
+}
+
 // prStory says in plain sentences where a PR stands, for the session
 // profile: one sentence for review and one for CI. The profile labels each.
-export function prStory(pr: Facts): { review: string; ci: string } {
+// routine marks a review wait that clears by itself, which reads muted.
+export function prStory(pr: Facts): { review: string; ci: string; routine: boolean } {
   const tracks = prTracks(pr)
   const end = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`)
+  const routine = pr.reviewState === 'blocked' && pr.reviewBlockKind === 'head-refresh'
   const review = pr.isDraft ? 'The PR is a draft, so review waits.'
     : pr.status === 'paused' && pr.pauseReason ? end(`Paused: ${pr.pauseReason}`)
     : pr.reviewState === 'queued' ? (pr.queuePosition ? `Waiting for a reviewer, ${ordinal(pr.queuePosition)} in line.` : 'Waiting for a reviewer.')
     : pr.reviewState === 'reviewing' ? 'A reviewer is reading it now.'
-    : pr.reviewState === 'approved' ? (tracks.ready ? 'Approved and ready to merge.' : 'Approved. It merges when CI passes.')
+    : pr.reviewState === 'approved' ? approvedStory(pr, tracks)
     : pr.reviewState === 'changes' ? (pr.verdict === 'question' ? 'The reviewer asked the author a question.' : 'The reviewer asked for changes.')
     : pr.reviewState === 'off' ? 'Automatic review is off.'
+    : routine ? 'Checking the latest push.'
     : pr.reviewState === 'blocked' ? end(pr.reviewBlocked || 'Review is blocked')
+    : tracks.ci === 'failed' ? 'Review waits for CI to pass.'
     : end(statusMeta(pr).label)
   // The profile labels this line CI, so the sentence does not repeat it.
   const ci = tracks.ci === 'passed' ? 'Passed.'
@@ -69,7 +85,7 @@ export function prStory(pr: Facts): { review: string; ci: string } {
     : tracks.ci === 'absent' ? 'This repository has none.'
     : tracks.ci === 'local' ? 'Local CI checks this change.'
     : 'No result yet.'
-  return { review, ci }
+  return { review, ci, routine }
 }
 
 const ORDINALS = ['th', 'st', 'nd', 'rd']
@@ -119,7 +135,8 @@ export function reviewMeta(pr?: Facts | null): Meta | null {
     }
     case 'changes': return pr.verdict === 'question' ? { label: 'Question for the author', tone: 'gold' } : { label: 'Changes requested', tone: 'gold' }
     case 'off': return { label: 'Review off', tone: 'faint' }
-    case 'blocked': return { label: pr.reviewBlocked || 'Review blocked', tone: 'gold' }
+    // A head refresh clears by itself, so it is not a block anyone must act on.
+    case 'blocked': return pr.reviewBlockKind === 'head-refresh' ? { label: 'Checking the latest push', tone: 'quiet' } : { label: pr.reviewBlocked || 'Review blocked', tone: 'gold' }
     default: return null
   }
 }

@@ -81,3 +81,10 @@ func TestChangeRowsLeaveOutRetiredLandingHistory(t *testing.T) {
 		})
 	}
 }
+
+func TestPRViewTypesARoutineHeadRefreshWait(t *testing.T) {
+	row := changeView(watch.ReviewFacts{}, watch.Record{Head: "head", HeadStale: true, Watching: true, State: state.PROpen})
+	if row.ReviewState != "blocked" || row.ReviewBlockKind != watch.ReviewBlockKindHeadRefresh || row.ReviewBlocked == "" {
+		t.Fatalf("stale head view = %q %q %q", row.ReviewState, row.ReviewBlockKind, row.ReviewBlocked)
+	}
+}

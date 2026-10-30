@@ -157,8 +157,8 @@ func TestSourceReviewStaysQueuedWithoutGitHubCI(t *testing.T) {
 	st := State{Policies: map[string]ChangePolicy{"room": changepolicy.Default()}, Reviewers: map[string]Reviewer{}}
 	for _, kind := range []string{"local", "github"} {
 		state, _, reason := reviewState(t, e, st, Record{Head: "head", Kind: kind, CI: "absent", RoomID: "room", Watching: true, State: "open"})
-		if state != "queued" || reason != "" {
-			t.Fatalf("source review: %s %s", state, reason)
+		if state != "queued" || reason != (ReviewBlock{}) {
+			t.Fatalf("source review: %s %+v", state, reason)
 		}
 	}
 }

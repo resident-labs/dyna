@@ -427,7 +427,7 @@ func TestReviewerPoolRechecksAuthorAndDependenciesAfterStartup(t *testing.T) {
 	}
 }
 
-func reviewState(t *testing.T, e *testEnv, st State, r Record) (string, *int, string) {
+func reviewState(t *testing.T, e *testEnv, st State, r Record) (string, *int, ReviewBlock) {
 	t.Helper()
 	facts, err := e.s.ReviewFacts(st)
 	if err != nil {
