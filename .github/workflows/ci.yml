@@ -384,7 +384,8 @@ jobs:
           retention-days: 1
 
   # next/ is the v2 module with its own go.mod, so the root ./... skips it.
-  # This job vets and tests it alone. Its Go version comes from next/go.mod.
+  # This job checks, vets and tests it alone, through the same script as local CI.
+  # Its Go version comes from next/go.mod.
   next:
     name: next
     needs: [changes]
@@ -397,12 +398,8 @@ jobs:
         with:
           go-version-file: next/go.mod
           cache-dependency-path: next/go.sum
-      - name: Vet
-        working-directory: next
-        run: go vet ./...
-      - name: Test
-        working-directory: next
-        run: go test ./... -count=1
+      - name: Format, vet and test
+        run: bash scripts/ci.sh next
 
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
