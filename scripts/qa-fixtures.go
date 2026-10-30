@@ -13,19 +13,29 @@ import (
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/watch"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/updaterservice"
 )
 
 // qaSeedFixtures writes only to an existing, empty data directory. The caller
 // must create that directory for the isolated QA engine and remove it afterward.
-func qaSeedFixtures(dataDir string) error {
+func qaSeedFixtures(dataDir, configDir string) error {
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {
 		return fmt.Errorf("read QA data directory: %w", err)
 	}
 	if len(entries) != 0 {
 		return fmt.Errorf("QA data directory must be empty")
+	}
+	profiles := &profile.Store{Path: filepath.Join(configDir, "dyna", "profiles.json"), Profiles: []profile.Profile{
+		{Name: "atlas", Harness: profile.HarnessPi, Model: "example-atlas", Taste: 8, Intelligence: 9, Cost: 7, Default: true},
+		{Name: "swift", Harness: profile.HarnessPi, Model: "example-swift", Taste: 7, Intelligence: 8, Cost: 9},
+		{Name: "reason", Harness: profile.HarnessPi, Model: "example-reason", Taste: 9, Intelligence: 10, Cost: 5},
+		{Name: "local", Harness: profile.HarnessPi, Model: "example-local", Taste: 6, Intelligence: 7, Cost: 10},
+	}}
+	if err := profiles.Save(); err != nil {
+		return err
 	}
 	rooms := &room.Store{Root: filepath.Join(dataDir, "rooms")}
 	rec, err := rooms.Create(room.CreateInput{Name: "qa-demo", CreatedBy: "owner"})
