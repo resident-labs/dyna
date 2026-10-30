@@ -97,7 +97,7 @@ type TranscriptAppendResponse struct {
 	AckedOffset int64 `json:"ackedOffset"`
 }
 type TurnInput struct {
-	Delivery int64        `json:"delivery"`
+	Delivery DeliverySeq  `json:"delivery"`
 	Surface  Surface      `json:"surface"`
 	Reply    ReplyChannel `json:"reply"`
 	Text     string       `json:"text"`
@@ -124,3 +124,9 @@ type TurnStop struct {
 type Upgrade struct {
 	Version string `json:"version"`
 }
+
+type DeliverySeq int64
+type DeliveryDoneRequest struct {
+	Delivery DeliverySeq `json:"delivery"`
+}
+type DeliveryDoneResponse struct{}
