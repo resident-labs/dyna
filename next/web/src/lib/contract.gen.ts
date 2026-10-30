@@ -114,6 +114,8 @@ export type FinalReply = { reply: ReplyChannel; posted?: EventID; };
 export type Usage = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; };
 export type ShellJobEnded = { session: SessionID; job: ShellJobID; exitCode: number; tail: string; };
 export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from: BoxState; to: BoxState; reason?: string; };
+export type PressureKind = "high" | "max";
+export type BoxPressure = { box: BoxID; kind: PressureKind; };
 export type ImageBuilt = { host: HostName; repo: RepoName; name: string; tag: string; seconds: number; };
 export type ImageFailed = { host: HostName; repo: RepoName; name: string; tag: string; reason: string; logTail: string; };
 export type BoxState = "pending" | "creating" | "starting" | "ready" | "stopped" | "closing" | "deleted" | "failed" | "lost";
@@ -167,6 +169,7 @@ export type OpDecided = { id: OpID; state: OpState; decision: Decision; };
 export type OpRan = { id: OpID; state: OpState; result: OpResult; };
 export type EventBody =
   | { type: "box.changed"; body: BoxChanged }
+  | { type: "box.pressure"; body: BoxPressure }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
   | { type: "op.decided"; body: OpDecided }

@@ -10,7 +10,7 @@ import (
 
 func TestClosingLeaf(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestClosingLeaf(t *testing.T) {
 
 func TestRoomTree(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
