@@ -118,7 +118,7 @@ export function needsSignIn(account?: AccountLike | null): boolean {
   return !!(account?.needsLogin || account?.status === 'not signed in' || account?.status === 'needs_auth' || account?.status === 'needs-sign-in')
 }
 
-export function accountStatus(account?: AccountLike | null, plan = '', now = Date.now()): string {
+export function accountStatus(account?: AccountLike | null, plan = '', now = Date.now(), noPlan = 'Plan not reported'): string {
   if (needsSignIn(account)) return 'Needs sign-in'
   const block = blockedNow(account, now)
   if (block) {
@@ -126,7 +126,6 @@ export function accountStatus(account?: AccountLike | null, plan = '', now = Dat
     const reset = dateTime(block.reset)
     return reset ? `${label} · Resets ${reset}` : label
   }
-  const noPlan = 'Plan not reported'
   // TODO: legacy/shim remove later — a plan sent as a bare string by older hosts; remove when no host sends one.
   if (account?.plan) return typeof account.plan === 'string' ? account.plan : account.plan.label || plan || noPlan
   if (plan && [undefined, 'ready', 'authenticated', 'configured'].includes(account?.status)) return plan
