@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,7 +82,7 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 	if err := h.EnsureSlice(ctx, box.Slice{Name: "dyna-aaa-bbb-ccc.slice", CPUs: 2, MemHigh: 4, MemMax: 6, Pids: 8}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.CreateContainer(ctx, box.ContainerSpec{Box: "a", Image: "image", Slice: "dyna-aaa-bbb-ccc.slice", Mounts: []box.Mount{{HostPath: "/data", BoxPath: "/box"}}}); err != nil {
+	if err := h.CreateContainer(ctx, box.ContainerSpec{Box: "a", Image: "image", Slice: "dyna-aaa-bbb-ccc.slice", Mounts: []box.Mount{{HostPath: "/data", BoxPath: "/box"}, {HostPath: "/host/sock/a", BoxPath: "/run/dyna/engine", ReadOnly: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -88,7 +90,7 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		suffix string
 	}{
 		{3, "'systemctl' '--user' 'set-property' '--runtime' 'dyna-aaa-bbb-ccc.slice' 'CPUQuota=200%' 'MemoryHigh=4' 'MemoryMax=6' 'TasksMax=8'"},
-		{5, "'podman' '--cgroup-manager=systemd' 'create' '--name' 'a' '--label' 'dyna.box=a' '--cgroup-parent=dyna-aaa-bbb-ccc.slice' '--cgroupns=private' '--systemd=always' '--stop-signal' 'SIGTERM' '--entrypoint' '/usr/bin/tini' '--tmpfs' '/run/dyna' '--env' 'HOME=/box/home' '--env' 'PI_CODING_AGENT_DIR=/box/pi' '--volume' '/data:/box' 'image' '--' '/opt/dyna/bin/current/dyna' 'box-agent'"},
+		{5, "'podman' '--cgroup-manager=systemd' 'create' '--name' 'a' '--userns=keep-id:uid=1000,gid=1000' '--user' '1000:1000' '--label' 'dyna.box=a' '--cgroup-parent=dyna-aaa-bbb-ccc.slice' '--cgroupns=private' '--systemd=always' '--stop-signal' 'SIGTERM' '--entrypoint' '/usr/bin/tini' '--tmpfs' '/run/dyna' '--env' 'HOME=/box/home' '--env' 'PI_CODING_AGENT_DIR=/box/pi' '--volume' '/data:/box' '--volume' '/host/sock/a:/run/dyna/engine:ro' 'image' '--' '/opt/dyna/bin/current/dyna' 'box-agent'"},
 	} {
 		args := r.calls[tc.call]
 		if !strings.HasSuffix(args[len(args)-1], tc.suffix) {
@@ -100,9 +102,16 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 	r := &runner{}
 	h := newTestHost(t, r)
 	ctx := context.Background()
-	f := box.Forward{HostPath: "/remote/s", EnginePath: "/local/s"}
+	f := box.Forward{Box: "a", HostPath: "/remote/sock/a/engine.sock", EnginePath: "/local/s"}
 	if err := h.AddForward(ctx, f); err != nil {
 		t.Fatal(err)
+	}
+	if err := h.CreateContainer(ctx, box.ContainerSpec{Box: "a", Image: "image", Slice: "dyna-a.slice", Mounts: []box.Mount{{HostPath: "/remote/sock/a", BoxPath: "/run/dyna/engine", ReadOnly: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	create := r.calls[len(r.calls)-1]
+	if !strings.Contains(create[len(create)-1], "'/remote/sock/a:/run/dyna/engine:ro'") {
+		t.Fatalf("socket directory mount missing: %v", create)
 	}
 	r.calls = nil
 	r.dead = true
@@ -112,6 +121,8 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 	if err := h.RemoveForward(ctx, f); err != nil {
 		t.Fatal(err)
 	}
+	// The box mounts /remote/sock/a as a directory, so replacing engine.sock
+	// during restoration does not require replacing the container mount.
 	var ops []string
 	for _, args := range r.calls {
 		for i, a := range args {
@@ -128,11 +139,74 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 			if a != "-O" || (args[i+1] != "forward" && args[i+1] != "cancel") {
 				continue
 			}
-			want := append(h.base(), "-O", args[i+1], "-R", "/remote/s:/local/s", "user@host")
+			want := append(h.base(), "-O", args[i+1], "-R", "/remote/sock/a/engine.sock:/local/s", "user@host")
 			if !reflect.DeepEqual(args, want) {
 				t.Fatalf("forward argv %v, want %v", args, want)
 			}
 		}
+	}
+}
+
+type blockingRunner struct {
+	count                    atomic.Int32
+	entered, release, second chan struct{}
+}
+
+func (r *blockingRunner) Run(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
+	for _, a := range args {
+		if a == "-O" {
+			return nil, nil
+		}
+	}
+	if r.count.Add(1) == 1 {
+		close(r.entered)
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	} else {
+		close(r.second)
+	}
+	return []byte("DYNA-END 00000000000000000000 000\n"), nil
+}
+func TestHeartbeatRunsDuringHostCommand(t *testing.T) {
+	r := &blockingRunner{entered: make(chan struct{}), release: make(chan struct{}), second: make(chan struct{})}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = h.run(context.Background(), "long") }()
+	<-r.entered
+	launched := make(chan struct{})
+	probeDone := make(chan struct{})
+	go func() { close(launched); defer close(probeDone); _, _ = h.run(context.Background(), "true") }()
+	<-launched
+	runtime.Gosched()
+	select {
+	case <-r.second:
+	default:
+		close(r.release)
+		<-done
+		<-probeDone
+		t.Fatal("heartbeat blocked by host command")
+	}
+	close(r.release)
+	<-done
+	<-probeDone
+}
+func TestCancelledHeartbeatDoesNotWaitForHostState(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	if err := h.lock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer h.unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := h.run(ctx, "true"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
 	}
 }
 

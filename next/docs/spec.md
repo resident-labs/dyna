@@ -527,7 +527,7 @@ The control plane runs no boxes. It opens one SSH master to each host and does a
 The owner adds a host with `dyna host add <name> --ssh user@addr`. The engine then runs the **host check** over the master. A host is `ready` only when every item passes:
 
 - cgroup v2, with `Delegate=yes` for the user manager and the cpu, memory, io and pids controllers delegated;
-- rootless Podman 5 or later, with the systemd cgroup manager;
+- rootless Podman 5 or later, with the systemd cgroup manager and `--userns=keep-id:uid=1000,gid=1000` support (introduced in Podman 4.3);
 - sshd allows `StreamLocalForwarding`, and curl 7.40 or later is available for the socket probe;
 - free disk and memory above the host floor (default 20 GiB and 4 GiB);
 - the owner states at registration that only they have admin rights on the host.
@@ -671,7 +671,7 @@ New objects go into the box volume, so a box cannot change the cache. Shared dep
 
 ### 5.7 Box socket, model route and git
 
-**Box socket.** The engine listens on one Unix socket per box, `<runtime>/boxes/<box>.sock`. Over the host's master it adds `ssh -O forward -R <hostdata>/sock/<box>.sock:<runtime>/boxes/<box>.sock` (StreamLocalForward, with `StreamLocalBindUnlink=yes`). The host path is bind-mounted into the box as `/run/dyna/engine.sock`, and no other socket is mounted. The listener maps to one box, the box to one session, and the session to its Principal. No token is sent.
+**Box socket.** The engine listens on one Unix socket per box, `<runtime>/boxes/<box>.sock`. Over the host's master it adds `ssh -O forward -R <hostdata>/sock/<box>/engine.sock:<runtime>/boxes/<box>.sock` (StreamLocalForward, with `StreamLocalBindUnlink=yes`). The host creates the per-box directory with mode 0700 and bind-mounts it read-only at `/run/dyna/engine`. The box connects to `/run/dyna/engine/engine.sock`, and no other box socket is mounted. The directory stays in place across master restarts and is removed after the forward is cancelled on box removal. The listener maps to one box, the box to one session, and the session to its Principal. No token is sent.
 
 If a master dies, the engine starts it again and adds every forward again. The box agent retries with backoff (0.5 s, doubling to 10 s) and buffers outgoing data up to 64 MiB, so a short loss never ends a turn.
 
