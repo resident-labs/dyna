@@ -3,6 +3,7 @@ package contract
 type Method string
 
 const (
+	MethodDeliveryDone     Method = "delivery.done"
 	MethodRoomCreate       Method = "room.create"
 	MethodSessionStart     Method = "session.start"
 	MethodSessionClose     Method = "session.close"
