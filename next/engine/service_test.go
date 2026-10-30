@@ -99,15 +99,15 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 		t.Fatalf("room persisted: %d %v", count, err)
 	}
 }
-func TestCloseParentWithChildIsRejected(t *testing.T) {
+func TestSessionCannotDiscardChild(t *testing.T) {
 	s, room, parent, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	_, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrHasChildren {
-		t.Fatalf("close: %v", e)
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.SessionCloseRequest{Session: child.Session, Discard: true}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("discard: %v", e)
 	}
 }
 func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
@@ -122,15 +122,15 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: child.Session}); e == nil {
 		t.Fatal("expected canceled child close")
 	}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrHasChildren {
-		t.Fatalf("parent close: %v", e)
-	}
 	s.boxes = fakeBoxes{}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: child.Session}); e != nil {
-		t.Fatal(e)
-	}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
 		t.Fatal(e)
+	}
+	if _, err := s.store.Session(ctx, child.Session); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("child remains open: %v", err)
+	}
+	if _, err := s.store.Session(ctx, parent); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("parent remains open: %v", err)
 	}
 }
 func TestRoomRepoAPI(t *testing.T) {
@@ -291,6 +291,39 @@ func TestFailedResultReachesParent(t *testing.T) {
 	steer := (<-channel).Body.(contract.TurnSteer)
 	if steer.Input.Text != "turn failed: tool failed" {
 		t.Fatalf("text %q", steer.Input.Text)
+	}
+}
+
+func TestFailedTurnConsumesInputs(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channelCtx, cancel := context.WithCancel(ctx)
+	channel, e := s.BoxChannel(channelCtx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	start := (<-channel).Body.(contract.TurnStart)
+	cancel()
+	for range channel {
+	}
+	if _, e := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnFailed, Error: "setup failed"}); e != nil {
+		t.Fatal(e)
+	}
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, inputs, err := s.store.Dispatch(ctx, session, "retry", event, false)
+	if err != nil || turn != "" || len(inputs) != 0 {
+		t.Fatalf("failure retried: turn %q inputs %+v error %v", turn, inputs, err)
+	}
+	var pending int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id=? AND state IN ('pending','taken')", session).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("unconsumed deliveries %d: %v", pending, err)
+	}
+	events, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"turn.started"}})
+	if e != nil || len(events.Events) != 1 {
+		t.Fatalf("started events %+v: %v", events.Events, e)
 	}
 }
 
@@ -501,7 +534,7 @@ func (b blockingBoxes) Create(ctx context.Context, spec BoxSpec) (string, error)
 func (blockingBoxes) Remove(context.Context, contract.BoxID) error { return nil }
 
 func TestCloseCancelsCreatingBox(t *testing.T) {
-	s, room, _, ctx := setup(t)
+	s, room, root, ctx := setup(t)
 	adapter := blockingBoxes{started: make(chan BoxSpec)}
 	s.boxes = adapter
 	done := make(chan *contract.Error, 1)
@@ -510,6 +543,12 @@ func TestCloseCancelsCreatingBox(t *testing.T) {
 		done <- e
 	}()
 	spec := <-adapter.started
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE sessions SET parent=? WHERE id=?", root, spec.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: spec.Session}); e != nil {
 		t.Fatal(e)
 	}
@@ -709,13 +748,22 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 			t.Fatalf("placement: %+v", spec)
 		}
 	}
-	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: parent.Session}); e == nil || e.Code != contract.ErrHasChildren {
-		t.Fatalf("close: %v", e)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e == nil || e.Code != contract.ErrConflict {
+		t.Fatalf("close while child starts: %v", e)
 	}
 	close(adapter.unblock)
 	for _, id := range []contract.SessionID{a.Session, b.Session} {
 		unlock := s.lockBox(id)
 		unlock()
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e != nil {
+		t.Fatal(e)
+	}
+	for _, id := range []contract.SessionID{a.Session, b.Session, parent.Session} {
+		if _, err := s.store.Session(ctx, id); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("session remains open: %v", err)
+		}
 	}
 }
 

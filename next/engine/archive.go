@@ -97,7 +97,7 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 	if err := s.store.SaveArchives(ctx, []store.Archive{report}); err != nil {
 		return contract.ArchiveDoneResponse{}, failure(err)
 	}
-	if err := s.finishClose(context.WithoutCancel(ctx), session, current, contract.Principal{Kind: contract.PrincipalEngine}); err != nil {
+	if err := s.finishClose(context.WithoutCancel(ctx), session, current, contract.Principal{Kind: contract.PrincipalEngine}, false); err != nil {
 		return contract.ArchiveDoneResponse{}, err
 	}
 	return contract.ArchiveDoneResponse{}, nil
