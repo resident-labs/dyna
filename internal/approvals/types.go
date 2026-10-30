@@ -139,6 +139,15 @@ type DecisionInput struct {
 	Reason    string `json:"reason"`
 }
 
+// HeldRequest is a pending approval that waits on the caller as its holder.
+type HeldRequest struct {
+	ID        string    `json:"id"`
+	Requester string    `json:"requester"`
+	Class     Class     `json:"class"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // Summary is the decision state a card needs without loading the feed.
 type Summary struct {
 	ID    string `json:"id"`

@@ -349,6 +349,31 @@ func (s *Service) List(actor authority.Actor, roomRef string) ([]Summary, error)
 	return out, nil
 }
 
+// Held returns the pending approvals that wait on the caller as holder.
+func (s *Service) Held(actor authority.Actor, roomRef string) ([]HeldRequest, error) {
+	rec, err := s.roomFor(actor, roomRef)
+	if err != nil {
+		return nil, err
+	}
+	holder := Owner
+	if actor.Role != authority.Owner {
+		holder = actor.Session
+	}
+	requests, err := s.held(rec.ID, holder)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]HeldRequest, 0, len(requests))
+	for _, r := range requests {
+		requester, err := s.holderName(r.Requester)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, HeldRequest{ID: r.ID, Requester: requester, Class: r.Class, Title: r.Title, CreatedAt: r.CreatedAt})
+	}
+	return out, nil
+}
+
 // Get returns one request to its requester or the owner.
 func (s *Service) Get(actor authority.Actor, roomRef, id string) (Request, error) {
 	rec, err := s.roomFor(actor, roomRef)
