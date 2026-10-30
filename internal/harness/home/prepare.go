@@ -132,8 +132,9 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	out["DYNA_BIN"] = filepath.Join(bin, "dyna")
 	// Tools write the global Git config (gh auth setup-git, git config --global),
 	// so GIT_CONFIG_GLOBAL is a writable file that includes the immutable one.
-	// One file per publication, created once and never rewritten: a running
-	// session keeps its settings, and a tool's write is never lost to a rewrite.
+	// One file per publication, created once. Tool writes from newer publications
+	// are appended, never rewritten: a running session keeps its settings, and a
+	// tool's write is never lost to a rewrite.
 	writable := filepath.Join(Home(nativeScope), ".dyna-gitconfig-"+filepath.Base(publication))
 	if err := createWritableGitConfig(writable, filepath.Join(publication, "gitconfig")); err != nil {
 		return nil, err
@@ -486,13 +487,13 @@ func gitConfigHeader(published string) string {
 }
 
 // earlierToolSettings returns what tools wrote to the newest other writable
-// config in dir: its text after the include lines that Prepare put first.
-func earlierToolSettings(dir, self string) string {
+// config in dir after since: its text after the include lines that Prepare put first.
+func earlierToolSettings(dir, self string, since time.Time) string {
 	matches, _ := filepath.Glob(filepath.Join(dir, ".dyna-gitconfig-*"))
 	newest, newestTime := "", time.Time{}
 	for _, match := range matches {
 		info, err := os.Lstat(match)
-		if match == self || err != nil || !info.Mode().IsRegular() {
+		if match == self || err != nil || !info.Mode().IsRegular() || !info.ModTime().After(since) {
 			continue
 		}
 		if newest == "" || info.ModTime().After(newestTime) {
@@ -516,12 +517,13 @@ func earlierToolSettings(dir, self string) string {
 }
 
 // createWritableGitConfig creates path as a Git config that includes the
-// published, immutable one. An existing file stays as it is: it may hold what a
-// tool wrote, and a running session reads it. The file appears whole or not at
-// all, so a concurrent launch never reads half of it.
+// published, immutable one. An existing file keeps its content, and tool writes
+// newer than it are appended, so a running session keeps reading the same file.
+// The new file appears whole or not at all, so a concurrent launch never reads
+// half of it.
 func createWritableGitConfig(path, published string) error {
-	if _, err := os.Lstat(path); err == nil {
-		return nil
+	if info, err := os.Lstat(path); err == nil {
+		return appendNewerToolSettings(path, info.ModTime())
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -537,7 +539,7 @@ func createWritableGitConfig(path, published string) error {
 	// A tool's earlier writes carry over from the most recently written config of
 	// another publication, so a changed PATH does not drop `gh auth setup-git`.
 	// They are copied, not included: includes nest at most ten deep.
-	_, err = tmp.WriteString(gitConfigHeader(published) + earlierToolSettings(dir, path))
+	_, err = tmp.WriteString(gitConfigHeader(published) + earlierToolSettings(dir, path, time.Time{}))
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
@@ -552,6 +554,32 @@ func createWritableGitConfig(path, published string) error {
 		return err
 	}
 	return nil
+}
+
+// appendNewerToolSettings appends the tool writes made after path was last
+// written. Git reads later sections last, so the newer values win. Appending
+// never rewrites what a tool or a running session already reads.
+func appendNewerToolSettings(path string, modified time.Time) error {
+	newer := earlierToolSettings(filepath.Dir(path), path, modified)
+	if newer == "" {
+		return nil
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(current), newer) {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(newer)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // AgentGitName and AgentGitEmail are the Git identity of agent commits. The

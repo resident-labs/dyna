@@ -596,3 +596,38 @@ func TestGitWriteCarriesToANewPublication(t *testing.T) {
 		t.Fatalf("the earlier write is missing from the new launch: %q %v", out, err)
 	}
 }
+
+// D-292: a launch that returns to an older publication gets the Git settings that
+// tools wrote under a newer publication while it was away.
+func TestGitWriteFromANewerPublicationReachesAnOlderOne(t *testing.T) {
+	scope, _, env := fixture(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	older, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := exec.Command(git, "config", "--global", "credential.helper", "gh-helper")
+	write.Env = merged(env, newer)
+	if out, err := write.CombinedOutput(); err != nil {
+		t.Fatalf("git config --global: %s %v", out, err)
+	}
+	back, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back["GIT_CONFIG_GLOBAL"] != older["GIT_CONFIG_GLOBAL"] {
+		t.Fatalf("the launch did not return to the older publication: %s", back["GIT_CONFIG_GLOBAL"])
+	}
+	get := exec.Command(git, "config", "--global", "--includes", "--get", "credential.helper")
+	get.Env = merged(env, back)
+	if out, err := get.Output(); err != nil || strings.TrimSpace(string(out)) != "gh-helper" {
+		t.Fatalf("the newer write is missing from the older publication: %q %v", out, err)
+	}
+}
