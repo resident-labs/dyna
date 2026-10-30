@@ -22,6 +22,7 @@
   import { bindConfirm, confirmView } from './lib/app/confirm.svelte.ts'
   import { bindSelection, selectionView } from './lib/app/selection.svelte.ts'
   import { bindSync, syncView } from './lib/app/sync.svelte.ts'
+  import { createSettingsPanel } from './lib/app/settingsPanel.svelte.ts'
   import { closeToastDetail, hideToast, runToastAction, say, sayDetails, sayLine, toasts, toggleToastDetail } from './lib/app/toasts.svelte.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
   import { patchListRows } from './lib/ui/listChanges.ts'
@@ -41,7 +42,6 @@
   import { seatDMConversation } from './lib/rooms/conversations.ts'
   import { isShellResult, shellJobID } from './lib/rooms/feedRows.ts'
   import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
-  import type { HookLogTarget } from './lib/settings/hookLog.ts'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
   import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.ts'
   import { visibleTo } from './lib/rooms/look.ts'
@@ -149,7 +149,6 @@
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
   import type { CallRequest } from './lib/voice/callRequests.ts'
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
-  import type { ModelSelection } from './lib/settings/profiles/state.ts'
   import type { RunAgent } from './lib/api/workflow.ts'
   import { resolveAgent } from './lib/app/agentRef.ts'
   import type { AgentRef } from './lib/app/agentRef.ts'
@@ -458,13 +457,13 @@
   let runsError = $state('')
   let runDetail = $state<RunDetail | null>(null)
   let runError = $state('')
-  let showSettings = $state(false)
-  let showRoomSettings = $state(false)
-  let settingsKey = $state(0)
-  let roomSettingsKey = $state(0)
-  let palettePath = $state<string | null>(null) // set: the palette opens on New room with this path
-  let settingsAt = $state<{ start: string; pairNow: boolean; profile?: string; accountId?: string; initialSelection?: ModelSelection }>({ start: 'profiles', pairNow: false }) // where Settings opens
-  let roomSettingsAt = $state<{ start: string; hookRun?: HookLogTarget | null }>({ start: 'general' }) // where Room settings opens
+  let palettePath = $state<string | null>(null)
+  const settingsPanel = createSettingsPanel({
+    hasRoom: () => !!room,
+    closeNav: () => { navOpen = false },
+    roomRequired: () => say({ tone: 'info', subject: 'Open a room first', text: 'Hook runs belong to a room repository.' }),
+  })
+  const { openSettings, openHookLog, createProfile } = settingsPanel
   let showPalette = $state(false) // Ctrl+K, or the search button on a phone
   let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
@@ -559,7 +558,7 @@
   let sidebarChips = $derived((narrow ? navOpen : showSide) && (machinesNav || live.length > 0))
   function visibleList(name: string) {
     return consolidationAlive && pageVisible && listVisible(name, {
-      view, drill, reviewOpen, showRoomSettings, memberChips, sidebarChips,
+      view, drill, reviewOpen, showRoomSettings: settingsPanel.showRoomSettings, memberChips, sidebarChips,
       sideVisible: narrow ? navOpen : showSide,
       controlsOpen: !!roomControlsMenu || !!clearDormantConfirm,
     })
@@ -790,7 +789,7 @@
     api.profiles().then((p: ProfileChoice[] | null) => (profiles = p ?? [])).catch(() => {})
   }
 
-  $effect(() => { if (showRoomSettings) untrack(loadProfiles) })
+  $effect(() => { if (settingsPanel.showRoomSettings) untrack(loadProfiles) })
 
   const workflowData = createWorkflowData(api, {
     current: () => ({ room: roomId, visit: roomRequest, id: openRun, running: view === 'runs' && !!openRun && runDetail?.run?.status === 'running', visible: document.visibilityState === 'visible' }),
@@ -858,7 +857,7 @@
   // Read navigation here; list state reads inside loaders must not become
   // dependencies that schedule another refresh after every response.
   $effect(() => {
-    roomId; view; drill; showRoomSettings; memberChips; sidebarChips; pageVisible
+    roomId; view; drill; settingsPanel.showRoomSettings; memberChips; sidebarChips; pageVisible
     untrack(() => {
       loadChanges()
       loadReviewer()
@@ -951,7 +950,7 @@
     machineView.clear()
     machinesNav = !id
     if (id !== roomId) {
-      showRoomSettings = false
+      settingsPanel.closeRoomSettings()
       selectionView.clear()
     }
     if (id !== roomId) computerView.clear()
@@ -1606,32 +1605,6 @@
     }
   }
 
-  function openSettings(start = 'profiles', pairNow = false, profile = '', accountId = '') {
-    navOpen = false
-    settingsAt = { start, pairNow, profile, accountId }
-    settingsKey++
-    showSettings = true
-  }
-
-  // A hook card asks for its run's log. Hooks belong to the repository, and
-  // Room settings manages them for every room on it, so the modal opens on
-  // Hooks with the repo and the run already in front, as `dyna git hooks log` reads.
-  // The pane reports a run this room's repository does not hold.
-  function openHookLog(target: HookLogTarget) {
-    navOpen = false
-    if (!room) { say({ tone: 'info', subject: 'Open a room first', text: 'Hook runs belong to a room repository.' }); return }
-    showSettings = false
-    roomSettingsAt = { start: 'hooks', hookRun: target }
-    roomSettingsKey++
-    showRoomSettings = true
-  }
-
-  function createProfile(selection: ModelSelection) {
-    settingsAt = { start: 'profiles', pairNow: false, initialSelection: selection }
-    settingsKey++
-    showSettings = true
-  }
-
   // Slash argument parsing stays here; menu and palette actions call the
   // same handlers with no argument.
   let templates = $state<{ name: string; description?: string }[] | null>(null)
@@ -1650,7 +1623,7 @@
       openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
       openPins: () => { showPins = true; if (narrow) showMembers = false },
       openSearch: (arg) => openSearch(arg || ''),
-      openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) { roomSettingsAt = { start: 'general' }; roomSettingsKey++; showRoomSettings = true } },
+      openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) { settingsPanel.openRoomSettings() } },
       openSessionPRs: () => openReview('prs'),
       cancelRun: (run) => askConfirm({ kind: 'cancelrun', run }),
       toggleSidebar: () => (narrow ? (navOpen = !navOpen) : (showSide = !showSide)),
@@ -2018,15 +1991,15 @@
   {@const attachment = viewing}
   <Viewer roomId={viewing.roomId ?? room.id} att={viewing} onjump={attachment.postId && (attachment.roomId ?? room.id) === room.id ? () => { viewing = null; if (attachment.postId) jumpTo(attachment.postId) } : null} onclose={() => (viewing = null)} />
 {/if}
-{#if showSettings}
-  {#key settingsKey}
-    <Settings {update} {dataDir} start={settingsAt.start} pairNow={settingsAt.pairNow} profile={settingsAt.profile ?? ''} accountId={settingsAt.accountId ?? ''} initialSelection={settingsAt.initialSelection} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { showSettings = false; loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
+{#if settingsPanel.showSettings}
+  {#key settingsPanel.settingsKey}
+    <Settings {update} {dataDir} start={settingsPanel.settingsAt.start} pairNow={settingsPanel.settingsAt.pairNow} profile={settingsPanel.settingsAt.profile ?? ''} accountId={settingsPanel.settingsAt.accountId ?? ''} initialSelection={settingsPanel.settingsAt.initialSelection} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { settingsPanel.closeSettings(); loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
   {/key}
 {/if}
-{#if showRoomSettings && room}
-  {#key roomSettingsKey}
+{#if settingsPanel.showRoomSettings && room}
+  {#key settingsPanel.roomSettingsKey}
   {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} start={roomSettingsAt.start} hookRun={roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { showRoomSettings = false; openSettings('hooks') }} onclose={() => (showRoomSettings = false)} />
+  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} start={settingsPanel.roomSettingsAt.start} hookRun={settingsPanel.roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { settingsPanel.closeRoomSettings(); openSettings('hooks') }} onclose={() => (settingsPanel.closeRoomSettings())} />
   {/key}
 {/if}
 {#if roomMenu}
