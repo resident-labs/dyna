@@ -49,7 +49,7 @@ test('accounts are grouped by provider and Use calls the API with the selected s
     accountsPage: (scope: string) => ({
       ...saved,
       scope,
-      providers: groups.map((group) => ({ ...group, accounts: group.accounts.map((a) => ({ ...a, activeHere: scope ? inRoom[scope] === a.id : a.active })) })),
+      providers: groups.map((group) => ({ ...group, accounts: (group.accounts ?? []).map((a) => ({ ...a, activeHere: scope ? inRoom[scope] === a.id : a.active })) })),
     }),
   })
   const { dir, default: AccountsPane, mount, flushSync, unmount } = await importBundle(built, 'AccountsPane')

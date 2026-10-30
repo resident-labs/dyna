@@ -28,7 +28,7 @@ const planId = (account: AccountLike) => (typeof account.plan === 'object' ? acc
 // reports usage is a card of its provider, one that needs a login or is
 // quota-blocked is an alert row. A plan that reports its period still gets a
 // card, so a weekly quota without a percentage stays visible.
-export function accountRows(snapshot?: { providers?: { provider?: Provider; accounts?: ScopeAccount[] }[] | null } | null): HomeAccounts {
+export function accountRows(snapshot?: { providers?: { provider?: Provider | ''; accounts?: ScopeAccount[] | null }[] | null } | null): HomeAccounts {
   const cards: ProviderAccounts[] = []
   const alerts: AccountAlert[] = []
   for (const group of snapshot?.providers ?? []) {
