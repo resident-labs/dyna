@@ -421,7 +421,7 @@
               {#if !folded.others}
                 {#each panel.others as thread (thread.key)}
                   {@const person = members.find((p) => p.address === thread.key)}
-                  <div class="panel-row"><ThreadChip glyph="▱" name={short(thread.key, room.name)} avatar={person?.avatar ?? thread.posts.at(-1)?.avatar} hue={person?.hue} badge={`${thread.posts.length} message${thread.posts.length === 1 ? '' : 's'}`} snippet={plain(thread.posts.at(-1)?.text)} time={ago(thread.posts.at(-1)?.ts)} selected={selectedThread === thread.key} onopen={() => openThread(thread.key)} /></div>
+                  <div class="panel-row"><ThreadChip glyph="▱" name={short(thread.key, room.name)} avatar={person?.avatar} here={room.name} hue={person?.hue} badge={`${thread.posts.length} message${thread.posts.length === 1 ? '' : 's'}`} snippet={plain(thread.posts.at(-1)?.text)} time={ago(thread.posts.at(-1)?.ts)} selected={selectedThread === thread.key} onopen={() => openThread(thread.key)} /></div>
                 {/each}
               {/if}
             {/if}
@@ -437,7 +437,7 @@
 {#snippet memberRow(row: PanelRow<Member>)}
   {@const posts = threadPosts(row)}
   <div class="panel-row">
-    <ThreadChip name={row.member.name} avatar={row.member.avatar} hue={row.member.hue} state={row.member.state} status={row.member.status} note={sessionStatus(row.member)} title={`Open ${row.member.name}'s messages`} onopen={() => onsession?.(row.member)} />
+    <ThreadChip name={row.member.name} avatar={row.member.avatar} here={room.name} hue={row.member.hue} state={row.member.state} status={row.member.status} note={sessionStatus(row.member)} title={`Open ${row.member.name}'s messages`} onopen={() => onsession?.(row.member)} />
     {#if row.thread && posts}
       {@const thread = row.thread}
       <button class="thread-count" title={`Posts between ${session?.member.name ?? ''} and ${row.member.name}`} onclick={() => openThread(thread.key)}>{posts} post{posts === 1 ? '' : 's'}<span class="when"> · {ago(thread.posts.at(-1)?.ts)}</span> ›</button>
