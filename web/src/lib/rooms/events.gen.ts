@@ -72,6 +72,9 @@ export type RunState = "completed" | "failed" | "stopped" | "interrupted"
 // TurnState is a named string type of an event payload.
 export type TurnState = "completed" | "failed" | "stopped"
 
+// CandidateState is a named string type of an event payload.
+export type CandidateState = "available" | "unavailable" | "unknown"
+
 // RuleVerb is a named string type of an event payload.
 export type RuleVerb = "added" | "edited" | "removed"
 
@@ -104,6 +107,13 @@ export type VoiceEndReason = "input-closed" | "time-limit" | "idle" | "provider-
 
 // RoomCapKind is a named string type of an event payload.
 export type RoomCapKind = "memory.high" | "memory.max" | "pids.max"
+
+// TransferCandidate is a struct of an event payload.
+export interface TransferCandidate {
+  profile: string
+  state: CandidateState
+  evidenceAt?: string
+}
 
 // MergePR is a struct of an event payload.
 export interface MergePR {
@@ -599,6 +609,8 @@ export interface TurnEvent {
   error?: string
   workerStderr?: string
   detail?: string
+  candidates?: TransferCandidate[]
+  candidatesError?: boolean
 }
 
 // EventPayload is the payload of any registered system event.
@@ -1550,6 +1562,7 @@ const APPROVAL_STATE: ReadonlySet<unknown> = new Set(["done", "failed", "denied"
 const SHELL_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped", "interrupted"])
 const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
+const CANDIDATE_STATE: ReadonlySet<unknown> = new Set(["available", "unavailable", "unknown"])
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
 const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
@@ -1561,6 +1574,17 @@ const CALL_STATE: ReadonlySet<unknown> = new Set(["joined", "declined", "withdra
 const VOICE_SESSION_STATE: ReadonlySet<unknown> = new Set(["started", "ended"])
 const VOICE_END_REASON: ReadonlySet<unknown> = new Set(["input-closed", "time-limit", "idle", "provider-closed", "error", "cancelled"])
 const ROOM_CAP_KIND: ReadonlySet<unknown> = new Set(["memory.high", "memory.max", "pids.max"])
+
+export function isTransferCandidate(v: unknown): v is TransferCandidate {
+  return isRecord(v) &&
+    typeof v.profile === "string" &&
+    CANDIDATE_STATE.has(v.state) &&
+    (v.evidenceAt === undefined || typeof v.evidenceAt === "string")
+}
+
+export function isTransferCandidateList(v: unknown): v is TransferCandidate[] {
+  return Array.isArray(v) && v.every((item: unknown) => isTransferCandidate(item))
+}
 
 export function isMergePR(v: unknown): v is MergePR {
   return isRecord(v) &&
@@ -2079,7 +2103,9 @@ export function isTurnEvent(v: unknown): v is TurnEvent {
     (v.summary === undefined || typeof v.summary === "string") &&
     (v.error === undefined || typeof v.error === "string") &&
     (v.workerStderr === undefined || typeof v.workerStderr === "string") &&
-    (v.detail === undefined || typeof v.detail === "string")
+    (v.detail === undefined || typeof v.detail === "string") &&
+    (v.candidates === undefined || isTransferCandidateList(v.candidates)) &&
+    (v.candidatesError === undefined || typeof v.candidatesError === "boolean")
 }
 
 export function isEventPayload(family: string | undefined, type: string | undefined, v: unknown): v is EventPayload {
