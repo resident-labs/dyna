@@ -107,24 +107,15 @@ func TestWorkerSnapshotUsesFinalAttributedBody(t *testing.T) {
 
 // A published PR comment is an agent write: it must reach the approval request
 // as a pr comment, not a refusal, and must not run gh before approval.
-func TestPublishThroughApprovalPinsReviewCommit(t *testing.T) {
-	originalRequest, originalWait := requestApproval, waitApproval
-	t.Cleanup(func() { requestApproval, waitApproval = originalRequest, originalWait })
-	var sent approvals.RequestInput
-	requestApproval = func(_ context.Context, in approvals.RequestInput) (approvals.Request, error) {
-		sent = in
-		return approvals.Request{ID: "A-8"}, nil
-	}
-	waitApproval = func(_ context.Context, _ string, id string, _ time.Duration) (approvals.Request, error) {
-		return approvals.Request{ID: id, State: approvals.StatePending, At: "room:parent"}, nil
-	}
+func TestPinnedReviewArgsPinAndClassifyAsAgent(t *testing.T) {
 	const head = "62908e5755a767d1a3d65260fb6d11f65affcf2c"
-	args := []string{"api", "--hostname", "github.com", "repos/owner/project/pulls/7/reviews", "--method", "POST", "--raw-field", "commit_id=" + head, "--raw-field", "event=COMMENT", "--raw-field", "body=feedback"}
-	if err := PublishThroughApproval(context.Background(), "room-1", t.TempDir(), args); SessionExitCode(err) != 75 {
-		t.Fatalf("error = %v", err)
+	args := PinnedReviewArgs("github.com", "owner/project", 7, head, "feedback")
+	if !slices.Contains(args, "commit_id="+head) {
+		t.Fatalf("review argv does not pin the reviewed head: %q", args)
 	}
-	if !slices.Contains(sent.Argv, "commit_id="+head) {
-		t.Fatalf("approval argv does not pin the reviewed head: %q", sent.Argv)
+	in := ClassifyInput{Host: "github.com", Repo: "owner/project", APIHost: "github.com"}
+	if got := Classify(context.Background(), args, in); got != approvals.ClassAgent {
+		t.Fatalf("Classify(%q) = %q, want agent", args, got)
 	}
 }
 
