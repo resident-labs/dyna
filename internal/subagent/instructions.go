@@ -12,6 +12,7 @@ import (
 	"time"
 
 	harnessconfig "dyna-agent/internal/harness/config"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/instructions"
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/profile"
@@ -354,17 +355,22 @@ func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []str
 	if m == nil {
 		return nil
 	}
+	reached, _ := m.noteRoomInstructions(ctx, roomID, time.Now())
+	return reached
+}
+
+func (m *Manager) noteRoomInstructions(ctx context.Context, roomID string, changedAt time.Time) ([]string, error) {
 	if m.InstructionsChanged != nil {
 		defer m.InstructionsChanged()
 	}
 	sessions, err := m.store().listMeta(false, true)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var reached []string
+	var failures []error
 	// One queued update has one deadline. Otherwise the engine wakes for the
 	// first session and an owner batch can lose the sessions that are due later.
-	changedAt := time.Now()
 	for _, meta := range sessions {
 		if !meta.Closed.IsZero() || (roomID != "" && meta.RoomID != roomID) || meta.Instructions == nil {
 			continue
@@ -372,16 +378,20 @@ func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []str
 		queued := false
 		_, err := m.store().updateMetaContext(ctx, meta.ID, func(mm *Meta) {
 			if mm.Closed.IsZero() {
-				mm.InstructionsChangedAt = changedAt
+				if mm.InstructionsChangedAt.Before(changedAt) {
+					mm.InstructionsChangedAt = changedAt
+				}
 				queued = true
 			}
 		})
-		if err == nil && queued {
+		if err != nil {
+			failures = append(failures, err)
+		} else if queued {
 			reached = append(reached, meta.Address())
 		}
 	}
 	slices.Sort(reached)
-	return reached
+	return reached, errors.Join(failures...)
 }
 
 // FlushInstructionNotes sends one combined note after three quiet seconds.
@@ -390,6 +400,26 @@ func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []str
 // It returns when the next session's quiet period ends, or zero when none waits,
 // so the engine can wake it then.
 func (m *Manager) FlushInstructionNotes(ctx context.Context, now time.Time) (time.Time, error) {
+	dir := filepath.Dir(m.store().root())
+	unlock, err := instructionqueue.Lock(ctx, dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	entries, err := instructionqueue.List(dir)
+	if err == nil {
+		for _, entry := range entries {
+			if _, err = m.noteRoomInstructions(ctx, entry.Room, entry.ChangedAt); err != nil {
+				break
+			}
+			if err = instructionqueue.Delete(dir, entry.ID); err != nil {
+				break
+			}
+		}
+	}
+	unlock()
+	if err != nil {
+		return time.Time{}, err
+	}
 	sessions, err := m.store().listMeta(false, true)
 	if err != nil {
 		return time.Time{}, err

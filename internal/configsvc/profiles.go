@@ -11,7 +11,9 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/harness/health"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 )
 
@@ -310,7 +312,17 @@ func saveProfile(ctx context.Context, sessions *subagent.Manager, reg *profile.S
 // saveProfiles notes the change on sessions, the engine's Manager, or on a
 // fresh one when it is nil.
 func saveProfiles(ctx context.Context, sessions *subagent.Manager, s *profile.Store) error {
-	if err := s.Save(); err != nil {
+	dir := store.DataDir()
+	unlock, err := instructionqueue.Lock(ctx, dir)
+	if err != nil {
+		return err
+	}
+	err = instructionqueue.Insert(dir)
+	if err == nil {
+		err = s.Save()
+	}
+	unlock()
+	if err != nil {
 		return err
 	}
 	if sessions == nil {
