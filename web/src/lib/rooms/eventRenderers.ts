@@ -51,7 +51,6 @@ import { eventSpecs } from './events.gen.ts'
 import type { EventSpecEntry } from './events.gen.ts'
 import type { EventNotice, Question, Room } from '../api/room.ts'
 import type { EventPayload } from './events.gen.ts'
-import type { HookFold } from './feedRows.ts'
 import type { ApprovalDecision, ApprovalOpen } from '../api/approvals.ts'
 import type { PostSelection } from '../ui/postSelect.ts'
 export { sealedEvent } from './eventPayloads.ts'
@@ -85,9 +84,6 @@ export interface EventProps {
   surface?: EventSurface
   // posts is the folded posts of one feed row, oldest first.
   posts?: EventPost[]
-  // hookFold is the fold of a row of hook passes: its count and the time of
-  // its last pass. A card of one post has none.
-  hookFold?: HookFold
   room?: Room
   pinned?: Set<string>
   selection?: PostSelection | null
