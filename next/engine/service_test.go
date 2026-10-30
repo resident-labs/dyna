@@ -326,7 +326,12 @@ func TestSessionCannotClose(t *testing.T) {
 }
 
 func TestBoxLifecycleEmitsTransitions(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, root, ctx := setup(t)
+	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
+	if e != nil {
+		t.Fatal(e)
+	}
+	session := lead.Session
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
 		t.Fatal(e)
@@ -339,6 +344,7 @@ func TestBoxLifecycleEmitsTransitions(t *testing.T) {
 		t.Fatal(e)
 	}
 	want := []contract.BoxState{contract.BoxPending, contract.BoxCreating, contract.BoxStarting, contract.BoxReady, contract.BoxClosing, contract.BoxDeleted}
+	list.Events = list.Events[3:]
 	if len(list.Events) != len(want) {
 		t.Fatalf("got %d transitions, want %d", len(list.Events), len(want))
 	}
@@ -387,7 +393,12 @@ func (cancelOnRemove) Create(context.Context, BoxSpec) (string, error) { return 
 func (b cancelOnRemove) Remove(context.Context, contract.BoxID) error  { b.cancel(); return nil }
 
 func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, root, ctx := setup(t)
+	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
+	if e != nil {
+		t.Fatal(e)
+	}
+	session := lead.Session
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
 		t.Fatal(e)
@@ -474,8 +485,11 @@ func TestChildWaitsForParentBox(t *testing.T) {
 }
 
 type heldParentBox struct {
-	started chan BoxSpec
-	release chan struct{}
+	started  chan BoxSpec
+	release  chan struct{}
+	children chan BoxSpec
+	blocked  contract.BoxID
+	unblock  chan struct{}
 }
 
 func (b *heldParentBox) Create(_ context.Context, spec BoxSpec) (string, error) {
@@ -483,14 +497,18 @@ func (b *heldParentBox) Create(_ context.Context, spec BoxSpec) (string, error) 
 	case b.started <- spec:
 		<-b.release
 	default:
+		b.children <- spec
+		if spec.Box == b.blocked {
+			<-b.unblock
+		}
 	}
 	return "image", nil
 }
 func (*heldParentBox) Remove(context.Context, contract.BoxID) error { return nil }
 
-func TestPendingChildStartsWhenParentStarts(t *testing.T) {
+func TestPendingChildrenRetryIndependently(t *testing.T) {
 	s, room, root, ctx := setup(t)
-	adapter := &heldParentBox{started: make(chan BoxSpec), release: make(chan struct{})}
+	adapter := &heldParentBox{started: make(chan BoxSpec), release: make(chan struct{}), children: make(chan BoxSpec, 2), unblock: make(chan struct{})}
 	s.boxes = adapter
 	result := make(chan *contract.Error, 1)
 	go func() {
@@ -498,24 +516,40 @@ func TestPendingChildStartsWhenParentStarts(t *testing.T) {
 		result <- e
 	}()
 	parent := <-adapter.started
-	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent.Session})
-	if e != nil {
-		t.Fatal(e)
+	start := func(name string) contract.SessionStartResponse {
+		t.Helper()
+		r, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: name, Profile: "test", Parent: parent.Session})
+		if e != nil {
+			t.Fatal(e)
+		}
+		return r
 	}
-	pending, err := s.store.Box(ctx, child.Box)
-	if err != nil || pending.Reason != string(box.PendingParentHost) {
-		t.Fatalf("pending: %+v, %v", pending, err)
-	}
+	a, b := start("a"), start("b")
+	adapter.blocked = a.Box
 	close(adapter.release)
 	if e := <-result; e != nil {
 		t.Fatal(e)
 	}
-	b, err := s.store.Box(ctx, child.Box)
-	if err != nil || b.State != contract.BoxStarting || b.Host != parent.Host {
-		t.Fatalf("child: %+v, %v", b, err)
+	for i := 0; i < 2; i++ {
+		spec := <-adapter.children
+		want, err := box.SliceName([]contract.BoxID{parent.Box, spec.Box})
+		if err != nil || spec.Slice != want || spec.Host != parent.Host {
+			t.Fatalf("placement: %+v", spec)
+		}
 	}
-	want, err := box.SliceName([]contract.BoxID{parent.Box, child.Box})
-	if err != nil || b.Slice != want {
-		t.Fatalf("slice: %s, want %s, %v", b.Slice, want, err)
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: parent.Session}); e == nil || e.Code != contract.ErrHasChildren {
+		t.Fatalf("close: %v", e)
+	}
+	close(adapter.unblock)
+	for _, id := range []contract.SessionID{a.Session, b.Session} {
+		unlock := s.lockBox(id)
+		unlock()
+	}
+}
+
+func TestCloseRootIsForbidden(t *testing.T) {
+	s, _, root, ctx := setup(t)
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: root}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("close root: %v", e)
 	}
 }
