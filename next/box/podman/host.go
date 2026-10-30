@@ -37,6 +37,7 @@ type Host struct {
 	runner              Runner
 	forwards            map[box.Forward]struct{}
 	restored            bool
+	masterReset         bool
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
@@ -89,6 +90,13 @@ func (h *Host) control(ctx context.Context, op string, extra ...string) error {
 	return err
 }
 func (h *Host) ensure(ctx context.Context) error {
+	if !h.masterReset {
+		_ = h.control(ctx, "exit")
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h.masterReset = true
+	}
 	if h.control(ctx, "check") != nil {
 		h.restored = false
 		args := []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "StreamLocalBindUnlink=yes", h.destination}
