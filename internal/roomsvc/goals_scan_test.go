@@ -115,8 +115,9 @@ func TestGoalScanSkipsUnchangedRoomsAndPreservesDeletes(t *testing.T) {
 	}
 	for _, s := range scans {
 		scan(s, false)
-		if len(s.events) != 2 || s.events[0].Change != nil || s.events[1].Change != nil {
-			t.Fatalf("global rules must update both rooms: %+v", s.events)
+		// Both rooms, then one roomless event for clients such as Settings.
+		if len(s.events) != 3 || s.events[0].Change != nil || s.events[1].Change != nil || s.events[2].RoomID != "" {
+			t.Fatalf("global rules must update both rooms and Settings: %+v", s.events)
 		}
 		s.events = nil
 		scan(s, false)
