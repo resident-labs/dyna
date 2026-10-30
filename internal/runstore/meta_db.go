@@ -674,6 +674,9 @@ func deleteMeta(db *sql.DB, id string) error {
 		if _, err := conn.ExecContext(ctx, "DELETE FROM runs WHERE id=?", id); err != nil {
 			return err
 		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_step_records WHERE run_id=?", id); err != nil {
+			return err
+		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM run_directories WHERE run_id=?", id); err != nil {
 			return err
 		}
