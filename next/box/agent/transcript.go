@@ -116,9 +116,17 @@ func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, file str
 	if err := h.Close(); err != nil {
 		return err
 	}
+	if err := retryClose(ctx, after, func(ctx context.Context) error { return transcript.Sync(ctx, file) }); err != nil {
+		return err
+	}
+	return retryClose(ctx, after, archived)
+}
+
+// retryClose runs step until it succeeds. It waits between failures with backoff, so a transient engine error does not end the close.
+func retryClose(ctx context.Context, after func(time.Duration) <-chan time.Time, step func(context.Context) error) error {
 	delay := transcriptRetryMin
-	for err := transcript.Sync(ctx, file); err != nil; err = transcript.Sync(ctx, file) {
-		log.Printf("transcript sync before archive %s: %v", file, err)
+	for err := step(ctx); err != nil; err = step(ctx) {
+		log.Printf("close step failed, retrying: %v", err)
 		select {
 		case <-after(delay):
 		case <-ctx.Done():
@@ -126,7 +134,7 @@ func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, file str
 		}
 		delay = min(2*delay, transcriptRetryMax)
 	}
-	return archived(ctx)
+	return nil
 }
 
 // waitRun ends Run when the box channel or server fails, or when ctx ends. A runner error ends Run only before a close starts. After that, closeBox decides when Run ends, so a failed turn report cannot cancel the transcript retry.
