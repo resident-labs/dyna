@@ -6,15 +6,6 @@ import (
 	"time"
 )
 
-// PersonalLogin is the owner's own native login for one harness. Saved means
-// that a Dyna account already holds the same identity.
-type PersonalLogin struct {
-	Harness  string `json:"harness"`
-	Label    string `json:"label"`
-	Saved    bool   `json:"saved"`
-	identity string
-}
-
 // FindPersonalLogin reads the owner's native login for harness without
 // changing it. It returns nil when there is nothing that Sign in can offer: the
 // owner is not signed in, or another Dyna account already exists. Dyna copies a
