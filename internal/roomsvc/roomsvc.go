@@ -105,6 +105,8 @@ type Service struct {
 	// onMemberScan, for tests, sees each members scan: the sessions it read
 	// again, or -1 for all of them.
 	onMemberScan func(sessions int)
+	// onUnreadScan, for tests, observes room rail unread scans.
+	onUnreadScan func(roomID string)
 }
 
 type unreadEntry struct {
@@ -345,6 +347,9 @@ func (s *Service) Rooms() ([]Room, error) {
 			eligible[id] = true
 		}
 		seen := map[string]bool{}
+		if s.onUnreadScan != nil {
+			s.onUnreadScan(rec.ID)
+		}
 		page, err := store.ReadPage(rec.ID, "", 1, room.PageFilter{Unread: func(m room.Message) bool {
 			thread := m.ThreadKey()
 			unread := eligible[m.ID] && !reads[m.ID] && (thread == "" || !seen[thread])
