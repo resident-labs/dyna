@@ -28,23 +28,70 @@ func TestChildSuccessReportsOnlyToCurrentParent(t *testing.T) {
 // A question posted to the parent mid-turn is not the report: the turn's final
 // result still reaches the parent (D-226).
 func TestMidTurnPostToParentDoesNotHideTheFinalReport(t *testing.T) {
-	e := newTestEnv(t, withImmediateTurns)
-	rec := e.room()
-	parent := e.start(rec, "lead", nil)
-	child := e.start(rec, "child", &parent)
-	child.CurrentTurn = 1
-	if _, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: child}, Mentions: []string{"@parent"}, Text: "Which option sets the lifetime?"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.mgr.Store.UpdateTurn(child.ID, 1, func(turn *subagent.Turn) { turn.Result = "Ready for review." }); err != nil {
-		t.Fatal(err)
-	}
-	result, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(result.Message.To, []string{parent.Address()}) || !turnReport(result.Message, room.TurnCompleted) {
-		t.Fatalf("the final report was hidden by the earlier post: %+v", result)
+	for _, tc := range []struct {
+		name   string
+		seat   bool
+		active bool
+	}{
+		{name: "idle lead"},
+		{name: "idle root", seat: true},
+		{name: "running lead", active: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seat := tc.seat
+			e := newTestEnv(t, withImmediateTurns)
+			rec := e.room()
+			var parent subagent.Info
+			if seat {
+				e.human(rec, "RESPOND: ready", "@root")
+				parent = e.wait(e.rootSession(rec).ID, 1)
+			} else {
+				parent = e.start(rec, "lead", nil)
+			}
+			child := e.start(rec, "child", &parent)
+			child.CurrentTurn = 1
+			if _, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: child}, Mentions: []string{"@parent"}, Text: "Which option sets the lifetime?"}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.active {
+				lock, err := e.mgr.Store.TryLockTurnForTest(parent.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer lock.Close()
+			}
+			if _, err := e.mgr.Store.UpdateTurn(child.ID, 1, func(turn *subagent.Turn) { turn.Result = "Ready for review." }); err != nil {
+				t.Fatal(err)
+			}
+			result, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(result.Message.To, []string{parent.Address()}) || !turnReport(result.Message, room.TurnCompleted) || result.Message.Wake != tc.active {
+				t.Fatalf("completion has wrong wake intent: %+v", result)
+			}
+			if len(result.Deliveries) == 0 {
+				t.Fatal("completion has no parent delivery")
+			}
+			wantDelivery, wantMode := "session-quiet", room.DeliveryQuiet
+			if tc.active {
+				wantDelivery, wantMode = "session-queued", room.DeliveryWake
+			}
+			for _, delivery := range result.Deliveries {
+				if delivery.Delivery != wantDelivery {
+					t.Fatalf("parent delivery = %+v", result.Deliveries)
+				}
+			}
+			rows, err := e.svc.Rooms.SessionDeliveries(rec.ID, room.DeliveryKeys(parent.ID, parent.Address()), []string{result.Message.ID})
+			if seat {
+				row, ok, err := e.svc.Rooms.SeatDelivery(rec.ID, result.Message.ID)
+				if err != nil || !ok || row.Mode != room.DeliveryQuiet {
+					t.Fatalf("root seat row = %+v, %v, %v", row, ok, err)
+				}
+			} else if row, ok := rows[result.Message.ID]; err != nil || !ok || row.Mode != wantMode {
+				t.Fatalf("parent row = %+v, %v, %v", row, ok, err)
+			}
+		})
 	}
 }
 
