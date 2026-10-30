@@ -96,7 +96,7 @@ func TestNativeFeaturesInFreshAndRestoredGenerations(t *testing.T) {
 				joined := strings.Join(g.args, " ")
 				switch h {
 				case "claude-code":
-					for _, key := range []string{"CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_DISABLE_CRON", "CLAUDE_CODE_DISABLE_WORKFLOWS", "CLAUDE_CODE_DISABLE_AGENT_VIEW"} {
+					for _, key := range []string{"CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_DISABLE_CRON", "CLAUDE_CODE_DISABLE_WORKFLOWS", "CLAUDE_CODE_DISABLE_AGENT_VIEW", "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"} {
 						if g.env[key] != "1" {
 							t.Errorf("%s %s=%q, want 1", g.name, key, g.env[key])
 						}
