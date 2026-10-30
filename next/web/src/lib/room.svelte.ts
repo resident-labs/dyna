@@ -26,7 +26,8 @@ export class RoomStore {
   constructor(room: string) { this.room = room; }
 
   get newest(): number { return this.seqs.at(-1) ?? 0; }
-  get ordered(): Event[] { return this.seqs.map(seq => this.events.get(seq)!); }
+  // seqs is a plain array; reading events.size makes Svelte readers see new seqs.
+  get ordered(): Event[] { return this.events.size ? this.seqs.map(seq => this.events.get(seq)!) : []; }
 
   async open(): Promise<void> {
     const page = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: Number.MAX_SAFE_INTEGER, limit: 200 });

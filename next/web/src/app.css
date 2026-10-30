@@ -1,11 +1,11 @@
 :root {
   color-scheme: light dark;
   --bg: #f7f7f6; --sidebar: #f0f0ee; --line: #dededb;
-  --text: #242421; --muted: #777772; --attention: #a45500;
+  --text: #242421; --muted: #777772; --attention: #a45500; --danger: #b3332e;
   font: 14px/1.4 system-ui, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #181818; --sidebar: #202020; --line: #343434; --text: #e5e5e3; --muted: #92928e; --attention: #efb66d; }
+  :root { --bg: #181818; --sidebar: #202020; --line: #343434; --text: #e5e5e3; --muted: #92928e; --attention: #efb66d; --danger: #e67a76; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
