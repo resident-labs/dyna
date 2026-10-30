@@ -102,6 +102,35 @@ func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
 	}
 }
 
+func TestCloseRetryResendsArchiveOnLiveChannel(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
+		t.Fatal(err)
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := s.BoxChannel(ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := (<-channel).Body.(contract.Archive); !ok {
+		t.Fatal("expected archive")
+	}
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Error: "failed"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := (<-channel).Body.(contract.Archive); !ok {
+		t.Fatal("expected archive on retry")
+	}
+}
+
 func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
