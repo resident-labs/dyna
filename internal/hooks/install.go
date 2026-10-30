@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/updaterservice"
 )
 
 // SelfUpdateRecipe only builds configuration. The owner enables it with hooks add.
@@ -171,6 +172,9 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 			hs, err := s.List(ctx, j.Config.Main)
 			if err != nil {
 				return err
+			}
+			if j.Hook == updaterservice.RunName {
+				hs = append(hs, Hook{Name: updaterservice.RunName, Label: "Updates"})
 			}
 			for _, h := range hs {
 				if h.Name != j.Hook {
