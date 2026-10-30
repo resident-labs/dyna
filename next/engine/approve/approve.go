@@ -43,9 +43,6 @@ type waiter struct {
 }
 
 func New(st *store.Store, ctx context.Context, kinds map[contract.OpKind]Entry, now func() time.Time, expiry time.Duration, id func(string) (string, error)) *Service {
-	if expiry <= 0 {
-		expiry = 24 * time.Hour
-	}
 	return &Service{Store: st, Context: ctx, Kinds: kinds, Now: now, Expiry: expiry, ID: id, waiters: make(map[contract.OpID]waiter)}
 }
 

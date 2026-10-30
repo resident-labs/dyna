@@ -152,7 +152,10 @@ export type Card = { title: string; body?: string; target: Target; changes?: Arr
 export type Target = { kind: TargetKind; name: string; };
 export type Change = { field: ChangeField; old: string; new: string; };
 export type Decision = { by: Principal; approved: boolean; reason?: string; at: string; };
-export type OpResult = { exitCode: number; error?: string; output?: string; outputFile?: string; };
+export type PrOpenArgs = { title: string; body: string; base: string; draft: boolean; };
+export type PrOpened = { repo: RepoName; number: number; session: SessionID; url: string; };
+export type PrOpenResult = { number: number; url: string; };
+export type OpResult = { pr?: PrOpenResult | null; exitCode: number; error?: string; output?: string; outputFile?: string; };
 export type OpSubmitRequest = { operation: Operation; };
 export type OpSubmitResponse = { operation: Operation; };
 export type OpDecideRequest = { id: OpID; approve: boolean; reason?: string; };
@@ -173,13 +176,14 @@ export type EventBody =
   | { type: "op.ran"; body: OpRan }
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
+  | { type: "pr.opened"; body: PrOpened }
   | { type: "session.closed"; body: SessionClosed }
   | { type: "session.started"; body: SessionStarted }
   | { type: "shell.job.ended"; body: ShellJobEnded }
   | { type: "turn.ended"; body: TurnEnded }
   | { type: "turn.started"; body: TurnStarted }
 ;
-export type OpArgs = never;
+export type OpArgs = PrOpenArgs;
 export type BoxMessageBody =
   | { type: "archive"; body: Archive }
   | { type: "turn.start"; body: TurnStart }
