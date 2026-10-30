@@ -32,9 +32,11 @@ case "$suite" in
     cd web
     npm ci --prefer-offline --no-audit
     type_checks() {
-      # The four checks do not depend on each other, so they run side by side.
+      # The five checks do not depend on each other, so they run side by side.
+      # check-ui-guard reads only the lines this change adds, so it needs the base commit.
       pids=()
       npm exec -- node scripts/check-typescript.ts & pids+=($!)
+      npm exec -- node scripts/check-ui-guard.ts & pids+=($!)
       npm exec -- svelte-check --tsconfig ./tsconfig.json & pids+=($!)
       npm exec -- tsc --project ./tsconfig.json & pids+=($!)
       npm exec -- tsc --project ./tsconfig.worker.json & pids+=($!)
