@@ -108,7 +108,7 @@ func TestPostDoesNotAllocateTheFirstTurnOfACreatingSession(t *testing.T) {
 		t.Fatalf("Wake = %v, want ErrBusy while the first turn is not allocated", err)
 	}
 	// The original start still owns turn 1, with its brief and schema.
-	turn, delivered, err := e.m.beginTurnConfigured(id, "SLEEP:0\nRESPOND: first brief", `{"type":"object"}`, []string{e.room.Name}, "", "", false, time.Time{})
+	turn, delivered, err := e.m.beginTurnConfigured(id, "SLEEP:0\nRESPOND: first brief", `{"type":"object"}`, []string{e.room.Name}, "", "", false, false, time.Time{})
 	if err != nil || delivered {
 		t.Fatalf("initial turn = %+v, delivered = %v, %v", turn, delivered, err)
 	}

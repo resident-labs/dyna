@@ -108,20 +108,11 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		firstCall     *workeroutput.CallUsage
 		baseline      = meta.UsageBaseline
 		contextTokens = meta.ContextTokens
-		// idleFor is how long the session sat idle before this turn. The
-		// first harness start consumes it, so a retry inside the turn does
-		// not compact again.
-		idleFor     time.Duration
-		sessionID   = meta.HarnessSession
-		actualModel string
-		mu          sync.Mutex
-		gate        *turnGate
+		sessionID     = meta.HarnessSession
+		actualModel   string
+		mu            sync.Mutex
+		gate          *turnGate
 	)
-	if n > 1 {
-		if prev, err := store.ReadTurn(id, n-1); err == nil && !prev.Ended.IsZero() {
-			idleFor = time.Since(prev.Ended)
-		}
-	}
 	if meta.UsageBaselineTurn != n-1 {
 		baseline = nil
 	}
@@ -363,8 +354,6 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		}
 		mu.Lock()
 		resumeID, lastContext := sessionID, contextTokens
-		idle := idleFor
-		idleFor = 0
 		forking := forkPending && forkFrom != ""
 		mu.Unlock()
 		execution := writes.nativeExecution(meta.Role)
@@ -387,7 +376,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			},
 			UsageBaseline: baseline,
 			ContextTokens: lastContext,
-			IdleFor:       idle,
+			CompactOnly:   turn.CompactOnly,
 			OnFallback: func(f harness.ModelFallback) {
 				writes.note(TurnNote{Fallback: &f})
 			},
@@ -417,6 +406,10 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		mu.Lock()
 		if r.ContextTokens > 0 {
 			contextTokens = r.ContextTokens
+		} else if turn.CompactOnly {
+			// The summary replaced the history, so the old size is stale and
+			// the next real turn reports the new one.
+			contextTokens = 0
 		}
 		if r.Model != "" {
 			actualModel = r.Model
@@ -437,6 +430,17 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		return r, err
 	}
 
+	if turn.CompactOnly {
+		// An idle compaction takes no input and sends no prompt: it only
+		// compacts the resumed session.
+		if err := writes.start(ctx, TurnStart{Turn: n}); err != nil {
+			return fail(fmt.Errorf("mark turn %d running: %w", n, err))
+		}
+		if _, err := runOne(""); err != nil {
+			return fail(err)
+		}
+		return finish(TurnOK, nil, nil)
+	}
 	base, roomContext := m.buildTurnPrompt(store, meta, turn, id, n, prof.Harness)
 	claimed, err := writes.claimInput(ctx, InputClaim{Turn: n, Startup: true, Covered: covered})
 	if err != nil {

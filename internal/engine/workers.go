@@ -49,6 +49,9 @@ type workerSignals struct {
 	// worker last fired their session-turn-ended events. One event per session
 	// per pass, however many turns it ran in between.
 	turnEnds map[string]bool
+	// idleCompaction arms a session's idle compaction at its turn end. The
+	// engine sets it once, before the workers run; nil arms nothing.
+	idleCompaction *idleCompaction
 	// roomResumed marks that a paused room resumed since the hooks worker last
 	// ran, so its check-ins are due again.
 	roomResumed bool
@@ -402,6 +405,9 @@ func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *w
 			// A turn end fires its event before the spool drains, so a job for
 			// it starts in this pass and not one interval later.
 			ids := signals.takeTurnEnds()
+			if signals.idleCompaction != nil {
+				signals.idleCompaction.turnEnded(ids)
+			}
 			resumed := signals.takeRoomResumed()
 			turnEnds := fireTurnEnds(ctx, rooms.Notify.Sessions.Store, spool, ids)
 			// A turn end or a resumed room can make a check-in due at once, and
@@ -703,6 +709,15 @@ const localCIStop = localci.StopWait
 func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time, jobsService *jobs.Service) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
+	}
+	sessions := rooms.Notify.Sessions
+	signals.idleCompaction = &idleCompaction{
+		timers: t,
+		turns: func(id string) (int, error) {
+			info, err := sessions.Store.Inspect(id)
+			return info.Turns, err
+		},
+		compact: func(id string, turn int) error { return sessions.CompactIdle(ctx, id, turn) },
 	}
 	workerSet := engineWorkers(ctx, rooms, signals, load, events, hookService, started)
 	workerSet.jobsStart = func() {

@@ -233,21 +233,24 @@ type Turn struct {
 	// were read, and a post after it wakes the session again. A repaired turn
 	// uses it as its input cutoff, so input queued while that turn ran is not
 	// mistaken for input it already read.
-	StartCutoff     *int64                  `json:"startCutoff,omitempty"`
-	Deadline        time.Time               `json:"deadline,omitempty"`
-	RoomHeld        bool                    `json:"roomHeld,omitempty"`
-	PendingInputIDs []string                `json:"pendingInputIds,omitempty"`
-	HeldAccepted    bool                    `json:"heldAccepted,omitempty"`
-	HeldPrompt      string                  `json:"heldPrompt,omitempty"`
-	WrapUp          bool                    `json:"wrapUp,omitempty"`
-	Harness         string                  `json:"harness,omitempty"`
-	OutputDialect   string                  `json:"outputDialect,omitempty"`
-	Profile         string                  `json:"profile,omitempty"`
-	Model           string                  `json:"model,omitempty"`
-	AccountSwitch   *harness.AccountSwitch  `json:"accountSwitch,omitempty"` // the turn moved to another account after a usage limit
-	Fallbacks       []harness.ModelFallback `json:"fallbacks,omitempty"`     // moves to the next model in the profile's chain
-	TransferID      string                  `json:"transferId,omitempty"`
-	N               int                     `json:"n"`
+	StartCutoff     *int64    `json:"startCutoff,omitempty"`
+	Deadline        time.Time `json:"deadline,omitempty"`
+	RoomHeld        bool      `json:"roomHeld,omitempty"`
+	PendingInputIDs []string  `json:"pendingInputIds,omitempty"`
+	HeldAccepted    bool      `json:"heldAccepted,omitempty"`
+	HeldPrompt      string    `json:"heldPrompt,omitempty"`
+	WrapUp          bool      `json:"wrapUp,omitempty"`
+	// CompactOnly marks an idle compaction: the turn compacts the session and
+	// sends no prompt.
+	CompactOnly   bool                    `json:"compactOnly,omitempty"`
+	Harness       string                  `json:"harness,omitempty"`
+	OutputDialect string                  `json:"outputDialect,omitempty"`
+	Profile       string                  `json:"profile,omitempty"`
+	Model         string                  `json:"model,omitempty"`
+	AccountSwitch *harness.AccountSwitch  `json:"accountSwitch,omitempty"` // the turn moved to another account after a usage limit
+	Fallbacks     []harness.ModelFallback `json:"fallbacks,omitempty"`     // moves to the next model in the profile's chain
+	TransferID    string                  `json:"transferId,omitempty"`
+	N             int                     `json:"n"`
 	// Wake is why this turn started. Empty on a turn stored before the field existed.
 	Wake               WakeCause                       `json:"wake,omitzero"`
 	Prompt             string                          `json:"prompt"`
