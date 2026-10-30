@@ -59,13 +59,19 @@ var ownerIdentities = func() ([]string, error) {
 // them name a file instead of holding the text.
 var textFlags = map[string]bool{"--title": false, "-t": false, "--body": false, "-b": false, "--body-file": true, "-F": true}
 
-// closeTextFlags are the text flags of issue close and reopen, which add -c and
-// --comment. On pr review those flags are switches, so they stay out of textFlags.
-var closeTextFlags = map[string]bool{"--title": false, "-t": false, "--body": false, "-b": false, "--comment": false, "-c": false, "--body-file": true, "-F": true}
+// closeTextFlags are the comment flags of issue close and reopen. On pr review
+// -c and --comment are switches, so they stay out of textFlags.
+var closeTextFlags = map[string]bool{"--comment": false, "-c": false}
+
+// closesIssue reports whether command is gh issue close or reopen, whose comment
+// flag takes the text itself and no file.
+func closesIssue(command []string) bool {
+	return len(command) >= 2 && command[0] == "issue" && (command[1] == "close" || command[1] == "reopen")
+}
 
 // bodyFlagsFor returns the text flags of a command.
 func bodyFlagsFor(command []string) map[string]bool {
-	if len(command) >= 2 && command[0] == "issue" && (command[1] == "close" || command[1] == "reopen") {
+	if closesIssue(command) {
 		return closeTextFlags
 	}
 	return textFlags
@@ -307,6 +313,10 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 		return none, nil
 	}
 	body = withAttributionFirst(body, rec.Attribution)
+	if closesIssue(command) {
+		cmd.Args = append([]string{cmd.Args[0]}, append(rest, "--comment="+body)...)
+		return none, nil
+	}
 	file, err := os.CreateTemp("", "dyna-gh-body-")
 	if err != nil {
 		return none, err
