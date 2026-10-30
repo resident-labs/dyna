@@ -107,6 +107,18 @@ func findBrowserDaemons(id string) map[int]string {
 	return out
 }
 
+// browserStopPolls bounds the wait for SIGTERM to take effect. 50 polls at 20 ms
+// is about one second on an idle host.
+const browserStopPolls = 50
+
+// browserStopTick returns the channel that releases the next stop poll. A test
+// replaces it with a closed channel, so the stop never waits on the clock.
+var browserStopTick = func() <-chan time.Time { return time.After(20 * time.Millisecond) }
+
+// killBrowserProcess sends a signal to a daemon process. A test replaces it to
+// record the signal instead of ending the process.
+var killBrowserProcess = unix.Kill
+
 // Give the tool time to close Chrome and remove its temporary profile. SIGTERM
 // every owned process first, so each browser gets a graceful stop with the
 // short timeout before the fallback kills only the selected processes with
@@ -119,14 +131,13 @@ func stopBrowserDaemons(id string) {
 	owned := descendants(processes(), roots)
 	signal := func(pid int, start string, sig unix.Signal) {
 		if info, ok := processInfo(pid); ok && info.start == start && info.state != "Z" {
-			_ = unix.Kill(pid, sig)
+			_ = killBrowserProcess(pid, sig)
 		}
 	}
 	for pid, start := range owned {
 		signal(pid, start, unix.SIGTERM)
 	}
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	for attempt := 0; attempt < browserStopPolls; attempt++ {
 		alive := false
 		for pid, start := range owned {
 			if info, ok := processInfo(pid); ok && info.start == start && info.state != "Z" {
@@ -137,7 +148,7 @@ func stopBrowserDaemons(id string) {
 		if !alive {
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		<-browserStopTick()
 	}
 	for pid, start := range owned {
 		signal(pid, start, unix.SIGKILL)
