@@ -203,7 +203,7 @@ func TestExternalOrchestrationPrintsOneHarnessRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"root-addressed alerts", "issue", "cleanup notices", "No second --all stream", "quiet posts stay held", "one JSON block", "last waking post ID", "timed-flush notice", "--lines", "-- since <post-id>", "dyna room read <room> <post-id>"} {
+	for _, want := range []string{"root-addressed alerts", "issue", "cleanup notices", "Use one default watcher", "quiet posts stay held", "one JSON block", "last waking post ID", "timed-flush notice", "--lines", "-- since <post-id>", "dyna room read <room> <post-id>"} {
 		if !strings.Contains(list, want) {
 			t.Errorf("shared root guide misses %q", want)
 		}
