@@ -63,6 +63,20 @@ var ownerAlive = func(pid int, start uint64) bool {
 	return err != nil || got == start
 }
 
+// HasActiveAttachments reports live or recoverable CI runs across all rooms.
+func (s Store) HasActiveAttachments(ctx context.Context) (bool, error) {
+	rows, err := s.queryAttachments(ctx, "1=1")
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if ownerAlive(row.ownerPID, row.ownerStart) || row.orphaned() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // OrphanedAttachment identifies a run whose owner process is gone.
 type OrphanedAttachment struct {
 	Repo, SHA, Node, RunID string

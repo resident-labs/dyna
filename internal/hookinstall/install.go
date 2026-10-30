@@ -20,6 +20,7 @@ import (
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/updaterservice"
 )
 
 type driver struct {
@@ -145,6 +146,34 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		fmt.Fprintln(out, "Already installed "+head)
 		return s.Jobs.Update(id, func(j *Job) error { j.Installed = head; return nil })
 	}
+	// Compare against the binary's actual revision, not the last observed main.
+	// An unreadable history builds conservatively.
+	if state.Installed != "" {
+		changed, diffErr := git("diff", "--no-renames", "--name-only", "-z", state.Installed, head, "--")
+		if diffErr == nil {
+			affectsBuild := false
+			for _, path := range strings.Split(changed, "\x00") {
+				if path != "" && !strings.HasPrefix(path, "docs/") && !strings.HasPrefix(path, "next/") {
+					affectsBuild = true
+					break
+				}
+			}
+			if !affectsBuild {
+				fmt.Fprintln(out, "No installed build inputs changed")
+				return nil
+			}
+		}
+	}
+	if j.Hook == updaterservice.RunName && !j.Force {
+		ready, guardErr := s.updateGuard(ctx, s.now())
+		if guardErr != nil {
+			return guardErr
+		}
+		if !ready {
+			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
+			return nil
+		}
+	}
 	restartComputers, err := d.computersChanged(ctx, state.Installed, head)
 	if err != nil {
 		return err
@@ -195,6 +224,19 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 	// binaries or restart services for a build that has already been replaced.
 	if skip, err := s.skipSuperseded(j, out); err != nil || skip {
 		return err
+	}
+	if j.Hook == updaterservice.RunName && !j.Force {
+		ready, guardErr := s.updateGuard(ctx, s.now())
+		if guardErr != nil {
+			return guardErr
+		}
+		if !ready {
+			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
+			return nil
+		}
+		if err = s.recordUpdateRestart(ctx, s.now()); err != nil {
+			return err
+		}
 	}
 	if err = os.MkdirAll(c.Bin, 0755); err != nil {
 		return err

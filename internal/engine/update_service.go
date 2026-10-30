@@ -131,11 +131,11 @@ func scheduledUpdate(ctx context.Context, h hooks.Service, now time.Time) error 
 	if err != nil || !due {
 		return err
 	}
-	_, err = runUpdate(ctx, h, cfg.Source, cfg.ToolPath)
+	_, err = runUpdate(ctx, h, cfg.Source, cfg.ToolPath, false)
 	return err
 }
 
-func runUpdate(ctx context.Context, h hooks.Service, source, toolPath string) (hooks.Run, error) {
+func runUpdate(ctx context.Context, h hooks.Service, source, toolPath string, force bool) (hooks.Run, error) {
 	if source == "" {
 		return hooks.Run{}, fmt.Errorf("set updater.source before running Updates")
 	}
@@ -151,5 +151,5 @@ func runUpdate(ctx context.Context, h hooks.Service, source, toolPath string) (h
 	if err != nil {
 		return hooks.Run{}, err
 	}
-	return h.StartUpdate(ctx, hooks.Event{Event: hooks.Schedule, Repo: r.Root, Worktree: r.Main, Branch: branch.Name, SHA: sha}, source, toolPath)
+	return h.StartUpdate(ctx, hooks.Event{Event: hooks.Schedule, Repo: r.Root, Worktree: r.Main, Branch: branch.Name, SHA: sha, Force: force}, source, toolPath)
 }
