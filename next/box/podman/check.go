@@ -24,6 +24,7 @@ const (
 	CheckCgroup    CheckName = "cgroup v2 and delegated controllers"
 	CheckArch      CheckName = "host architecture"
 	CheckPodman    CheckName = "rootless Podman 5 with systemd"
+	CheckGit       CheckName = "git"
 	CheckCapacity  CheckName = "capacity"
 	CheckHostSlice CheckName = "host slice"
 	CheckForward   CheckName = "stream-local forwarding"
@@ -89,6 +90,8 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	add(CheckCgroup, err)
 	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
 	add(CheckPodman, err)
+	_, err = h.run(ctx, "git", "--version")
+	add(CheckGit, err)
 	result.CPUs, result.MemBytes, result.DiskBytes, err = h.capacity(ctx, o)
 	add(CheckCapacity, err)
 	if err == nil {

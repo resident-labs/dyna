@@ -23,6 +23,11 @@ type runner struct {
 }
 
 func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	for i, a := range args {
+		if a == "-O" && i+1 < len(args) && args[i+1] == "exit" {
+			return nil, nil
+		}
+	}
 	r.calls = append(r.calls, append([]string(nil), args...))
 	for i, a := range args {
 		if a == "-O" && i+1 < len(args) {
@@ -114,6 +119,17 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		}
 	}
 }
+func TestStopContainerIgnoresMissing(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	if err := h.StopContainer(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	args := r.calls[1]
+	if !strings.HasSuffix(args[len(args)-1], "'podman' '--cgroup-manager=systemd' 'stop' '--ignore' 'a'") {
+		t.Fatalf("command %v", args)
+	}
+}
 func TestRemoveContainerLeavesVolumeForMove(t *testing.T) {
 	r := &runner{}
 	h := newTestHost(t, r)
@@ -182,6 +198,38 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 				t.Fatalf("forward argv %v, want %v", args, want)
 			}
 		}
+	}
+}
+
+type resetRunner struct{ calls [][]string }
+
+func (r *resetRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	for i, arg := range args {
+		if arg == "-O" && args[i+1] == "exit" {
+			return nil, nil
+		}
+		if arg == "-O" && args[i+1] == "check" {
+			return nil, errors.New("no master")
+		}
+		if arg == "-M" {
+			return nil, nil
+		}
+	}
+	return []byte("DYNA-END 00000000000000000000 000\n"), nil
+}
+func TestFirstUseReplacesStaleMaster(t *testing.T) {
+	r := &resetRunner{}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.StartContainer(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	want := append(h.base(), "-O", "exit", "user@host")
+	if !reflect.DeepEqual(r.calls[0], want) || !reflect.DeepEqual(r.calls[2], []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "StreamLocalBindUnlink=yes", "user@host"}) {
+		t.Fatalf("commands %v", r.calls)
 	}
 }
 
