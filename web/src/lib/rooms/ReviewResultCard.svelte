@@ -58,14 +58,14 @@
       {#if nextStep}<p class="reason">{nextStep}</p>{/if}
       {#if findings.length}
         <div class="counts">
-          {#if counts[0]}<Chip tone="coral">{counts[0]} blocking</Chip>{/if}
-          {#if counts[1]}<Chip tone="gold">{counts[1]} should fix</Chip>{/if}
+          {#if counts[0]}<Chip tone="danger">{counts[0]} blocking</Chip>{/if}
+          {#if counts[1]}<Chip tone="warning">{counts[1]} should fix</Chip>{/if}
           {#if counts[2]}<Chip>{counts[2]} nit{counts[2] === 1 ? '' : 's'}</Chip>{/if}
         </div>
         <ul class="findings">
           {#each shown as finding (finding.id)}
             <li>
-              <span class="where"><Chip tone={finding.severity === 'blocking' ? 'coral' : finding.severity === 'should-fix' ? 'gold' : ''}>{severityWords[finding.severity]}</Chip> <b class="mono">{finding.file}{finding.line ? `:${finding.line}` : ''}</b></span>
+              <span class="where"><Chip tone={finding.severity === 'blocking' ? 'danger' : finding.severity === 'should-fix' ? 'warning' : 'neutral'}>{severityWords[finding.severity]}</Chip> <b class="mono">{finding.file}{finding.line ? `:${finding.line}` : ''}</b></span>
               <span class="why">{finding.why}</span>
             </li>
           {/each}

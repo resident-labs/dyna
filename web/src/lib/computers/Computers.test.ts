@@ -113,7 +113,7 @@ test('a running tile matches the aspect ratio of its computer and shows its name
     assert.ok(textOf(tile).includes('up 12 min'))
     const chip = one(tile, '.chip')
     assert.equal(textOf(chip).trim(), 'Running')
-    assert.ok(chip.classList.contains('sage'), 'running is green')
+    assert.ok(chip.classList.contains('success'), 'running is green')
     assert.equal(tile.querySelector('.chip .dot'), null)
   })
 })
@@ -122,7 +122,7 @@ test('a starting tile shows an amber Starting chip', async () => {
   await withView([run({ state: 'starting', startedAt: undefined })], ({ target }) => {
     const chip = one(target, 'button.g .chip')
     assert.equal(textOf(chip).trim(), 'Starting…')
-    assert.ok(chip.classList.contains('gold'))
+    assert.ok(chip.classList.contains('live'))
   })
 })
 

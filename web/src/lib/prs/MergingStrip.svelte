@@ -1,5 +1,6 @@
 <script lang="ts">
   import Chip from '../ui/Chip.svelte'
+  import { toneOf } from '../ui/tone.ts'
   import type { MergeControlStatus } from '../api/change.ts'
   import { shortSha } from './pr.ts'
   import { trialProgress, waitingReason, waitingWords } from './roomPRs.ts'
@@ -9,7 +10,7 @@
   let reason = $derived(status ? waitingReason(status) : null)
 </script>
 <section class="merging" aria-label="Merging">
-  <div class="heading"><h2>Merging</h2>{#if status?.paused}<Chip tone="gold">Paused</Chip>{/if}</div>
+  <div class="heading"><h2>Merging</h2>{#if status?.paused}<Chip tone="warning">Paused</Chip>{/if}</div>
   {#if status?.paused}
     <div class="pause" role="status">
       <div><strong>Merging is paused</strong><p>{status.reason || 'No reason was recorded.'}</p></div>
@@ -28,7 +29,7 @@
     {#each status.trials ?? [] as trial (trial.branch)}
       {@const progress = trialProgress(trial, status)}
       <div class="trial">
-        <div class="trial-head"><strong>{progress.label}</strong><Chip tone={progress.tone}>{trial.branch.split('/').at(-1) ? `Trial ${trial.branch.split('/').at(-1)}` : 'Trial'}</Chip></div>
+        <div class="trial-head"><strong>{progress.label}</strong><Chip tone={toneOf(progress.tone)}>{trial.branch.split('/').at(-1) ? `Trial ${trial.branch.split('/').at(-1)}` : 'Trial'}</Chip></div>
         <div class="batch">{#each trial.batch ?? [] as id}<button onclick={() => onpick(id)}>{id.includes('#') ? `#${id.split('#').at(-1)}` : id}</button>{/each}</div>
         {#if progress.total}
           <p class="checks">{progress.nodes ? `${progress.nodes} · ` : ''}{progress.completed}/{progress.total} checks complete · {progress.passed} passed{#if progress.failed} · <span class="error">{progress.failed} failed</span>{/if}</p>

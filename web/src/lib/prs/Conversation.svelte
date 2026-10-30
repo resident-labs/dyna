@@ -16,6 +16,7 @@
   import { ago, markdown } from '../ui/format.ts'
   import Card from '../ui/Card.svelte'
   import Chip from '../ui/Chip.svelte'
+  import { toneOf } from '../ui/tone.ts'
   import Thread from './Thread.svelte'
   import ChangeReview from './ChangeReview.svelte'
   import { checkSummary, verdictMeta, shortSha } from './pr.ts'
@@ -70,7 +71,7 @@
   {@const isLatest = r.round === latest?.round}
   {@const expanded = isShown(r)}
   <div class="it" id={isLatest ? 'latest-round' : undefined}>
-    <span class="av"><Chip tone={vm?.tone === 'ok' ? 'sage' : 'gold'}>R{r.round}</Chip></span>
+    <span class="av"><Chip tone={vm?.tone === 'ok' ? 'success' : 'warning'}>R{r.round}</Chip></span>
     <div class="rcard" class:ok={vm?.tone === 'ok'}>
       <header><strong>{reviewer}</strong> {vm ? vm.label.toLowerCase() : 'reviewed'} · round {r.round} · {n} {n === 1 ? 'finding' : 'findings'}{r.head ? ` · at ${shortSha(r.head)}` : ''} · {ago(r.at)}</header>
       <div class="rbody">
@@ -86,13 +87,13 @@
   </div>
 {/snippet}
 {#snippet after()}
-  {#if ci}<p class="it ev"><span class="av small"><Chip tone={ci.tone}>{ci.icon}</Chip></span>{ci.line}</p>{/if}
+  {#if ci}<p class="it ev"><span class="av small"><Chip tone={toneOf(ci.tone)}>{ci.icon}</Chip></span>{ci.line}</p>{/if}
 {/snippet}
 
 {#if latest && open}
   <Card>
     <button class="pin" onclick={reveal}>
-      <span class="chip"><Chip tone="gold">{`Round ${latest.round} · ${open} open`}</Chip></span>
+      <span class="chip"><Chip tone="warning">{`Round ${latest.round} · ${open} open`}</Chip></span>
       <span class="why">Findings the author has not settled</span>
       <span class="go">View ›</span>
     </button>
