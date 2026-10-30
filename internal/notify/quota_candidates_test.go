@@ -13,7 +13,7 @@ import (
 func TestQuotaReportReplaysFrozenCandidates(t *testing.T) {
 	e := newTestEnv(t, withImmediateTurns)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	profiles := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{Name: "disabled", Disabled: true}, {Name: "service", Uses: []string{profile.UseServices}}, {Name: "possible"}}}
+	profiles := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{Name: "disabled", Disabled: true}, {Name: "service", Uses: []string{profile.UseServices}}, {Name: "invalid"}, {Name: "possible", Harness: profile.HarnessPi, Taste: 1, Intelligence: 1, Cost: 1}}}
 	if err := profiles.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestQuotaReportReplaysFrozenCandidates(t *testing.T) {
 		t.Fatal("expected acknowledgement failure")
 	}
 	event, ok := first.Message.TurnResult()
-	if !ok || len(event.Candidates) != 3 || event.Candidates[0].State != room.CandidateUnavailable || event.Candidates[1].State != room.CandidateUnknown || event.Candidates[2].State != room.CandidateUnavailable {
+	if !ok || len(event.Candidates) != 4 || event.Candidates[0].State != room.CandidateUnavailable || event.Candidates[1].State != room.CandidateUnavailable || event.Candidates[2].State != room.CandidateUnknown || event.Candidates[3].State != room.CandidateUnavailable {
 		t.Fatalf("candidate event = %+v", event)
 	}
 	profiles.Remove("disabled")
