@@ -276,7 +276,7 @@ func tsType(e ast.Expr) string {
 			return "string"
 		case "bool":
 			return "boolean"
-		case "int", "int64", "int32", "uint", "uint64":
+		case "int", "int64", "int32", "uint", "uint64", "float32", "float64":
 			return "number"
 		case "byte":
 			return "number"

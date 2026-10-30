@@ -3,6 +3,7 @@ package contract
 type Method string
 
 const (
+	MethodArchiveDone      Method = "archive.done"
 	MethodDeliveryDone     Method = "delivery.done"
 	MethodRoomCreate       Method = "room.create"
 	MethodSessionStart     Method = "session.start"
@@ -100,10 +101,18 @@ type ModelChoice struct {
 	Thinking ThinkingLevel `json:"thinking"`
 }
 
+type BoxRepo struct {
+	Name   RepoName `json:"name"`
+	Cache  string   `json:"cache"`
+	Branch string   `json:"branch"`
+	Base   string   `json:"base"`
+}
+
 type BoxHelloResponse struct {
 	Session SessionID   `json:"session"`
 	Box     BoxID       `json:"box"`
 	Model   ModelChoice `json:"model"`
+	Repos   []BoxRepo   `json:"repos,omitempty"`
 	Upgrade string      `json:"upgrade,omitempty"`
 }
 type TurnOutputRequest struct {
@@ -152,6 +161,16 @@ type Upgrade struct {
 	Version string `json:"version"`
 }
 
+type Archive struct{}
+
+type ArchiveDoneRequest struct {
+	Repo    RepoName `json:"repo"`
+	Commit  string   `json:"commit"`
+	Skipped bool     `json:"skipped"`
+	Error   string   `json:"error,omitempty"`
+}
+type ArchiveDoneResponse struct{}
+
 type DeliverySeq int64
 type DeliveryDoneRequest struct {
 	Delivery DeliverySeq `json:"delivery"`
@@ -166,6 +185,9 @@ type BoxMessageBody interface {
 type BoxMessage struct {
 	Body BoxMessageBody `json:"body"`
 }
+
+func (Archive) BoxMessageType() BoxMessageType { return "archive" }
+func (Archive) isBoxMessageBody()              {}
 
 func (TurnStart) BoxMessageType() BoxMessageType { return "turn.start" }
 func (TurnStart) isBoxMessageBody()              {}
