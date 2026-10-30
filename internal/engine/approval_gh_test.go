@@ -174,6 +174,10 @@ esac
 	}); err != nil {
 		t.Fatal(err)
 	}
+	mediaRequest, err := s.approvalRequest(authority.WithActor(t.Context(), actor), approvals.RequestInput{Argv: []string{"pr", "comment", "7", "--repo", "owner/repo", "--body", "hello", "--attach", "image.png"}, Cwd: dir, Repo: "owner/repo", Media: []approvals.Media{media}})
+	if err != nil || mediaRequest.State != approvals.StatePending || mediaRequest.At != root.Name || mediaRequest.Class != approvals.ClassAgent {
+		t.Fatalf("own PR media = %+v, %v", mediaRequest, err)
+	}
 	before, err := s.rooms.Notify.Rooms.Messages(rec.ID)
 	if err != nil {
 		t.Fatal(err)

@@ -81,7 +81,7 @@ func Register[P any](s *Service, op Operation[P]) {
 			}
 			if err != nil {
 				result.Reason = err.Error()
-				if result.ExitCode == nil {
+				if result.ExitCode == nil || *result.ExitCode == 0 {
 					code := 1
 					result.ExitCode = &code
 				}
