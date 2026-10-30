@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -188,5 +189,44 @@ func TestTurnOutputRetryIsIdempotent(t *testing.T) {
 	}
 	if len(list.Events) != 1 {
 		t.Fatalf("got %d turn-ended events", len(list.Events))
+	}
+}
+
+type unavailableBoxes struct{}
+
+func (unavailableBoxes) Start(context.Context, contract.SessionID, contract.BoxID, contract.BoxSizeName) (Placement, error) {
+	return Placement{}, errors.New("host unavailable")
+}
+func (unavailableBoxes) Close(context.Context, contract.BoxID) error { return nil }
+
+func TestStartErrorReturnsReachablePendingSession(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	s.boxes = unavailableBoxes{}
+	response, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "pending", Profile: "test"})
+	if e != nil || response.Session == "" || response.Box == "" {
+		t.Fatalf("got %+v, %v", response, e)
+	}
+	list, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	last := list.Events[len(list.Events)-1].Body.(contract.BoxChanged)
+	if last.Session != response.Session || last.To != contract.BoxPending || last.Reason != "host unavailable" {
+		t.Fatalf("unexpected placement: %+v", last)
+	}
+}
+
+func TestSessionCannotStart(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.SessionStart(ctx, caller, contract.SessionStartRequest{Room: room, Name: "other", Profile: "test"}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("start: %v", e)
+	}
+}
+func TestSessionCannotClose(t *testing.T) {
+	s, _, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.SessionClose(ctx, caller, contract.SessionCloseRequest{Session: session}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("close: %v", e)
 	}
 }
