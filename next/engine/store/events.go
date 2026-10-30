@@ -88,6 +88,22 @@ func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64
 	return events, rows.Err()
 }
 
+// Event returns one event by sequence, including events from another room.
+func (s *Store) Event(ctx context.Context, seq int64) (contract.Event, error) {
+	var room sql.NullString
+	if err := s.Read().QueryRowContext(ctx, "SELECT room FROM events WHERE seq=?", seq).Scan(&room); err != nil {
+		return contract.Event{}, err
+	}
+	events, err := s.Events(ctx, contract.RoomID(room.String), seq-1, 1, nil)
+	if err != nil {
+		return contract.Event{}, err
+	}
+	if len(events) == 0 || events[0].Seq != seq {
+		return contract.Event{}, sql.ErrNoRows
+	}
+	return events[0], nil
+}
+
 // Subscribe registers a live feed. Overflow closes the channel; resubscribe
 // and replay Events after the last observed sequence.
 func (s *Store) Subscribe() (<-chan contract.Event, func()) {

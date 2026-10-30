@@ -14,6 +14,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/room"
 )
 
 type Profiles interface {
@@ -303,28 +304,73 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if strings.TrimSpace(req.Text) == "" {
 		return contract.PostResponse{}, invalid("post text is required")
 	}
-	var mentions []contract.Principal
-	var recipients []contract.Delivery
-	seen := make(map[contract.SessionID]bool)
-	for _, name := range req.Mentions {
-		session, err := s.store.SessionByName(ctx, req.Room, strings.TrimPrefix(name, "@"))
+	if req.Home.Kind == "" {
+		req.Home.Kind = contract.ConversationFeed
+	}
+	surface := contract.SurfaceFeed
+	if req.Home.Kind == contract.ConversationDM {
+		if caller.Kind != contract.PrincipalOwner || req.Home.Session == "" || len(req.Mentions) != 0 {
+			return contract.PostResponse{}, invalid("invalid DM")
+		}
+		session, err := s.store.Session(ctx, req.Home.Session)
 		if err != nil {
 			return contract.PostResponse{}, failure(err)
 		}
-		if seen[session.ID] {
-			continue
+		if session.Room != req.Room {
+			return contract.PostResponse{}, invalid("DM session is in another room")
 		}
-		seen[session.ID] = true
-		mentions = append(mentions, contract.Principal{Kind: contract.PrincipalSession, Session: session.ID})
-		if caller.Kind != contract.PrincipalSession || caller.Session != session.ID {
-			recipients = append(recipients, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
-		}
+		surface = contract.SurfaceDM
+	} else if req.Home.Kind != contract.ConversationFeed || req.Home.Session != "" {
+		return contract.PostResponse{}, invalid("invalid conversation")
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: contract.Conversation{Kind: contract.ConversationFeed}})
+	tree, err := s.store.RoomTree(ctx, req.Room)
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
-	seq, err := s.store.Post(ctx, event, recipients)
+	var mentions []contract.Principal
+	var recipients []room.Recipient
+	seen := make(map[contract.SessionID]bool)
+	for _, name := range req.Mentions {
+		if !strings.HasPrefix(name, "@") {
+			name = "@" + name
+		}
+		address, err := room.ParseAddress(name)
+		if err != nil {
+			return contract.PostResponse{}, invalid(err.Error())
+		}
+		names := make(map[string]contract.SessionID)
+		if address.Kind == room.AddressName {
+			targetRoom := req.Room
+			if address.Room != "" {
+				targetRoom, err = s.store.RoomByName(ctx, address.Room)
+				if err != nil {
+					return contract.PostResponse{}, failure(err)
+				}
+			}
+			session, err := s.store.SessionByName(ctx, targetRoom, address.Name)
+			if err != nil {
+				return contract.PostResponse{}, failure(err)
+			}
+			names[address.Name] = session.ID
+		}
+		ids, group := tree.Resolve(caller.Session, address, names)
+		for _, target := range ids {
+			recipients = append(recipients, room.Recipient{Session: target, Explicit: !group})
+			if !seen[target] {
+				mentions = append(mentions, contract.Principal{Kind: contract.PrincipalSession, Session: target})
+				seen[target] = true
+			}
+		}
+	}
+	if surface == contract.SurfaceDM {
+		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
+	}
+	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo})
+	if err != nil {
+		return contract.PostResponse{}, failure(err)
+	}
+	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
+	seq, err := s.store.Post(ctx, event, deliveries)
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}

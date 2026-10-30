@@ -146,6 +146,50 @@ func TestFailedTurnRecordsError(t *testing.T) {
 		t.Fatalf("unexpected outcome: %+v", ended)
 	}
 }
+func TestPostAcrossRooms(t *testing.T) {
+	s, source, sender, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	other, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	target, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: other.Room, Name: "target", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: target.Session})
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	_, e = s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sender}, contract.PostRequest{Room: source, Text: "cross-room", Mentions: []string{"@other:target"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	steer := (<-channel).Body.(contract.TurnSteer)
+	if steer.Input.Text != "cross-room" || steer.Input.Reply.Kind != contract.ReplyPost || steer.Input.Reply.Target.Session != sender {
+		t.Fatalf("got %+v", steer)
+	}
+}
+
+func TestPostToOwnerDM(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	home := contract.Conversation{Kind: contract.ConversationDM, Session: session}
+	post, e := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "direct", Home: home})
+	if e != nil {
+		t.Fatal(e)
+	}
+	started, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inputs, err := s.store.Dispatch(ctx, session, "turn", started, false)
+	if err != nil || len(inputs) != 2 || inputs[1].Reply.Kind != contract.ReplyFinal || inputs[1].Reply.Home != home {
+		t.Fatalf("post %v inputs %+v: %v", post, inputs, err)
+	}
+}
+
 func TestOwnPostDoesNotWake(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	_, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.PostRequest{Room: room, Text: "self", Mentions: []string{"worker"}})
