@@ -50,6 +50,16 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 			return
 		}
 		if r.Method == http.MethodPost && parts[2] == "git-receive-pack" {
+			selected, err := rooms.Session(r.Context(), session)
+			if err != nil {
+				http.Error(w, "repository access unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if repo != selected.Repo {
+				_, _ = io.Copy(io.Discard, r.Body)
+				http.Error(w, "repository not owned by this session", http.StatusForbidden)
+				return
+			}
 			if encoding := r.Header.Get("Content-Encoding"); encoding != "" && encoding != "identity" {
 				http.Error(w, "unsupported content encoding", http.StatusUnsupportedMediaType)
 				return
