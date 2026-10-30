@@ -81,7 +81,37 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		defer close(out)
 		defer func() { cancel() }()
 		replay := true
+		archiveSent := false
 		for {
+			current, err := s.store.Box(ctx, session.Box)
+			if err != nil || current.State == contract.BoxDeleted {
+				return
+			}
+			if current.State == contract.BoxClosing {
+				if !archiveSent && current.Reason == "" {
+					repos, err := s.store.RoomRepos(ctx, session.Room)
+					if err != nil {
+						return
+					}
+					if len(repos) > 0 {
+						select {
+						case out <- contract.BoxMessage{Body: contract.Archive{}}:
+							archiveSent = true
+						case <-ctx.Done():
+							return
+						}
+					}
+				}
+				select {
+				case _, ok := <-sub:
+					if !ok {
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
 			s.mu.Lock()
 			turnID, err := id("turn_", s.now())
 			if err != nil {

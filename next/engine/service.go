@@ -28,17 +28,19 @@ type Repositories interface {
 }
 
 type Service struct {
-	store     *store.Store
-	boxes     BoxAdapter
-	profiles  Profiles
-	repos     Repositories
-	now       func() time.Time
-	mu        sync.Mutex
-	channels  map[contract.SessionID]*boxChannel
-	admit     sync.Mutex
-	boxLockMu sync.Mutex
-	boxLocks  map[contract.SessionID]*sync.Mutex
-	boxRuns   map[contract.SessionID]*boxRun
+	store           *store.Store
+	boxes           BoxAdapter
+	profiles        Profiles
+	repos           Repositories
+	archiveVerifier ArchiveVerifier
+	archiveWake     map[contract.SessionID]chan struct{}
+	now             func() time.Time
+	mu              sync.Mutex
+	channels        map[contract.SessionID]*boxChannel
+	admit           sync.Mutex
+	boxLockMu       sync.Mutex
+	boxLocks        map[contract.SessionID]*sync.Mutex
+	boxRuns         map[contract.SessionID]*boxRun
 }
 
 type boxRun struct {
@@ -47,7 +49,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
+	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), archiveWake: make(map[contract.SessionID]chan struct{}), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -324,6 +326,16 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 		if current.State != contract.BoxClosing {
 			current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
 			if err != nil {
+				return contract.SessionCloseResponse{}, failure(err)
+			}
+		}
+		if !req.Discard {
+			if current.Reason != "" {
+				if err = s.archiveReason(ctx, session.Room, current, ""); err != nil {
+					return contract.SessionCloseResponse{}, failure(err)
+				}
+			}
+			if err = s.waitArchives(ctx, session); err != nil {
 				return contract.SessionCloseResponse{}, failure(err)
 			}
 		}
