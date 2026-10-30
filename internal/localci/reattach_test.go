@@ -555,3 +555,17 @@ func TestCancelledRecoveryDoesNotStartFresh(t *testing.T) {
 		t.Fatalf("recovery error = %v, want cancellation", err)
 	}
 }
+
+// Another live engine owns this run. A restart must wait rather than launch
+// another run when it cannot claim that attachment.
+func TestResumeWaitsForLiveAttachment(t *testing.T) {
+	store := Store{DataDir: t.TempDir()}
+	repo, sha := "/repo", strings.Repeat("a", 40)
+	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{SuiteGoStatic}}); err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{DataDir: store.DataDir, Node: &Node{Name: "pve"}}
+	if _, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", nil); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("live attachment was treated as absent: %v", err)
+	}
+}
