@@ -476,8 +476,10 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 			return fakeNodeReports(out, checks, true)
 		}
 		// Every node script must parse: a setup that does not stops each run.
-		if output, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); name == "bash" && err != nil {
-			return fmt.Errorf("invalid script: %w: %s", err, output)
+		if name == "bash" {
+			if output, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); err != nil {
+				return fmt.Errorf("invalid script: %w: %s", err, output)
+			}
 		}
 		if name != "systemd-run" {
 			return nil
@@ -541,14 +543,19 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	newFakeMachine(t, legacy).attach(&runner)
 	wait := runner.wait
 	runner.wait = func(ctx context.Context, delay time.Duration) error {
+		// The fake jobs cannot finish before release. Park their pollers rather
+		// than repeatedly polling and writing to SQLite while the slots are held.
+		if delay != time.Second {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return wait(ctx, delay)
+		}
+		// Only admission uses one second. Its wait reason is already logged.
 		if err := wait(ctx, delay); err != nil {
 			return err
-		}
-		// The node poller shares this hook with a two-second interval. Only
-		// admission uses one second, so this call is the sole queued check
-		// running after its own wait reason reached the log.
-		if delay != time.Second {
-			return nil
 		}
 		db, err := database.Open(dataDir)
 		if err != nil {
@@ -566,7 +573,12 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		case waitNoted <- waitNote{check: CheckName(name), reason: reason}:
 		default:
 		}
-		return nil
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	type outcome struct {
 		result Result
