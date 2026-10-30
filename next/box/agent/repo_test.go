@@ -81,6 +81,45 @@ func TestSetupRetryAfterCheckoutFailure(t *testing.T) {
 	}
 }
 
+func TestArchiveRetryAfterAnotherRepoFails(t *testing.T) {
+	root := t.TempDir()
+	repos := []contract.BoxRepo{{Name: "owner/a", Branch: "v2/s"}, {Name: "owner/b", Branch: "v2/s"}}
+	pushed := map[string]bool{}
+	fail := true
+	git := func(_ context.Context, dir, _ string, args ...string) (string, error) {
+		switch args[0] {
+		case "rev-parse":
+			return "head", nil
+		case "status":
+			return "dirty", nil
+		case "write-tree":
+			return "tree", nil
+		case "-c":
+			return "snapshot", nil
+		case "push":
+			if strings.HasSuffix(dir, "/b") && fail {
+				return "", errors.New("push failed")
+			}
+			if pushed[dir] && args[1] != "--force" {
+				return "", errors.New("non-fast-forward")
+			}
+			pushed[dir] = true
+		}
+		return "", nil
+	}
+	first := archiveRepo(context.Background(), root, "s", repos[0], git)
+	second := archiveRepo(context.Background(), root, "s", repos[1], git)
+	if first.Error != "" || second.Error == "" {
+		t.Fatal(first, second)
+	}
+	fail = false
+	for _, repo := range repos {
+		if got := archiveRepo(context.Background(), root, "s", repo, git); got.Error != "" {
+			t.Fatal(got)
+		}
+	}
+}
+
 func TestArchiveRepo(t *testing.T) {
 	for _, mode := range []string{"skip", "snapshot", "error"} {
 		t.Run(mode, func(t *testing.T) {
@@ -103,7 +142,7 @@ func TestArchiveRepo(t *testing.T) {
 					return "other\trefs/heads/v2/s", nil
 				case "read-tree":
 					index = idx
-				case "add", "write-tree", "commit-tree":
+				case "add", "write-tree", "-c":
 					if idx == "" || idx != index {
 						t.Fatal("real index used")
 					}
@@ -111,7 +150,7 @@ func TestArchiveRepo(t *testing.T) {
 				switch args[0] {
 				case "write-tree":
 					return "tree", nil
-				case "commit-tree":
+				case "-c":
 					return "snapshot", nil
 				}
 				return "", nil
@@ -130,7 +169,7 @@ func TestArchiveRepo(t *testing.T) {
 				if got.Commit != "snapshot" || got.Error != "" || index == "" {
 					t.Fatal(got)
 				}
-				want := [][]string{{"read-tree", "HEAD"}, {"add", "-A"}, {"write-tree"}, {"commit-tree", "tree", "-p", "head", "-m", "archive s"}, {"push", "origin", "snapshot:refs/dyna/archive/s"}}
+				want := [][]string{{"read-tree", "HEAD"}, {"add", "-A"}, {"write-tree"}, {"-c", "user.name=Dyna Archive", "-c", "user.email=archive@dyna.invalid", "commit-tree", "tree", "-p", "head", "-m", "archive s"}, {"push", "--force", "origin", "snapshot:refs/dyna/archive/s"}}
 				if !reflect.DeepEqual(calls[3:], want) {
 					t.Fatal(calls)
 				}

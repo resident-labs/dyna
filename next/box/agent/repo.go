@@ -99,10 +99,10 @@ func archiveRepo(ctx context.Context, root string, session contract.SessionID, r
 				tree, err = git(ctx, dir, index, "write-tree")
 			}
 			if err == nil {
-				result.Commit, err = git(ctx, dir, index, "commit-tree", tree, "-p", head, "-m", "archive "+string(session))
+				result.Commit, err = git(ctx, dir, index, "-c", "user.name=Dyna Archive", "-c", "user.email=archive@dyna.invalid", "commit-tree", tree, "-p", head, "-m", "archive "+string(session))
 			}
 			if err == nil {
-				_, err = git(ctx, dir, "", "push", "origin", result.Commit+":refs/dyna/archive/"+string(session))
+				_, err = git(ctx, dir, "", "push", "--force", "origin", result.Commit+":refs/dyna/archive/"+string(session))
 			}
 		}
 	}
