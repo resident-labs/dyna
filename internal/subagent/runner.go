@@ -437,20 +437,14 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		if err := writes.start(ctx, TurnStart{Turn: n}); err != nil {
 			return fail(fmt.Errorf("mark turn %d running: %w", n, err))
 		}
-		r, err := runOne("")
-		if err != nil {
+		// A failed compaction ends the turn ok, so no parent is told. runOne
+		// has already stored it as the typed compaction status event the
+		// session view shows, and CompactIdle will not retry it until the
+		// session runs a real turn.
+		if _, err := runOne(""); err != nil {
 			return fail(err)
 		}
-		// A failed compaction ends the turn ok, so no parent is told, but the
-		// turn's result says so for the owner. CompactIdle will not retry it
-		// until the session runs a real turn.
-		result := "Idle compaction did not run."
-		if c := r.Compaction; c != nil && c.State == "completed" {
-			result = fmt.Sprintf("Idle compaction completed; the context was %d tokens.", c.Before)
-		} else if c != nil {
-			result = "Idle compaction failed: " + c.Reason
-		}
-		return finish(TurnOK, result, nil)
+		return finish(TurnOK, nil, nil)
 	}
 	base, roomContext := m.buildTurnPrompt(store, meta, turn, id, n, prof.Harness)
 	claimed, err := writes.claimInput(ctx, InputClaim{Turn: n, Startup: true, Covered: covered})
