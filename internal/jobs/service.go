@@ -1143,7 +1143,7 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		inner += ContainerStopFunction + "trap " + q("dyna_stop_container "+name) + " EXIT; trap 'exit 143' TERM; "
 		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --name " + q(name) + " --cpus=" + strconv.Itoa(resources.CPUs) +
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
-			" --pids-limit=512" + network + mount + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
+			" --pids-limit=512" + network + mount + " -e " + strings.Join(childenv.NoEditor(), " -e ") + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
 	} else {
 		inner += "cd " + q(work) + "; "
 		inner += "timeout --foreground --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s bash -o pipefail -c " + q(command)
