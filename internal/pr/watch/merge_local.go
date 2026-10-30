@@ -167,7 +167,7 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 		// A machine fault, including a git push or checkout failure, retries on
 		// another machine. The trial waits for that retry. A spent retry falls
 		// through and fails with the saved git error.
-		if cisched.MachineFailureRetryFrom(result) != "" {
+		if cisched.SavedResultActionFor(result) == cisched.RetryOnAnotherMachine {
 			return VerdictPending, "", "retrying local CI after a node failure", nil
 		}
 		return VerdictFailed, logs, "local CI failed", nil
