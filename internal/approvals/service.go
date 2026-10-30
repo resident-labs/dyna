@@ -32,6 +32,8 @@ type Service struct {
 	executors map[Kind]ExecuteFunc
 	running   map[string]bool
 	runCtx    context.Context
+	// inflight counts decision-triggered executions, including result delivery.
+	inflight sync.WaitGroup
 }
 
 // New pairs approvals with the room and session stores.

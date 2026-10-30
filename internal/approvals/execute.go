@@ -29,7 +29,11 @@ func (s *Service) trigger(r Request) {
 	if !ok {
 		return
 	}
-	go func() { _ = s.execute(ctx, r, execute) }()
+	s.inflight.Add(1)
+	go func() {
+		defer s.inflight.Done()
+		_ = s.execute(ctx, r, execute)
+	}()
 }
 
 func (s *Service) claim(r Request) (ExecuteFunc, context.Context, bool) {
