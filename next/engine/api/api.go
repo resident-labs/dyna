@@ -27,17 +27,17 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomCreate, c, owner, a.service.RoomCreate)
 	call(mux, contract.MethodSessionStart, c, owner, a.service.SessionStart)
 	call(mux, contract.MethodSessionClose, c, owner, a.service.SessionClose)
-	call(mux, contract.MethodPost, c, user, func(ctx context.Context, c Caller, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
+	call(mux, contract.MethodPost, c, user, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 		if box(c) && req.Room != c.Room {
 			return contract.PostResponse{}, forbidden()
 		}
-		return a.service.Post(ctx, c, req)
+		return a.service.Post(ctx, p, req)
 	})
-	call(mux, contract.MethodEventsList, c, user, func(ctx context.Context, c Caller, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
+	call(mux, contract.MethodEventsList, c, user, func(ctx context.Context, p contract.Principal, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
 		if box(c) && req.Room != c.Room {
 			return contract.EventsListResponse{}, forbidden()
 		}
-		return a.service.EventsList(ctx, c, req)
+		return a.service.EventsList(ctx, p, req)
 	})
 	call(mux, contract.MethodBoxHello, c, box, a.service.BoxHello)
 	call(mux, contract.MethodTurnOutput, c, box, a.service.TurnOutput)
@@ -66,7 +66,7 @@ func (a *API) handler(c Caller) http.Handler {
 			}
 			after = n
 		}
-		ch, err := a.service.Events(r.Context(), c, room, after)
+		ch, err := a.service.Events(r.Context(), c.Principal, room, after)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -102,7 +102,7 @@ func (a *API) handler(c Caller) http.Handler {
 			writeError(w, forbidden())
 			return
 		}
-		ch, err := a.service.BoxChannel(r.Context(), c)
+		ch, err := a.service.BoxChannel(r.Context(), c.Principal)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -145,7 +145,7 @@ func box(c Caller) bool {
 }
 func user(c Caller) bool { return owner(c) || box(c) }
 
-func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, allowed func(Caller) bool, fn func(context.Context, Caller, Req) (Resp, *contract.Error)) {
+func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, allowed func(Caller) bool, fn func(context.Context, contract.Principal, Req) (Resp, *contract.Error)) {
 	mux.HandleFunc("POST /v1/"+string(method), func(w http.ResponseWriter, r *http.Request) {
 		if !allowed(c) {
 			writeError(w, forbidden())
@@ -163,7 +163,7 @@ func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, a
 			writeError(w, invalid())
 			return
 		}
-		result, err := fn(r.Context(), c, *req)
+		result, err := fn(r.Context(), c.Principal, *req)
 		if err != nil {
 			writeError(w, err)
 			return
