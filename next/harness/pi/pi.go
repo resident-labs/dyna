@@ -297,7 +297,7 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 			} `json:"message"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			return false, err
+			continue // Pi ignores malformed session lines after interrupted writes.
 		}
 		if entry.Type == "message" && entry.Message.Role == "user" && entry.Message.DeliveryID == strconv.FormatInt(int64(id), 10) {
 			return true, nil
