@@ -18,6 +18,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
@@ -109,6 +110,9 @@ func Migrate(dataDir string) error {
 }
 
 func (s *Store) open() (*sql.DB, error) {
+	if err := instructionqueue.Migrate(filepath.Dir(s.Root)); err != nil {
+		return nil, err
+	}
 	db, err := database.Open(filepath.Dir(s.Root))
 	if err != nil {
 		return nil, err
