@@ -67,3 +67,23 @@ func TestFinalPublicationDeadline(t *testing.T) {
 		t.Fatal("blocked publication succeeded")
 	}
 }
+
+func TestLivePublisherRenewsWithoutOutput(t *testing.T) {
+	p := &Publisher{record: Record{Signal: Signal{Copier: CopierRunning}}, pending: make(chan struct{}, 1), done: make(chan struct{})}
+	ticks := make(chan time.Time)
+	saved := make(chan Record)
+	done := make(chan struct{})
+	go func() { defer close(done); p.publishLoop(ticks, func(r Record) { saved <- r }) }()
+	first := time.Unix(100, 0)
+	ticks <- first
+	a := <-saved
+	second := first.Add(PublishInterval)
+	ticks <- second
+	b := <-saved
+	if a.Signal.LeaseUntil != first.Add(Lease) || b.Signal.LeaseUntil != second.Add(Lease) || b.Signal.Copier != CopierRunning {
+		t.Errorf("first = %+v, second = %+v", a, b)
+	}
+	p.Close()
+	<-saved
+	<-done
+}
