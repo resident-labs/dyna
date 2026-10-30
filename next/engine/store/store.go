@@ -257,7 +257,8 @@ func (s *Store) writeLoop() {
 				writerErr = err
 				// database/sql rolls the transaction back when the caller's context ends,
 				// so a commit that lost that race is the caller's cancel, not a writer fault.
-				if err != nil && r.ctx.Err() != nil {
+				// Other commit errors stay writer errors, even when the context is also done.
+				if errors.Is(err, sql.ErrTxDone) && r.ctx.Err() != nil {
 					err = r.ctx.Err()
 					writerErr = nil
 				}
