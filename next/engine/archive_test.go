@@ -11,6 +11,9 @@ import (
 func setupArchive(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context.Context) {
 	t.Helper()
 	s, room, root, ctx := setup(t)
+	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
+		t.Fatal(err)
+	}
 	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test"})
 	if e != nil {
 		t.Fatal(e)
@@ -52,14 +55,12 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	}
 }
 
-func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
+func TestReconnectArchivesOnlySessionRepository(t *testing.T) {
 	s, room, session, ctx := setupArchive(t)
-	for _, name := range []contract.RepoName{"owner/one", "owner/two"} {
-		if err := s.store.AddRoomRepo(ctx, room, name, false); err != nil {
-			t.Fatal(err)
-		}
+	if err := s.store.AddRoomRepo(ctx, room, "owner/other", false); err != nil {
+		t.Fatal(err)
 	}
-	s.SetRepositories(&fakeRepos{commits: map[contract.RepoName]string{"owner/one": "first", "owner/two": "second"}})
+	s.SetRepositories(&fakeRepos{})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	first, e := s.BoxChannel(ctx, caller)
 	if e != nil {
@@ -69,16 +70,9 @@ func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
-	if _, ok := (<-first).Body.(contract.Archive); !ok {
-		t.Fatal("expected archive")
-	}
-	_, e = s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/one", Commit: "first"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	var count int
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM archives").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("partial archive rows: %d, %v", count, err)
+	<-first
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/other", Commit: "abc"}); e == nil {
+		t.Fatal("other repository archive was accepted")
 	}
 	second, e := s.BoxChannel(ctx, caller)
 	if e != nil {
@@ -87,11 +81,11 @@ func TestReconnectResendsArchiveAndWaitsForAllRepos(t *testing.T) {
 	if _, ok := (<-second).Body.(contract.Archive); !ok {
 		t.Fatal("expected archive after reconnect")
 	}
-	_, e = s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/two", Commit: "second"})
-	if e != nil {
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
 		t.Fatal(e)
 	}
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM archives").Scan(&count); err != nil || count != 2 {
+	var count int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM archives WHERE session=? AND repo=?", session, "owner/repo").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("archive rows: %d, %v", count, err)
 	}
 }
@@ -213,7 +207,7 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 }
 
 func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
-	s, _, session, ctx := setupArchive(t)
+	s, _, session, ctx := setup(t)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
