@@ -153,3 +153,30 @@ func TestClassifyAPIWithoutKnownHost(t *testing.T) {
 		t.Fatalf("known API host gave %q, want agent", got)
 	}
 }
+
+func TestRoutinePRWrites(t *testing.T) {
+	in := ClassifyInput{Host: "github.com", Repo: "o/r", RoomRepository: true, OwnPR: func(_ context.Context, ref ItemRef) bool { return ref.Target == "7" }}
+	for _, tc := range []struct {
+		args []string
+		want approvals.Class
+	}{
+		{[]string{"pr", "create"}, approvals.ClassAuto},
+		{[]string{"pr", "edit", "7"}, approvals.ClassAuto},
+		{[]string{"pr", "ready", "7"}, approvals.ClassAuto},
+		{[]string{"pr", "comment", "7"}, approvals.ClassAuto},
+		{[]string{"pr", "edit", "8"}, approvals.ClassAgent},
+		{[]string{"pr", "close", "7"}, approvals.ClassOwner},
+	} {
+		if got := Classify(context.Background(), tc.args, in); got != tc.want {
+			t.Errorf("%v: got %s, want %s", tc.args, got, tc.want)
+		}
+	}
+	pinned := PinRoutinePR([]string{"pr", "edit", "branch", "--title", "hello"}, ItemRef{Host: "github.com", Repo: "o/r"}, 7)
+	if strings.Join(pinned, " ") != "pr edit 7 --title hello --repo github.com/o/r" {
+		t.Errorf("pinned command: %v", pinned)
+	}
+	in.RoomRepository = false
+	if got := Classify(context.Background(), []string{"pr", "create"}, in); got != approvals.ClassAgent {
+		t.Errorf("other repository: got %s", got)
+	}
+}

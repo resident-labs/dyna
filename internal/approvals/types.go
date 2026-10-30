@@ -73,6 +73,8 @@ type GHPayload struct {
 
 // CreateInput is the typed input to the kind-independent core.
 type CreateInput struct {
+	// Auto is set only by the engine after it verifies a routine write.
+	Auto       bool
 	Room       string
 	Kind       Kind
 	Class      Class
