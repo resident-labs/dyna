@@ -19,7 +19,9 @@ import (
 	"dyna-agent/internal/cli/jsonout"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/nodehistory"
 	"dyna-agent/internal/room"
+	dynastore "dyna-agent/internal/store"
 	"dyna-agent/internal/websvc"
 )
 
@@ -54,7 +56,7 @@ var saveMachine = func(ctx context.Context, ref string, patch websvc.MachinePatc
 // the engine, so a probe from the command line stores what the engine's own
 // probe stores.
 func prober() machines.Prober {
-	return machines.Prober{Store: store()}
+	return machines.Prober{Store: store(), Record: nodehistory.Recorder(dynastore.DataDir())}
 }
 
 func listCommand() *cobra.Command {
