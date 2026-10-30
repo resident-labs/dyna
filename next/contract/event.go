@@ -94,7 +94,7 @@ type BoxChanged struct {
 	Box     BoxID     `json:"box"`
 	Session SessionID `json:"session"`
 	Host    HostName  `json:"host,omitempty"`
-	From    BoxState  `json:"from"`
+	From    BoxState  `json:"from,omitempty"` // empty for a new box
 	To      BoxState  `json:"to"`
 	Reason  string    `json:"reason,omitempty"`
 }
