@@ -82,6 +82,14 @@ type Usage struct {
 	CacheWriteTokens int64  `json:"cacheWriteTokens"`
 }
 
+// ShellJobEnded reports a background shell job that ended. It wakes the session once.
+type ShellJobEnded struct {
+	Session  SessionID  `json:"session"`
+	Job      ShellJobID `json:"job"`
+	ExitCode int        `json:"exitCode"`
+	Tail     string     `json:"tail"`
+}
+
 type BoxChanged struct {
 	Box     BoxID     `json:"box"`
 	Session SessionID `json:"session"`
@@ -151,6 +159,9 @@ func (TurnStarted) isEventBody()         {}
 
 func (TurnEnded) EventType() EventType { return "turn.ended" }
 func (TurnEnded) isEventBody()         {}
+
+func (ShellJobEnded) EventType() EventType { return "shell.job.ended" }
+func (ShellJobEnded) isEventBody()         {}
 
 func (ImageBuilt) EventType() EventType { return "image.built" }
 func (ImageBuilt) isEventBody()         {}
