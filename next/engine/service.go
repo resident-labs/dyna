@@ -149,13 +149,7 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	if req.Parent != "" {
-		parent, err := s.store.Session(ctx, req.Parent)
-		if err != nil {
-			return contract.SessionStartResponse{}, failure(err)
-		}
-		if parent.Room != req.Room {
-			return contract.SessionStartResponse{}, forbidden()
-		}
+		return contract.SessionStartResponse{}, invalid("child sessions are not supported in M1")
 	}
 	now := s.now()
 	sid, err := id("ses_", now)
