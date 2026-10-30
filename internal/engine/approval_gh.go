@@ -16,7 +16,11 @@ import (
 	"dyna-agent/internal/room"
 )
 
-func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
+// claimComment records the session that posted a GitHub comment ID, so its
+// replies route back to that session.
+type claimComment func(session string, id int64) error
+
+func ghApprovalExecutor(rooms *room.Store, claim claimComment) approvals.ExecuteFunc {
 	return func(ctx context.Context, r approvals.Request) (approvals.Result, error) {
 		var payload approvals.GHPayload
 		if err := json.Unmarshal(r.Payload, &payload); err != nil {
@@ -68,8 +72,24 @@ func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
 				break
 			}
 		}
+		if runErr == nil && code == 0 && len(payload.Argv) > 1 && payload.Argv[0] == "pr" && payload.Argv[1] == "comment" {
+			if err := recordPostedComment(r.Requester, result.URL, claim); err != nil {
+				return result, err
+			}
+		}
 		return result, runErr
 	}
+}
+
+// recordPostedComment reads the comment ID from the URL that gh prints, such as
+// https://github.com/owner/repo/pull/7#issuecomment-123, and claims it.
+func recordPostedComment(session, url string, claim claimComment) error {
+	_, fragment, found := strings.Cut(url, "#issuecomment-")
+	id, err := strconv.ParseInt(fragment, 10, 64)
+	if !found || err != nil || id < 1 {
+		return errors.New("the comment is posted, but gh printed no comment ID: Dyna could not record its routing; do not post it again")
+	}
+	return claim(session, id)
 }
 
 // bindApprovalFiles restores every snapshot and points the original argument

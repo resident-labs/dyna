@@ -150,6 +150,11 @@ esac
 	if _, err := os.Stat(writes); !os.IsNotExist(err) {
 		t.Fatalf("agent wrote GitHub: %v", err)
 	}
+	t.Setenv(mode.EnvMode, mode.Subagent)
+	stale := strings.Repeat("b", 40)
+	if _, err := call("review", url, "--body-file", file, "--head", stale, "--publish"); err == nil || !strings.Contains(err.Error(), "tracked head") {
+		t.Fatalf("stale agent review head: %v", err)
+	}
 	reviewFile := file
 	// The owner can still publish comments and reviews without attribution.
 	storetest.ClearStamp(t)
