@@ -33,8 +33,8 @@ The owner settled the design on the card. Writing the spec needed the decisions 
      - **Writes on the session's own PRs and issues run at once.** Own means the session owns it in `pr_owners`, or it opened the issue. `gh pr create` and `gh issue create` on a room repository take the `pr.open` path (class `auto`) and record the session as owner.
      - **Every other write becomes an operation** that waits for approval: class `agent`, or class `owner` for repository settings (`repo.settings.set`), such as branch rules, secrets, webhooks and collaborators.
      - **Merges never pass through.** `gh pr merge` gets a typed error that points to `dyna pr approve`, because Dyna merges only through the approval flag.
-     - **Scope.** A box reaches only its room's repositories and public data. A private repository outside the room is refused. The M3 design note shows how GraphQL is held to this scope, for example with a GitHub App installation token limited to the room's repositories.
-     - **Budget:** about 350 engine lines and 40 box agent lines. Any owner gets the full `gh` command for agents, with no token in a box and one guard for the GitHub quota.
+     - **Scope.** A box reaches only its room's repositories and public data. The engine uses the owner's existing `gh` sign-in, which can reach every repository of the owner, so the engine itself holds the scope (owner, 2026-10-30). It parses each REST path and each GraphQL query: it checks every `owner` and `name` argument, resolves every node ID and checks its repository, and refuses anything outside the room's repositories or public data. A GitHub App token is an optional later step, only if the owner asks for it.
+     - **Budget:** about 400 engine lines, because the scope check parses GraphQL and resolves node IDs, and 40 box agent lines. Any owner gets the full `gh` command for agents, with no token in a box and one guard for the GitHub quota.
 
 ## 1. Goals and non-goals
 
@@ -1325,7 +1325,7 @@ Acceptance:
 13. manual: one full working day in all rooms on v2 with no blocking failure.
 14. unit: a workflow runner that restarts after two of three agent steps returns their recorded results without starting them again, and starts only the third. A step that does not fit the run's budget waits in `pending` (fake box host).
 15. unit: one simulated hour of polling one repository with 20 open PRs makes under 300 GitHub requests, with one GraphQL query per poll and no REST call per PR. REST reads send `If-None-Match`. The interval doubles while nothing changes, resets on a change, and waits at least 10 minutes when less than 20% of the quota is left (fake GitHub client, injected clock).
-16. unit: through the box's GitHub route, a read runs once and is then served with `If-None-Match`. A comment on the session's own PR runs at once. A comment on another session's PR emits `op.requested` with class `agent`. A branch-rule change waits for the owner. `gh pr merge` gets the typed error. A read of a private repository outside the room is refused. With less than 20% of the quota left, a box call fails with the reset time. No request that reaches the box carries the token (fake GitHub client).
+16. unit: through the box's GitHub route, a read runs once and is then served with `If-None-Match`. A comment on the session's own PR runs at once. A comment on another session's PR emits `op.requested` with class `agent`. A branch-rule change waits for the owner. `gh pr merge` gets the typed error. A read of a private repository outside the room is refused, by REST path, by GraphQL `owner` and `name` arguments, and by a GraphQL node ID. With less than 20% of the quota left, a box call fails with the reset time. No request that reaches the box carries the token (fake GitHub client).
 
 ## 12. Team and ownership
 
