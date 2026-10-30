@@ -14,16 +14,18 @@ import (
 func TestCompactIdleStartsACompactOnlyTurnOnlyForAnIdleBigSession(t *testing.T) {
 	claude := profile.Profile{Name: "claude", Harness: profile.HarnessClaudeCode, Default: true}
 	for _, tc := range []struct {
-		name    string
-		status  string
-		context int64
-		armed   int
-		spawned bool
+		name            string
+		status          string
+		context         int64
+		armed           int
+		spawned         bool
+		lastCompactOnly bool
 	}{
-		{"idle and big", StatusIdle, profile.IdleCompactMinTokens, 1, true},
-		{"small context", StatusIdle, profile.IdleCompactMinTokens - 1, 1, false},
-		{"another turn ran since", StatusIdle, profile.IdleCompactMinTokens, 2, false},
-		{"dormant", StatusDormant, profile.IdleCompactMinTokens, 1, false},
+		{"idle and big", StatusIdle, profile.IdleCompactMinTokens, 1, true, false},
+		{"small context", StatusIdle, profile.IdleCompactMinTokens - 1, 1, false, false},
+		{"another turn ran since", StatusIdle, profile.IdleCompactMinTokens, 2, false, false},
+		{"dormant", StatusDormant, profile.IdleCompactMinTokens, 1, false, false},
+		{"last turn was a failed idle compaction", StatusIdle, profile.IdleCompactMinTokens, 1, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t, claude)
@@ -51,7 +53,7 @@ func TestCompactIdleStartsACompactOnlyTurnOnlyForAnIdleBigSession(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := e.m.Store.writeTurn(id, Turn{N: 1, Status: TurnOK, Profile: "claude", Prompt: "work",
+			if err := e.m.Store.writeTurn(id, Turn{N: 1, Status: TurnOK, Profile: "claude", Prompt: "work", CompactOnly: tc.lastCompactOnly,
 				Created: now, Started: now, Ended: now, InputCutoff: &cutoff}); err != nil {
 				t.Fatal(err)
 			}
