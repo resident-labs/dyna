@@ -4,22 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/store"
 )
-
-type ArchiveVerifier interface {
-	Verify(context.Context, contract.SessionID, contract.ArchiveDoneRequest) error
-}
-
-type archiveState struct {
-	reports map[contract.RepoName]store.Archive
-}
-
-func (s *Service) SetArchiveVerifier(v ArchiveVerifier) { s.archiveVerifier = v }
 
 func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, current box.Box, reason string) error {
 	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: current.ID, Session: current.Session, Host: current.Host, From: contract.BoxClosing, To: contract.BoxClosing, Reason: reason})
@@ -46,22 +38,8 @@ func (s *Service) ResumeClosures(ctx context.Context) *contract.Error {
 		if err != nil {
 			return failure(err)
 		}
-		if current.State == contract.BoxDeleted {
-			_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session.ID})
-			if e != nil {
-				return e
-			}
-			continue
-		}
-		repos, err := s.store.RoomRepos(ctx, session.Room)
-		if err != nil {
-			return failure(err)
-		}
-		if len(repos) == 0 {
-			_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session.ID})
-			if e != nil {
-				return e
-			}
+		if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session.ID}); e != nil {
+			return e
 		}
 	}
 	return nil
@@ -91,25 +69,23 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.ArchiveDoneResponse{}, failure(err)
 	}
-	found := false
-	for _, repo := range repos {
-		if repo.Repo == req.Repo {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(repos, func(repo contract.RoomRepo) bool { return repo.Repo == req.Repo }) {
 		return contract.ArchiveDoneResponse{}, forbidden()
 	}
 	reason := req.Error
 	if reason == "" && req.Commit == "" {
 		reason = "archive commit is missing"
 	}
+	ref := "refs/dyna/archive/" + string(session.ID)
+	if req.Skipped {
+		ref = "refs/heads/" + enginegit.SessionBranchPrefix + string(session.ID)
+	}
 	if reason == "" {
-		if s.archiveVerifier == nil {
-			reason = "archive verification unavailable"
-		} else if err := s.archiveVerifier.Verify(ctx, session.ID, req); err != nil {
+		hash, err := s.repos.Ref(ctx, req.Repo, ref)
+		if err != nil {
 			reason = err.Error()
+		} else if hash != req.Commit {
+			reason = "archive ref mismatch"
 		}
 	}
 	if reason != "" {
@@ -118,27 +94,23 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 		}
 		s.mu.Lock()
 		delete(s.archives, session.ID)
-		if channel := s.channels[session.ID]; channel != nil {
-			channel.stop()
-		}
 		s.mu.Unlock()
 		return contract.ArchiveDoneResponse{}, nil
 	}
-	ref := ""
-	if !req.Skipped {
-		ref = "refs/dyna/archive/" + string(session.ID)
+	if req.Skipped {
+		ref = ""
 	}
 	now := s.now()
 	s.mu.Lock()
 	state := s.archives[session.ID]
 	if state == nil {
-		state = &archiveState{reports: make(map[contract.RepoName]store.Archive)}
+		state = make(map[contract.RepoName]store.Archive)
 		s.archives[session.ID] = state
 	}
-	state.reports[req.Repo] = store.Archive{Session: session.ID, Repo: req.Repo, Ref: ref, Commit: req.Commit, CreatedAt: now, ExpiresAt: now.Add(14 * 24 * time.Hour)}
+	state[req.Repo] = store.Archive{Session: session.ID, Repo: req.Repo, Ref: ref, Commit: req.Commit, CreatedAt: now, ExpiresAt: now.Add(14 * 24 * time.Hour)}
 	reports := make([]store.Archive, 0, len(repos))
 	for _, repo := range repos {
-		report, ok := state.reports[repo.Repo]
+		report, ok := state[repo.Repo]
 		if !ok {
 			break
 		}
@@ -149,7 +121,7 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 		if err := s.store.SaveArchives(ctx, reports); err != nil {
 			return contract.ArchiveDoneResponse{}, failure(err)
 		}
-		if err := s.finishClose(context.WithoutCancel(ctx), session, current); err != nil {
+		if err := s.finishClose(context.WithoutCancel(ctx), session, current, contract.Principal{Kind: contract.PrincipalEngine}); err != nil {
 			return contract.ArchiveDoneResponse{}, err
 		}
 	}
