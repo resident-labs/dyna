@@ -122,6 +122,9 @@ func (s services) registerGitHubWrite() {
 		Kind: githubWrite,
 		Decide: func(ctx context.Context, actor authority.Actor, p *approvals.GHPayload) (approvals.Decision, error) {
 			class, err := s.classifyGitHubWrite(ctx, actor, p)
+			if err == nil && class == approvals.ClassAuto && len(p.Media) > 0 {
+				class = approvals.ClassAgent
+			}
 			if err != nil {
 				return approvals.Decision{}, err
 			}
