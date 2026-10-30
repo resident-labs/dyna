@@ -73,7 +73,7 @@ For requested visuals or "viz", post ` + "`" + `dyna post @parent --html <file.h
 If dyna is absent from PATH, use "$DYNA_BIN" for all commands, including guides.
 Read ` + "`" + `dyna guide <topic>` + "`" + ` at its trigger:
 ` + guideTriggers() + `
-Leave merging to the Dyna merge service. Use ` + "`" + `dyna git pr comment` + "`" + ` for GitHub comments; omit agent attribution.
+Leave merging to the Dyna merge service. Use ` + "`" + `dyna git pr comment` + "`" + ` for GitHub comments.
 
 End or move PRs, goals, questions and children as your turn ends. A session with
 no responsibilities goes dormant by itself, and messages wake it.`

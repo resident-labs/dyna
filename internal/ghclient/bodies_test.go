@@ -14,6 +14,8 @@ import (
 )
 
 func TestOwnerIdentityRefusedInPublicText(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
 	previous := ownerIdentities
 	ownerIdentities = func() ([]string, error) {
 		return []string{"Pat Example", "pat.example@example.invalid"}, nil
@@ -56,7 +58,10 @@ func TestOwnerIdentityRefusedInPublicText(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := refuseOwnerIdentity(WithAgentText(context.Background()), cmd)
+			cleanup, err := ComposeBody(ctx, cmd, repository{"github.com", "fork/project"})
+			if cleanup != nil {
+				defer cleanup()
+			}
 			if tt.uninspectable {
 				if !errors.Is(err, errUninspectableText) {
 					t.Fatalf("error = %v, want the uninspectable refusal", err)
@@ -85,7 +90,7 @@ func TestOwnerIdentityIgnoredForDynaCalls(t *testing.T) {
 	ownerIdentities = func() ([]string, error) { return []string{"Pat Example"}, nil }
 	t.Cleanup(func() { ownerIdentities = previous })
 	cmd := exec.Command("gh", "pr", "edit", "1", "--body", "by Pat Example")
-	if err := refuseOwnerIdentity(context.Background(), cmd); err != nil {
+	if _, err := ComposeBody(context.Background(), cmd, repository{}); err != nil {
 		t.Fatalf("owner edit refused: %v", err)
 	}
 }
@@ -102,7 +107,7 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("gh", args...)
 		cmd.Dir = dir
-		cleanup, err := withAttribution(ctx, cmd, own)
+		cleanup, err := ComposeBody(ctx, cmd, own)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +134,7 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := exec.Command("gh", "pr", "edit", "1", "--body", "Owner text")
-	if _, err := withAttribution(WithRoom(context.Background(), records[0].ID), owner, own); err != nil || owner.Args[len(owner.Args)-1] != "Owner text" {
+	if _, err := ComposeBody(WithRoom(context.Background(), records[0].ID), owner, own); err != nil || owner.Args[len(owner.Args)-1] != "Owner text" {
 		t.Fatalf("owner edit changed: %q, %v", owner.Args, err)
 	}
 	if err := room.DefaultStore().SetAttribution(records[0].ID, ""); err != nil {
@@ -170,6 +175,9 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 			}
 		})
 	}
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "> 🤖 Posted by an agent"); err != nil {
+		t.Fatal(err)
+	}
 	for name, tt := range map[string]struct{ body, want string }{
 		"slash command":       {"/claim", "/claim\n\n> 🤖 Posted by an agent"},
 		"republished command": {"/claim\n\n> 🤖 Posted by an agent", "/claim\n\n> 🤖 Posted by an agent"},
@@ -180,16 +188,16 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		"not a command":       {"/123", "> 🤖 Posted by an agent\n\n/123"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := withAttributionFirst(tt.body, "> 🤖 Posted by an agent"); got != tt.want {
+			if got := strings.TrimSuffix(body(t, "pr", "comment", "3", "--body", tt.body), "\n"); got != tt.want {
 				t.Fatalf("body = %q, want %q", got, tt.want)
 			}
 		})
 	}
 	// A marker such as "> 🤖" spans the leading punctuation and the first word.
-	if got := withAttributionFirst("> 🤖 Opened by the swarm\n\nHi", "> 🤖 Opened by an agent."); got != "> 🤖 Opened by the swarm\n\nHi" {
+	if got := strings.TrimSuffix(body(t, "pr", "comment", "3", "--body", "> 🤖 Opened by the swarm\n\nHi"), "\n"); got != "> 🤖 Opened by the swarm\n\nHi" {
 		t.Fatalf("a variant of the line was doubled: %q", got)
 	}
-	if got := withAttributionFirst("> quote\n\nHi", "> 🤖 Opened by an agent."); !strings.HasPrefix(got, "> 🤖 Opened by an agent.\n\n> quote") {
+	if got := strings.TrimSuffix(body(t, "pr", "comment", "3", "--body", "> quote\n\nHi"), "\n"); !strings.HasPrefix(got, "> 🤖 Posted by an agent\n\n> quote") {
 		t.Fatalf("a quote was taken for the line: %q", got)
 	}
 }
@@ -231,7 +239,7 @@ func TestAttributedCloseKeepsTerminator(t *testing.T) {
 	for _, verb := range []string{"close", "reopen"} {
 		cmd := exec.Command("gh", "issue", verb, "--comment", "Done", "--", "7")
 		cmd.Dir = records[0].Repo
-		cleanup, err := withAttribution(ctx, cmd, own)
+		cleanup, err := ComposeBody(ctx, cmd, own)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -240,5 +248,79 @@ func TestAttributedCloseKeepsTerminator(t *testing.T) {
 		if !slices.Equal(cmd.Args, want) {
 			t.Fatalf("%s args = %q, want %q", verb, cmd.Args, want)
 		}
+	}
+}
+
+func TestComposeBodyPlacements(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
+	repo := repository{"github.com", "fork/project"}
+	verbs := [][]string{{"issue", "create"}, {"pr", "create"}, {"issue", "edit", "1"}, {"pr", "edit", "1"}, {"issue", "comment", "1"}, {"pr", "comment", "1"}, {"issue", "close", "1"}, {"issue", "reopen", "1"}, {"pr", "review", "1", "--comment"}, {"api", "-X", "PATCH", "repos/fork/project/issues/comments/9"}, {"api", "-X", "POST", "repos/fork/project/pulls/1/reviews"}}
+	for _, placement := range []room.AttributionPlacement{room.AttributionLine, room.AttributionPrefix} {
+		if err := room.DefaultStore().SetAttribution(records[0].ID, "🤖 Agent:", placement); err != nil {
+			t.Fatal(err)
+		}
+		for _, verb := range verbs {
+			for _, body := range []string{"hello", "/claim", "🤖 Agent: hello", ""} {
+				t.Run(strings.Join(verb, "_")+"/"+string(placement)+"/"+body, func(t *testing.T) {
+					args := append([]string(nil), verb...)
+					flag := "--body"
+					if verb[0] == "api" {
+						flag = "--raw-field"
+						body = "body=" + body
+					} else if closesIssue(verb) {
+						flag = "--comment"
+					}
+					args = append(args, flag, body)
+					cmd := exec.Command("gh", args...)
+					cleanup, err := ComposeBody(ctx, cmd, repo)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer cleanup()
+					var got string
+					for _, arg := range cmd.Args {
+						if v, ok := strings.CutPrefix(arg, "--body-file="); ok {
+							data, err := os.ReadFile(v)
+							if err != nil {
+								t.Fatal(err)
+							}
+							got = strings.TrimSuffix(string(data), "\n")
+						}
+						if v, ok := strings.CutPrefix(arg, "--comment="); ok {
+							got = v
+						}
+						if v, ok := strings.CutPrefix(arg, "body="); ok {
+							got = v
+						}
+					}
+					input := strings.TrimPrefix(body, "body=")
+					want := "🤖 Agent:"
+					if strings.HasPrefix(input, want) {
+						want = input
+					} else if input != "" {
+						if placement == room.AttributionPrefix {
+							want += " " + input
+						} else if input == "/claim" {
+							want = input + "\n\n" + want
+						} else {
+							want += "\n\n" + input
+						}
+					}
+					if got != want {
+						t.Fatalf("got %q, want %q", got, want)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestComposeBodyRefusesMissingRoom(t *testing.T) {
+	setupRooms(t, "fork/project")
+	cmd := exec.Command("gh", "issue", "comment", "1", "--body", "hello")
+	_, err := ComposeBody(WithAgentText(WithRoom(context.Background(), "missing")), cmd, repository{"github.com", "fork/project"})
+	if err == nil {
+		t.Fatal("write accepted without a readable room")
 	}
 }

@@ -58,11 +58,33 @@ func (s *Store) SetUpstream(ref, upstream string) error {
 	})
 }
 
+// AttributionPlacement chooses where the room marker appears.
+type AttributionPlacement string
+
+const (
+	AttributionLine   AttributionPlacement = "line"
+	AttributionPrefix AttributionPlacement = "prefix"
+)
+
+func ParseAttributionPlacement(value string) (AttributionPlacement, error) {
+	switch AttributionPlacement(value) {
+	case "", AttributionLine:
+		return AttributionLine, nil
+	case AttributionPrefix:
+		return AttributionPrefix, nil
+	default:
+		return "", fmt.Errorf("attribution placement must be line or prefix")
+	}
+}
+
 // SetAttribution stores the line that agent-written GitHub text ends with.
 // The caller passes a value from ParseAttribution.
-func (s *Store) SetAttribution(ref, line string) error {
+func (s *Store) SetAttribution(ref, line string, placement ...AttributionPlacement) error {
 	return s.UpdatePreferences(ref, func(r *Record) error {
 		r.Attribution = line
+		if len(placement) > 0 {
+			r.AttributionPlacement = placement[0]
+		}
 		return nil
 	})
 }
