@@ -138,8 +138,27 @@ func saveTurnRow(ctx context.Context, db *sql.DB, id string, n int, raw []byte) 
 	if err != nil {
 		return 0, err
 	}
+	writer := state.For(db)
 	var revision int64
-	err = state.For(db).WriteChanged(ctx, sessionlife.Changed(id), func(conn *sql.Conn) (bool, error) {
+	var identical bool
+	err = writer.Read(ctx, func(r state.Reader) error {
+		previous, current, err := resolvedTurn(ctx, r, id, n)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		revision, identical = current, bytes.Equal(previous, canonical)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if identical && !state.RequestPending(ctx) {
+		return revision, nil
+	}
+	err = writer.WriteChanged(ctx, sessionlife.Changed(id), func(conn *sql.Conn) (bool, error) {
 		previous, current, err := resolvedTurn(ctx, conn, id, n)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return false, err

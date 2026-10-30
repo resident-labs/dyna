@@ -360,7 +360,7 @@ func SaveContext(ctx context.Context, sessions, id string, v any) error {
 	if err != nil {
 		return err
 	}
-	return state.For(db).WriteChanged(ctx, Changed(id), func(conn *sql.Conn) (bool, error) { return saveTx(conn, id, v) })
+	return state.For(db).Write(ctx, Changed(id), func(conn *sql.Conn) error { return SaveTx(conn, id, v) })
 }
 
 // SaveIf replaces session id's record with v in one write transaction, only
@@ -385,31 +385,17 @@ func SaveIf(sessions, id string, v any, still func(raw []byte) error) error {
 
 // SaveTx is Save inside the caller's dyna.db write transaction on conn.
 func SaveTx(conn *sql.Conn, id string, v any) error {
-	_, err := saveTx(conn, id, v)
-	return err
-}
-
-func saveTx(conn *sql.Conn, id string, v any) (bool, error) {
 	if err := checkID(id); err != nil {
-		return false, err
+		return err
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if !isObject(raw) || len(raw) > recordLimit {
-		return false, fmt.Errorf("%w: session %s record is not a JSON object under %d bytes", ErrRecord, id, recordLimit)
+		return fmt.Errorf("%w: session %s record is not a JSON object under %d bytes", ErrRecord, id, recordLimit)
 	}
-	var old string
-	err = conn.QueryRowContext(context.Background(), "SELECT meta FROM session_records WHERE id = ?", id).Scan(&old)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	if err == nil && old == string(raw) {
-		return false, nil
-	}
-	err = writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest")
-	return err == nil, err
+	return writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest")
 }
 
 // recordColumns are the record fields copied into columns.
