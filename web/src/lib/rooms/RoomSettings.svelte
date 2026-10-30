@@ -40,6 +40,7 @@
     room: Room
     profiles?: ProfileChoice[]
     onrootprofile?: (roomId: string, profile: string) => void
+    oncolor?: (roomId: string, color: Room['color']) => void
     oncheckin?: (roomId: string, value: string) => void
     onlimit?: (roomId: string, field: RoomLimitField, value: string) => void
     start?: string
@@ -51,7 +52,20 @@
     onhooks?: () => unknown
     onclose: () => void
   }
-  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, onlimit = () => {}, start = 'general', reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, onhooks = () => {}, onclose }: Props = $props()
+  let { room, profiles = [], onrootprofile = () => {}, oncolor = () => {}, oncheckin = () => {}, onlimit = () => {}, start = 'general', reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, onhooks = () => {}, onclose }: Props = $props()
+  const colors: Room['color'][] = ['crimson', 'blue', 'violet', 'teal', 'orange', 'magenta', 'sky', 'olive']
+  let colorBusy = $state(false)
+  let colorError = $state('')
+  async function saveColor(color: Room['color']) {
+    const target = room.id
+    colorBusy = true
+    colorError = ''
+    try {
+      await api.setRoomColor(target, color)
+      oncolor(target, color)
+    } catch (e) { colorError = errorText(e) }
+    finally { colorBusy = false }
+  }
   let rootProfile = $state(untrack(() => room.rootProfile || ''))
   let rootProfileBusy = $state(false)
   let rootProfileError = $state('')
@@ -318,6 +332,9 @@
       <Row title="Name" help="Agents still address the room as #{room.name}.">
         {#snippet control()}<span class="value">{roomLabel(room)}</span><button class="ghost" onclick={() => onaction('rename')}>Rename…</button>{/snippet}
       </Row>
+      <Row title="Room color" help="This color identifies the room." error={colorError}>
+        {#snippet control()}<div class="swatches">{#each colors as color}<button type="button" class="swatch" style="--room:var(--room-{color})" aria-label={color} aria-pressed={room.color === color} disabled={colorBusy} onclick={() => saveColor(color)}>{#if room.color === color}✓{/if}</button>{/each}</div>{/snippet}
+      </Row>
       <Row title="Pin to rail" help="Pinned rooms stay at the top of the rail.">
         {#snippet control()}<Switch on={!!room.pinned} label="Pin to rail" onchange={() => onaction('room-pin')} />{/snippet}
       </Row>
@@ -420,6 +437,8 @@
 </SettingsShell>
 
 <style>
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .swatch { width: 30px; height: 30px; border-radius: 50%; background: var(--room); color: #161616; font-size: var(--t-page); font-weight: 700; }
   .field { width: 280px; max-width: 100%; background: var(--rail); border: 1px solid transparent; border-radius: 6px; color: var(--ink); padding: 7px 10px; font: inherit; font-size: var(--t-ui); outline: none; }
   .field:focus { border-color: var(--iris-edge); }
   .field:disabled { opacity: 0.5; }
