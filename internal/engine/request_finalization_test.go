@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -169,7 +168,7 @@ func TestRequestFinalizationFingerprintConflict(t *testing.T) {
 	}
 }
 
-func TestRequestFinalizationLookupFailureKeepsFinishAttempt(t *testing.T) {
+func TestRequestFinalizationStoresResultAfterCallerCancel(t *testing.T) {
 	_, w, _ := thingsStore(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -177,28 +176,33 @@ func TestRequestFinalizationLookupFailureKeepsFinishAttempt(t *testing.T) {
 	once := &requestRunner{w: w, logf: func(format string, args ...any) {
 		logs = append(logs, fmt.Sprintf(format, args...))
 	}}
+	executions := 0
 	call := func(ctx context.Context, _ []json.RawMessage) (any, error) {
+		executions++
 		if err := w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-			return w.FinishRequestIn(ctx, conn, "CommitThing", []byte(`"reply"`))
+			_, err := conn.ExecContext(ctx, "INSERT INTO things(name) VALUES('once')")
+			return err
 		}); err != nil {
 			return nil, err
 		}
-		// The newly added lookup fails after the mutation has committed.
+		// The caller gives up after the mutation commits and before its result is stored.
 		cancel()
 		return "reply", nil
 	}
-	before := w.Health().Writes
 	result, err := once.run(ctx, "cancel-1", "CommitThing", call, nil)
 	if err != nil || result != "reply" {
-		t.Fatalf("post-commit cancellation changed the healthy result: %v, %v", result, err)
+		t.Fatalf("post-commit cancellation changed the result: %v, %v", result, err)
 	}
-	// The second attempt is canceled, not a successful SQL commit.
-	if attempts := w.Health().Writes - before; attempts != 2 || len(logs) != 1 || !strings.Contains(logs[0], "applied, but its result was not stored") {
-		t.Fatalf("finalization attempt or post-commit log was lost: attempts %d, logs %v", attempts, logs)
+	if len(logs) != 0 {
+		t.Fatalf("result was not stored after the caller canceled: %v", logs)
 	}
 	raw, done, err := w.RequestDone(t.Context(), "cancel-1")
 	if err != nil || !done || string(raw) != `"reply"` {
-		t.Fatalf("committed exact receipt lost: %s %v %v", raw, done, err)
+		t.Fatalf("stored result = %s, done %v, error %v; want \"reply\"", raw, done, err)
+	}
+	replay, err := once.run(t.Context(), "cancel-1", "CommitThing", call, nil)
+	if raw, marshalErr := json.Marshal(replay); err != nil || marshalErr != nil || string(raw) != `"reply"` || executions != 1 {
+		t.Fatalf("retry replay = %s, %v, %v; executions %d, want \"reply\" once", raw, err, marshalErr, executions)
 	}
 }
 
