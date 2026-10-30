@@ -13,13 +13,21 @@ after(() => {
 
 const compiled = await build({
   bundle: true, write: false, platform: 'node', format: 'esm', conditions: ['node'], logLevel: 'silent',
-  stdin: { contents: "export { default as Feed } from './rooms/Feed.svelte'; export { render } from 'svelte/server'", resolveDir: new URL('..', import.meta.url).pathname },
+  stdin: { contents: "export { default as Feed } from './rooms/Feed.svelte'; export { default as EventSteps } from './rooms/EventSteps.svelte'; export { render } from 'svelte/server'", resolveDir: new URL('..', import.meta.url).pathname },
   plugins: [svelteEsbuildPlugin('server')],
 })
 const output = compiled.outputFiles?.[0]
 assert.ok(output)
-const { Feed, render } = await import('data:text/javascript;base64,' + Buffer.from(output.contents).toString('base64'))
+const { Feed, EventSteps, render } = await import('data:text/javascript;base64,' + Buffer.from(output.contents).toString('base64'))
 const room = { id: 'room', name: 'room' }
+
+test('event steps show times and labels in order', () => {
+  const steps = [{ id: 'a', time: '09:01', label: 'Queued' }, { id: 'b', time: '09:02', label: 'Landed' }]
+  const body = render(EventSteps, { props: { steps } }).body
+  assert.match(body, /Show steps \(2\)/)
+  assert.match(body, /09:01<\/time> · Queued.*09:02<\/time> · Landed/s)
+  assert.doesNotMatch(render(EventSteps, { props: { steps: steps.slice(0, 1) } }).body, /Show steps/)
+})
 
 test('an empty room guides profile setup and shows one enabled profile command', () => {
   const noProfile = render(Feed, { props: { room, posts: [], profiles: [], onnewprofile() {} } }).body
