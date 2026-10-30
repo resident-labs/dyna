@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,7 @@ const (
 	CheckAdmin     CheckName = "owner-only administration"
 	CheckPaths     CheckName = "paths"
 	CheckCgroup    CheckName = "cgroup v2 and delegated controllers"
+	CheckArch      CheckName = "host architecture"
 	CheckPodman    CheckName = "rootless Podman 5 with systemd"
 	CheckCapacity  CheckName = "capacity"
 	CheckHostSlice CheckName = "host slice"
@@ -82,6 +84,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		add(CheckPaths, fmt.Errorf("host data and runtime paths must be absolute"))
 		return result
 	}
+	add(CheckArch, h.checkArch(ctx))
 	_, err := h.run(ctx, "bash", "-c", `test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs && test "$(systemctl show "user@$(id -u).service" -p Delegate --value)" = yes && cg=$(systemctl show "user@$(id -u).service" -p ControlGroup --value) && for c in cpu memory io pids; do grep -qw "$c" "/sys/fs/cgroup$cg/cgroup.controllers" || exit 1; done`)
 	add(CheckCgroup, err)
 	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
@@ -103,6 +106,18 @@ func (h *Host) capacity(ctx context.Context, o CheckOptions) (int, int64, int64,
 		return 0, 0, 0, err
 	}
 	return parseCapacity(output, o.MemoryFloor, o.DiskFloor)
+}
+
+func (h *Host) checkArch(ctx context.Context) error {
+	output, err := h.run(ctx, "uname", "-m")
+	if err != nil {
+		return err
+	}
+	arch := strings.TrimSpace(string(output))
+	if (arch == "x86_64" && runtime.GOARCH == "amd64") || (arch == "aarch64" && runtime.GOARCH == "arm64") {
+		return nil
+	}
+	return fmt.Errorf("host architecture %q does not match engine architecture %q", arch, runtime.GOARCH)
 }
 
 // parseCapacity validates the host probe and reserves the host floor once.
