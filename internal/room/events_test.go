@@ -375,7 +375,7 @@ func TestPREventStoresItsFactsAndText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if msg.Kind != string(FamilyPR) || msg.Notice.Kind != string(PRCIFailed) || !msg.Wake || msg.From != EngineSender {
+	if msg.Kind != string(FamilyPR) || msg.Notice.Kind != string(PRCIFailed) || msg.Notice.Thread != "pr:"+ev.ChangeID || !msg.Wake || msg.From != EngineSender {
 		t.Fatalf("stored event = %+v", msg)
 	}
 	stored, ok := msg.PR()
