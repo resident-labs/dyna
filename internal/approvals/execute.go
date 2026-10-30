@@ -33,6 +33,9 @@ func (s *Service) trigger(r Request) {
 }
 
 func (s *Service) claim(r Request) (ExecuteFunc, context.Context, bool) {
+	if !s.CopyTime.IsZero() && !r.CreatedAt.After(s.CopyTime) {
+		return nil, nil, false
+	}
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 	execute := s.executors[r.Kind]
