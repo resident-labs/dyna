@@ -57,44 +57,6 @@ func (s *Service) TerminalDirectory(ref string) (roomID, sessionID, cwd string, 
 	return
 }
 
-type ShellJob struct {
-	ID      string     `json:"id"`
-	Owner   string     `json:"owner,omitempty"`
-	Command []string   `json:"command"`
-	Name    string     `json:"name,omitempty"`
-	Cwd     string     `json:"cwd"`
-	State   string     `json:"state"`
-	Code    int        `json:"code"`
-	Started time.Time  `json:"started"`
-	Ended   *time.Time `json:"ended,omitempty"`
-	// Signal and StopBy say how a stopped job ended; BackgroundAt is when a
-	// foreground call outlived its limit; OutputLines is known once it ended.
-	Signal       string     `json:"signal,omitempty"`
-	StopBy       string     `json:"stopBy,omitempty"`
-	BackgroundAt *time.Time `json:"backgroundAt,omitempty"`
-	OutputLines  int        `json:"outputLines,omitempty"`
-	// OutputBytes and Tail (the last lines, plain text) show a job that is
-	// open or just ended. The log has the rest.
-	OutputBytes int64 `json:"outputBytes,omitempty"`
-	// LogPruned is set when the job's log file is gone, for a job whose row
-	// carries a tail.
-	LogPruned bool   `json:"logPruned,omitempty"`
-	Tail      string `json:"tail,omitempty"`
-}
-
-type ShellLog struct {
-	Text      string `json:"text"`
-	Truncated bool   `json:"truncated"`
-}
-
-// ShellLogChunk is one forward read of a log: Next is where to read on, and
-// Size is the log's length now.
-type ShellLogChunk struct {
-	Text string `json:"text"`
-	Next int64  `json:"next"`
-	Size int64  `json:"size"`
-}
-
 const (
 	tailLines = 6
 	// justEnded is how long a finished job's row still carries its tail, so
