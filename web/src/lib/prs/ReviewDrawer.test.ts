@@ -72,10 +72,10 @@ test('the PR page has no reviewer bar and no review strip at the top', async () 
   const { dir, component, render } = await load('PRChip')
   try {
    const show = (tone: string, props: object = {}) => render(component, { props: { pr: { number: 9, title: 'Example' }, meta: { tone, label: 'State' }, ...props } }).body
-   assert.match(show('done'), /class="chip sage[^"]*outline/)
+   assert.match(show('done'), /class="chip success[^"]*outline/)
    assert.match(show('faint'), /class="chip [^"]*outline/)
    assert.match(show('run'), /class="dot /)
-   assert.match(show('iris', { more: 2 }), /class="chip iris/)
+   assert.match(show('iris', { more: 2 }), /class="chip info/)
    assert.match(text(show('iris', { more: 2 })), /#9 State \+2/)
    assert.doesNotMatch(text(show('sage', { short: true, number: false })), /#9|State/)
   } finally { await rm(dir, { recursive: true, force: true }) }

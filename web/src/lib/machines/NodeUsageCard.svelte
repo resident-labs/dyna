@@ -24,7 +24,7 @@
 
 <Card title="Usage">
   {#snippet action()}<span class="fresh">{freshness(machine)}</span>{/snippet}
-  <div class="tiles">
+  <div class="tiles stat-grid">
     <StatTile label="CPU" value={cpu == null ? '–' : `${Math.round(cpu)}%`} detail={average === undefined || !cpus ? 'No reading' : `load ${average.toFixed(1)} on ${cpus} CPUs`} tone={usageTone(cpu)} />
     <StatTile label="Memory" value={memory == null ? '–' : `${Math.round(memory)}%`} detail={used === undefined || !total ? 'No reading' : `${sizeText(used)} of ${sizeText(total)}`} tone={usageTone(memory)} />
     <StatTile label="Disk free" value={disk === undefined ? '–' : sizeText(disk)} detail={floor === undefined ? 'No reading' : `floor ${sizeText(floor)}${machine.local ? machine.seenAt ? ` · probed ${ago(machine.seenAt)}` : ' · probe time unavailable' : ''}`} tone={diskTone(disk, floor)} />
@@ -47,7 +47,7 @@
 
 <style>
   .fresh, .detail { color: var(--faint); font-size: var(--t-cap); }
-  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--hair); border-radius: var(--r-sm); overflow: hidden; }
+  .tiles { border: 1px solid var(--hair); border-radius: var(--r-sm); }
   .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--raise); }
   .seg { display: block; height: 100%; }
   .legend { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); font-size: var(--t-cap); color: var(--muted); }
@@ -57,5 +57,4 @@
   .other, .m-other { background: var(--faint); } .m-dyna { background: var(--hue-4); }
   .m-free { background: transparent; } .dot.m-free { box-shadow: inset 0 0 0 1px var(--faint); }
   .note { margin: 0; color: var(--faint); font-size: var(--t-sm); }
-  @media (max-width: 650px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } :global(.tiles > :nth-child(2)) { border-right: 0; } :global(.tiles > :nth-child(-n+2)) { border-bottom: 1px solid var(--hair); } }
 </style>

@@ -4,10 +4,10 @@ import { diskTone, freshness, usageTone } from './nodeUsage.ts'
 import { createTestServer } from '../../../test/ssr-server.ts'
 
 test('usage tones follow the thresholds and the admission floor', () => {
-  assert.deepEqual([79, 80, 94, 95].map(usageTone), ['muted', 'warn', 'warn', 'bad'])
-  assert.equal(diskTone(19, 20), 'warn')
-  assert.equal(diskTone(20, 20), 'muted')
-  assert.equal(diskTone(undefined, 20), 'muted')
+  assert.deepEqual([79, 80, 94, 95].map(usageTone), ['neutral', 'warning', 'warning', 'danger'])
+  assert.equal(diskTone(19, 20), 'warning')
+  assert.equal(diskTone(20, 20), 'neutral')
+  assert.equal(diskTone(undefined, 20), 'neutral')
 })
 
 test('local disk names its probe time separately from live CPU and memory', async (t) => {
