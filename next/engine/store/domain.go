@@ -128,6 +128,12 @@ func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, er
 	return session, err
 }
 
+func (s *Store) RoomByName(ctx context.Context, name contract.RoomName) (contract.RoomID, error) {
+	var id contract.RoomID
+	err := s.Read().QueryRowContext(ctx, "SELECT id FROM rooms WHERE name=?", name).Scan(&id)
+	return id, err
+}
+
 func (s *Store) SessionByName(ctx context.Context, room contract.RoomID, name string) (Session, error) {
 	var session Session
 	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.name=? AND s.closed_at IS NULL", room, name).Scan(&session.ID, &session.Room, &session.Name, &session.Profile, &session.Box)
