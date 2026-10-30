@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -534,6 +535,14 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	suited := localci.NodesForSuites(enabled, plan.suites)
 	eligible := localci.NodesForLabels(suited, labels)
 	chosen, retryResumed = s.chooseCINode(ctx, registry, repo, job.head, eligible, job.record.RoomID, retriedFrom, nodeFloor)
+	// An attached run must return to its original node even when that node is
+	// full. Otherwise prefer a node that can admit the first check now.
+	if cisched.PinnedCINode(ctx, registry, repo, job.head, eligible, job.record.RoomID, retriedFrom) == nil {
+		ready := s.readyCINodes(ctx, eligible, job, plan)
+		if preferred, preferredResumed := s.chooseCINode(ctx, registry, repo, job.head, ready, job.record.RoomID, retriedFrom, -1); preferred != nil {
+			chosen, retryResumed = preferred, preferredResumed
+		}
+	}
 	resumed = resumed || retryResumed
 	if chosen == nil {
 		roomNodes := localci.NodesForRoom(enabled, job.record.RoomID)
@@ -555,6 +564,25 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run, retriedFrom, resumed)
 	return true, nil
+}
+
+// readyCINodes predicts admission with each node's clamped first-check demand.
+func (s *Service) readyCINodes(ctx context.Context, nodes []localci.Node, job registeredCIJob, plan localCIPlan) []localci.Node {
+	var ready []localci.Node
+	queue := s.ciAdmission()
+	for _, node := range nodes {
+		if !node.AllowsRoom(job.record.RoomID) {
+			continue
+		}
+		demand, err := localci.FirstCheckDemand(plan.execution, plan.suites, node, job.record.RoomID, job.trial || job.sync)
+		if err != nil {
+			continue
+		}
+		if fits, err := queue.CanAdmit(ctx, demand); err == nil && fits {
+			ready = append(ready, node)
+		}
+	}
+	return ready
 }
 
 // chooseCINode picks the machine for a run from nodes: the head's pinned node
@@ -693,12 +721,36 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			}
 			return startCtx.Err()
 		}
-		if s.RunNodeCI != nil {
-			result, err = s.RunNodeCI(ctx, node, req)
-		} else {
-			runner := localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node, Engine: true}
-			runner.OnCacheRepair = s.CacheRepairReporter(job.record.RoomID)
-			result, err = runner.Run(ctx, req)
+		for {
+			req.OnQueue = func(waitCtx context.Context) *localci.Node {
+				nodes, listErr := s.registeredCINodes(waitCtx)
+				if listErr != nil {
+					return nil
+				}
+				nodes = localci.NodesForLabels(localci.NodesForSuites(nodes, suites), plan.execution.LabelsForSuites(suites))
+				ready := s.readyCINodes(waitCtx, nodes, job, plan)
+				if retriedFrom != "" {
+					ready = slices.DeleteFunc(ready, func(candidate localci.Node) bool { return candidate.Name == retriedFrom })
+				}
+				return s.availableCINode(waitCtx, ready, job.record.RoomID, node.Name, -1)
+			}
+			if s.RunNodeCI != nil {
+				result, err = s.RunNodeCI(ctx, node, req)
+			} else {
+				runner := localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node, Engine: true}
+				runner.OnCacheRepair = s.CacheRepairReporter(job.record.RoomID)
+				result, err = runner.Run(ctx, req)
+			}
+			var move *localci.RelocateError
+			if !errors.As(err, &move) || ctx.Err() != nil {
+				break
+			}
+			node = move.Node
+			runs := s.nodeRuns()
+			runs.Lock()
+			run.Node = node.Name
+			runs.Unlock()
+			s.runningCIChanged()
 		}
 		// The node work is over: its teardown has stopped the keeper and released
 		// the machine's locks.
