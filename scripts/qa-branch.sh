@@ -79,6 +79,11 @@ if [[ $isolated == true ]]; then
   if ! command -v bwrap >/dev/null; then echo 'isolated QA needs bubblewrap (bwrap); use proxy mode without --isolated on this host' >&2; exit 1; fi
   chromium=$(command -v chromium || command -v chromium-browser || :)
   node=$(command -v node)
+  # A mise shim cannot resolve its tool inside the isolated sandbox.
+  if command -v mise >/dev/null; then
+    node=$(mise which node 2>/dev/null || printf '%s\n' "$node")
+  fi
+  node=$(realpath "$node")
   if [[ -z $chromium ]]; then echo 'isolated QA needs Chromium' >&2; exit 1; fi
   mkdir -p "$build_dir/deps" "$build_dir/root" "$build_dir/npm-home"
   cp internal/cli/computer/browserdeps/package*.json "$build_dir/deps/"
