@@ -225,7 +225,7 @@ type TurnEnded struct {
 	Turn    TurnID         `json:"turn"`
 	Outcome TurnOutcome    `json:"outcome"`
 	Final   string         `json:"final,omitempty"`   // the final response
-	Replies []ReplyChannel `json:"replies,omitempty"` // where Final was delivered
+	Replies []FinalReply   `json:"replies,omitempty"` // where Final was delivered
 	Usage   Usage          `json:"usage"`
 	Error   string         `json:"error,omitempty"`   // failed only
 }
@@ -284,6 +284,12 @@ type ReplyChannel struct {
 	Target  Principal    `json:"target,omitempty"`
 	Home    Conversation `json:"home,omitempty"`
 	ReplyTo EventID      `json:"replyTo,omitempty"`
+}
+
+// FinalReply is one delivery of a turn's final response (7.5).
+type FinalReply struct {
+	Reply  ReplyChannel `json:"reply"`
+	Posted EventID      `json:"posted,omitempty"` // set when the turn already posted to the target: delivered quietly, with a link to that post
 }
 
 type Delivery struct {

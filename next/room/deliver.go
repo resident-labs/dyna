@@ -66,29 +66,51 @@ func (t Tree) reply(in DeliveryInput, r Recipient) contract.ReplyChannel {
 	return reply
 }
 
-type FinalReply struct {
-	Channel contract.ReplyChannel
-	Wake    bool
-	Posted  contract.EventID
+type Destination struct {
+	Target contract.Principal
+	Home   contract.Conversation
+}
+
+// PostsForReplies finds the latest post to each final destination in the turn.
+func PostsForReplies(inputs []contract.Delivery, events []contract.Event, session contract.SessionID) map[Destination]contract.EventID {
+	posts := make(map[Destination]contract.EventID)
+	for _, event := range events {
+		if event.From.Kind != contract.PrincipalSession || event.From.Session != session {
+			continue
+		}
+		post := event.Body.(contract.PostCreated)
+		for _, input := range inputs {
+			channel := input.Reply
+			if channel.Kind != contract.ReplyFinal {
+				continue
+			}
+			matched := channel.Target.Kind == contract.PrincipalOwner && channel.Home == post.Home
+			for _, mentioned := range post.Mentions {
+				if mentioned == channel.Target {
+					matched = true
+				}
+			}
+			if matched {
+				posts[Destination{Target: channel.Target, Home: channel.Home}] = event.ID
+			}
+		}
+	}
+	return posts
 }
 
 // FinalReplies returns one response for each distinct final target and home.
-func FinalReplies(inputs []contract.Delivery, posts map[contract.Principal]contract.EventID) []FinalReply {
-	type destination struct {
-		target contract.Principal
-		home   contract.Conversation
-	}
-	seen := make(map[destination]bool)
-	var replies []FinalReply
+func FinalReplies(inputs []contract.Delivery, posts map[Destination]contract.EventID) []contract.FinalReply {
+	seen := make(map[Destination]bool)
+	var replies []contract.FinalReply
 	for _, input := range inputs {
 		channel := input.Reply
-		key := destination{target: channel.Target, home: channel.Home}
+		key := Destination{Target: channel.Target, Home: channel.Home}
 		if channel.Kind != contract.ReplyFinal || seen[key] {
 			continue
 		}
 		seen[key] = true
-		post := posts[channel.Target]
-		replies = append(replies, FinalReply{Channel: channel, Wake: post == "", Posted: post})
+		post := posts[key]
+		replies = append(replies, contract.FinalReply{Reply: channel, Posted: post})
 	}
 	return replies
 }
