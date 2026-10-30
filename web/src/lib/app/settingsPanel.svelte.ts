@@ -4,7 +4,6 @@ import type { ModelSelection } from '../settings/profiles/state.ts'
 export interface SettingsPanelHost {
   hasRoom(): boolean
   closeNav(): void
-  roomRequired(): void
   // openServices shows the open room's Services page.
   openServices(): void
 }
@@ -44,11 +43,16 @@ export function createSettingsPanel(host: SettingsPanelHost) {
       showRoomSettings = true
     },
     // openHooks closes the settings panels and shows Services > Hooks, with
-    // one hook run open when a feed card asked for it. Hooks live on a room's
-    // Services page, so it needs an open room.
+    // one hook run open when a feed card asked for it. With no room open,
+    // Settings shows this computer's hooks instead.
     openHooks(run: HookLogTarget | null = null) {
       host.closeNav()
-      if (!host.hasRoom()) { host.roomRequired(); return }
+      if (!host.hasRoom()) {
+        settingsAt = { start: 'hooks', pairNow: false }
+        settingsKey++
+        showSettings = true
+        return
+      }
       showSettings = false
       showRoomSettings = false
       hooksAt = { request: hooksAt.request + 1, run }

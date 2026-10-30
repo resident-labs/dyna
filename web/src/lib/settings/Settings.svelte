@@ -12,6 +12,7 @@
   import AccountsPane from './accounts/AccountsPane.svelte'
   import SettingsPane from './SettingsPane.svelte'
   import DevicesPane from './DevicesPane.svelte'
+  import HooksSection from '../services/HooksSection.svelte'
   import type { ModelSelection } from './profiles/state.ts'
   import type { UpdateNotice } from '../api/settings.ts'
 
@@ -25,7 +26,8 @@
     profile?: string
     initialSelection?: ModelSelection | null
     oncreateprofile?: (selection: ModelSelection) => void
-    // onhooks shows Services > Hooks, where hooks now live.
+    // onhooks shows Services > Hooks, where hooks now live. With no room open
+    // there is no Services page, so the pane shows this computer's hooks.
     onhooks?: () => void
     onclose: () => void
   }
@@ -43,14 +45,14 @@
     { id: 'skills', label: 'Skills', hint: 'Skills every session can read' },
     { id: 'mcp', label: 'MCP', hint: 'MCP servers Dyna manages' },
     { id: 'accounts', label: 'Accounts', hint: 'Sign-ins, usage and active account' },
-    { id: 'hooks', label: 'Hooks', hint: 'On the Services page' },
+    { id: 'hooks', label: 'Hooks', hint: roomId ? 'On the Services page' : 'Commands on this computer' },
     { id: 'settings', label: 'Settings', hint: 'How Dyna behaves' },
     { id: 'devices', label: 'Devices', hint: 'Phones and browsers' },
     { id: 'about', label: 'Updates', hint: 'Version and data' },
   ]
 
   function selectPane(next: string) {
-    if (next === 'hooks') { onhooks(); return }
+    if (next === 'hooks' && roomId) { onhooks(); return }
     if (next !== pane) { profileSelection = null; profileToOpen = '' }
     pane = next
   }
@@ -73,6 +75,8 @@
     <AccountsPane accountId={accountToOpen} {roomId} {oncreateprofile} onprofile={viewProfile} onmodal={(open) => (busy = open)} />
   {:else if pane === 'settings'}
     <SettingsPane {roomId} />
+  {:else if pane === 'hooks'}
+    <HooksSection />
   {:else if pane === 'devices'}
     <DevicesPane {pairNow} onmodal={(open) => (busy = open)} />
   {:else}

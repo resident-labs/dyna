@@ -14,11 +14,10 @@ const built = await build({
 const source = need(built.outputFiles[0]).text
 const module: { createSettingsPanel: typeof createSettingsPanel } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 
-test('hooks open on the Services page once per request and require a room', () => {
+test('hooks open on the Services page once per request, and in Settings with no room open', () => {
   let room = true
-  let notices = 0
   let services = 0
-  const panel = module.createSettingsPanel({ hasRoom: () => room, closeNav() {}, roomRequired: () => { notices++ }, openServices: () => { services++ } })
+  const panel = module.createSettingsPanel({ hasRoom: () => room, closeNav() {}, openServices: () => { services++ } })
   const run = { repo: '/one', hook: 'build', runId: 'one' }
   // A getter call, so an assertion does not narrow the next read.
   const at = () => panel.hooksAt
@@ -33,5 +32,7 @@ test('hooks open on the Services page once per request and require a room', () =
   panel.openHooks(run)
   assert.equal(at().request, 2)
   assert.equal(services, 2)
-  assert.equal(notices, 1)
+  // With no room there is no Services page; Settings shows this computer's hooks.
+  assert.equal(panel.showSettings, true)
+  assert.equal(panel.settingsAt.start, 'hooks')
 })
