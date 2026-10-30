@@ -168,14 +168,18 @@ done
 
 // ContainerStopFunction defines dyna_stop_container for a node script. It stops
 // a job's container and removes it, through docker or passwordless sudo docker.
-// It succeeds only when docker no longer lists the container. The timeout
-// client kills only the docker run client, so the container needs this stop.
+// It succeeds only when docker lists no such container. A failed listing means
+// the daemon was not reached, so absence is not confirmed and the stop fails.
+// The timeout client kills only the docker run client, so the container needs
+// this stop.
 const ContainerStopFunction = `dyna_stop_container() {
   local -a docker=(docker)
   if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi
   "${docker[@]}" stop -t 10 "$1" >/dev/null 2>&1 || true
   "${docker[@]}" rm -f "$1" >/dev/null 2>&1 || true
-  if "${docker[@]}" container inspect "$1" >/dev/null 2>&1; then return 1; fi
+  local left
+  left=$("${docker[@]}" ps -aq --filter "name=^$1$") || return 1
+  [ -z "$left" ]
 }
 `
 
@@ -189,7 +193,7 @@ const ContainerStopFunction = `dyna_stop_container() {
 // unit down, is left alone: the wrapper already waited for the writer, and
 // the forced calls would only restate what the manager already answered.
 const StopScript = ContainerStopFunction + UnitStoppedFunction + `d=$1; unit=$2; container=${3:-}
-if [ -n "$container" ]; then dyna_stop_container "$container" || { echo "container $container is still present" >&2; exit 1; }; fi
+if [ -n "$container" ]; then dyna_stop_container "$container" || { echo "container $container is not confirmed stopped" >&2; exit 1; }; fi
 if [ -s "$d/pid" ]; then
   pid=$(cat "$d/pid")
   kill -TERM -- "-$pid" 2>/dev/null || true
