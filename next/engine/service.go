@@ -139,8 +139,11 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.RoomCreateResponse{}, forbidden()
 	}
-	if strings.TrimSpace(req.Name) == "" {
-		return contract.RoomCreateResponse{}, invalid("room name is required")
+	if strings.TrimSpace(req.Name) == "" || req.RootProfile == "" {
+		return contract.RoomCreateResponse{}, invalid("room name and root profile are required")
+	}
+	if _, _, err := s.profiles.Model(req.RootProfile); err != nil {
+		return contract.RoomCreateResponse{}, failure(err)
 	}
 	now := s.now()
 	value, err := id("room_", now)
@@ -150,6 +153,9 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 	room := contract.RoomID(value)
 	if err := s.store.CreateRoom(ctx, room, req.Name, now); err != nil {
 		return contract.RoomCreateResponse{}, failure(err)
+	}
+	if _, e := s.SessionStart(ctx, caller, contract.SessionStartRequest{Room: room, Name: "root", Profile: req.RootProfile}); e != nil {
+		return contract.RoomCreateResponse{}, e
 	}
 	return contract.RoomCreateResponse{Room: room}, nil
 }
