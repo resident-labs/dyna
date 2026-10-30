@@ -12,21 +12,26 @@ type harnessFake struct {
 	mu        sync.Mutex
 	started   chan struct{}
 	release   chan struct{}
+	permit    chan struct{}
 	steers    int
 	delivered map[contract.DeliverySeq]bool
 }
 
-func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, error) {
+func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	h.mu.Lock()
 	for _, input := range inputs {
 		h.delivered[input.Delivery] = true
 	}
 	h.mu.Unlock()
 	close(h.started)
+	if h.permit != nil {
+		<-h.permit
+	}
+	started()
 	<-h.release
 	return contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed")}, nil
 }
-func (h *harnessFake) Continue(context.Context, contract.TurnID) (contract.TurnEnded, error) {
+func (h *harnessFake) Continue(context.Context, contract.TurnID, func()) (contract.TurnEnded, error) {
 	panic("unexpected continuation")
 }
 func (h *harnessFake) Recover(contract.TurnID, []contract.TurnInput) (contract.TurnEnded, bool, error) {
@@ -65,6 +70,28 @@ func (s *sinkFake) DeliveryDone(_ context.Context, id contract.DeliverySeq) erro
 func (s *sinkFake) TurnOutput(_ context.Context, result contract.TurnEnded) error {
 	s.done <- result
 	return nil
+}
+
+func TestRunnerWaitsForStartBeforeReadingSteer(t *testing.T) {
+	h := &harnessFake{started: make(chan struct{}), release: make(chan struct{}), permit: make(chan struct{}), delivered: make(map[contract.DeliverySeq]bool)}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	result := make(chan error, 1)
+	go func() {
+		result <- runner.Handle(context.Background(), contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1}}}})
+	}()
+	<-h.started
+	select {
+	case err := <-result:
+		t.Fatalf("start returned before Pi accepted: %v", err)
+	default:
+	}
+	close(h.permit)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	close(h.release)
+	<-sink.done
 }
 
 func TestRunnerSkipsReplayedSteer(t *testing.T) {
