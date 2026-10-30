@@ -103,7 +103,7 @@ export async function runQA(config, chromium, log = console.log) {
     args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ' + new URL(config.origin).hostname],
   });
   try {
-    const context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false });
+    const context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false, reducedMotion: 'reduce' });
     await context.addCookies([{ name: cookieName, value: config.cookie, url: config.origin }]);
     await context.route('**/*', route => restrict(route, config));
     // Sockets relay live streams, such as the computer viewer, so every socket stays shut.
