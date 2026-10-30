@@ -329,8 +329,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// starts with its checks already on the machine, so it stays pending until its
 	// workers have seen every check end, which covers an early return too.
 	var unsettled, resumePending atomic.Bool
+	cleanupFailed := false
 	resumePending.Store(resume != nil)
-	keepsForRestart := func() bool { return EngineStopping() && (unsettled.Load() || resumePending.Load()) }
+	keepsForRestart := func() bool { return cleanupFailed || EngineStopping() && (unsettled.Load() || resumePending.Load()) }
 	control, cancel := context.WithTimeout(ctx, time.Duration(len(checks))*(req.Timeout+admissionWait)+2*time.Minute)
 	defer cancel()
 	// A run removes its own directory on the node, whatever ended it: a finished
@@ -341,9 +342,8 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// the reports were copied back.
 	defer func() {
 		if keepsForRestart() {
-			// An engine stop leaves an unfinished run on its machine: its checks keep
-			// running and a restarted engine reattaches. A run whose checks all ended
-			// has nothing to reattach to, so its folder goes now and no keeper waits.
+			// A failed teardown or engine stop can leave checks on the machine.
+			// Keep their folder for a later owner to stop or reattach them.
 			return
 		}
 		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), runRemovalTimeout)
@@ -363,8 +363,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	defer func() {
 		background := context.WithoutCancel(ctx)
 		if keepsForRestart() {
-			// The checks stay on the machine, and the record passes to whoever runs
-			// the commit next.
+			// The checks may still run. Hand the record to recovery.
 			if e := localStore.releaseAttachment(background, attachKey, sha, node.Name, runID); e != nil {
 				log.Printf("local CI %s: hand over started checks: %v", node.Name, e)
 			}
@@ -437,9 +436,8 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 		script := teardownScript(node, cache, runDir, runID, checks)
 		// The checks decided the commit. A cleanup that fails or times out is
-		// tried once more, because a timeout is often a busy node, and the run's
-		// directory and record are removed right after this, so a survivor would
-		// have no second chance. A cleanup that still fails is a warning on the
+		// tried once more, because a timeout is often a busy node. A failed cleanup
+		// keeps the directory and record for recovery. It is a warning on the
 		// run, never an error that replaces a passed result.
 		var failure error
 		var lastOutput string
@@ -460,6 +458,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			}
 			lastOutput = tail.String()
 		}
+		cleanupFailed = true
 		log.Printf("local CI %s: cleanup node: %v: %s", node.Name, failure, lastOutput)
 		result.Warnings = append(result.Warnings, NodeCleanupUnfinished)
 	}()
