@@ -334,31 +334,16 @@ export interface MergeHistoryEntry {
  * MainWaitKind names why the queue waits on the default branch's CI. The web
  * writes the words from the kind; the service never formats a sentence.
  */
-export type MainWaitKind = string;
+export const MainWaitKindNoPushCI = "no-push-ci";
+export const MainWaitKindNoHead = "no-head";
+export const MainWaitKindPassed = "passed";
+export const MainWaitKindFailed = "failed";
+export const MainWaitKindPending = "pending";
+export const MainWaitKindPaused = "paused";
 /**
  * Main wait kinds.
  */
-export const MainWaitNoPushCI: MainWaitKind = "no-push-ci";
-/**
- * Main wait kinds.
- */
-export const MainWaitNoHead: MainWaitKind = "no-head";
-/**
- * Main wait kinds.
- */
-export const MainWaitPassed: MainWaitKind = "passed";
-/**
- * Main wait kinds.
- */
-export const MainWaitFailed: MainWaitKind = "failed";
-/**
- * Main wait kinds.
- */
-export const MainWaitPending: MainWaitKind = "pending";
-/**
- * Main wait kinds.
- */
-export const MainWaitPaused: MainWaitKind = "paused";
+export type MainWaitKind = typeof MainWaitKindNoPushCI | typeof MainWaitKindNoHead | typeof MainWaitKindPassed | typeof MainWaitKindFailed | typeof MainWaitKindPending | typeof MainWaitKindPaused;
 
 //////////
 // source: internal/pr/view/change_types.go
