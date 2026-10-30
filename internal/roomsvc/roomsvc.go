@@ -9,6 +9,8 @@ import (
 	"context"
 	"hash/fnv"
 	"log"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -60,10 +62,12 @@ type Service struct {
 	// results caches full completion texts by post ID. A finished turn's
 	// result never changes. The LRU keeps the newest 256 entries, so the
 	// long-lived web server does not retain every completion forever.
-	results  *resultCache
-	ownerMu  sync.Mutex
-	ownerIDs map[string]*ownerPostIDs
-	snap     sessionSnapshot
+	results     *resultCache
+	ownerMu     sync.Mutex
+	ownerIDs    map[string]*ownerPostIDs
+	unreadMu    sync.Mutex
+	unreadCache map[string]unreadEntry
+	snap        sessionSnapshot
 	// prWake asks Watch to scan PRs now, after the engine's own PR state
 	// write. It holds one pending wake.
 	prWake      chan struct{}
@@ -101,6 +105,13 @@ type Service struct {
 	// onMemberScan, for tests, sees each members scan: the sessions it read
 	// again, or -1 for all of them.
 	onMemberScan func(sessions int)
+}
+
+type unreadEntry struct {
+	version room.LogVersion
+	ids     []string
+	reads   map[string]bool
+	count   int
 }
 
 type ownerPostIDs struct {
@@ -307,6 +318,10 @@ func (s *Service) Rooms() ([]Room, error) {
 	var out []Room
 	for _, rec := range records {
 		r := Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
+		version, err := store.MessageLogVersion(rec.ID)
+		if err != nil {
+			return nil, err
+		}
 		ids, err := s.ownerPosts(rec)
 		if err != nil {
 			return nil, err
@@ -315,6 +330,16 @@ func (s *Service) Rooms() ([]Room, error) {
 		if err != nil {
 			return nil, err
 		}
+		s.unreadMu.Lock()
+		cached, ok := s.unreadCache[rec.ID]
+		if ok && cached.version == version && slices.Equal(cached.ids, ids) && maps.Equal(cached.reads, reads) {
+			r.Unread = cached.count
+			s.unreadMu.Unlock()
+			r.Members, r.Running = counts[rec.ID].Members, counts[rec.ID].Running
+			out = append(out, r)
+			continue
+		}
+		s.unreadMu.Unlock()
 		eligible := make(map[string]bool, len(ids))
 		for _, id := range ids {
 			eligible[id] = true
@@ -335,6 +360,18 @@ func (s *Service) Rooms() ([]Room, error) {
 			return nil, err
 		}
 		r.Unread = page.Unread
+		after, err := store.MessageLogVersion(rec.ID)
+		if err != nil {
+			return nil, err
+		}
+		if after == version {
+			s.unreadMu.Lock()
+			if s.unreadCache == nil {
+				s.unreadCache = make(map[string]unreadEntry)
+			}
+			s.unreadCache[rec.ID] = unreadEntry{version, slices.Clone(ids), maps.Clone(reads), page.Unread}
+			s.unreadMu.Unlock()
+		}
 		r.Members, r.Running = counts[rec.ID].Members, counts[rec.ID].Running
 		out = append(out, r)
 	}
@@ -391,9 +428,10 @@ func (s *Service) ownerSelection(rec room.Record) ([]string, error) {
 		selected = &ownerPostIDs{name: rec.Name}
 		s.ownerIDs[rec.ID] = selected
 	}
-	return s.rooms().MessageIDs(rec.ID, &selected.selection, func(message room.Message) bool {
+	ids, err := s.rooms().MessageIDs(rec.ID, &selected.selection, func(message room.Message) bool {
 		return countsUnread(message, rec.Name)
 	})
+	return slices.Clone(ids), err
 }
 
 // NameHues is how many stable name colors front ends define. Gold and
