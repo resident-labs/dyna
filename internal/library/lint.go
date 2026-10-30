@@ -17,14 +17,6 @@ import (
 // MaxSummary is the summary length limit in characters (lint rule 5).
 const MaxSummary = 240
 
-// Finding is one lint warning. Lint never blocks in the first version.
-type Finding struct {
-	Rule    int    `json:"rule"`
-	Entry   string `json:"entry,omitempty"`
-	File    string `json:"file,omitempty"`
-	Message string `json:"message"`
-}
-
 // sourceExt lists the file types an entry is expected to own.
 var sourceExt = map[string]bool{}
 

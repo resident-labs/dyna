@@ -1,0 +1,17 @@
+packages:
+  - path: dyna-agent/internal/library
+    output_path: web/src/lib/api/library.gen.ts
+    include_files: [wire_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/librarian
+    output_path: web/src/lib/api/library.gen.ts
+    include_files: [wire_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      library.Entry: Entry
+      library.Finding: Finding

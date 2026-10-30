@@ -15,23 +15,6 @@ import (
 // Kinds are tags, not structure.
 var Kinds = []string{"feature", "adapter", "integration", "service"}
 
-// Entry is one feature in the map.
-type Entry struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"`
-	Parent     string   `json:"parent,omitempty"`
-	Summary    string   `json:"summary"`
-	Differs    string   `json:"differs,omitempty"`
-	Owns       []string `json:"owns"`
-	Docs       []string `json:"docs,omitempty"`
-	Tests      []string `json:"tests,omitempty"`
-	Relates    []string `json:"relates,omitempty"`
-	VerifiedAt string   `json:"verifiedAt,omitempty"`
-	Retired    bool     `json:"retired,omitempty"`
-	Successor  string   `json:"successor,omitempty"`
-}
-
 var idPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // sentenceEnd counts sentence breaks; a period inside a name such as

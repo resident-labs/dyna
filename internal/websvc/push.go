@@ -121,14 +121,6 @@ func pushDevice(p Principal) string {
 	return "pd:" + p.Device
 }
 
-// pushStatus is the reply to a push "status" call. The web client reads all
-// three fields on every reply, so none of them are omitted.
-type pushStatus struct {
-	Subscribed bool   `json:"subscribed"`
-	Names      bool   `json:"names"`
-	Key        string `json:"key"`
-}
-
 func (s *Push) push(w http.ResponseWriter, r *http.Request, p Principal, op string, body map[string]json.RawMessage) {
 	dev := pushDevice(p)
 	var names bool
@@ -141,7 +133,7 @@ func (s *Push) push(w http.ResponseWriter, r *http.Request, p Principal, op stri
 			s.logf("push: %v", err)
 			return
 		}
-		JSONReply(w, http.StatusOK, pushStatus{Subscribed: ok, Names: ok && e.Names, Key: s.VAPID.PublicKey()})
+		JSONReply(w, http.StatusOK, PushStatus{Subscribed: ok, Names: ok && e.Names, Key: s.VAPID.PublicKey()})
 		return
 	case "subscribe":
 		if !s.allow("push:"+dev, 10) {

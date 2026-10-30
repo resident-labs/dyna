@@ -12,15 +12,6 @@ import (
 	"dyna-agent/internal/repoid"
 )
 
-type Progress struct {
-	Kind      string    `json:"kind"`
-	State     string    `json:"state"`
-	StartedAt time.Time `json:"startedAt"`
-	Head      string    `json:"head"`
-	PRURL     string    `json:"prURL"`
-	Error     string    `json:"error"`
-	Attempts  int       `json:"attempts"`
-}
 type Operation struct {
 	Progress
 	RoomID             string    `json:"roomId"`
@@ -38,23 +29,6 @@ type Export struct {
 	PRURL   string   `json:"prURL"`
 	Changes []string `json:"changes"`
 }
-type Commit struct {
-	SHA    string `json:"sha"`
-	Title  string `json:"title"`
-	Author string `json:"author"`
-	At     string `json:"at"`
-}
-type Integration struct {
-	Head       string   `json:"head"`
-	LastExport string   `json:"lastExport"`
-	Commits    []Commit `json:"commits"`
-}
-type Repository struct {
-	Remotes     map[string]Remote `json:"remotes"`
-	Integration Integration       `json:"integration"`
-	Operation   *Progress         `json:"operation,omitempty"`
-}
-type Status map[string]Repository
 
 func Active(state string) bool {
 	return state == "building" || state == "testing" || state == "publishing"

@@ -7,14 +7,6 @@ import (
 	"strings"
 )
 
-// Route is one way to reach the server: the app origin a browser opens and
-// the card origin that serves its cards. Both are origins: scheme, host and
-// a port only when it is not the scheme's default.
-type Route struct {
-	App   string `json:"app"`
-	Cards string `json:"cards"`
-}
-
 // ParseRoute reads "<app origin>,<card origin>", for example
 // "https://dyna.example.ts.net,https://dyna.example.ts.net:8443".
 func ParseRoute(spec string) (Route, error) {
