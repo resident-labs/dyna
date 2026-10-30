@@ -351,7 +351,11 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
   const reviewNote = [said, count].filter(Boolean).join(' · ')
   const m = state ?? mergeState(c, merge)
   const icon = MERGE_ICON[m.tone] ?? 'wait'
-  const note = m.id === 'next' ? 'The merge service will test this PR in the next batch.' : m.reason || box.say
+  const action = nextAction(c, merge)
+  const note = action.others.length
+    ? [action.others.join(' · '), m.reason].filter(Boolean).join(' · ')
+    : ['Waiting for CI', 'CI missing', 'Blocked: CI failed'].includes(action.label) ? ''
+    : m.id === 'next' ? 'The merge service will test this PR in the next batch.' : m.reason || box.say
   const missing = prTracks(c).missing
   // Required reviewers show only when the PR has requirements; the names come from the room.
   const required = c.requiredReviewers?.length
@@ -365,7 +369,7 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
       // review tab, and a first round that has not started has no link.
       { id: 'review', ...rv, note: reviewNote, link: c.reviewState === 'reviewing' && c.reviewerSession ? 'session' : c.reviewRound ? 'review' : '' },
       ...required,
-      { id: 'merge', icon, title: isDone(c) ? m.label : nextAction(c, merge).label, note, link: '' },
+      { id: 'merge', icon, title: isDone(c) ? m.label : action.label, note, link: '' },
     ],
     status: box,
   }
