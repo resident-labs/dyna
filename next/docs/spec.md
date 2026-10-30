@@ -648,7 +648,7 @@ Disk requests are for admission accounting only; they do not set a volume quota.
 
 - The limits apply to the budget slice, which holds the box and all its descendants. A short peak slows the tree down instead of killing a harness.
 - Defaults: root `small`, a lead `medium`, a child the size its parent picks, up to the parent's own size. A repository can set a default in `.dyna/images/<name>/size`.
-- **Pressure.** The box agent emits `box.pressure` once per episode, when `memory.events` shows `high` throttling for 60 s, or when a process reaches `max`. It is a room event that wakes nobody. It shows whether boxes need growth.
+- **Pressure.** Each host's heartbeat reads its dyna budget slices' `memory.events` on every 10 s probe, in one host command, and the engine emits `box.pressure` once per episode, when `memory.events` shows `high` throttling for 60 s, or when a process reaches `max`. It is a room event that wakes nobody. It shows whether boxes need growth.
 - **No growth until after the cutover** (owner, 2026-10-30, q40). Budgets already allow bursts to 1.5 times the size, and throttling slows a box down instead of killing it. A session that needs a larger box closes it and starts a new one at a larger size. `box.grow` comes later, when the pressure events show the need.
 
 ### 5.5 Budgets and placement
@@ -1260,7 +1260,7 @@ Acceptance:
 2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move to another host, or of a subtree with a running shell job, is refused. During a move, a turn in the subtree that starts a shell job gets a refusal (fake box agent). A move holds the subtree's wakes until its turns end, then re-creates the boxes under the new slices, parent before child, and delivers the held wakes. Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. When that parent is root, the goals have no holder, and `session.closed` lists them. Close of root fails.
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
-5. unit: a box whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
+5. unit: a budget slice whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
 6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no-grant`, revoke, expiry, and the `hostexec-scope` refusal.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
