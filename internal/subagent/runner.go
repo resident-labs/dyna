@@ -228,43 +228,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
-	profs, err := m.profiles()
+	prof, err := m.prepareTurnProfile(meta, id, writes)
 	if err != nil {
 		return fail(err)
-	}
-	p, ok := profs.Get(meta.Profile)
-	if meta.Run != nil && meta.Run.Profile != nil {
-		p, ok = meta.Run.Profile, true
-	}
-	if !ok {
-		return fail(fmt.Errorf("profile %q is no longer registered", meta.Profile))
-	}
-	prof := *p
-	if meta.Model != "" {
-		models := prof.EffectiveModels()
-		if len(models) <= 1 || !slices.Contains(models, meta.Model) {
-			prof.Model = meta.Model
-			prof.Models = nil
-		} else {
-			rest := slices.DeleteFunc(slices.Clone(models), func(m string) bool { return m == meta.Model })
-			prof.Model, prof.Models = meta.Model, append([]string{meta.Model}, rest...)
-		}
-	}
-	writes.note(TurnNote{Profile: &TurnProfile{Profile: prof.Name, Model: prof.Model, Harness: prof.Harness, Dialect: prof.EffectiveDialect()}})
-	prof.Env = cloneEnv(prof.Env)
-	childenv.SetTrimpath(prof.Env)
-	scratchPath, err := scratch.Ensure(id)
-	if err != nil {
-		log.Printf("session scratch unavailable: %v", err)
-	}
-	prof.Env[scratch.Env] = scratchPath
-	if err := scratch.SetTemp(prof.Env, id); err != nil {
-		log.Printf("session temporary folder unavailable: %v", err)
-	}
-	stampSession(prof.Env, meta)
-	prof.Env[runstore.SessionEnv] = id
-	if exe := m.executable(); exe != "" {
-		prof.Env["DYNA_BIN"] = exe
 	}
 
 	rawPath, _ := store.RawOutputPath(id)
@@ -459,42 +425,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		return r, err
 	}
 
-	base := turn.Prompt
-	roomContext := store.SelectorContext(meta)
-	if usage := usageFrame(prof.Harness); usage != "" {
-		roomContext += "\n" + usage
-	}
-	// The instructions carry the whole spawn goal, so the goal frame leaves
-	// out its clipped line.
-	shownGoal := ""
-	goalBlock, hasBrief := m.spawnGoalBlock(meta)
-	if goalBlock != "" {
-		shownGoal = meta.Goal
-	}
-	if frame := m.goalFrame(meta, shownGoal); frame != "" {
-		roomContext += "\n" + frame
-	}
-	if n > 1 {
-		if prev, err := store.ReadTurn(id, n-1); err == nil {
-			if store.turnImitatesDelivery(id, prev) {
-				roomContext += "\n" + forgedDeliveryNote
-			}
-		}
-	}
-	if line := turn.Wake.HeaderLine(); line != "" {
-		roomContext += "\n" + line
-	}
-	if n == 1 || turn.TransferID != "" {
-		// A new session's brief is in the instructions. A transfer packet or a
-		// service assignment still follows it.
-		task := turn.Prompt
-		if n == 1 && turn.TransferID == "" && hasBrief {
-			task = ""
-		}
-		base = firstTurnPrompt(roomContext, task)
-	} else {
-		base = followUpPrompt(n, turn.Prompt, roomContext)
-	}
+	base, roomContext := m.buildTurnPrompt(store, meta, turn, id, n, prof.Harness)
 	claimed, err := writes.claimInput(ctx, InputClaim{Turn: n, Startup: true, Covered: covered})
 	if err != nil {
 		return fail(err)
@@ -610,6 +541,91 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	err = fmt.Errorf("schema validation failed after %d attempts: %w", structuredoutput.SchemaAttempts, lastErr)
 	_ = finish(TurnError, raw, err)
 	return err
+}
+
+// prepareTurnProfile resolves the profile and prepares the child environment.
+func (m *Manager) prepareTurnProfile(meta Meta, id string, writes *runnerWrites) (profile.Profile, error) {
+	profs, err := m.profiles()
+	if err != nil {
+		return profile.Profile{}, err
+	}
+	p, ok := profs.Get(meta.Profile)
+	if meta.Run != nil && meta.Run.Profile != nil {
+		p, ok = meta.Run.Profile, true
+	}
+	if !ok {
+		return profile.Profile{}, fmt.Errorf("profile %q is no longer registered", meta.Profile)
+	}
+	prof := *p
+	if meta.Model != "" {
+		models := prof.EffectiveModels()
+		if len(models) <= 1 || !slices.Contains(models, meta.Model) {
+			prof.Model = meta.Model
+			prof.Models = nil
+		} else {
+			rest := slices.DeleteFunc(slices.Clone(models), func(m string) bool { return m == meta.Model })
+			prof.Model, prof.Models = meta.Model, append([]string{meta.Model}, rest...)
+		}
+	}
+	writes.note(TurnNote{Profile: &TurnProfile{Profile: prof.Name, Model: prof.Model, Harness: prof.Harness, Dialect: prof.EffectiveDialect()}})
+	prof.Env = cloneEnv(prof.Env)
+	childenv.SetTrimpath(prof.Env)
+	scratchPath, err := scratch.Ensure(id)
+	if err != nil {
+		log.Printf("session scratch unavailable: %v", err)
+	}
+	prof.Env[scratch.Env] = scratchPath
+	if err := scratch.SetTemp(prof.Env, id); err != nil {
+		log.Printf("session temporary folder unavailable: %v", err)
+	}
+	stampSession(prof.Env, meta)
+	prof.Env[runstore.SessionEnv] = id
+	if exe := m.executable(); exe != "" {
+		prof.Env["DYNA_BIN"] = exe
+	}
+
+	return prof, nil
+}
+
+// buildTurnPrompt assembles the turn context before claiming room input.
+func (m *Manager) buildTurnPrompt(store *Store, meta Meta, turn Turn, id string, n int, harnessName string) (string, string) {
+	base := turn.Prompt
+	roomContext := store.SelectorContext(meta)
+	if usage := usageFrame(harnessName); usage != "" {
+		roomContext += "\n" + usage
+	}
+	// The instructions carry the whole spawn goal, so the goal frame leaves
+	// out its clipped line.
+	shownGoal := ""
+	goalBlock, hasBrief := m.spawnGoalBlock(meta)
+	if goalBlock != "" {
+		shownGoal = meta.Goal
+	}
+	if frame := m.goalFrame(meta, shownGoal); frame != "" {
+		roomContext += "\n" + frame
+	}
+	if n > 1 {
+		if prev, err := store.ReadTurn(id, n-1); err == nil {
+			if store.turnImitatesDelivery(id, prev) {
+				roomContext += "\n" + forgedDeliveryNote
+			}
+		}
+	}
+	if line := turn.Wake.HeaderLine(); line != "" {
+		roomContext += "\n" + line
+	}
+	if n == 1 || turn.TransferID != "" {
+		// A new session's brief is in the instructions. A transfer packet or a
+		// service assignment still follows it.
+		task := turn.Prompt
+		if n == 1 && turn.TransferID == "" && hasBrief {
+			task = ""
+		}
+		base = firstTurnPrompt(roomContext, task)
+	} else {
+		base = followUpPrompt(n, turn.Prompt, roomContext)
+	}
+	return base, roomContext
 }
 
 // drainRoomMessages returns the posts to this session after its room cursor
