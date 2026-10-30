@@ -36,6 +36,8 @@ func TestWritePolicy(t *testing.T) {
 		{name: "unknown comment author", args: []string{"api", "repos/o/r/issues/comments/7", "-X", "DELETE"}, target: TargetUpstream, rule: "comment-foreign", reason: ReasonForeignComment},
 		{name: "failed rerun", args: []string{"run", "rerun", "3", "--failed"}, target: TargetRoom, rule: "rerun-failed", class: approvals.ClassAgent},
 		{name: "own run", args: []string{"run", "cancel", "3"}, target: TargetRoom, author: "bot", rule: "run-own", class: approvals.ClassAgent},
+		{name: "own upstream run rerun", args: []string{"run", "rerun", "3", "--failed"}, target: TargetUpstream, author: "bot", rule: "run-own", class: approvals.ClassAgent},
+		{name: "foreign upstream run rerun", args: []string{"run", "rerun", "3", "--failed"}, target: TargetUpstream, author: "other", rule: "upstream-verb", reason: ReasonUpstreamVerb},
 		{name: "fork upstream", args: []string{"repo", "fork", "o/r"}, target: TargetUpstream, rule: "fork-upstream", class: approvals.ClassAgent},
 		{name: "other repo", args: []string{"pr", "review", "3", "--approve"}, target: TargetOther, rule: "other-repository", reason: ReasonOther},
 		{name: "read only", args: []string{"pr", "create"}, target: TargetRoom, readOnly: true, rule: "read-only", reason: ReasonReadOnly},
