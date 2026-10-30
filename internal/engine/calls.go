@@ -143,6 +143,8 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Nodes", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Nodes},
 		{Name: "Node", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Node},
 		{Name: "NodeWork", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.NodeWork},
+		{Name: "NodeHistory", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.NodeHistory},
+		{Name: "NodeLastDiagnosis", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.NodeLastDiagnosis},
 		// Changing a machine's roles or route retargets the engine's work, so
 		// the write needs the admin scope, like other settings.
 		{Name: "SaveNode", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyMachine, Method: machine.SaveNode},
