@@ -205,7 +205,23 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 		return byAuthor(ItemIssue, p.positional)
 	case "pr close", "pr reopen":
 		return byAuthor(ItemPR, p.positional)
-	case "run rerun", "run cancel":
+	case "run rerun":
+		// Rerunning failed jobs on the room's own repository only retries CI, so any
+		// account may do it. The upstream repository still goes by run author.
+		failedOnly := false
+		if value, ok := p.flags["--failed"]; ok {
+			// A bare --failed is a switch. Otherwise gh parses the value as a boolean,
+			// so --failed=false reruns every job and is not failed-only.
+			failedOnly = value == ""
+			if enabled, err := strconv.ParseBool(value); err == nil {
+				failedOnly = enabled
+			}
+		}
+		if failedOnly && !strings.EqualFold(in.Host+"/"+in.Repo, in.Upstream) {
+			return approvals.ClassAgent
+		}
+		return byAuthor(ItemRun, p.positional)
+	case "run cancel":
 		return byAuthor(ItemRun, p.positional)
 	case "repo fork":
 		if _, org := p.flags["--org"]; org || in.Upstream == "" {
