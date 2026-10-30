@@ -53,6 +53,15 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 	}
 	return s, room.Room, session.Session, ctx
 }
+func TestRoomCreatesRootAndAttachesWorker(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	var parent contract.SessionID
+	var name string
+	err := s.store.Read().QueryRowContext(ctx, "SELECT p.id,p.name FROM sessions w JOIN sessions p ON p.id=w.parent WHERE w.id=? AND p.room=? AND p.parent IS NULL", worker, room).Scan(&parent, &name)
+	if err != nil || parent == "" || name != "root" {
+		t.Fatalf("root %s %q: %v", parent, name, err)
+	}
+}
 func TestRoomRepoAPI(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -354,6 +363,14 @@ func TestBoxLifecycleEmitsTransitions(t *testing.T) {
 		if change.To != want[i] {
 			t.Fatalf("transition %d: got %s, want %s", i, change.To, want[i])
 		}
+	}
+}
+
+func TestSessionStartRejectsUnknownParent(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: "missing"})
+	if e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("expected invalid, got %v", e)
 	}
 }
 
