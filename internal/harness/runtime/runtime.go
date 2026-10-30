@@ -21,19 +21,6 @@ import (
 	"dyna-agent/internal/store"
 )
 
-type Doctor struct {
-	Profile       string   `json:"profile"`
-	Harness       string   `json:"harness"`
-	Binary        string   `json:"binary"`
-	Version       string   `json:"version"`
-	Home          string   `json:"home"`
-	AccountID     string   `json:"accountId"`
-	Status        string   `json:"status"`
-	Reason        string   `json:"reason"`
-	SwitchPending bool     `json:"switchPending"`
-	RunningTurns  int      `json:"runningTurns"`
-	Warnings      []string `json:"warnings,omitempty"`
-}
 type Runtime struct {
 	privateRecommendations func(context.Context) []RecommendedVersion
 	privateLoginMu         sync.Mutex
@@ -562,17 +549,6 @@ func AccountInUse(id string) bool {
 	}
 	pending, running := NewAccounts().SwitchStatus(n.Harness)
 	return pending || running > 0
-}
-
-type Capability struct {
-	Harness             string `json:"harness"`
-	Status              string `json:"status"`
-	Reason              string `json:"reason"`
-	InstallSupported    bool   `json:"installSupported"`
-	AccountBlocked      string `json:"accountBlocked"`
-	MCP                 bool   `json:"mcp"`
-	Concurrent          bool   `json:"concurrent"`
-	SharedPersonalLogin bool   `json:"sharedPersonalLogin"`
 }
 
 func Capabilities() []Capability {
