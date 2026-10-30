@@ -2,6 +2,8 @@
 // data and returns a typed value, or null where the call failed or the shape
 // is wrong. Nothing here changes data.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
+import { StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp, DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, type Detail, type State } from '../api/service.gen.ts'
+import type { RegistryService } from '../api/service.ts'
 import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, RunReason, ServiceInfo as ServiceRow, SyncInfoByRepo, SyncRemote, TestHealth, UsageRow } from './model.ts'
 
 const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord) : [])
@@ -157,3 +159,17 @@ export function readHookLog(v: unknown): RunReason | null {
   const lines = str(v.tail).split('\n').map((l) => l.trim()).filter(Boolean)
   return { exitCode: v.exitCode, detail: v.exitCode >= 0 ? '' : lines.at(-1) ?? '' }
 }
+
+const states: readonly State[] = [StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp]
+const details: readonly Detail[] = [DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable]
+
+// ServiceRegistry: serviceregistry.Service. A row with a state or detail this
+// page does not know is dropped, so its service shows as unreadable.
+export const readRegistry = (v: unknown): RegistryService[] | null =>
+  Array.isArray(v)
+    ? v.filter(isRecord).flatMap((r) => {
+      const state = states.find((s) => s === r.state)
+      const detail = details.find((d) => d === r.detail)
+      return state && detail && isString(r.id) ? [{ ...(r as unknown as RegistryService), state, detail }] : []
+    })
+    : null

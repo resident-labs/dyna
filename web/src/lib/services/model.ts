@@ -3,6 +3,8 @@
 // call the engine already serves; a field with no source stays empty and the
 // page shows it as unknown. Nothing here changes data.
 
+import type { RegistryService, RegistryServiceId, RegistryState } from '../api/service.ts'
+
 export type Tone = 'live' | 'on' | 'off' | 'error'
 
 // ServiceInfo is one ListServices row.
@@ -140,6 +142,8 @@ export interface Inputs {
   queue: QueueRow[] | null
   mergePaused: boolean | null
   history: MergeHistoryRow[]
+  // registry is the engine's service list, the one the CLI prints; null when it could not be read.
+  registry: RegistryService[] | null
   services: ServiceInfo[] | null
   notices: NoticeRow[] | null
   hooks: HookRow[] | null
@@ -306,51 +310,66 @@ function libraryRepos(settings: Inputs['settings']): string[] | null {
   } catch { return null }
 }
 
+// stateTone is how a registry state draws: working is live, an enabled service
+// is on, a stopped or unconfigured one is off.
+const stateTone: Record<RegistryState, Tone> = { on: 'on', running: 'live', waiting: 'on', idle: 'on', off: 'off', error: 'error', 'not-set-up': 'off' }
+
+// detailLine words a registry service's typed detail for the owner. A service
+// with no detail says what it does.
+function detailLine(s: RegistryService): string {
+  switch (s.detail) {
+    case 'last-run-failed': return 'Last run failed'
+    case 'no-run-yet': return 'No run yet'
+    case 'profile-waiting': return 'Waiting for a profile that can run'
+    case 'working': return s.count ? `Working · ${s.count} waiting` : 'Working'
+    case 'queued': return `${s.count} waiting`
+    case 'paused': return 'Paused'
+    case 'in-a-call': return 'In a call'
+    case 'unavailable': return 'Not available on this machine'
+    case 'unreadable': return 'Could not be read'
+    case '': return s.description
+  }
+}
+
 export function buildRows(i: Inputs): Row[] {
   const svc = (role: string): ServiceInfo | undefined => i.services?.find((s) => s.role === role)
   const rows: Row[] = []
   const base = { toggle: null, profile: null, value: '', last: '', nextAt: '', nextText: '', filterable: true }
+  // The engine's service list gives each row its state, detail and times, so
+  // this page and `dyna services` always agree. Without it a row says unreadable.
+  const reg = (id: RegistryServiceId): Pick<Row, 'state' | 'tone' | 'detail' | 'last' | 'nextAt'> => {
+    const s = i.registry?.find((r) => r.id === id)
+    return s
+      ? { state: s.state, tone: stateTone[s.state], detail: detailLine(s), last: s.lastRun ?? '', nextAt: s.nextRun ?? '' }
+      : { state: unknown, tone: 'off', detail: 'The service list could not be read', last: '', nextAt: '' }
+  }
 
   // PR reviewers: one session per ready change, with a switch and a profile
   // the owner can change without opening anything.
-  // A provider limit only matters while there is work, so an idle reviewer
-  // says idle. With work it says the limit once, in its one status.
   const rev = i.reviewer
   const reviewerSvc = svc('reviewer')
-  const limited = !!rev && (!!rev.current || rev.queued > 0) && !!rateLimit(i.notices, reviewerSvc?.profile ?? rev.profile)
   rows.push({
     ...base,
+    ...reg('reviewer'),
     id: 'reviewer',
     name: 'PR reviewers',
-    state: !rev ? 'unreadable' : !rev.enabled ? 'off' : reviewerSvc?.reason.startsWith('waiting:') ? 'waiting' : rev.lastError ? 'error' : limited ? 'rate-limited' : rev.current ? 'running' : rev.queued ? 'waiting' : 'idle',
-    tone: !rev ? 'off' : !rev.enabled ? 'off' : rev.lastError ? 'error' : rev.current ? 'live' : 'on',
-    detail: !rev
-      ? 'Reviewer state could not be read'
-      : reviewerSvc?.reason.startsWith('waiting:') ? reviewerSvc.reason
-      : rev.lastError || (rev.current ? `reviewing #${rev.current.pr} · ${rev.current.title}` : rev.queued ? `${rev.queued} waiting for review` : 'nothing to review now'),
     toggle: rev ? { id: 'review.enabled', on: rev.enabled } : null,
     profile: reviewerSvc ? { id: 'review.profile', value: reviewerSvc.pinned, options: ['', ...reviewerSvc.profiles] } : null,
     value: turnsOf(i.usage, 'reviewer'),
-    last: rev?.lastVerdictAt ?? '',
-    nextText: rev?.queued ? `${rev.queued} waiting` : '',
   })
 
   // Merge queue: the worker runs trials and publishes; the switch pauses it.
   const paused = i.mergePaused
-  const counts = queueCounts(i.queue)
   rows.push({
     ...base,
+    ...reg('merge-queue'),
     id: 'merge',
     name: 'Merge queue',
-    state: !i.queue || paused === null ? 'unreadable' : paused ? 'paused' : counts.running ? 'running' : 'waiting',
-    tone: !i.queue || paused === null ? 'off' : paused ? 'off' : counts.running ? 'live' : 'on',
-    detail: queueLine(i.queue),
     toggle: i.queue && paused !== null ? { id: 'merge.paused', on: !paused } : null,
-    last: i.history[0]?.at ?? '',
-    nextText: counts.ready ? `${counts.ready} ready` : '',
   })
 
   // Conflict radar runs with the watcher on every push, so it has no switch.
+  // The registry counts it with the PR watcher, so its overlap line stays here.
   const overlaps = i.changes.filter((c) => (typeof c.overlaps === 'number' ? c.overlaps : c.overlaps?.length ?? 0) > 0).length
   rows.push({
     ...base,
@@ -362,134 +381,50 @@ export function buildRows(i: Inputs): Row[] {
     nextText: 'each push',
   })
 
-  // PR watcher: the engine polls each open change's pull request, so its last
-  // tick and the error of the newest failed poll are the row's state. It has
-  // no switch, because the review and merge flow reads what it polls.
-  const watched = i.changes
-    .filter((c) => c.watching === true && c.kind !== 'local')
-    .sort((a, b) => seen(b.checked).localeCompare(seen(a.checked)))
-  const polled = watched.map((c) => seen(c.checked)).find(Boolean) ?? ''
-  const pollError = watched.find((c) => c.error)?.error?.split('\n')[0] ?? ''
-  rows.push({
-    ...base,
-    id: 'watcher',
-    name: 'PR watcher',
-    state: 'on',
-    tone: pollError ? 'error' : 'on',
-    detail: pollError
-      ? [pollError, polled ? `last tick ${hhmm(polled)}` : ''].filter(Boolean).join(' · ')
-      : `Watches ${watched.length} open ${watched.length === 1 ? 'change' : 'changes'} each minute · ${polled ? `last tick ${hhmm(polled)}` : 'no tick yet'}`,
-    last: polled,
-    nextText: 'each minute',
-  })
-
-  // Lane sync fetches this room's lane remotes on its own timer, and a fetch or
-  // export error is the row's error. It has no switch, because integration and
-  // the PR gates read what it fetches.
-  const laneStatus = i.laneSync
-  const lane = laneStatus && i.repo ? laneStatus[i.repo] ?? null : null
-  const laneError = [
-    lane?.remotes.find((r) => r.lastError)?.lastError.split('\n')[0] ?? '',
-    lane?.operationError ?? '',
-  ].filter(Boolean).join(' · ')
-  const fetched = lane?.remotes.map((r) => seen(r.checkedAt)).find(Boolean) ?? ''
-  rows.push({
-    ...base,
-    id: 'lanesync',
-    name: 'Lane sync',
-    state: laneStatus === null ? unknown : 'on',
-    tone: laneStatus === null ? 'off' : laneError ? 'error' : 'on',
-    detail: laneStatus === null
-      ? 'Lane status could not be read'
-      : !i.repo
-        ? 'No repository for this room'
-        : !lane
-          ? 'No lane remotes set up for this repository'
-          : laneError
-            ? [laneError, fetched ? `last fetch ${hhmm(fetched)}` : ''].filter(Boolean).join(' · ')
-            : `Fetches ${lane.remotes.length} lane ${lane.remotes.length === 1 ? 'remote' : 'remotes'} every 5 min · ${fetched ? `last fetch ${hhmm(fetched)}` : 'no fetch yet'}`,
-    last: fetched,
-    nextText: 'every 5 min',
-  })
+  // PR watcher and lane sync have no switch, because the review and merge flow
+  // and the PR gates read what they fetch.
+  rows.push({ ...base, ...reg('pr-watcher'), id: 'watcher', name: 'PR watcher', nextText: 'each minute' })
+  rows.push({ ...base, ...reg('lane-sync'), id: 'lanesync', name: 'Lane sync', nextText: 'every 5 min' })
 
   // Librarian activation stays local; the browser shows status and profile.
-  const repos = libraryRepos(i.settings)
-  const libraryOn = repos === null || !i.repo ? null : repos.includes(i.repo)
-  const main = hook(i.hooks, 'librarian-main')
   const library = svc('librarian')
-  const libraryWait = library?.reason
-  const libraryWaiting = libraryWait?.startsWith('waiting:') ? libraryWait : ''
   rows.push({
     ...base,
+    ...reg('library'),
     id: 'librarian',
     name: 'Librarian',
-    state: libraryWaiting ? 'waiting' : libraryOn === null ? unknown : libraryOn ? 'on' : 'off',
-    tone: libraryOn === null ? 'off' : libraryOn ? 'on' : 'off',
-    detail: libraryWaiting || (libraryOn === null
-      ? !i.repo ? 'No repository for this room' : 'Librarian settings could not be read'
-      : libraryOn ? 'Keeps the feature map current' : 'Turn on with dyna library enable on this machine'),
     profile: library
       ? { id: 'library.profile', value: library.pinned, options: ['', ...library.profiles] }
       : i.settings ? { id: 'library.profile', value: i.settings['library.profile'] ?? '', options: [] } : null,
     value: turnsOf(i.usage, 'librarian'),
-    last: main?.lastRun?.startedAt ?? '',
-    // The next pass is the engine's deferred wake; nothing shows when no pass is deferred.
-    nextAt: libraryOn ? i.deferred ?? '' : '',
   })
 
   // Update Dyna follows its configured trigger, usually main-updated.
   const update = hook(i.hooks, 'self-update')
-  const updateOff = update?.hook.disabled ?? false
-  const updateResult = update?.lastRun?.result ?? ''
-  const updateFailed = updateResult === 'error'
-  const updateRunning = updateResult === 'pending'
-  const updateTrigger = !update ? '' : update.hook.event === 'schedule'
-    ? `Every ${update.hook.everyMinutes} min`
-    : update.hook.event === 'main-updated' ? 'When main updates' : `On ${update.hook.event.replaceAll('-', ' ')}`
-  const updateLast = updateRunning ? 'running' : `last ${updateResult === 'pass' ? 'passed' : updateFailed ? 'failed' : updateResult || unknown}`
+  const updateRunning = update?.lastRun?.result === 'pending'
   rows.push({
     ...base,
+    ...reg('updates'),
     id: 'update',
     name: 'Update Dyna',
-    state: !update ? (i.hooks === null ? unknown : 'off') : updateRunning ? 'running' : updateOff ? 'off' : updateFailed ? 'error' : 'on',
-    tone: !update ? 'off' : updateRunning ? 'live' : updateOff ? 'off' : updateFailed ? 'error' : 'on',
-    detail: i.hooks === null
-      ? 'Hook state could not be read'
-      : !update
-        ? 'No update hook in this repository'
-        : `${updateTrigger} · ${update.lastRun ? updateLast : 'no run yet'}`,
-    toggle: update ? { id: 'update.enabled', on: !updateOff } : null,
+    toggle: update ? { id: 'update.enabled', on: !update.hook.disabled } : null,
     value: update && !updateRunning ? elapsed(update.lastRun?.startedAt ?? '', update.lastRun?.finishedAt ?? '') : '',
-    last: update?.lastRun?.startedAt ?? '',
-    nextAt: nextAt(update),
-    nextText: update && !updateOff ? updateTrigger : '',
   })
 
   // Maintenance and account usage run on their own. They carry no switch,
   // because off would leave data on disk forever, or gain nothing at all.
   rows.push({
     ...base,
+    ...reg('maintenance'),
     id: 'maintenance',
     name: 'Maintenance',
-    state: 'on',
-    tone: 'on',
-    detail: i.settings ? `Keeps runs ${readableDuration(i.settings['runs.retention'] ?? '')} · worktrees ${i.settings['worktrees.retention'] ?? unknown}` : 'Settings need admin access',
     nextText: 'each min',
     settings: i.settings ? [
       { id: 'runs.retention', label: 'Keep runs for', value: i.settings['runs.retention'] ?? '' },
       { id: 'worktrees.retention', label: 'Keep worktrees', value: i.settings['worktrees.retention'] ?? 'changed', options: ['changed', 'all', 'none'] },
     ] : [],
   })
-  rows.push({
-    ...base,
-    id: 'usage',
-    name: 'Account usage',
-    state: !i.accounts ? unknown : i.accounts.stale ? 'stale' : 'on',
-    tone: !i.accounts ? 'off' : i.accounts.stale ? 'off' : 'on',
-    detail: !i.accounts ? 'Account usage could not be read' : `Refreshes on sign-in and account switch · ${i.accounts.count} ${i.accounts.count === 1 ? 'account' : 'accounts'}`,
-    last: i.accounts?.at ?? '',
-    nextText: 'on sign-in',
-  })
+  rows.push({ ...base, ...reg('account-usage'), id: 'usage', name: 'Account usage', nextText: 'on sign-in' })
 
   // CI admission decides what a run may cost; its budget is its control.
   rows.push({
@@ -505,15 +440,7 @@ export function buildRows(i: Inputs): Row[] {
   })
 
   // Voice runs one call at a time, started and stopped per call.
-  const voiceOff = i.voice?.startsWith('unavailable') ?? false
-  rows.push({
-    ...base,
-    id: 'voice',
-    name: 'Voice',
-    state: i.voice === null ? unknown : voiceOff ? 'off' : i.voice === 'live' ? 'in a call' : 'idle',
-    tone: i.voice === null || voiceOff ? 'off' : i.voice === 'live' ? 'live' : 'on',
-    detail: i.voice === null ? 'Voice status could not be read' : voiceOff ? i.voice.replace(/^unavailable:?\s*/, '') || 'Not available' : 'Started and stopped per call',
-  })
+  rows.push({ ...base, ...reg('voice'), id: 'voice', name: 'Voice' })
   return rows
 }
 
