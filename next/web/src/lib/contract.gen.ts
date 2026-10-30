@@ -113,7 +113,9 @@ export type TurnEnded = { session: SessionID; turn: TurnID; outcome: TurnOutcome
 export type FinalReply = { reply: ReplyChannel; posted?: EventID; };
 export type Usage = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; };
 export type ShellJobEnded = { session: SessionID; job: ShellJobID; exitCode: number; tail: string; };
-export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from: BoxState; to: BoxState; reason?: string; };
+export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from?: BoxState; to: BoxState; reason?: string; };
+export type PressureKind = "high" | "max";
+export type BoxPressure = { box: BoxID; kind: PressureKind; };
 export type ImageBuilt = { host: HostName; repo: RepoName; name: string; tag: string; seconds: number; };
 export type ImageFailed = { host: HostName; repo: RepoName; name: string; tag: string; reason: string; logTail: string; };
 export type BoxState = "pending" | "creating" | "starting" | "ready" | "stopped" | "closing" | "deleted" | "failed" | "lost";
@@ -150,7 +152,10 @@ export type Card = { title: string; body?: string; target: Target; changes?: Arr
 export type Target = { kind: TargetKind; name: string; };
 export type Change = { field: ChangeField; old: string; new: string; };
 export type Decision = { by: Principal; approved: boolean; reason?: string; at: string; };
-export type OpResult = { exitCode: number; error?: string; output?: string; outputFile?: string; };
+export type PrOpenArgs = { title: string; body: string; base: string; draft: boolean; };
+export type PrOpened = { repo: RepoName; number: number; session: SessionID; url: string; };
+export type PrOpenResult = { number: number; url: string; };
+export type OpResult = { pr?: PrOpenResult | null; exitCode: number; error?: string; output?: string; outputFile?: string; };
 export type OpSubmitRequest = { operation: Operation; };
 export type OpSubmitResponse = { operation: Operation; };
 export type OpDecideRequest = { id: OpID; approve: boolean; reason?: string; };
@@ -164,19 +169,21 @@ export type OpDecided = { id: OpID; state: OpState; decision: Decision; };
 export type OpRan = { id: OpID; state: OpState; result: OpResult; };
 export type EventBody =
   | { type: "box.changed"; body: BoxChanged }
+  | { type: "box.pressure"; body: BoxPressure }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
   | { type: "op.decided"; body: OpDecided }
   | { type: "op.ran"; body: OpRan }
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
+  | { type: "pr.opened"; body: PrOpened }
   | { type: "session.closed"; body: SessionClosed }
   | { type: "session.started"; body: SessionStarted }
   | { type: "shell.job.ended"; body: ShellJobEnded }
   | { type: "turn.ended"; body: TurnEnded }
   | { type: "turn.started"; body: TurnStarted }
 ;
-export type OpArgs = never;
+export type OpArgs = PrOpenArgs;
 export type BoxMessageBody =
   | { type: "archive"; body: Archive }
   | { type: "turn.start"; body: TurnStart }

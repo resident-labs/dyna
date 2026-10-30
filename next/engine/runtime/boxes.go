@@ -4,6 +4,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -37,8 +38,26 @@ type Boxes struct {
 	PiTarball []byte
 	Mirror    *enginegit.Mirror
 	Images    *engineimages.Builder
+	Context   context.Context
+	Pressure  *engine.Service
 	mu        sync.Mutex
 	hosts     map[contract.HostName]*podman.Host
+}
+
+// cache stores a host driver and starts its heartbeat until the engine stops. A cached name keeps its first driver and heartbeat. The caller holds b.mu.
+func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
+	if b.hosts == nil {
+		b.hosts = make(map[contract.HostName]*podman.Host)
+	}
+	if b.hosts[name] != nil {
+		return
+	}
+	b.hosts[name] = h
+	ticker := time.NewTicker(10 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		h.Heartbeat(b.Context, ticker.C, func(ok bool) { log.Printf("host %s reachable: %t", name, ok) }, b.pressure(name))
+	}()
 }
 
 func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host, error) {
@@ -57,10 +76,7 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			if err != nil {
 				return nil, err
 			}
-			if b.hosts == nil {
-				b.hosts = make(map[contract.HostName]*podman.Host)
-			}
-			b.hosts[name] = h
+			b.cache(name, h)
 			return h, nil
 		}
 	}
@@ -102,10 +118,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 		return err
 	}
 	b.mu.Lock()
-	if b.hosts == nil {
-		b.hosts = make(map[contract.HostName]*podman.Host)
-	}
-	b.hosts[req.Name] = h
+	b.cache(req.Name, h)
 	b.mu.Unlock()
 	return nil
 }
