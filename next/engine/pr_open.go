@@ -87,7 +87,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			client := http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 			response, err := client.Do(request)
 			if err != nil {
-				return contract.OpResult{Error: "GitHub request failed"}
+				return contract.OpResult{Error: "GitHub request failed; outcome unknown, reconcile before retrying"}
 			}
 			defer response.Body.Close()
 			var payload struct {
@@ -106,36 +106,34 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return contract.OpResult{Error: strings.ReplaceAll(strings.Join(parts, ": "), token, "***")}
 			}
 			if err != nil || payload.Number <= 0 {
-				return contract.OpResult{Error: "invalid GitHub PR response"}
+				return contract.OpResult{Error: "GitHub may have opened the PR but returned an invalid response; reconcile before retrying"}
 			}
 			link := "https://github.com/" + string(repo) + "/pull/" + strconv.Itoa(payload.Number)
 			result := contract.OpResult{Output: link, PR: &contract.PrOpenResult{Number: payload.Number, URL: link}}
+			failed := result
+			failed.Error = "PR opened but ownership could not be recorded; reconcile before retrying: " + link
 			session, err := s.store.Session(ctx, who.Session)
 			if err != nil {
-				result.Error = "PR opened but ownership could not be recorded: " + link
-				return result
+				return failed
 			}
 			tree, err := s.store.RoomTree(ctx, session.Room)
 			if err != nil {
-				result.Error = "PR opened but ownership could not be recorded: " + link
-				return result
+				return failed
 			}
 			event, err := s.event(session.Room, who, contract.PrOpened{Repo: repo, Number: payload.Number, Session: who.Session, URL: link})
 			if err != nil {
-				result.Error = "PR opened but ownership could not be recorded: " + link
-				return result
+				return failed
 			}
 			var deliveries []contract.Delivery
 			if who.Session != tree.Root() {
 				parent, err := tree.Handoff(who.Session)
 				if err != nil {
-					result.Error = "PR opened but ownership could not be recorded: " + link
-					return result
+					return failed
 				}
 				deliveries = []contract.Delivery{{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent.PRHolder}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}}
 			}
 			if err := s.store.RecordPROpen(ctx, repo, payload.Number, who.Session, event, deliveries); err != nil {
-				result.Error = "PR opened but ownership could not be recorded: " + link
+				return failed
 			}
 			return result
 		},
