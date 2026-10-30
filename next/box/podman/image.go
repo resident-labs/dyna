@@ -21,8 +21,12 @@ func (h *Host) BuildBase(ctx context.Context, containerfile, piTarball []byte) (
 		hash.Write(input)
 	}
 	tag := fmt.Sprintf("dyna-base:%x", hash.Sum(nil))
-	h.buildMu.Lock()
-	defer h.buildMu.Unlock()
+	select {
+	case h.buildGate <- struct{}{}:
+		defer func() { <-h.buildGate }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 	_, err := h.run(ctx, "podman", "image", "exists", tag)
 	if err == nil {
 		return tag, nil
