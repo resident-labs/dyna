@@ -692,7 +692,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
-    threadEnd: false,
+    threadEnd: true,
     audience: "room",
     text: "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
   },

@@ -295,7 +295,7 @@
       {:else if sealedEvent(p)}
         {@const Card = rendererFor(p)}
         {#if Card}
-          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} request={questionsById[terminalRequestEvent(p)?.requestId ?? terminalDoneEvent(p)?.requestId ?? '']} {onreviewrequest} {ondeclinerequest} approval={openApprovals[approvalRequestedEvent(p)?.requestId ?? '']} latest={newestApproval[approvalRequestedEvent(p)?.requestId ?? ''] === p.id} {ondecideapproval} focus={flash?.key === row.key ? flash.id : ''} />
+          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} request={questionsById[terminalRequestEvent(p)?.requestId ?? terminalDoneEvent(p)?.requestId ?? '']} {onreviewrequest} {ondeclinerequest} approval={openApprovals[approvalRequestedEvent(p)?.requestId ?? '']} latest={newestApproval[approvalRequestedEvent(p)?.requestId ?? ''] === p.id} {ondecideapproval} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
           <UnknownEventRow />
         {/if}

@@ -287,6 +287,14 @@ func TestHookRunPostsStartAndResult(t *testing.T) {
 	if result.Notice.Kind != string(TypeResult) || start.ID == result.ID {
 		t.Fatalf("stored result = %+v (start %s)", result, start.ID)
 	}
+	if start.Notice.Thread != "hook:ab12" || result.Notice.Thread != "hook:ab12" || ThreadEnded(start) || !ThreadEnded(result) {
+		t.Fatalf("hook thread boundary: start=%+v result=%+v", start.Notice, result.Notice)
+	}
+	legacy := start
+	legacy.Notice.Thread = ""
+	if legacy.ThreadKey() != "hook:ab12" {
+		t.Fatalf("legacy hook thread = %q", legacy.ThreadKey())
+	}
 	for _, msg := range []Message{start, result} {
 		if got, ok := msg.Hook(); !ok || got.RunID != "ab12" || got.Hook != "self-update" || got.Repo != "/repo" {
 			t.Fatalf("stored payload of %s = %+v, %v", msg.ID, got, ok)
