@@ -17,9 +17,13 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+type hostRegistrar interface {
+	AddHost(context.Context, contract.HostAddRequest) error
+}
+
 type serviceWithHosts struct {
 	*engine.Service
-	boxes *Boxes
+	boxes hostRegistrar
 }
 
 func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principal, req contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {

@@ -172,6 +172,7 @@ func (b *Boxes) Restore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	installed := make(map[contract.HostName]bool)
 	for _, record := range records {
 		if record.Host == "" || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
 			continue
@@ -186,6 +187,20 @@ func (b *Boxes) Restore(ctx context.Context) error {
 		host, err := b.host(ctx, record.Host)
 		if err != nil {
 			return err
+		}
+		if !installed[record.Host] {
+			executable, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			binary, err := os.ReadFile(executable)
+			if err != nil {
+				return err
+			}
+			if err := host.InstallBinary(ctx, b.HostData, b.Version, binary); err != nil {
+				return err
+			}
+			installed[record.Host] = true
 		}
 		forward := box.Forward{Box: record.ID, HostPath: filepath.Join(b.HostData, "sock", string(record.ID), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(record.ID)+".sock")}
 		if err := host.AddForward(ctx, forward); err != nil {
