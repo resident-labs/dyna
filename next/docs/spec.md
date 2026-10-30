@@ -528,7 +528,7 @@ The owner adds a host with `dyna host add <name> --ssh user@addr`. The engine th
 
 - cgroup v2, with `Delegate=yes` for the user manager and the cpu, memory, io and pids controllers delegated;
 - rootless Podman 5 or later, with the systemd cgroup manager;
-- sshd allows `StreamLocalForwarding`;
+- sshd allows `StreamLocalForwarding`, and curl 7.40 or later is available for the socket probe;
 - free disk and memory above the host floor (default 20 GiB and 4 GiB);
 - the owner states at registration that only they have admin rights on the host.
 
