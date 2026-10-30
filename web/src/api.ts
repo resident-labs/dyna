@@ -297,6 +297,7 @@ export const api = {
   shellLogRange: (id: string, offset = 0, limit = 0) => app.ShellLogRange(id, offset, limit),
   listHooks: (repo: string) => app.ListHooks(repo),
   hookSummary: (repo: string) => app.HookSummary(repo),
+  librarianDeferred: (repo: string) => app.LibrarianDeferred(repo),
   hookRuns: (repo: string, name: string) => app.HookRuns(repo, name),
   hookRunLog: (repo: string, name: string, id: string) => app.HookRunLog(repo, name, id),
   runHook: (repo: string, name: string) => app.RunHook(repo, name),

@@ -143,6 +143,13 @@ func (s Service) deferWake(ctx context.Context, repoDir string, results ...Resul
 	return nil
 }
 
+// Restore runs one wake of the repository at once. A deferred wake lives only in
+// memory, so after a restart this wake checks the repository and defers its own
+// next pass again.
+func (s Service) Restore(ctx context.Context, repoDir string) error {
+	return s.deferWake(ctx, repoDir, Result{next: s.now()})
+}
+
 // WakeSmellsNow runs only the smell pass, without waiting for SmellInterval.
 // Only the owner or a root may ask for it. A session that is not root gets an
 // error that names the rule. A root may start it only for the repository whose
