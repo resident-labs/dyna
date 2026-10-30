@@ -24,7 +24,7 @@ test('time says when a rule was added or last edited', () => {
   assert.equal(ruleTime({ createdAt: '2026-10-18T12:00:00Z', updatedAt: '2026-10-18T12:00:00Z' }, now), 'just now')
 })
 test('a new list replaces the shown one only on a hash change and never during an edit', () => {
-  const a: RuleList = { hash: 'a', rules: [] }, b: RuleList = { hash: 'b', rules: [] }
+  const a: RuleList = { hash: 'a' }, b: RuleList = { hash: 'b' }
   assert.deepEqual(nextRules(a, { hash: 'a' }, false), { shown: a, pending: null })
   assert.deepEqual(nextRules(a, b, false), { shown: b, pending: null })
   assert.deepEqual(nextRules(a, b, true), { shown: a, pending: b })

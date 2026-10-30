@@ -3,6 +3,7 @@ package roomsvc
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/room"
@@ -22,6 +23,12 @@ type goalAuthor struct {
 
 // goalCaller resolves the authenticated caller and enforces its room restriction.
 func (s *Service) goalCaller(ctx context.Context, ref string) (room.Record, goalAuthor, error) {
+	return s.goalCallerIn(ctx, ref, false)
+}
+
+// goalCallerIn is goalCaller. With roomless set, a caller outside a session
+// that names no room gets an empty record instead of an error.
+func (s *Service) goalCallerIn(ctx context.Context, ref string, roomless bool) (room.Record, goalAuthor, error) {
 	actor := authority.Of(ctx)
 	author := goalAuthor{ID: "owner", Name: "owner", Address: "owner", ResolveAs: "owner"}
 	callerRoom := ""
@@ -47,6 +54,9 @@ func (s *Service) goalCaller(ctx context.Context, ref string) (room.Record, goal
 		author.ID, author.Name, author.Address = recorded, recorded, recorded
 	} else if actor.Role == authority.Worker {
 		return room.Record{}, goalAuthor{}, fmt.Errorf("goal and rule changes need a recorded caller")
+	}
+	if roomless && strings.TrimSpace(ref) == "" {
+		return room.Record{}, author, nil
 	}
 	rec, err := s.rooms().Resolve(ref)
 	if err == nil && callerRoom != "" && rec.ID != callerRoom {
