@@ -1094,3 +1094,17 @@ test('an interrupted workflow explains its typed replay decision', () => {
   web.unmount(mounted)
   target.remove()
 })
+
+test('folded check-in history exposes the focused earlier child facts', () => {
+  const older = postFor('checkin', 'summary', { parent: 'parent', windowStart: 1, attention: 'none', counts: { running: 0, queued: 0, idle: 1 }, children: [{ name: 'older child', state: 'idle', age: '20m', goal: 'old goal', pr: 'old PR' }] })
+  const newer = { ...older, id: 'newer', payload: { parent: 'parent', windowStart: 2, attention: 'none', counts: { running: 1, queued: 0, idle: 0 }, children: [{ name: 'new child', state: 'running', age: '1m', goal: 'new goal', pr: 'new PR' }] } }
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.CheckinCard, { target, props: { post: newer, posts: [older, newer], focus: older.id } })
+  web.flushSync()
+  assert.match(target.textContent ?? '', /old goal/)
+  assert.match(target.textContent ?? '', /old PR/)
+  assert.equal(target.querySelectorAll('details[open]').length, 3)
+  web.unmount(mounted)
+  target.remove()
+})
