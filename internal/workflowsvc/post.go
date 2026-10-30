@@ -10,7 +10,7 @@ import (
 )
 
 // ScriptPoster delivers a workflow script's post() as run:<runID>.
-func ScriptPoster(ctx context.Context, runID string, mentions []string, text string) (workflow.PostResult, error) {
+func ScriptPoster(ctx context.Context, runID, stepKey string, mentions []string, text string) (workflow.PostResult, error) {
 	svc := notify.Default()
 	snd, err := svc.ScriptSender(runID)
 	if err != nil {
@@ -21,7 +21,7 @@ func ScriptPoster(ctx context.Context, runID string, mentions []string, text str
 		return workflow.PostResult{}, err
 	}
 	script := &room.ScriptRef{RunID: runID, Workflow: meta.Name}
-	res, err := svc.Post(ctx, notify.PostInput{Sender: snd, Mentions: mentions, Text: text, Script: script})
+	res, err := svc.Post(ctx, notify.PostInput{Sender: snd, WorkflowKey: stepKey, Mentions: mentions, Text: text, Script: script})
 	out := workflow.PostResult{ID: res.Message.ID}
 	for _, d := range res.Deliveries {
 		item := map[string]any{"to": d.To, "delivery": d.Delivery}

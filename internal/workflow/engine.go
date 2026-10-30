@@ -71,7 +71,7 @@ type Options struct {
 	// It is supplied by the CLI so the engine stays independent of Dyna
 	// routing. A non-nil error with a non-empty result ID means the post was
 	// stored but at least one delivery failed.
-	Poster func(ctx context.Context, runID string, mentions []string, text string) (PostResult, error)
+	Poster func(ctx context.Context, runID, stepKey string, mentions []string, text string) (PostResult, error)
 	// Engine starts agent() sessions and submits and waits for job() calls. A
 	// run coordinator passes its engine connection; tests pass a fake.
 	Engine EngineCaller
@@ -117,6 +117,7 @@ type sharedState struct {
 	execSeq           int // run() and job() steps; counted apart from agents and their cap
 	jobNamespace      string
 	jobOccurrences    map[string]int
+	postOccurrences   map[string]int
 	workflowSeq       int
 	profSems          map[string]chan struct{}
 	profCalls         map[string]int
@@ -157,7 +158,7 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 		}
 		worktreeWarning = warning
 		shared = &sharedState{
-			scratchID: runstore.NewID(), jobNamespace: jobNamespace, jobOccurrences: map[string]int{},
+			scratchID: runstore.NewID(), jobNamespace: jobNamespace, jobOccurrences: map[string]int{}, postOccurrences: map[string]int{},
 			sem:      make(chan struct{}, maxConc),
 			cmdSem:   newCommandLimit(o.MaxCommands),
 			profSems: map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
