@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/database"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
@@ -910,5 +911,34 @@ func TestGCRemovesClosedLocalOnlyTree(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("closed local-only tree remains: %v; decisions: %#v", err, trees)
+	}
+}
+
+func TestGCKeepsWorktreeUsedByOpenTrackedPR(t *testing.T) {
+	repo := gcRepo(t)
+	path := gcTree(t, repo, "tracked-pr", "closed-owner")
+	root := prstate.Root(store.DataDir())
+	if err := prstate.Update(t.Context(), root, func(st *prstate.State) error {
+		st.Records["github.com/example/repo#1"] = &prstate.Record{Key: "github.com/example/repo#1", RepoPath: path, State: prstate.PROpen, Watching: true}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	opts := GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }}
+	trees, err := GC(t.Context(), repo, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+		t.Fatalf("tracked PR worktree removed: %v; decisions: %+v", err, trees)
+	}
+	if err := prstate.Update(t.Context(), root, func(st *prstate.State) error { st.Records["github.com/example/repo#1"].Watching = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GC(t.Context(), repo, opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("untracked worktree was not cleaned: %v", err)
 	}
 }
