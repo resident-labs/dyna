@@ -311,6 +311,17 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		e.emit(ev)
 	}
 	emit(runstore.Event{T: "exec_start", Command: textutil.ClipOneLine(line, 400)})
+	if e.opts.Replay != nil {
+		matched, value, replayErr := e.replayCall(runstore.WorkflowCallCommand, key, id)
+		if matched || replayErr != nil {
+			if replayErr != nil {
+				reject(replayErr)
+			} else {
+				resolve(value)
+			}
+			return vm.ToValue(promise)
+		}
+	}
 
 	if !e.beginWorker() {
 		werr := e.ctx.Err()
