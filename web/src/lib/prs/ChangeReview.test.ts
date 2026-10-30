@@ -8,7 +8,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import type { Finding } from '../api/change.ts'
 import { need } from '../../../test/need.ts'
-import { verdictMeta, statusMeta, refName, changeName, changeTitle, groupFindings } from './pr.ts'
+import { verdictMeta, statusMeta, refName, changeName, changeTitle, groupFindings, prAttention, prStory } from './pr.ts'
 
 // Render the real ChangeReview on the server and read the text.
 async function load(name: string) {
@@ -99,4 +99,27 @@ test('change review renders notes, severity groups, patch toggle and replies', a
     assert.doesNotMatch(text(render(component, { props: { change: { ...change, findings: [f('o1', 'owner')] }, roomId: '' } }).body), /Resolve/)
     assert.doesNotMatch(text(render(component, { props: { change: { verdict: 'approve', findings: [], reviewRounds: [] }, roomId: 'r' } }).body), /No findings/)
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('a session row gets a dot only when its PR needs someone, and the profile says why in sentences', () => {
+  assert.equal(prAttention({ number: 9, status: 'ci-running' }), null)
+  assert.equal(prAttention(null), null)
+  const reason = 'The reviewer stopped early: too-large.'
+  const blocked = { number: 9, status: 'ci-running', reviewState: 'blocked', reviewBlockKind: 'reviewer-stopped' as const, reviewBlocked: reason }
+  assert.deepEqual(prAttention(blocked), { tone: 'warning', label: `#9: ${reason}` })
+  assert.equal(prAttention({ number: 9, status: 'ci-failed' })?.tone, 'danger')
+  assert.equal(prStory({ number: 9, status: 'ci-failed', ci: 'failed' }).review, 'Review waits for CI to pass.')
+  assert.deepEqual(prStory(blocked), { review: reason, ci: 'Running.', routine: false })
+  assert.deepEqual(prStory({ number: 9, reviewState: 'queued', queuePosition: 2, ci: 'failed', ciReason: 'go test timed out' }), { review: 'Waiting for a reviewer, 2nd in line.', ci: 'Failed: go test timed out.', routine: false })
+  // A head refresh after a push clears by itself: no dot, muted words.
+  const refresh = { ...blocked, reviewBlockKind: 'head-refresh' as const, reviewBlocked: 'The PR head is unverified; waiting for a successful refresh.' }
+  assert.equal(prAttention(refresh), null)
+  assert.deepEqual(prStory(refresh), { review: 'Checking the latest push.', ci: 'Running.', routine: true })
+  // An approval promises a merge only when Dyna merges and only CI is left.
+  const approved = { number: 9, reviewState: 'approved', state: 'open', ci: 'passed', head: 'b', reviewHead: 'b' }
+  assert.equal(prStory(approved).review, 'Approved and ready to merge.')
+  assert.equal(prStory({ ...approved, ci: 'pending' }).review, 'Approved. It merges when CI passes.')
+  assert.equal(prStory({ ...approved, reviewHead: 'a' }).review, 'An earlier push was approved; the latest push needs review.')
+  assert.equal(prStory({ ...approved, missingRequiredReviewers: ['ari'] }).review, 'Approved. It still needs a review from ari.')
+  assert.equal(prStory({ ...approved, upstreamPr: true }).review, 'Approved. Maintainers of the upstream repository merge it.')
 })

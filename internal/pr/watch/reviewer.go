@@ -396,50 +396,56 @@ func (f ReviewFacts) UpstreamPR(r Record) bool {
 	return upstreamPR(r, f.Upstreams)
 }
 
-func (f ReviewFacts) ReviewState(r Record) (string, *int, string) {
+// ReviewBlock is a blocked review's kind and its plain-sentence reason.
+type ReviewBlock struct {
+	Kind   ReviewBlockKind
+	Reason string
+}
+
+func (f ReviewFacts) ReviewState(r Record) (string, *int, ReviewBlock) {
 	if f.Paused[r.RoomID] {
-		return "blocked", nil, "Room sessions are paused."
+		return "blocked", nil, ReviewBlock{ReviewBlockKindRoomPaused, "Room sessions are paused."}
 	}
 	// Maintainers of the upstream review a PR that Dyna only tracks (D-503).
 	if f.UpstreamPR(r) {
-		return "off", nil, ""
+		return "off", nil, ReviewBlock{}
 	}
 
 	if r.Watching && r.State == state.PROpen && r.IsDraft {
-		return "blocked", nil, "The PR is a draft."
+		return "blocked", nil, ReviewBlock{ReviewBlockKindDraft, "The PR is a draft."}
 	}
 	if r.Watching && r.State == state.PROpen && !headVerified(r) {
-		return "blocked", nil, "The PR head is unverified; waiting for a successful refresh."
+		return "blocked", nil, ReviewBlock{ReviewBlockKindHeadRefresh, "The PR head is unverified; waiting for a successful refresh."}
 	}
 	if r.RoundHead == r.Head {
 		if approved(r.Verdict) {
-			return "approved", nil, ""
+			return "approved", nil, ReviewBlock{}
 		}
 		// TODO: legacy/shim remove later — a stored review from before the typed
 		// results may still say question; remove when that history ages out.
 		if r.Verdict == "changes" || r.Verdict == "question" {
-			return "changes", nil, ""
+			return "changes", nil, ReviewBlock{}
 		}
 		if r.StopReason != "" {
-			return "blocked", nil, "The reviewer stopped early: " + string(r.StopReason) + ". Push a new head or run dyna git pr reviewer --restart."
+			return "blocked", nil, ReviewBlock{ReviewBlockKindReviewerStopped, "The reviewer stopped early: " + string(r.StopReason) + ". Push a new head or run dyna git pr reviewer --restart."}
 		}
 	}
 	if !r.Watching || r.State != state.PROpen || EffectivePolicy(f.State, r).Review == "off" {
-		return "off", nil, ""
+		return "off", nil, ReviewBlock{}
 	}
 	if r.CI == state.CIFailed {
-		return "blocked", nil, "CI failed for the current head."
+		return "blocked", nil, ReviewBlock{ReviewBlockKindCIFailed, "CI failed for the current head."}
 	}
 	if f.Busy[r.Key].Info.ID != "" {
-		return "reviewing", nil, ""
+		return "reviewing", nil, ReviewBlock{}
 	}
 	for i, item := range f.Queue(r.RoomID) {
 		if item.Key == r.Key {
 			position := i + 1
-			return "queued", &position, ""
+			return "queued", &position, ReviewBlock{}
 		}
 	}
-	return "queued", nil, ""
+	return "queued", nil, ReviewBlock{}
 }
 
 func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
