@@ -281,6 +281,14 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if e := s.ResumeClosures(ctx); e != nil {
 		t.Fatal(e)
 	}
+	childAck := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	if _, e := s.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
+	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
 	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
 		t.Fatalf("close order: %+v, %v", events, err)
