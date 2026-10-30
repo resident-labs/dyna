@@ -60,3 +60,30 @@ func TestWorkflowManifestUnsafeAndDeletion(t *testing.T) {
 		t.Fatalf("deleted manifest: %v", err)
 	}
 }
+
+func TestWorkflowReplayInputsPersistWithRun(t *testing.T) {
+	newTestRun(t, "wf_inputs")
+	ctx := t.Context()
+	if err := RecordWorkflowReplayInputs(ctx, "wf_inputs", WorkflowReplayInputs{Deterministic: true, Fingerprint: "abc", Options: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadWorkflowReplayInputs(ctx, "wf_inputs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Deterministic || got.Fingerprint != "abc" {
+		t.Fatalf("inputs = %+v", got)
+	}
+}
+
+func TestWorkflowReplayClaimIsAtMostOnce(t *testing.T) {
+	newTestRun(t, "wf_claim")
+	first, err := ClaimWorkflowReplay(t.Context(), "wf_claim")
+	if err != nil || !first {
+		t.Fatalf("first claim = %v, %v", first, err)
+	}
+	second, err := ClaimWorkflowReplay(t.Context(), "wf_claim")
+	if err != nil || second {
+		t.Fatalf("second claim = %v, %v", second, err)
+	}
+}

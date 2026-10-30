@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/store"
@@ -20,11 +21,11 @@ func TestReplayBarrierMatchesBeforeAllowingNewEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, replay, err := barrier.Match(runstore.WorkflowCallPost, "post", 0); err != nil || !replay {
-		t.Fatalf("post match = %v, %v", replay, err)
-	}
 	if _, replay, err := barrier.Match(runstore.WorkflowCallCommand, "command", 1); err != nil || !replay {
 		t.Fatalf("command match = %v, %v", replay, err)
+	}
+	if _, replay, err := barrier.Match(runstore.WorkflowCallPost, "post", 0); err != nil || !replay {
+		t.Fatalf("post match = %v, %v", replay, err)
 	}
 	if _, replay, err := barrier.Match(runstore.WorkflowCallAgent, "new", 1); err != nil || replay {
 		t.Fatalf("new call = %v, %v", replay, err)
@@ -103,5 +104,59 @@ func TestWorkflowReplaysCallsWithoutEffects(t *testing.T) {
 	}
 	if commands.attempts != 1 || len(engine.Starts()) != 1 || posts != 1 {
 		t.Fatalf("effects: %d commands, %d agents, %d posts", commands.attempts, len(engine.Starts()), posts)
+	}
+}
+
+func TestWorkflowReplayRejectsChangedCommandTimeout(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	dir := t.TempDir()
+	run, err := runstore.Create("timeout", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	commands := newFakeCommands()
+	opts := Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir, Commands: commands, RecordManifest: true}
+	if _, err := executeWorkflowTest(t, `return await run('true', {timeout: 1});`, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runstore.ReadWorkflowManifest(t.Context(), run.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Replay, err = NewReplayBarrier(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.RecordManifest = false
+	_, err = executeWorkflowTest(t, `return await run('true', {timeout: 2});`, opts)
+	if !errors.Is(err, ErrReplayMismatch) {
+		t.Fatalf("changed timeout = %v", err)
+	}
+	if commands.attempts != 1 {
+		t.Fatalf("started %d commands", commands.attempts)
+	}
+}
+
+func TestReplayBarrierChecksSynchronousPostOrderAtNextAsyncCall(t *testing.T) {
+	manifest := runstore.WorkflowManifest{Complete: true, Calls: []runstore.WorkflowManifestCall{
+		{Kind: runstore.WorkflowCallCommand, Identity: "first", Ordinal: 1, Result: json.RawMessage(`null`)},
+		{Kind: runstore.WorkflowCallPost, Identity: "second", Ordinal: 0, Result: json.RawMessage(`{}`)},
+	}}
+	barrier, err := NewReplayBarrier(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, replay, err := barrier.Match(runstore.WorkflowCallPost, "second", 0); err != nil || !replay {
+		t.Fatalf("post = %v, %v", replay, err)
+	}
+	if _, _, err := barrier.Match(runstore.WorkflowCallCommand, "first", 1); !errors.Is(err, ErrReplayMismatch) {
+		t.Fatalf("out-of-order calls = %v", err)
 	}
 }

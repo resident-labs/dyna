@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,5 +144,70 @@ func TestManifestDoesNotCompleteUncertainCommand(t *testing.T) {
 	}
 	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
 		t.Fatalf("seal uncertain command = %v", err)
+	}
+}
+
+func TestManifestRejectsUncapturedNestedSource(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "child.js"), []byte(`return 'ok'`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runstore.Create("uncaptured nested", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = executeWorkflowTest(t, `const child = workflow; return await child('./child.js');`, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir, RecordManifest: true, CheckReplaySources: true, ReplaySources: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		t.Fatalf("seal uncaptured source = %v", err)
+	}
+}
+
+func TestManifestRejectsUncapturedWorkingDirectory(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	run, err := runstore.Create("uncaptured cwd", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf(`await run('true', {cwd: %q});`, t.TempDir())
+	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: newFakeCommands(), RecordManifest: true, CheckReplaySources: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		t.Fatalf("seal uncaptured cwd = %v", err)
+	}
+}
+
+func TestManifestRejectsIncompletePostRouting(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	run, err := runstore.Create("post routing", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	poster := func(context.Context, string, string, []string, string) (PostResult, error) {
+		return PostResult{ID: "msg_saved"}, errors.New("routing incomplete")
+	}
+	_, err = executeWorkflowTest(t, `post('@room', 'hello'); return 'done';`, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), RecordManifest: true, Poster: poster})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		t.Fatalf("seal incomplete post routing = %v", err)
 	}
 }
