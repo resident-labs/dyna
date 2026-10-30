@@ -651,6 +651,52 @@ func TestClosePendingRepositoryFreeChildWithoutArchiveAck(t *testing.T) {
 	}
 }
 
+func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
+	now := func() time.Time { return time.Unix(1000, 0) }
+	st, err := store.Open(t.TempDir(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	ctx := context.Background()
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	worker, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	record, err := st.Session(ctx, worker.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := st.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A restart after the close marked the pending box and before it finished leaves this state behind.
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, noAgentReason); err != nil {
+		t.Fatal(err)
+	}
+	if e := s.ResumeClosures(ctx); e != nil {
+		t.Fatal(e)
+	}
+	current, err = st.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxDeleted {
+		t.Fatalf("box %+v, error %v, want deleted without an archive ack", current, err)
+	}
+	if _, err := st.Session(ctx, worker.Session); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("session remains open: %v", err)
+	}
+}
+
 func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
