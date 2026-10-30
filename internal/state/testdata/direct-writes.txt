@@ -139,6 +139,7 @@ not-state internal/harness/runtime/preferences.go Runtime.ImportPreferences 2 # 
 not-state internal/harness/runtime/probe.go BundleManager.Probe 1 # removes the throwaway probe scope and its private HOME
 not-state internal/harness/runtime/provider_keys.go writePiAuthFile 3 # saves a Pi home's login by rename when Pi is not installed; a harness CLI private home
 not-state internal/harness/runtime/resource_lease.go ResourceLease.Bind 1 # flock-held process lease; a crash frees a flock, a row could not
+not-state internal/harness/runtime/resource_lease.go ResourceLease.SetData 1 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/resource_lease.go ResourceLease.Close 1 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/resource_lease.go newResourceLease 3 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/resource_lease.go removeResourceLease 2 # flock-held process lease; a crash frees a flock, a row could not
