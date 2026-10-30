@@ -34,6 +34,10 @@ const SmellInterval = 6 * time.Hour
 // pin that cannot run yet. No hook fires when such a turn ends.
 const RetryAfter = 10 * time.Minute
 
+// MaxWakeRetries bounds how often a failed deferred wake retries. After the last
+// retry, the next main update or engine restart runs the pass again.
+const MaxWakeRetries = 5
+
 // Service runs librarian wakes. Tests replace Sessions, Settings, Now and Defer.
 type Service struct {
 	// Hook functions are supplied by the engine's existing hook handlers.
@@ -135,12 +139,22 @@ func (s Service) deferWake(ctx context.Context, repoDir string, results ...Resul
 	if err != nil {
 		return err
 	}
-	s.Defer(r.Main, due, func() {
-		if _, err := s.Wake(context.Background(), repoDir); err != nil {
-			log.Printf("librarian wake of %s: %v", r.Main, err)
-		}
-	})
+	s.Defer(r.Main, due, s.deferredWake(repoDir, r.Main, 0))
 	return nil
+}
+
+// deferredWake runs one deferred wake. A failed wake keeps its work: it retries
+// after RetryAfter, up to MaxWakeRetries times, so a transient Git, database or
+// session error does not strand the pending pass.
+func (s Service) deferredWake(repoDir, main string, attempt int) func() {
+	return func() {
+		if _, err := s.Wake(context.Background(), repoDir); err != nil {
+			log.Printf("librarian wake of %s: %v", main, err)
+			if attempt < MaxWakeRetries {
+				s.Defer(main, s.now().Add(RetryAfter), s.deferredWake(repoDir, main, attempt+1))
+			}
+		}
+	}
 }
 
 // Restore runs one wake of the repository at once. A deferred wake lives only in
