@@ -205,6 +205,7 @@ func (s *Service) deleteBlockers(rec room.Record) error {
 	return fmt.Errorf("room %s is in use; close or stop these first:\n  %s", rec.Name, strings.Join(blockers, "\n  "))
 }
 
+// SetRoomColor changes the room identity color.
 func (s *Service) SetRoomColor(ctx context.Context, ref string, value room.RoomColor) error {
 	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
 		return err

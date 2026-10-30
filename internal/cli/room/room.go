@@ -102,11 +102,12 @@ func upstreamOrOff(upstream string) string {
 
 // setCmd is `dyna room set`: one room setting, shown without a value.
 func setCmd() *cobra.Command {
-	var placement, kind, color string
+	var placement, kind string
 	cmd := &cobra.Command{
 		Use:   "set <room> <setting> [<value>]",
 		Short: "Change a room setting",
 		Long: "Change a room setting, or show it without a value. Only the owner and the room's root may change one.\n" +
+			"color is one of crimson, blue, violet, teal, orange, magenta, sky or olive.\n" +
 			"checkInInterval is how often Dyna wakes a parent to check its children in this room: a duration such as 30m,\n" +
 			"off to stop check-ins in this room, or default to use the parent check-ins hook's global interval.\n" +
 			"limits.memoryHigh, limits.memoryMax and limits.tasksMax are the room's resource limits: a size such as 2G for\n" +
@@ -114,26 +115,25 @@ func setCmd() *cobra.Command {
 			"upstream is the parent repository of this room's fork, such as github.com/owner/repo, so that `pr track`\n" +
 			"accepts a PR opened on that parent; off clears it.\n" +
 			"attribution is the one line that PR and issue text written by agents ends with; off clears it.",
-		Args: cobra.RangeArgs(1, 3),
+		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("color") {
-				if len(args) != 1 {
-					return fmt.Errorf("--color takes one room")
-				}
-				if err := engineClient().Call(cmd.Context(), "SetRoomColor", []any{args[0], color}, nil); err != nil {
-					return fmt.Errorf("the room was not updated: %w", err)
-				}
-				return nil
-			}
-			if len(args) < 2 {
-				return fmt.Errorf("a setting is required")
-			}
-			if args[1] != "checkInInterval" && args[1] != "upstream" && args[1] != "attribution" && !strings.HasPrefix(args[1], "limits.") {
-				return fmt.Errorf("unknown room setting %q; checkInInterval, upstream, attribution and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
+			if args[1] != "color" && args[1] != "checkInInterval" && args[1] != "upstream" && args[1] != "attribution" && !strings.HasPrefix(args[1], "limits.") {
+				return fmt.Errorf("unknown room setting %q; color, checkInInterval, upstream, attribution and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
 			}
 			rec, err := store().Resolve(args[0])
 			if err != nil {
 				return err
+			}
+			if args[1] == "color" {
+				if len(args) == 2 {
+					fmt.Fprintln(cmd.OutOrStdout(), rec.Color)
+					return nil
+				}
+				if err := engineClient().Call(cmd.Context(), "SetRoomColor", []any{rec.Name, args[2]}, nil); err != nil {
+					return fmt.Errorf("the room was not updated: %w", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s color: %s\n", rec.Name, args[2])
+				return nil
 			}
 			if args[1] == "attribution" {
 				if len(args) == 2 {
@@ -208,7 +208,6 @@ func setCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&color, "color", "", "room color")
 	cmd.Flags().StringVar(&placement, "placement", "line", "attribution placement: line, end or prefix")
 	cmd.Flags().StringVar(&kind, "kind", "", "attribution kind: pr, issue, review or comment")
 	return cmd

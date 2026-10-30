@@ -2,6 +2,7 @@ package roomsvc
 
 import (
 	"bytes"
+	"dyna-agent/internal/room"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -127,6 +128,9 @@ func writeTSComment(b *strings.Builder, indent, doc string) {
 // tsWireType maps a field type of the wire structs to TypeScript. encoding/json
 // writes a time.Time as RFC 3339 text, so it reads as a string.
 func tsWireType(typ reflect.Type) (string, error) {
+	if typ == reflect.TypeFor[room.RoomColor]() {
+		return fmt.Sprintf("%q | %q | %q | %q | %q | %q | %q | %q", room.ColorCrimson, room.ColorBlue, room.ColorViolet, room.ColorTeal, room.ColorOrange, room.ColorMagenta, room.ColorSky, room.ColorOlive), nil
+	}
 	if typ == reflect.TypeFor[time.Time]() {
 		return "string", nil
 	}

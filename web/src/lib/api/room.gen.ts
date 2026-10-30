@@ -3,7 +3,7 @@
 
 // Room is one row of the room rail.
 export interface Room {
-  color: string
+  color: "crimson" | "blue" | "violet" | "teal" | "orange" | "magenta" | "sky" | "olive"
   displayName?: string
   pinned: boolean
   pinOrder: number

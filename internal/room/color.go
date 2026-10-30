@@ -2,6 +2,7 @@ package room
 
 import "fmt"
 
+// RoomColor is one of the room identity colors.
 type RoomColor string
 
 const (
@@ -17,6 +18,7 @@ const (
 
 var roomColors = [...]RoomColor{ColorCrimson, ColorBlue, ColorViolet, ColorTeal, ColorOrange, ColorMagenta, ColorSky, ColorOlive}
 
+// ParseRoomColor validates a room color at an input boundary.
 func ParseRoomColor(value string) (RoomColor, error) {
 	for _, color := range roomColors {
 		if string(color) == value {
@@ -26,6 +28,7 @@ func ParseRoomColor(value string) (RoomColor, error) {
 	return "", fmt.Errorf("unknown room color %q; choose crimson, blue, violet, teal, orange, magenta, sky or olive", value)
 }
 
+// nextRoomColor picks the first unused color, wrapping after all are used.
 func nextRoomColor(records []Record) RoomColor {
 	used := make(map[RoomColor]bool, len(records))
 	for _, rec := range records {
