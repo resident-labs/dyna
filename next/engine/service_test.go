@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -62,6 +63,33 @@ func TestRoomCreatesRootAndAttachesWorker(t *testing.T) {
 		t.Fatalf("root %s %q: %v", parent, name, err)
 	}
 }
+func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	var root contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: root}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("root close: %v", e)
+	}
+	current, err := s.store.Session(ctx, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := s.event("new-room", owner, contract.SessionStarted{Session: "new-root", Name: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", "", "", event, contract.Event{}, "")
+	if err == nil {
+		t.Fatal("expected duplicate box failure")
+	}
+	var count int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM rooms WHERE id='new-room'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("room persisted: %d %v", count, err)
+	}
+}
 func TestRoomRepoAPI(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -92,9 +120,14 @@ func TestSessionStartCreatesWake(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	body, ok := events.Events[0].Body.(contract.SessionStarted)
-	if !ok || body.Brief != "brief" || body.Goal != "goal" {
-		t.Fatalf("unexpected start: %+v", events.Events[0])
+	var body contract.SessionStarted
+	for _, event := range events.Events {
+		if started, ok := event.Body.(contract.SessionStarted); ok && started.Session == session {
+			body = started
+		}
+	}
+	if body.Brief != "brief" || body.Goal != "goal" {
+		t.Fatalf("unexpected start: %+v", body)
 	}
 	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
@@ -354,15 +387,15 @@ func TestBoxLifecycleEmitsTransitions(t *testing.T) {
 		t.Fatal(e)
 	}
 	want := []contract.BoxState{contract.BoxPending, contract.BoxCreating, contract.BoxStarting, contract.BoxReady, contract.BoxClosing, contract.BoxDeleted}
-	list.Events = list.Events[3:]
-	if len(list.Events) != len(want) {
-		t.Fatalf("got %d transitions, want %d", len(list.Events), len(want))
-	}
-	for i, event := range list.Events {
+	var got []contract.BoxState
+	for _, event := range list.Events {
 		change := event.Body.(contract.BoxChanged)
-		if change.To != want[i] {
-			t.Fatalf("transition %d: got %s, want %s", i, change.To, want[i])
+		if change.Session == session {
+			got = append(got, change.To)
 		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("transitions %v, want %v", got, want)
 	}
 }
 
