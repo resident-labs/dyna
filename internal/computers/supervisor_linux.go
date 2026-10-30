@@ -694,12 +694,10 @@ func (s *supervisor) stop() error {
 	for browserProcessesAlive(owned) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	saveErr := withBrowserCleanup(saveCtx, s.meta.SessionID, func() error { return saveBrowserProfile(saveCtx, s.meta.SessionID) })
+	saveErr := saveBackBrowserProfile(s.meta.SessionID)
 	if saveErr != nil {
 		s.state.Reason += "; browser save-back: " + saveErr.Error()
 	}
-	saveCancel()
 	s.bus.stop()
 	// A stopped computer has no bus; apps launched meanwhile keep their own.
 	removeBusSocket(s.meta.SessionID)
