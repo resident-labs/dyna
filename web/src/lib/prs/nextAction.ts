@@ -14,7 +14,8 @@ export function nextAction(row: Row, merge: MergeItem | null = null): NextAction
   const blockers: { label: string; tone: Tone }[] = []
   if (row.ci === 'failed' || row.status === 'ci-failed' || merge?.state === 'ci-failed') blockers.push({ label: 'Blocked: CI failed', tone: 'danger' })
   if (merge?.state === 'conflict') blockers.push({ label: 'Blocked: conflict', tone: 'danger' })
-  if (asksChanges(row) || merge?.state === 'changes') blockers.push({ label: 'Changes requested', tone: 'warning' })
+  if (row.verdict === 'question') blockers.push({ label: 'Review question', tone: 'warning' })
+  else if (asksChanges(row) || merge?.state === 'changes') blockers.push({ label: 'Changes requested', tone: 'warning' })
   if (!row.isDraft && merge?.state === 'held') blockers.push({ label: 'Held', tone: 'warning' })
   if (row.ciPaused || row.status === 'paused' || row.pauseReason || merge?.state === 'paused') blockers.push({ label: 'Automation paused', tone: 'warning' })
   if (merge?.state === 'trial-failed' || merge?.state === 'trial-rejected') blockers.push({ label: 'Blocked: trial failed', tone: 'danger' })
@@ -30,6 +31,7 @@ export function nextAction(row: Row, merge: MergeItem | null = null): NextAction
   if (merge?.state === 'waiting-repository') return { label: 'Waiting for repository', others: [] }
   if (merge?.trial || merge?.state.startsWith('trial-')) return { label: 'In merge trial', others: [] }
   if (merge?.state === 'ready' || (!merge && isReady(row))) return { label: 'Ready to merge', others: [] }
-  if (prTracks(row).ci !== 'passed' && prTracks(row).ci !== 'absent') return { label: 'Waiting for CI', others: [] }
+  if (prTracks(row).ci === 'absent') return { label: 'CI missing', others: [] }
+  if (merge?.state === 'ci' || prTracks(row).ci !== 'passed') return { label: 'Waiting for CI', others: [] }
   return { label: 'Needs review', others: [] }
 }
