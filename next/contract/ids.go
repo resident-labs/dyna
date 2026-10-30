@@ -1,0 +1,42 @@
+package contract
+
+type (
+	RoomID         string // "room_<ulid>"
+	SessionID      string // "ses_<ulid>"
+	MemberID       string // "mem_<ulid>", an external agent
+	BoxID          string // "box_<ulid>"
+	EventID        string // "ev_<ulid>"
+	OpID           string // "op_<ulid>"
+	GrantID        string // "gr_<ulid>"
+	TurnID         string // "turn_<ulid>"
+	DeviceID       string // "dev_<ulid>", a paired device
+	SubscriptionID string // "sub_<ulid>"
+	GoalID         string // "g<n>"; v1 numbers are kept at import (M3)
+	HostName       string // a registered host, such as "hermeslab"
+	RepoName       string // "owner/name" on GitHub
+	ProfileName    string // a registered profile, such as "terra"
+	DurationMS     int64  // a duration in milliseconds
+)
+
+// ControlPlane is the reserved host name of the engine's own machine.
+const ControlPlane HostName = "control-plane"
+
+// AllHosts in a grant matches every registered host and the control plane.
+const AllHosts HostName = "*"
+
+type PrincipalKind string
+
+const (
+	PrincipalOwner   PrincipalKind = "owner"   // the human
+	PrincipalSession PrincipalKind = "session" // an agent session; root is one
+	PrincipalMember  PrincipalKind = "member"  // an external agent with a pull inbox
+	PrincipalEngine  PrincipalKind = "engine"  // the engine as its own sender
+)
+
+// Principal is who acts or who receives. The engine sets it from the
+// connection, never from a request body.
+type Principal struct {
+	Kind    PrincipalKind `json:"kind"`
+	Session SessionID     `json:"session,omitempty"` // Kind session only
+	Member  MemberID      `json:"member,omitempty"`  // Kind member only
+}
