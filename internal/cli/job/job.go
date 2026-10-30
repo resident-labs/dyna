@@ -213,11 +213,15 @@ func logsCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			var out struct {
-				ID  string `json:"id"`
-				Log string `json:"log"`
+				ID        string `json:"id"`
+				Log       string `json:"log"`
+				Truncated bool   `json:"truncated"`
 			}
 			if err := engineclient.New("").Call(c.Context(), "JobLogs", []any{args[0]}, &out); err != nil {
 				return err
+			}
+			if out.Truncated {
+				fmt.Fprintln(c.OutOrStdout(), "[Log truncated: showing the last 64 KiB.]")
 			}
 			if out.Log != "" {
 				fmt.Fprintln(c.OutOrStdout(), out.Log)
