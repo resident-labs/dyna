@@ -704,7 +704,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 - **Shell server (M2).** The MCP shell for the harness, with secret masking. Commands run locally in the box, with no `node=` option and no SSH hint (D-585). Each shell job runs in its own process group, and stopping a job kills its group. In M1, Pi's built-in bash tool runs commands, and Pi's abort stops it.
 - **Transcript stream (M2).** It tails the harness transcript and posts append-only chunks `{Path, Offset, Bytes}`. The engine acknowledges each offset and keeps the copy. After a reconnect, the box agent resends from the last acknowledged offset.
 
-**Release skew.** `hello` carries the binary version. When it differs from the engine's, the engine sends `Upgrade` once the box is idle, and the box agent runs `/opt/dyna/bin/current/dyna box-agent` in its place.
+**Release skew.** `hello` carries the binary version. When it differs from the engine's, the engine sends `Upgrade` once the box is idle, and the box agent runs `/opt/dyna/bin/current/dyna box-agent` in its place. This comes in M2. In M1, the engine accepts a `hello` with another version, and the owner closes every box before an engine upgrade.
 
 ### 5.9 Close (archive in M3)
 
