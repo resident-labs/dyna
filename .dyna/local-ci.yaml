@@ -184,6 +184,17 @@ checks:
       GOFLAGS: -p=2
     reports: none
 
+  # next/web is the v2 web app. It needs Node 24, which the golang image lacks,
+  # so it gets its own check and image. The check stays out of the trial list
+  # until next/web lands on main: a merge trial runs every trial suite, and main
+  # has no next/web/package.json yet.
+  - id: next-web
+    name: next-web
+    image: node:24
+    command: bash scripts/ci.sh next-web
+    caches: [npm]
+    reports: none
+
   # The desktop module is a nested module, so the root Go commands never reach
   # it. The hosted workflow reports it as its own desktop job, and the base
   # graph requires that name, so it stays a check of its own.
@@ -411,6 +422,11 @@ suites:
   - id: next
     files: ['^next/', '^scripts/ci\.sh$']
     checks: [next]
+
+  # Runs only for changes under next/web/. It is not in trial yet (see its check).
+  - id: next-web
+    files: ['^next/web/']
+    checks: [next-web]
 
   - id: cross
     group: cross-build
