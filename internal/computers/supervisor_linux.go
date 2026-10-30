@@ -694,8 +694,8 @@ func (s *supervisor) stop() error {
 	for browserProcessesAlive(owned) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	saveErr := withBrowserCleanup(saveCtx, s.meta.SessionID, func() error { return saveBrowserProfile(saveCtx, s.meta.SessionID) })
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), browserSaveBackBudget)
+	saveErr := saveBackBrowserProfile(saveCtx, s.meta.SessionID)
 	if saveErr != nil {
 		s.state.Reason += "; browser save-back: " + saveErr.Error()
 	}
