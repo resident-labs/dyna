@@ -18,6 +18,10 @@ type Runner interface {
 	Run(context.Context, []string, ...string) ([]byte, error)
 }
 
+type MissingTokenError struct{}
+
+func (MissingTokenError) Error() string { return "GH_TOKEN is not set" }
+
 type GitRunner struct{}
 
 func (GitRunner) Run(ctx context.Context, env []string, args ...string) ([]byte, error) {
@@ -47,6 +51,9 @@ func (m *Mirror) path(repo contract.RepoName) (string, error) {
 
 // Prepare fetches before pushing all branches to the host cache.
 func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, repo contract.RepoName, session contract.SessionID) (contract.BoxRepo, error) {
+	if m.Token == "" {
+		return contract.BoxRepo{}, MissingTokenError{}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	path, err := m.path(repo)
