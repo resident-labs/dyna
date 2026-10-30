@@ -41,6 +41,7 @@ func (s *Store) turnReplies(ctx context.Context, tx *sql.Tx, room contract.RoomI
 	if err != nil {
 		return nil, nil, err
 	}
+	// A same-millisecond prior post is safe: the target already received it.
 	kept := posts[:0]
 	for _, post := range posts {
 		if !post.Time.Before(time.UnixMilli(start)) {
