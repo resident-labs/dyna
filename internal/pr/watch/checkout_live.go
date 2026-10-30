@@ -12,16 +12,11 @@ import (
 // file or directory" for the missing command directory (D-131; processguard
 // rewrites the kernel's exec-shaped wording).
 //
-// RepoPath is a checkout Dyna resolved and matched against the record's
-// repository before storing it. LookupDir and Dir are only the directories the
-// caller and its session worked in, so a GitHub record proves each of them with
-// matchingCheckout before using it. The room repository outlives every session
-// and is the last fallback, with the same proof.
+// Stored checkout paths can become stale or be replaced. A GitHub record proves
+// each candidate still matches its repository before using it. The room
+// repository outlives every session and is the last fallback, with the same proof.
 func (s *Service) checkoutDir(ctx context.Context, r Record) (string, error) {
-	if isDirectory(r.RepoPath) {
-		return r.RepoPath, nil
-	}
-	for _, dir := range []string{r.LookupDir, r.Dir} {
+	for _, dir := range []string{r.RepoPath, r.LookupDir, r.Dir} {
 		if !isDirectory(dir) {
 			continue
 		}
