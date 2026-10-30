@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/localci"
+	cisched "dyna-agent/internal/pr/watch/ci"
 )
 
 // A pull request head has no local run since local CI serves merge trials only,
@@ -62,11 +63,11 @@ func TestEngineStopResultIsRerunNotDecided(t *testing.T) {
 	if !s.registeredJobResultComplete(t.Context(), job, stopped) {
 		t.Fatal("a stopped run is saved evidence, so admission must consult the retry decision")
 	}
-	if act := savedResultActionFor(stopped); act != retryStoppedRun {
+	if act := cisched.SavedResultActionFor(stopped); act != cisched.RetryStoppedRun {
 		t.Fatalf("a stopped run action = %v, want retryStoppedRun", act)
 	}
 	stopped.Resumed = true
-	if act := savedResultActionFor(stopped); act != settleSavedResult {
+	if act := cisched.SavedResultActionFor(stopped); act != cisched.SettleSavedResult {
 		t.Fatalf("a stopped replacement action = %v, want settleSavedResult", act)
 	}
 	stopped.Resumed = false

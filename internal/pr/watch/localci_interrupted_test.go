@@ -8,6 +8,7 @@ import (
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
+	cisched "dyna-agent/internal/pr/watch/ci"
 )
 
 // stoppedRun is the result shape D-146 reported: every check of a trial on one
@@ -21,36 +22,6 @@ func stoppedRun() localci.Result {
 			{Suite: "fmt", CheckName: "fmt", Node: "pve", Status: localci.OutcomeError, Cause: localci.CauseEngineStop, Error: "check stopped before its reports were read"},
 			{Suite: "test-core", CheckName: "test-core", Node: "pve", Status: localci.OutcomeError, Cause: localci.CauseCancelled, Error: "context canceled"},
 		},
-	}
-}
-
-// A local run that Dyna itself stopped says nothing about the commit, so it runs
-// again on the same machine, and the marker bounds that to one retry.
-func TestStoppedLocalRunIsRetriedOnce(t *testing.T) {
-	stopped := stoppedRun()
-	if act := savedResultActionFor(stopped); act != retryStoppedRun {
-		t.Fatalf("action = %v, want retryStoppedRun", act)
-	}
-	stopped.Resumed = true
-	if act := savedResultActionFor(stopped); act != settleSavedResult {
-		t.Fatalf("second interruption action = %v, want settleSavedResult", act)
-	}
-	// A machine failure keeps its own rule: it moves to another machine.
-	machine := stoppedRun()
-	machine.Cause = localci.CauseContainerFailure
-	for i := range machine.Checks {
-		machine.Checks[i].Cause = localci.CauseContainerFailure
-	}
-	if act := savedResultActionFor(machine); act != retryOnAnotherMachine {
-		t.Fatalf("machine failure action = %v, want retryOnAnotherMachine", act)
-	}
-	// A test failure is evidence about the commit and never runs again.
-	failed := stoppedRun()
-	failed.Status = localci.OutcomeFailed
-	failed.Cause = localci.CauseTestFailure
-	failed.Checks = []localci.SuiteResult{{CheckName: "fmt", Status: localci.OutcomeFailed, Cause: localci.CauseTestFailure}}
-	if act := savedResultActionFor(failed); act != settleSavedResult {
-		t.Fatalf("test failure action = %v, want settleSavedResult", act)
 	}
 }
 
@@ -151,7 +122,7 @@ func TestStoppedTrialRetryHappensOnceAndJoinsAFullQueue(t *testing.T) {
 	}
 	runs := e.s.nodeRuns()
 	runs.Lock()
-	run := runs.runs[registeredJobKey(job)]
+	run := runs.Runs[registeredJobKey(job)]
 	runs.Unlock()
 	<-ci.started
 	if ci.results[head].Resumed {
@@ -162,7 +133,7 @@ func TestStoppedTrialRetryHappensOnceAndJoinsAFullQueue(t *testing.T) {
 	<-ci.saved
 	// The run writes its refresh after it saves, so wait for the whole run to end
 	// before the test returns and its TempDir is removed.
-	<-run.ended
+	<-run.Ended
 	if saved := ci.results[head]; !saved.Resumed {
 		t.Fatalf("the replacement does not carry the marker: %+v", saved)
 	}
@@ -172,7 +143,7 @@ func TestStoppedTrialRetryHappensOnceAndJoinsAFullQueue(t *testing.T) {
 	second := stoppedRun()
 	second.Repo, second.SHA, second.Resumed = repo, head, true
 	ci.results[head] = second
-	if act := savedResultActionFor(second); act != settleSavedResult {
+	if act := cisched.SavedResultActionFor(second); act != cisched.SettleSavedResult {
 		t.Fatalf("a stopped replacement action = %v, want settleSavedResult", act)
 	}
 }
@@ -300,7 +271,7 @@ func TestResumedReplacementThatLosesSSHFailsTheTrial(t *testing.T) {
 		resumed.Checks[i].Cause = localci.CauseSSHDrop
 	}
 	resumed.Resumed = true
-	if act := savedResultActionFor(resumed); act != settleSavedResult {
+	if act := cisched.SavedResultActionFor(resumed); act != cisched.SettleSavedResult {
 		t.Fatalf("a resumed machine failure action = %v, want settleSavedResult", act)
 	}
 

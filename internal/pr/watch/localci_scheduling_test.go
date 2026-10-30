@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/localci"
+	cisched "dyna-agent/internal/pr/watch/ci"
 )
 
 // preparationFailure is the result shape D-156 reported: the run never started,
@@ -32,7 +33,7 @@ func TestTrialWhoseRunNeverStartedFailsWithTheSchedulingCause(t *testing.T) {
 	s := &Service{}
 
 	never := preparationFailure()
-	if act := savedResultActionFor(never); act != retryStoppedRun {
+	if act := cisched.SavedResultActionFor(never); act != cisched.RetryStoppedRun {
 		t.Fatalf("a run that never started action = %v, want one retry", act)
 	}
 	// The first failure waits: the retry is what decides.
