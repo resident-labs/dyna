@@ -56,9 +56,6 @@
   let note = $state('')
   const shown = 10 // runs listed per hook
 
-  // The built-ins come first and the owner's own hooks follow, so the two
-  // groups of the global screen never mix.
-  let builtins = $derived((hooks ?? []).filter((h) => isBuiltin(h)))
   let mine = $derived((hooks ?? []).filter((h) => !isBuiltin(h)))
 
   // An open form keeps Esc from closing Settings over unsaved input.
@@ -149,20 +146,6 @@
     busy[h.name] = false
   }
 
-  // reset restores the seeded schedule, timeout and switch of a built-in.
-  async function reset(h: Hook) {
-    busy[h.name] = true
-    error = ''
-    try {
-      await api.resetHook(h.name)
-      say(`${h.label || h.name} is back to its default.`)
-      await load(true)
-    } catch (e) {
-      error = errorText(e)
-    }
-    busy[h.name] = false
-  }
-
   async function remove() {
     const asked = removing
     if (!asked) return
@@ -184,13 +167,7 @@
     const { hook, form } = current
     editor = { ...current, busy: true, error: '' }
     try {
-      if (hook && isBuiltin(hook)) {
-        // A built-in keeps its action, so only its schedule and timeout change.
-        const patch: Partial<HookInput> = {}
-        if (Number(form.everyMinutes) !== hook.everyMinutes) patch.everyMinutes = Number(form.everyMinutes)
-        if (form.timeout.trim() !== timeoutLabel(hook.timeout)) patch.timeout = form.timeout.trim()
-        if (Object.keys(patch).length) await api.editGlobalHook(hook.name, patch)
-      } else if (!hook) {
+      if (!hook) {
         await (isGlobal() ? api.addGlobalHook(hookOf(form)) : api.addHook(repo, hookOf(form)))
       } else {
         const patch = hookPatch(hook, form)
@@ -257,7 +234,6 @@
         <div class="acts">
           <Switch on={!h.disabled} label={`${h.label || h.name} runs automatically`} disabled={busy[h.name] || !!editor} onchange={(on: boolean) => toggle(h, on)} />
           <button class="btn" disabled={busy[h.name] || !!editor} onclick={() => (editor = { hook: h, form: hookForm(h) })}>Edit</button>
-          {#if isBuiltin(h)}<button class="btn quiet" disabled={busy[h.name]} onclick={() => reset(h)}>Reset to default</button>{/if}
           <button class="btn" disabled={busy[h.name]} onclick={() => run(h)}>{busy[h.name] ? 'Running…' : 'Run now'}</button>
           {#if !isBuiltin(h)}
             {#if removing?.name === h.name}
@@ -329,14 +305,6 @@
 
   {#if hooks && !hooks.length && !error && !editor}
     <EmptyState title="No hooks yet">Add one here, or from a terminal in the repo: <code class="mono">dyna git hooks add verify --event before-land --command 'go test ./...' --on-fail block</code></EmptyState>
-  {/if}
-
-  {#if hooks && isGlobal() && builtins.length}
-    <h3 class="section-label">Built-in</h3>
-    <p class="quiet">Dyna runs these itself, on its own schedule. They cannot be removed; turn one off, or change how often it runs.</p>
-    <div class="list">
-      {#each builtins as h (h.name)}{@render hookRow(h)}{/each}
-    </div>
   {/if}
 
   {#if hooks && mine.length}
