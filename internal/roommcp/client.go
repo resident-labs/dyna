@@ -33,6 +33,7 @@ type Client struct {
 	http       *http.Client
 	mu         sync.Mutex
 	session    string
+	prompts    bool
 	retryUntil time.Time
 	now        func() time.Time
 }

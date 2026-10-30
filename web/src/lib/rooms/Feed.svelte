@@ -312,6 +312,7 @@
         {@render completionPost(p)}
       {:else}
         {#if p.skill}<span class="skill-chip">Skill · {p.skill.name}</span>{/if}
+        {#if p.mcpPrompt}<span class="skill-chip">MCP prompt · {p.mcpPrompt.server} · {p.mcpPrompt.prompt}</span>{/if}
         <FeedMessage post={p} {room} cont={!!row.cont} recipients={recipients(p)} expanded={expanded.has(p.id)} ontoggle={() => toggleMessage(p.id)} {onaddress} />
       {/if}
       {#if p.forward}<ForwardQuote {room} post={p.forward} author={byId[p.forward.id]} onpost={jump} {onopenfile} />{/if}
