@@ -19,7 +19,7 @@ import type { GitHubDetail, GitHubListResult, TrackedIssues } from './github.ts'
 import type { Goal, GoalEvent, GoalItem, GoalJournalEntry, GoalRule, GoalStatus, RulesView } from './goal.ts'
 import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, SignInState } from './harness.ts'
 import type { SyncStarted, SyncStatus } from './lanesync.ts'
-import type { MachineDetail, MachinePatch, MachineSummary, MachineWork } from './machine.ts'
+import type { MachineDetail, MachinePatch, MachineSummary, MachineWork, NodeHistoryPoint, NodeDiagnosis } from './machine.ts'
 import type { LibraryView } from './library.ts'
 import type { ProfileCheck, ProfileEdit, ProfileList, ProfileUsageSnapshot, ProfileView } from './profile.ts'
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SetRoomLimitResult, SpawnResult, TerminalVerdict, Visual } from './room.ts'
@@ -101,6 +101,8 @@ export interface Engine {
   Node(id: string): Promise<MachineDetail>
   // NodeWork reads the Work section of one node's page.
   NodeWork(id: string): Promise<MachineWork>
+  NodeHistory(id: string): Promise<NodeHistoryPoint[]>
+  NodeLastDiagnosis(id: string): Promise<NodeDiagnosis | null>
   SaveNode(id: string, patch: MachinePatch): Promise<MachineDetail>
   ProbeNode(id: string): Promise<MachineDetail>
   SyncStatus(): Promise<SyncStatus>
