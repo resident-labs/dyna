@@ -20,9 +20,11 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 7. **Root is a position in the tree.** Any session above another may approve its agent-class operations and start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The cutover follows only after the trial works and a dry-run import passes (section 11).
 9. **Some v1 features wait until after the cutover.** Voice, workflows, web search through Dyna, computers and the librarian's updates come back after the cutover. The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
-10. **Node jobs are not ported.** CI runs in a box. Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
+10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
 11. **CLIProxyAPI is vendored and runs inside the engine.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` runs it in-process through its Go SDK, on the control-plane loopback, so v2 stays one binary (5.7). It lands in M1, because the model route needs it.
 12. **Size budget and scope cuts (r22).** Each milestone report counts product lines per package against the plan's budget. On 2026-10-30 the owner kept subtree moves, box growth, `Run` subscriptions and terminal questions, and cut these until a need shows: a box starting again on another host after a host failure (a lost box waits for its host, 5.10), box checkpoints, the relocation commands (a manual procedure instead, 5.10), the bundle data of issue watches and room MCP servers, one cgroup per shell job (process groups instead, 5.8), `node_modules` reflink seeding, and external members (7.3). M1 also moves the Dyna shell server and the transcript stream to M2 (5.8).
+13. **GitHub is the source of truth for PRs, reviews, merges and CI.** The owner chose this on 2026-10-30 (option B of the forge note), in place of porting v1's 42,510 lines. Dyna is stateless here: it stores only which session owns which PR (`pr_owners`), and it reads PRs, reviews and checks from GitHub when it needs them, through an ETag cache. Merges use GitHub's merge queue, or auto-merge on green where a repository has none. CI runs on GitHub Actions: self-hosted runners in boxes run the owner's and Dyna's PRs, each box gets only a single-job just-in-time runner token from the engine, and outside PRs use GitHub-hosted runners or wait for the owner. A Dyna reviewer posts its verdict as the `dyna/review` commit status, with no public comment (u4). Comment trust, merge trials, the CI time budget, the conflict radar and the room PR views are dropped. Budget: about 3,000 Go lines for PRs, reviews and CI.
+   - **Accepted risk.** Agents read every comment on their PRs, including outside comments on public repositories, which can carry prompt injection.
 
 ## 1. Goals and non-goals
 
@@ -506,7 +508,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M3 | `archives` | section 5.9 |
 | M3 | `room_repos`, `repos`, `repo_attribution`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
-| M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `prs`, `library_entries`, `accounts` (labels and limits only), `counters`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
+| M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `pr_owners` ((`repo`, `number`) PK, `session`, `goal`), `library_entries`, `accounts` (labels and limits only), `counters`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
 | M3 | `proxy_auths` | `id` PK, `provider`, `record` (the proxy's auth record, which holds tokens), `updated_at`. Only the embedded proxy's token store reads and writes it (5.7). |
 
 `counters` holds keyed counters (D-580), such as the next issue number per room. A counter update is one primary-key write with prebuilt SQL.
@@ -724,7 +726,7 @@ The new host must reach every host over SSH. The copy holds secrets, so it moves
 ### 5.11 Carried from D-585
 
 - The shell tool runs locally in the box. `node=` is not built, and the #1243 SSH hint is gone.
-- Node jobs are not ported (section 0, decision 10). CI runs in a box. Host-specific work uses host exec, or a box on a host with the right label. The snapshot method from #1246 lives on as the archive.
+- Node jobs are not ported (section 0, decision 10). CI runs on GitHub Actions, with runners in boxes. Host-specific work uses host exec, or a box on a host with the right label. The snapshot method from #1246 lives on as the archive.
 - One host has one master, from #1250. It carries image builds, host exec and the box socket forwards.
 
 
@@ -875,7 +877,7 @@ A turn with several inputs owes one reply per distinct `final` target.
 - Each repository has exactly one default room. Other rooms may also list it.
 - **Events follow ownership.** An event about something a session owns goes to that session's room and wakes that session: `pr.merged` for its tracked PR, `ci.finished` for its run, or `pr.reviewed`. After close, the owning session is the nearest open ancestor.
 - **Unowned events**, such as `repo.main_updated`, an outside PR or a new GitHub issue, give one delivery to each room that lists the repository. Only the root of the repository's default room wakes. The store keeps one event row.
-- **Shared settings.** Merge policy, CI mode, reviewer profile, test budget and GitHub attribution belong to the repository. They change only through `repo.settings.set`, class `owner`. This also enforces rule u4.
+- **Shared settings.** Merge policy, CI mode, reviewer profile and GitHub attribution belong to the repository. They change only through `repo.settings.set`, class `owner`. This also enforces rule u4.
 
 ```go
 type RoomRepo struct {
@@ -883,8 +885,8 @@ type RoomRepo struct {
 	Default bool     `json:"default"`
 }
 
-type MergePolicy string     // "queue" | "manual"
-type CIMode string          // "github" | "box"
+type MergePolicy string     // "queue" (GitHub's merge queue, or auto-merge on green where it has none) | "manual"
+type CIMode string          // where Actions jobs run: "github" (GitHub-hosted) | "box" (a self-hosted runner in a box)
 type AttributionKind string // "commit" | "pr" | "comment"
 
 type AttributionLine struct {
@@ -897,12 +899,11 @@ type RepoSettings struct {
 	MergePolicy     MergePolicy      `json:"mergePolicy"`
 	CIMode          CIMode           `json:"ciMode"`
 	ReviewerProfile ProfileName      `json:"reviewerProfile"`
-	TestBudget      DurationMS       `json:"testBudget"`
 	Attribution     []AttributionLine `json:"attribution,omitempty"`
 }
 ```
 
-Tables: `room_repos` ((`room`, `repo`) PK, `is_default`), `repos` (`repo` PK, `default_room`, `merge_policy`, `ci_mode`, `reviewer_profile`, `test_budget_ms`), `repo_attribution` (`repo`, `kind`, `line`), `devices` (`id` PK, `name`, `token_sha256`, `paired_at`, `revoked_at`) and `device_scopes` (`device`, `scope`).
+Tables: `room_repos` ((`room`, `repo`) PK, `is_default`), `repos` (`repo` PK, `default_room`, `merge_policy`, `ci_mode`, `reviewer_profile`), `repo_attribution` (`repo`, `kind`, `line`), `devices` (`id` PK, `name`, `token_sha256`, `paired_at`, `revoked_at`) and `device_scopes` (`device`, `scope`).
 
 ## 8. Migration bundle and cutover
 
@@ -929,7 +930,7 @@ type GlobalBundle struct {
 	Rules         []Rule         `json:"rules"`         // global rules
 	Settings      SettingsBundle `json:"settings"`      // cleaned settings.json
 	Profiles      []ProfileBundle `json:"profiles"`
-	Hosts         []HostBundle   `json:"hosts"`         // from machines and local_ci_modes
+	Hosts         []HostBundle   `json:"hosts"`         // from machines
 	Accounts      []AccountLabel `json:"accounts"`      // provider, label, limits; no credential
 	Devices       []DeviceBundle `json:"devices"`       // name, scopes, token hash
 	Repos         []RepoBundle   `json:"repos"`         // settings, default room, library entries
@@ -948,7 +949,7 @@ type RoomBundle struct {
 	Goals         []GoalBundle     `json:"goals"`     // active, with items; no holder
 	Issues        []IssueBundle    `json:"issues"`    // open and goal-linked; D-numbers kept
 	NextIssue     int              `json:"nextIssue"`
-	PRs           []TrackedPR      `json:"prs"`       // open only
+	PRs           []TrackedPR      `json:"prs"`       // open only; ownership only (decision 13)
 	Questions     []QuestionBundle `json:"questions"` // unanswered only
 	Subscriptions []Subscription   `json:"subscriptions"` // room and session scope
 	Handoff       []SessionHandoff `json:"handoff"`       // one card per open v1 session
@@ -1073,10 +1074,10 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | files-visuals | M2 cards and files; after: the Chromium visual check | cards carry owner decisions |
 | goals, goal-service, parent-checkins | M3 | leads and builders build v2 in v2 |
 | questions | M3 | `ask-owner` and card answers |
-| prs, reviewer-pool, pr-comment-trust | M3 | self-hosting tracks, reviews and merges PRs; untrusted comments stay data |
-| pr-merge-queue | M3, simplified | merging stays with the merge service |
-| local-ci | M3 as CI in a box; act dropped | merges need a CI result |
-| local-issues, github-issues, room-prs | M3 | 288 open issues keep their D-numbers |
+| prs, reviewer-pool | M3, thin and stateless (decision 13) | Dyna stores only which session owns which PR and reads the rest from GitHub; the reviewer posts its verdict as the `dyna/review` commit status |
+| pr-merge-queue | M3 as GitHub's merge queue, or auto-merge on green where a repository has none | no merge trials of our own |
+| local-ci | M3 as GitHub Actions with self-hosted runners in boxes; act dropped | merges need a CI result |
+| local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
 | maintenance | M3 | box, archive ref and store pruning |
 | remote-access, connect, device-scopes | M3 | phone access must work on cutover day |
@@ -1093,9 +1094,11 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | web-search | after | Pi has no built-in search, so agents have no web search until this port (9.1) |
 | computers, computer-reminders | after | no self-hosting step needs a desktop in a box |
 | command-palette, library-page, review-workspace, services-page, settings-mcp, settings-profiles, web-settings | after | the CLI covers them until they are ported |
-| ci-test-budget, pr-conflict-radar, idle-compaction | after | conveniences; Pi compacts by itself |
+| idle-compaction | after | a convenience; Pi compacts by itself |
+| pr-comment-trust | dropped | the owner accepted the risk (decision 13) |
+| ci-test-budget, pr-conflict-radar, room-prs | dropped | an Actions step fails slow tests; GitHub shows conflicts and the PR list (decision 13) |
 | session-transfer | dropped | one harness, so no session format to convert |
-| jobs | dropped | CI runs in a box; host-specific work uses host exec or a box on a labeled host |
+| jobs | dropped | CI runs on Actions runners in boxes; host-specific work uses host exec or a box on a labeled host |
 | worktrees | dropped | the box volume is the worktree; close archives to a ref; each box has its own ports |
 | load-doctor | dropped | budgets with `memory.high` and `memory.max` replace it |
 | test-slots | dropped | box budgets bound concurrent tests |
@@ -1205,7 +1208,7 @@ Acceptance:
 
 ### M3: bundle import and self-hosting
 
-Scope: rooms with repositories, git through the engine, close with archive, PRs, reviews and merges, CI in a box, goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, the import, and the cutover. Section 9 lists every feature.
+Scope: rooms with repositories, git through the engine, close with archive, PRs, reviews, merges and CI through GitHub (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, the import, and the cutover. Section 9 lists every feature.
 
 The order inside M3:
 
