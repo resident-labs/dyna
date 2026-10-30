@@ -1,5 +1,7 @@
 package room
 
+import "strings"
+
 // ShellState is how a detached shell job ended: with its command's exit
 // status, or stopped before it finished.
 type ShellState string
@@ -60,3 +62,20 @@ func (ShellSilenceEvent) eventFamily() EventFamily { return FamilyShell }
 func (ShellSilenceEvent) eventType() EventType     { return TypeShellSilence }
 func (s ShellSilenceEvent) eventSubject() string   { return s.ShellID }
 func (s ShellSilenceEvent) eventDedupe() string    { return s.ShellID }
+
+// ShellInactivityEvent reports continuously observed local output inactivity.
+// It does not claim that CPU was idle or that the command deadlocked.
+type ShellInactivityEvent struct {
+	ShellID    string `json:"shellId"`
+	Label      string `json:"label"`
+	Session    string `json:"session"`
+	Minutes    int    `json:"minutes"`
+	LastOutput string `json:"lastOutput,omitempty"`
+}
+
+func (ShellInactivityEvent) eventFamily() EventFamily { return FamilyShell }
+func (ShellInactivityEvent) eventType() EventType     { return TypeShellInactivity }
+func (s ShellInactivityEvent) eventSubject() string   { return s.ShellID }
+func (s ShellInactivityEvent) eventDedupe() string {
+	return strings.Join([]string{s.ShellID, s.LastOutput}, "\x00")
+}

@@ -133,8 +133,9 @@ const (
 	// TypeJobFinished is the end of a detached job.
 	TypeJobFinished EventType = "finished"
 	// TypeSummary tells a check-in apart from any other event of its family.
-	TypeSummary      EventType = "summary"
-	TypeShellSilence EventType = "output-silence"
+	TypeSummary         EventType = "summary"
+	TypeShellSilence    EventType = "output-silence"
+	TypeShellInactivity EventType = "observed-output-inactivity"
 	// TypeInstructionBatch is one owner-facing summary of a shared instruction
 	// change. Each session still gets its own agent-facing note.
 	TypeInstructionBatch EventType = "instruction-batch"

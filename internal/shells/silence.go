@@ -1,13 +1,19 @@
 package shells
 
 import (
-	"os"
 	"time"
+
+	"dyna-agent/internal/activity"
 )
 
-// Silent lists running jobs whose output log has not grown for the interval.
-// Capped logs cannot show further growth and are excluded.
-func (s *Store) Silent(now time.Time, interval time.Duration) ([]Info, error) {
+// QuietJob has a running shell and the output timestamp that identifies its quiet period.
+type QuietJob struct {
+	Info
+	LastOutput time.Time
+}
+
+// Silent lists shells with continuous, fresh output observation for the interval.
+func (s *Store) Silent(now time.Time, interval time.Duration) ([]QuietJob, error) {
 	if interval <= 0 {
 		return nil, nil
 	}
@@ -15,29 +21,34 @@ func (s *Store) Silent(now time.Time, interval time.Duration) ([]Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	var silent []Info
+	var silent []QuietJob
 	for _, job := range jobs {
 		if job.Status != "running" || job.RoomID == "" {
 			continue
 		}
-		path, err := s.OutputPath(job.ID)
-		if err != nil {
+		signal, err := s.Activity(job.ID, now)
+		if err != nil || !quietPeriod(signal, now, interval) {
 			continue
 		}
-		info, err := os.Stat(path)
-		if err == nil {
-			modified := info.ModTime()
-			if job.Started.After(modified) {
-				modified = job.Started
-			}
-			if silentLog(now, modified, info.Size(), interval) {
-				silent = append(silent, job)
-			}
-		}
+		silent = append(silent, QuietJob{Info: job, LastOutput: signal.LastOutput})
 	}
 	return silent, nil
 }
 
-func silentLog(now, modified time.Time, size int64, interval time.Duration) bool {
-	return interval > 0 && size < MaxOutputBytes && !modified.After(now.Add(-interval))
+func quietPeriod(s activity.Signal, now time.Time, interval time.Duration) bool {
+	s = s.At(now)
+	if interval <= 0 || s.Copier != activity.CopierRunning || s.ObservedSince.IsZero() || s.ObservedSince.After(now) || s.LastOutput.After(now) {
+		return false
+	}
+	quietSince := s.ObservedSince
+	if s.LastOutput.After(quietSince) {
+		quietSince = s.LastOutput
+	}
+	// The lease is based on the copier's last proof. Output after that proof
+	// may still be waiting for publication, so do not count that time.
+	proof := s.LeaseUntil.Add(-activity.Lease)
+	if proof.After(now) {
+		return false
+	}
+	return !quietSince.After(proof.Add(-interval))
 }
