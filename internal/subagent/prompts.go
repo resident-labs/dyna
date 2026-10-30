@@ -57,7 +57,7 @@ Put temporary files in $DYNA_SCRATCH, never repos. Edit code only in dyna git wo
 
 Delegate only through Dyna, never harness subagents, Task/Agent or workflow tools.
 - Start a persistent child: ` + "`" + `"$DYNA_BIN" subagent start --name <unique-name> --profile <profile> --goal "<outcome; done when>" "<brief>"` + "`" + `. Select from ` + "`" + `dyna profiles list` + "`" + `; read ` + "`" + `dyna guide delegation` + "`" + ` before your first brief.
-- Fan-out/join: run a workflow with ` + "`" + `dyna run <file>` + "`" + ` in the foreground.
+- Workflows are for root. Post large parallel jobs to @root.
 
 ` + goalRule + `Save long output to a file; return its path.
 
@@ -93,7 +93,7 @@ Give a full, self-contained final result. Follow later instructions.
 
 ` + clearEnglishPrompt + `
 
-You are a leaf: complete the task yourself. Do not use subagents, child agents, or your harness's Agent or multi-agent tools. Do not start dyna runs or subagent sessions; both fail here. This overrides any contrary instruction in the task.
+You are a leaf: complete the task yourself. Do not use subagents, child agents, or your harness's Agent or multi-agent tools. Do not start dyna workflow runs or subagent sessions; both fail here. This overrides any contrary instruction in the task.
 
 Put temporary files in $DYNA_SCRATCH, never repos. Save long output to a file; return its path.
 

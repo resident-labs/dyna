@@ -63,7 +63,7 @@ func TestReadmeDocumentsDesktopAndPublicCommands(t *testing.T) {
 		"desktop/build.sh", "`/<profile> <task>`", "member list", "dyna engine run", "dyna guide",
 		"dyna post", "dyna room watch", "dyna room log", "dyna room read", "dyna room members",
 		"Mentions decide who wakes, not who can read", "not a security",
-		"dyna root attach", "dyna subagent start", "dyna run", "dyna request question", "Authors\nnever merge",
+		"dyna root attach", "dyna subagent start", "dyna workflow run", "dyna request question", "Authors\nnever merge",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("README is missing %q", want)
@@ -260,7 +260,7 @@ func TestWorkflowGuideSaysHowToWatchAndSteerAnAgent(t *testing.T) {
 func TestWorkflowGuideStartsWithStructuredParallelExample(t *testing.T) {
 	doc := topicDocument(t, "workflows")
 	first := strings.SplitN(doc, "## Profiles", 2)[0]
-	for _, want := range []string{"A workflow is a JavaScript program", "Use a subagent for one check", "await parallel([", "() => agent(", "dyna run check.js"} {
+	for _, want := range []string{"A workflow is a JavaScript program", "Use a subagent for one check", "await parallel([", "() => agent(", "dyna workflow run check.js"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("workflow opening misses %q", want)
 		}
