@@ -94,6 +94,86 @@ func BenchmarkAdmissionNoOpPass(b *testing.B) {
 	b.ReportMetric(float64(state.For(db).Health().Writes-before)/float64(b.N), "writes/pass")
 }
 
+func TestAdmissionWaiterReadsWithoutDrivingPass(t *testing.T) {
+	ctx := context.Background()
+	queue := Admission{DataDir: t.TempDir(), Engine: true}
+	db, err := queue.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before int
+	ticks := 0
+	stop := errors.New("stop")
+	_, err = queue.Acquire(ctx, Demand{ID: "check", Node: "missing"}, func(context.Context, time.Duration) error {
+		ticks++
+		if ticks == 1 {
+			before = state.For(db).Health().Writes
+			// Simulate an engine update that leaves a changed wait reason.
+			if _, err := db.ExecContext(ctx, "UPDATE admissions SET reason='' WHERE id='check'"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if ticks == 100 {
+			if writes := state.For(db).Health().Writes - before; writes != 0 {
+				t.Fatalf("100 waiter ticks wrote %d transactions", writes)
+			}
+			return stop
+		}
+		return nil
+	}, nil)
+	if !errors.Is(err, stop) {
+		t.Fatalf("Acquire: %v", err)
+	}
+}
+
+func TestAdmissionStandaloneFallback(t *testing.T) {
+	now := time.Unix(1000, 0)
+	node := machines.Machine{Name: "node", Enabled: true}
+	queue := Admission{DataDir: t.TempDir(), Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, clock: func() time.Time { return now }}
+	ticks := 0
+	port, err := queue.Acquire(context.Background(), Demand{ID: "check", Node: "node"}, func(context.Context, time.Duration) error {
+		ticks++
+		if ticks > int(standalonePassEvery/time.Second) {
+			return errors.New("fallback did not admit the check")
+		}
+		now = now.Add(time.Second)
+		return nil
+	}, nil)
+	if err != nil || port < 0 || ticks != int(standalonePassEvery/time.Second) {
+		t.Fatalf("port=%d ticks=%d error=%v", port, ticks, err)
+	}
+}
+
+func TestAdmissionNoOpRenewAndRelease(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1000, 0)
+	queue := Admission{DataDir: t.TempDir(), Engine: true, clock: func() time.Time { return now }}
+	if _, err := queue.Hold(ctx, Demand{ID: "check", Node: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := queue.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := state.For(db).Health().Writes
+	if err := queue.Renew(ctx, "node", "check"); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.For(db).Health().Writes - before; got != 0 {
+		t.Fatalf("unchanged renewal wrote %d transactions", got)
+	}
+	if err := queue.Release(ctx, "node", "check"); err != nil {
+		t.Fatal(err)
+	}
+	before = state.For(db).Health().Writes
+	if err := queue.Release(ctx, "node", "check"); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.For(db).Health().Writes - before; got != 0 {
+		t.Fatalf("repeated release wrote %d transactions", got)
+	}
+}
+
 func TestAdmissionNoOpPassDoesNotWrite(t *testing.T) {
 	ctx := context.Background()
 	queue := Admission{DataDir: t.TempDir(), Engine: true}
