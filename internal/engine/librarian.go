@@ -108,7 +108,7 @@ func (s services) librarianMainUpdates(h hooks.Service) hooks.Service {
 			source, err := repoid.Resolve(ctx, cfg.Source)
 			if err != nil {
 				errs = append(errs, err)
-			} else if source.Root == changed.Root {
+			} else if source.ID == changed.ID {
 				_, err := h.StartUpdate(ctx, event, cfg.Source, cfg.ToolPath)
 				errs = append(errs, err)
 			}

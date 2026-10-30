@@ -86,7 +86,11 @@ func updateRunLog(id string) (hooks.HookRunLog, error) {
 }
 
 func updateSourceItem(source string) configsvc.Item {
-	return configsvc.Item{Key: "updater.source", Value: source, Source: "stored", LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "Absolute source checkout for automatic source updates. Empty keeps release updates unchanged."}
+	origin := settings.SourceDefault
+	if source != "" {
+		origin = settings.SourceFile
+	}
+	return configsvc.Item{Key: "updater.source", Value: source, Source: origin, LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "Absolute source checkout for automatic source updates. Empty keeps release updates unchanged."}
 }
 
 func (s services) settingsItems(ctx context.Context) ([]configsvc.Item, error) {
