@@ -276,6 +276,28 @@ func (a Admission) Acquire(ctx context.Context, d Demand, wait func(context.Cont
 	}
 }
 
+// CanAdmit reports whether a new check would pass the current node queue.
+// This is a prediction, not a reservation; the queue decides again at admission.
+func (a Admission) CanAdmit(ctx context.Context, d Demand) (bool, error) {
+	if err := a.sweep(ctx); err != nil {
+		return false, err
+	}
+	q, err := a.readQueue(ctx, d.Node)
+	if err != nil {
+		return false, err
+	}
+	machine, machineErr := a.machines().Get(ctx, d.Node)
+	// The ID exists only in this snapshot and cannot collide with stored IDs.
+	d.ID = "\x00placement-probe"
+	q.waitingRows = append(q.waitingRows, admissionRow{Demand: d, Created: a.now().Add(time.Millisecond)})
+	admitted, reasons := map[string]bool{}, map[string]string{}
+	needsWrite := false
+	if err := passNode(ctx, nil, a.now(), d.Node, machine, machineErr, q, a.RoomName, admitted, reasons, &needsWrite); err != nil {
+		return false, err
+	}
+	return admitted[d.ID], nil
+}
+
 // Hold reattaches running work while preserving its original port.
 func (a Admission) Hold(ctx context.Context, d Demand) (int, error) {
 	if d.Timeout <= 0 {
@@ -942,6 +964,9 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 				}
 			} else {
 				held.portsUsed[port] = true
+				if conn == nil {
+					admitted[unit.id] = true
+				}
 				writes = append(writes, rowWrite{id: unit.id, port: port})
 			}
 			continue
