@@ -1,12 +1,14 @@
 import type { SlashCommand } from '../../api.ts'
 
 export function commandOptions(commands: SlashCommand[]) {
-  return commands.filter((c) => c.source === 'skill' || c.source === 'mcp-prompt').map((c) => ({
+  const order = { workflow: 0, skill: 1, 'mcp-prompt': 2 }
+  return commands.map((c) => ({
     value: '/' + c.name,
-    group: c.source === 'skill' ? 'Skills' : 'MCP prompts',
+    group: c.source === 'workflow' ? 'Workflows' : c.source === 'skill' ? 'Skills' : 'MCP prompts',
     arg: c.source === 'skill' ? 'message' : c.args.map((arg) => arg.name).join(', '),
     hint: c.description,
-  })).sort((a, b) => (a.group === b.group ? 0 : a.group === 'Skills' ? -1 : 1))
+    order: order[c.source],
+  })).sort((a, b) => a.order - b.order)
 }
 
 export function matchCommand(commands: SlashCommand[], draft: string) {

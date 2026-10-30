@@ -91,3 +91,30 @@ func TestRunPromptWithoutArgumentsPreservesOutputAndTarget(t *testing.T) {
 		t.Fatalf("wrong prompt post: %+v, arguments %q", post.Message, prompts.text)
 	}
 }
+
+func TestWorkflowCommandListsAndUsesDMTarget(t *testing.T) {
+	e := newEnv(t)
+	rec, err := e.svc.rooms().Create(room.CreateInput{Name: "workflow", Repo: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := e.room("other")
+	target := e.start(other, "lead", nil)
+	commands, err := e.svc.Commands(e.ctx, rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, command := range commands {
+		if command.Name == "deep-research" && command.Source == slashcmd.Workflow {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("bundled workflow missing")
+	}
+	_, err = e.svc.RunCommand(e.ctx, rec.ID, "deep-research", "question", target.ID)
+	if err == nil || !strings.Contains(err.Error(), "result target must belong") {
+		t.Fatalf("wrong target error: %v", err)
+	}
+}
