@@ -68,16 +68,13 @@ test('the PR page has no reviewer bar and no review strip at the top', async () 
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
- test('PR chips use the shared settled outlines and running dot', async () => {
+ test('PR status reserves color for attention', async () => {
   const { dir, component, render } = await load('PRChip')
   try {
-   const show = (tone: string, props: object = {}) => render(component, { props: { pr: { number: 9, title: 'Example' }, meta: { tone, label: 'State' }, ...props } }).body
-   assert.match(show('done'), /class="chip success[^"]*outline/)
-   assert.match(show('faint'), /class="chip [^"]*outline/)
-   assert.match(show('run'), /class="dot /)
-   assert.match(show('iris', { more: 2 }), /class="chip info/)
-   assert.match(text(show('iris', { more: 2 })), /#9 State \+2/)
-   assert.doesNotMatch(text(show('sage', { short: true, number: false })), /#9|State/)
+   const show = (tone: string) => render(component, { props: { pr: { number: 9 }, meta: { tone, label: 'State' } } }).body
+   assert.doesNotMatch(show('run'), /class="status pill/)
+   assert.match(show('coral'), /class="status pill danger /)
+   assert.match(show('gold'), /class="status pill warning /)
   } finally { await rm(dir, { recursive: true, force: true }) }
  })
 
