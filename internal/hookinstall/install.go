@@ -234,9 +234,6 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
 			return nil
 		}
-		if err = s.recordUpdateRestart(ctx, s.now()); err != nil {
-			return err
-		}
 	}
 	if err = os.MkdirAll(c.Bin, 0755); err != nil {
 		return err
@@ -267,6 +264,9 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		}
 	}
 	if err = d.restartServer(ctx, filepath.Join(c.Bin, "dyna"), restartComputers); err != nil {
+		return err
+	}
+	if err = s.recordUpdateRestart(ctx, s.now()); err != nil {
 		return err
 	}
 	if err = prunePiAssets(filepath.Dir(piPath), c.Bin); err != nil {

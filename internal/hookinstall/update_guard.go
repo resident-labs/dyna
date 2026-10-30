@@ -85,6 +85,14 @@ id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since IN
 		}
 		return false, nil
 	}
+	if since != 0 || noticed {
+		if err = statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			_, err := conn.ExecContext(ctx, "UPDATE update_restart_guard SET busy_since=0,noticed=0 WHERE id=1")
+			return err
+		}); err != nil {
+			return false, err
+		}
+	}
 	if last != 0 && now.Sub(time.Unix(last, 0)) < time.Hour {
 		return false, nil
 	}
@@ -110,7 +118,11 @@ func (s Service) recordUpdateRestart(ctx context.Context, now time.Time) error {
 		return err
 	}
 	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, "UPDATE update_restart_guard SET last_restart=?,busy_since=0,noticed=0 WHERE id=1", now.Unix())
+		if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS update_restart_guard (
+id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since INTEGER NOT NULL, noticed INTEGER NOT NULL)`); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, "INSERT INTO update_restart_guard VALUES(1,?,0,0) ON CONFLICT(id) DO UPDATE SET last_restart=excluded.last_restart,busy_since=0,noticed=0", now.Unix())
 		return err
 	})
 }
