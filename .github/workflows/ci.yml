@@ -339,11 +339,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
+  # next/ is the v2 module with its own go.mod, so the root ./... skips it.
+  # This job vets and tests it alone. Its Go version comes from next/go.mod.
+  next:
+    name: next
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: next/go.mod
+          cache-dependency-path: next/go.sum
+      - name: Vet
+        working-directory: next
+        run: go vet ./...
+      - name: Test
+        working-directory: next
+        run: go test ./... -count=1
+
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
   test:
     name: go-test
-    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check]
+    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next]
     if: ${{ always() && needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -351,7 +372,7 @@ jobs:
       - name: Require every Go job
         env:
           WEB: ${{ needs.changes.outputs.web }}
-          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
           FRONTEND_CHECK: ${{ needs.frontend-check.result }}
         run: |
           echo "Results: $RESULTS"
