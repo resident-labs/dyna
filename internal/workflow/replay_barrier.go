@@ -161,3 +161,26 @@ func (e *engine) checkReplayCwd(cwd string) error {
 	}
 	return nil
 }
+
+// beginReplayAsync tracks promises until their result reaches the script. It
+// keeps overlapping calls ineligible because their settlement order is unknown.
+func (e *engine) beginReplayAsync() (func(), error) {
+	if !e.opts.RecordManifest && e.opts.Replay == nil {
+		return nil, nil
+	}
+	if e.asyncPending > 0 {
+		reason := errors.New("overlapping asynchronous workflow calls have no recorded settlement order")
+		if e.opts.Replay != nil {
+			return nil, e.opts.Replay.fail(reason)
+		}
+		if !e.overlapMarked {
+			if err := runstore.MarkWorkflowManifestUnsafe(e.ctx, e.runID(), reason.Error()); err != nil {
+				e.manifestWriteFailed()
+				return nil, fmt.Errorf("mark overlapping calls unsafe: %w", err)
+			}
+			e.overlapMarked = true
+		}
+	}
+	e.asyncPending++
+	return func() { e.asyncPending-- }, nil
+}

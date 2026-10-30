@@ -40,6 +40,7 @@ var computerCodePaths = []string{
 	"internal/profile",
 	"internal/protectedpath",
 	"internal/providerfailure",
+	"internal/replayreason",
 	"internal/repoid",
 	"internal/room",
 	"internal/runprocs",
