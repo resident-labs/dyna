@@ -45,6 +45,13 @@ func captureRun(t *testing.T, args ...string) callspec.RunJobInput {
 	return captured
 }
 
+func TestRunWithoutImageRunsOnHost(t *testing.T) {
+	request := captureRun(t, "--", "true")
+	if request.Image != "" {
+		t.Fatalf("image = %q, want none: a job without --image runs on the host", request.Image)
+	}
+}
+
 func TestRunNetworkNoneFlag(t *testing.T) {
 	request := captureRun(t, "--image", "alpine", "--network", "none", "--", "true")
 	if request.Network != "none" {
