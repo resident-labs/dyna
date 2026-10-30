@@ -116,3 +116,5 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 		return nil, fmt.Errorf("unknown operation kind %q", k)
 	}
 }
+
+var eventBodyTypes = []EventType{"box.changed", "post.created", "session.closed", "session.started", "turn.ended", "turn.started"}
