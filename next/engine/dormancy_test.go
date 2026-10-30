@@ -66,12 +66,12 @@ func wakeSession(t *testing.T, s *Service, ctx context.Context, room contract.Ro
 
 func TestDormancyStopsAndWakes(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if h.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
 		t.Fatal("quiet box did not stop")
 	}
 	wakeSession(t, s, ctx, room, sid)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if h.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
 		t.Fatal("woken box did not start")
 	}
@@ -79,7 +79,7 @@ func TestDormancyStopsAndWakes(t *testing.T) {
 
 func TestDormancyKeepsShellJobs(t *testing.T) {
 	s, h, _, sid, ctx := quietSession(t, 1)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if h.stops != 0 || stateOf(t, s, ctx, sid) != contract.BoxReady {
 		t.Fatal("box with shell jobs stopped")
 	}
@@ -88,7 +88,7 @@ func TestDormancyKeepsShellJobs(t *testing.T) {
 func TestWakeDuringQuietPeriodPreventsStop(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
 	wakeSession(t, s, ctx, room, sid)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if h.stops != 0 || stateOf(t, s, ctx, sid) != contract.BoxReady {
 		t.Fatal("box stopped with a pending wake")
 	}
@@ -96,7 +96,7 @@ func TestWakeDuringQuietPeriodPreventsStop(t *testing.T) {
 
 func TestWakeWithoutRoomWaitsPending(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET cpus=0")
 		return err
@@ -105,7 +105,7 @@ func TestWakeWithoutRoomWaitsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	wakeSession(t, s, ctx, room, sid)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if h.starts != 0 || stateOf(t, s, ctx, sid) != contract.BoxPending {
 		t.Fatal("box did not wait for capacity")
 	}
@@ -114,9 +114,13 @@ func TestWakeWithoutRoomWaitsPending(t *testing.T) {
 func TestDormancyRetriesFailedStop(t *testing.T) {
 	s, h, _, sid, ctx := quietSession(t, 0)
 	h.stopErr = errors.New("unavailable")
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	h.stopErr = nil
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, false)
+	if h.stops != 1 {
+		t.Fatal("event retried the stop")
+	}
+	s.ReconcileDormancy(ctx, false, true)
 	if h.stops != 2 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
 		t.Fatal("failed stop was not retried")
 	}
@@ -124,15 +128,15 @@ func TestDormancyRetriesFailedStop(t *testing.T) {
 
 func TestDormancyRetriesFailedStart(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	wakeSession(t, s, ctx, room, sid)
 	h.startErr = errors.New("unavailable")
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if stateOf(t, s, ctx, sid) != contract.BoxStopped {
 		t.Fatal("failed start did not return to stopped")
 	}
 	h.startErr = nil
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if h.starts != 2 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
 		t.Fatal("failed start was not retried")
 	}
@@ -140,7 +144,7 @@ func TestDormancyRetriesFailedStart(t *testing.T) {
 
 func TestStoppedBoxRejectsHello(t *testing.T) {
 	s, _, _, sid, ctx := quietSession(t, 0)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	_, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.BoxHelloRequest{})
 	if problem == nil {
 		t.Fatal("stopped box accepted hello")
@@ -161,7 +165,7 @@ func TestDormancySkipsUncreatedPendingBox(t *testing.T) {
 		t.Fatal(err)
 	}
 	wakeSession(t, s, ctx, session.Room, sid)
-	s.ReconcileDormancy(ctx, false)
+	s.ReconcileDormancy(ctx, false, true)
 	if h.starts != 0 {
 		t.Fatal("started a box without a container")
 	}
