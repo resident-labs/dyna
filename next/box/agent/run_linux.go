@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/resident-labs/dyna/box/computer"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
 )
@@ -42,7 +44,12 @@ func Run(ctx context.Context, version string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	client := NewClient(engineSocket)
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
+	closeComputer, err := computer.Serve(ctx, "/run/dyna/agent.sock", errs)
+	if err != nil {
+		return err
+	}
+	defer closeComputer()
 	go client.Run(ctx)
 	hello, err := client.Hello(ctx, version)
 	if err != nil {
@@ -79,7 +86,12 @@ func Run(ctx context.Context, version string) error {
 		return err
 	}
 	defer h.Close()
-	runner := &Runner{Harness: h, Sink: client, Setup: setup, setupErr: setupErr}
+	transcript := NewTranscript(client, sessions)
+	transcript.syncLogged(ctx, h.SessionFile())
+	ticks := time.NewTicker(transcriptInterval)
+	defer ticks.Stop()
+	go transcript.Run(ctx, ticks.C, h.SessionFile)
+	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
 			if _, ok := message.Body.(contract.Archive); ok {

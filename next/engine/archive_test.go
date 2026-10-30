@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -248,6 +249,41 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 	}
 	if _, err := s.store.Session(ctx, session); err == nil {
 		t.Fatal("session remained open")
+	}
+}
+
+func TestRestoreStartsMarkedLeaf(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	record, err := s.store.Session(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.transition(ctx, room, current, contract.BoxClosing, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET id='000' WHERE session=?", child.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.MarkClosing(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if e := s.ResumeClosures(ctx); e != nil {
+		t.Fatal(e)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
+	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
+		t.Fatalf("close order: %+v, %v", events, err)
 	}
 }
 
