@@ -55,7 +55,7 @@
 </form>
 
 <style>
-  form { display: grid; gap: 14px; max-width: 560px; margin: 18px 0; padding: 20px; border: 1px solid var(--line); background: var(--side); border-radius: 10px; }
+  form { display: grid; gap: 14px; max-width: var(--page-reading-width); margin: 18px 0; padding: 20px; border: 1px solid var(--line); background: var(--side); border-radius: 10px; }
   h3 { margin: 0; font-size: var(--t-lead); font-weight: 500; }
   label { display: grid; gap: 6px; color: var(--ink-2); font-size: var(--t-sm); }
   input, select { width: 100%; min-width: 0; background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: var(--s2) 10px; color: var(--ink); }
