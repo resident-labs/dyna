@@ -134,6 +134,9 @@ func fakeInstaller(t *testing.T, j Job, branch, fail string, calls *[]string, de
 		if strings.Contains(command, "rev-parse origin/") {
 			fmt.Fprintln(p.Output, testSHA)
 		}
+		if slices.Contains(p.Args, "--name-only") {
+			fmt.Fprint(p.Output, "internal/engine/run.go\\x00")
+		}
 		if strings.Contains(command, "branch --show-current") {
 			fmt.Fprintln(p.Output, branch)
 		}
@@ -218,7 +221,7 @@ func TestInstallSkipsChangesOutsideBuild(t *testing.T) {
 	fake := fakeInstaller(t, j, "main", "", &calls)
 	s.Exec = func(ctx context.Context, p processguard.Process) error {
 		if slices.Contains(p.Args, "--name-only") {
-			fmt.Fprint(p.Output, "docs/guide.md\\x00next/engine/main.go\\x00")
+			fmt.Fprint(p.Output, "docs/guide.md\x00next/engine/main.go\x00")
 			return nil
 		}
 		return fake(ctx, p)
@@ -227,7 +230,7 @@ func TestInstallSkipsChangesOutsideBuild(t *testing.T) {
 	if err := s.Locked(t.Context(), j.ID, "", &output); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(strings.Join(calls, "\\n"), "npm ") {
+	if strings.Contains(strings.Join(calls, "\n"), "npm ") {
 		t.Fatalf("documentation-only change started a build: %v", calls)
 	}
 	state, err := s.Jobs.installState(j.Config.State)
