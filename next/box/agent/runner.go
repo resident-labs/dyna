@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 )
+
+var errTurnSettling = errors.New("turn is settling")
 
 type turnSink interface {
 	DeliveryDone(context.Context, contract.DeliverySeq) error
@@ -139,7 +142,7 @@ func (r *Runner) steer(ctx context.Context, input contract.TurnSteer) error {
 	r.mu.Lock()
 	if r.active == "" || r.settling {
 		r.mu.Unlock()
-		return fmt.Errorf("steer without a running turn")
+		return errTurnSettling
 	}
 	if _, exists := r.sent[input.Input.Delivery]; exists {
 		r.mu.Unlock()
@@ -186,13 +189,10 @@ func (r *Runner) finish(ctx context.Context, result contract.TurnEnded) error {
 			}
 		}
 	}
-	if err := r.Sink.TurnOutput(ctx, result); err != nil {
-		return err
-	}
 	r.mu.Lock()
 	r.active = ""
 	r.settling = false
 	r.sent = nil
 	r.mu.Unlock()
-	return nil
+	return r.Sink.TurnOutput(ctx, result)
 }
