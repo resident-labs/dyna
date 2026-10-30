@@ -20,7 +20,8 @@ import (
 
 // TODO: legacy/shim remove later — sweeps directories left by old row-only
 // pruning. Keep this until the upgrade floor guarantees the sweep has run.
-// SweepOrphanDirectories processes one bounded directory page per pass.
+// SweepOrphanDirectories processes one bounded directory page per pass. It
+// starts another scan at EOF to revisit entries that were too young earlier.
 func (s *Store) SweepOrphanDirectories(ctx context.Context, now time.Time) (int, error) {
 	db, err := s.db()
 	if err != nil {
@@ -33,9 +34,6 @@ func (s *Store) SweepOrphanDirectories(ctx context.Context, now time.Time) (int,
 		err := db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&cursor)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
-		}
-		if cursor == "done" {
-			return nil
 		}
 		var offset int64
 		if cursor != "" {
@@ -57,7 +55,7 @@ func (s *Store) SweepOrphanDirectories(ctx context.Context, now time.Time) (int,
 		if err != nil {
 			return err
 		}
-		next := "done"
+		next := "0"
 		if n > 0 {
 			position, err := f.Seek(0, io.SeekCurrent)
 			if err != nil {

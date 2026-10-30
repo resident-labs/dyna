@@ -52,4 +52,14 @@ func TestSweepOrphanDirectories(t *testing.T) {
 			t.Fatalf("directory %s: %v", id, err)
 		}
 	}
+	// EOF resets the cursor; a later scan revisits a previously young marker.
+	if _, err := s.SweepOrphanDirectories(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.SweepOrphanDirectories(context.Background(), time.Now().Add(48*time.Hour)); err != nil || n != 1 {
+		t.Fatalf("later sweep removed %d, %v; want the aged directory", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Root, recent)); !os.IsNotExist(err) {
+		t.Fatalf("aged directory remains: %v", err)
+	}
 }
