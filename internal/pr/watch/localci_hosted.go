@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/localci"
 )
@@ -35,9 +36,40 @@ func hostedRunMatches(job registeredCIJob, run Run) bool {
 	return strings.EqualFold(job.record.HeadRepo, job.record.Repo) && run.Event == "pull_request"
 }
 
+type hostedCancelKey struct {
+	repo string
+	head string
+}
+
+const hostedCancelInterval = 30 * time.Second
+
 // Cancellation is limited to queued exact-head runs. Started hosted jobs race
 // local CI. Main pushes and fork PRs cannot enter this path.
 func (s *Service) cancelQueuedHostedCI(ctx context.Context, job registeredCIJob, repo string) error {
+	key := hostedCancelKey{repo: repo, head: job.head}
+	s.hostedCancelMu.Lock()
+	now := s.now()
+	for k, next := range s.hostedCancelNext {
+		if !now.Before(next) && !s.hostedCancelActive[k] {
+			delete(s.hostedCancelNext, k)
+		}
+	}
+	if s.hostedCancelActive[key] || now.Before(s.hostedCancelNext[key]) {
+		s.hostedCancelMu.Unlock()
+		return nil
+	}
+	if s.hostedCancelActive == nil {
+		s.hostedCancelActive = make(map[hostedCancelKey]bool)
+		s.hostedCancelNext = make(map[hostedCancelKey]time.Time)
+	}
+	s.hostedCancelActive[key] = true
+	s.hostedCancelMu.Unlock()
+	defer func() {
+		s.hostedCancelMu.Lock()
+		delete(s.hostedCancelActive, key)
+		s.hostedCancelNext[key] = s.now().Add(hostedCancelInterval)
+		s.hostedCancelMu.Unlock()
+	}()
 	gh := s.github(job.record.RoomID)
 	runs, err := gh.readCommitRuns(ctx, refRecord(job.record), job.head)
 	if err != nil {
