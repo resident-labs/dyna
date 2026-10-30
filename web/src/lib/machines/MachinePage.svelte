@@ -13,13 +13,13 @@
   import ScopeList from './ScopeList.svelte'
   import MachineWorkCard from './MachineWorkCard.svelte'
   import type { Room } from '../api/room.ts'
-  import SystemLoadCard from '../system/SystemLoadCard.svelte'
+  import NodeUsageCard from './NodeUsageCard.svelte'
   import { pollLoad } from '../system/systemLoad.ts'
   import { ago, roomLabel } from '../ui/format.ts'
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineWork } from '../api/machine.ts'
-  import { ciRunDetail, ciRunText, computersText, diskText, loadText, memoryPct, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
+  import { ciRunDetail, ciRunText, computersText, diskText, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, rooms = [], owner = true, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
@@ -63,8 +63,6 @@
   // What the last probe read. A machine no probe has reached has no
   // capabilities, and the page then shows no figure at all.
   let caps = $derived(machine?.capabilities ?? null)
-  let remote = $derived(machine && !machine.local ? machine.load ?? null : null)
-  let memory = $derived(remote ? memoryPct(remote) : null)
 
   let roomOptions = $derived(rooms.map((r) => ({ value: r.id, label: roomLabel(r) })).sort((a, b) => a.label.localeCompare(b.label)))
 
@@ -153,13 +151,8 @@
         {/if}
       </Card>
 
+      <NodeUsageCard {machine} {load} work={workHere?.value ?? null} />
       {#if machine.local}
-        <div class="usage">
-          {#if load}
-            <SystemLoadCard title="Usage" {load} rows={false} />
-          {:else}
-            <Card title="Usage"><p class="note">Reading this node…</p></Card>
-          {/if}
           <Card title="Running now" count={machine.running?.length || null}>
             {#each machine.running ?? [] as agent (agent.id)}
               <Row dense text={agent.name} onclick={() => onagent?.(agent)}>
@@ -170,35 +163,6 @@
               <p class="note">No agent runs here now.</p>
             {/each}
           </Card>
-        </div>
-      {/if}
-
-      {#if remote}
-        <Card title="Usage">
-          <Row dense text="CPU">
-            {#snippet trail()}
-              {#if remote.cpuPercent !== undefined}
-                <span class="mem">
-                  <span class="bar" aria-hidden="true"><span class="fill" style="width: {remote.cpuPercent}%"></span></span>
-                  <span class="value">{remote.cpuPercent}%</span>
-                </span>
-              {:else}<span class="value">No reading</span>{/if}
-            {/snippet}
-          </Row>
-          <Row dense text="Load average">
-            {#snippet trail()}<span class="value mono">{remote.loadAvg.map((v) => v.toFixed(2)).join(' · ')}</span>{/snippet}
-          </Row>
-          <Row dense text="Memory">
-            {#snippet trail()}
-              {#if memory !== null}
-                <span class="mem">
-                  <span class="bar" aria-hidden="true"><span class="fill" style="width: {memory}%"></span></span>
-                  <span class="value">{loadText(remote)}</span>
-                </span>
-              {:else}<span class="value">No reading</span>{/if}
-            {/snippet}
-          </Row>
-        </Card>
       {/if}
 
       <MachineWorkCard work={workHere?.value ?? null} failed={workHere !== null && workHere.value === null} />
