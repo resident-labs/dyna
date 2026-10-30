@@ -148,7 +148,7 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 		// too, nothing else will run it, so the trial fails with the cause instead
 		// of waiting for a run that will never come.
 		if cisched.StoppedLocalResult(result) {
-			if result.Resumed {
+			if cisched.SavedResultActionFor(result) == cisched.SettleSavedResult {
 				return VerdictFailed, logs, localFailureNote(result), nil
 			}
 			return VerdictPending, "", "local CI stopped with the engine; running it again", nil
@@ -156,7 +156,7 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 		// A run that never started says nothing about the commit, so the verdict
 		// names the scheduling cause instead of reporting a failed test.
 		if result.Cause == localci.CauseScheduling {
-			if result.Resumed {
+			if cisched.SavedResultActionFor(result) == cisched.SettleSavedResult {
 				return VerdictFailed, logs, localFailureNote(result), nil
 			}
 			return VerdictPending, "", "local CI could not start a run; trying again", nil
