@@ -23,7 +23,7 @@ func TestLocalReviewDefaultPreservesMarkdownWithoutGitHubWrites(t *testing.T) {
 			e.tick()
 			r = e.record()
 			task := e.launches[0]
-			if r.ReviewPublishing != PublishingLocal || !strings.Contains(task, "Read GitHub without posting") || !strings.Contains(task, "--head "+r.Head) || strings.Contains(task, "gh pr review --comment") {
+			if r.ReviewPublishing != PublishingLocal || !strings.Contains(task, "Read GitHub and record your review in Dyna") || !strings.Contains(task, "--head "+r.Head) || strings.Contains(task, "gh pr review --comment") {
 				t.Fatalf("local assignment: %+v, %s", r, task)
 			}
 			// A running legacy assignment must also accept a local verdict.

@@ -1044,7 +1044,7 @@ func assignment(r Record) ReviewAssignment {
 	return ReviewAssignment{ChangeID: changeID(r), Kind: changeKind(r), Repo: r.Repo, Branch: r.Branch, Base: r.Base, Head: r.Head, URL: r.URL, Notes: r.Notes}
 }
 func reviewTask(r Record) string {
-	base := fmt.Sprintf("Review %s at head %s. Do not merge or push changes.\n", changeLocation(r), r.Head)
+	base := fmt.Sprintf("Review %s at head %s. Leave merging and pushing to the author.\n", changeLocation(r), r.Head)
 	command := "dyna git change verdict " + shellquote.Quote(changeID(r))
 	if changeKind(r) == "github" {
 		base += "Read the prepared diff file that the assignment context names; files marked generated are omitted from it. If that file is missing, read the diff with gh pr diff.\n"
@@ -1053,12 +1053,12 @@ func reviewTask(r Record) string {
 	if len(r.ReviewRounds) > 0 {
 		base += "This is an incremental review. Confirm earlier findings and replies against the delta.\n"
 	}
-	base += "Your working directory is the author's checkout: never write files there. Write review files under your scratch folder, using the real path from echo \"$DYNA_SCRATCH\" because file tools do not expand variables.\n"
+	base += "Read the author's checkout at your working directory. Write all files under your scratch folder, using the real path from echo \"$DYNA_SCRATCH\" because file tools do not expand variables.\n"
 	input, _ := json.Marshal(assignment(r))
 	base += "Assignment input: " + string(input) + "\n"
 	base += "You may start at most 3 live helper sessions, one level deep, using your own profile or a cheaper profile (higher cost-efficiency). Helpers report findings to you. Only you may record this assignment's verdict. Keep this reviewer session open between reviews.\n"
-	return base + fmt.Sprintf(`This assignment is Dyna-only. Read GitHub without posting: do not publish GitHub reviews or comments for this assignment.
-Record exactly one typed result in Dyna before your turn ends: %s approve|changes|approve-fast|stop-early --body-file <file> --findings-file <json-file> --head %s. A turn that ends without a typed result is an error. Use changes when fixes are needed, with structured findings. approve-fast is for test code or low-risk changes of any kind, at the reviewer's own discretion. It lands without a merge trial when required CI passed at exactly the approved head. Use stop-early with --reason superseded|duplicate|empty|too-large when you stop before judging the change. Reviews over 12000 bytes are rejected, never silently clipped. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. The stored result is visible in Dyna and a changes result is delivered to the author.`, command, r.Head)
+	return base + fmt.Sprintf(`This assignment is Dyna-only. Read GitHub and record your review in Dyna.
+Record exactly one typed result in Dyna before your turn ends: %s approve|changes|approve-fast|stop-early --body-file <file> --findings-file <json-file> --head %s. A turn that ends without a typed result is an error. Use changes when fixes are needed, with structured findings. approve-fast is for test code or low-risk changes of any kind, at the reviewer's own discretion. It lands without a merge trial when required CI passed at exactly the approved head. Use stop-early with --reason superseded|duplicate|empty|too-large when you stop before judging the change. Reviews over 12000 bytes are rejected. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. The stored result is visible in Dyna and a changes result is delivered to the author.`, command, r.Head)
 }
 func (s *Service) launch(ctx context.Context, r Record, profile, task string) (string, error) {
 	if s.LaunchReviewer != nil {

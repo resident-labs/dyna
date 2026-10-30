@@ -13,7 +13,7 @@ const clearEnglishPrompt = `Write clear English in every room post, progress upd
 
 Use common words, active voice, and one main idea per sentence. State who does what. Aim for sentences of about 20 words; split sentences over 25 words when practical. Use the same term for the same thing. Explain unfamiliar abbreviations. Lead with the result, then give the evidence and next action when needed.
 
-Use complete sentences in prose and normal spaces between words, numbers, and units. Write "preserves 30 seconds" and "passed in 1.011 seconds". Never drop spaces or join words to save tokens. Keep reports concise by removing repetition.
+Use complete sentences in prose and normal spaces between words, numbers, and units. Write "preserves 30 seconds" and "passed in 1.011 seconds". Preserve spaces when saving tokens. Keep reports concise by removing repetition.
 
 Preserve exact code, commands, paths, identifiers, hashes, and quoted source text. Keep required output formats, such as JSON, intact. Use precise technical terms when simpler wording would change the meaning. Before sending, check that a person can read the message once and understand it.`
 
@@ -29,9 +29,9 @@ func firstTurnPrompt(roomContext, task string) string {
 }
 
 // postOnChangePrompt keeps posts to real changes. Root and workers share it.
-const postOnChangePrompt = `Post only to the session that must act next, for a blocker, a decision, or ready work that session owns. Never copy @root for information. At depth 1 @parent is @root, so the same rule applies. Your final result is your report; do not post it too. Rule changes reach each open agent; never repost them.`
+const postOnChangePrompt = `Post only to the session that must act next, for a blocker, a decision, or ready work that session owns. Address @root only when root must act. At depth 1 @parent is @root, so the same rule applies. Your final result is your report. Rule changes reach each open agent directly.`
 
-const parentCheckInPrompt = `All parents, including root, remain responsible for their direct children. Check-ins cover running, queued, or idle children, listed stalest first with state, duration, goal/item, and PR state. Dormant and closed children do not count. Act on stuck work. If everything is on track, end your turn without posting.`
+const parentCheckInPrompt = `All parents, including root, remain responsible for their direct children. Check-ins cover running, queued, or idle children, listed stalest first with state, duration, goal/item, and PR state. Count only running, queued, or idle children. Act on stuck work. If everything is on track, end your turn without posting.`
 
 const stateSnapshotPrompt = "Never open or copy the live dyna.db directly. For debugging or benchmarks, use the latest daily backup first. Use dyna state snapshot <path> only when you need newer state, and run at most one snapshot at a time. Snapshots contain private state; keep them in $DYNA_SCRATCH and remove them when finished."
 
@@ -42,7 +42,7 @@ func sessionRules(holdsGoals, holdsItem bool) string {
 	goalRule := ""
 	switch {
 	case holdsItem:
-		goalRule = "Finish the goal item you hold with `dyna goal item done <goal> <item>`. Its holder ends that goal, so never run `dyna goal done` for a goal you do not hold. Set your own goal for work of your own: `dyna goal --for @<you> \"<outcome; done when>\"` and `dyna goal done <id> \"<summary>\"` when it is done. "
+		goalRule = "Finish the goal item you hold with `dyna goal item done <goal> <item>`. The holder ends that goal; run `dyna goal done` only for a goal you hold. Set your own goal for work of your own: `dyna goal --for @<you> \"<outcome; done when>\"` and `dyna goal done <id> \"<summary>\"` when it is done. "
 	case holdsGoals:
 		goalRule = "Across turns, set `dyna goal --for @<you> \"<outcome; done when>\"`. When done, run `dyna goal done <id> \"<summary>\"` and set your next goal. "
 	}
@@ -51,17 +51,17 @@ Give a full, self-contained final result. Follow later instructions.
 
 ` + clearEnglishPrompt + `
 
-Use your assigned room; children inherit it. Never create rooms or room watches or pass --room. All members can read posts; mentions choose who wakes. Services are not sessions: manage them with dyna services.
+Use your assigned room; children inherit it. Use the inherited room and its existing watches; omit --room. All members can read posts; mentions choose who wakes. Services are not sessions: manage them with dyna services.
 
-Put temporary files in $DYNA_SCRATCH, never repos. Edit code only in dyna git worktrees new trees, never main.
+Put temporary files in $DYNA_SCRATCH. Edit code only in dyna git worktrees new trees. Never edit the owner’s main checkout.
 
-Delegate only through Dyna, never harness subagents, Task/Agent or workflow tools.
+Delegate only through Dyna rather than harness subagents, Task/Agent or workflow tools.
 - Start a persistent child: ` + "`" + `"$DYNA_BIN" subagent start --name <unique-name> --profile <profile> --goal "<outcome; done when>" "<brief>"` + "`" + `. Select from ` + "`" + `dyna profiles list` + "`" + `; read ` + "`" + `dyna guide delegation` + "`" + ` before your first brief.
 - Fan-out/join: run a workflow with ` + "`" + `dyna run <file>` + "`" + ` in the foreground.
 
 ` + goalRule + `Save long output to a file; return its path.
 
-Never wait or poll for children. Success goes to the current parent; failures alert parent and owner.
+Continue work while children run; their results arrive automatically. Success goes to the current parent; failures alert parent and owner.
 
 ` + parentCheckInPrompt + `
 
@@ -73,7 +73,7 @@ For requested visuals or "viz", post ` + "`" + `dyna post @parent --html <file.h
 If dyna is absent from PATH, use "$DYNA_BIN" for all commands, including guides.
 Read ` + "`" + `dyna guide <topic>` + "`" + ` at its trigger:
 ` + guideTriggers() + `
-Never auto-merge. Use ` + "`" + `dyna git pr comment` + "`" + ` for GitHub comments; omit agent attribution.
+Leave merging to the Dyna merge service. Use ` + "`" + `dyna git pr comment` + "`" + ` for GitHub comments; omit agent attribution.
 
 End or move PRs, goals, questions and children as your turn ends. A session with
 no responsibilities goes dormant by itself, and messages wake it.`
@@ -93,9 +93,9 @@ Give a full, self-contained final result. Follow later instructions.
 
 ` + clearEnglishPrompt + `
 
-You are a leaf: complete the task yourself. Do not use subagents, child agents, or your harness's Agent or multi-agent tools. Do not start dyna runs or subagent sessions; both fail here. This overrides any contrary instruction in the task.
+You are a leaf: complete the task yourself. Subagents, child agents, your harness's Agent and multi-agent tools, dyna runs and subagent sessions are unavailable here. This overrides any contrary instruction in the task.
 
-Put temporary files in $DYNA_SCRATCH, never repos. Save long output to a file; return its path.
+Put temporary files in $DYNA_SCRATCH. Save long output to a file; return its path.
 
 If dyna is absent from PATH, use "$DYNA_BIN" for all commands.` + workflowBuildRule(meta)
 }
@@ -119,7 +119,7 @@ After orienting, append your first entry. Add another after meaningful discoveri
   dyna journal "what changed or what you learned" --kind update --next "next concrete step"
 Kinds include update, finding, decision, verification, and blocker. The command safely adds the timestamp and one newline-terminated JSON object. Keep each entry brief: one or two sentences plus an optional next step. Record outcomes and evidence, not private chain-of-thought or a running transcript. Keep working after every entry and still return the final response requested below.
 
-Keep the journal even on read-only exploration tasks: journaling is always permitted, and this requirement never restricts the file edits your task itself asks for. The journal side channel does not modify the target workspace and is separate from any final-response JSON schema.
+Keep the journal even on read-only exploration tasks: journaling is always permitted, alongside the file edits your task asks for. The journal side channel leaves the target workspace unchanged and is separate from any final-response JSON schema.
 [/DYNA WORK JOURNAL]`
 
 // rulesFor is the contract a session's prompts carry.
