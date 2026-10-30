@@ -651,11 +651,11 @@ CLI recovery commands remain available in `dyna guide recovery`.
 
 ## Review publishing
 
-A room's publishing setting (`local` or `github`) decides where reviewer
-assignments and agent feedback land; only the owner changes it. Root and
-session PR comments and comment-only reviews go through the approval path,
-with an explicit publish choice required when the room keeps feedback local.
-Local Markdown feedback, including file:line references,
+Reviewer assignments always stay in Dyna. From the CLI, root and session PR
+comments and comment-only reviews go through the approval path, with an
+explicit publish choice required when the room keeps feedback local; the
+room's publishing setting, which only the owner changes, is the default for
+that choice. Local Markdown feedback, including file:line references,
 appears in the shared PR card in session and repository views. Old reviews
 with GitHub review IDs remain labeled **Published on GitHub**. Desktop, paired
 web and Connect share PRSettings and SetPRSettings.
