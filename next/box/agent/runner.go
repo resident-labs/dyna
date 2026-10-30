@@ -17,13 +17,10 @@ type turnSink interface {
 	TurnOutput(context.Context, contract.TurnEnded) error
 }
 
-type turnGuard interface{ StopAll() error }
-
 // Runner forwards inputs to Pi without maintaining a second input queue.
 type Runner struct {
 	Harness  harness.Harness
 	Sink     turnSink
-	Guard    turnGuard
 	Upgrade  func() error
 	mu       sync.Mutex
 	active   contract.TurnID
@@ -52,11 +49,6 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		active := r.active == m.Turn
 		r.mu.Unlock()
 		if active {
-			if r.Guard != nil {
-				if err := r.Guard.StopAll(); err != nil {
-					return err
-				}
-			}
 			return r.Harness.Abort(ctx)
 		}
 		return nil
