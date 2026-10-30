@@ -63,11 +63,11 @@ type Store struct {
 	subs          map[chan contract.Event]struct{}
 }
 
-// Open creates or opens a store in dir. now is injected for deterministic scheduling.
+// Open creates or opens a store in dir.
 func Open(dir string, now func() time.Time) (*Store, error) {
 	return open(dir, now, floorVersion, floorCommit, nil)
 }
-func open(dir string, now func() time.Time, floor int, commit string, checkpointRun func() error) (*Store, error) {
+func open(dir string, _ func() time.Time, floor int, commit string, checkpointRun func() error) (*Store, error) {
 	path := filepath.Join(dir, "store.db")
 	_, err := os.Stat(path)
 	fresh := errors.Is(err, os.ErrNotExist)
@@ -127,7 +127,7 @@ func open(dir string, now func() time.Time, floor int, commit string, checkpoint
 	}
 	s.checkpointRun = checkpointRun
 	go s.writeLoop()
-	go s.checkLoop(path, now)
+	go s.checkLoop(path)
 	return s, nil
 }
 
