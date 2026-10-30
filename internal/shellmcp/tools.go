@@ -366,7 +366,7 @@ func (t *Tools) Call(ctx context.Context, name string, raw json.RawMessage, clie
 	return r
 }
 
-func (t *Tools) run(ctx context.Context, r *Result, command, description, cwd string) error {
+func (t *Tools) run(ctx context.Context, r *Result, command, description, cwd string) (resultErr error) {
 	if strings.TrimSpace(command) == "" {
 		return errors.New("command is required")
 	}
@@ -404,6 +404,19 @@ func (t *Tools) run(ctx context.Context, r *Result, command, description, cwd st
 		t.mu.Unlock()
 		return err
 	}
+	// Once launched, a tracking failure must not invite a duplicate command.
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		if database.NewerSchema(resultErr) || database.OutdatedStore() {
+			t.markOutdated()
+		}
+		_ = t.Store.HoldExit(meta.ID, time.Time{})
+		r.claim = ""
+		r.Text = fmt.Sprintf("Job %s was launched, but output tracking failed: %v. Do not run the command again. Use shell_output to check the job.", meta.ID, resultErr)
+		resultErr = nil
+	}()
 	in, ended, steered, err := t.wait(ctx, meta.ID, limit, nil)
 	if ended {
 		r.claim = meta.ID
