@@ -150,7 +150,7 @@ func (MergeDecisionEvent) eventSubject() string { return "decision" }
 // event with a fresh ID, so two equal notes stay two decisions.
 func (d MergeDecisionEvent) eventDedupe() string { return d.Note }
 
-// ThreadKey reads a post's display thread, including merge posts saved before
+// ThreadKey reads a post's display thread, including events saved before
 // event threads were introduced.
 func (m Message) ThreadKey() string {
 	if m.Notice.Thread != "" {
@@ -161,6 +161,9 @@ func (m Message) ThreadKey() string {
 		return event.eventThread()
 	}
 	if event, ok := m.Session(); ok {
+		return event.eventThread()
+	}
+	if event, ok := m.Hook(); ok && event.RunID != "" {
 		return event.eventThread()
 	}
 	return ""
