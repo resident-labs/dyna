@@ -21,13 +21,7 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	var id string
-	switch event.From.Kind {
-	case contract.PrincipalSession:
-		id = string(event.From.Session)
-	case contract.PrincipalMember:
-		id = string(event.From.Member)
-	}
+	id := string(event.From.Session)
 	var room *string
 	if event.Room != "" {
 		value := string(event.Room)
@@ -84,12 +78,7 @@ func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64
 		}
 		event.Time = time.UnixMilli(at).UTC()
 		event.Room = contract.RoomID(room.String)
-		switch event.From.Kind {
-		case contract.PrincipalSession:
-			event.From.Session = contract.SessionID(fromID)
-		case contract.PrincipalMember:
-			event.From.Member = contract.MemberID(fromID)
-		}
+		event.From.Session = contract.SessionID(fromID)
 		event.Body, err = contract.DecodeEventBody(kind, body)
 		if err != nil {
 			return nil, fmt.Errorf("event %d: %w", event.Seq, err)

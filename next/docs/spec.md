@@ -528,8 +528,8 @@ The control plane runs no boxes. It opens one SSH master to each host and does a
 The owner adds a host with `dyna host add <name> --ssh user@addr`. The engine then runs the **host check** over the master. A host is `ready` only when every item passes:
 
 - cgroup v2, with `Delegate=yes` for the user manager and the cpu, memory, io and pids controllers delegated;
-- rootless Podman 5 or later, with the systemd cgroup manager;
-- sshd allows `StreamLocalForwarding`;
+- rootless Podman 5 or later, with the systemd cgroup manager and `--userns=keep-id:uid=1000,gid=1000` support (introduced in Podman 4.3);
+- sshd allows `StreamLocalForwarding`, and curl 7.40 or later is available for the socket probe;
 - free disk and memory above the host floor (default 20 GiB and 4 GiB);
 - the owner states at registration that only they have admin rights on the host.
 
@@ -543,13 +543,14 @@ type Host struct {
 	CPUs      int   // schedulable, after the host reserve
 	MemBytes  int64 // schedulable, after the host reserve
 	DiskBytes int64 // free in the host data folder at the last check
-	NoReflink bool
 	Labels    []string // owner labels, such as "gpu"
 	CheckedAt time.Time
 }
 ```
 
-**Admission** is the only placement code. A box's request is its size, and its limit is its `memory.max`. A box goes on a `ready` host only when the sum of requests on that host, plus this one, fits in `CPUs` and `MemBytes`, and free disk stays above the floor. Otherwise the box waits in `pending`, and `box.changed` names the reason. Only running boxes count. A stopped (dormant) box counts only its disk.
+The host check sets schedulable `MemBytes` to `MemTotal` minus the memory floor, and `CPUs` to online CPUs minus one, with a minimum of one CPU.
+
+**Admission** is the only placement code. A box's request is its size, and its limit is its `memory.max`. A box goes on a `ready` host only when the sum of requests on that host, plus this one, fits in `CPUs` and `MemBytes`, and free disk stays above the floor. Otherwise the box waits in `pending`, and `box.changed` names the reason. Only running boxes count for CPU and memory. A stopped (dormant) box counts only its disk. The measured free disk already includes boxes placed at or before the host's last check. Subtract the disk requests of boxes placed since that check and the new request; the result must remain at or above the floor.
 
 Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `checked_at`) and `host_labels` (`host`, `label`).
 
@@ -614,6 +615,8 @@ type Box struct {
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
 | creating, starting | failed | a step failed, or `hello` timed out |
 | ready, stopped, closing | lost | the host is unreachable (5.10) |
+| lost | closing | the session closes while its host is unreachable; closing waits for the host or its removal |
+| closing | failed | the host returns without the container, or the owner removes the host; the last checkpoint is the archive |
 | lost | ready | the host is back, the container still runs, and the box agent reconnected |
 | lost | failed | the host is back without the container, or the owner removes the host |
 
@@ -627,11 +630,13 @@ Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `s
 
 ### 5.4 Sizes and growth
 
-| Size | CPUs | memory.high | memory.max | pids.max |
-|---|---|---|---|---|
-| small | 2 | 4 GiB | 6 GiB | 2048 |
-| medium | 4 | 8 GiB | 12 GiB | 4096 |
-| large | 8 | 16 GiB | 24 GiB | 8192 |
+| Size | CPUs | memory.high | memory.max | pids.max | disk request |
+|---|---|---|---|---|---|
+| small | 2 | 4 GiB | 6 GiB | 2048 | 10 GiB |
+| medium | 4 | 8 GiB | 12 GiB | 4096 | 20 GiB |
+| large | 8 | 16 GiB | 24 GiB | 8192 | 40 GiB |
+
+Disk requests are for admission accounting only; they do not set a volume quota.
 
 - The limits apply to the budget slice, which holds the box and all its descendants. A short peak slows the tree down instead of killing a harness.
 - Defaults: root `small`, a lead `medium`, a child the size its parent picks, up to the parent's own size. A repository can set a default in `.dyna/images/<name>/size`.
@@ -639,7 +644,7 @@ Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `s
 
 ### 5.5 Budgets and placement
 
-Budget slices follow the tree with systemd's naming, where each dash adds a level: a lead is `dyna-<l>.slice`, its child `dyna-<l>-<c>.slice`, a grandchild `dyna-<l>-<c>-<g>.slice`. Each part is 12 hex characters from the box ID, and admission checks that it is unique on the host. A unit name has at most 255 characters, so this allows about 18 levels. A child's box starts with `podman run --cgroup-parent=<child slice>`, so its use counts against every ancestor below the lead.
+Budget slices follow the tree with systemd's naming, where each dash adds a level: a lead is `dyna-<l>.slice`, its child `dyna-<l>-<c>.slice`, a grandchild `dyna-<l>-<c>-<g>.slice`. Each part is the first 12 lowercase hex characters of SHA-256(BoxID), and admission checks that it is unique on the host. A unit name has at most 255 characters, so this allows about 18 levels. A child's box starts with `podman run --cgroup-parent=<child slice>`, so its use counts against every ancestor below the lead.
 
 Every budget sits under the host slice `dyna.slice`, whose `memory.max` is the host's `MemBytes`. Admission counts sizes, but budgets may grow to 1.5 times their size. The host limit keeps any memory kill inside Dyna's boxes, away from sshd and the master.
 
@@ -666,7 +671,7 @@ New objects go into the box volume, so a box cannot change the cache. Shared dep
 
 ### 5.7 Box socket, model route and git
 
-**Box socket.** The engine listens on one Unix socket per box, `<runtime>/boxes/<box>.sock`. Over the host's master it adds `ssh -O forward -R <hostdata>/sock/<box>.sock:<runtime>/boxes/<box>.sock` (StreamLocalForward, with `StreamLocalBindUnlink=yes`). The host path is bind-mounted into the box as `/run/dyna/engine.sock`, and no other socket is mounted. The listener maps to one box, the box to one session, and the session to its Principal. No token is sent.
+**Box socket.** The engine listens on one Unix socket per box, `<runtime>/boxes/<box>.sock`. Over the host's master it adds `ssh -O forward -R <hostdata>/sock/<box>/engine.sock:<runtime>/boxes/<box>.sock` (StreamLocalForward, with `StreamLocalBindUnlink=yes`). The host creates the per-box directory with mode 0700 and bind-mounts it read-only at `/run/dyna/engine`. The box connects to `/run/dyna/engine/engine.sock`, and no other box socket is mounted. The directory stays in place across master restarts and is removed after the forward is cancelled on box removal. The listener maps to one box, the box to one session, and the session to its Principal. No token is sent.
 
 If a master dies, the engine starts it again and adds every forward again. The box agent retries with backoff (0.5 s, doubling to 10 s) and buffers outgoing data up to 64 MiB, so a short loss never ends a turn.
 
