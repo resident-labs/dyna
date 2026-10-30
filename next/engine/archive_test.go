@@ -24,7 +24,7 @@ func setupArchive(t *testing.T) (*Service, contract.RoomID, contract.SessionID, 
 func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 	s, room, parent, ctx := setupArchive(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "grandchild", Profile: "test", Parent: parent})
 	if e != nil {
 		t.Fatal(e)
 	}
