@@ -38,8 +38,9 @@ type shellRequest struct {
 	Params  struct {
 		Name      string `json:"name"`
 		Arguments struct {
-			Command string `json:"command"`
-			Cwd     string `json:"cwd"`
+			Command string  `json:"command"`
+			Cwd     string  `json:"cwd"`
+			Node    *string `json:"node"`
 		} `json:"arguments"`
 	} `json:"params"`
 }
@@ -139,7 +140,7 @@ func Shell(ctx context.Context, executor ShellExecutor, input io.Reader, output 
 				return err
 			}
 		case "tools/call":
-			if req.Params.Name != "shell" || req.Params.Arguments.Command == "" {
+			if req.Params.Name != "shell" || req.Params.Arguments.Command == "" || req.Params.Arguments.Node != nil {
 				if err := write(envelope[shellCallResult]{ID: req.ID, Error: &rpcError{Code: -32602, Message: "invalid shell arguments"}}); err != nil {
 					return err
 				}
