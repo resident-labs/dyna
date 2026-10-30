@@ -12,6 +12,13 @@ test('isSessionReference accepts one DM reference row and rejects a missing fiel
   assert.equal(isSessionReference({ ...row, attachments: '1' }), false)
 })
 
+test('posts and references retain avatars when the home room was deleted', () => {
+  const deletedRoomAvatar = { ...avatar, color: '' }
+  assert.equal(isPost({ ...post, avatar: deletedRoomAvatar }), true)
+  assert.equal(isSessionReference({ avatar: deletedRoomAvatar, postId: 'm1', from: 'r:lead', speaker: 'lead', fromHue: 2, conversation: 'room', ts: 1, preview: 'hi', attachments: 0 }), true)
+  assert.equal(isPost({ ...post, avatar: { ...avatar, color: 'invalid' } }), false)
+})
+
 test('isPost accepts a null recipient list and rejects a missing field', () => {
   assert.equal(isPost(post), true)
   assert.equal(isPost({ ...post, id: undefined }), false)
