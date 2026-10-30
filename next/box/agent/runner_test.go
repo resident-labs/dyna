@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -85,6 +86,18 @@ func (s *sinkFake) TurnOutput(_ context.Context, result contract.TurnEnded) erro
 	}
 	s.done <- result
 	return nil
+}
+
+func TestRunnerReportsRepositorySetupFailure(t *testing.T) {
+	sink := &sinkFake{done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Sink: sink, Setup: func(context.Context) error { return errors.New("cache unavailable") }}
+	if err := runner.Handle(context.Background(), contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := <-sink.done
+	if got.Turn != "turn_a" || got.Outcome != "failed" || got.Error != "repository setup: cache unavailable" {
+		t.Fatal(got)
+	}
 }
 
 func TestRunnerDoesNotRestartWhileOutputIsBlocked(t *testing.T) {
