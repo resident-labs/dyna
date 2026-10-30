@@ -13,6 +13,7 @@ import (
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
+	cisched "dyna-agent/internal/pr/watch/ci"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 )
@@ -146,7 +147,7 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 		// again instead of failing the batch. Once that replacement was stopped
 		// too, nothing else will run it, so the trial fails with the cause instead
 		// of waiting for a run that will never come.
-		if stoppedLocalResult(result) {
+		if cisched.StoppedLocalResult(result) {
 			if result.Resumed {
 				return VerdictFailed, logs, localFailureNote(result), nil
 			}
@@ -163,7 +164,7 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 		// A machine fault, including a git push or checkout failure, retries on
 		// another machine. The trial waits for that retry. A spent retry falls
 		// through and fails with the saved git error.
-		if machineFailureRetryFrom(result) != "" {
+		if cisched.MachineFailureRetryFrom(result) != "" {
 			return VerdictPending, "", "retrying local CI after a node failure", nil
 		}
 		return VerdictFailed, logs, "local CI failed", nil
@@ -267,7 +268,7 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 	// fails the trial with the cause instead of waiting for a run that will never
 	// come. Treating a stop as final here would also keep a sync head, whose only
 	// scheduler entry is this reader, from ever retrying.
-	retryStop := saved && stoppedLocalResult(result) && !result.Resumed
+	retryStop := saved && cisched.StoppedLocalResult(result) && !result.Resumed
 	if saved {
 		// The budget of the room judges the saved run exactly as the gate does.
 		applyLocalBudgets(&result, EffectivePolicy(st, job.record))
@@ -320,8 +321,8 @@ func (s *Service) runningCINode(job registeredCIJob) string {
 	runs := s.nodeRuns()
 	runs.Lock()
 	defer runs.Unlock()
-	if run := runs.runs[registeredJobKey(job)]; run != nil {
-		return run.node
+	if run := runs.Runs[registeredJobKey(job)]; run != nil {
+		return run.Node
 	}
 	return ""
 }
