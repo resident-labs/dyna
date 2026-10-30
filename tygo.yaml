@@ -1,0 +1,59 @@
+type_mappings:
+  time.Time: string
+  time.Duration: number
+  workeroutput.Usage: Usage
+  workeroutput.UsageNormalization: UsageNormalization
+  workeroutput.CallUsage: CallUsage
+  terminalsvc.ShellJob: ShellJob
+  room.EventNotice: EventNotice
+  room.EventPayload: EventPayload
+  subagent.TransferState: TransferState
+  subagent.CloseRecovery: Recovery
+  harnessruntime.Pin: Pin
+
+packages:
+  - path: dyna-agent/internal/transcript
+    output_path: web/src/lib/api/session.gen.ts
+    include_files: [step_kind.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      import type { EventPayload } from '../rooms/events.gen.ts'
+      import type { EventNotice, Member, Post } from './room.ts'
+      import type { ShellJob } from './terminal.ts'
+
+  - path: dyna-agent/internal/workeroutput
+    output_path: web/src/lib/api/session.gen.ts
+    include_files: [usage_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/harness/runtime
+    output_path: web/src/lib/api/session.gen.ts
+    include_files: [pin.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/sessionclose
+    output_path: web/src/lib/api/session.gen.ts
+    include_files: [recovery.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/subagent
+    output_path: web/src/lib/api/session.gen.ts
+    include_files: [session_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/roomsvc
+    output_path: web/src/lib/api/session.gen.ts
+    include_files: [session_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
