@@ -38,3 +38,9 @@ If Dyna cannot read the owner's identities, it refuses the call.
 ## Known limit
 
 The token is stored in Dyna's private account store. No Dyna API, environment variable, generated harness config, log, event or transcript shows it. A process that runs as your Unix user can still read that file, as it can read every credential Dyna saves. Do not use a token that can write until Dyna hides its credential directories from agent processes.
+
+## Server prompts
+
+Attach pins the server's prompts as well as its tools. Refreshing the server updates the pinned list. Only prompts from attached servers appear as room slash commands, named `server:prompt`.
+
+Only the owner can run a prompt. Supply arguments as space-separated `key=value` pairs. If the prompt has exactly one required argument, plain text supplies that argument instead. Dyna rejects unknown, duplicate and missing arguments. It scans the values before contacting the server, using the same policy as tool calls. Prompt audit events never include argument values. Dyna scrubs the token and wraps the text messages as untrusted data. If a prompt contains non-text content, Dyna reports an error rather than sending an incomplete prompt. Detach cancels a prompt in flight.

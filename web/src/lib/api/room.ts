@@ -92,6 +92,7 @@ export interface Message {
   to: string[] | null
   text: string
   skill?: { name: string; path: string }
+  mcpPrompt?: { server: string; prompt: string }
   sessionIds?: Record<string, string>
   kind?: string
   notice?: EventNotice

@@ -207,6 +207,7 @@ type PostInput struct {
 	Mentions []string
 	Text     string
 	Skill    *room.SkillRef
+	Prompt   *room.PromptRef
 	// Script is the run behind a workflow script's post, kept on the stored post.
 	Script  *room.ScriptRef
 	ReplyTo string
@@ -389,8 +390,11 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		// spec decides for every other post.
 		wake = !in.NoWake && (in.NeedsRoot || desc.Wake == room.WakeTarget)
 	}
-	text := strings.TrimSpace(in.Text)
-	if text == "" && len(in.References) == 0 && len(in.Attachments) == 0 && len(in.Files) == 0 && in.ForwardOf == "" {
+	text := in.Text
+	if in.Prompt == nil {
+		text = strings.TrimSpace(text)
+	}
+	if strings.TrimSpace(text) == "" && len(in.References) == 0 && len(in.Attachments) == 0 && len(in.Files) == 0 && in.ForwardOf == "" {
 		return Result{}, errors.New("post text is required")
 	}
 	if !utf8.ValidString(text) {
@@ -529,7 +533,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs, SenderRoomID: senderRoomID,
 			ID: in.ID, NeedsRoot: in.NeedsRoot, Conversation: in.Conversation,
 			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), Script: in.Script, To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
-			Attachments: atts, References: in.References, Skill: in.Skill,
+			Attachments: atts, References: in.References, Skill: in.Skill, Prompt: in.Prompt,
 		})
 	}
 	if err != nil {
@@ -554,7 +558,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		// ID, so a reply to the post answers it in the sender's room too. It
 		// wakes nobody: the recipients read the post in their own room.
 		if _, err := s.Rooms.Post(origin.ID, room.PostInput{ID: msg.ID, From: res.from, Human: in.Sender.Human, SessionIDs: copyIDs, To: res.addrs(), Via: res.via, ReplyTo: originReply,
-			Text: text, Attachments: copyAtts, References: in.References, Forward: fwd, Skill: in.Skill}); err != nil {
+			Text: text, Attachments: copyAtts, References: in.References, Forward: fwd, Skill: in.Skill, Prompt: in.Prompt}); err != nil {
 			out.Deliveries = append(out.Deliveries, Delivery{To: origin.Name, Delivery: "failed", Error: "the post was sent, but its copy in " + origin.Name + " was not saved: " + err.Error()})
 		}
 	}
