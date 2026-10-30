@@ -44,35 +44,6 @@ type Options struct {
 	MaxTerminals int           // zero: 64
 }
 
-type Info struct {
-	Title        string    `json:"title"`
-	Ref          string    `json:"ref"`
-	Alive        bool      `json:"alive"`
-	ID           string    `json:"id"`
-	RoomID       string    `json:"roomId"`
-	SessionID    string    `json:"sessionId,omitempty"`
-	Cwd          string    `json:"cwd"`
-	Shell        string    `json:"shell"`
-	Cols         uint16    `json:"cols"`
-	Rows         uint16    `json:"rows"`
-	Created      time.Time `json:"created"`
-	LastActivity time.Time `json:"lastActivity"`
-	Exited       bool      `json:"exited"`
-	ExitCode     int       `json:"exitCode"`
-}
-
-// Event carries raw bytes (base64 in JSON). Start and Offset are byte offsets.
-// Reset means the requested offset fell outside the retained buffer.
-type Event struct {
-	ID       string `json:"id"`
-	Data     []byte `json:"data"`
-	Start    uint64 `json:"start"`
-	Offset   uint64 `json:"offset"`
-	Reset    bool   `json:"reset,omitempty"`
-	Exited   bool   `json:"exited"`
-	ExitCode int    `json:"exitCode"`
-}
-
 type terminal struct {
 	mu     sync.Mutex
 	input  sync.Mutex

@@ -85,7 +85,7 @@
   })
 
   // A command is an argument list; quote the parts a shell would split.
-  const cmd = (c: string[] | string | undefined) => (Array.isArray(c) ? c.map((a) => (/^[\w./:=@%+,-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`)).join(' ') : c || '')
+  const cmd = (c: string[] | string | null | undefined) => (Array.isArray(c) ? c.map((a) => (/^[\w./:=@%+,-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`)).join(' ') : c || '')
   const stateText: Record<string, string> = { running: 'running', starting: 'starting', exited: 'exited', lost: 'lost' }
 
   async function loadLog() {
