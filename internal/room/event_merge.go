@@ -125,6 +125,7 @@ func (m MergeEvent) eventType() EventType   { return EventType(m.Type) }
 
 // eventSubject folds every event of one trial into one card.
 func (m MergeEvent) eventSubject() string { return m.TrialID }
+func (m MergeEvent) eventThread() string  { return "merge:" + m.TrialID }
 
 // eventDedupe keys one post per fact of a trial. The type and the steward's
 // own key make a queued trial post once and each checks step post once.

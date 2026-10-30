@@ -18,6 +18,9 @@
     ts?: string | number
     title: string
     summary?: string
+    summaryWrap?: boolean
+    summaryContent?: Snippet
+    footer?: Snippet
     chips?: readonly EventChip[]
     surface?: 'feed' | 'dm'
     icon?: Snippet
@@ -34,6 +37,9 @@
     ts = undefined,
     title,
     summary = '',
+    summaryWrap = false,
+    summaryContent = undefined,
+    footer = undefined,
     chips = [],
     surface = 'feed',
     icon = undefined,
@@ -54,7 +60,7 @@
     {/snippet}
     {#snippet children()}
       <span class="headline">{#if headline}{@render headline()}{:else}<strong>{title}</strong>{/if}{#each chips as chip, i (i)}<span class="state" class:failed={chip.failure === true}>{chip.label}</span>{/each}{#if extra}{@render extra()}{/if}</span>
-      {#if summary || summaryExtra}<span class="summary">{summary}{#if summary && summaryExtra}{' · '}{/if}{#if summaryExtra}{@render summaryExtra()}{/if}</span>{/if}
+      {#if summary || summaryExtra || summaryContent}<span class="summary" class:wrap={summaryWrap}>{#if summaryContent}{@render summaryContent()}{:else}{summary}{#if summary && summaryExtra}{' · '}{/if}{#if summaryExtra}{@render summaryExtra()}{/if}{/if}</span>{/if}
     {/snippet}
     {#snippet trail()}
       <time title={new Date(ts ?? 0).toLocaleString()}>{clock(ts)}</time>
@@ -71,6 +77,7 @@
 {:else}
   <div class="event {surface}" data-id={id}>{@render summaryRow()}</div>
 {/if}
+{#if footer}<div class="footer">{@render footer()}</div>{/if}
 
 <style>
   .event { min-width: 0; }
@@ -87,6 +94,8 @@
   .headline :global(a), .summary :global(a) { color: var(--muted); text-decoration: none; transition: color var(--motion-fast) var(--ease); }
   .headline :global(a:hover), .summary :global(a:hover) { color: var(--ink); text-decoration: underline; }
   .summary { display: block; margin-top: 2px; color: var(--muted); font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .summary.wrap { white-space: normal; overflow-wrap: anywhere; }
+  .footer { padding: 0 var(--s2) var(--s2) 44px; color: var(--muted); font-size: var(--t-sm); }
   time, .chevron { flex: none; color: var(--faint); font-size: var(--t-cap); }
   .chevron { font-size: var(--t-title); }
   .detail { padding: var(--s2) var(--s2) var(--s3) 44px; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
