@@ -5,8 +5,9 @@
   // optional props are the row's actions, which a DM does not pass.
   import { openExternal } from '../../api.ts'
   import { markdown, stamp } from '../ui/format.ts'
+  import { prEvent } from '../rooms/eventPayloads.ts'
   import { commitUrl, refName, shortSha } from './pr.ts'
-  import { prView } from './prCard.ts'
+  import { chipOf, prView } from './prCard.ts'
   import EventRow from '../rooms/EventRow.svelte'
   import PostActions from '../ui/PostActions.svelte'
   import PinIcon from '../ui/PinIcon.svelte'
@@ -52,11 +53,19 @@
   {surface}
   title={view.number ? `PR #${view.number}` : view.title || 'PR watcher'}
   chips={view.chips.map((chip) => ({ ...chip, failure: chip.tone === 'coral' }))}
-  summary={[view.title, showRepo ? view.repo : '', view.head ? `pushed ${refName(view.head)}` : '', folded.length > 1 ? `${folded.length} updates` : ''].filter(Boolean).join(' · ')}
+  summary={[view.title, showRepo ? view.repo : '', view.head ? `pushed ${refName(view.head)}` : ''].filter(Boolean).join(' · ')}
+  summaryWrap={true}
   {open}
   ontoggle={(value) => (more = value)}
 >
   {#snippet icon()}↑{/snippet}
+  {#snippet footer()}
+    {#if folded.length > 1}
+      <details><summary>Show steps ({folded.length})</summary>
+        {#each folded as step (step.id)}{@const event = prEvent(step)}<div class="step-note">{stamp(step.ts)} · {event ? chipOf(event).label : 'Update'}</div>{/each}
+      </details>
+    {/if}
+  {/snippet}
   {#snippet detail()}
     <div class="details">
       {#if view.url}<button class="link" onclick={() => openExternal(view.url)}>Open PR #{view.number} on GitHub</button>{/if}
@@ -86,6 +95,7 @@
 </EventRow>
 
 <style>
+  .step-note { color: var(--muted); }
   .notice-head { display: flex; align-items: center; gap: var(--s2); }
   .notice-pin { display: inline-flex; color: var(--muted); }
   .notice:focus-visible { outline: 2px solid var(--iris); outline-offset: var(--s1); }

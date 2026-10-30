@@ -8,16 +8,18 @@
   import EventRow from './EventRow.svelte'
   import ReviewIcon from '../ui/ReviewIcon.svelte'
   import EventDetails from './EventDetails.svelte'
-  import { reviewEvent } from './eventPayloads.ts'
+  import { prEvent, reviewEvent } from './eventPayloads.ts'
+  import { stamp } from '../ui/format.ts'
+  import { chipOf } from '../prs/prCard.ts'
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import type { ReviewKind, ReviewSeverity } from './events.gen.ts'
 
-  let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
+  let { post, posts = [post], notice = post.notice, surface = 'feed' }: { post: EventPost; posts?: EventPost[]; notice?: EventNotice; surface?: EventSurface } = $props()
 
   const stateWords: Record<ReviewKind, string> = {
     approve: 'approved',
-    changes: 'changes requested',
+    changes: 'Changes requested',
     'approve-fast': 'approved',
     'stop-early': 'stopped early',
   }
@@ -50,6 +52,13 @@
   summary={[kind === 'stop-early' && reason ? `Stopped early: ${reason}.` : '', findings.length ? `${findings.length} finding${findings.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
 >
   {#snippet icon()}<ReviewIcon size={15} />{/snippet}
+  {#snippet footer()}
+    {#if posts.length > 1}
+      <details><summary>Show steps ({posts.length})</summary>
+        {#each posts as step (step.id)}{@const pr = prEvent(step)}{@const review = reviewEvent(step)}<div class="step-note">{stamp(step.ts)} · {pr ? chipOf(pr).label : review ? stateWords[review.kind] : 'Update'}</div>{/each}
+      </details>
+    {/if}
+  {/snippet}
   {#snippet detail()}
   <div class="body">
     {#if payload}
@@ -84,6 +93,7 @@
 
 <style>
   .quiet { color: var(--muted); font-size: var(--t-sm); }
+  .step-note { color: var(--muted); }
   .reason { margin: 0 0 var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s2); }
   .findings { list-style: none; margin: 0 0 var(--s2); padding: 0; display: grid; gap: 6px; }
