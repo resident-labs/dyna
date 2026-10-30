@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/shellquote"
@@ -1091,6 +1092,7 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 	} else {
 		inner += "unset " + scratch.Env + "; "
 	}
+	inner += "export " + strings.Join(childenv.NoEditor(), " ") + "; "
 	inner += "mkdir -p " + q(path.Dir(work)) + "; "
 	if job.SHA != "" {
 		cache := path.Join(base, RepoKey(job.Repo)+".git")
