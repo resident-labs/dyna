@@ -96,15 +96,17 @@ func probeKimiCodeUsage(ctx context.Context, client claudeHTTPClient, now time.T
 
 type kimiCodeUsageRow struct {
 	id, label, period string
-	entry             *kimiCodeUsageEntry
+	// length is the fixed window length, or 0 when the calendar sets it.
+	length time.Duration
+	entry  *kimiCodeUsageEntry
 }
 
 func kimiCodeUsageRows(response kimiCodeUsageResponse) []kimiCodeUsageRow {
 	return []kimiCodeUsageRow{
-		{"five_hour", "5-hour", "", response.Usages.Limit5h},
-		{"seven_day", "Weekly", "week", response.Usages.Limit7d},
-		{"monthly", "Monthly", "month", response.Usages.LimitMonthAll},
-		{"monthly_code", "Monthly Code", "month", response.Usages.LimitMonthCode},
+		{"five_hour", "5-hour", "", 5 * time.Hour, response.Usages.Limit5h},
+		{"seven_day", "Weekly", "week", 7 * 24 * time.Hour, response.Usages.Limit7d},
+		{"monthly", "Monthly", "month", 0, response.Usages.LimitMonthAll},
+		{"monthly_code", "Monthly Code", "month", 0, response.Usages.LimitMonthCode},
 	}
 }
 
@@ -126,7 +128,8 @@ func kimiCodeUsageObservation(raw []byte, now time.Time) (store.Observation, err
 			continue
 		}
 		percent := ratio * 100
-		windows = append(windows, store.Window{ID: row.id, Label: row.label, Period: row.period, UsedPercent: &percent, Unit: "percent", ResetsAt: validReset(row.entry.ResetTime)})
+		reset := validReset(row.entry.ResetTime)
+		windows = append(windows, store.Window{ID: row.id, Label: row.label, Period: row.period, PeriodStart: windowStart(reset, row.length), UsedPercent: &percent, Unit: "percent", ResetsAt: reset})
 	}
 	if len(windows) == 0 {
 		return store.Observation{}, errKimiCodeUsage

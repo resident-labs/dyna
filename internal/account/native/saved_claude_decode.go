@@ -64,12 +64,14 @@ func DecodeClaudeUsage(body []byte) ([]store.Window, error) {
 	windows := []store.Window{}
 	if session != nil {
 		if p := percent(session.Utilization); p != nil {
-			windows = append(windows, store.Window{ID: "five_hour", Label: "Session (5-hour)", UsedPercent: p, Unit: "percent", ResetsAt: claudeReset(session.ResetsAt)})
+			reset := claudeReset(session.ResetsAt)
+			windows = append(windows, store.Window{ID: "five_hour", Label: "Session (5-hour)", UsedPercent: p, Unit: "percent", ResetsAt: reset, PeriodStart: windowStart(reset, 5*time.Hour)})
 		}
 	}
 	if weekly != nil {
 		if p := percent(weekly.Utilization); p != nil {
-			windows = append(windows, store.Window{ID: "seven_day", Label: "Weekly (7-day)", UsedPercent: p, Unit: "percent", ResetsAt: claudeReset(weekly.ResetsAt)})
+			reset := claudeReset(weekly.ResetsAt)
+			windows = append(windows, store.Window{ID: "seven_day", Label: "Weekly (7-day)", UsedPercent: p, Unit: "percent", ResetsAt: reset, PeriodStart: windowStart(reset, 7*24*time.Hour)})
 		}
 	}
 	seen := map[string]bool{}
