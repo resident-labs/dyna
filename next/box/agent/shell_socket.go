@@ -20,7 +20,15 @@ func ServeShell(ctx context.Context, socket string, executor ShellExecutor) erro
 	}
 	defer listener.Close()
 	defer os.Remove(socket)
-	go func() { <-ctx.Done(); listener.Close() }()
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		select {
+		case <-ctx.Done():
+			listener.Close()
+		case <-stop:
+		}
+	}()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
