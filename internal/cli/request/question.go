@@ -35,7 +35,7 @@ func newQuestion(roomRef *string, jsonOut *bool) *cobra.Command {
 			return err
 		}
 		if len(args) == 0 {
-			return listMine(c, s, snd, *roomRef, *jsonOut)
+			return listMine(c, s, snd, *roomRef, *jsonOut, false)
 		}
 		options := []string{}
 		if c.Flags().Changed("options") {

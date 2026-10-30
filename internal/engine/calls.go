@@ -367,6 +367,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Visuals", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Visuals},
 		{Name: "ApprovalRequest", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.approvalRequest},
 		{Name: "ApprovalList", Access: websvc.Read, Scope: websvc.ScopeOperate, Method: s.approvalList},
+		{Name: "ApprovalHeld", Access: websvc.Read, Scope: websvc.ScopeOperate, Method: s.approvalHeld},
 		{Name: "ApprovalDecide", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.approvalDecide},
 		{Name: "ApprovalCancel", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.approvalCancel},
 		{Name: "ApprovalWait", Access: websvc.Read, Scope: websvc.ScopeOperate, Method: s.approvalWait},

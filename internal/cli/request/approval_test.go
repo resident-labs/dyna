@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/enginetest"
@@ -14,6 +15,32 @@ import (
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/websvc"
 )
+
+func TestRequestListShowsApprovalsHeldByCaller(t *testing.T) {
+	storetest.DataDir(t)
+	storetest.ClearStamp(t)
+	rec, err := room.DefaultStore().Create(room.CreateInput{Name: "approval-held"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, err := websvc.Bind([]websvc.Binding{
+		{Name: "ApprovalHeld", Access: websvc.Read, Scope: websvc.ScopeOperate, Method: func(_ context.Context, _ string) ([]approvals.HeldRequest, error) {
+			return []approvals.HeldRequest{{ID: "A-119", Requester: "child", Class: approvals.ClassAgent, Title: "Create pull request", CreatedAt: time.Now().Add(-3 * time.Minute)}}, nil
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enginetest.Serve(t, store.DataDir(), calls)
+	var out bytes.Buffer
+	cmd := NewCommand()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--room", rec.ID, "list"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil || !strings.Contains(out.String(), "A-119  held by you, filed by child  approval agent  waiting 3m") {
+		t.Fatalf("list printed %q, %v", out.String(), err)
+	}
+}
 
 func TestApprovalDecisionCLIUsesEngine(t *testing.T) {
 	storetest.DataDir(t)
