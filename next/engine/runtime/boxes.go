@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
 	enginegit "github.com/resident-labs/dyna/engine/git"
+	engineimages "github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -34,6 +35,9 @@ type Boxes struct {
 	HostData  string
 	Version   string
 	PiTarball []byte
+	Rooms     enginegit.RoomRepositories
+	Mirror    *enginegit.Mirror
+	Images    *engineimages.Builder
 	mu        sync.Mutex
 	hosts     map[contract.HostName]*podman.Host
 }
@@ -152,6 +156,26 @@ func (b *Boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 	image, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
 	if err != nil {
 		return "", err
+	}
+	repos, err := b.Rooms.RoomRepos(ctx, session.Room)
+	if err != nil {
+		return "", err
+	}
+	for _, repo := range repos {
+		if !repo.Default {
+			continue
+		}
+		name, tree, data, err := b.Mirror.ImageContext(ctx, repo.Repo)
+		if err != nil {
+			return "", err
+		}
+		if name != "" {
+			image, err = b.Images.Build(ctx, h, session.Room, spec.Host, repo.Repo, name, image, tree, data)
+			if err != nil {
+				return "", err
+			}
+		}
+		break
 	}
 	size := spec.Size
 	if err = h.EnsureSlice(ctx, box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}); err != nil {
