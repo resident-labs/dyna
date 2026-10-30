@@ -11,4 +11,4 @@ import { feedViewList } from '../src/lib/ui/prefs.ts'
 import { need } from '../test/need.ts'
 
 feedViewList.set(new URLSearchParams(location.search).get('list') ?? 'all')
-mount(Sidebar, { target: need(document.getElementById('app'), 'app'), props: { room: { id: 'room-a', name: 'dyna-agent', repo: '/home/user/dyna-agent', lastActivity: '', unread: 0, running: 0, members: 0, pinned: false, pinOrder: 0, archived: false }, viewUnread: { general: 4, 'channel:ui-guy-right': 7, 'channel:engine-lead': 12 }, onview: () => {}, onmember: () => {} } })
+mount(Sidebar, { target: need(document.getElementById('app'), 'app'), props: { room: { color: 'crimson', id: 'room-a', name: 'dyna-agent', repo: '/home/user/dyna-agent', lastActivity: '', unread: 0, running: 0, members: 0, pinned: false, pinOrder: 0, archived: false }, viewUnread: { general: 4, 'channel:ui-guy-right': 7, 'channel:engine-lead': 12 }, onview: () => {}, onmember: () => {} } })
