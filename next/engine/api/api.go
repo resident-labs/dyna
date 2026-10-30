@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -104,8 +105,15 @@ func (a *API) handler(c Caller) http.Handler {
 			return
 		}
 		f.Flush()
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
+			case <-ticker.C:
+				if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+					return
+				}
+				f.Flush()
 			case <-r.Context().Done():
 				return
 			case event, ok := <-ch:
