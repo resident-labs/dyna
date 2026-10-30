@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/questions"
@@ -38,6 +39,9 @@ func TestAskCLI(t *testing.T) {
 		}},
 		{Name: "WithdrawRequest", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(_ context.Context, ref, id, reason string) error {
 			return svc.WithdrawQuestion(sender, ref, id, reason)
+		}},
+		{Name: "ApprovalHeld", Access: websvc.Read, Scope: websvc.ScopeOperate, Method: func(_ context.Context, _ string) ([]approvals.HeldRequest, error) {
+			return nil, nil
 		}},
 	})
 	if err != nil {

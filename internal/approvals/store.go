@@ -48,17 +48,7 @@ CREATE TABLE approval_decisions (
  reason TEXT NOT NULL DEFAULT '',
  at INTEGER NOT NULL
 );
-CREATE INDEX approval_decision_request ON approval_decisions(request,seq);
-CREATE TABLE approval_rules (
- seq INTEGER PRIMARY KEY AUTOINCREMENT,
- room TEXT NOT NULL,
- kind TEXT NOT NULL,
- command TEXT NOT NULL DEFAULT '',
- server TEXT NOT NULL DEFAULT '',
- tool TEXT NOT NULL DEFAULT '',
- decide TEXT NOT NULL,
- created_at INTEGER NOT NULL
-);`
+CREATE INDEX approval_decision_request ON approval_decisions(request,seq);`
 
 var idPattern = regexp.MustCompile(`^A-[1-9][0-9]*$`)
 
@@ -68,17 +58,21 @@ func Migrate(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "approvals.schema", 2, func(conn *sql.Conn, from int) error {
+	return database.Migrate(db, "approvals.schema", 3, func(conn *sql.Conn, from int) error {
 		if from == 0 {
 			_, err := conn.ExecContext(context.Background(), schema)
 			return err
 		}
-		for _, column := range []string{"repository", "server", "command", "tool", "title", "body"} {
-			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE approval_requests ADD COLUMN "+column+" TEXT NOT NULL DEFAULT ''"); err != nil {
-				return err
+		if from < 2 {
+			for _, column := range []string{"repository", "server", "command", "tool", "title", "body"} {
+				if _, err := conn.ExecContext(context.Background(), "ALTER TABLE approval_requests ADD COLUMN "+column+" TEXT NOT NULL DEFAULT ''"); err != nil {
+					return err
+				}
 			}
 		}
-		return nil
+		// Version 3 drops approval_rules, which no code read or wrote.
+		_, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS approval_rules")
+		return err
 	})
 }
 
@@ -171,6 +165,20 @@ func (s *Service) pending(roomID string) ([]Request, error) {
 		return nil, err
 	}
 	rows, err := db.Query(`SELECT `+requestColumns+` FROM approval_requests WHERE room=? AND state='pending' ORDER BY seq`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return readRequests(rows)
+}
+
+// held returns the pending requests that wait on holder, an owner or session ID.
+func (s *Service) held(roomID, holder string) ([]Request, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT `+requestColumns+` FROM approval_requests WHERE room=? AND state='pending' AND at=? ORDER BY seq`, roomID, holder)
 	if err != nil {
 		return nil, err
 	}
