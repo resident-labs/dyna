@@ -319,12 +319,11 @@ func TestRunAndDemoAreRefusedInWorkflowMode(t *testing.T) {
 	if err := demo.Execute(); err == nil || err.Error() != "demo is owner or root or session only; use subagent mode to start work" {
 		t.Fatalf("dyna demo err = %v", err)
 	}
-	// Planning starts no workers and stays available.
 	plan := NewRunCommand()
 	plan.SetArgs([]string{script, "--plan"})
 	plan.SetOut(io.Discard)
-	if err := plan.Execute(); err != nil {
-		t.Fatalf("dyna workflow run --plan refused in workflow mode: %v", err)
+	if err := plan.Execute(); err == nil {
+		t.Fatal("dyna workflow run --plan accepted in workflow mode")
 	}
 }
 

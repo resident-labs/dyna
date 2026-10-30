@@ -62,10 +62,8 @@ func NewRunCommand() *cobra.Command {
 		Short: "Execute a workflow script (progress on stderr, result JSON on stdout)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, a []string) error {
-			if !planOnly {
-				if err := authority.Check("workflow run", authority.Current(), nil); err != nil {
-					return err
-				}
+			if err := authority.Check("workflow run", authority.Current(), nil); err != nil {
+				return err
 			}
 			if _, err := applyRunRoom(roomRef); err != nil {
 				return err
