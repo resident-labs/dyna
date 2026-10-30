@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -317,6 +318,49 @@ func saveProfiles(ctx context.Context, sessions *subagent.Manager, s *profile.St
 	}
 	sessions.NoteRoomInstructions(ctx, "")
 	return nil
+}
+
+// EditProfileField changes one named field and keeps every other stored field,
+// env included. The value is parsed here, the boundary that owns it, and the
+// saved profile passes the same validation as add.
+func (s *Service) EditProfileField(ctx context.Context, name, field, value string) error {
+	if err := authority.Check("profiles set", authority.Of(ctx), nil); err != nil {
+		return err
+	}
+	return update(ctx, s.Sessions, name, func(p *profile.Profile) error {
+		ints := map[string]*int{
+			"taste": &p.Taste, "intelligence": &p.Intelligence, "cost": &p.Cost, "diagnostics": &p.Diagnostics,
+			"timeout": &p.TimeoutSec, "limit-concurrent": &p.MaxConcurrent, "limit-calls": &p.MaxCallsPerRun,
+		}
+		switch field {
+		case "description":
+			p.Description = strings.TrimSpace(value)
+		case "fallback":
+			p.Fallback = strings.TrimSpace(value)
+		case "compact":
+			tokens, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				return fmt.Errorf("compact needs a whole number of tokens: %w", err)
+			}
+			c := profile.Compact{}
+			if p.Compact != nil {
+				c = *p.Compact
+			}
+			c.Tokens = tokens
+			p.Compact = &c
+		default:
+			dst, ok := ints[field]
+			if !ok {
+				return fmt.Errorf("profile field %q cannot be edited", field)
+			}
+			n, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil {
+				return fmt.Errorf("%s needs a whole number: %w", field, err)
+			}
+			*dst = n
+		}
+		return nil
+	})
 }
 
 // UpsertProfile keeps the complete CLI profile, including its output declaration
