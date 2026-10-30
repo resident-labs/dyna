@@ -102,6 +102,7 @@ func TestProxyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Check 7: StrictMode lives only in claude-api-key cloak blocks, so no key means strict cloak stays off.
 	if cfg.Host != "127.0.0.1" || cfg.Port == 0 || cfg.RequestRetry != 0 || cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || len(cfg.ClaudeKey) != 0 {
 		t.Fatal("proxy config violates the loopback, retry, management, or affinity policy")
 	}
