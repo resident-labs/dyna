@@ -93,13 +93,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					archiveSent = false
 				}
 				if !archiveSent && current.Reason == "" {
-					if session.Repo != "" {
-						select {
-						case out <- contract.BoxMessage{Body: contract.Archive{}}:
-							archiveSent = true
-						case <-ctx.Done():
-							return
-						}
+					select {
+					case out <- contract.BoxMessage{Body: contract.Archive{}}:
+						archiveSent = true
+					case <-ctx.Done():
+						return
 					}
 				}
 				select {

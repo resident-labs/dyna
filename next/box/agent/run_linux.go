@@ -105,7 +105,10 @@ func Run(ctx context.Context, version string) error {
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
 			if _, ok := message.Body.(contract.Archive); ok {
-				return closeBox(ctx, h, transcript, h.SessionFile(), func(ctx context.Context) error {
+				return closeBox(ctx, h, transcript, h.SessionFile(), time.After, func(ctx context.Context) error {
+					if len(hello.Repos) == 0 {
+						return client.ArchiveDone(ctx, contract.ArchiveDoneRequest{})
+					}
 					for _, repo := range hello.Repos {
 						if err := client.ArchiveDone(ctx, archiveRepo(ctx, "/box/work", hello.Session, repo, runGit)); err != nil {
 							return err

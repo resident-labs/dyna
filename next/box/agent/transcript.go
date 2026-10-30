@@ -20,6 +20,12 @@ const transcriptChunk = 1 << 20
 // transcriptInterval is how often a running turn sends new transcript bytes.
 const transcriptInterval = 2 * time.Second
 
+// transcriptRetryMin and transcriptRetryMax bound the wait between failed syncs before archive. The wait doubles each time.
+const (
+	transcriptRetryMin = time.Second
+	transcriptRetryMax = 30 * time.Second
+)
+
 type transcriptSink interface {
 	TranscriptAppend(context.Context, contract.TranscriptAppendRequest) (contract.TranscriptAppendResponse, error)
 }
@@ -104,13 +110,20 @@ func (s endedSink) TurnOutput(ctx context.Context, result contract.TurnEnded) er
 	return err
 }
 
-// closeBox stops Pi and sends the rest of the transcript. Only then does it report the box archived, so the engine cannot delete the box with unsent bytes.
-func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, file string, archived func(context.Context) error) error {
+// closeBox stops Pi and sends the rest of the transcript. It retries a failed sync with backoff, then reports the box archived, so the engine cannot delete the box with unsent bytes.
+func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, file string, after func(time.Duration) <-chan time.Time, archived func(context.Context) error) error {
 	if err := h.Close(); err != nil {
 		return err
 	}
-	if err := transcript.Sync(ctx, file); err != nil {
-		return err
+	delay := transcriptRetryMin
+	for err := transcript.Sync(ctx, file); err != nil; err = transcript.Sync(ctx, file) {
+		log.Printf("transcript sync before archive %s: %v", file, err)
+		select {
+		case <-after(delay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		delay = min(2*delay, transcriptRetryMax)
 	}
 	return archived(ctx)
 }
