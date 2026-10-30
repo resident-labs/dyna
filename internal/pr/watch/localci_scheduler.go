@@ -780,6 +780,11 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		result.Status = "passed"
 		result.Checks = []localci.SuiteResult{{Suite: localci.SuiteChanges, CheckName: localci.CheckName(localci.SuiteChanges), Node: node.Name, Status: localci.OutcomePassed}}
 	}
+	// A competing process reserved the head after admission checked it. Leave
+	// the saved result untouched; the next pass waits for or adopts that run.
+	if errors.Is(err, localci.ErrAttachmentBusy) {
+		return
+	}
 	// A resumed run replaces one Dyna stopped, and says so in its own result, so a
 	// second interruption is bounded where the first was retried. The runner does
 	// not know this, so the marker is set here, before any save or recovery.
