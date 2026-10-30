@@ -250,7 +250,7 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 		return none, nil
 	}
 	if strings.Contains(a.Text, "{login}") {
-		login, err := AccountFor(ctx, cmd.Path, r.host, r.name)
+		login, _, err := selectAccountAfterPolicy(ctx, cmd, r)
 		if err != nil {
 			return none, fmt.Errorf("resolve attribution login: %w", err)
 		}
