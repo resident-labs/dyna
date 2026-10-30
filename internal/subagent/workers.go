@@ -114,7 +114,7 @@ func (m *Manager) ResumeWorkersForEngine() error {
 	}
 	for _, id := range ids {
 		meta, err := m.store().ReadMeta(id)
-		if err != nil || !meta.Transfer.Active() || meta.Transfer.RootSeat || meta.Consolidating != "" {
+		if err != nil || !m.CopyTime.IsZero() && !meta.Created.After(m.CopyTime) || !meta.Transfer.Active() || meta.Transfer.RootSeat || meta.Consolidating != "" {
 			continue
 		}
 		launch := m.TransferLaunch
@@ -133,6 +133,9 @@ func (m *Manager) ResumeWorkersForEngine() error {
 		meta, err := m.store().ReadMeta(id)
 		if err != nil {
 			m.workers().logf("consolidation worker %s not resumed: %v", id, err)
+			continue
+		}
+		if !m.CopyTime.IsZero() && !meta.Created.After(m.CopyTime) {
 			continue
 		}
 		c := meta.Consolidation

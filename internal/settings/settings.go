@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/isolation"
 	"dyna-agent/internal/store"
 )
 
@@ -152,6 +153,9 @@ type Values struct {
 }
 
 func DefaultPath() string {
+	if copied, err := isolation.CopyTime(store.DataDir()); err == nil && !copied.IsZero() {
+		return filepath.Join(store.DataDir(), "settings.json")
+	}
 	return filepath.Join(store.ConfigDir(), "settings.json")
 }
 

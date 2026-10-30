@@ -478,12 +478,29 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		go func() { errs <- socketServer.Serve(listeners.socket) }()
 	}
 	readOnly, migrateStatus, connectRefused, migrateCause := startMode(dataDir, f.ReadOnly, group, ownerData)
+	var copyTime time.Time
+	if _, err := os.Stat(filepath.Join(dataDir, "dyna.db")); err == nil {
+		copyTime, err = database.CopyTime(dataDir)
+		if err != nil {
+			return fmt.Errorf("read database copy marker: %w", err)
+		}
+		if filepath.Clean(dataDir) == filepath.Clean(ownerData) {
+			if !readOnly && !copyTime.IsZero() {
+				if err := database.ClearCopyMarker(dataDir); err != nil {
+					return fmt.Errorf("clear restored database marker: %w", err)
+				}
+			}
+			copyTime = time.Time{}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	if !readOnly {
 		go dailyBackups(ctx, store.DataDir())
 		go keepCheckpointed(ctx, store.DataDir())
 	}
 
-	store, err := devicestore.DefaultStore()
+	deviceStore, err := devicestore.DefaultStore()
 	if err != nil {
 		return err
 	}
@@ -584,7 +601,12 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 		return err
 	}
 	dropDynaEnv()
+	// Keep the already resolved store when dropping an agent launch stamp.
+	if err := os.Setenv(store.DataDirEnv, dataDir); err != nil {
+		return err
+	}
 	rooms := roomsvc.New(nil)
+	rooms.Notify.Sessions.CopyTime = copyTime
 	rooms.Approvals.Register(approvals.KindGH, ghApprovalExecutor(rooms.Notify.Rooms, rooms.PRs.Watcher().ClaimIssueComment))
 	rooms.Approvals.SetLifetime(ctx)
 	rooms.Notify.Sessions.CloseApprovals = func(ctx context.Context, info, heir subagent.Info) error {
@@ -728,6 +750,9 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	notify := push.Notifier(pushMayRead(cstore))
 	retryMigration := make(chan struct{})
 	recoverStores(engineTimers, migrateCause, callerid.ProcessOf, func() { close(retryMigration) }, func(cause error) {
+		if !copyTime.IsZero() {
+			return
+		}
 		migrationAlert(rooms.Notify.Rooms, cause, func(roomID string) {
 			root, open, err := rooms.Notify.Sessions.RootSession(roomID)
 			if err != nil {
@@ -801,7 +826,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	srv, err := websvc.New(websvc.Options{
 		Callers:    callers.identify,
 		Routes:     routes,
-		Store:      store,
+		Store:      deviceStore,
 		Shell:      shell,
 		Calls:      calls,
 		Files:      files.FilesHandler(),
@@ -852,7 +877,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	if status != "" {
 		fmt.Printf("  note: %s\n", status)
 	}
-	if printCode(store, nil) != 0 {
+	if printCode(deviceStore, nil) != 0 {
 		return errors.New("could not make a pairing code")
 	}
 	if linked {
@@ -897,7 +922,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 				return
 			case <-t.C:
 				push.Prune(func(id string) bool {
-					list, err := store.Devices()
+					list, err := deviceStore.Devices()
 					return err != nil || slices.ContainsFunc(list, func(d devicestore.Device) bool { return d.ID == id })
 				}, nil)
 				pruneRelayPush(push, cstore)

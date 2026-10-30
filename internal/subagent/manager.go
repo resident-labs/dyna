@@ -64,6 +64,8 @@ type Manager struct {
 	ResumeRoomLaunch func(*Manager, string, uint64) error
 	Store            *Store
 	Rooms            *room.Store
+	// CopyTime prevents a copied session from resuming in an isolated engine.
+	CopyTime time.Time
 	// counts holds the responsibility counts of the current revision key. Use
 	// countCache to read it, because a literal Manager starts with none.
 	counts *countCache
@@ -679,6 +681,9 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 		if err != nil {
 			return err
 		}
+		if !m.CopyTime.IsZero() && !meta.Created.After(m.CopyTime) {
+			return errors.New("copied sessions cannot wake in an isolated engine")
+		}
 		if !meta.Closed.IsZero() {
 			return fmt.Errorf("%w: %s", ErrClosed, id)
 		}
@@ -857,6 +862,9 @@ func (m *Manager) Wake(ctx context.Context, ref string, opts WakeOptions) (WakeR
 	info, err := store.DeliveryTarget(ref)
 	if err != nil {
 		return WakeResult{}, err
+	}
+	if !m.CopyTime.IsZero() && !info.Created.After(m.CopyTime) {
+		return WakeResult{}, errors.New("copied sessions cannot wake in an isolated engine")
 	}
 	if info.Status == StatusClosed {
 		return WakeResult{}, fmt.Errorf("%w: %s; start a new session", ErrClosed, info.ID)
