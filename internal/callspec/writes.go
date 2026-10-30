@@ -185,6 +185,7 @@ var WriteCalls = map[string]bool{
 	"SendToSession":               true,
 	"SendToSessionWithReferences": true,
 	"SendWithReferences":          true,
+	"RunCommand":                  true,
 	"SendWorktreeComments":        true,
 	"SetAccountRepos":             true,
 	"SetCatalogEntryEnabled":      true,

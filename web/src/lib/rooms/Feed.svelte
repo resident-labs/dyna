@@ -311,6 +311,7 @@
       {:else if p.completion}
         {@render completionPost(p)}
       {:else}
+        {#if p.skill}<span class="skill-chip">Skill · {p.skill.name}</span>{/if}
         <FeedMessage post={p} {room} cont={!!row.cont} recipients={recipients(p)} expanded={expanded.has(p.id)} ontoggle={() => toggleMessage(p.id)} {onaddress} />
       {/if}
       {#if p.forward}<ForwardQuote {room} post={p.forward} author={byId[p.forward.id]} onpost={jump} {onopenfile} />{/if}
@@ -326,6 +327,7 @@
 </div>
 
 <style>
+  .skill-chip { display: inline-block; margin: 4px 0 4px 36px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: var(--t-sm); }
   .question-state.answered { color: var(--sage); }
   .question-state.withdrawn, .question-id, .question-mark.quiet { color: var(--faint); }
   .question-mark { color: var(--gold); font-weight: 700; }
