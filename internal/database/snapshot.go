@@ -42,6 +42,9 @@ func Snapshot(ctx context.Context, db *sql.DB, destination string) (string, erro
 	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {
 		return "", fmt.Errorf("copy Dyna state: %w", err)
 	}
+	if err := markCopy(ctx, partial); err != nil {
+		return "", fmt.Errorf("mark state snapshot: %w", err)
+	}
 	if err := os.Link(partial, absolute); errors.Is(err, os.ErrExist) {
 		// A competing file appeared after the first check. Leave it untouched.
 		return "", fmt.Errorf("snapshot destination already exists: %s", absolute)
