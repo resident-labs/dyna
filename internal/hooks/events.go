@@ -195,7 +195,7 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 		events = append(events, Event{Event: Schedule, Repo: r.Root, Worktree: r.Main, Name: name})
 	}
 	if refresh && fetchErr == nil && head != "" {
-		s.fastForwardRoomCheckouts(ctx)
+		s.fastForwardRoomCheckout(ctx, r.Root)
 	}
 	errs := []error{fetchErr}
 	for _, e := range events {
