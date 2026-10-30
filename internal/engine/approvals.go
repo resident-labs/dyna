@@ -83,6 +83,10 @@ func (s services) approvalList(ctx context.Context, room string) ([]approvals.Su
 	return s.rooms.Approvals.List(authority.Of(ctx), room)
 }
 
+func (s services) approvalHeld(ctx context.Context, room string) ([]approvals.HeldRequest, error) {
+	return s.rooms.Approvals.Held(authority.Of(ctx), room)
+}
+
 func (s services) approvalDecide(ctx context.Context, in approvals.DecisionInput) (approvals.Request, error) {
 	return s.rooms.Approvals.Decide(ctx, authority.Of(ctx), in)
 }
