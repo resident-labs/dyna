@@ -149,13 +149,15 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(host)
 
 	room := &cobra.Command{Use: "room"}
+	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0]})
+		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Room)
 		}
 		return err
 	}}
+	create.Flags().StringVar(&rootProfile, "root-profile", "", "Root session profile")
 	var follow bool
 	log := &cobra.Command{Use: "log ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
@@ -218,9 +220,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(room)
 
 	session := &cobra.Command{Use: "session"}
-	var roomID, name, profile, goal, brief string
+	var roomID, name, profile, goal, brief, sessionRepo, parent string
 	start := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Profile: contract.ProfileName(profile), Goal: goal, Brief: brief})
+		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, Brief: brief})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Session)
 		}
@@ -229,6 +231,8 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&roomID, "room", "", "Room ID")
 	start.Flags().StringVar(&name, "name", "", "Session name")
 	start.Flags().StringVar(&profile, "profile", "", "Profile")
+	start.Flags().StringVar(&sessionRepo, "repo", "", "Session repository")
+	start.Flags().StringVar(&parent, "parent", "", "Parent session ID")
 	start.Flags().StringVar(&goal, "goal", "", "Goal")
 	start.Flags().StringVar(&brief, "brief", "", "Brief")
 	var discard bool
