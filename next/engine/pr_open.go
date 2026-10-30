@@ -51,6 +51,8 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			return input, err
 		},
 		Execute: func(ctx context.Context, args contract.OpArgs, who contract.Principal) contract.OpResult {
+			unlock := s.lockBox(who.Session)
+			defer unlock()
 			session, head, err := lookup(ctx, who)
 			if err != nil {
 				return contract.OpResult{Error: "session repository unavailable"}
