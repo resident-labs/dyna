@@ -18,7 +18,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 5. **A dormant session stops its box.** The container stops, and its volume stays. Its request no longer counts on the host. A wake starts it again (section 5.3).
 6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. The engine refuses owner-only calls from host-exec processes (section 6).
 7. **Root is a position in the tree.** Any session above another may approve its agent-class operations and start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
-8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The cutover follows only after the trial works and a dry-run import passes (section 11).
+8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The trial starts in M2, as soon as one box can build and test dyna (root, 2026-10-30). From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback until the cutover. The cutover follows only after the trial works and a dry-run import passes (section 11).
 9. **Some v1 features wait until after the cutover.** Voice, workflows, web search through Dyna and the librarian's updates come back after the cutover. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
 11. **CLIProxyAPI is vendored and runs inside the engine.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` runs it in-process through its Go SDK, on the control-plane loopback, so v2 stays one binary (5.7). It lands in M1, because the model route needs it.
@@ -174,8 +174,8 @@ Event types by milestone:
 | Milestone | Types |
 |---|---|
 | M1 | `post.created`, `session.started`, `session.closed`, `turn.started`, `turn.ended`, `box.changed` |
-| M2 | `op.requested`, `op.decided`, `op.ran`, `grant.created`, `grant.revoked`, `grant.expired`, `session.moved`, `box.pressure`, `image.built`, `image.failed` |
-| M3 | `goal.*`, `issue.*`, `question.asked`, `question.answered`, `rule.changed`, `pr.opened`, `pr.approved`, `pr.merged`, `pr.closed`, `ci.finished`, `repo.main_updated`, `hook.finished`, `checkin.due`, `notice.posted`, `account.quota_low`, `account.failed`, `migrate.handoff` |
+| M2 | `op.requested`, `op.decided`, `op.ran`, `grant.created`, `grant.revoked`, `grant.expired`, `session.moved`, `box.pressure`, `image.built`, `image.failed`, `pr.opened` |
+| M3 | `goal.*`, `issue.*`, `question.asked`, `question.answered`, `rule.changed`, `pr.approved`, `pr.merged`, `pr.closed`, `ci.finished`, `repo.main_updated`, `hook.finished`, `checkin.due`, `notice.posted`, `account.quota_low`, `account.failed`, `migrate.handoff` |
 
 `notice.posted` carries a typed `NoticeKind` (such as `host.unreachable` or `account.exhausted`), so every owner-facing notice has a designed card (r8).
 
@@ -510,10 +510,12 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `grant_hosts`, `grant_commands`, `grant_command_args` | section 6.1; no JSON columns |
 | M2 | `hostexec_runs` | section 6.3 |
 | M2 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; the default notice subscription needs them |
-| M3 | `archives` | section 5.9 |
-| M3 | `room_repos`, `repos`, `repo_attribution`, `devices`, `device_scopes` | section 7 |
+| M2 | `archives` | section 5.9 |
+| M2 | `room_repos`, `repos` | section 7.6 |
+| M2 | `pr_owners` | (`repo`, `number`) PK, `session`, `goal`, `approved_head`. M2 opens PRs; M3 approves and merges them (decision 13). |
+| M3 | `repo_attribution`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
-| M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `pr_owners` ((`repo`, `number`) PK, `session`, `goal`, `approved_head`), `library_entries`, `accounts` (labels and limits only), `counters`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
+| M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `library_entries`, `accounts` (labels and limits only), `counters`. The import also fills `pr_owners`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
 | M3 | `proxy_auths` | `id` PK, `provider`, `record` (the proxy's auth record, which holds tokens), `updated_at`. Only the embedded proxy's token store reads and writes it (5.7). |
 
 `counters` holds keyed counters (D-580), such as the next issue number per room. A counter update is one primary-key write with prebuilt SQL.
@@ -656,9 +658,9 @@ A cgroup nests only inside one kernel, so a child runs on its parent's host. The
 - **A lead's subtree never splits across hosts.** A child that does not fit on its lead's host waits in `pending`.
 - **M1** uses one host, hermeslab.
 
-### 5.6 Repository copy and shared caches (M3)
+### 5.6 Repository copy and shared caches (M2)
 
-Repositories, git through the engine and the archive on close (5.6 to 5.9) land in M3. In M1 and M2, a box has no repository, so close has nothing to archive.
+Repositories, git through the engine and the archive on close (5.6 to 5.9) land early in M2, because the trial needs them (section 11). In M1, a box has no repository, so close has nothing to archive.
 
 Each host keeps one bare cache per repository at `<hostdata>/git/<owner>/<repo>.git`. **Hosts never talk to GitHub and hold no GitHub credentials.** The control plane fetches from GitHub and pushes into the host cache over the master, before it creates a box and when it sees the default branch move.
 
@@ -690,7 +692,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 - In M1 the proxy keeps its sign-ins in its own file store, `<data>/cliproxy/auth` (mode 0700). In M3 the engine registers a token store on `store.db` through the SDK's `Store` interface (`List`, `Save`, `Delete`), so no JSON state is left. `store.db` and its backups then hold tokens and stay 0600.
 - Accepted costs: the binary grows by the proxy's dependencies (gin, a Redis client, zeroconf and others), which later patches may trim. A panic in a proxy goroutine stops the engine; systemd restarts it, and box agents buffer meanwhile (5.7).
 
-**Git (M3).** `git-remote-dyna` (a link to `dyna box-agent git-remote`) carries smart HTTP over the box socket to `/git/<repo>/`. The engine checks the session's repositories and proxies to GitHub with its own token. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
+**Git (M2).** `git-remote-dyna` (a link to `dyna box-agent git-remote`) carries smart HTTP over the box socket to `/git/<repo>/`. The engine checks the session's repositories and proxies to GitHub with its own token. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
 
 **Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
 
@@ -708,7 +710,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 
 **Release skew.** `hello` carries the binary version. When it differs from the engine's, the engine sends `Upgrade` once the box is idle, and the box agent runs `/opt/dyna/bin/current/dyna box-agent` in its place. This comes in M2. In M1, the engine accepts a `hello` with another version, and the owner closes every box before an engine upgrade.
 
-### 5.9 Close (archive in M3)
+### 5.9 Close (archive in M2)
 
 Close ends the whole subtree, as the card decided: each child is closed and deleted, deepest first, with its own archive. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
 
@@ -1215,7 +1217,13 @@ Acceptance:
 
 ### M2: web room view, approvals, host exec
 
-Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, the default notice subscription, images from `.dyna/images/`, box growth, the Dyna shell server with secret masking, the transcript stream, and computers (5.14). Computers land first in M2, before its UI work starts.
+Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, the default notice subscription, images from `.dyna/images/`, box growth, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), and opening a PR through an operation (decision 13).
+
+The order inside M2:
+
+1. **The trial parts first:** images from `.dyna/images/`, rooms with repositories, the repository copy, git through the engine, close with archive, opening a PR, and computers.
+2. **Self-hosting trial.** It starts as soon as one box builds and tests dyna and pushes its branch. v2 runs beside v1 with its own data, runtime and SSH control folders (decision 8), in a trial room for the `dyna` repository. While v1 still tracks the same repository, v2 names session branches `v2/<session>`, acts only on PRs that v2 sessions opened, and does not wake on unowned repository events. v1 does not track `v2/` branches. v1 reviews and merges v2's PRs until the approval flag lands in M3. From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback.
+3. **The rest of M2**, including the web room view, which UI builders check from inside v2 with computers.
 
 Acceptance:
 
@@ -1232,15 +1240,16 @@ Acceptance:
 11. manual: a lead and its child run on hermeslab; the child's cgroup is under the lead's slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
 13. manual: an agent in a box serves a web page from inside the box, opens it in its computer, takes a screenshot to a file, and attaches it to a post; the owner watches the same page live on the session page.
+14. unit: the git route refuses a push to a branch that the session does not own. Close archives before it deletes, and stays in `closing` when the archive push fails.
 
 ### M3: bundle import and self-hosting
 
-Scope: rooms with repositories, git through the engine, close with archive, PRs, the approval flag, merges and CI through GitHub (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, the import, and the cutover. Section 9 lists every feature.
+Scope: the approval flag, merges and CI through GitHub (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, the import, and the cutover. Section 9 lists every feature.
 
 The order inside M3:
 
 1. Build the features. Each has its unit tests.
-2. **Self-hosting trial.** v2 runs beside v1 with its own data, runtime and SSH control folders (decision 8), in a trial room for the `dyna` repository. v2 sessions make the remaining M3 changes through v2 PRs. While v1 still tracks the same repository, v2 names session branches `v2/<session>`, acts only on PRs that v2 sessions opened, and does not wake on unowned repository events. v1 does not track `v2/` branches.
+2. **Self-hosting.** The trial started in M2. v2 sessions make the remaining M3 changes through v2 PRs, and more of the work moves to v2 as each M3 part lands.
 3. **Dry run.** Export from a copy of the latest v1 backup, and import into a scratch v2 store. Compare the counts.
 4. **Cutover** (section 8).
 
@@ -1250,16 +1259,15 @@ Acceptance:
 2. unit: the exporter maps `dyna:root`, the owner and engine senders to the right principals on a small fixture.
 3. unit: subscriptions fire only on their event type or schedule. One with both `Wake` and `Run`, or neither, fails validation.
 4. unit: an unowned `repo.main_updated` for a repository in rooms A (default) and B makes one delivery per room, and only A's root wakes. `repo.settings.set` from a session waits for the owner.
-5. unit: the git route refuses a push to a branch that the session does not own. Close archives before it deletes, and stays in `closing` when the archive push fails.
-6. manual: during the trial, a v2 session in a box changes `next/`, opens a PR through an operation, CI passes, its lead runs `dyna pr approve`, and Dyna merges it.
-7. manual: the dry-run import matches the inventory's keep list for every part, and old CI shows the same `go list -m all` except the `github.com/resident-labs/dyna` line.
-8. manual: after the cutover, each room's root starts from its `migrate.handoff` event, and every open goal, PR, issue and question from the bundle is present.
-9. manual: Connect works with the copied secrets, and a paired phone opens a room without pairing again. Its posts come from the owner with its `DeviceID`.
-10. manual: with a host powered off, its boxes go `lost`, and no box starts on another host. When the host is back, a box whose container still runs returns to `ready`, and Pi marks an interrupted tool call instead of running it again.
-11. unit: with a fake CLIProxyAPI management API, `accounts.connect` returns the proxy's link or code, and the store keeps no token or key outside the proxy's token-store table. The SQLite token store round-trips a proxy auth record through `Save`, `List` and `Delete`. A quota below the floor emits one `account.quota_low`, and no second one until the quota recovers and drops again. A provider with no limit from either source shows its counted usage with the limit unknown, and it never emits `account.quota_low`.
-12. unit: a GitHub comment by an outside login reaches the agent between two `DANGER EXTERNAL INFORMATION` lines, and a comment by the owner's account is passed unwrapped (fake GitHub client).
-13. unit: `dyna pr approve` from the author or its child fails, and from its lead it sets the flag. A new head clears the flag. Dyna merges only when the flag matches the current head and CI is green, and it passes that head SHA (fake GitHub client).
-14. manual: one full working day in all rooms on v2 with no blocking failure.
+5. manual: during the trial, a v2 session in a box changes `next/`, opens a PR through an operation, CI passes, its lead runs `dyna pr approve`, and Dyna merges it.
+6. manual: the dry-run import matches the inventory's keep list for every part, and old CI shows the same `go list -m all` except the `github.com/resident-labs/dyna` line.
+7. manual: after the cutover, each room's root starts from its `migrate.handoff` event, and every open goal, PR, issue and question from the bundle is present.
+8. manual: Connect works with the copied secrets, and a paired phone opens a room without pairing again. Its posts come from the owner with its `DeviceID`.
+9. manual: with a host powered off, its boxes go `lost`, and no box starts on another host. When the host is back, a box whose container still runs returns to `ready`, and Pi marks an interrupted tool call instead of running it again.
+10. unit: with a fake CLIProxyAPI management API, `accounts.connect` returns the proxy's link or code, and the store keeps no token or key outside the proxy's token-store table. The SQLite token store round-trips a proxy auth record through `Save`, `List` and `Delete`. A quota below the floor emits one `account.quota_low`, and no second one until the quota recovers and drops again. A provider with no limit from either source shows its counted usage with the limit unknown, and it never emits `account.quota_low`.
+11. unit: a GitHub comment by an outside login reaches the agent between two `DANGER EXTERNAL INFORMATION` lines, and a comment by the owner's account is passed unwrapped (fake GitHub client).
+12. unit: `dyna pr approve` from the author or its child fails, and from its lead it sets the flag. A new head clears the flag. Dyna merges only when the flag matches the current head and CI is green, and it passes that head SHA (fake GitHub client).
+13. manual: one full working day in all rooms on v2 with no blocking failure.
 
 ## 12. Team and ownership
 
