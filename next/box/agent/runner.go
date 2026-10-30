@@ -183,10 +183,13 @@ func (r *Runner) finish(ctx context.Context, result contract.TurnEnded) error {
 			}
 		}
 	}
+	if err := r.Sink.TurnOutput(ctx, result); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	r.active = ""
 	r.settling = false
 	r.sent = nil
 	r.mu.Unlock()
-	return r.Sink.TurnOutput(ctx, result)
+	return nil
 }
