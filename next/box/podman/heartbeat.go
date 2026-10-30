@@ -28,7 +28,9 @@ func (h *Host) Heartbeat(ctx context.Context, ticker Ticker, report func(reachab
 		case <-ctx.Done():
 			return
 		case <-ticker.C():
-			_, err := h.run(ctx, "true")
+			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_, err := h.run(probeCtx, "true")
+			cancel()
 			if err != nil {
 				misses++
 				if misses >= 3 && reachable {
