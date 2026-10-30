@@ -26,13 +26,13 @@ export const api = {
     row('reviewer', 'pull-requests', { switch: { on: true }, profile: 'terra' }),
     row('lane-sync', 'pull-requests', { state: 'not-set-up', settingsKeys: ['lane.local.repos'] }),
     row('library', 'agents', { state: 'idle', switch: { on: true }, profile: 'glm-flash' }),
-    row('updates', 'this-computer', { state: 'error', detail: 'last-run-failed', switch: { on: true } }),
+    row('updates', 'this-computer', { state: 'error', detail: 'last-run-failed', switch: { on: true }, hook: 'self-update' }),
     row('maintenance', 'this-computer', { switch: { on: true }, schedule: { everyMinutes: 60, timeout: '10m0s' } }),
   ]),
   settings: () => Promise.resolve([]),
   globalHookRuns: () => Promise.resolve([]),
   hookRuns: () => Promise.resolve([]),
-  listHooks: () => Promise.resolve([]),
+  listHooks: () => Promise.resolve([{ name: 'self-update', label: 'Update Dyna', event: 'main-updated', command: 'x' }, { name: 'lint', event: 'schedule', everyMinutes: 60, command: 'make lint' }]),
   hookSummary: () => Promise.resolve([]),
   listGlobalHooks: () => Promise.resolve([]),
   globalHookSummary: () => Promise.resolve([]),
@@ -41,7 +41,7 @@ export const api = {
 export const openExternal = () => {}
 `
 
-test('the page shows the registry groups in order, Not set up last, then Hooks; only the failed service has a pill', async () => {
+test('the page shows the registry groups in order, Not set up last, then Hooks without service hooks; only the failed service has a pill', async () => {
   globalThis.__writes = []
   const dom = installDom()
   const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/Services', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/Services')
@@ -60,6 +60,9 @@ test('the page shows the registry groups in order, Not set up last, then Hooks; 
     assert.ok(rowOf('updates').querySelector('.status.pill.danger'))
     assert.match(rowOf('library').textContent ?? '', /Idle · glm-flash/)
     assert.doesNotMatch(rowOf('maintenance').querySelector('.status')?.textContent ?? '', /\bOn\b/)
+    // The Update Dyna hook does the Updates service's work, so it shows only there.
+    const hookRows = [...need(root.querySelector('#hooks')).querySelectorAll('.setting h3')].map((h) => h.textContent)
+    assert.deepEqual(hookRows, ['lint'])
     // A click on the row opens its detail in place, where Run now runs the pass.
     need(rowOf('maintenance').querySelector<HTMLElement>('button.toggle')).click()
     flushSync()

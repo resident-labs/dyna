@@ -1,9 +1,13 @@
 <script lang="ts">
   // The interval and time limit of a built-in service, and a reset to the
-  // defaults. Each save writes through the call that owns it and the page then
-  // reads the service again.
+  // defaults. Both read and take a time the way the settings do, such as 10m,
+  // 1h or 1d, and save on Enter or blur like every other field here.
   import SettingRow from '../ui/SettingRow.svelte'
+  import SettingControl from './SettingControl.svelte'
+  import { settingDisplay } from '../settings/display.ts'
+  import { minutes, minutesText } from './model.ts'
   import type { RegistryService, ServicePatch } from '../api/service.ts'
+  import type { SettingItem } from '../api/settings.ts'
 
   interface Props {
     schedule: NonNullable<RegistryService['schedule']>
@@ -13,31 +17,28 @@
   }
   let { schedule, busy, onsave, onreset }: Props = $props()
 
-  let every = $state('')
-  let limit = $state('')
-  $effect(() => { every = String(schedule.everyMinutes) })
-  $effect(() => { limit = schedule.timeout })
+  let errors = $state<Record<string, string>>({})
+  const field = (key: string, display: string): SettingItem => ({ key, value: display, display, kind: 'duration', source: 'file', liveVsRestart: '', help: '' })
+
+  function save(key: string, text: string, patch: (n: number) => ServicePatch): Promise<void> {
+    const n = minutes(text)
+    errors = { ...errors, [key]: n ? '' : 'Use a time such as 10m, 1h or 1d' }
+    return n ? onsave(patch(n)) : Promise.resolve()
+  }
 </script>
 
-<SettingRow title="Runs every" description="Minutes between runs.">
-  {#snippet control()}
-    <input class="field" type="number" min="1" bind:value={every} aria-label="Minutes between runs" />
-    <button class="btn" disabled={busy || Number(every) === schedule.everyMinutes} onclick={() => onsave({ everyMinutes: Number(every) })}>Save</button>
-  {/snippet}
+<SettingRow title="Runs every" description="Time between runs">
+  {#snippet control()}<SettingControl item={field('every', minutesText(schedule.everyMinutes))} label="Time between runs" onsave={(v: string) => save('every', v, (n) => ({ everyMinutes: n }))} />{/snippet}
+  {#snippet status()}{#if errors.every}<span class="err" role="alert">{errors.every}</span>{/if}{/snippet}
 </SettingRow>
-<SettingRow title="Time limit" description="Longest one run may take, such as 5m0s.">
-  {#snippet control()}
-    <input class="field" type="text" bind:value={limit} aria-label="Time limit of one run" />
-    <button class="btn" disabled={busy || limit.trim() === schedule.timeout || !limit.trim()} onclick={() => onsave({ timeout: limit.trim() })}>Save</button>
-  {/snippet}
+<SettingRow title="Time limit" description="Longest one run may take">
+  {#snippet control()}<SettingControl item={field('limit', settingDisplay({ kind: 'duration', value: schedule.timeout }))} label="Time limit of one run" onsave={(v: string) => save('limit', v, (n) => ({ timeout: `${n}m` }))} />{/snippet}
+  {#snippet status()}{#if errors.limit}<span class="err" role="alert">{errors.limit}</span>{/if}{/snippet}
 </SettingRow>
-<SettingRow title="Defaults" description="Restores the switch, the interval and the time limit.">
-  {#snippet control()}
-    <button class="btn" disabled={busy} onclick={onreset}>Reset</button>
-  {/snippet}
+<SettingRow title="Defaults" description="Restores the switch, the interval and the time limit">
+  {#snippet control()}<button class="btn" disabled={busy} onclick={onreset}>Reset</button>{/snippet}
 </SettingRow>
 
 <style>
-  .field { width: 6rem; min-height: 30px; padding: 0 var(--s2); background: var(--rail); border: 1px solid var(--border-soft); border-radius: var(--r-xs); color: var(--ink); font-size: var(--t-sm); }
-  .field:focus { border-color: var(--iris-edge); outline: none; }
+  .err { color: var(--tone-danger-fg); }
 </style>

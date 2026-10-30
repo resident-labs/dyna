@@ -120,7 +120,8 @@ test('lists with a known layout load as skeleton rows', () => {
 
 test('rows added to or removed from a list slide with the shared motion time', () => {
   for (const f of ['ProfilesPane', 'DevicesPane', '../services/HookList']) {
-    assert.match(read(`./${f}.svelte`), /transition:slide=\{\{ duration: motion\(BASE\) \}\}/, f)
+    // A list may skip the slide for the rows of its first load.
+    assert.match(read(`./${f}.svelte`), /transition:slide=\{\{ duration: (?:\w+ \? 0 : )?motion\(BASE\) \}\}/, f)
   }
 })
 

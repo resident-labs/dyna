@@ -112,6 +112,10 @@ type Service struct {
 	// that runs no agent.
 	Profile string `json:"profile"`
 	// Session is the address of the agent session the service runs in, or empty.
-	Session      string   `json:"session"`
+	Session string `json:"session"`
+	// Hook names the repository hook that does this service's work, such as
+	// self-update for Updates, or is empty. The Services page shows that hook
+	// under the service and leaves it out of the hook list.
+	Hook         string   `json:"hook"`
 	SettingsKeys []string `json:"settingsKeys"`
 }

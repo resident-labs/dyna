@@ -3,9 +3,10 @@
   // computer. Each row says when the hook runs and how its last run went, with
   // its switch on the right; a click shows its command, its actions and its
   // runs, and a run opens its log. `internal/hooks` does the work, the same code
-  // `dyna git hooks` uses.
+  // `dyna git hooks` uses. A hook that does a service's work (hide) shows under
+  // that service instead: there the list renders only that hook (only), open.
   import { errorText } from '../errorText.ts'
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { slide } from 'svelte/transition'
   import { api } from '../../api.ts'
   import Card from '../ui/Card.svelte'
@@ -36,7 +37,7 @@
     error?: string
   }
 
-  let { title, repo = '', scope = 'repository', focus = null }: { title: string; repo?: string; scope?: HookScope; focus?: HookLogTarget | null } = $props()
+  let { title, repo = '', scope = 'repository', focus = null, hide = [], only = '' }: { title: string; repo?: string; scope?: HookScope; focus?: HookLogTarget | null; hide?: string[]; only?: string } = $props()
 
   // A test runs these functions without props, so the check tolerates no scope.
   const isGlobal = () => typeof scope !== 'undefined' && scope === 'global'
@@ -52,7 +53,10 @@
   let editor = $state<Editor | null>(null)
   let error = $state('')
   let note = $state('')
+  // Rows that arrive with the first load appear at once; later ones slide.
+  let loading = $state(true)
   const shown = 10 // runs listed per hook
+  const listed = $derived((hooks ?? []).filter((h) => (only ? h.name === only : !hide.includes(h.name))))
 
   function say(text: string) {
     note = text
@@ -198,6 +202,8 @@
 
   onMount(async () => {
     await load()
+    await tick()
+    loading = false
     if (focus) await showFocus(focus)
   })
 
@@ -235,15 +241,16 @@
 {#snippet hookRow(h: Hook)}
   {@const last = runs[h.name]?.[0]}
   {#snippet more()}{@render runList(h)}{/snippet}
-  <div transition:slide={{ duration: motion(BASE) }}>
+  <div transition:slide={{ duration: loading ? 0 : motion(BASE) }}>
     {#if editor?.hook?.name === h.name}
       <div class="form"><HookForm bind:form={editor.form} editing busy={editor.busy} error={editor.error} onsave={saveHook} oncancel={() => (editor = null)} /></div>
     {:else}
       <SettingRow inline title={h.label || h.name} description={eventLabel(h.event, h.everyMinutes)} expanded={open === h.name} ontoggle={() => toggleRuns(h.name)} children={open === h.name ? more : undefined}>
         {#snippet status()}
-          {#if last && failed(last)}<StatusPill label="Failed {when(last.startedAt, Date.now())}" tone="danger" />{:else if last}<span>Last {when(last.startedAt, Date.now())}</span>{/if}
           {@const nextAt = next[h.name]}
-          {#if nextAt && !h.disabled}<span>Next {when(nextAt, Date.now())}</span>{/if}
+          {@const facts = [last && !failed(last) ? `Last ${when(last.startedAt, Date.now())}` : '', nextAt && !h.disabled ? `Next ${when(nextAt, Date.now())}` : ''].filter(Boolean)}
+          {#if last && failed(last)}<StatusPill label="Failed {when(last.startedAt, Date.now())}" tone="danger" />{/if}
+          {#if facts.length}<span>{facts.join(' · ')}</span>{/if}
           {#if h.onFail === 'block'}<StatusPill label="Blocks landing" />{/if}
           {#if removing?.name === h.name && removing.error}<span class="err" role="alert">{removing.error}</span>{/if}
         {/snippet}
@@ -255,19 +262,31 @@
   </div>
 {/snippet}
 
-<Card {title} flush divided count={hooks?.length || null}>
+{#if only}
+  {#each listed as h (h.name)}
+    {#if editor?.hook?.name === h.name}
+      <HookForm bind:form={editor.form} editing busy={editor.busy} error={editor.error} onsave={saveHook} oncancel={() => (editor = null)} />
+    {:else}
+      {@render runList(h)}
+    {/if}
+  {/each}
+  {#if error}<p class="facts err" role="alert">{error}</p>{/if}
+  {#if note}<p class="facts" role="status">{note}</p>{/if}
+{:else}
+<Card {title} flush divided count={listed.length || null}>
   {#snippet action()}{#if hooks && !editor}<button class="btn quiet" onclick={() => (editor = { hook: null, form: newHook() })}>Add hook</button>{/if}{/snippet}
   {#if editor && !editor.hook}
     <div class="form"><HookForm form={editor.form} busy={editor.busy} error={editor.error} onsave={saveHook} oncancel={() => (editor = null)} /></div>
   {/if}
   {#if hooks === null && !error}<Skeleton label="Loading hooks" rows={2} />{/if}
-  {#each hooks ?? [] as h (h.name)}{@render hookRow(h)}{/each}
-  {#if hooks && !hooks.length && !editor}
+  {#each listed as h (h.name)}{@render hookRow(h)}{/each}
+  {#if hooks && !listed.length && !editor}
     <p class="line">No hooks yet. {isGlobal() ? 'A hook here runs for the whole computer.' : 'A hook here runs for every room on this repository.'}</p>
   {/if}
   {#if error}<p class="line err" role="alert">{error}</p>{/if}
   {#if note}<p class="line" role="status">{note}</p>{/if}
 </Card>
+{/if}
 
 <style>
   .form { padding: var(--s3) var(--s4); }
