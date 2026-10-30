@@ -54,12 +54,8 @@ const (
 	seenEvery    = time.Minute
 )
 
-// Route is one way to reach this machine, with its kind: loopback,
-// tailscale, custom or tunnel.
-type Route struct {
-	Kind string `json:"kind"`
-	websvc.Route
-}
+// Route is one way to reach this machine.
+type Route = ConnectRoute
 
 // Options configures a Service.
 type Options struct {
