@@ -1041,6 +1041,15 @@ func decide(t Tree, closed func(string) (bool, error)) Tree {
 	case !t.Merged:
 		t.Reason = ReasonNotMerged
 	default:
+		protected, err := trackedPRProtection(context.Background(), t.Path)
+		if err != nil {
+			t.Reason = err.Error()
+			return t
+		}
+		if protected {
+			t.Reason = "used by an open tracked PR"
+			return t
+		}
 		known := t.sessionID != "" || t.runID != ""
 		isClosed := false
 		if t.runID != "" {
