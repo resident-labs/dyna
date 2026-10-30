@@ -62,8 +62,10 @@ func TestRoomRepoAPI(t *testing.T) {
 	if _, e := s.RoomRepoAdd(ctx, agent, contract.RoomRepoAddRequest{Room: room, Repo: "a/b"}); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("agent add: %v", e)
 	}
-	if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: "bad"}); e == nil || e.Code != contract.ErrInvalid {
-		t.Fatalf("invalid add: %v", e)
+	for _, name := range []contract.RepoName{"bad", "../x", "owner/..", "owner/.", "owner/x/y"} {
+		if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: name}); e == nil || e.Code != contract.ErrInvalid {
+			t.Fatalf("invalid %s: %v", name, e)
+		}
 	}
 	if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: "a/b"}); e != nil {
 		t.Fatal(e)
