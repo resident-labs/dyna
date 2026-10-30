@@ -459,7 +459,7 @@ func serviceProfiles(ctx context.Context, call engineCaller, r refs) ([]string, 
 		return nil, fmt.Errorf("no room; pass --room <room>")
 	}
 	var rows []serviceRow
-	if err := call.Call(ctx, "ListServices", []any{r.Room}, &rows); err != nil {
+	if err := call.Call(ctx, "ListServices", []any{r.Room, r.Repo}, &rows); err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
@@ -591,7 +591,7 @@ func readRegistry(ctx context.Context, call engineCaller, r refs) ([]serviceregi
 		return nil, fmt.Errorf("no room; pass --room <room>")
 	}
 	var rows []serviceregistry.Service
-	if err := call.Call(ctx, "ServiceRegistry", []any{r.Room}, &rows); err != nil {
+	if err := call.Call(ctx, "ServiceRegistry", []any{r.Room, r.Repo}, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
