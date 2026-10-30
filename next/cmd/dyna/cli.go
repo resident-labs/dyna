@@ -21,6 +21,8 @@ import (
 type client interface {
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
+	RoomRepoAdd(context.Context, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error)
+	RoomRepos(context.Context, contract.RoomReposRequest) (contract.RoomReposResponse, error)
 	SessionStart(context.Context, contract.SessionStartRequest) (contract.SessionStartResponse, error)
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
@@ -37,10 +39,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.HostAddRequest | contract.RoomCreateRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest
+	contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest
 }
 type responseType interface {
-	contract.HostAddResponse | contract.RoomCreateResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse
+	contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -74,6 +76,12 @@ func (c *socketClient) HostAdd(ctx context.Context, q contract.HostAddRequest) (
 }
 func (c *socketClient) RoomCreate(ctx context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	return call[contract.RoomCreateRequest, contract.RoomCreateResponse](ctx, c, contract.MethodRoomCreate, q)
+}
+func (c *socketClient) RoomRepoAdd(ctx context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
+	return call[contract.RoomRepoAddRequest, contract.RoomRepoAddResponse](ctx, c, contract.MethodRoomRepoAdd, q)
+}
+func (c *socketClient) RoomRepos(ctx context.Context, q contract.RoomReposRequest) (contract.RoomReposResponse, error) {
+	return call[contract.RoomReposRequest, contract.RoomReposResponse](ctx, c, contract.MethodRoomRepos, q)
 }
 func (c *socketClient) SessionStart(ctx context.Context, q contract.SessionStartRequest) (contract.SessionStartResponse, error) {
 	return call[contract.SessionStartRequest, contract.SessionStartResponse](ctx, c, contract.MethodSessionStart, q)
@@ -141,13 +149,15 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(host)
 
 	room := &cobra.Command{Use: "room"}
+	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0]})
+		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Room)
 		}
 		return err
 	}}
+	create.Flags().StringVar(&rootProfile, "root-profile", "", "Root session profile")
 	var follow bool
 	log := &cobra.Command{Use: "log ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
@@ -182,13 +192,37 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return nil
 	}}
 	log.Flags().BoolVar(&follow, "follow", false, "Follow new events")
-	room.AddCommand(create, log)
+	repo := &cobra.Command{Use: "repo"}
+	var makeDefault bool
+	addRepo := &cobra.Command{Use: "add ROOM REPO", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().RoomRepoAdd(cmd.Context(), contract.RoomRepoAddRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1]), Default: makeDefault})
+		return err
+	}}
+	addRepo.Flags().BoolVar(&makeDefault, "default", false, "Make this the room default")
+	listRepos := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := getClient().RoomRepos(cmd.Context(), contract.RoomReposRequest{Room: contract.RoomID(args[0])})
+		if err != nil {
+			return err
+		}
+		for _, repo := range r.Repos {
+			if repo.Default {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s (default)\n", repo.Repo); err != nil {
+					return err
+				}
+			} else if _, err := fmt.Fprintln(cmd.OutOrStdout(), repo.Repo); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	repo.AddCommand(addRepo, listRepos)
+	room.AddCommand(create, log, repo)
 	root.AddCommand(room)
 
 	session := &cobra.Command{Use: "session"}
-	var roomID, name, profile, goal, brief string
+	var roomID, name, profile, goal, brief, sessionRepo, parent string
 	start := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Profile: contract.ProfileName(profile), Goal: goal, Brief: brief})
+		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, Brief: brief})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Session)
 		}
@@ -197,6 +231,8 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&roomID, "room", "", "Room ID")
 	start.Flags().StringVar(&name, "name", "", "Session name")
 	start.Flags().StringVar(&profile, "profile", "", "Profile")
+	start.Flags().StringVar(&sessionRepo, "repo", "", "Session repository")
+	start.Flags().StringVar(&parent, "parent", "", "Parent session ID")
 	start.Flags().StringVar(&goal, "goal", "", "Goal")
 	start.Flags().StringVar(&brief, "brief", "", "Brief")
 	var discard bool
