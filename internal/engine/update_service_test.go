@@ -63,14 +63,19 @@ func TestMainUpdatedStartsSourceInstaller(t *testing.T) {
 	installer := hookinstall.New()
 	var calls int
 	installer.Exec = func(_ context.Context, p processguard.Process) error {
-		calls++
-		if len(p.Args) == 0 || p.Args[0] != "systemd-run" {
+		if len(p.Args) == 0 {
+			t.Fatal("empty installer command")
+		}
+		if p.Args[0] == "systemd-run" {
+			calls++
+		} else if p.Args[0] != "systemctl" {
 			t.Fatalf("installer command = %v", p.Args)
 		}
 		return nil
 	}
 	s.hooks.Install = &installer
-	s.hooks.Post = func(hooks.Event, room.HookEvent) error { return nil }
+	var events []room.HookEvent
+	s.hooks.Post = func(_ hooks.Event, ev room.HookEvent) error { events = append(events, ev); return nil }
 	h := s.librarianMainUpdates(s.hooks)
 	event := hooks.Event{Event: hooks.MainUpdated, Repo: repo, SHA: strings.Repeat("a", 40)}
 	if err := h.MainUpdated(t.Context(), event); err != nil {
@@ -85,5 +90,22 @@ func TestMainUpdatedStartsSourceInstaller(t *testing.T) {
 	}
 	if err := h.MainUpdated(t.Context(), event); err != nil || calls != 1 {
 		t.Fatalf("duplicate start: calls=%d err=%v", calls, err)
+	}
+	if err := installer.Jobs.Update(runs[0].ID, func(j *hookinstall.Job) error {
+		j.StartedAt = time.Now().Add(-4 * time.Minute)
+		j.Status, j.Result, j.FinishedAt = "finished", "pass", time.Now()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.hooks.ReconcileInstall(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].State != room.HookRunning || events[1].State != room.HookPassed || events[1].RunID != events[0].RunID || events[1].Event != hooks.MainUpdated {
+		t.Fatalf("events = %+v", events)
+	}
+	log, err := updateRunLog(runs[0].ID)
+	if err != nil || log.ExitCode != 0 || !strings.Contains(log.Tail, "Install unit:") {
+		t.Fatalf("update log = %+v, %v", log, err)
 	}
 }

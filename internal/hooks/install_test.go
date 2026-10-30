@@ -141,7 +141,7 @@ func TestPassedInstallUnitEndsTheRunCard(t *testing.T) {
 	if err = os.WriteFile(logPath, []byte("Install unit: dyna-install-example\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	ev := Run{ID: id, Repo: r.ID, Name: "hook-install", Result: "pending", LogPath: logPath, StartedAt: time.Now().Add(-2 * time.Second)}
+	ev := Run{ID: id, Repo: r.ID, Name: "hook-install", Label: "Update Dyna", Event: Schedule, Result: "pending", LogPath: logPath, StartedAt: time.Now().Add(-2 * time.Second)}
 	if _, err = s.saveRun(ctx, ev); err != nil {
 		t.Fatal(err)
 	}
@@ -151,12 +151,16 @@ func TestPassedInstallUnitEndsTheRunCard(t *testing.T) {
 	if err = installer.Jobs.Update(id, func(out *hookinstall.Job) error { *out = j; return nil }); err != nil {
 		t.Fatal(err)
 	}
+	// Migration may remove the hook while its detached installer still runs.
+	if err := s.Remove(ctx, repo, "install"); err != nil {
+		t.Fatal(err)
+	}
 	var got []room.HookEvent
 	s.Post = func(_ Event, ev room.HookEvent) error { got = append(got, ev); return nil }
 	if err = s.ReconcileInstall(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].State != room.HookPassed || got[0].RunID != id || got[0].Hook != "install" {
+	if len(got) != 1 || got[0].State != room.HookPassed || got[0].RunID != id || got[0].Hook != "install" || got[0].Event != Schedule {
 		t.Fatalf("events = %+v", got)
 	}
 	if got[0].DurationMS <= 0 {

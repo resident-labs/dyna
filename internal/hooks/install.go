@@ -144,6 +144,16 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
+				found := false
+				for _, h := range hs {
+					if h.Name == j.Hook {
+						found = true
+						break
+					}
+				}
+				if !found {
+					hs = append(hs, Hook{Name: j.Hook, Label: ev.Label})
+				}
 			}
 			for _, h := range hs {
 				if h.Name != j.Hook {
@@ -156,7 +166,11 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 						return err
 					}
 				}
-				event := Event{Event: MainUpdated, Repo: j.Config.Main, Room: j.Room, Session: j.Session, SHA: j.SHA}
+				eventName := ev.Event
+				if eventName == "" {
+					eventName = MainUpdated
+				}
+				event := Event{Event: eventName, Repo: j.Config.Main, Room: j.Room, Session: j.Session, SHA: j.SHA}
 				// The unit's result always ends the run the hook started, passing or
 				// not. Warnings from the checkout stay on the same card, and the
 				// run's log holds them too.
