@@ -255,3 +255,10 @@ packages:
     fallback_type: unknown
     preserve_comments: types
     enum_style: union
+
+  - path: dyna-agent/internal/serviceregistry
+    output_path: web/src/lib/api/service.gen.ts
+    include_files: [types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

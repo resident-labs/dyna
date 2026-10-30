@@ -149,10 +149,17 @@ function reviewEntries(i: Inputs, now: number): Entry[] {
 
 const byNewest = (list: Entry[]): Entry[] => list.filter((e) => Number.isFinite(e.at) && e.at > 0).sort((a, b) => b.at - a.at)
 
+// newestResult is the result of a hook's newest run by start time. The run
+// list is not sorted for this, and any event may have started the newest run.
+function newestResult(row: HookRow, runs: Inputs['runs']): string {
+  const list = runs[row.hook.name] ?? []
+  const newest = list.reduce<HookRunRow | null>((a, b) => (a && Date.parse(a.startedAt) >= Date.parse(b.startedAt) ? a : b), null)
+  return newest?.result ?? row.lastRun?.result ?? ''
+}
+
 function hookTone(rows: HookRow[], runs: Inputs['runs']): Tone {
-  const newest = (r: HookRow): string => runs[r.hook.name]?.[0]?.result ?? r.lastRun?.result ?? ''
-  if (rows.some((r) => isFailure(newest(r)))) return 'error'
-  return rows.some((r) => newest(r) === 'pending') ? 'live' : 'on'
+  if (rows.some((r) => isFailure(newestResult(r, runs)))) return 'error'
+  return rows.some((r) => newestResult(r, runs) === 'pending') ? 'live' : 'on'
 }
 
 export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
@@ -184,7 +191,7 @@ export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
 
   const librarian = row('librarian')
   const main = libraryHooks.find((h) => h.hook.name === 'librarian-main') ?? null
-  const mainResult = i.runs[main?.hook.name ?? '']?.[0]?.result ?? main?.lastRun?.result ?? ''
+  const mainResult = main ? newestResult(main, i.runs) : ''
   const nextText = librarian?.nextAt ? `next ${until(librarian.nextAt, now)}` : ''
   const librarianLine = !librarian ? '' : librarian.state === 'on'
     ? [isFailure(mainResult) ? 'Failing' : mainResult === 'pending' ? 'Running' : 'On', mainResult && !isFailure(mainResult) && mainResult !== 'pending' ? `last ${resultWord(mainResult)}` : '', nextText].filter(Boolean).join(' · ')
