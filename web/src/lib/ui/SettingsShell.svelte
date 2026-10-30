@@ -70,8 +70,8 @@
   .foot { margin: 18px 10px 0; font-size: var(--t-sm); color: var(--faint); line-height: var(--leading); }
   main { flex: 1 1 800px; display: flex; min-width: 0; }
   .pane { width: min(760px, 100%); padding: 56px 40px 60px; overflow-y: auto; }
-  main.wide { flex-basis: 1160px; }
-  .pane.wide { width: min(1160px, 100%); }
+  main.wide { flex-basis: var(--page-reading-width); }
+  .pane.wide { width: min(var(--page-reading-width), 100%); }
   .close { align-self: flex-start; margin: 56px 0 0 var(--s2); display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--muted); }
   .x { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; }
   .close .x { transition: border-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
