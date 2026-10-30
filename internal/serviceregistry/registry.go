@@ -113,7 +113,7 @@ var definitions = []definition{
 	{IDLibrary, GroupAgents, "Library", "An agent keeps the feature map and docs current.", []string{"library.enabled", "library.profile", "library.smellProfile", "library.smellsPerDay", "library.readmeMaxLines"}},
 	{IDParentCheckIns, GroupAgents, "Parent check-ins", "Each parent hears how its children are doing.", []string{"sessions.checkInInterval"}},
 	{IDVoice, GroupAgents, "Voice", "Talk to Dyna in a call; it hands work to the room's root.", []string{"voice.agent", "voice.ducking", "voice.model", "voice.provider", "voice.url"}},
-	{IDUpdates, GroupThisComputer, "Updates", "Installs a new Dyna build when main changes.", []string{"updater.autoCheck"}},
+	{IDUpdates, GroupThisComputer, "Updates", "Installs a new Dyna build when main changes.", []string{"updater.source", "updater.autoCheck"}},
 	{IDLoadDoctor, GroupThisComputer, "Load doctor", "Watches this computer's load and tells the rooms that cause it.", []string{"doctor.condition"}},
 	{IDMaintenance, GroupThisComputer, "Maintenance", "Frees disk space and removes old worktrees and runs.", []string{"runs.retention", "worktrees.retention", "worktrees.minFreeBytes", "worktrees.root"}},
 	{IDAccountUsage, GroupThisComputer, "Account usage", "Keeps the usage readings of your saved accounts fresh.", nil},

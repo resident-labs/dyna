@@ -331,17 +331,7 @@ func setEnabled(ctx context.Context, call engineCaller, r refs, id ServiceID, on
 		}
 		fmt.Fprintf(out, "the merge queue is %s for room %s\n", stateWord(on), r.Room)
 		return nil
-	case serviceregistry.IDUpdates:
-		if r.Repo == "" {
-			return fmt.Errorf("no repository; run this inside one or pass --repo <path>")
-		}
-		off := !on
-		if err := call.Call(ctx, "EditHook", []any{r.Repo, serviceregistry.UpdatesHook, hooks.Patch{Disabled: &off}}, nil); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "updates are %s for %s\n", stateWord(on), r.Repo)
-		return nil
-	case serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
+	case serviceregistry.IDUpdates, serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
 		off := !on
 		if err := call.Call(ctx, "EditService", []any{string(id), hooks.ServicePatch{Disabled: &off}}, nil); err != nil {
 			return err
@@ -470,7 +460,7 @@ func serviceProfiles(ctx context.Context, call engineCaller, r refs) ([]string, 
 // owner can retime: its switch, interval and time limit.
 func builtinService(id ServiceID) bool {
 	switch id {
-	case serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
+	case serviceregistry.IDUpdates, serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
 		return true
 	}
 	return false
@@ -515,6 +505,9 @@ func setSchedule(ctx context.Context, call engineCaller, id ServiceID, interval,
 		patch.EveryMinutes = &minutes
 	}
 	if setTimeout {
+		if id == serviceregistry.IDUpdates {
+			return fmt.Errorf("Updates has a fixed 75-minute limit")
+		}
 		if timeout <= 0 {
 			return fmt.Errorf("--timeout must be longer than zero")
 		}
@@ -578,14 +571,8 @@ func runNow(ctx context.Context, call engineCaller, r refs, id ServiceID, out io
 	var run hooks.Run
 	var err error
 	switch id {
-	case serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
+	case serviceregistry.IDUpdates, serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
 		err = call.Call(ctx, "RunService", []any{string(id)}, &run)
-	case serviceregistry.IDUpdates:
-		r = resolve(ctx, call, r)
-		if r.Repo == "" {
-			return fmt.Errorf("no repository; run this inside one or pass --repo <path>")
-		}
-		err = call.Call(ctx, "RunHook", []any{r.Repo, serviceregistry.UpdatesHook}, &run)
 	default:
 		return fmt.Errorf("%s does not run on request; `dyna services restart` gives the reviewers and the librarian a turn", id)
 	}
@@ -823,6 +810,10 @@ func detailText(row serviceregistry.Service) string {
 		return "not available on this computer"
 	case serviceregistry.DetailUnreadable:
 		return "could not be read"
+	case serviceregistry.DetailUpdateSourceInvalid:
+		return "source checkout is missing or not a Git repository"
+	case serviceregistry.DetailMultipleUpdateHooks:
+		return "several update hooks; choose a source and disable the old hooks"
 	}
 	return ""
 }
