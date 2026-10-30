@@ -181,10 +181,10 @@ func (s *Service) Visuals(ref string) ([]Visual, error) {
 	}
 	return out, nil
 }
-func (s *Service) scanQuestions(signatures map[string]string, version *string, first bool, emit func(Event)) {
+func (s *Service) scanQuestions(signatures map[string]string, version *int64, first bool, emit func(Event)) {
 	questionStore := s.Notify.QuestionStore()
 	current, err := questionStore.Revision()
-	if err != nil || current == *version {
+	if err != nil || !first && current == *version {
 		return
 	}
 	st, err := questionStore.Read()

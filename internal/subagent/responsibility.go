@@ -130,7 +130,7 @@ func (m *Manager) countKey() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("pr=%s goals=%s items=%s questions=%s runs=%d sessions=%s", pr, goals, items, questions, runs, sessions), nil
+	return fmt.Sprintf("pr=%s goals=%d items=%d questions=%d runs=%d sessions=%s", pr, goals, items, questions, runs, sessions), nil
 }
 
 // countCache keeps the store items that each session owns, for one revision
