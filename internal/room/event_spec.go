@@ -27,7 +27,9 @@ type EventSpec struct {
 	RootOnOwnerReport bool
 	// Once drops a later post with the same key instead of appending it.
 	Once bool
-	Text string
+	// ThreadEnd closes the current display thread after this event.
+	ThreadEnd bool
+	Text      string
 	// Blocks are the payload fields that the agent text appends after the
 	// template, in order. Empty means the default blocks: detail and logTail.
 	Blocks []string
@@ -1100,6 +1102,12 @@ func eventSpecFor(family, typ string) (EventSpec, bool) {
 		}
 	}
 	return EventSpec{}, false
+}
+
+// ThreadEnded reports whether this event closes its display thread.
+func ThreadEnded(m Message) bool {
+	spec, ok := eventSpecFor(m.Kind, m.Notice.Kind)
+	return ok && spec.ThreadEnd
 }
 
 // sealedFamily reports a family whose posts only PostEvent may store.

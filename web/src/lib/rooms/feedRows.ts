@@ -245,6 +245,29 @@ function openHookRow<P extends FeedInput>(out: FeedRow<P>[], key: string, ts: nu
 export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = '', calls: readonly CallRequest[] = []): FeedRow<P>[] {
   const out: FeedRow<P>[] = []
   const hidden = hiddenHookStarts(posts)
+  const openThreads = new Map<string, P[]>()
+  const threadRows = new Map<string, P[]>()
+  const closeThread = (group: P[]) => {
+    const newest = group[group.length - 1]
+    if (!newest) return
+    threadRows.set(newest.id, group)
+    for (const post of group.slice(0, -1)) hidden.add(post.id)
+  }
+  for (const post of posts) {
+    const thread = post.notice?.thread
+    if (!thread) continue
+    const group = openThreads.get(thread) ?? []
+    group.push(post)
+    openThreads.set(thread, group)
+    const spec = eventSpecs.find((entry) => entry.family === post.kind && entry.type === post.notice?.kind)
+    if (spec?.threadEnd) {
+      closeThread(group)
+      openThreads.delete(thread)
+    }
+  }
+  for (const group of openThreads.values()) closeThread(group)
+  const markerGroup = [...threadRows.values()].find((group) => group.some((post) => post.id === unreadFrom))
+  const marker = markerGroup?.[markerGroup.length - 1]?.id ?? unreadFrom
   let prev: P | null = null
   let prevDay = ''
   const waiting = calls.map((call) => ({ call, ts: Date.parse(call.askedAt) })).sort((a, b) => a.ts - b.ts)
@@ -270,10 +293,9 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
       continue
     }
     if (!post) continue
-    // The unread marker stays where the first unread post is, also when that
-    // post shows nowhere and when it folds into a row above: a reader must
-    // still see where the unread posts begin.
-    if (post.id === unreadFrom) {
+    // A thread moves its unread marker to the card at its newest post.
+    // Other hidden posts retain the existing marker behavior.
+    if (post.id === marker) {
       out.push({ kind: 'new', key: 'new' })
       prev = null
     }
@@ -283,6 +305,12 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
       !post.replyTo && prev.from === post.from && !!prev.human === !!post.human && gap < senderGap &&
       (prev.to || []).join() === (post.to || []).join()
     const last = out[out.length - 1]
+    const threadPosts = threadRows.get(post.id)
+    if (threadPosts) {
+      out.push({ kind: 'post', key: post.id, post, cont, posts: threadPosts })
+      prev = post
+      continue
+    }
     const key = foldKey(post)
     // A PR row, a hook row and a merge trial row can fold, so each keeps its
     // posts from the start.
