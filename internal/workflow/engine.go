@@ -765,7 +765,11 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			inline := prof
 			agentStart.Inline = &inline
 		}
-		state, err := runAgentSession(actx, e.opts.Engine, agentStart)
+		stepKey := ""
+		if e.opts.Run != nil {
+			stepKey = key
+		}
+		state, err := runAgentSession(actx, e.opts.Engine, agentStart, stepKey)
 		if err != nil {
 			// The call ended without a result (canceled, timed out, or failed):
 			// stop the session before this call gives up its slots, so a script
