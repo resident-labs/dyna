@@ -148,6 +148,12 @@ func (e *engine) post(call goja.FunctionCall) goja.Value {
 		}
 	}
 	res, err := e.opts.Poster(context.Background(), e.opts.Run.Meta.ID, key, mentions, text)
+	if e.opts.RecordManifest && err != nil && res.ID != "" {
+		if markErr := runstore.MarkWorkflowManifestUnsafe(context.WithoutCancel(e.ctx), e.runID(), "workflow post routing is incomplete"); markErr != nil {
+			e.manifestWriteFailed()
+			panic(vm.NewGoError(fmt.Errorf("mark post routing unsafe: %w", markErr)))
+		}
+	}
 	if e.opts.RecordManifest && res.ID != "" {
 		if recordErr := runstore.CompleteWorkflowCall(context.WithoutCancel(e.ctx), e.runID(), runstore.WorkflowCallPost, identityKey, ordinal, res.ID, res, err); recordErr != nil {
 			e.manifestWriteFailed()

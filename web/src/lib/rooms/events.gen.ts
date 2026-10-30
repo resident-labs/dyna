@@ -69,6 +69,9 @@ export type ShellState = "completed" | "failed" | "stopped"
 // RunState is a named string type of an event payload.
 export type RunState = "completed" | "failed" | "stopped" | "interrupted"
 
+// WorkflowReplayReason is a named string type of an event payload.
+export type WorkflowReplayReason = "eligible" | "legacy" | "not_deterministic" | "incomplete" | "uncertain" | "unsafe" | "input_mismatch" | "launch_uncertain"
+
 // TurnState is a named string type of an event payload.
 export type TurnState = "completed" | "failed" | "stopped"
 
@@ -597,6 +600,8 @@ export interface RunEvent {
   agents?: number
   durationMs?: number
   parent?: string
+  replayReason?: WorkflowReplayReason
+  replayRun?: string
   detail?: string
 }
 
@@ -1562,6 +1567,7 @@ const APPROVAL_ACTION: ReadonlySet<unknown> = new Set(["approve", "deny", "pass"
 const APPROVAL_STATE: ReadonlySet<unknown> = new Set(["done", "failed", "denied", "expired", "cancelled"])
 const SHELL_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped", "interrupted"])
+const WORKFLOW_REPLAY_REASON: ReadonlySet<unknown> = new Set(["eligible", "legacy", "not_deterministic", "incomplete", "uncertain", "unsafe", "input_mismatch", "launch_uncertain"])
 const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const CANDIDATE_STATE: ReadonlySet<unknown> = new Set(["available", "unavailable", "unknown"])
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
@@ -2093,6 +2099,8 @@ export function isRunEvent(v: unknown): v is RunEvent {
     (v.agents === undefined || Number.isInteger(v.agents)) &&
     (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
     (v.parent === undefined || typeof v.parent === "string") &&
+    (v.replayReason === undefined || WORKFLOW_REPLAY_REASON.has(v.replayReason)) &&
+    (v.replayRun === undefined || typeof v.replayRun === "string") &&
     (v.detail === undefined || typeof v.detail === "string")
 }
 

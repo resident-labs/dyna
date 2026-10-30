@@ -32,3 +32,23 @@ func TestReadMetadataRejectsInvalidSource(t *testing.T) {
 		t.Fatal("expected a parse error")
 	}
 }
+
+func TestReadMetadataDeterministicOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want bool
+	}{
+		{`const meta = { deterministic: true }; return 1`, true},
+		{`const meta = { deterministic: false }; return 1`, false},
+		{`const meta = { deterministic: 'true' }; return 1`, false},
+		{`return 1`, false},
+	} {
+		m, err := ReadMetadata(tc.src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Deterministic != tc.want {
+			t.Fatalf("%s: deterministic = %v", tc.src, m.Deterministic)
+		}
+	}
+}
