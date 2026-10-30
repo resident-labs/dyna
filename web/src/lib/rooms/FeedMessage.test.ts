@@ -54,7 +54,8 @@ test('only an avatar from another room has a ring and room label', () => {
   const identity = { kind: 'root', emoji: '🖥️', color: 'blue', room: 'lab' }
   const visitor = render({ from: 'lab:root', avatar: identity })
   assert.ok(visitor.target.querySelector('.room-ring'))
-  assert.match(visitor.header, /root lab/)
+  assert.equal(visitor.target.querySelector('header .name')?.textContent, 'root')
+  assert.equal(visitor.target.querySelector('header .room-tag')?.textContent, 'lab')
   assert.doesNotMatch(visitor.header, /lab:root/)
   visitor.done()
   const local = render({ from: 'dyna-agent:root', avatar: { ...identity, room: 'dyna-agent' } })
