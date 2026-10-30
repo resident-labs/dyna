@@ -28,7 +28,7 @@ test('goal reads distinguish pending, failure and empty while discarding stale s
  const text = () => document.body.textContent ?? ''
  const clickRetry = () => document.querySelector<HTMLElement>('.read-error button')?.click()
  try {
-  ui.flushSync(); assert.match(text(), /Loading checklist/); assert.doesNotMatch(text(), /No items\./)
+  ui.flushSync(); assert.equal(document.querySelector('h2')?.textContent, 'Goal'); assert.match(text(), /Loading checklist/); assert.doesNotMatch(text(), /No items\./)
   ui.flushSync(() => app.select('b')); ui.flushSync(() => app.select('a'))
   pending.items[0]?.resolve([{ id: 'old', text: 'Old result' }]); pending.status[1]?.resolve({ label: 'stuck', reason: 'Wrong goal' }); await settle()
   assert.doesNotMatch(text(), /Old result|Wrong goal/)
