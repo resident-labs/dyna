@@ -24,16 +24,18 @@ const (
 )
 
 type Info struct {
-	Name        string `json:"name"`
-	Scope       Scope  `json:"scope"`
-	Description string `json:"description"`
+	Name        string             `json:"name"`
+	Scope       Scope              `json:"scope"`
+	Description string             `json:"description"`
+	Args        []plan.WorkflowArg `json:"args"`
 }
 
 func List(workDir, personalDir string) ([]Info, error) {
 	out := []Info{}
 	add := func(name string, scope Scope, source []byte) {
 		meta, _ := plan.ReadMetadata(string(source))
-		out = append(out, Info{Name: name, Scope: scope, Description: meta.Description})
+		args := append([]plan.WorkflowArg{}, meta.Args...)
+		out = append(out, Info{Name: name, Scope: scope, Description: meta.Description, Args: args})
 	}
 	for _, entry := range []struct {
 		dir   string

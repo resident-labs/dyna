@@ -25,13 +25,6 @@
   let available = $derived((workflows ?? []).filter((w, i, all) => all.findIndex((other) => other.name === w.name) === i))
   let shown = $derived(available.filter((w) => `${w.name} ${w.description}`.toLowerCase().includes(filter.toLowerCase())))
   let selected = $derived(available.find((w) => w.name === pick))
-  const hints: Record<string, string> = {
-    audit: '{"what": "", "paths": [""]}',
-    'deep-research': '{"question": ""}',
-    'fix-until': '{"command": "", "maxRounds": 3}',
-    migrate: '{"instruction": "", "glob": ""}',
-  }
-  let hint = $derived(selected?.scope === 'bundled' ? hints[selected.name] : undefined)
   let ready = $derived(!busy && shown.some((w) => w.name === pick))
 
   onMount(async () => {
@@ -101,7 +94,10 @@
         {/if}
       </div>
       {#if selected}
-        <label class="field"><span class="lab">Arguments (JSON)</span><textarea bind:value={input} rows="4" placeholder={hint ?? 'Optional JSON arguments'}></textarea></label>
+        <label class="field"><span class="lab">Arguments (JSON)</span><textarea bind:value={input} rows="4" placeholder={'Optional JSON arguments'}></textarea></label>
+        {#each selected.args as arg (arg.name)}
+          <p class="quiet"><strong>{arg.name}</strong> ({arg.required ? 'required' : 'optional'}): {arg.description}</p>
+        {/each}
       {/if}
       {#if error}<p class="err" role="alert">{error}</p>{/if}
     </div>
