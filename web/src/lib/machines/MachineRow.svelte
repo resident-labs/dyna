@@ -4,6 +4,7 @@
   // a row, not a group of rows.
   import type { MachineSummary } from '../api/machine.ts'
   import { loadPct, statusText, summaryText } from './machines.ts'
+  import { usageThresholds } from './nodeUsage.ts'
 
   let { machine, selected = false, onopen }: {
     machine: MachineSummary
@@ -22,7 +23,10 @@
       <span class="name">{machine.name}</span>
     </span>
     {#if pct !== null}
-      <span class="bar" aria-hidden="true"><span class="fill" style="width: {pct}%"></span></span>
+      <span class="bar" aria-hidden="true"><span class="fill" class:hot={pct >= usageThresholds.warn} style="width: {pct}%"></span></span>
+    {/if}
+    {#if machine.memoryPercent !== undefined}
+      <span class="bar" aria-hidden="true"><span class="fill memory" class:hot={machine.memoryPercent >= usageThresholds.warn} style="width: {Math.max(0, Math.min(100, machine.memoryPercent))}%"></span></span>
     {/if}
     {#if counts}<span class="counts">{counts}</span>{/if}
   </span>
@@ -59,5 +63,7 @@
   .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .bar { display: block; height: 3px; border-radius: 2px; overflow: hidden; background: var(--raise); }
   .fill { display: block; height: 100%; background: var(--iris); }
+  .fill.memory { background: var(--hue-4); }
+  .fill.hot { background: var(--gold); }
   .counts { font-size: var(--t-cap); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
