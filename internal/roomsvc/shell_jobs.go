@@ -60,8 +60,13 @@ func due(in shells.Info) bool {
 	return !terminalsvc.ShellJobLive(in)
 }
 
+// scanShellJobs reads the room watcher w from the shell store of the session root.
 func (s *Service) scanShellJobs(w *shellJobWatch, first bool, emit func(Event)) {
-	store := terminalsvc.ShellStore(s.sessions().Root)
+	w.scan(terminalsvc.ShellStore(s.sessions().Root), first, emit)
+}
+
+// scan publishes the job events for the rows that changed in store since the last scan.
+func (w *shellJobWatch) scan(store *shells.Store, first bool, emit func(Event)) {
 	var ids map[string]bool
 	if w.events != nil {
 		var err error
