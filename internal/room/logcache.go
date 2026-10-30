@@ -118,6 +118,21 @@ func (s *Store) dropMessageLog(path string) {
 	delete(s.logs, path)
 }
 
+// LogVersion identifies one decoded log generation and length.
+type LogVersion struct {
+	version *messageLogVersion
+	length  int
+}
+
+// MessageLogVersion returns a token that changes when the indexed log changes.
+func (s *Store) MessageLogVersion(roomID string) (LogVersion, error) {
+	var version LogVersion
+	err := s.withMessageLog(roomID, func(log *messageLog) {
+		version = LogVersion{log.version, len(log.lines)}
+	})
+	return version, err
+}
+
 // ReadFrom returns complete messages in the next 4 MiB of the log. Readers
 // share decoded records, but receive independent values they can change.
 func (s *Store) ReadFrom(roomID string, offset int64) ([]Message, int64, error) {
