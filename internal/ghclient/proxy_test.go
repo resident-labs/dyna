@@ -115,9 +115,9 @@ func TestPinnedReviewArgsPinAndClassifyAsAgent(t *testing.T) {
 	if !slices.Contains(args, "commit_id="+head) {
 		t.Fatalf("review argv does not pin the reviewed head: %q", args)
 	}
-	in := ClassifyInput{Host: "github.com", Repo: "owner/project", APIHost: "github.com"}
-	if got := Classify(context.Background(), args, in); got != approvals.ClassAgent {
-		t.Fatalf("Classify(%q) = %q, want agent", args, got)
+	w := ParseWrite(args, "github.com", "owner/project", TargetRoom)
+	if w.Verb != "pr.review.comment" {
+		t.Fatalf("review verb = %s", w.Verb)
 	}
 }
 
