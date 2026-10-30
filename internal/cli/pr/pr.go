@@ -462,7 +462,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 				if *reviewHead != "" && *reviewHead != rec.Head {
 					return fmt.Errorf("the review head %s is not the tracked head %s; review the tracked head before publishing", *reviewHead, rec.Head)
 				}
-				return ghclient.PublishThroughApproval(c.Context(), roomID, "", []string{"api", "--hostname", r.Host, fmt.Sprintf("repos/%s/pulls/%d/reviews", r.Repo, r.Number), "--method", "POST", "--raw-field", "commit_id=" + rec.Head, "--raw-field", "event=COMMENT", "--raw-field", "body=" + body})
+				return ghclient.PublishThroughApproval(c.Context(), roomID, "", ghclient.PinnedReviewArgs(r.Host, r.Repo, r.Number, rec.Head, body))
 			}
 			var id int64
 			err = engineclient.New("").Call(c.Context(), "PostPRReview", []any{roomID, r, body, *reviewHead, comments, *reviewPublish}, &id)
