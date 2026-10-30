@@ -117,6 +117,26 @@ test('a refused setting keeps the typed text so the owner can correct it', async
   }
 })
 
+test('a refused release source keeps the stored checkout selected', async () => {
+  const dom = installDom()
+  const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/SettingControl', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/SettingControl')
+  const root = need(document.getElementById('app'))
+  let app: Mounted | undefined
+  const item = { key: 'updater.source', value: '/checkout', kind: 'string', source: 'file', liveVsRestart: '', help: '' }
+  flushSync(() => { app = mount(C, { target: root, props: { item, label: 'Update source', onsave: () => Promise.reject(new Error('refused')) } }) })
+  try {
+    need([...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Release')).click()
+    await Promise.resolve()
+    flushSync()
+    assert.equal(need([...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Source checkout')).getAttribute('aria-checked'), 'true')
+    assert.equal(need(root.querySelector('input')).value, '/checkout')
+  } finally {
+    unmount(need(app))
+    dom.window.close()
+    for (const n of domNames) Reflect.deleteProperty(globalThis, n)
+  }
+})
+
 test('an edit typed while a save is pending survives that save', async () => {
   const dom = installDom()
   const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/SettingControl', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/SettingControl')
