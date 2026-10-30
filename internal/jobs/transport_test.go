@@ -135,3 +135,17 @@ func TestRemoteInputMustBeCompleteBeforeExecution(t *testing.T) {
 		t.Fatalf("short input ran the command: %v", err)
 	}
 }
+
+// The framed SSH response descriptor belongs to the transport, not to node
+// programs. A detached child must not inherit it and hold the reply open.
+func TestRemoteFrameDoesNotExposeReplyDescriptor(t *testing.T) {
+	cmd := exec.Command("bash", "-o", "pipefail", "-c", remoteFrame, "dyna-frame", `if [ -e /proc/self/fd/3 ]; then printf leak; else printf closed; fi`)
+	cmd.Stdin = strings.NewReader("DYNA-IN 00000000000000000000\n")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(out), "closedDYNA-END 00000000000000000006 000\n"; got != want {
+		t.Fatalf("reply = %q, want %q", got, want)
+	}
+}
