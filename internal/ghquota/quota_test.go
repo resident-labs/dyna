@@ -34,6 +34,22 @@ func TestQuotaSummaryNamesTheCallersThatSpendQuota(t *testing.T) {
 	}
 }
 
+// A workflow run list is named by the filter it asks for, so a per-commit read
+// is told apart from a branch cleanup. Filter values never reach the label.
+func TestRunListCallerNamesTheFilterNotItsValue(t *testing.T) {
+	cases := map[string]string{
+		"repos/owner/repo/actions/runs?head_sha=abc123&per_page=100":      "runs-head-sha",
+		"repos/owner/repo/actions/runs?branch=feature%2Fx&status=success": "runs-branch",
+		"repos/owner/repo/actions/runs?event=push&per_page=100":           "runs-branch",
+		"repos/owner/repo/actions/runs?per_page=100":                      "runs",
+	}
+	for path, want := range cases {
+		if got := ghQuotaCaller(path); got != want {
+			t.Errorf("ghQuotaCaller(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 // A caller with no API path, such as a session's access check, is counted
 // under its own name so the journal shows what turn startup spends.
 func TestQuotaSummaryCountsANamedCaller(t *testing.T) {
