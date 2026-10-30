@@ -202,7 +202,11 @@ func withAttributionFirst(body, line string) string {
 	if command, ok := strings.CutPrefix(first, "/"); ok {
 		for _, r := range command {
 			if unicode.IsLetter(r) {
-				return strings.TrimRight(body, "\n") + "\n\n" + line
+				body = strings.TrimRight(body, "\n")
+				if strings.HasSuffix(body, "\n\n"+line) {
+					return body
+				}
+				return body + "\n\n" + line
 			}
 			break
 		}
