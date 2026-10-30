@@ -19,6 +19,7 @@ type StoredOperation struct {
 
 const operationColumns = "id,kind,room,by_kind,by_id,class,state,card,args,created_at,expires_at,decision,result"
 
+// Scan matches database/sql rows, whose destination types vary by column.
 type operationRow interface{ Scan(...interface{}) error }
 
 func scanOperation(row operationRow) (StoredOperation, error) {
@@ -54,13 +55,15 @@ func (s *Store) Operation(ctx context.Context, id contract.OpID) (StoredOperatio
 
 // Operations lists records in a state. A nonzero due time limits expiry to that time.
 func (s *Store) Operations(ctx context.Context, state contract.OpState, due time.Time) ([]StoredOperation, error) {
-	query := "SELECT " + operationColumns + " FROM operations WHERE state=?"
+	query := "SELECT " + operationColumns + " FROM operations"
 	var rows *sql.Rows
 	var err error
-	if due.IsZero() {
-		rows, err = s.read.QueryContext(ctx, query+" ORDER BY created_at,id", state)
+	if state == "" {
+		rows, err = s.read.QueryContext(ctx, query+" ORDER BY created_at,id")
+	} else if due.IsZero() {
+		rows, err = s.read.QueryContext(ctx, query+" WHERE state=? ORDER BY created_at,id", state)
 	} else {
-		rows, err = s.read.QueryContext(ctx, query+" AND expires_at<=? ORDER BY expires_at,id", state, due.UnixMilli())
+		rows, err = s.read.QueryContext(ctx, query+" WHERE state=? AND expires_at<=? ORDER BY expires_at,id", state, due.UnixMilli())
 	}
 	if err != nil {
 		return nil, err
