@@ -6,6 +6,8 @@ const (
 	MethodArchiveDone      Method = "archive.done"
 	MethodDeliveryDone     Method = "delivery.done"
 	MethodRoomCreate       Method = "room.create"
+	MethodRoomRepoAdd      Method = "room.repo.add"
+	MethodRoomRepos        Method = "room.repos"
 	MethodSessionStart     Method = "session.start"
 	MethodSessionClose     Method = "session.close"
 	MethodPost             Method = "post"
@@ -38,6 +40,18 @@ type RoomCreateRequest struct {
 }
 type RoomCreateResponse struct {
 	Room RoomID `json:"room"`
+}
+type RoomRepoAddRequest struct {
+	Room    RoomID   `json:"room"`
+	Repo    RepoName `json:"repo"`
+	Default bool     `json:"default"`
+}
+type RoomRepoAddResponse struct{}
+type RoomReposRequest struct {
+	Room RoomID `json:"room"`
+}
+type RoomReposResponse struct {
+	Repos []RoomRepo `json:"repos"`
 }
 type SessionStartRequest struct {
 	Room    RoomID      `json:"room"`
