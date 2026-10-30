@@ -36,9 +36,9 @@ func checkMachineWrite(ctx context.Context, _ string, args []json.RawMessage) er
 			}
 			return fmt.Errorf("SaveNode: a room root registers mounts and devices for its own room only")
 		}
-		return fmt.Errorf("SaveNode is owner only for a node's creation, name, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, node queue limits, named resources, and its own room's mounts and devices (for example %s)", hostChecksCommand)
+		return fmt.Errorf("SaveNode is owner only for a node's creation, name, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, node queue limits, named resources, and its own room's mounts and devices (for example %s). Ask the owner to run the change with: dyna request terminal --reason \"<why>\" -- <command>", hostChecksCommand)
 	}
-	return fmt.Errorf("SaveNode is owner only; the owner allows host checks with %s", hostChecksCommand)
+	return fmt.Errorf("SaveNode is owner only; the owner allows host checks with %s. Ask the owner to run: dyna request terminal --reason \"<why>\" -- %s", hostChecksCommand, hostChecksCommand)
 }
 
 // machinePatchOf reads the patch of a SaveNode call. It reports false when
