@@ -32,12 +32,12 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 	s.SetRepositories(&fakeRepos{})
 	parentCaller := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
 	childCaller := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
-	parentChannel, e := s.BoxChannel(ctx, parentCaller)
+	parentChannel, e := testChannel(t, s, ctx, parentCaller)
 	if e != nil {
 		t.Fatal(e)
 	}
 	<-parentChannel
-	childChannel, e := s.BoxChannel(ctx, childCaller)
+	childChannel, e := testChannel(t, s, ctx, childCaller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -74,7 +74,7 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	}
 	verifier := &fakeRepos{}
 	s.SetRepositories(verifier)
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -108,7 +108,7 @@ func TestReconnectArchivesOnlySessionRepository(t *testing.T) {
 	}
 	s.SetRepositories(&fakeRepos{})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	first, e := s.BoxChannel(ctx, caller)
+	first, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -120,7 +120,7 @@ func TestReconnectArchivesOnlySessionRepository(t *testing.T) {
 	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/other", Commit: "abc"}); e == nil {
 		t.Fatal("other repository archive was accepted")
 	}
-	second, e := s.BoxChannel(ctx, caller)
+	second, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -142,7 +142,7 @@ func TestCloseRetryResendsArchiveOnLiveChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := s.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -171,7 +171,7 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.SetRepositories(&fakeRepos{err: errors.New("archive ref mismatch")})
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -211,7 +211,7 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
 	restarted.SetRepositories(&fakeRepos{})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := restarted.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, restarted, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
