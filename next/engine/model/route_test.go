@@ -63,6 +63,18 @@ func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestRouteRejectsURLSelectedModel(t *testing.T) {
+	called := false
+	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer up.Close()
+	target, _ := url.Parse(up.URL)
+	w := httptest.NewRecorder()
+	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
+	if w.Code != http.StatusNotFound || called {
+		t.Fatalf("status %d, called %v", w.Code, called)
+	}
+}
+
 func TestRouteRejectsAmbiguousModel(t *testing.T) {
 	target, _ := url.Parse("http://127.0.0.1")
 	w := httptest.NewRecorder()
