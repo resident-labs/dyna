@@ -9,6 +9,7 @@ import (
 	"dyna-agent/internal/localci"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/runstore"
 	statewrite "dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
@@ -27,6 +28,13 @@ func updateBusy(ctx context.Context) (bool, error) {
 			prstate.MergeTrialPhaseStacking, prstate.MergeTrialPhasePublishing:
 			return true, nil
 		}
+	}
+	runs, err := runstore.Running()
+	if err != nil {
+		return false, err
+	}
+	if len(runs) > 0 {
+		return true, nil
 	}
 	return (localci.Store{DataDir: store.DataDir()}).HasActiveAttachments(ctx)
 }
@@ -107,7 +115,7 @@ func noticeUpdateWait(source string) error {
 	}
 	_, err = rooms.PostEventInput(room.PostEventInput{
 		RoomID: rec.ID, Producer: room.ProducerEngine, NeedsRoot: true, To: []string{rec.Name},
-		Event: room.AlertEvent{Source: room.AlertEngine, Summary: "An update has waited 3 hours for CI to finish.", Detail: "Active merge trials or local CI keep the engine update waiting. Choose a quiet time or run Updates manually."},
+		Event: room.AlertEvent{Source: room.AlertEngine, Summary: "An update has waited 3 hours for work to finish.", Detail: "Active workflows, merge trials or local CI keep the engine update waiting. Choose a quiet time or run Updates manually."},
 	})
 	return err
 }
