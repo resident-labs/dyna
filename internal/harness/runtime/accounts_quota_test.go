@@ -34,6 +34,12 @@ func TestAccountQuotaAvailability(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(QuotaUnavailable)
+	later := time.Now().Add(time.Second)
+	setReading(t, a, n, &store.Observation{ObservedAt: later, Windows: []store.Window{{ID: "seven_day", UsedPercent: &used}}})
+	got, err := a.QuotaAvailability("claude-code", store.ProviderAnthropic, "repo", later)
+	if err != nil || got.State != QuotaAvailable {
+		t.Fatalf("newer reading = %+v, %v", got, err)
+	}
 }
 
 // D-110: a quota-exhausted account keeps its harness out of automatic profile

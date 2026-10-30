@@ -70,7 +70,7 @@ func (a *Accounts) QuotaAvailability(harness string, provider store.Provider, re
 	var evidence time.Time
 	for _, n := range open {
 		o := readings[n.ID]
-		if _, limited := limits[n.ID]; limited {
+		if _, limited := limits[n.ID]; limited && !readingHasQuotaLeft(o, recorded[n.ID], now) {
 			if recorded[n.ID].After(evidence) {
 				evidence = recorded[n.ID]
 			}
