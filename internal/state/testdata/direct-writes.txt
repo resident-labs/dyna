@@ -22,6 +22,7 @@ not-state internal/cli/computer/browser_holder.go holderPID 1 # browser launcher
 not-state internal/cli/computer/browser_holder.go startHolder 3 # browser launcher files of one computer
 not-state internal/cli/managed/managed.go runner.write 1 # removes its temporary staging file after installing host configuration
 not-state internal/cli/managed/managed.go stageImage 1 # removes a temporary downloaded root filesystem tarball
+not-state internal/cli/slot/slot.go acquire 1 # ephemeral flock holder label; the lock, not the file contents, owns the slot
 not-state internal/cli/room/room.go AttachmentCmd 1 # writes a downloaded attachment to the path the user named
 not-state internal/cli/room/visual_check.go VisualCmd 1 # temporary WebP output under DYNA_SCRATCH or the system temporary directory
 not-state internal/computers/browser_device_linux.go logSignInFailure 1 # one computer's browser profile files

@@ -94,6 +94,7 @@ func TestAgentStampKeysPreserveOwnerGuard(t *testing.T) {
 var nonStampKeys = map[string]string{
 	"DYNA_CI_RUN":                         "Local CI run kind passed to checks, not a caller stamp.",
 	"DYNA_CI_BASE":                        "Local CI comparison commit passed to checks, not a caller stamp.",
+	"DYNA_TEST_SLOT_HELD":                 "Marks a nested test command that already holds a host slot, not a caller identity.",
 	"DYNA_TESTSAFE_ROOT":                  "The first test binary's temporary folder, which its child test binaries keep.",
 	"DYNA_FOREGROUND_SCOPE":               "A foreground cgroup, not a caller identity.",
 	"DYNA_LAUNCH_GATE":                    "An inherited launch-gate file descriptor, unset at process start.",
