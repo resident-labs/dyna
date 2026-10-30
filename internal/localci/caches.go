@@ -35,11 +35,14 @@ const (
 // writes there now, so its entries stay until their age passes.
 const legacyCacheDir = "/var/tmp/dyna-local-ci"
 
+// localCacheRoot holds every node's cache directory on this machine. The user
+// ID is the controller's, not the SSH account's. Tests point it at t.TempDir.
+var localCacheRoot = fmt.Sprintf("/var/tmp/dyna-local-ci-%d", os.Getuid())
+
 // cacheBase names the one directory a node keeps on its machine. Setup and
 // cleanup both use it, so a cleanup always visits the tree a run writes to.
-// The user ID is the controller's, not the SSH account's.
 func cacheBase(node string) string {
-	return fmt.Sprintf("/var/tmp/dyna-local-ci-%d/%s", os.Getuid(), node)
+	return localCacheRoot + "/" + node
 }
 
 func repositoryCacheRoot(base string) string { return path.Join(base, "caches") }
