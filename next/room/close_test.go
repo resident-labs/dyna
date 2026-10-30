@@ -8,7 +8,7 @@ import (
 )
 
 func TestCloseAndMove(t *testing.T) {
-	tree := NewTree([]Node{{ID: "root", Room: "room", Host: "h"}, {ID: "a", Parent: "root", Room: "room", Host: "h"}, {ID: "b", Parent: "a", Room: "room", Host: "h"}, {ID: "c", Parent: "b", Room: "room", Host: "h"}, {ID: "peer", Parent: "root", Room: "room", Host: "h"}})
+	tree := NewTree([]Node{{ID: "root", Host: "h"}, {ID: "a", Parent: "root", Host: "h"}, {ID: "b", Parent: "a", Host: "h"}, {ID: "c", Parent: "b", Host: "h"}, {ID: "peer", Parent: "root", Host: "h"}, {ID: "remote", Parent: "root", Host: "else"}})
 	for _, tt := range []struct {
 		name    string
 		session contract.SessionID
@@ -47,15 +47,15 @@ func TestCloseAndMove(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		session contract.SessionID
-		parent  Node
+		parent  contract.SessionID
 		fail    bool
 	}{
-		{"valid", "b", Node{ID: "peer", Room: "room", Host: "h"}, false},
-		{"cycle", "a", Node{ID: "c", Room: "room", Host: "h"}, true},
-		{"self", "a", Node{ID: "a", Room: "room", Host: "h"}, true},
-		{"other room", "a", Node{ID: "outside", Room: "else", Host: "h"}, true},
-		{"other host", "a", Node{ID: "peer", Room: "room", Host: "else"}, true},
-		{"root", "root", Node{ID: "peer", Room: "room", Host: "h"}, true},
+		{"valid", "b", "peer", false},
+		{"cycle", "a", "c", true},
+		{"self", "a", "a", true},
+		{"other room", "a", "outside", true},
+		{"other host", "a", "remote", true},
+		{"root", "root", "peer", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tree.CheckMove(tt.session, tt.parent)
