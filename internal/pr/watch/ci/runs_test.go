@@ -1,4 +1,4 @@
-package watch
+package ci
 
 import (
 	"testing"
@@ -14,10 +14,10 @@ func TestRegisteredCIRuns(t *testing.T) {
 		{
 			name: "add refuses a closed run set",
 			run: func(t *testing.T) {
-				runs := &registeredCIRuns{runs: map[string]*registeredCIRun{}}
-				runs.closeAdmission()
+				runs := &Runs{Runs: map[string]*Run{}}
+				runs.CloseAdmission()
 				runs.Lock()
-				added := runs.add("head", &registeredCIRun{})
+				added := runs.Add("head", &Run{})
 				runs.Unlock()
 				if added {
 					t.Fatal("add admitted a run after admission closed")
@@ -27,15 +27,15 @@ func TestRegisteredCIRuns(t *testing.T) {
 		{
 			name: "add refuses a key that already runs",
 			run: func(t *testing.T) {
-				current := &registeredCIRun{}
-				runs := &registeredCIRuns{runs: map[string]*registeredCIRun{"head": current}}
+				current := &Run{}
+				runs := &Runs{Runs: map[string]*Run{"head": current}}
 				runs.Lock()
-				added := runs.add("head", &registeredCIRun{})
+				added := runs.Add("head", &Run{})
 				runs.Unlock()
 				if added {
 					t.Fatal("add replaced a key that already runs")
 				}
-				if runs.runs["head"] != current {
+				if runs.Runs["head"] != current {
 					t.Fatal("add replaced the stored run")
 				}
 			},
@@ -43,12 +43,12 @@ func TestRegisteredCIRuns(t *testing.T) {
 		{
 			name: "finish keeps a different stored run",
 			run: func(t *testing.T) {
-				stored := &registeredCIRun{}
-				runs := &registeredCIRuns{runs: map[string]*registeredCIRun{"head": stored}}
-				if runs.finish("head", &registeredCIRun{}) {
+				stored := &Run{}
+				runs := &Runs{Runs: map[string]*Run{"head": stored}}
+				if runs.Finish("head", &Run{}) {
 					t.Fatal("finish removed a different run")
 				}
-				if runs.runs["head"] != stored {
+				if runs.Runs["head"] != stored {
 					t.Fatal("finish replaced or removed the stored run")
 				}
 			},
@@ -58,12 +58,12 @@ func TestRegisteredCIRuns(t *testing.T) {
 			run: func(t *testing.T) {
 				unwantedCancelled := false
 				disabledNodeCancelled := false
-				runs := &registeredCIRuns{runs: map[string]*registeredCIRun{
-					"unwanted": {node: "worker", cancel: func() { unwantedCancelled = true }},
-					"disabled": {node: "retired", cancel: func() { disabledNodeCancelled = true }},
+				runs := &Runs{Runs: map[string]*Run{
+					"unwanted": {Node: "worker", Cancel: func() { unwantedCancelled = true }},
+					"disabled": {Node: "retired", Cancel: func() { disabledNodeCancelled = true }},
 				}}
 				runs.Lock()
-				runs.cancelUnwanted(map[string]registeredCIJob{}, []localci.Node{{Name: "worker"}})
+				runs.CancelUnwanted(map[string]struct{}{}, []localci.Node{{Name: "worker"}})
 				runs.Unlock()
 				if !unwantedCancelled {
 					t.Error("cancelUnwanted kept a hosted run that no job wants")
@@ -77,11 +77,11 @@ func TestRegisteredCIRuns(t *testing.T) {
 			name: "cancelUnwanted keeps an unnamed local run",
 			run: func(t *testing.T) {
 				cancelled := false
-				runs := &registeredCIRuns{runs: map[string]*registeredCIRun{
-					"local": {node: "worker", local: true, cancel: func() { cancelled = true }},
+				runs := &Runs{Runs: map[string]*Run{
+					"local": {Node: "worker", Local: true, Cancel: func() { cancelled = true }},
 				}}
 				runs.Lock()
-				runs.cancelUnwanted(map[string]registeredCIJob{}, []localci.Node{{Name: "worker"}})
+				runs.CancelUnwanted(map[string]struct{}{}, []localci.Node{{Name: "worker"}})
 				runs.Unlock()
 				if cancelled {
 					t.Fatal("cancelUnwanted cancelled a local run that no job names")

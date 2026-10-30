@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/pr/state"
+	cisched "dyna-agent/internal/pr/watch/ci"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
@@ -78,7 +79,7 @@ func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 	started := time.Unix(1000, 0)
 	// Each fixture owns its run set, so no run from another test can wait on this
 	// test's engine stop.
-	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Notify: notify.New(rooms, subagent.NewManager()), Now: func() time.Time { return started }, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{}}}
+	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Notify: notify.New(rooms, subagent.NewManager()), Now: func() time.Time { return started }, registeredRuns: &registeredCIRuns{Runs: map[string]*registeredCIRun{}}}
 	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
 		if filepath.Base(cmd.Path) == "git" {
 			return nil
@@ -544,7 +545,7 @@ func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 	if !s.registeredJobResultComplete(t.Context(), job, saved) {
 		t.Fatal("a stopped run must reach the retry decision, not be re-admitted blindly")
 	}
-	if act := savedResultActionFor(saved); act != retryStoppedRun {
+	if act := cisched.SavedResultActionFor(saved); act != cisched.RetryStoppedRun {
 		t.Fatalf("a stopped run action = %v, want retryStoppedRun", act)
 	}
 	// The real reader the trial uses must stay undecided on that evidence.
@@ -564,7 +565,7 @@ func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 	// so pending alone would wait forever.
 	second := newFakeNodeWork()
 	restarted := *s
-	restarted.registeredRuns = &registeredCIRuns{runs: map[string]*registeredCIRun{}}
+	restarted.registeredRuns = &registeredCIRuns{Runs: map[string]*registeredCIRun{}}
 	restarted.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
 		return second.work(ctx)
 	}
