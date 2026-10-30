@@ -23,7 +23,7 @@ test('issueGroups orders the groups and puts older closed issues in Closed', () 
 
 const API = `export const api = {
   feedAround: () => Promise.resolve({ posts: [{ id: 'msg_local', text: 'Local body text' }] }),
-  issueWatches: () => globalThis.issueWatchFails ? Promise.reject(new Error('the web client has no method IssueWatches')) : Promise.resolve(globalThis.issueWatched ?? []),
+  trackedIssues: () => globalThis.issueWatchFails ? Promise.reject(new Error('the web client has no method TrackedIssues')) : Promise.resolve({ items: globalThis.issueWatched ?? [], unread: 0 }),
   githubList: () => globalThis.issueListFails ? Promise.reject(new Error('No repository')) : Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
   githubView: (_r, _k, n) => globalThis.issueViewFails ? Promise.reject(new Error('Issue not found')) : Promise.resolve({ number: n, title: 'Issue ' + n, ...globalThis.issueItems.find((i) => i.number === n), body: 'Body text', comments: [] }),
   mergeControlStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve({ roomId: 'r', paused: false, queue: [], trials: [], localCIChecks: {} }) },
@@ -347,15 +347,15 @@ test('the tracked Issues tab lists watched issues and says how to track one when
   } finally { await empty.done() }
 })
 
-// A failed list call, such as an older engine without IssueWatches, shows a
+// A failed list call, such as an older engine without TrackedIssues, shows a
 // designed error with Retry and never the engine's raw text (rule r8).
-test('a failed watched issues call shows Retry instead of the raw error', async () => {
+test('a failed tracked issues call shows Retry instead of the raw error', async () => {
   Object.assign(globalThis, { issueWatchFails: true, issueWatched: [issue(4028, 'needs-owner', { title: 'Upstream crash' })] })
   const r = await render([], {}, microtasks, 'tracked')
   try {
     const failed = element(r.target, '[role=alert]')
-    assert.match(failed.textContent, /Watched issues did not load/)
-    assert.doesNotMatch(r.target.textContent || '', /no method|IssueWatches/)
+    assert.match(failed.textContent, /Tracked issues did not load/)
+    assert.doesNotMatch(r.target.textContent || '', /no method|TrackedIssues/)
     Object.assign(globalThis, { issueWatchFails: false })
     need(elements(failed, 'button').find((b) => b.textContent === 'Retry')).click()
     await microtasks()
