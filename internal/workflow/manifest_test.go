@@ -88,3 +88,33 @@ func TestCaughtManifestWriteErrorStopsTheRun(t *testing.T) {
 		t.Fatalf("error = %v, sent = %v", err, sent)
 	}
 }
+
+func TestManifestIncludesAcceptedQueuedCalls(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Setenv(runstore.AgentJournalRootEnv, "")
+	dir := store.DataDir()
+	t.Cleanup(func() { database.Close(dir) })
+	run, err := runstore.Create("queued manifest", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}
+	script := `run('true'); agent('RESPOND: never started'); return 'done';`
+	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, Commands: newFakeCommands(), WorkDir: t.TempDir(), RecordManifest: true, Paused: func() bool { return true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runstore.ReadWorkflowManifest(t.Context(), run.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Calls) != 2 {
+		t.Fatalf("accepted calls = %+v; want command and agent", manifest.Calls)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		t.Fatalf("seal queued calls = %v", err)
+	}
+}
