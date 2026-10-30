@@ -258,6 +258,8 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	connectAgent(ctx, t, s, child.Session)
+	connectAgent(ctx, t, s, parent)
 	record, err := s.store.Session(ctx, parent)
 	if err != nil {
 		t.Fatal(err)
@@ -328,6 +330,7 @@ func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 		t.Fatal(e)
 	}
 	<-channel // the initial turn
+	connectAgent(ctx, t, s, child.Session)
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: child.Session}); e != nil {
 		t.Fatal(e)
 	}
