@@ -13,16 +13,6 @@ import (
 	"unicode/utf8"
 )
 
-// An item is one line of delegated work on a goal. State is open, done or
-// dropped, and list order is the numeric item suffix (i2 before i10).
-type Item struct {
-	ID        string    `json:"id"`
-	Text      string    `json:"text"`
-	State     string    `json:"state"`
-	Assignee  string    `json:"assignee,omitempty"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
 const (
 	ItemOpen    = "open"
 	ItemDone    = "done"

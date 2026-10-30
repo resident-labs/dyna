@@ -5,32 +5,47 @@ import (
 	"sort"
 	"time"
 
+	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/harness/runtime"
 )
 
+// Scope is the place an Accounts view is taken for: a room ID and the
+// identity of its repository, or the zero value for the global selection.
+type Scope struct {
+	Room string
+	Repo string
+}
+
 // Accounts lists the accounts grouped by provider, with the account each
-// provider uses in scope, which is empty for the global row or a room ID.
-// refresh asks the providers for current usage, as the Usage view does.
-func (s *Service) Accounts(ctx context.Context, scope string, refresh bool) AccountsSnapshot {
+// provider uses in scope and whether its repo limit lets it run there. The
+// zero scope is the global row. refresh asks the providers for current usage,
+// as the Usage view does.
+func (s *Service) Accounts(ctx context.Context, scope Scope, refresh bool) AccountsSnapshot {
 	ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
 	defer cancel()
 	snap := s.Snapshot(ctx, refresh)
 	selections := s.selections()
-	out := AccountsSnapshot{Scope: scope, Providers: []ProviderAccounts{}, Problems: snap.Problems, CheckedAt: snap.CheckedAt, Message: snap.Message}
+	out := AccountsSnapshot{Scope: scope.Room, Providers: []ProviderAccounts{}, Problems: snap.Problems, CheckedAt: snap.CheckedAt, Message: snap.Message}
+	rules := reposcope.Rules{}
+	for _, a := range snap.Accounts {
+		rules[a.ID] = a.Repos
+	}
 	groups := map[store.Provider][]ScopeAccount{}
 	for _, a := range snap.Accounts {
 		key := runtime.SelectionProvider(a.Harness, a.Provider)
 		here := a.Active
-		if scope != "" {
+		serves := true
+		if scope.Room != "" {
 			// A room with no row of its own uses the global account, as the
 			// launcher does. A room row that names no account overrides it with
 			// no selection.
-			if id, found := selections[selectionKey{key, a.Harness, scope}]; found {
+			if id, found := selections[selectionKey{key, a.Harness, scope.Room}]; found {
 				here = id == a.ID
 			}
+			serves = rules.Allows(a.ID, scope.Repo)
 		}
-		groups[a.Provider] = append(groups[a.Provider], ScopeAccount{Account: a, ActiveHere: here})
+		groups[a.Provider] = append(groups[a.Provider], ScopeAccount{Account: a, ActiveHere: here, ServesHere: serves})
 	}
 	providers := make([]store.Provider, 0, len(groups))
 	for provider := range groups {

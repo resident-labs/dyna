@@ -143,6 +143,8 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Nodes", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Nodes},
 		{Name: "Node", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.Node},
 		{Name: "NodeWork", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.NodeWork},
+		{Name: "NodeHistory", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.NodeHistory},
+		{Name: "NodeLastDiagnosis", Access: websvc.Read, Scope: websvc.ScopeRead, Method: machine.NodeLastDiagnosis},
 		// Changing a machine's roles or route retargets the engine's work, so
 		// the write needs the admin scope, like other settings.
 		{Name: "SaveNode", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyMachine, Method: machine.SaveNode},
@@ -652,12 +654,6 @@ func terminalOptions(rooms *roomsvc.Service, idle time.Duration) terminalsvc.Opt
 	}
 }
 
-// SystemLoad is the machine load with each top row named.
-type SystemLoad struct {
-	sysload.Load
-	Top []roomsvc.LoadOwnerCores `json:"top"`
-}
-
 func (s services) systemLoad() SystemLoad {
 	l := s.load.Load()
 	out := SystemLoad{Load: l, Top: []roomsvc.LoadOwnerCores{}}
@@ -671,41 +667,41 @@ func (s services) systemLoad() SystemLoad {
 // reference, whose row overrides the global one, or empty for the global
 // selection alone.
 func (s services) accountsList(ctx context.Context, scope string, refresh bool) (service.AccountsSnapshot, error) {
-	roomID, err := s.accountScope(scope)
+	sc, err := s.accountScope(ctx, scope)
 	if err != nil {
 		return service.AccountsSnapshot{}, err
 	}
-	return s.accounts.Accounts(ctx, roomID, refresh), nil
+	return s.accounts.Accounts(ctx, sc, refresh), nil
 }
 
 // accountsView returns the Accounts view of its saved readings, without asking a
 // provider for new usage: a read that changes nothing.
 func (s services) accountsView(ctx context.Context, scope string) (service.AccountsSnapshot, error) {
-	roomID, err := s.accountScope(scope)
+	sc, err := s.accountScope(ctx, scope)
 	if err != nil {
 		return service.AccountsSnapshot{}, err
 	}
-	return s.accounts.Accounts(ctx, roomID, false), nil
+	return s.accounts.Accounts(ctx, sc, false), nil
 }
 
 // accountsUse makes an account the one its provider uses in scope: that room
 // when scope names one, else globally.
 func (s services) accountsUse(ctx context.Context, id, scope string) (service.AccountsSnapshot, error) {
-	roomID, err := s.accountScope(scope)
+	sc, err := s.accountScope(ctx, scope)
 	if err != nil {
 		return service.AccountsSnapshot{}, err
 	}
-	if roomID != "" {
+	if sc.Room != "" {
 		// A room choice changes that room's future turns, so a session may choose
 		// only for its own room. The owner may choose for any room.
-		if _, err := authority.ActorIn(ctx, roomID); err != nil {
+		if _, err := authority.ActorIn(ctx, sc.Room); err != nil {
 			return service.AccountsSnapshot{}, err
 		}
 	}
-	if err := s.runtime.UseAccount(ctx, id, roomID); err != nil {
+	if err := s.runtime.UseAccount(ctx, id, sc.Room); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
-	return s.accounts.Accounts(ctx, roomID, false), nil
+	return s.accounts.Accounts(ctx, sc, false), nil
 }
 
 // accountsRemove deletes an account and its homes. The caller asked for the
@@ -714,20 +710,25 @@ func (s services) accountsRemove(ctx context.Context, id string) (service.Accoun
 	if err := s.runtime.RemoveAccount(id); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
-	return s.accounts.Accounts(ctx, "", false), nil
+	return s.accounts.Accounts(ctx, service.Scope{}, false), nil
 }
 
-// accountScope reads a room reference as the scope key of an account selection.
+// accountScope reads a room reference as the scope of an account view: the
+// room ID and its repository identity, which repo limits are checked against.
 // An empty reference is the global scope.
-func (s services) accountScope(scope string) (string, error) {
+func (s services) accountScope(ctx context.Context, scope string) (service.Scope, error) {
 	if strings.TrimSpace(scope) == "" {
-		return "", nil
+		return service.Scope{}, nil
 	}
 	rec, err := s.rooms.Notify.Rooms.Resolve(scope)
 	if err != nil {
-		return "", err
+		return service.Scope{}, err
 	}
-	return rec.ID, nil
+	sc := service.Scope{Room: rec.ID}
+	if rec.Repo != "" {
+		sc.Repo = harnessruntime.RepoIdentity(ctx, rec.Repo)
+	}
+	return sc, nil
 }
 
 // accountsAdd adds an API key as a new account of one provider for harness:
@@ -744,5 +745,5 @@ func (s services) accountsAdd(ctx context.Context, harness, provider, label, key
 	if _, err := s.runtime.AddProviderKey(ctx, harness, p, label, key); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
-	return s.accounts.Accounts(ctx, "", false), nil
+	return s.accounts.Accounts(ctx, service.Scope{}, false), nil
 }

@@ -14,57 +14,6 @@ import (
 	"dyna-agent/internal/store"
 )
 
-type Edit struct {
-	At      time.Time `json:"at"`
-	By      string    `json:"by"`
-	OldText string    `json:"oldText"`
-}
-type Outcome struct {
-	At      time.Time `json:"at"`
-	By      string    `json:"by"`
-	Summary string    `json:"summary"`
-}
-
-// Amendment is one later correction to a goal's brief. Amendments are
-// append-only, so the stored brief stays the brief as it was set.
-type Amendment struct {
-	At   time.Time `json:"at"`
-	By   string    `json:"by"`
-	Text string    `json:"text"`
-}
-type Goal struct {
-	ID   string `json:"id"`
-	Room string `json:"room"`
-	Text string `json:"text"`
-	// Detail is the brief stored with a spawn goal: context, owned files,
-	// checks and limits. Dyna resends it with Text after compaction.
-	Detail string `json:"detail,omitempty"`
-	// Amendments correct the brief after it was set; oldest first.
-	Amendments []Amendment `json:"amendments,omitempty"`
-	Setter     string      `json:"setter"`
-	Holders    []string    `json:"holders"`
-	Shared     bool        `json:"shared"`
-	// NextItem allocates the goal's item IDs: i1, i2, ...
-	NextItem int `json:"nextItem,omitempty"`
-	// ItemsClosed counts the times the goal went from some open items to none.
-	// Each of those closes posts one notice keyed by this number, so a reopen
-	// and a second close notify the holders again.
-	ItemsClosed int       `json:"itemsClosed,omitempty"`
-	State       string    `json:"state"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	Edits       []Edit    `json:"edits"`
-	Done        *Outcome  `json:"done,omitempty"`
-	// ExpediteUntil marks the room's one expedited goal until that time.
-	// Readers drop an expired value; see Store.Expedite.
-	ExpediteUntil *time.Time `json:"expediteUntil,omitempty"`
-	// LegacyOwnerHeld marks a goal that an old build left with the owner. Root
-	// must ask the owner about it, then drop or finish the goal, or hand it to
-	// an open session. Nothing writes it now.
-	// TODO: legacy/shim remove later — only goals saved by an old build carry it; remove once every room's owner-held goals are resolved.
-	LegacyOwnerHeld bool `json:"legacyOwnerHeld,omitempty"`
-}
-
 func (g Goal) Open() bool { return g.State == "active" }
 
 // NeedsRoot reports a goal that only root can move: root asks the owner about

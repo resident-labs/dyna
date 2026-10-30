@@ -127,7 +127,7 @@ packages:
 
   - path: dyna-agent/internal/websvc
     output_path: web/src/lib/api/machine.gen.ts
-    include_files: [machine_types.go]
+    include_files: [machine_types.go, node_history.go]
     fallback_type: unknown
     preserve_comments: types
     enum_style: union
@@ -242,6 +242,109 @@ packages:
     preserve_comments: types
     enum_style: union
 
+  - path: dyna-agent/internal/configsvc
+    output_path: web/src/lib/api/profile.gen.ts
+    include_files: [profile_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      type StringMapOrNull = Record<string, string> | null
+      import type { Compact } from './account.ts'
+      import type { HarnessSupport } from '../settings/support.ts'
+      import type { ProfileProblem } from './profile.ts'
+      import type { Cost, CachePaired } from '../settings/accounts/activity.ts'
+    type_mappings:
+      profile.Compact: Compact
+      profile.Status: ProfileProblem
+
+  - path: dyna-agent/internal/subagent
+    output_path: web/src/lib/api/profile.gen.ts
+    include_files: [profile_usage_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      UsageCost: Cost
+      UsageCachePaired: CachePaired
+
+  - path: dyna-agent/internal/state
+    output_path: web/src/lib/api/system-state.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/hub
+    output_path: web/src/lib/api/system-hub.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/sysload
+    output_path: web/src/lib/api/system.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      import type { Health as WriteHealth } from './system-state.gen.ts'
+      import type { Stats as EventStats } from './system-hub.gen.ts'
+      type LoadAverage = [number, number, number]
+      type SystemLoadBase = Omit<Load, 'top'>
+
+  - path: dyna-agent/internal/database
+    output_path: web/src/lib/api/system.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/roomsvc
+    output_path: web/src/lib/api/system.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/engine
+    output_path: web/src/lib/api/system.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      state.Health: WriteHealth
+      hub.Stats: EventStats
+      database.Metrics: Metrics
+      sysload.Load: SystemLoadBase
+      roomsvc.LoadOwnerCores: LoadOwnerCores
+
+  - path: dyna-agent/internal/computers
+    output_path: web/src/lib/api/computer.gen.ts
+    include_files: [computer_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/computerweb
+    output_path: web/src/lib/api/computer.gen.ts
+    include_files: [computer_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      computers.ActionIntent: ActionIntent
+      computers.Stream: Stream
+
+  - path: dyna-agent/internal/terminalsvc
+    output_path: web/src/lib/api/terminal.gen.ts
+    include_files: [terminal_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
   - path: dyna-agent/internal/devicesvc
     output_path: web/src/lib/api/settings.gen.ts
     include_files: [settings_types.go]
@@ -256,9 +359,43 @@ packages:
     preserve_comments: types
     enum_style: union
 
+  - path: dyna-agent/internal/plan
+    output_path: web/src/lib/api/workflow.gen.ts
+    include_files: [workflow_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      import type { Doing } from './room.ts'
+
+  - path: dyna-agent/internal/workflowcatalog
+    output_path: web/src/lib/api/workflow.gen.ts
+    include_files: [workflow_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      plan.WorkflowArg: WorkflowArg
+
+  - path: dyna-agent/internal/roomsvc
+    output_path: web/src/lib/api/workflow.gen.ts
+    include_files: [workflow_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      workeroutput.Activity: Doing
+      json.RawMessage: unknown
+
   - path: dyna-agent/internal/pr/view
     output_path: web/src/lib/api/github.gen.ts
     include_files: [github_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+  - path: dyna-agent/internal/goals
+    output_path: web/src/lib/api/goal.gen.ts
+    include_files: [goal_types.go]
     fallback_type: unknown
     preserve_comments: types
     enum_style: union

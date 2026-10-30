@@ -16,13 +16,6 @@ import (
 	"dyna-agent/internal/workflowsvc"
 )
 
-type RunSource struct {
-	Script string `json:"script,omitempty"`
-}
-type StartedRun struct {
-	ID string `json:"id"`
-}
-
 func (s *Service) ListWorkflows(ref string) ([]workflowcatalog.Info, error) {
 	rec, err := s.rooms().Resolve(ref)
 	if err != nil {
@@ -33,13 +26,6 @@ func (s *Service) ListWorkflows(ref string) ([]workflowcatalog.Info, error) {
 		return nil, err
 	}
 	return workflowcatalog.List(dir, "")
-}
-
-type StartNamedRunRequest struct {
-	Room     string          `json:"room"`
-	Name     string          `json:"name"`
-	Input    json.RawMessage `json:"input"`
-	ResultTo string          `json:"resultTo,omitempty"`
 }
 
 func (s *Service) StartNamedRun(ctx context.Context, req StartNamedRunRequest) (StartedRun, error) {
