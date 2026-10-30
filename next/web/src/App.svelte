@@ -25,23 +25,33 @@
     history.pushState(null, "", event.currentTarget.href);
     path = window.location.pathname;
   }
-  let sidebar: HTMLElement;
-  let content: HTMLElement;
+  let draft = $state("");
+  function send(event: KeyboardEvent) {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || !store || !room || !draft.trim()) return;
+    event.preventDefault();
+    const text = draft;
+    draft = "";
+    store.post({ room, text, home: session ? { kind: "dm", session } : undefined }).catch(() => { draft = text; });
+  }
+  let rail: HTMLElement;
+  let feed: HTMLElement;
+  let composer: HTMLElement | undefined = $state();
+  let members: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
     if (event.key !== "F6") return;
     event.preventDefault();
-    const areas = [sidebar, content];
+    const areas = [rail, feed, composer, members].filter(area => area !== undefined);
     const index = areas.findIndex(area => area.contains(document.activeElement));
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
   }
-  let title =$derived(!room ? "Welcome" : session ? store?.sessions.get(session)?.name ?? "Session"
-    : rooms.find(item => item.id === room)?.name ?? "Room");
+  let roomName = $derived(rooms.find(item => item.id === room)?.name ?? "Room");
+  let title = $derived(!room ? "Welcome" : session ? store?.sessions.get(session)?.name ?? "Session" : roomName);
 </script>
 
 <svelte:window onkeydown={cycle} />
-<div class="shell">
-  <aside aria-label="Rooms" tabindex="-1" bind:this={sidebar}>
+<div class="shell" class:open={room}>
+  <aside aria-label="Rooms" tabindex="-1" bind:this={rail}>
     <header><strong>Dyna</strong></header>
     <div class="section-title">Rooms</div>
     {#if rooms.length}
@@ -50,8 +60,21 @@
       {/each}</nav>
     {:else}<p class="hint">Your rooms will appear here.</p>{/if}
   </aside>
-  <main tabindex="-1" bind:this={content}>
+  <main>
     <header><span>{title}</span></header>
-    <p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>
+    <section class="feed" aria-label="Feed" tabindex="-1" bind:this={feed}>
+      <p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>
+    </section>
+    {#if room && !unavailable}
+      <textarea class="composer" rows="1" aria-label="Message" bind:this={composer} bind:value={draft} onkeydown={send}
+        placeholder={"Message " + title}></textarea>
+    {/if}
   </main>
+  {#if room}
+    <aside class="members" aria-label="Sessions" tabindex="-1" bind:this={members}>
+      <header class="label">Sessions</header>
+      {#each [...(store?.sessions.values() ?? [])] as item (item.session)}<div class="member">{item.name}</div>
+      {:else}<p class="hint">No sessions yet.</p>{/each}
+    </aside>
+  {/if}
 </div>
