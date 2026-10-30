@@ -3,6 +3,7 @@
 // entry; a failure keeps its own entry and names its reason. Nothing here
 // changes data.
 
+import { ResultInstalling } from '../api/settings.gen.ts'
 import { duration } from '../ui/format.ts'
 
 // EntryTone marks an entry's dot: work running now, a failure, or a quiet result.
@@ -65,7 +66,7 @@ export interface ChangeRow {
 }
 
 const isFailure = (result: string): boolean => result === 'error' || result === 'fail'
-const resultWord = (result: string): string => (result === 'pass' ? 'passed' : isFailure(result) ? 'failed' : result === 'pending' ? 'running' : result || 'unknown')
+const resultWord = (result: string): string => (result === 'pass' ? 'passed' : isFailure(result) ? 'failed' : result === 'pending' ? 'running' : result === ResultInstalling ? 'already installing' : result || 'unknown')
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
 // elapsed is a run's length, as "36 s" or "6 m 20 s".

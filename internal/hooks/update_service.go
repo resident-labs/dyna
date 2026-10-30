@@ -39,6 +39,15 @@ func (s Service) StartUpdate(ctx context.Context, event Event, source, toolPath 
 	if err != nil {
 		return Run{}, err
 	}
+	if s.installer().Installing(ctx, event.SHA) {
+		fmt.Fprintln(log, "Install unit dyna-install-"+event.SHA+" is already active. It records the result.")
+		run.Result, run.FinishedAt = ResultInstalling, time.Now().UTC()
+		closeErr := log.Close()
+		if _, err = s.saveRun(ctx, run); err == nil {
+			err = closeErr
+		}
+		return run, err
+	}
 	s.emit(event, hookEvent(event, h, run, room.HookRunning, ""))
 	config := hookinstall.DefaultConfig(r.Main, exe)
 	var dirs []string
