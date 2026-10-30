@@ -1,4 +1,5 @@
-FROM dyna-base
+ARG DYNA_BASE
+FROM ${DYNA_BASE}
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl && rm -rf /var/lib/apt/lists/*
 RUN arch="$(dpkg --print-architecture)" && case "$arch" in \
     amd64) sha=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 ;; \
