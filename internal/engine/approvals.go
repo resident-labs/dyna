@@ -19,12 +19,42 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 		return approvals.Request{}, err
 	}
 	ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, actor.Room), s.rooms.Notify.Rooms)
-	class, err := ghclient.ClassifyForApproval(ctx, "", in.Cwd, in.Argv)
+	var checkedRef ghclient.ItemRef
+	var checkedNumber int
+	var owns func(context.Context, ghclient.ItemRef) bool
+	if actor.Role == authority.Session && actor.Session != "" {
+		owns = func(ctx context.Context, ref ghclient.ItemRef) bool {
+			number, err := ghclient.ApprovalPRNumber(ctx, in.Cwd, ref)
+			if err != nil {
+				return false
+			}
+			records, err := s.rooms.PRs.Watcher().Changes(actor.Room)
+			if err != nil {
+				return false
+			}
+			for _, record := range records {
+				if record.Author == actor.Session && record.Number == number && strings.EqualFold(record.Host, ref.Host) && strings.EqualFold(record.Repo, ref.Repo) {
+					checkedRef, checkedNumber = ref, number
+					return true
+				}
+			}
+			return false
+		}
+	}
+	class, pinnedArgs, err := ghclient.ClassifyForSession(ctx, "", in.Cwd, in.Argv, owns)
 	if err != nil {
 		return approvals.Request{}, err
 	}
 	if class == approvals.ClassRead {
 		return approvals.Request{}, errors.New("read commands do not need approval")
+	}
+	in.Argv = pinnedArgs
+	if class == approvals.ClassAuto && checkedNumber != 0 {
+		in.Argv = ghclient.PinRoutinePR(in.Argv, checkedRef, checkedNumber)
+	}
+	auto := class == approvals.ClassAuto
+	if auto {
+		class = approvals.ClassAgent
 	}
 	stored := approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files}
 	payload, err := json.Marshal(stored)
@@ -32,7 +62,7 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 		return approvals.Request{}, err
 	}
 	return s.rooms.Approvals.Create(ctx, actor, approvals.CreateInput{
-		Kind: approvals.KindGH, Class: class, Payload: payload, Repository: in.Repo,
+		Kind: approvals.KindGH, Class: class, Auto: auto, Payload: payload, Repository: in.Repo,
 		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: ghclient.DisplayApprovalBody(stored),
 	})
 }
