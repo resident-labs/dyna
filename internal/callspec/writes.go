@@ -89,6 +89,7 @@ var WriteCalls = map[string]bool{
 	"EditGoalSelectors":           true,
 	"EditHook":                    true,
 	"EditPR":                      true,
+	"EditProfileField":            true,
 	"EditRule":                    true,
 	"EnableLibrarian":             true,
 	"ExpediteGoal":                true,
