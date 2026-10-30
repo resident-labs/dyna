@@ -20,6 +20,7 @@ import { asComputerViewFailure } from './lib/api/computer.ts'
 import type { DiffComment } from './lib/files/diffComments.ts'
 import type { Reference } from './lib/rooms/references.ts'
 import type { HookInput } from './lib/settings/hooks.ts'
+import type { Owner } from './lib/api/settings.ts'
 
 // ConnectLink is the Resident Labs Connect link the engine puts in the page
 // config. Source: Meta in internal/connect/service.go.
@@ -378,6 +379,7 @@ export const api = {
   settings: () => app.Settings(),
   setSetting: (key: string, value: string) => app.SetSetting(key, value),
   ownerProfile: () => app.OwnerProfile(),
+  setOwnerProfile: (owner: Owner) => app.SetOwnerProfile(owner),
   updateNotice: () => app.UpdateNotice(),
   updateDyna: () => app.UpdateDyna(),
   // Dyna alerts: machine notices such as low disk space and hook or provider
