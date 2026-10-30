@@ -28,6 +28,8 @@ type client interface {
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
 	EventsList(context.Context, contract.EventsListRequest) (contract.EventsListResponse, error)
 	Events(context.Context, contract.RoomID, int64, func(contract.Event) error) error
+	OpList(context.Context, contract.OpListRequest) (contract.OpListResponse, error)
+	OpDecide(context.Context, contract.OpDecideRequest) (contract.OpDecideResponse, error)
 }
 
 type socketClient struct{ http *http.Client }
@@ -39,10 +41,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest
+	contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest
 }
 type responseType interface {
-	contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse
+	contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -94,6 +96,12 @@ func (c *socketClient) Post(ctx context.Context, q contract.PostRequest) (contra
 }
 func (c *socketClient) EventsList(ctx context.Context, q contract.EventsListRequest) (contract.EventsListResponse, error) {
 	return call[contract.EventsListRequest, contract.EventsListResponse](ctx, c, contract.MethodEventsList, q)
+}
+func (c *socketClient) OpList(ctx context.Context, q contract.OpListRequest) (contract.OpListResponse, error) {
+	return call[contract.OpListRequest, contract.OpListResponse](ctx, c, contract.MethodOpList, q)
+}
+func (c *socketClient) OpDecide(ctx context.Context, q contract.OpDecideRequest) (contract.OpDecideResponse, error) {
+	return call[contract.OpDecideRequest, contract.OpDecideResponse](ctx, c, contract.MethodOpDecide, q)
 }
 func (c *socketClient) Events(ctx context.Context, room contract.RoomID, after int64, emit func(contract.Event) error) error {
 	u := "http://dyna/v1/events?room=" + url.QueryEscape(string(room)) + "&after=" + strconv.FormatInt(after, 10)
@@ -255,4 +263,28 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	post.Flags().StringVar(&postRoom, "room", "", "Room ID")
 	post.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
 	root.AddCommand(post)
+
+	op := &cobra.Command{Use: "op"}
+	opList := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := getClient().OpList(cmd.Context(), contract.OpListRequest{Room: contract.RoomID(args[0])})
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(r.Operations)
+	}}
+	opApprove := &cobra.Command{Use: "approve ID", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().OpDecide(cmd.Context(), contract.OpDecideRequest{ID: contract.OpID(args[0]), Approve: true})
+		return err
+	}}
+	var denyReason string
+	opDeny := &cobra.Command{Use: "deny ID", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().OpDecide(cmd.Context(), contract.OpDecideRequest{ID: contract.OpID(args[0]), Approve: false, Reason: denyReason})
+		return err
+	}}
+	opDeny.Flags().StringVar(&denyReason, "reason", "", "Why the operation is denied")
+	_ = opDeny.MarkFlagRequired("reason") // fails only for an undefined flag, and "reason" is defined above
+	op.AddCommand(opList, opApprove, opDeny)
+	root.AddCommand(op)
 }
