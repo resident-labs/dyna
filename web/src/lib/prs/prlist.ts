@@ -1,6 +1,7 @@
 // What the Pull requests screen shows: the list groups, one chip per row, and
 // the detail's status box. The functions are pure; GitHub.svelte and
 // PRDetail.svelte draw the result.
+import { nextAction } from './nextAction.ts'
 import type { BotReview, ChangePolicy, Finding, MainCI, MergeQueueItem, MergeTrialStatus } from '../api/change.ts'
 import type { GitHubItem, GitHubUser } from '../api/github.ts'
 import { ordinal, verdictMeta, isLocal, prTracks, withCI, checkSummary, checkMeta, changeName, type Facts, type Meta } from './pr.ts'
@@ -285,7 +286,7 @@ function reviewStep(c: Row): Step {
   if (c.reviewState === 'reviewing') return { name: 'Review', state: 'run', note: `round ${c.reviewRound || 1}` }
   if (c.reviewState === 'queued') return { name: 'Review', state: 'wait', note: c.queuePosition ? `${ordinal(c.queuePosition)} in line` : 'queued' }
   if (c.reviewState === 'off') return { name: 'Review', state: 'wait', note: 'off' }
-  return { name: 'Review', state: 'wait', note: 'not started' }
+  return { name: 'Review', state: 'wait', note: 'Not started' }
 }
 
 function mergeStep(c: Row, merge: Pick<MergeItem, 'state'> | null): Step {
@@ -350,7 +351,11 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
   const reviewNote = [said, count].filter(Boolean).join(' · ')
   const m = state ?? mergeState(c, merge)
   const icon = MERGE_ICON[m.tone] ?? 'wait'
-  const note = m.id === 'next' ? 'The merge service will test this PR in the next batch.' : m.reason || box.say
+  const action = nextAction(c, merge)
+  const note = action.others.length
+    ? [action.others.join(' · '), m.reason].filter(Boolean).join(' · ')
+    : ['Waiting for CI', 'CI missing', 'Blocked: CI failed'].includes(action.label) ? ''
+    : m.id === 'next' ? 'The merge service will test this PR in the next batch.' : m.reason || box.say
   const missing = prTracks(c).missing
   // Required reviewers show only when the PR has requirements; the names come from the room.
   const required = c.requiredReviewers?.length
@@ -364,7 +369,7 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
       // review tab, and a first round that has not started has no link.
       { id: 'review', ...rv, note: reviewNote, link: c.reviewState === 'reviewing' && c.reviewerSession ? 'session' : c.reviewRound ? 'review' : '' },
       ...required,
-      { id: 'merge', icon, title: m.label, note, link: '' },
+      { id: 'merge', icon, title: isDone(c) ? m.label : action.label, note, link: '' },
     ],
     status: box,
   }

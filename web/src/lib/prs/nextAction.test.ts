@@ -1,7 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { nextAction } from './nextAction.ts'
-import type { Row, MergeItem } from './prlist.ts'
+import { mergeBox, type Row, type MergeItem } from './prlist.ts'
+
+test('the detail merge headline matches the list action', () => {
+  const row: Row = { ci: 'failed', state: 'open' }
+  const merge: MergeItem = { state: 'conflict' }
+  assert.equal(mergeBox(row, { merge }).rows.find((r) => r.id === 'merge')?.title, nextAction(row, merge).label)
+})
 
 test('next action names blockers in order and ready work', () => {
   const cases: [Row, MergeItem | null, string, string[]][] = [
