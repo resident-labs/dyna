@@ -9,7 +9,9 @@ import (
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/nodehistory"
 	"dyna-agent/internal/pr/watch"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/websvc"
 )
@@ -21,7 +23,9 @@ func (s services) machineAPI() websvc.MachineAPI {
 	if s.rooms != nil && s.rooms.Notify != nil {
 		alerter = machineDiskAlerter{notify: s.rooms.Notify}
 	}
-	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, CIQueue: s.machineCIQueue, Work: (jobs.Admission{}).Work, SessionName: s.machineSessionName, Alerter: alerter, RoomName: s.machineRoomName}
+	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, CIQueue: s.machineCIQueue, Work: (jobs.Admission{}).Work, SessionName: s.machineSessionName, Alerter: alerter, RoomName: s.machineRoomName, RecordProbe: func(m machines.Machine, result machines.ProbeResult) error {
+		return nodehistory.Recorder(store.DataDir())(m, result)
+	}}
 }
 
 // machineRoomName names the room whose root allowed host checks, so the Machine
