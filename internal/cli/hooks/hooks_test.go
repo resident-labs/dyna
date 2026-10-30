@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,7 +19,6 @@ import (
 )
 
 func TestLifecycleCLI(t *testing.T) {
-	withFakeNodeTools(t)
 	for _, entry := range os.Environ() {
 		key, value, _ := strings.Cut(entry, "=")
 		if strings.HasPrefix(key, "DYNA_") {
@@ -96,28 +94,6 @@ func TestLifecycleCLI(t *testing.T) {
 	if _, err := run("add", "bad", "--event", "after-land", "--command", "true", "--on-fail", "block"); err == nil {
 		t.Fatal("invalid block accepted")
 	}
-	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module dyna-agent\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, "desktop"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "desktop", "build.sh"), []byte("fake"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run("add", "--recipe", "self-update"); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run("list"); err != nil || !strings.Contains(out, "main-updated") || !strings.Contains(out, "hooks _install") {
-		t.Fatalf("recipe: %s %v", out, err)
-	}
-	if _, err := run("add", "--recipe", "unknown"); err == nil {
-		t.Fatal("unknown recipe accepted")
-	}
-
-	if _, err := run("add", "--recipe", "doctor"); err == nil || !strings.Contains(err.Error(), "installed by default") {
-		t.Fatalf("a repository doctor recipe was accepted: %v", err)
-	}
 
 }
 
@@ -131,20 +107,6 @@ func TestEveryHooksCommandHasHelp(t *testing.T) {
 			t.Errorf("%s help is empty", cmd.Name())
 		}
 	}
-}
-
-// withFakeNodeTools appends stub npm and node commands to PATH. The
-// self-update recipe resolves go, npm and node when it is added; CI's Go
-// container has no Node tools, and the recipe never runs them in tests.
-func withFakeNodeTools(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	for _, tool := range []string{"npm", "node"} {
-		if err := os.WriteFile(filepath.Join(dir, tool), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+dir)
 }
 
 func TestHooksRejectRetiredDispatch(t *testing.T) {

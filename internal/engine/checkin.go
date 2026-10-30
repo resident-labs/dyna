@@ -3,17 +3,43 @@ package engine
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/automations"
 	"dyna-agent/internal/configsvc"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
+	"dyna-agent/internal/updaterservice"
 )
 
 func (s services) setSetting(ctx context.Context, key, value string) (configsvc.Item, error) {
+	if key == "updater.source" {
+		if err := authority.Check("settings set", authority.Of(ctx), nil); err != nil {
+			return configsvc.Item{}, err
+		}
+		value = strings.TrimSpace(value)
+		if value != "" && !filepath.IsAbs(value) {
+			return configsvc.Item{}, fmt.Errorf("updater.source must be an absolute path")
+		}
+		err := (updaterservice.Store{DataDir: store.DataDir()}).Update(ctx, func(c *updaterservice.Config) error {
+			c.Source = value
+			c.MultipleHooks = false
+			if value == "" {
+				c.Enabled = false
+			}
+			return nil
+		})
+		if err != nil {
+			return configsvc.Item{}, err
+		}
+		return updateSourceItem(value), nil
+	}
 	if key == settings.KeySessionCheckInInterval {
 		// The hook owns check-ins now, and this value was imported once. A silent
 		// write here would look like it changed the cadence, so name the hook.

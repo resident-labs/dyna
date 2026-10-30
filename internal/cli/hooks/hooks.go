@@ -38,47 +38,15 @@ func NewCommand() *cobra.Command {
 	list.Flags().BoolVar(&listGlobal, "global", false, "list the hooks you added for the whole machine")
 	var h hooks.Hook
 	var timeout time.Duration
-	var recipe string
-	add := &cobra.Command{Use: "add [name]", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. Use --recipe self-update for the Dyna-only Update Dyna recipe. --global saves a hook that belongs to the machine and needs an absolute working directory. Agents must tell the owner when they add or change a hook.", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, a []string) error {
-		if len(a) == 0 && recipe == "" {
-			return fmt.Errorf("hook name is required")
-		}
-		name := recipe
-		if len(a) > 0 {
-			name = a[0]
-		}
-		if recipe != "" {
-			r, ok := hooks.Recipes[recipe]
-			if recipe == "doctor" {
-				return fmt.Errorf("the doctor hook belongs to the machine and is installed by default; change it with `dyna git hooks edit doctor --global`, and set its thresholds with `dyna settings set doctor.condition`")
-			}
-			if !ok {
-				return fmt.Errorf("unknown hook recipe %q; built-in recipes are %s", recipe, hooks.RecipeHelp())
-			}
-			for _, flag := range []string{"event", "command", "cwd", "timeout", "on-fail", "every-minutes"} {
-				if c.Flags().Changed(flag) {
-					return fmt.Errorf("--recipe cannot be combined with --%s", flag)
-				}
-			}
-			exe, err := os.Executable()
-			if err != nil {
-				return err
-			}
-			h, err = r.Build(c.Context(), repo, exe, name)
-			if err != nil {
-				return err
-			}
-		} else {
-			h.Name = name
-			h.Timeout = timeout.String()
-		}
+	add := &cobra.Command{Use: "add <name>", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. --global saves a hook that belongs to the machine and needs an absolute working directory. Agents must tell the owner when they add or change a hook.", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		h.Name = a[0]
+		h.Timeout = timeout.String()
 		if addGlobal {
 			return engineclient.New("").Call(c.Context(), "AddGlobalHook", []any{h}, nil)
 		}
 		return engineclient.New("").Call(c.Context(), "AddHook", []any{repo, h}, nil)
 	}}
 	add.Flags().BoolVar(&addGlobal, "global", false, "add a hook that belongs to the machine, not one repository")
-	add.Flags().StringVar(&recipe, "recipe", "", "built-in recipe: "+hooks.RecipeHelp())
 	add.Flags().StringVar(&h.Event, "event", "", "lifecycle event")
 	add.Flags().StringVar(&h.Command, "command", "", "trusted shell command")
 	add.Flags().StringVar(&h.Cwd, "cwd", "worktree", "worktree, main, or an absolute path")

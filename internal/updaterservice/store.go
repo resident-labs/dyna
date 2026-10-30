@@ -67,14 +67,26 @@ func (s Store) ClaimInterval(ctx context.Context, now time.Time) (Config, bool, 
 	return c, claimed, err
 }
 
-// Set replaces the updater configuration in one committed write.
-func (s Store) Set(ctx context.Context, c Config) error {
+// Update changes the updater configuration in one committed write.
+func (s Store) Update(ctx context.Context, change func(*Config) error) error {
 	db, err := database.Open(s.DataDir)
 	if err != nil {
 		return err
 	}
 	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `UPDATE updater_service SET source=?, enabled=?, every_minutes=?, multiple_hooks=? WHERE id=1`, c.Source, c.Enabled, c.EveryMinutes, c.MultipleHooks)
+		var c Config
+		if err := conn.QueryRowContext(ctx, `SELECT source,enabled,every_minutes,multiple_hooks FROM updater_service WHERE id=1`).Scan(&c.Source, &c.Enabled, &c.EveryMinutes, &c.MultipleHooks); err != nil {
+			return err
+		}
+		old := c
+		if err := change(&c); err != nil {
+			return err
+		}
+		if c.Source != old.Source || c.EveryMinutes != old.EveryMinutes || c.Enabled != old.Enabled {
+			_, err := conn.ExecContext(ctx, `UPDATE updater_service SET source=?, enabled=?, every_minutes=?, multiple_hooks=?, next_due='' WHERE id=1`, c.Source, c.Enabled, c.EveryMinutes, c.MultipleHooks)
+			return err
+		}
+		_, err := conn.ExecContext(ctx, `UPDATE updater_service SET multiple_hooks=? WHERE id=1`, c.MultipleHooks)
 		return err
 	})
 }
