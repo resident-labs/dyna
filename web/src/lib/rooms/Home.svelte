@@ -210,7 +210,7 @@
     </Card>
   {/if}
 
-  <ServicesCard {rooms} {onroom} />
+  <ServicesCard {onsettings} />
 
   {#if updates.length}
     <Card title="Updates" count={updates.length}>

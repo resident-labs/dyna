@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { groupRows, healthyLine, hookRows, logKey, readLog, serviceRows, settleReads } from './servicesCard.ts'
+import { groupRows, healthyLine, hookRows, logKey, readLog, serviceRows } from './servicesCard.ts'
 import type { Hook, HookRun, HookSummary } from '../api/settings.ts'
-import type { ServiceView } from '../api/service.ts'
+import type { RegistryService } from '../api/service.ts'
 
 const hook = (over: Partial<Hook>): Hook => ({ name: 'maintenance', event: 'schedule', command: '', cwd: '', timeout: '5m', onFail: 'alert', scope: 'global', addedBy: 'dyna', addedAt: '', ...over })
 const run = (result: string, id = 'r1'): HookRun => ({ id, repo: '', name: 'maintenance', command: '', result, logPath: '', startedAt: '2026-10-26T10:00:00Z' })
 const summary = (h: Partial<Hook>, last?: HookRun): HookSummary => ({ hook: hook(h), lastRun: last })
-const service = (over: Partial<ServiceView>): ServiceView => ({ role: 'librarian', name: 'Librarian', page: '', profile: 'sol', pinned: '', source: '', reason: '', waiting: false, scope: 'global', sessions: 0, profiles: [], ...over })
+const service = (over: Partial<RegistryService>): RegistryService => ({ id: 'doctor', group: 'this-computer', scope: 'global', label: 'Load doctor', description: '', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [], ...over })
 
 test('a failed hook run is failing, a pass is healthy, and its log is that run', () => {
   const [bad, ok] = hookRows([summary({ name: 'a' }, run('error', 'x')), summary({ name: 'b' }, run('pass'))])
@@ -20,23 +20,18 @@ test('a hook that is off or never ran is quiet, and the doctor trigger is not li
   assert.deepEqual(rows.map((r) => [r.id, r.tone, r.state]), [['hook:a', 'idle', 'Off'], ['hook:b', 'idle', 'Never run']])
 })
 
-test('a service with no usable profile fails in any room, and its log opens that room', () => {
-  const rows = serviceRows([
-    { room: 'one', services: [service({})] },
-    { room: 'two', services: [service({ profile: '', reason: 'no enabled librarian profile is available' })] },
-    { room: 'three', services: [service({})] },
-  ])
-  assert.equal(rows.length, 1)
-  assert.deepEqual([rows[0]?.tone, rows[0]?.state, rows[0]?.log], ['bad', 'no enabled librarian profile is available', { kind: 'room', room: 'two' }])
+test('Home lists only global registry services', () => {
+  const rows = serviceRows([service({}), service({ id: 'reviewer', scope: 'room', label: 'Reviews' }), service({ id: 'library', scope: 'room', label: 'Library', state: 'error', detail: 'last-run-failed' })])
+  assert.deepEqual(rows.map((r) => [r.name, r.log]), [['Load doctor', { kind: 'settings' }]])
 })
 
 test('failing rows come first and the healthy rows fold into one line', () => {
-  const rows = [...hookRows([summary({ name: 'ok' }, run('pass')), summary({ name: 'bad' }, run('fail'))]), ...serviceRows([{ room: 'one', services: [service({})] }])]
+  const rows = [...hookRows([summary({ name: 'ok' }, run('pass')), summary({ name: 'bad' }, run('fail'))]), ...serviceRows([service({})])]
   const { failing, healthy } = groupRows(rows)
   assert.deepEqual(failing.map((r) => r.id), ['hook:bad'])
   assert.equal(healthy.length, 2)
-  assert.equal(healthyLine(8, 0), '8 running normally')
-  assert.equal(healthyLine(2, 1), '2 others running normally')
+  assert.equal(healthyLine(8, 0), '8 services')
+  assert.equal(healthyLine(2, 1), '2 other services')
 })
 
 test('a failed global run opens its log, and a failed read shows the reason', async () => {
@@ -54,21 +49,4 @@ test('a newer run of the same hook has its own log key', () => {
   const [b] = hookRows([summary({ name: 'maintenance' }, run('error', 'new'))])
   if (a?.log?.kind !== 'hook' || b?.log?.kind !== 'hook') return assert.fail('hook rows carry hook logs')
   assert.notEqual(logKey(a.log), logKey(b.log))
-})
-
-test('a failed room read keeps that room last good list, and a room never read shows as unreadable', () => {
-  const bad = service({ profile: '', reason: 'no profile' })
-  const first = settleReads({}, [{ room: 'one', services: [bad] }, { room: 'two', services: [service({})] }])
-  const again = settleReads(first.kept, [{ room: 'one', services: null }, { room: 'two', services: [service({})] }])
-  assert.deepEqual(serviceRows(again.byRoom).map((r) => r.state), ['Could not refresh; showing the last read', 'no profile'])
-  const fresh = settleReads({}, [{ room: 'one', services: null }, { room: 'two', services: [service({})] }])
-  assert.deepEqual(serviceRows(fresh.byRoom).map((r) => [r.id, r.tone, r.state]), [['service:unreadable:one', 'bad', 'Could not be read'], ['service:librarian', 'ok', 'sol']])
-})
-
-test('a healthy read followed by a failed refresh keeps the rows and warns', () => {
-  const first = settleReads({}, [{ room: 'one', services: [service({})] }])
-  const again = settleReads(first.kept, [{ room: 'one', services: null }])
-  assert.deepEqual(serviceRows(again.byRoom).map((r) => [r.id, r.tone]), [['service:stale:one', 'bad'], ['service:librarian', 'ok']])
-  const recovered = settleReads(again.kept, [{ room: 'one', services: [service({})] }])
-  assert.deepEqual(serviceRows(recovered.byRoom).map((r) => r.id), ['service:librarian'])
 })
