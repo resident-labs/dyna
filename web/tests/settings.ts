@@ -63,21 +63,21 @@ const catalog: HarnessConfig = {
 const later = <T>(value: T, ms = delay): Promise<T> => new Promise((resolve) => setTimeout(() => resolve(structuredClone(value)), ms))
 api.privateRuntimes = () => later(snapshot)
 api.harnessConfig = () => later(catalog)
-api.addHarnessSkill = (entry: ManagedSkill) => { catalog.skills = [...catalog.skills, entry]; return later(catalog) }
-api.addHarnessMCP = (entry: ManagedMCP) => { catalog.mcp = [...catalog.mcp, entry]; return later(catalog) }
+api.addHarnessSkill = (entry: ManagedSkill) => { catalog.skills = [...(catalog.skills ?? []), entry]; return later(catalog) }
+api.addHarnessMCP = (entry: ManagedMCP) => { catalog.mcp = [...(catalog.mcp ?? []), entry]; return later(catalog) }
 api.setHarnessConfigEnabled = (kind: string, name: string, harness: string, enabled: boolean) => {
   if (kind === 'skill') {
-    const skill = need(catalog.skills.find((s) => s.name === name))
+    const skill = need((catalog.skills ?? []).find((s) => s.name === name))
     skill.enabled = enabled
   } else {
-    const server = need(catalog.mcp.find((m) => m.name === name))
-    server.enabledHarnesses = enabled ? [...new Set([...server.enabledHarnesses, harness])] : server.enabledHarnesses.filter((h) => h !== harness)
+    const server = need((catalog.mcp ?? []).find((m) => m.name === name))
+    server.enabledHarnesses = enabled ? [...new Set([...(server.enabledHarnesses ?? []), harness])] : (server.enabledHarnesses ?? []).filter((h) => h !== harness)
   }
   return later(catalog)
 }
 api.removeHarnessConfig = (kind: string, name: string) => {
-  if (kind === 'skill') catalog.skills = catalog.skills.filter((s) => s.name !== name)
-  else catalog.mcp = catalog.mcp.filter((m) => m.name !== name)
+  if (kind === 'skill') catalog.skills = (catalog.skills ?? []).filter((s) => s.name !== name)
+  else catalog.mcp = (catalog.mcp ?? []).filter((m) => m.name !== name)
   return later(catalog)
 }
 api.privateRuntimeLogins = () => later([])

@@ -73,6 +73,7 @@ test('harnessRowState derives ready, partial, not signed in, and switch pending 
 test('catalog rows require current runtime IDs', () => {
   assert.equal(harnessMeta('claude-code').name, 'Claude Code')
   assert.equal(harnessMeta('claude').id, 'claude')
+  assert.equal(toolEnabledForHarness({ enabledHarnesses: null }, 'claude-code'), false)
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude-code'] }, 'claude-code'), true)
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude', 'grok'] }, 'claude-code'), false)
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude'] }, 'pi'), false)
