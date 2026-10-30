@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StatusPill from '../ui/StatusPill.svelte'
   import DoingLine from './DoingLine.svelte'
   import FailedCall from './FailedCall.svelte'
   import ShellOutput from './ShellOutput.svelte'
@@ -6,7 +7,7 @@
   import StepIcon from './StepIcon.svelte'
   import { blockState, mergeJob, metaOf, titleOf } from './shell.ts'
   import { toolCallLabel } from './toolCallLabel.ts'
-  import { elapsed, stamp } from '../ui/format.ts'
+  import { stamp } from '../ui/format.ts'
   import type { Doing } from '../api/room.ts'
   import type { ShellJob } from '../api/terminal.ts'
   import type { TimelineRow } from './dm.ts'
@@ -34,14 +35,11 @@
     const timer = setInterval(() => now = Date.now(), 1000)
     return () => clearInterval(timer)
   })
-  let span = $derived(row.turn ? elapsed(Math.max(0, (row.turn.status === 'running' ? now : row.turn.ended ? Date.parse(row.turn.ended) : new Date(row.steps.at(-1)?.ts ?? row.turn.started).getTime()) - Date.parse(row.turn.started))) : '')
 </script>
 
 <section class="timeline" aria-label={row.turn ? `Turn ${row.turn.n} activity` : 'Shell activity'}>
   <header>
-    <span>{row.turn ? `Turn ${row.turn.n}` : 'Shell activity'}</span>
-    <span>· {row.steps.length} step{row.steps.length === 1 ? '' : 's'}</span>
-    {#if span}<span>· {span}</span>{/if}
+    <span>{row.steps.length} step{row.steps.length === 1 ? '' : 's'}</span>
   </header>
   <ol>
     {#each row.steps as step (step.key)}
@@ -53,7 +51,6 @@
       <li class={state} id={step.kind === 'shell' ? `shell-${step.jobId}` : undefined}>
         <details open={expanded} ontoggle={(event) => opened[step.key] = event.currentTarget.open}>
           <summary>
-            <span class="dot" aria-label={state}></span>
             {#if step.kind === 'shell'}
               <span class="verb">Shell command</span>
               <span class="target" title={job ? titleOf(job) : undefined}>{job ? titleOf(job) : 'outside this transcript'}</span>
@@ -65,9 +62,9 @@
             {:else}
               <StepIcon kind={step.step} />
               <span class="label" title={call.paths.join(', ') || step.target || call.title}>{call.title}</span>
-              <span class="chip {state}">{state === 'running' ? 'running' : state === 'failed' ? 'failed' : 'done'}</span>
               {#if stepTime(step.durationMs)}<span class="meta">{stepTime(step.durationMs)}</span>{/if}
             {/if}
+            {#if state === 'running'}<StatusPill label="running" variant="dot" pulse />{:else if state === 'failed'}<StatusPill label="failed" tone="danger" />{/if}
             <span class="chevron" aria-hidden="true">›</span>
           </summary>
           {#if expanded}
@@ -107,19 +104,11 @@
   summary::-webkit-details-marker { display: none; }
   summary:hover { color: var(--ink); }
   summary:focus-visible { outline: 2px solid var(--iris); outline-offset: 2px; border-radius: var(--r-xs); }
-  .dot { position: absolute; left: -4px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: var(--sage); box-shadow: 0 0 0 3px var(--main); }
-  .running .dot, .background .dot { background: var(--iris); }
-  .failed .dot { background: var(--coral); }
-  .stopped .dot { background: var(--gold); }
   .verb { flex: none; color: var(--faint); }
-  .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-  .chip { flex: none; padding: 0 6px; border-radius: var(--r-xs); background: var(--raise); color: var(--muted); font: var(--t-cap)/1.7 var(--sans); }
-  .chip.failed { background: var(--coral-wash, var(--raise)); color: var(--coral); }
-  .chip.running { color: var(--iris); }
-  .target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+  .target { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { margin-left: auto; flex: none; color: var(--faint); font: var(--t-cap)/1.5 var(--sans); font-variant-numeric: tabular-nums; }
   .failed .meta { color: var(--coral); }
-  .running .meta, .background .meta { color: var(--iris); }
   .chevron { flex: none; color: var(--faint); }
   details[open] .chevron { transform: rotate(90deg); }
   .detail { padding: var(--s1) 0 var(--s3); min-width: 0; }
@@ -128,10 +117,8 @@
   .link { padding: var(--s1) 0; color: var(--iris); text-align: left; }
   .live { padding: var(--s2) 0 0 21px; }
   @media (max-width: 760px) {
-    summary { flex-wrap: wrap; min-height: 44px; gap: 2px var(--s2); }
-    .dot { top: 18px; }
-    .target { flex: 1; }
-    .meta { order: 3; flex-basis: 100%; margin-left: 0; }
+    summary { min-height: 44px; gap: var(--s2); }
+    .meta { overflow: hidden; text-overflow: ellipsis; }
     .chevron { margin-left: auto; }
     .link { min-height: 44px; }
   }
