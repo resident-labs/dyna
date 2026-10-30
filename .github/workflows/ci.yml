@@ -31,6 +31,7 @@ jobs:
       computers: ${{ steps.filter.outputs.computers }}
       web: ${{ steps.filter.outputs.web }}
       pi: ${{ steps.filter.outputs.pi }}
+      next_pi: ${{ steps.filter.outputs.next_pi }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -67,6 +68,49 @@ jobs:
         with:
           name: pi-test-report
           path: ${{ runner.temp }}/pi-test.xml
+          if-no-files-found: error
+          retention-days: 1
+
+  next-pi:
+    needs: changes
+    if: needs.changes.outputs.next_pi == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --experimental-strip-types
+    defaults:
+      run:
+        working-directory: next/third_party/pi
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: next/third_party/pi/package-lock.json
+      - name: Build, test and pack v2 Pi
+        env:
+          JUNIT_REPORT_PATH: ${{ runner.temp }}/next-pi-test.xml
+        run: |
+          npm ci --ignore-scripts
+          bash scripts/pi-hydrate.sh
+          npm run build:offline
+          PI_OFFLINE= node --import ./packages/coding-agent/src/experimental/source-resolver.ts --input-type=module -e '
+            import { ensureTool } from "./packages/coding-agent/src/utils/tools-manager.ts";
+            for (const tool of ["fd", "rg"]) {
+              const path = await ensureTool(tool, ({ message }) => console.log(message));
+              if (!path) throw new Error(`Unable to provision ${tool}`);
+            }
+          '
+          npm test --workspace=@earendil-works/pi-coding-agent -- --maxWorkers=2 --reporter=default --reporter=junit --outputFile="$JUNIT_REPORT_PATH"
+          npm --prefix packages/ai test -- anthropic-mid-conversation-effort.test.ts
+          PI_PACK_SKIP_BUILD=1 bash scripts/pi-pack.sh "$RUNNER_TEMP/next-pi-fork.tgz"
+      - name: Upload v2 Pi test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-pi-test-report
+          path: ${{ runner.temp }}/next-pi-test.xml
           if-no-files-found: error
           retention-days: 1
 
@@ -339,32 +383,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
-  # next/ is the v2 module with its own go.mod, so the root ./... skips it.
-  # This job vets and tests it alone. Its Go version comes from next/go.mod.
-  next:
-    name: next
-    needs: [changes]
-    if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: next/go.mod
-          cache-dependency-path: next/go.sum
-      - name: Vet
-        working-directory: next
-        run: go vet ./...
-      - name: Test
-        working-directory: next
-        run: go test ./... -count=1
-
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
   test:
     name: go-test
-    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next]
+    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check]
     if: ${{ always() && needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -372,7 +395,7 @@ jobs:
       - name: Require every Go job
         env:
           WEB: ${{ needs.changes.outputs.web }}
-          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
           FRONTEND_CHECK: ${{ needs.frontend-check.result }}
         run: |
           echo "Results: $RESULTS"

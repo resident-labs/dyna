@@ -7,7 +7,7 @@
 # and a docs-only change would run the Go tests.
 set -euo pipefail
 if [ "${EVENT:-}" != "pull_request" ]; then
-  for k in relay go computers web pi; do echo "$k=true"; done
+  for k in relay go computers web pi next_pi; do echo "$k=true"; done
   exit 0
 fi
 if git rev-parse -q --verify HEAD^2 >/dev/null; then
@@ -22,8 +22,9 @@ fi
 # gives printf SIGPIPE after an early match, and pipefail reports false.
 has() { printf '%s\n' "$files" | grep -E "$1" >/dev/null && echo true || echo false; }
 echo "relay=$(has '^(relay|\.github)/|^scripts/ci\.sh$')"
-echo "go=$(has '(\.go$|^internal/|^next/|^go\.(mod|sum)$|^tygo\.yaml$|^tygo/.*\.yaml$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)')"
+echo "go=$(has '(\.go$|^internal/|^go\.(mod|sum)$|^tygo\.yaml$|^tygo/.*\.yaml$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)')"
 echo "computers=$(has '^internal/(computers|computerweb)/|^\.github/')"
 # Two web tests read these backend files, so a change to either runs the web suites.
 echo "web=$(has '^web/|^internal/filesvc/files\.go$|^internal/voice/realtime/testdata/page-protocol\.json$|^\.github/|^scripts/ci\.sh$')"
 echo "pi=$(has '^third_party/pi/|^scripts/pi-(hydrate|pack)\.sh$|^scripts/ci\.sh$|^\.github/')"
+echo "next_pi=$(has '^next/third_party/pi/|^scripts/ci-changes\.sh$|^\.github/')"
