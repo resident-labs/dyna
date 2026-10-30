@@ -313,6 +313,7 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
     },
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
+  Reflect.set(c, 'settingsPanel', { get showRoomSettings() { return c.showRoomSettings } })
   c.fetchedGoal ??= null; c.fetchedGoalVersion ??= 0
   c.refreshHeldComments ??= () => {}
   runApp(app, c, ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'applyItemEvent', 'handle'])
