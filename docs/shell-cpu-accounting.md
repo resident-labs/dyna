@@ -19,6 +19,21 @@ group stopping. It also needs cleanup and safe behavior across engine restarts.
 
 The current shell scope does not guarantee delegated child cgroups. Do not
 infer support from the presence of cgroup v2 or from a writable parent alone.
-Hosts without verified delegation must remain unsupported. CPU sampling,
-freshness during output silence, thresholds, notices, and agent and workflow
-publishers remain later work.
+Hosts without verified delegation must remain unsupported.
+
+## Local output inactivity notices
+
+The engine can report continuously observed local shell output inactivity.
+The notice does not report CPU inactivity or claim a deadlock. It requires a
+fresh, running output observer for the full quiet period. Missing coverage
+resets that period. The raw output observer sees bytes before line buffering
+and truncation.
+
+The setting `shells.silenceMinutes` sets the threshold. The default is 30
+minutes. Set it to 0 to turn notices off. A shell gets one notice per quiet
+period. New output starts a new period.
+
+Agent turns and workflow steps do not yet provide proven observer liveness.
+Workflow command stderr and hosted partial frames also remain unobserved.
+Those executions do not get inactivity notices until their coverage is proven.
+Command-only CPU accounting remains unsupported.

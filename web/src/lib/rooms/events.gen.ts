@@ -573,6 +573,15 @@ export interface ShellSilenceEvent {
   minutes: number
 }
 
+// ShellInactivityEvent is the payload of the shell/observed-output-inactivity events.
+export interface ShellInactivityEvent {
+  shellId: string
+  label: string
+  session: string
+  minutes: number
+  lastOutput?: string
+}
+
 // JobEvent is the payload of the job/queued and job/started and job/finished events.
 export interface JobEvent {
   jobId: string
@@ -615,10 +624,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | IssueWatchEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | JobEvent | RunEvent | TurnEvent
+export type EventPayload = MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | IssueWatchEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | ShellInactivityEvent | JobEvent | RunEvent | TurnEvent
 
 export type EventFamily = "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "issue-watch" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "approval" | "terminal" | "shell" | "job" | "run" | "turn"
-export type EventType = "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "comment" | "reopened" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
+export type EventType = "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "comment" | "reopened" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "observed-output-inactivity" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1468,6 +1477,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "Shell job {label} started by {session} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
   },
   {
+    family: "shell",
+    type: "observed-output-inactivity",
+    renderer: "ShellInactivityCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "Shell job {label} started by {session} has observed local output inactivity for {minutes} minutes. CPU activity is not measured; this does not mean the job is stuck.",
+  },
+  {
     family: "job",
     type: "queued",
     renderer: "JobCard",
@@ -2069,6 +2088,15 @@ export function isShellSilenceEvent(v: unknown): v is ShellSilenceEvent {
     Number.isInteger(v.minutes)
 }
 
+export function isShellInactivityEvent(v: unknown): v is ShellInactivityEvent {
+  return isRecord(v) &&
+    typeof v.shellId === "string" &&
+    typeof v.label === "string" &&
+    typeof v.session === "string" &&
+    Number.isInteger(v.minutes) &&
+    (v.lastOutput === undefined || typeof v.lastOutput === "string")
+}
+
 export function isJobEvent(v: unknown): v is JobEvent {
   return isRecord(v) &&
     typeof v.jobId === "string" &&
@@ -2194,6 +2222,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "terminal" && type === "request.done") return isTerminalDoneEvent(v)
   if (family === "shell" && type === "result") return isShellEvent(v)
   if (family === "shell" && type === "output-silence") return isShellSilenceEvent(v)
+  if (family === "shell" && type === "observed-output-inactivity") return isShellInactivityEvent(v)
   if (family === "job" && type === "queued") return isJobEvent(v)
   if (family === "job" && type === "started") return isJobEvent(v)
   if (family === "job" && type === "finished") return isJobEvent(v)
