@@ -78,7 +78,7 @@ not-state internal/database/statement_cache.go cacheConn.BeginTx 1 # driver wrap
 not-state internal/database/statement_cache.go cacheConn.ExecContext 2 # driver wrapper forwards writes and holds no durable state
 violation internal/devicegrant/grant.go Store.Delete 1
 violation internal/devicegrant/grant.go Store.Put 1
-not-state internal/engine/approval_gh.go bindApprovalFiles 2 # temporary files hold the exact approved payload only while the engine executes it
+not-state internal/engine/approval_gh.go bindApprovalFilesForRoom 3 # temporary files hold the exact approved payload only while the engine executes it
 not-state internal/engine/socket.go writeSocketOwner 1 # a record beside the engine socket that names the data folder it serves; it is not Dyna state and is read only by the bind check
 not-state internal/engine/runner_spool.go reserve 1 # reserves an empty frozen spool or rejected-artifact name with O_EXCL before the rename fills it; the spool is a transport log, not state
 not-state internal/engine/runner_spool.go runnerSpool.apply 1 # removes a taken runner spool file once every line went through the runner calls; the spool is a transport log, not state
@@ -89,6 +89,7 @@ not-state internal/fsutil/atomic.go WriteFile 2 # the atomic file write primitiv
 not-state internal/fsutil/stable_executable.go copyExecutable 2 # a private cache copy of the running dyna image; a build artifact, not shared Dyna state
 not-state internal/fsutil/stable_executable.go SetLink 2 # the link that names the build's cached image for one native scope; a pointer into the build cache, not shared Dyna state
 not-state internal/fsutil/stable_executable.go pruneImages 1 # removes superseded cache copies of the running dyna image, never one a live process runs
+not-state internal/ghclient/media_upload.go uploadMedia 3 # temporary media and body files are removed after the GitHub write
 not-state internal/ghclient/run.go runAnonymously 1 # removes the throwaway empty gh config directory it made for one credential-free read; no Dyna state
 not-state internal/ghclient/bodies.go withAttribution 1 # one throwaway body file handed to gh and removed after the call; no Dyna state
 not-state internal/ghclient/session.go SessionEnvironment 1 # private session gh launcher symlink; no queried runtime state
