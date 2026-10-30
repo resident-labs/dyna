@@ -34,8 +34,8 @@ func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []cont
 func (h *harnessFake) Continue(context.Context, contract.TurnID, func()) (contract.TurnEnded, error) {
 	panic("unexpected continuation")
 }
-func (h *harnessFake) Recover(contract.TurnID, []contract.TurnInput) (contract.TurnEnded, bool, error) {
-	panic("unexpected recovery")
+func (h *harnessFake) Recover(id contract.TurnID, _ []contract.TurnInput) (contract.TurnEnded, bool, error) {
+	return contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed"), Final: "recovered"}, true, nil
 }
 func (h *harnessFake) Steer(_ context.Context, input contract.TurnInput) error {
 	h.mu.Lock()
@@ -70,6 +70,22 @@ func (s *sinkFake) DeliveryDone(_ context.Context, id contract.DeliverySeq) erro
 func (s *sinkFake) TurnOutput(_ context.Context, result contract.TurnEnded) error {
 	s.done <- result
 	return nil
+}
+
+func TestRunnerRecoversReplayedTurnWithDoneInput(t *testing.T) {
+	h := &harnessFake{delivered: map[contract.DeliverySeq]bool{1: true}}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	if err := runner.Handle(context.Background(), contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1}}}}); err != nil {
+		t.Fatal(err)
+	}
+	result := <-sink.done
+	sink.mu.Lock()
+	acked := sink.acked[1]
+	sink.mu.Unlock()
+	if !acked || result.Final != "recovered" {
+		t.Fatalf("acked=%v result=%+v", acked, result)
+	}
 }
 
 func TestRunnerWaitsForStartBeforeReadingSteer(t *testing.T) {
