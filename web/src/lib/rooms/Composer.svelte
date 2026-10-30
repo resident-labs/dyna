@@ -168,7 +168,22 @@
 
   // App commands a profile does not shadow, and the one the draft names.
   let roomCommands = $state<import('../../api.ts').SlashCommand[]>([])
-  $effect(() => { room.id; roomCommands = [] })
+  let commandLoad: Promise<boolean> | null = null
+  let commandRoom = ''
+  $effect(() => { room.id; roomCommands = []; commandLoad = null; commandRoom = '' })
+  function loadCommands(): Promise<boolean> {
+    const roomID = room.id
+    if (commandLoad && commandRoom === roomID) return commandLoad
+    commandRoom = roomID
+    commandLoad = api.commands(roomID).then((list) => {
+      if (room.id === roomID && active) roomCommands = list
+      return true
+    }).catch((e) => {
+      if (room.id === roomID && active) { error = errorText(e); commandLoad = null }
+      return false
+    })
+    return commandLoad
+  }
   let appCommands = $derived(commands.filter((c) => !profiles.some((p) => p.name === c.name)))
   let skillCommands = $derived(roomCommands.filter((c) => c.source === 'skill' && !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
   let skillCommand = $derived.by(() => {
@@ -298,8 +313,8 @@
     if (start === 0 && text.startsWith('/') && !text.startsWith('//')) {
       if (!token?.slash) {
         onslash?.()
-        const roomID = room.id
-        api.commands(roomID).then((list) => { if (room.id === roomID && active) roomCommands = list }).catch((e) => { if (room.id === roomID && active) error = errorText(e) })
+        commandLoad = null
+        void loadCommands()
       }
       token = { start, end: pos, text, slash: true }
     }
@@ -370,12 +385,27 @@
   }
 
   async function send() {
+    if (draft.startsWith('/') && !draft.startsWith('//')) {
+      const original = draft
+      busy = true
+      const loaded = await loadCommands()
+      await tick()
+      busy = false
+      if (!loaded || !active || draft !== original) return
+    }
     if (skillCommand && !forwarding) {
       if (!skillCommand.text) { error = 'Type a message for the skill.'; return }
       if (references.length || $attachments.items.length || reply) { error = 'Send the skill message without files, references, or a reply.'; return }
       error = ''
       busy = true
-      try { await api.runCommand(room.id, skillCommand.skill.name, skillCommand.text); draft = '' }
+      try {
+        const text = await prepareText(skillCommand.text)
+        if (!active) return
+        const result = await api.runCommand(room.id, skillCommand.skill.name, text)
+        if (result.failed?.length) error = result.failed.map((f) => `${short(f.to, room.name)}: ${f.error || 'delivery failed'}`).join(' · ')
+        else { note = result.deliveries?.length ? `Delivered to ${result.deliveries.length} recipient${result.deliveries.length === 1 ? '' : 's'}` : 'Posted'; setTimeout(() => (note = ''), 2400) }
+        if (result.message.id) draft = ''
+      }
       catch (e) { error = errorText(e) }
       finally { busy = false; await tick(); field?.focus() }
       return
