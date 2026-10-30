@@ -56,9 +56,11 @@ type SessionCloseRequest struct {
 }
 type SessionCloseResponse struct{}
 type PostRequest struct {
-	Room     RoomID   `json:"room"`
-	Text     string   `json:"text"`
-	Mentions []string `json:"mentions,omitempty"`
+	Room     RoomID       `json:"room"`
+	Text     string       `json:"text"`
+	Mentions []string     `json:"mentions,omitempty"`
+	Home     Conversation `json:"home,omitempty"`
+	ReplyTo  EventID      `json:"replyTo,omitempty"`
 }
 type PostResponse struct {
 	Event EventID `json:"event"`
