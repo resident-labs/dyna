@@ -27,6 +27,22 @@ func TestQuickLaneUnitLimits(t *testing.T) {
 	}
 }
 
+func TestQuickLaneReservesMemory(t *testing.T) {
+	machine := machines.Machine{Name: "node", Capabilities: machines.Capabilities{CPUs: 8, MemTotal: 8 << 30}}
+	q := nodeQueue{queued: []Job{
+		{ID: "build", Lane: LaneDeclared, CPUs: 4, MemoryMiB: 8192, Created: time.Unix(1, 0)},
+		{ID: "quick", Lane: LaneQuick, Created: time.Unix(2, 0)},
+	}}
+	admitted, reasons := map[string]bool{}, map[string]string{}
+	needsWrite := false
+	if err := passNode(context.Background(), nil, time.Time{}, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
+		t.Fatal(err)
+	}
+	if admitted["build"] || !admitted["quick"] || !strings.Contains(reasons["build"], "7 GiB free") {
+		t.Fatalf("admitted %v, reasons %v", admitted, reasons)
+	}
+}
+
 func TestQuickLaneAdmission(t *testing.T) {
 	machine := machines.Machine{Name: "node", QuickSlots: 1, Capabilities: machines.Capabilities{CPUs: 2, MemTotal: 8 << 30}}
 	q := nodeQueue{
