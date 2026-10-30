@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"math/big"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -140,6 +141,39 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 		return contract.RoomCreateResponse{}, failure(err)
 	}
 	return contract.RoomCreateResponse{Room: room}, nil
+}
+
+func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, req contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.RoomRepoAddResponse{}, forbidden()
+	}
+	owner, name, ok := strings.Cut(string(req.Repo), "/")
+	ownerOK, _ := regexp.MatchString(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`, owner)
+	nameOK, _ := regexp.MatchString(`^[A-Za-z0-9_.-]+$`, name)
+	if !ok || !ownerOK || !nameOK || name == "." || name == ".." {
+		return contract.RoomRepoAddResponse{}, invalid("repository must be owner/name")
+	}
+	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contract.RoomRepoAddResponse{}, invalid("unknown room")
+		}
+		return contract.RoomRepoAddResponse{}, failure(err)
+	}
+	return contract.RoomRepoAddResponse{}, nil
+}
+
+func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.RoomReposResponse{}, forbidden()
+	}
+	repos, err := s.store.RoomRepos(ctx, req.Room)
+	if errors.Is(err, sql.ErrNoRows) {
+		return contract.RoomReposResponse{}, invalid("unknown room")
+	}
+	if err != nil {
+		return contract.RoomReposResponse{}, failure(err)
+	}
+	return contract.RoomReposResponse{Repos: repos}, nil
 }
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
