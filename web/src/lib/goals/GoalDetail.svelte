@@ -30,6 +30,7 @@
   let busy = $state(false)
   let error = $state('')
   let draft = $state('')
+  let amending = $state(false)
   let amendError = $state('')
   let now = $state(Date.now())
   let status = $state<GoalStatus | null>(null)
@@ -72,13 +73,13 @@
     if (id) { loadStatus(id, room); loadItems(id, room) }
     return () => { statusRequest++; itemsRequest++ }
   })
-  const TONES: Record<string, string> = { on_track: 'sage', waiting: 'muted', stuck: 'coral', errored: 'coral', ready_to_close: 'gold', unowned: 'gold', needs_root: 'gold' }
+  const TONES: Record<string, string> = { stuck: 'coral', errored: 'coral', needs_root: 'gold' }
   const LABELS: Record<string, string> = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned', needs_root: 'Needs root' }
   const mark = (state: string): string => (state === 'done' ? '✓' : state === 'dropped' ? '×' : '•')
   // The engine appends amendments, so stored order is oldest first.
   const amendments = $derived(g.amendments ?? [])
   const member = (id: string) => members.find((m) => m.id === id || m.address === id)
-  const name = (id: string): string => member(id)?.name ?? id
+  const name = (id: string): string => member(id)?.name ?? 'unknown session'
   async function perform(fn: () => unknown) {
     busy = true; error = ''
     try { await fn(); editing = false; pick = false; action = ''; await onchanged() }
@@ -92,7 +93,7 @@
     const body = draft.trim()
     if (!body || busy) return
     busy = true; amendError = ''
-    try { await api.amendGoalBrief(roomId, g.id, body); draft = ''; await onchanged() }
+    try { await api.amendGoalBrief(roomId, g.id, body); draft = ''; amending = false; await onchanged() }
     catch (e) { amendError = errorText(e) }
     finally { busy = false }
   }
@@ -102,18 +103,16 @@
   }
 </script>
 <aside class="detail" aria-label="Goal {g.id}">
-  <header><GoalGlyph goal={g} /><h2>Goal {g.id}</h2>{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<button class="link" disabled={editing} onclick={() => { text = g.text; editing = true }}>Edit</button><button class="x" aria-label="Close goal detail" title="Close (Esc)" onclick={onclose}>✕</button></header>
+  <header><GoalGlyph goal={g} /><h2>{g.text}</h2>{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<button class="link" disabled={editing} onclick={() => { text = g.text; editing = true }}>Edit</button><button class="x" aria-label="Close goal detail" title="Close (Esc)" onclick={onclose}>✕</button></header>
   <div class="scroll">
     {#if editing}
       <textarea aria-label="Edit goal text" maxlength="2000" rows="5" bind:value={text}></textarea>
       <div class="buttons"><button disabled={busy || !text.trim()} onclick={() => perform(() => api.editGoal(roomId, g.id, text, g.holders ?? [], g.shared))}>Save</button><button onclick={() => (editing = false)}>Cancel</button></div>
-    {:else}
-      <p class="prose">{g.text}</p>
     {/if}
     {#if statusState === 'loading'}<p class="quiet" role="status">Loading status…</p>
     {:else if statusState === 'failed'}<p class="read-error" role="alert">Status unavailable: {statusError} <button onclick={() => loadStatus()}>Retry status</button></p>{/if}
     {#if status}
-      <p class="statusline"><span class="tone-{TONES[status.label] ?? 'muted'}">{LABELS[status.label] ?? status.label}</span> <span class="reason">{status.reason}</span>{#if status.open || status.done || status.dropped}<span class="counts">{status.open} open · {status.done} done · {status.dropped} dropped</span>{/if}</p>
+      <p class="statusline"><span class="tone-{TONES[status.label] ?? 'muted'}">{LABELS[status.label] ?? status.label}</span> <span class="reason">· {status.reason}</span></p>
     {/if}
     <dl>
       <dt>Holders</dt><dd>
@@ -130,7 +129,6 @@
         {/if}
       </dd>
       <dt>From</dt><dd>{name(g.setter)}</dd>
-      <dt>State</dt><dd class:done={g.state === 'done'}>{g.state}</dd>
     </dl>
     {#if g.state === 'active'}
       <div class="buttons actions">{#if onexpedite}<button disabled={busy} title="Review and merge this goal's agents and PRs first" onclick={() => perform(() => onexpedite(g))}>{goalExpedited($expedite, g) ? 'Stop expediting' : 'Expedite'}</button>{/if}<button onclick={() => (action = action === 'done' ? '' : 'done')}>Mark done</button><button class="danger" onclick={() => (action = action === 'drop' ? '' : 'drop')}>Drop</button></div>
@@ -153,10 +151,11 @@
         {/each}
       </ol>
     {/if}
-    {#if g.state === 'active'}
+    {#if g.state === 'active' && !amending}<div class="buttons"><button onclick={() => (amending = true)}>Amend brief</button></div>{/if}
+    {#if g.state === 'active' && amending}
       <form class="amend" onsubmit={(e) => { e.preventDefault(); amend() }}>
         <textarea aria-label="Amend the brief" maxlength="2000" rows="3" placeholder="A short correction for the brief" bind:value={draft}></textarea>
-        <div class="buttons"><button disabled={busy || !draft.trim()}>Amend brief</button></div>
+        <div class="buttons"><button disabled={busy || !draft.trim()}>Amend brief</button><button type="button" onclick={() => (amending = false)}>Cancel</button></div>
         {#if amendError}<p class="error" role="alert">{amendError}</p>{/if}
       </form>
     {/if}
@@ -173,8 +172,7 @@
         </li>
       {/each}
     </ol>
-    <h3>History</h3>
-    {#if !g.edits?.length}<p class="quiet">No edits yet.</p>{/if}
+    {#if g.edits?.length}<h3>History</h3>{/if}
     {#each [...(g.edits ?? [])].reverse() as edit}<article class="history"><div>{name(edit.by)} edited · <time title={new Date(edit.at).toLocaleString()}>{goalAgo(edit.at, now)}</time></div><p><span>Was:</span> {edit.oldText}</p></article>{/each}
   </div>
 </aside>
