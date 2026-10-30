@@ -16,7 +16,9 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/shells"
+	"dyna-agent/internal/store"
 )
 
 // TestMain also serves as the job supervisor: Tools spawns this test binary
@@ -26,6 +28,15 @@ func TestMain(m *testing.M) {
 	if len(os.Args) == 4 && os.Args[1] == "shell" && os.Args[2] == "_spawn" {
 		if err := shells.StartSupervisor(os.Args[0], os.Args[3]); err != nil {
 			os.Exit(1)
+		}
+		if os.Getenv("DYNA_TEST_ADVANCE_SHELL_SCHEMA") == "1" {
+			db, err := database.Open(store.DataDir())
+			if err != nil {
+				os.Exit(1)
+			}
+			if _, err := db.Exec("UPDATE meta SET value='99' WHERE key='shells.version'"); err != nil {
+				os.Exit(1)
+			}
 		}
 		os.Exit(0)
 	}
@@ -117,6 +128,21 @@ func supervised(t *testing.T, tools *Tools, id string) bool {
 	path, _ := tools.Store.OutputPath(id)
 	_, err = os.Stat(filepath.Join(filepath.Dir(path), "noticed"))
 	return err == nil
+}
+
+func TestShellReportsJobWhenSchemaAdvancesAfterLaunch(t *testing.T) {
+	tools := newTools(t, 5*time.Second)
+	if err := shells.Migrate(store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DYNA_TEST_ADVANCE_SHELL_SCHEMA", "1")
+	database.DisownSchema()
+	t.Cleanup(database.OwnSchema)
+	raw := json.RawMessage(`{"command":"true","description":"Run true"}`)
+	r := tools.Call(context.Background(), "shell", raw, "")
+	if r.Failed || !strings.Contains(r.Text, "Job sh_") || !strings.Contains(r.Text, "Do not run the command again") {
+		t.Fatalf("launched job must be reported without a retry: %#v", r)
+	}
 }
 
 func TestShellReturnsExitAndOutputOfAFastCommand(t *testing.T) {
@@ -333,7 +359,7 @@ func TestForegroundCloseStopsJobsStillRunning(t *testing.T) {
 	// The client goes away while the command still runs.
 	job := onlyJob(t, tools)
 	cancel()
-	if r := <-started; !r.Failed {
+	if r := <-started; r.Failed || !strings.Contains(r.Text, job.ID) {
 		t.Fatalf("cancelled call = %#v", r)
 	}
 	if err := tools.Close(); err != nil {
