@@ -16,8 +16,8 @@ dyna room log <room> --all
 ## Model or provider failure
 
 For usage limits (`429`), auth/quota errors, provider errors, or repeated crashes,
-switch to a working profile without asking approval. Do not retry the blocked
-profile. Ask only when no safe successor or handoff exists. Report the failure,
+switch to a working profile directly and leave the blocked
+profile aside. Ask only when no safe successor or handoff exists. Report the failure,
 successor, and reset time with local timezone. Read `dyna guide steering` for alerts.
 
 Prefer transfer. Preserve the worktree, branch, dirty changes, and history.
@@ -97,7 +97,7 @@ dyna subagent transfer <session> --profile sol --retry
 The default handoff window is 30 seconds; `--wait-seconds` accepts 0 to 120.
 Zero or an already failed turn uses transcript context immediately. A running
 turn holds the ask only until that window ends; the transfer then stops the turn
-and uses the transcript, so it never waits without end. Write the
+and uses the transcript, so the wait is bounded. Write the
 actual task directory and branch; the launch directory can be stale. A final
 handoff may start with `[DYNA HANDOFF]`, then separate `Worktree: /absolute/path`
 and `Branch: feature/name` lines.
