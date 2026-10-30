@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -31,13 +32,17 @@ func (c *Client) Channel(ctx context.Context, handle func(contract.BoxMessage) e
 			for {
 				var msg contract.BoxMessage
 				if err = decoder.Decode(&msg); err != nil {
-					if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+					var netErr net.Error
+					if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.As(err, &netErr) {
 						resp.Body.Close()
 						return err
 					}
 					break
 				}
 				if err = handle(msg); err != nil {
+					if errors.Is(err, errTurnSettling) {
+						break
+					}
 					resp.Body.Close()
 					return err
 				}
