@@ -10,40 +10,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
 )
-
-// JournalLine is a saved status for one agent in a journal entry.
-type JournalLine struct {
-	Agent   string   `json:"agent"`
-	Status  string   `json:"status"`
-	Summary string   `json:"summary"`
-	Goals   []string `json:"goals"`
-	// Done lists goals of this agent recorded as finished but
-	// still open. Their holder is reminded once to close them.
-	Done []string `json:"done,omitempty"`
-	// Needs is a short, stable key for the action root or the owner must
-	// take, such as "owner-pi-login". It stays the same while the action does.
-	Needs string `json:"needs,omitempty"`
-}
-
-// An Event is one journal line about a goal or item: a note, or an item
-// state change. Its ID is "e" and the byte offset of its line. Event lines
-// carry kind "event"; a legacy keeper entry, converted by convertJournals in
-// sqlite.go, carries no kind.
-type Event struct {
-	ID    string    `json:"id"`
-	Goal  string    `json:"goal"`
-	Item  string    `json:"item,omitempty"`
-	By    string    `json:"by"`
-	Kind  string    `json:"kind"` // always "event"
-	Event string    `json:"event"`
-	Text  string    `json:"text,omitempty"`
-	At    time.Time `json:"at"`
-}
 
 // AddEvent appends one event line to the room's journal.
 func (s *Store) AddEvent(room string, e Event) (Event, error) {
@@ -78,18 +48,6 @@ func (s *Store) AddEvent(room string, e Event) (Event, error) {
 func (s *Store) Events(room, goal string, limit int) ([]Event, error) {
 	out, _, err := s.EventsPage(room, goal, "", limit)
 	return out, err
-}
-
-// JournalEntry is a saved report. Its ID is "j" and the byte
-// offset of its line in the room's journal file, so a cursor finds its place
-// without reading the whole file.
-type JournalEntry struct {
-	ID string `json:"id"`
-	// Round is the check-in round that wrote the entry.
-	Round       string        `json:"round,omitempty"`
-	At          time.Time     `json:"at"`
-	Entries     []JournalLine `json:"entries"`
-	NeedsAction bool          `json:"needsAction"`
 }
 
 // NeedsAction reports whether any line asks root to act.

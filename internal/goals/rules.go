@@ -11,29 +11,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
 const MaxRules = 20
 const MaxRuleText = 500
-
-type Rule struct {
-	ID         string    `json:"id"`
-	Text       string    `json:"text"`
-	Setter     string    `json:"setter"`
-	SetterName string    `json:"setterName"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
-	Edits      []Edit    `json:"edits,omitempty"`
-}
-
-type View struct {
-	Rules []Rule `json:"rules"`
-	Used  int    `json:"used"`
-	Max   int    `json:"max"`
-	Hash  string `json:"hash"`
-}
 
 // Global is the scope key for rules that apply in every room. Room IDs never
 // equal it. Global rule IDs use the "u" prefix; room rule IDs use "r".
