@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/cibudget"
+	"dyna-agent/internal/room"
 )
 
 func testReportZip(t *testing.T, entries map[string]string) []byte {
@@ -61,6 +62,10 @@ func TestTestBudgetFailsHeadAndWakesOnce(t *testing.T) {
 	}
 	if len(e.sent) == 0 || !strings.Contains(e.sent[0].Text, "12.5s  pkg/slow") {
 		t.Fatalf("wake: %+v", e.sent)
+	}
+	budget := prEventOf(r, e.sent[0])
+	if budget.Outcome != room.PROutcomeFailed {
+		t.Fatalf("budget event outcome = %q, want failed", budget.Outcome)
 	}
 	count := len(e.sent)
 	e.tick()
