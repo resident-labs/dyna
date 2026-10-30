@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,9 @@ func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte,
 	}
 	if args[0] == "ls-remote" {
 		return []byte(r.remote), nil
+	}
+	if len(args) > 2 && args[2] == "ls-remote" {
+		return []byte("ref: refs/heads/new-default\tHEAD\nabc\tHEAD\n"), nil
 	}
 	if len(args) > 2 && args[2] == "symbolic-ref" {
 		return []byte("main\n"), nil
@@ -47,7 +51,7 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 	c := &fakeCache{}
 	dir := t.TempDir()
 	m := &Mirror{Data: dir, Token: "secret", Runner: r}
-	result, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1")
+	result, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +64,32 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 		}
 	}
 }
+func TestPrepareRefreshesDefaultBranch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "git/owner/repo.git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeRunner{}
+	m := &Mirror{Data: dir, Token: "secret", Runner: r}
+	_, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetched, changed bool
+	for _, call := range r.calls {
+		args := strings.Join(call, " ")
+		if strings.Contains(args, "fetch --prune origin +refs/heads/*:refs/heads/*") {
+			fetched = true
+		}
+		if strings.Contains(args, "symbolic-ref HEAD refs/heads/new-default") {
+			changed = true
+		}
+	}
+	if !fetched || !changed {
+		t.Fatalf("calls %v", r.calls)
+	}
+}
+
 func TestRefReadsTheRequestedRemoteReference(t *testing.T) {
 	r := &fakeRunner{remote: "abc\trefs/dyna/archive/ses_1\n"}
 	m := &Mirror{Token: "secret", Runner: r}
@@ -71,7 +101,7 @@ func TestRefReadsTheRequestedRemoteReference(t *testing.T) {
 
 func TestPrepareRejectsMissingToken(t *testing.T) {
 	m := &Mirror{Data: t.TempDir(), Runner: &fakeRunner{}}
-	_, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1")
+	_, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1", true)
 	var missing MissingTokenError
 	if !errors.As(err, &missing) {
 		t.Fatalf("expected missing-token error, got %v", err)
@@ -82,7 +112,7 @@ func TestPrepareDoesNotPushWhenCloneFails(t *testing.T) {
 	r := &fakeRunner{fail: "clone"}
 	c := &fakeCache{}
 	m := &Mirror{Data: t.TempDir(), Token: "secret", Runner: r}
-	_, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1")
+	_, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1", true)
 	if err == nil || c.called {
 		t.Fatalf("error %v, cache called %v", err, c.called)
 	}

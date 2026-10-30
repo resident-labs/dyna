@@ -4,12 +4,12 @@ package git
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,21 +45,8 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 			http.Error(w, "repository access unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		allowed := false
-		for _, item := range repos {
-			if item.Repo == repo {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
+		if !slices.ContainsFunc(repos, func(item contract.RoomRepo) bool { return item.Repo == repo }) {
 			http.Error(w, "repository not in room", http.StatusForbidden)
-			return
-		}
-		if token == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(w).Encode(contract.Error{Code: contract.ErrUnavailable, Message: (MissingTokenError{}).Error()})
 			return
 		}
 		if r.Method == http.MethodPost && parts[2] == "git-receive-pack" {
@@ -73,6 +60,10 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 				return
 			}
 			if len(rejected) != 0 {
+				if _, err := io.Copy(io.Discard, body); err != nil {
+					http.Error(w, "invalid receive-pack body", http.StatusBadRequest)
+					return
+				}
 				w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
 				var report bytes.Buffer
 				pkt(&report, "unpack ok\n")
@@ -149,7 +140,7 @@ func commands(body io.ReadCloser, session contract.SessionID) (io.ReadCloser, []
 			return nil, nil, false, fmt.Errorf("bad command")
 		}
 		ref := fields[2]
-		allowed := ref == "refs/heads/v2/"+string(session) || ref == "refs/dyna/archive/"+string(session)
+		allowed := ref == "refs/heads/"+SessionBranchPrefix+string(session) || ref == "refs/dyna/archive/"+string(session)
 		refs = append(refs, ref)
 		if !allowed {
 			denied = true
