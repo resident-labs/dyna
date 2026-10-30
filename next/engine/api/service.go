@@ -10,11 +10,14 @@ type Caller struct {
 	Principal contract.Principal
 	Box       contract.BoxID
 	Room      contract.RoomID
+	Web       bool
 }
 
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error)
+	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)
 	OpSubmit(context.Context, contract.Principal, contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error)
 	OpDecide(context.Context, contract.Principal, contract.OpDecideRequest) (contract.OpDecideResponse, *contract.Error)
 	OpWithdraw(context.Context, contract.Principal, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, *contract.Error)
