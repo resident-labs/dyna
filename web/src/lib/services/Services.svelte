@@ -94,7 +94,7 @@
   <SettingRow inline id="service-{s.id}" title={s.label} description={s.description} expanded={open === s.id} ontoggle={() => toggle(s.id)} children={open === s.id ? detail : undefined}>
     {#snippet status()}
       {#if pill}<StatusPill label={pill.label} tone={pill.tone} />{/if}
-      <span>{[...(s.id === 'updates' && settings ? [String(settings.find((item) => item.key === 'updater.source')?.value || 'Release updater')] : []), ...factsOf(s, now, !!write)].join(' · ')}</span>
+      <span>{[...(s.id === 'updates' && settings && s.detail !== 'update-source-invalid' ? [String(settings.find((item) => item.key === 'updater.source')?.value || 'Release updater')] : []), ...factsOf(s, now, !!write)].join(' · ')}</span>
       {#if errors[s.id]}<span class="err" role="alert">{errors[s.id]}</span>{/if}
     {/snippet}
     {#snippet control()}

@@ -115,7 +115,7 @@ const settingText: Record<string, { title: string; description?: string }> = {
   'voice.provider': { title: 'Voice provider' },
   'voice.model': { title: 'Voice model', description: 'Empty uses the provider’s default' },
   'voice.url': { title: 'Voice server address', description: 'Needed for a self-hosted server' },
-  'updater.source': { title: 'Update source', description: 'Use the release updater or a source checkout. Source updates apply to source builds and migrated installs.' },
+  'updater.source': { title: 'Update source', description: 'Release installs new Dyna releases. Source checkout builds Dyna from a Git checkout when main changes.' },
   'updater.autoCheck': { title: 'Check for updates', description: 'At most once a day' },
   'doctor.condition': { title: 'When to examine this computer', description: 'Such as load>2/core for 5m or memory>85%; empty uses the default' },
   'runs.retention': { title: 'Keep finished runs', description: 'Off keeps them forever' },
