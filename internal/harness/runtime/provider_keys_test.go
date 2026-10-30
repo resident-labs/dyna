@@ -384,6 +384,9 @@ func TestPiProviderKeyCreatesAndActivatesAnAccount(t *testing.T) {
 	if err != nil || !found || !account.Active || account.Status != "ready" {
 		t.Fatalf("account after adding a key: %+v %v", account, err)
 	}
+	if want := string(store.ProviderZAI) + " · " + testProviderKey[len(testProviderKey)-4:]; account.Label != want {
+		t.Fatalf("account label = %q, want %q", account.Label, want)
+	}
 	raw, _ := os.ReadFile(filepath.Join(account.Home, "auth.json"))
 	if !strings.Contains(string(raw), `"api_key"`) {
 		t.Fatalf("account login file: %s", raw)
