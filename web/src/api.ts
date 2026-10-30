@@ -90,8 +90,8 @@ export const api = {
       isString(entry.description) && Array.isArray(entry.args) &&
       entry.args.every((arg: unknown) => isRecord(arg) && isString(arg.name) && typeof arg.required === 'boolean' && isString(arg.description)))
   },
-  runCommand: async (room: string, name: string, text: string) => {
-    const result = await post('/api/rooms/' + encodeURIComponent(room) + '/commands/run', { name, text, target: '' })
+  runCommand: async (room: string, name: string, text: string, target = '') => {
+    const result = await post('/api/rooms/' + encodeURIComponent(room) + '/commands/run', { name, text, target })
     if (!isPostResult(result)) throw new Error('The command result is invalid.')
     return result
   },
