@@ -8,10 +8,13 @@ import (
 	"testing"
 )
 
-type shellFake struct{ command, cwd string }
+type shellFake struct {
+	command, cwd string
+	timeout      int
+}
 
-func (f *shellFake) Run(_ context.Context, command, cwd string) (string, error) {
-	f.command, f.cwd = command, cwd
+func (f *shellFake) Run(_ context.Context, command, cwd string, timeout int) (string, error) {
+	f.command, f.cwd, f.timeout = command, cwd, timeout
 	return "local output", nil
 }
 
@@ -31,7 +34,7 @@ func TestShellRunsLocalCommand(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if fake.command != "pwd" || fake.cwd != "/tmp" || response.ID != 1 || len(response.Result.Content) != 1 || response.Result.Content[0].Text != "local output" {
+	if fake.command != "pwd" || fake.cwd != "/tmp" || fake.timeout != 600 || response.ID != 1 || len(response.Result.Content) != 1 || response.Result.Content[0].Text != "local output" {
 		t.Fatalf("command=%q cwd=%q response=%+v", fake.command, fake.cwd, response)
 	}
 }
