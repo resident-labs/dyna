@@ -781,7 +781,8 @@ Builders and reviewers design for the user first (owner rule). T3 Code guides th
 - **Color only for attention.** A session shows at most one status: Working (the only animation), Pending approval, or Failed. Other facts are muted text.
 - **Decisions in place.** An approval shows in the feed and in the approvals panel, with one shared component. The app has no modal dialogs, and the card send confirm is its only confirm step.
 - **Keyboard first.** Enter sends, and Shift+Enter makes a new line. F6 and mod+F6 move focus between the tree, the feed and the composer. Every control that can take focus shows a visible focus ring in light and dark. The Working pulse stops when the browser asks for reduced motion.
-- **Small and fast.** The feed keeps at most 500 rows in the page. The app has no avatars, reactions, toasts for events that the feed shows, count badges, onboarding screens or empty-state pictures.
+- **Long lists are virtual** (owner rule). One shared virtual list renders only the visible rows of every long list: the feed, a long session tree, approvals, file lists and transcripts. It measures each row, keeps the reader's place when older rows load above, and stays at the bottom only while the reader is there. The feed keeps at most 1,000 events in memory and pages with `beforeSeq`. While the reader is away from the newest page, new events update the session tree and the approvals, and one line offers to jump to the present. The session tree and the approvals come from `session.list` and `op.list`, never from the feed history.
+- **Small and fast.** The app has no avatars, reactions, toasts for events that the feed shows, count badges, onboarding screens or empty-state pictures.
 - **No raw text.** The app shows no IDs, raw logs or markdown labels.
 
 dyna:lead-rewrite is the design and taste reviewer for all v2 frontend work (owner rule):
