@@ -30,6 +30,9 @@ export type GoalState = "active" | "done" | "dropped"
 // CheckinState is a named string type of an event payload.
 export type CheckinState = "running" | "queued" | "idle"
 
+// CheckinAttention is a named string type of an event payload.
+export type CheckinAttention = "none" | "blocked" | "overdue"
+
 // SessionChange is a named string type of an event payload.
 export type SessionChange = "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request" | "computer-reminder"
 
@@ -237,6 +240,7 @@ export interface GoalEvent {
 // CheckinEvent is the payload of the checkin/summary events.
 export interface CheckinEvent {
   parent: string
+  attention?: CheckinAttention
   windowStart: number
   counts: { running: number; queued: number; idle: number }
   children: { name: string; state: CheckinState; age: string; goal: string; pr: string }[]
@@ -1665,6 +1669,7 @@ const ISSUE_WATCH_TYPE: ReadonlySet<unknown> = new Set(["comment", "closed", "re
 const GOAL_CHANGE: ReadonlySet<unknown> = new Set(["added", "edited", "amended", "items_done", "finished", "dropped"])
 const GOAL_STATE: ReadonlySet<unknown> = new Set(["active", "done", "dropped"])
 const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"])
+const CHECKIN_ATTENTION: ReadonlySet<unknown> = new Set(["none", "blocked", "overdue"])
 const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned", "transfer-request", "computer-reminder"])
 const ACCOUNT_REASON: ReadonlySet<unknown> = new Set(["usage-limit", "fallback"])
 const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "removed"])
@@ -1847,6 +1852,7 @@ export function isGoalEvent(v: unknown): v is GoalEvent {
 export function isCheckinEvent(v: unknown): v is CheckinEvent {
   return isRecord(v) &&
     typeof v.parent === "string" &&
+    (v.attention === undefined || CHECKIN_ATTENTION.has(v.attention)) &&
     Number.isInteger(v.windowStart) &&
     (isRecord(v.counts) && Number.isInteger(v.counts.running) && Number.isInteger(v.counts.queued) && Number.isInteger(v.counts.idle)) &&
     Array.isArray(v.children) && v.children.every((item: unknown) => (isRecord(item) && typeof item.name === "string" && CHECKIN_STATE.has(item.state) && typeof item.age === "string" && typeof item.goal === "string" && typeof item.pr === "string")) &&

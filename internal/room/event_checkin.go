@@ -17,6 +17,17 @@ const (
 // checkinStates lists every check-in state the web needs as a union type.
 var checkinStates = []CheckinState{CheckinRunning, CheckinQueued, CheckinIdle}
 
+// CheckinAttention identifies check-ins that need separate attention.
+type CheckinAttention string
+
+const (
+	CheckinAttentionNone    CheckinAttention = "none"
+	CheckinAttentionBlocked CheckinAttention = "blocked"
+	CheckinAttentionOverdue CheckinAttention = "overdue"
+)
+
+var checkinAttentions = []CheckinAttention{CheckinAttentionNone, CheckinAttentionBlocked, CheckinAttentionOverdue}
+
 // CheckinCounts is how many children were in each state.
 type CheckinCounts struct {
 	Running int `json:"running"`
@@ -42,6 +53,8 @@ type CheckinChild struct {
 // It wakes the parent and no one else, as the free-text check-in did.
 type CheckinEvent struct {
 	Parent string `json:"parent"`
+	// Attention is absent in check-ins written before this field existed.
+	Attention CheckinAttention `json:"attention,omitempty"`
 	// WindowStart is when the check-in window opened, in unix milliseconds.
 	// It keys the post of a window, so a retried delivery posts once.
 	WindowStart int64          `json:"windowStart"`

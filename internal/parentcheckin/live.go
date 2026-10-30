@@ -151,7 +151,7 @@ func checkin(parent subagent.Info, kids []subagent.Info, g *goals.Store, root st
 // with the counts the card shows and the table the agent reads.
 func checkinEvent(parent subagent.Info, reports []childReport, now time.Time) room.CheckinEvent {
 	reports = stalestFirst(reports, now)
-	ev := room.CheckinEvent{Parent: parent.ID, WindowStart: now.UnixMilli()}
+	ev := room.CheckinEvent{Parent: parent.ID, WindowStart: now.UnixMilli(), Attention: room.CheckinAttentionNone}
 	var lines []string
 	for _, child := range reports {
 		switch child.state {
