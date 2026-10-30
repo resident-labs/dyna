@@ -39,6 +39,8 @@ const bodies: Record<string, Check> = {
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
   "op.ran": object({ id: string, state, result: object({ exitCode: number, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
   "shell.job.ended": object({ session: string, job: string, exitCode: number, tail: string }),
+  "box.pressure": object({ box: string, kind: oneOf("high", "max") }),
+  "pr.opened": object({ repo: string, number: number, session: string, url: string }),
   "image.built": object({ host: string, repo: string, name: string, tag: string, seconds: number }),
   "image.failed": object({ host: string, repo: string, name: string, tag: string, reason: string, logTail: string }),
 };
