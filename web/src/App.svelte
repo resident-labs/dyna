@@ -1532,7 +1532,9 @@
           try { input = JSON.parse(text) } catch { input = text }
         }
         if (!r) return
-        const res = await api.startRun(r.id, { script: name }, input)
+        const res = name.includes('/') || name.includes('\\')
+          ? await api.startRun(r.id, { script: name }, input)
+          : await api.startNamedRun(r.id, name, input)
         say({ tone: 'success', subject: `${name} started`, text: 'Its agents run now.', action: res?.id ? { label: 'Open', run: () => showRun({ id: res.id }) } : undefined })
         await loadRuns()
         if (res?.id) showRun({ id: res.id })
