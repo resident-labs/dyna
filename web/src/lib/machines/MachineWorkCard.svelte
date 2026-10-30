@@ -15,11 +15,11 @@
 
 {#snippet item(unit: MachineWorkItem)}
   <Row dense text={workLabelText(unit)}>
-    {#snippet lead()}<Chip tone={unit.kind === 'job' ? 'iris' : ''} outline>{workKindText(unit.kind)}</Chip>{/snippet}
+    {#snippet lead()}<Chip tone={unit.kind === 'job' ? 'info' : 'neutral'} outline>{workKindText(unit.kind)}</Chip>{/snippet}
     {#snippet meta()}
       {#if workWhoText(unit)}<span>{workWhoText(unit)}</span>{/if}
       <span>{workHoldsText(unit)}</span>
-      {#if unit.heavy}<Chip tone="gold" outline>IO-heavy</Chip>{/if}
+      {#if unit.heavy}<Chip tone="warning" outline>IO-heavy</Chip>{/if}
       {#each unit.resources ?? [] as name (name)}<Chip outline>{name}</Chip>{/each}
     {/snippet}
     {#snippet trail()}

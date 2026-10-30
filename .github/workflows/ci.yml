@@ -469,6 +469,9 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The UI guard diffs a pull request's merge commit against its first parent.
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22

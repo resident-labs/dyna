@@ -1,16 +1,16 @@
 import type { MachineDetail } from '../api/machine.ts'
 import { ago } from '../ui/format.ts'
+import type { Tone } from '../ui/tone.ts'
 
-export type UsageTone = 'muted' | 'warn' | 'bad'
 export const usageThresholds = { warn: 80, bad: 95 } as const
 
-export function usageTone(percent: number | null | undefined): UsageTone {
-  if (percent == null) return 'muted'
-  return percent >= usageThresholds.bad ? 'bad' : percent >= usageThresholds.warn ? 'warn' : 'muted'
+export function usageTone(percent: number | null | undefined): Tone {
+  if (percent == null) return 'neutral'
+  return percent >= usageThresholds.bad ? 'danger' : percent >= usageThresholds.warn ? 'warning' : 'neutral'
 }
 
-export function diskTone(free: number | undefined, floor: number | undefined): UsageTone {
-  return free !== undefined && floor !== undefined && free < floor ? 'warn' : 'muted'
+export function diskTone(free: number | undefined, floor: number | undefined): Tone {
+  return free !== undefined && floor !== undefined && free < floor ? 'warning' : 'neutral'
 }
 
 export function freshness(machine: Pick<MachineDetail, 'local' | 'seenAt' | 'status'>): string {
