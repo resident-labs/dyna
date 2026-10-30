@@ -275,13 +275,8 @@ func (a *Accounts) TurnLeaseManaged(ctx context.Context, harness string) (*Resou
 		}
 	}
 	defer releaseAccountLock(gate)
-	// The gate and turn lock are held, so no switch can change the active account now.
-	active, err := a.activeID(h)
-	if err != nil {
-		releaseAccountLock(turns)
-		return nil, err
-	}
-	lease, err := newResourceLease(ctx, filepath.Join(dir, ".turns"), "turn-", turnUse{Account: active})
+	// The account is unknown until BindTurnAccount names the one this turn resolves.
+	lease, err := newResourceLease(ctx, filepath.Join(dir, ".turns"), "turn-", turnUse{})
 	if err != nil {
 		releaseAccountLock(turns)
 		return nil, err
@@ -302,6 +297,16 @@ func turnLeaseMayUse(id string) func(resourceUse) bool {
 		var turn turnUse
 		return json.Unmarshal(use.Data, &turn) != nil || turn.Account == "" || turn.Account == id
 	}
+}
+
+// BindTurnAccount names the account that this turn resolved. Until then the
+// lease counts for every account, so a removal waits for the turn to bind.
+func (l *ResourceLease) BindTurnAccount(id string) error {
+	raw, err := json.Marshal(turnUse{Account: id})
+	if err != nil {
+		return err
+	}
+	return l.SetData(raw)
 }
 
 // SwitchStatus counts only live file-lock holders. A crashed process cannot pin it.

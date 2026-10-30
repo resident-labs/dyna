@@ -494,6 +494,10 @@ func prepareRuntime(ctx context.Context, p profile.Profile, previous *harnessrun
 		return p, pin, nil, err
 	}
 	closers = append(closers, generationLease)
+	// The pin names the account this turn resolved, which may be a room's own account.
+	if err = lease.BindTurnAccount(pin.AccountID); err != nil {
+		return p, pin, nil, err
+	}
 	bundleLease, err := harnessruntime.NewBundleManager().LeaseManaged(ctx, pin.Bundle)
 	if err != nil {
 		return p, pin, nil, err
