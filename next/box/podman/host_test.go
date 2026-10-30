@@ -48,6 +48,16 @@ func newTestHost(t *testing.T, r *runner) *Host {
 	}
 	return h
 }
+func TestCapacityReservesFloorWithoutCountingBoxesTwice(t *testing.T) {
+	cpus, memory, disk, err := parseCapacity([]byte("8 16000 5000 90000"), 4000, 20000)
+	if err != nil || cpus != 7 || memory != 12000 || disk != 90000 {
+		t.Fatalf("capacity %d %d %d: %v", cpus, memory, disk, err)
+	}
+	if _, _, _, err := parseCapacity([]byte("8 16000 3999 90000"), 4000, 20000); err == nil {
+		t.Fatal("accepted memory below floor")
+	}
+}
+
 func TestTrailerRejectsSuccessfulSSHWithoutFrame(t *testing.T) {
 	for _, s := range []string{"", "ok", "xDYNA-END 00000000000000000000 000\n", "DYNA-END 00000000000000000000 999\n"} {
 		if _, _, err := parseReply([]byte(s)); err == nil {
