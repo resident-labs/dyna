@@ -767,6 +767,23 @@ Every PR that adds or changes a view has one required step (owner rule):
 - The reviewer checks the PR against that image and requests changes when the view is louder or less dense than the T3 Code page, or when the image is missing.
 - Each UI builder's brief repeats these steps.
 
+Every PR that changes what the owner sees has one more required step (owner rule):
+
+- After the PR is up, the builder posts screenshots to the room. It takes them in a computer or a browser, with data that looks real, not only empty states. It attaches PNG files, light and dark when the view has both, with one line per image that says what the image shows.
+- The merge does not wait for the owner. When the owner replies to the images, the reply is a change request for the next PR.
+
+Opus builders write the code under `next/web`, and an opus reviewer reviews it (owner rule). Terra may write and review the Go side of web features.
+
+Builders and reviewers design for the user first, with T3 Code's approach as the reference. A reviewer requests changes when a PR breaks one of these rules:
+
+- **The conversation is the product.** The owner's posts are soft blocks on the right. A session's post is plain text under a muted name line, with no avatar and no border.
+- **Agent work is folded.** Turn, box, shell job and operation events between two posts fold into one muted line that expands in place. A failed turn stays visible as its own row.
+- **Color only for attention.** A session shows at most one status: Working (the only animation), Pending approval, or Failed. Other facts are muted text.
+- **Decisions in place.** An approval shows in the feed and in the approvals panel, with one shared component. The app has no modal dialogs, and the card send confirm is its only confirm step.
+- **Keyboard first.** Enter sends, and Shift+Enter makes a new line. F6 and mod+F6 move focus between the tree, the feed and the composer. Every control that can take focus shows a visible focus ring in light and dark. The Working pulse stops when the browser asks for reduced motion.
+- **Small and fast.** The feed keeps at most 500 rows in the page. The app has no avatars, reactions, toasts for events that the feed shows, count badges, onboarding screens or empty-state pictures.
+- **No raw text.** The app shows no IDs, raw logs or markdown labels.
+
 dyna:lead-rewrite is the design and taste reviewer for all v2 frontend work (owner rule):
 
 - Before frontend work starts, the builder sends its design, with the T3 Code side-by-side, to dyna:lead-rewrite. Work starts only after that approval.
