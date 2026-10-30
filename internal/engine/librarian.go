@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
@@ -13,6 +14,7 @@ import (
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/websvc"
 )
@@ -45,6 +47,7 @@ func (s services) librarianService() librarian.Service {
 		Sessions: librarian.Live{Manager: n.Sessions, Rooms: n.Rooms}, Issues: n.Rooms,
 		Rooms:     n.Rooms,
 		ListHooks: s.hooks.List, AddHook: s.addHook, RemoveHook: s.hooks.Remove,
+		Defer: s.deferLibrarianWake,
 		Notice: func(ctx context.Context, roomID string, ev room.Event) error {
 			rec, err := n.Rooms.Resolve(roomID)
 			if err != nil {
@@ -57,6 +60,52 @@ func (s services) librarianService() librarian.Service {
 			return err
 		},
 	}
+}
+
+// deferLibrarianWake keeps one deadline per repository. A later deferral for the
+// same repository replaces the earlier one.
+func (s services) deferLibrarianWake(repo string, at time.Time, wake func()) {
+	if s.timers == nil {
+		return
+	}
+	s.timers.at(librarianWakeKey(repo), at, wake)
+}
+
+// librarianDeferred reports when the deferred wake of a repository is due. It is
+// nil when no pass is deferred.
+func (s services) librarianDeferred(ctx context.Context, repo string) (*time.Time, error) {
+	r, err := repoid.Resolve(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	if s.timers == nil {
+		return nil, nil
+	}
+	at, ok := s.timers.due(librarianWakeKey(r.Main))
+	if !ok {
+		return nil, nil
+	}
+	return &at, nil
+}
+
+// restoreLibrarianWakes runs one wake for each enabled repository when the engine
+// starts. The deferred wakes lived in memory, so each wake defers its own next pass.
+func (s services) restoreLibrarianWakes(ctx context.Context) {
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		log.Printf("restore librarian wakes: %v", err)
+		return
+	}
+	svc := s.librarianService()
+	for _, repo := range v.LibraryEnabled {
+		if err := svc.Restore(ctx, repo); err != nil {
+			log.Printf("restore librarian wake of %s: %v", repo, err)
+		}
+	}
+}
+
+func librarianWakeKey(repo string) string {
+	return timerLibrarianWake + ":" + repo
 }
 
 func librarianActor(ctx context.Context) (authority.Actor, string, error) {

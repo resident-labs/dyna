@@ -33,7 +33,7 @@
   // row empty. The page reads again every minute, so a change made elsewhere
   // shows without a reload.
   let data = $state(emptyData)
-  const reload = () => loadServiceData(api, roomId, new Date(), untrack(() => data), (d) => (data = d), undefined, repo ? () => api.hookSummary(repo) : null, repo ? (name) => api.hookRuns(repo, name) : null, repo ? (name, id) => api.hookRunLog(repo, name, id) : null)
+  const reload = () => loadServiceData(api, roomId, new Date(), untrack(() => data), (d) => (data = d), undefined, repo ? () => api.hookSummary(repo) : null, repo ? (name) => api.hookRuns(repo, name) : null, repo ? (name, id) => api.hookRunLog(repo, name, id) : null, repo ? () => api.librarianDeferred(repo) : null)
   $effect(() => {
     reload()
     const t = setInterval(reload, 60 * 1000)
@@ -56,7 +56,7 @@
   const inputs: Inputs = $derived({
     reviewer: data.reviewer, queue: data.queue, mergePaused: data.mergePaused, history: data.history, services: data.services,
     notices: data.notices, hooks: data.hooks, runs: data.runs, reasons: data.reasons, settings: data.settings, budget: data.budget, accounts: data.accounts,
-    usage: data.usage, voice: data.voice, changes: changeRows, testHealth: data.testHealth, laneSync: data.laneSync, repo,
+    usage: data.usage, voice: data.voice, changes: changeRows, testHealth: data.testHealth, laneSync: data.laneSync, deferred: data.deferred, repo,
   })
   const rows = $derived(buildRows(inputs))
   const tabs = $derived(buildTabs(inputs, rows, now))
