@@ -30,7 +30,7 @@ import type { ShellJob, ShellLog, ShellLogChunk, TermEvent, TermInfo } from './t
 import type { Health, SystemLoad } from './system.ts'
 import type { CallStatus } from './voice.ts'
 import type { Page } from './wire.ts'
-import type { RunDetail, RunList, RunResultView, RunSource, StartedRun, TemplateInfo, WorkflowInfo } from './workflow.ts'
+import type { RunDetail, RunList, RunResultView, RunSource, StartedRun, StartNamedRunRequest, TemplateInfo, WorkflowInfo } from './workflow.ts'
 
 // ProfileSave is ProfileEdit with the env changes left out when there are none.
 export type ProfileSave = Omit<ProfileEdit, 'envSet' | 'envRemove'> & Partial<Pick<ProfileEdit, 'envSet' | 'envRemove'>>
@@ -222,6 +222,7 @@ export interface Engine {
   ListTemplates(): Promise<TemplateInfo[]>
   ListWorkflows(ref: string): Promise<WorkflowInfo[]>
   StartRun(ref: string, source: RunSource, input: unknown): Promise<StartedRun>
+  StartNamedRun(request: StartNamedRunRequest): Promise<StartedRun>
   CancelRun(id: string): Promise<null>
   PauseRun(id: string, paused: boolean): Promise<null>
   Runs(roomId: string): Promise<RunList>

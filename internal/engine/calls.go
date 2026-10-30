@@ -402,6 +402,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ListTemplates", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ListTemplates},
 		{Name: "ListWorkflows", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ListWorkflows},
 		{Name: "StartRun", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.StartRun},
+		{Name: "StartNamedRun", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.rooms.StartNamedRun},
 		{Name: "CancelRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyCLI, Method: s.rooms.CancelRun},
 		{Name: "PauseRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyCLI, Method: runsvc.Pause},
 		{Name: "TransferRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyCLI, Local: true, Method: runsvc.Transfer},
