@@ -8,6 +8,7 @@ const source = `<script>
  import GoalDetail from './GoalDetail.svelte'
  let goal = $state({ id: 'a', text: 'Goal', state: 'active', shared: true })
  export function select(id) { goal = { ...goal, id } }
+ export function close() { goal = { ...goal, state: 'done', done: { summary: 'Tests pass' } } }
 </script>
 <GoalDetail roomId="global" {goal} onchanged={() => {}} onclose={() => {}} />`
 const compiled = await build({ bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['browser', 'production'], logLevel: 'silent',
@@ -41,6 +42,7 @@ test('goal reads distinguish pending, failure and empty while discarding stale s
   assert.match(text(), /Waiting/); assert.match(text(), /Checklist unavailable: read failed/); assert.doesNotMatch(text(), /No items\./)
   clickRetry(); ui.flushSync(); assert.equal(pending.status.length, 5)
   pending.items[4]?.resolve([]); await settle(); assert.match(text(), /No items\./)
+  ui.flushSync(() => app.close()); assert.match(text(), /Done · Tests pass/)
  } finally {
   await ui.unmount(app); dom.window.close()
   for (const name of [...domNames, 'HTMLMediaElement', 'goalApi']) Reflect.deleteProperty(globalThis, name)
