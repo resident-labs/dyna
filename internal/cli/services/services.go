@@ -336,7 +336,7 @@ func setEnabled(ctx context.Context, call engineCaller, r refs, id ServiceID, on
 			return fmt.Errorf("no repository; run this inside one or pass --repo <path>")
 		}
 		off := !on
-		if err := call.Call(ctx, "EditHook", []any{r.Repo, updateHook, hooks.Patch{Disabled: &off}}, nil); err != nil {
+		if err := call.Call(ctx, "EditHook", []any{r.Repo, serviceregistry.UpdatesHook, hooks.Patch{Disabled: &off}}, nil); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "updates are %s for %s\n", stateWord(on), r.Repo)
@@ -351,10 +351,6 @@ func setEnabled(ctx context.Context, call engineCaller, r refs, id ServiceID, on
 	}
 	return fmt.Errorf("%s has no switch: it always runs", id)
 }
-
-// updateHook is the repository hook that installs a new Dyna build; the
-// Updates service reads and switches it.
-const updateHook = "self-update"
 
 func stateWord(on bool) string {
 	if on {
@@ -589,7 +585,7 @@ func runNow(ctx context.Context, call engineCaller, r refs, id ServiceID, out io
 		if r.Repo == "" {
 			return fmt.Errorf("no repository; run this inside one or pass --repo <path>")
 		}
-		err = call.Call(ctx, "RunHook", []any{r.Repo, updateHook}, &run)
+		err = call.Call(ctx, "RunHook", []any{r.Repo, serviceregistry.UpdatesHook}, &run)
 	default:
 		return fmt.Errorf("%s does not run on request; `dyna services restart` gives the reviewers and the librarian a turn", id)
 	}
