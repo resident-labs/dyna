@@ -2,8 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { bundle, domNames, importBundle, installDom } from './prDetailHarness.ts'
-import { issueReference, issueWork, roomIssueLabel, unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
-import { issueGroups, issueChip } from './github.ts'
+import { issueReference, issueWork, roomIssueLabel, trackedIssueItems, unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
+import { issueGroups, issueChip, loadScope, saveScope, type ListScope } from './github.ts'
 import type { GitHubItem } from '../api/github.ts'
 import { element, elements, need } from '../../../test/need.ts'
 
@@ -23,6 +23,7 @@ test('issueGroups orders the groups and puts older closed issues in Closed', () 
 
 const API = `export const api = {
   feedAround: () => Promise.resolve({ posts: [{ id: 'msg_local', text: 'Local body text' }] }),
+  issueWatches: () => Promise.resolve(globalThis.issueWatched ?? []),
   githubList: () => globalThis.issueListFails ? Promise.reject(new Error('No repository')) : Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
   githubView: (_r, _k, n) => globalThis.issueViewFails ? Promise.reject(new Error('Issue not found')) : Promise.resolve({ number: n, title: 'Issue ' + n, ...globalThis.issueItems.find((i) => i.number === n), body: 'Body text', comments: [] }),
   mergeControlStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve({ roomId: 'r', paused: false, queue: [], trials: [], localCIChecks: {} }) },
@@ -32,16 +33,19 @@ const API = `export const api = {
 const listCode = await bundle({ component: 'GitHub', api: API })
 const pageCode = await bundle({ component: 'IssuePage', api: API })
 
-async function render(items: GitHubItem[], props: object = {}, wait = settle) {
+// render mounts the Issues tab. It opens on All on GitHub unless scope says
+// otherwise, so older tests keep their full GitHub list.
+async function render(items: GitHubItem[], props: object = {}, wait = settle, scope: ListScope = 'all') {
   const dom = installDom({ ResizeObserver: class { observe() {} unobserve() {} disconnect() {} }, issueItems: items, issueMergeCalls: 0 })
   dom.reconfigure({ url: 'http://localhost/' })
-  Object.assign(globalThis, { history: dom.window.history, location: dom.window.location })
+  dom.window.localStorage.setItem('dyna.github.scope', JSON.stringify({ r: { issue: scope } }))
+  Object.assign(globalThis, { history: dom.window.history, location: dom.window.location, localStorage: dom.window.localStorage })
   const { dir, default: GitHub, mount } = await importBundle(listCode, 'GitHub')
   const target = need(document.getElementById('app'), '#app')
   mount(GitHub, { target, props: { roomId: 'r', kind: 'issue', ...props } })
   await wait()
   await wait()
-  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'issueMergeCalls', 'issueItems', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
+  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'localStorage', 'issueMergeCalls', 'issueItems', 'issueWatched', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
 }
 
 test('the issue page hands its reference to the room composer', async () => {
@@ -292,4 +296,45 @@ test('an unresolved export is history, not a closed GitHub issue', () => {
   assert.equal(history[0]?.state, 'UNKNOWN')
   assert.equal(history[0]?.url, remote.url)
   assert.equal(unifiedIssues([remote], [exported], 'all', 'open', '')[0]?.state, 'OPEN')
+})
+
+// The Tracked view keeps the room's own issues and the GitHub issues it
+// watches, promoted or works on. A watched upstream issue outside the GitHub
+// page keeps its saved facts, and the search matches GitHub rows here.
+test('tracked issues are the room issues plus watched, promoted and worked GitHub issues', () => {
+  const local: RoomIssue = { id: 'msg_1', number: 7, title: 'Local seven', filedAt: 1, state: 'open', githubUrl: 'https://github.com/o/r/issues/3' }
+  const upstream = issue(4028, 'needs-owner', { title: 'Upstream crash', url: 'https://github.com/up/r/issues/4028' })
+  const page = [issue(1, 'needs-owner'), issue(2, 'working', { workingSession: 's1' }), issue(3, 'needs-owner'), issue(5, 'needs-owner')]
+  const items = trackedIssueItems(page, [upstream, issue(5, 'needs-owner')], [local])
+  assert.deepEqual(items.map((i) => i.number), [2, 3, 5, 4028])
+  const rows = unifiedIssues(items, [local], 'all', 'all', '4028', false)
+  assert.deepEqual(rows.map((i) => i.title), ['Upstream crash'])
+  assert.deepEqual(unifiedIssues(items, [local], 'all', 'all', 'crash', false).map((i) => i.number), [4028])
+  assert.equal(unifiedIssues(items, [local], 'all', 'all', 'crash', true).length, 4, 'All trusts GitHub to have searched its rows')
+})
+
+test('the list scope is saved per room and per tab', () => {
+  const store = new Map<string, string>()
+  Object.assign(globalThis, { localStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) } })
+  try {
+    assert.equal(loadScope('a', 'pr'), 'tracked')
+    saveScope('a', 'pr', 'all')
+    saveScope('b', 'issue', 'all')
+    assert.deepEqual([loadScope('a', 'pr'), loadScope('a', 'issue'), loadScope('b', 'pr'), loadScope('b', 'issue')], ['all', 'tracked', 'tracked', 'all'])
+  } finally { Reflect.deleteProperty(globalThis, 'localStorage') }
+})
+
+test('the tracked Issues tab lists watched issues and says how to track one when empty', async () => {
+  Object.assign(globalThis, { issueWatched: [issue(4028, 'needs-owner', { title: 'Upstream crash' })] })
+  const r = await render([issue(1, 'needs-owner')], {}, microtasks, 'tracked')
+  try {
+    assert.deepEqual(elements(r.target, '.row .title').map((t) => t.textContent), ['Upstream crash'])
+  } finally { await r.done() }
+  const empty = await render([issue(1, 'needs-owner')], {}, microtasks, 'tracked')
+  try {
+    assert.match(element(empty.target, '.empty').textContent, /No tracked issues.*dyna git issue watch/)
+    need(elements(empty.target, '.empty button').find((b) => b.textContent === 'Show all on GitHub')).click()
+    await microtasks()
+    assert.deepEqual(elements(empty.target, '.row .title').map((t) => t.textContent), ['Issue 1'])
+  } finally { await empty.done() }
 })

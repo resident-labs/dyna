@@ -8,6 +8,9 @@
   // history entry with its link (prlink.js), so Back returns to the list.
   // Issues come from GitHub through gh on the host, grouped by who is on them
   // (IssueList) and opened as an IssuePage.
+  // Each tab starts on Tracked: the PRs the room tracks, or the room's own
+  // issues and the GitHub issues it watches. All on GitHub lists every open
+  // item, and the room remembers the choice.
   import { onMount, untrack } from 'svelte'
   import { api, openExternal } from '../../api.ts'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
@@ -26,7 +29,7 @@
   import MentionInChat from './MentionInChat.svelte'
   import RowActions from './RowActions.svelte'
   import type { RowAction } from './props.ts'
-  import { issueWork, roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
+  import { issueWork, roomIssueLabel, trackedIssueItems, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
   import { location as issueLocation } from '../issues/localIssues.ts'
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
@@ -35,7 +38,7 @@
   import { neighbor } from './prboard.ts'
   import { prHash, parsePRHash, prRef, findPR, lookupNumber, issueHash, parseIssueHash, type Link } from './prlink.ts'
   import { roomHash, routeHash } from '../ui/route.ts'
-  import { trackedFor, loadFilters, saveFilters } from './github.ts'
+  import { trackedFor, loadFilters, saveFilters, loadScope, saveScope, type ListKind, type ListScope } from './github.ts'
   import type { MergeQueueItem, MergeControlStatus, ReviewerStatus } from '../api/change.ts'
   import type { Goal } from '../api/goal.ts'
   import type { GitHubDetail, GitHubItem, GitHubListResult } from '../api/github.ts'
@@ -97,6 +100,12 @@
   let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, session = '', active = true, kind = 'pr', integration = null, changes = null, members = [], link = null, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
+  let listKind: ListKind = $derived(kind === 'pr' ? 'pr' : 'issue')
+  // The workspace mounts this view once per room, so the saved choice is read once.
+  let scope = $state<ListScope>(untrack(() => loadScope(roomId, listKind)))
+  let tracked = $derived(scope === 'tracked')
+  let watched = $state<GitHubItem[]>([]) // the issues the room watches, from dyna.db
+  let watchError = $state('')
   let listState = $state(kind === 'issue' ? 'unhandled' : saved.state)
   let source = $state('all')
   let localSelected = $state<RoomIssue | null>(null)
@@ -143,7 +152,7 @@
     const q = search.trim().toLowerCase()
     return allRows.filter((c) => !q || `${changeTitle(c)} ${c.branch || ''} ${c.number || ''}`.toLowerCase().includes(q))
   })
-  let listRows = $derived(openPRs(searched, merge ?? []))
+  let listRows = $derived(openPRs(searched, merge ?? [], scope))
   let view = $derived(listView(listRows, merge))
   let anyRows = $derived(listRows.length > 0)
   let chg = $derived(inPRs ? allRows.find((c) => c.changeId === selId) ?? null : null)
@@ -153,9 +162,15 @@
   let chgReviewer = $derived(chg ? reviewerRef(chg, roomId) : null)
   let rowItems = $derived(list?.items ?? [])
   let issueAPIState = $derived(listState === 'unhandled' || listState === 'in-progress' ? 'open' : listState)
-  let allIssueRows = $derived(unifiedIssues(rowItems, localIssues, source, issueAPIState, query))
+  let issueItems = $derived(tracked ? trackedIssueItems(rowItems, watched, localIssues) : rowItems)
+  // Tracked search filters the rows here, as the person types; All searches on GitHub.
+  let allIssueRows = $derived(unifiedIssues(issueItems, localIssues, source, issueAPIState, tracked ? search : query, !tracked))
+  let nothingTracked = $derived(tracked && !localIssues.length && !issueItems.length)
   let issueRows = $derived(listState === 'unhandled' || listState === 'in-progress' ? allIssueRows.filter((it) => issueWork(it) === listState) : allIssueRows)
   async function pickIssue(it: IssueRow) {
+    // The panel reads issues of the room's repository; a watched issue of
+    // another repository, such as an upstream, opens on GitHub.
+    if (it.number && list?.repo && !it.url.toLowerCase().includes(`/${list.repo.toLowerCase()}/issues/`)) { openExternal(it.url); return }
     localSelected = it.number ? null : it.local || null
     localBody = ''; localBodyError = ''
     const n = ++localSequence
@@ -168,7 +183,7 @@
       if (n === localSequence) localBody = feed.posts?.find((p: { id: string }) => p.id === issue.id)?.text || ''
     } catch (e) { if (n === localSequence) localBodyError = errorText(e) }
   }
-  let item = $derived(detail ?? rowItems.find((it) => it.number === sel) ?? null)
+  let item = $derived(detail ?? issueItems.find((it) => it.number === sel) ?? null)
   let workSession = $derived(item?.workingSession ? byId[item.workingSession] : null)
   // Keyboard and swipe navigation follow exactly the visible open list.
   let order = $derived(listRows)
@@ -176,14 +191,35 @@
   let seq = 0
   async function load() {
     const n = ++seq
+    // Tracked PRs are the room's own rows, so only All asks GitHub. Tracked
+    // issues still read GitHub's open page for work facts, without the search.
+    if (inPRs && tracked) return
+    if (!inPRs && tracked) loadWatched()
     try {
-      const res = await api.githubList(roomId, kind, kind === 'pr' ? 'open' : issueAPIState, query)
+      const res = await api.githubList(roomId, kind, kind === 'pr' ? 'open' : issueAPIState, tracked ? '' : query)
       if (n !== seq) return
       list = res
       error = ''
     } catch (e) {
       if (n === seq) error = errorText(e)
     }
+  }
+
+  let wseq = 0
+  async function loadWatched() {
+    const n = ++wseq
+    try {
+      const res = await api.issueWatches(roomId)
+      if (n === wseq) { watched = res; watchError = '' }
+    } catch (e) {
+      if (n === wseq) watchError = errorText(e)
+    }
+  }
+  function setScope(next: ListScope) {
+    scope = next
+    saveScope(roomId, listKind, next)
+    query = search.trim()
+    load()
   }
 
   // Export changes the local row before GitHub's list contains the new issue.
@@ -299,7 +335,7 @@
       return
     }
     const n = lookupNumber(allRows, link)
-    if (!list || n === looked) return
+    if ((!list && !tracked) || n === looked) return
     if (!n) {
       followed = link
       return
@@ -339,6 +375,7 @@
   let timer: ReturnType<typeof setTimeout> | undefined
   function typed() {
     clearTimeout(timer)
+    if (tracked) return
     timer = setTimeout(() => {
       if (search.trim() === query) return
       query = search.trim()
@@ -413,6 +450,7 @@
       seq++
       dseq++
       mseq++
+      wseq++
       window.removeEventListener('focus', again)
       window.removeEventListener('popstate', popped)
       window.removeEventListener('hashchange', popped)
@@ -427,24 +465,28 @@
     })
   })
   const ISSUE_STATES: [string, string][] = [['unhandled', 'Unhandled'], ['in-progress', 'In progress'], ['closed', 'Closed'], ['all', 'All']]
+  const SCOPES: [ListScope, string][] = [['tracked', 'Tracked'], ['all', 'All on GitHub']]
 </script>
 {#snippet filters()}
   <header class="lhead">
-    {#if !inPRs}<div class="filters">
-      <Segmented small label="Source" options={[['all', 'All'], ['dyna', 'Dyna'], ['github', 'GitHub']]} value={source} onchange={(value: string) => source = value} />
-      <Segmented small label="State" options={ISSUE_STATES} value={listState} onchange={setState} />
-    </div>{/if}
-    <input class="search" type="search" bind:value={search} oninput={typed} onkeydown={(e) => e.key === 'Enter' && (clearTimeout(timer), (query = search.trim()), load())} placeholder="Search, for example author:@me label:bug" aria-label="Search {inPRs ? 'pull requests' : 'issues'}" />
+    <div class="filters">
+      <Segmented small label="Show" options={SCOPES} value={scope} onchange={setScope} />
+      {#if !inPRs}
+        <Segmented small label="Source" options={[['all', 'All'], ['dyna', 'Dyna'], ['github', 'GitHub']]} value={source} onchange={(value: string) => source = value} />
+        <Segmented small label="State" options={ISSUE_STATES} value={listState} onchange={setState} />
+      {/if}
+    </div>
+    <input class="search" type="search" bind:value={search} oninput={typed} onkeydown={(e) => e.key === 'Enter' && !tracked && (clearTimeout(timer), (query = search.trim()), load())} placeholder={tracked ? `Search tracked ${inPRs ? 'pull requests' : 'issues'}` : 'Search GitHub, for example author:@me label:bug'} aria-label="Search {tracked ? 'tracked ' : ''}{inPRs ? 'pull requests' : 'issues'}" />
   </header>
 {/snippet}
 <svelte:window onkeydown={keys} />
 <section class="gh" class:narrow class:pr-list={inPRs ? !chg : !sel && !localSelected} bind:clientWidth={width}>
   {#if inPRs}
       <div class="list prlist" hidden={narrow && !!chg}>
-        <TabHeader title="Pull requests" usage={`${listRows.length} open`} />
+        <TabHeader title="Pull requests" usage={`${listRows.length} ${tracked ? 'tracked' : 'open'}`} />
         <MergingStrip status={mergeStatus} error={mergeError} onpick={openMerge} onresume={resumeMerging} {resuming} {resumeError} />
         {@render filters()}
-        {#if error}<p class="more err">GitHub did not answer: {error}</p>{:else if list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
+        {#if !tracked && error}<p class="more err">GitHub did not answer: {error}</p>{:else if !tracked && list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {#if anyRows}
           <div class="rows">
             {#each listRows as row (row.changeId)}
@@ -466,8 +508,17 @@
           </div>
         {:else}
           <div class="empty">
-            <strong>No pull requests</strong>
-            <p>{search.trim() ? 'Nothing matches this search.' : 'Open pull requests in this room appear here.'}</p>
+            {#if search.trim()}
+              <strong>No pull requests</strong>
+              <p>{tracked ? 'No tracked pull request matches this search.' : 'Nothing matches this search.'}</p>
+            {:else if tracked}
+              <strong>No tracked pull requests</strong>
+              <p>Dyna reviews, watches CI and merges the PRs the room tracks. Open a PR in All on GitHub and choose Track, or run <code>dyna git pr track &lt;number&gt;</code>.</p>
+            {:else}
+              <strong>No pull requests</strong>
+              <p>Open pull requests in this room appear here.</p>
+            {/if}
+            {#if tracked}<button class="act" onclick={() => setScope('all')}>{search.trim() ? 'Search all on GitHub' : 'Show all on GitHub'}</button>{/if}
           </div>
           <LoadOlder auto {older} loading={loadingOlder} failed={failedOlder} onclick={onolder} />
         {/if}
@@ -485,13 +536,23 @@
         <TabHeader title="Issues" usage={`${issueRows.length} ${listState === 'all' ? 'total' : listState}`} />
         {@render filters()}
         {#if error && source !== 'dyna'}<p class="quiet err">GitHub did not answer: {error}</p>{/if}
+        {#if tracked && watchError && source !== 'dyna'}<p class="quiet err">Dyna could not read the watched issues: {watchError}</p>{/if}
         {#if !list && !error && source !== 'dyna'}<p class="quiet">Asking GitHub…</p>{/if}
         {#if issueRows.length}
           <IssueList groups={['open', 'closed'].map((id) => ({ id, label: id, rows: issueRows.filter((i) => (i.state === 'OPEN') === (id === 'open')) }))} {sel} {onmention} onpick={pickIssue}
             oncloseissue={oncloseissue ? (it) => it.local && oncloseissue(it.local) : undefined} onexport={onexportissue ? (it) => it.local && onexportissue(it.local) : undefined} ondismiss={ondismississue ? (it) => it.local && ondismississue(it.local) : undefined} />
-          {#if list?.more && source !== 'dyna'}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
-        {:else if list || error || source === 'dyna'}
-          <div class="empty"><strong>No issues</strong><p>{query ? 'Nothing matches this search.' : listState === 'unhandled' ? 'Every open issue has work in progress.' : 'No issues match these filters.'}</p></div>
+          {#if !tracked && list?.more && source !== 'dyna'}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
+        {:else if list || error || source === 'dyna' || tracked}
+          <div class="empty">
+            {#if nothingTracked}
+              <strong>No tracked issues</strong>
+              <p>Agents file room issues with <code>dyna issue</code>. Watch a GitHub issue, such as an upstream one, with <code>dyna git issue watch &lt;number&gt;</code>.</p>
+            {:else}
+              <strong>No issues</strong>
+              <p>{(tracked ? search.trim() : query) ? 'Nothing matches this search.' : listState === 'unhandled' ? 'Every open issue has work in progress.' : 'No issues match these filters.'}</p>
+            {/if}
+            {#if tracked}<button class="act" onclick={() => setScope('all')}>{search.trim() ? 'Search all on GitHub' : 'Show all on GitHub'}</button>{/if}
+          </div>
         {/if}
       </div>
     {/if}
@@ -521,7 +582,7 @@
           </div>
         {/if}
       </div>
-    {:else if !narrow && list?.items?.length}
+    {:else if !narrow && issueRows.length}
       <div class="detail none"><p class="quiet">Pick an issue to read it.</p></div>
     {/if}
   {/if}
@@ -563,6 +624,8 @@
   .dscroll { flex: 1; min-width: 0; overflow-y: auto; }
   .empty { margin: 28px 14px; text-align: center; background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; padding: 20px; }
   .empty p { color: var(--muted); font-size: 13.5px; margin: 6px 0 0; overflow-wrap: anywhere; }
+  .empty code { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); }
+  .empty .act { margin-top: var(--s3); }
   .quiet { color: var(--faint); font-size: 13.5px; padding: 12px 16px; }
   .err { color: var(--coral); padding: 12px 2px; overflow-wrap: anywhere; }
   @media (max-width: 760px) {

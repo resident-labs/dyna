@@ -225,6 +225,7 @@ export const api = {
   // is 'pr' or 'issue'; state is open, closed, merged or all.
   githubList: (roomRef: string, kind: string, state = 'open', search = '') => app.GitHubList(roomRef, kind, state, search),
   githubView: (roomRef: string, kind: string, number: number) => app.GitHubView(roomRef, kind, number),
+  issueWatches: (roomRef: string) => app.IssueWatches(roomRef),
   githubDiff: (roomRef: string, number: number) => app.GitHubDiff(roomRef, number),
   listTemplates: () => app.ListTemplates(),
   startRun: (ref: string, source: RunSource, input: unknown) => app.StartRun(ref, source, input),
