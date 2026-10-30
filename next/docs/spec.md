@@ -19,7 +19,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. The engine refuses owner-only calls from host-exec processes (section 6).
 7. **Root is a position in the tree.** Any session above another may approve its agent-class operations and start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The cutover follows only after the trial works and a dry-run import passes (section 11).
-9. **Some v1 features wait until after the cutover.** Voice, workflows, web search through Dyna, computers and the librarian's updates come back after the cutover. The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
+9. **Some v1 features wait until after the cutover.** Voice, workflows, web search through Dyna and the librarian's updates come back after the cutover. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
 11. **CLIProxyAPI is vendored and runs inside the engine.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` runs it in-process through its Go SDK, on the control-plane loopback, so v2 stays one binary (5.7). It lands in M1, because the model route needs it.
 12. **Size budget and scope cuts (r22).** Each milestone report counts product lines per package against the plan's budget. On 2026-10-30 the owner kept subtree moves, box growth, `Run` subscriptions and terminal questions, and cut these until a need shows: a box starting again on another host after a host failure (a lost box waits for its host, 5.10), box checkpoints, the relocation commands (a manual procedure instead, 5.10), the bundle data of issue watches and room MCP servers, one cgroup per shell job (process groups instead, 5.8), `node_modules` reflink seeding, and external members (7.3). M1 also moves the Dyna shell server and the transcript stream to M2 (5.8).
@@ -762,6 +762,18 @@ dyna:lead-rewrite is the design and taste reviewer for all v2 frontend work (own
 - Before frontend work starts, the builder sends its design, with the T3 Code side-by-side, to dyna:lead-rewrite. Work starts only after that approval.
 - dyna:lead-rewrite approves each frontend PR on design and taste. The normal reviewers check correctness and everything else.
 
+### 5.14 Computers (M2)
+
+A computer is one browser per box, so an agent can open a web page, act on it and take screenshots, and the owner can watch. It is kept minimal (r22).
+
+- **Where it runs.** Inside the box, as a child of the box agent, in the box's own budget slice. Nothing runs on the host or the control plane. It starts on first use and stops when the box stops.
+- **What it is.** One Chromium from the image, with its DevTools port on the box's loopback only. The agent drives it with `dyna computer` (open a URL, click, type, read the page text, take a screenshot to a file) or with any client that speaks the DevTools protocol, such as Playwright.
+- **Watching.** The box agent sends the browser's screencast frames over the box socket. The engine passes them to the web app, which shows a live view on the session page. The view is read-only: the owner watches and does not type into it.
+- **Not built.** No second browser, no recording, no owner input, no reminders, and no computer outside a box.
+- **Budget.** About 500 Go lines (box agent, engine route, `dyna computer`) and 200 TypeScript lines (the live view).
+
+M2 acceptance check 13 covers it.
+
 ## 6. Host exec
 
 Drafted by dyna:node-shell. Host exec runs one command outside every box: on a capacity host or on the control-plane host. Examples: `podman system prune`, a service restart, or reading host logs. It is an operation, and it always needs a grant.
@@ -1100,7 +1112,8 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | voice and its children | after | no self-hosting step needs voice |
 | workflows | after | leads with children cover self-hosting |
 | web-search | after | Pi has no built-in search, so agents have no web search until this port (9.1) |
-| computers, computer-reminders | after | no self-hosting step needs a desktop in a box |
+| computers | M2, minimal (5.14): one browser per box, driven by the agent and watched by the owner | UI work inside v2 needs screenshots and the T3 Code side-by-side (5.13) |
+| computer-reminders | after | a convenience |
 | command-palette, library-page, review-workspace, services-page, settings-mcp, settings-profiles, web-settings | after | the CLI covers them until they are ported |
 | idle-compaction | after | a convenience; Pi compacts by itself |
 | pr-comment-trust | dropped; outside text is wrapped instead (decision 13) | no hold and no state; the owner accepted the risk |
@@ -1113,7 +1126,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | settings-harnesses | dropped | harness versions live in the image; sign-in moves to accounts |
 | claude-code | dropped | Pi is the only harness (section 0, decision 4) |
 
-**What the owner gives up from the cutover until each port:** voice calls, workflows, web search through Dyna, computers (browser agents), the librarian's updates, issue watches, room MCP servers, and several settings panes. External members are dropped (7.3). Paired devices, the desktop window, issues, goals, PRs, rules and the library map keep working.
+**What the owner gives up from the cutover until each port:** voice calls, workflows, web search through Dyna, the librarian's updates, issue watches, room MCP servers, and several settings panes. External members are dropped (7.3). Paired devices, the desktop window, issues, goals, PRs, rules and the library map keep working.
 
 ### 9.1 What we lose from Claude Code
 
@@ -1197,7 +1210,7 @@ Acceptance:
 
 ### M2: web room view, approvals, host exec
 
-Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, the default notice subscription, images from `.dyna/images/`, box growth, the Dyna shell server with secret masking, and the transcript stream.
+Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, the default notice subscription, images from `.dyna/images/`, box growth, the Dyna shell server with secret masking, the transcript stream, and computers (5.14). Computers land first in M2, before its UI work starts.
 
 Acceptance:
 
@@ -1213,6 +1226,7 @@ Acceptance:
 10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it for one hour, it runs, and after a revoke it is refused again.
 11. manual: a lead and its child run on hermeslab; the child's cgroup is under the lead's slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
+13. manual: an agent in a box opens the web app in its computer, takes a screenshot to a file, and attaches it to a post; the owner watches the same page live on the session page.
 
 ### M3: bundle import and self-hosting
 
