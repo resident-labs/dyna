@@ -8,7 +8,7 @@ import { need } from '../test/need.ts'
 
 const results: { name: string; pass: boolean }[] = [], selections: ModelSelection[] = []
 const check = (name: string, value: unknown) => results.push({ name, pass: !!value })
-const base: ScopeAccount = { id: 'fixture-record', harness: 'pi', provider: 'opencode-go', kind: 'api_key', routeId: 'opencode-go/fixture', label: 'Fixture account', repos: null, status: 'ready', quotaBlocked: false, providerId: '', active: false, activeHere: false, source: '', observedAt: '', stale: false, profiles: [], windows: [], needsLogin: false }
+const base: ScopeAccount = { id: 'fixture-record', harness: 'pi', provider: 'opencode-go', kind: 'api_key', routeId: 'opencode-go/fixture', label: 'Fixture account', repos: null, status: 'ready', quotaBlocked: false, providerId: '', active: false, activeHere: false, servesHere: true, source: '', observedAt: '', stale: false, profiles: [], windows: [], needsLogin: false }
 const cases: [string, Partial<ScopeAccount>][] = [
  ['Not in use', {}],
  ['In use', { activeHere: true, active: true }],
@@ -16,7 +16,7 @@ const cases: [string, Partial<ScopeAccount>][] = [
 const app = need(document.getElementById('app'), 'app')
 for (const [name, extra] of cases) {
  const account = { ...base, ...extra }, before = selections.length
- const instance = mount(AccountDetails, { target: app, props: { account, onclose: () => {}, onsignin: () => {}, oncreateprofile: (selection: ModelSelection) => selections.push(selection), onprofile: () => {} } })
+ const instance = mount(AccountDetails, { target: app, props: { account, onclose: () => {}, onsignin: () => {}, oncreateprofile: (selection: ModelSelection) => selections.push(selection), onprofile: () => {}, onremove: () => {} } })
  await tick()
  const button = need([...document.querySelectorAll('button')].find((el) => el.textContent === 'Create profile'), 'Create profile')
  check(`${name}: creation follows the scope selection`, button.disabled === !account.activeHere)
