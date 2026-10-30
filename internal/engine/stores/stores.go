@@ -59,8 +59,7 @@ import (
 // engine runs them, at start, so other processes find current tables
 // (requirement 41). engine.TestEngineMigratesEveryStore keeps the list complete.
 var migrations = []func(dataDir string) error{
-	// First: a moved store's startup import reads its stamps through
-	// state.ImportIfForeign.
+	// First: moved stores inspect mirror stamps during startup imports.
 	state.MigrateMirrors,
 	activity.Migrate,
 	reposcope.Migrate,

@@ -9,6 +9,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/plan/ancestry"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/store/storetest"
 )
 
@@ -45,7 +46,11 @@ func TestEmptyAncestryCannotBeFilledByChangedHeader(t *testing.T) {
 					t.Fatal(err)
 				}
 				// The previous release stamped empty headers without inserting a row.
-				if _, err := state.For(db).ImportIfForeign(t.Context(), "plans/wf_empty-import", path, func(*sql.Conn, []byte) error { return nil }); err != nil {
+				info, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec("INSERT INTO state_mirrors(key, version) VALUES (?, ?)", "plans/wf_empty-import", store.VersionOf(info).Key()); err != nil {
 					t.Fatal(err)
 				}
 				if err := db.QueryRow("SELECT version FROM state_mirrors WHERE key='plans/wf_empty-import'").Scan(&stamp); err != nil {
