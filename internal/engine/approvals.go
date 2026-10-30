@@ -142,7 +142,7 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 	stored := approvals.GHPayload{MediaDestination: destination, Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files, Media: in.Media}
 	body := ghclient.DisplayApprovalBody(stored)
 	if len(in.Media) > 0 {
-		body += fmt.Sprintf("\n\nMedia destination: %s/%s (head %s)", destination.Host, destination.Base, destination.Head)
+		body += fmt.Sprintf("\n\nMedia destination: %s/%s (head %s, %s visibility)", destination.Host, destination.Base, destination.Head, destination.Visibility)
 		if destination.Number > 0 {
 			body += fmt.Sprintf(" PR #%d", destination.Number)
 		}
