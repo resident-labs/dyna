@@ -68,6 +68,7 @@ type SessionStartRequest struct {
 	Room    RoomID      `json:"room"`
 	Name    string      `json:"name"`
 	Parent  SessionID   `json:"parent,omitempty"`
+	Repo    RepoName    `json:"repo,omitempty"`
 	Profile ProfileName `json:"profile"`
 	Goal    string      `json:"goal,omitempty"`
 	Brief   string      `json:"brief,omitempty"`
