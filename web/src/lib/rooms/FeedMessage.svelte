@@ -76,7 +76,6 @@
       <header>
         {#if script}<a class="name run-name" href={scriptHref(post.roomId ?? '', script)} title="Open workflow run {script.runId}">{name}</a><span class="tag">workflow</span>
         {:else}<button class="name hue-{post.fromHue}" onclick={() => onaddress?.(post.from ?? '')}>{name}</button>{/if}{#if post.source === 'card'}<span class="tag" title="A card wrote this text. You confirmed it before it was sent.">card</span>{/if}
-        {#if post.owner && post.human}<span class="tag">human</span>{/if}
         {#if post.fromRoom}<span class="tag" title="The owner sent this from the {post.fromRoom} room. Your reply goes back there.">from room {post.fromRoom}</span>{/if}
         <time title={new Date(post.ts ?? 0).toLocaleString()}>{stamp(post.ts)}</time>
         {#if recipients}
