@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -122,11 +123,12 @@ func TestWaitTimeoutUsesOneNotice(t *testing.T) {
 
 func TestSlotDirectoryWithoutRuntimeDir(t *testing.T) {
 	root := t.TempDir()
-	first, err := slotDirectory("", root, os.Getuid())
+	runtimeRoot := filepath.Join(root, "runtime")
+	first, err := slotDirectory("", runtimeRoot, root, os.Getuid())
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := slotDirectory("", root, os.Getuid())
+	second, err := slotDirectory("", runtimeRoot, root, os.Getuid())
 	if err != nil || first != second {
 		t.Fatalf("fallback not shared: %q %q, %v", first, second, err)
 	}
@@ -137,8 +139,16 @@ func TestSlotDirectoryWithoutRuntimeDir(t *testing.T) {
 	if err := os.Chmod(filepath.Dir(first), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := slotDirectory("", root, os.Getuid()); err == nil {
+	if _, err := slotDirectory("", runtimeRoot, root, os.Getuid()); err == nil {
 		t.Fatal("accepted a public fallback directory")
+	}
+	userRuntime := filepath.Join(runtimeRoot, strconv.Itoa(os.Getuid()))
+	if err := os.MkdirAll(userRuntime, 0700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := slotDirectory("", runtimeRoot, root, os.Getuid())
+	if err != nil || got != filepath.Join(userRuntime, "dyna", "test-slots") {
+		t.Fatalf("standard runtime = %q, %v", got, err)
 	}
 }
 
