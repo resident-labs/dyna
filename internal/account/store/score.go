@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// SavedUsageWindow is the refresh interval for saved account usage.
+const SavedUsageWindow = 10 * time.Minute
+
 // NearCapUsedPercent marks a window so used that the automatic account pick
 // skips the account. It matches the owner's claude-accounts-usage swap tool
 // (NEAR_CAP_SESSION and NEAR_CAP_WEEKLY, both 0.90).
