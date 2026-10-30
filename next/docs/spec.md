@@ -533,6 +533,7 @@ The owner adds a host with `dyna host add <name> --ssh user@addr`. The engine th
 - cgroup v2, with `Delegate=yes` for the user manager and the cpu, memory, io and pids controllers delegated;
 - rootless Podman 5 or later, with the systemd cgroup manager and `--userns=keep-id:uid=1000,gid=1000` support (introduced in Podman 4.3);
 - sshd allows `StreamLocalForwarding`, and curl 7.40 or later is available for the socket probe;
+- git is installed, because the engine pushes the repository caches over the master (5.6);
 - free disk and memory above the host floor (default 20 GiB and 4 GiB);
 - the owner states at registration that only they have admin rights on the host.
 
@@ -662,7 +663,7 @@ A cgroup nests only inside one kernel, so a child runs on its parent's host. The
 
 Repositories, git through the engine and the archive on close (5.6 to 5.9) land early in M2, because the trial needs them (section 11). In M1, a box has no repository, so close has nothing to archive.
 
-Each host keeps one bare cache per repository at `<hostdata>/git/<owner>/<repo>.git`. **Hosts never talk to GitHub and hold no GitHub credentials.** The control plane fetches from GitHub and pushes into the host cache over the master, before it creates a box and when it sees the default branch move.
+Each host keeps one bare cache per repository at `<hostdata>/git/<owner>/<repo>.git`. **Hosts never talk to GitHub and hold no GitHub credentials.** The control plane fetches from GitHub into its own mirror and pushes into the host cache over the master before it creates a box, and from M3 also when it sees the default branch move.
 
 A box's repository is made in the box volume:
 
@@ -692,7 +693,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 - In M1 the proxy keeps its sign-ins in its own file store, `<data>/cliproxy/auth` (mode 0700). In M3 the engine registers a token store on `store.db` through the SDK's `Store` interface (`List`, `Save`, `Delete`), so no JSON state is left. `store.db` and its backups then hold tokens and stay 0600.
 - Accepted costs: the binary grows by the proxy's dependencies (gin, a Redis client, zeroconf and others), which later patches may trim. A panic in a proxy goroutine stops the engine; systemd restarts it, and box agents buffer meanwhile (5.7).
 
-**Git (M2).** `git-remote-dyna` (a link to `dyna box-agent git-remote`) carries smart HTTP over the box socket to `/git/<repo>/`. The engine checks the session's repositories and proxies to GitHub with its own token. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
+**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the session's repositories and proxies to GitHub with its own token. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
 
 **Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
 
@@ -719,7 +720,7 @@ Close ends the whole subtree, as the card decided: each child is closed and dele
 3. `podman rm`, delete the volume, stop the slice, and remove the forward and the listener.
 4. Emit `box.changed` to `deleted`, then `session.closed`.
 
-The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. A box is never deleted without its archive.
+The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
 
 Table: `archives` (`session` PK, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`).
 
@@ -1221,8 +1222,8 @@ Scope: the ported web room view (feed, DMs, composer, cards and files, session t
 
 The order inside M2:
 
-1. **The trial parts first:** images from `.dyna/images/`, rooms with repositories, the repository copy, git through the engine, close with archive, opening a PR, and computers.
-2. **Self-hosting trial.** It starts as soon as one box builds and tests dyna and pushes its branch. v2 runs beside v1 with its own data, runtime and SSH control folders (decision 8), in a trial room for the `dyna` repository. While v1 still tracks the same repository, v2 names session branches `v2/<session>`, acts only on PRs that v2 sessions opened, and does not wake on unowned repository events. v1 does not track `v2/` branches. v1 reviews and merges v2's PRs until the approval flag lands in M3. From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback.
+1. **The trial parts first:** images from `.dyna/images/`, rooms with repositories, the repository copy, git through the engine, close with archive, and computers.
+2. **Self-hosting trial.** It starts as soon as one box builds and tests dyna and pushes its branch. v2 runs beside v1 with its own data, runtime and SSH control folders (decision 8), in a trial room for the `dyna` repository. While v1 still tracks the same repository, v2 names session branches `v2/<session>`, acts only on PRs that v2 sessions opened, and does not wake on unowned repository events. v1 does not track `v2/` branches. Until operations land, dyna:lead-rewrite starts v2 sessions through the v2 owner socket and opens the PRs for pushed `v2/` branches from v1 (root, 2026-10-30). v1 reviews and merges v2's PRs until the approval flag lands in M3. From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback.
 3. **The rest of M2**, including the web room view, which UI builders check from inside v2 with computers.
 
 Acceptance:
