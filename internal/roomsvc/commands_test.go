@@ -151,3 +151,30 @@ func TestWorkflowInputNamedFields(t *testing.T) {
 	}
 	t.Fatal("audit missing")
 }
+
+func TestWorkflowInputPositional(t *testing.T) {
+	workflows, err := workflowcatalog.List(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, workflow := range workflows {
+		if workflow.Name != "fix-until" {
+			continue
+		}
+		raw, err := workflowInput(workflow, "FOO=bar go test ./...")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil || got.Command != "FOO=bar go test ./..." {
+			t.Fatalf("input %s: %+v, %v", raw, got, err)
+		}
+		if _, err := workflowInput(workflow, ""); err == nil {
+			t.Fatal("missing command accepted")
+		}
+		return
+	}
+	t.Fatal("fix-until missing")
+}
