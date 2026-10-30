@@ -84,6 +84,7 @@ var migrations = []func(dataDir string) error{
 	hooks.Migrate,
 	hooks.MigrateRuns,
 	hooks.MigrateDocuments,
+	hooks.MigrateUpdateRecipe,
 	hookinstall.Migrate,
 	cihealth.Migrate,
 	issuewatch.Migrate,

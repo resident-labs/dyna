@@ -8,13 +8,12 @@ from a terminal with `dyna git hooks`.
 
 See `dyna guide git`.
 
-A hook contains `name`, `event`, `command`, `cwd`, `slot`, `timeout`, `onFail`,
+A hook contains `name`, `event`, `command`, `cwd`, `timeout`, `onFail`,
 `addedBy`, and `addedAt`. Edits change only the supplied fields, preserve the
 creation records, and record `editedBy` and `editedAt`. Schedule hooks also contain `everyMinutes`.
 Timeouts use duration strings, such as `30s` or `5m`.
 `cwd` accepts `worktree`, `main`, or an absolute directory path.
-`slot` accepts `light` or `heavy`. Heavy hooks share the checks runner's slots.
-The timeout includes the slot wait and command run.
+The timeout includes the command run.
 
 Events are `worktree-created`, `before-land`, `after-land`, `pr-merged`,
 `main-updated`, `session-finish`, `session-turn-ended`, and `schedule`.
