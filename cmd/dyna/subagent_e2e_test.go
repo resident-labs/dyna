@@ -364,6 +364,13 @@ func (e *e2e) serveEngine() {
 	e.t.Helper()
 	e.t.Setenv("XDG_DATA_HOME", e.data)
 	e.t.Setenv("XDG_CONFIG_HOME", e.config)
+	// Worker tool homes prefer Dyna on PATH. Put the fixture binary first so
+	// an unrelated installed Dyna cannot receive the worker's commands.
+	bin := e.t.TempDir()
+	if err := os.Symlink(e.bin, filepath.Join(bin, "dyna")); err != nil {
+		e.t.Fatal(err)
+	}
+	e.t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "Post", Access: websvc.Write, Scope: websvc.ScopeOperate,
 		Method: func(ctx context.Context, req notify.PostRequest) (notify.Result, error) {
 			svc := notify.Default()
@@ -1129,17 +1136,14 @@ set -eu
 input=$(cat)
 # Sessions get no work journal.
 [ -z "${DYNA_AGENT_JOURNAL:-}" ] || { echo "session got a journal: $DYNA_AGENT_JOURNAL" >&2; exit 3; }
-case " $* " in
-  *" --resume "*)
+if [ -f "$WORK/child-address" ]; then
     printf '%s' "$input" > "$WORK/parent-followup-input"
     printf '%s\n' 'parent received explicit child post'
-    ;;
-  *)
+else
     child=$("$DYNA_BIN" subagent start --goal 'Check the left branch' --profile mock --name decoder --dir "$WORK" 'RESPOND: child job SLEEP:60000')
     printf '%s' "$child" > "$WORK/child-address"
     printf '%s\n' 'child started'
-    ;;
-esac
+fi
 `
 	e := newE2E(t,
 		profile.Profile{Name: "mock", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true},

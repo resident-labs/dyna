@@ -88,6 +88,7 @@ func TestJobCheckRejectsContradictions(t *testing.T) {
 // containers carry the run label and are removed afterwards, and the JUnit the
 // job uploaded as an artifact reaches the check's report directory.
 func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
+	t.Setenv("DYNA_CI_TRAILER", "")
 	dir := t.TempDir()
 	// The pinned binary is already installed, so the script skips the download.
 	actDir := filepath.Join(dir, "tools", "act-"+actVersion)
