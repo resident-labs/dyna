@@ -9,13 +9,13 @@ const code = await bundle({
   component: '../sessions/Session',
   format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8'),
   api: `export const api = {
-    commands: async () => [{ name: 'review', source: 'skill', description: 'Review code', args: [] }],
-    runCommand: async (...args) => { globalThis.commandArgs = args; return { message: { id: 'sent' }, deliveries: [], failed: [] } },
+    commands: async () => [{ name: 'review', source: 'skill', description: 'Review code', args: [] }, { name: 'deep-research', source: 'workflow', description: 'Research', args: [] }],
+    runCommand: async (...args) => { globalThis.commandArgs = args; return { kind: 'run', id: 'started' } },
   }`,
 })
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
 
-test('the DM menu runs a skill for its session', async () => {
+test('the DM menu starts a workflow for its session', async () => {
   const dom = installDom()
   for (const n of ['DOMParser', 'NodeFilter', 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.set(globalThis, n, Reflect.get(dom.window, n))
   Object.assign(globalThis, { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
@@ -39,11 +39,13 @@ test('the DM menu runs a skill for its session', async () => {
       await settle()
     }
     await type('/')
-    assert.match(target.querySelector('[role="option"]')?.textContent ?? '', /\/review/)
-    await type('/review check this')
+    assert.match(target.textContent ?? '', /Workflows/)
+    assert.match(target.textContent ?? '', /deep-research/)
+    await type('/deep-research check this')
     input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await settle()
-    assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'review', 'check this', 'repo:lead'])
+    assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'deep-research', 'check this', 'repo:lead'])
+    assert.equal(input.value, '')
   } finally {
     await ui.unmount(component)
     dom.window.close()
