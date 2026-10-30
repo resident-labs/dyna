@@ -46,7 +46,7 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 	if tag != want {
 		t.Fatalf("tag %s", tag)
 	}
-	if len(r.commands) != 2 || !strings.HasSuffix(r.commands[0], "'podman' 'image' 'exists' '"+tag+"'") || !strings.HasSuffix(r.commands[1], "'podman' 'build' '--tag' '"+tag+"' '-'") {
+	if len(r.commands) != 2 || !strings.HasSuffix(r.commands[0], "'podman' 'image' 'exists' '"+tag+"'") || !strings.HasSuffix(r.commands[1], "'podman' 'build' '-t' '"+tag+"' '-'") {
 		t.Fatalf("commands %v", r.commands)
 	}
 	i := bytes.IndexByte(r.input, '\n')
