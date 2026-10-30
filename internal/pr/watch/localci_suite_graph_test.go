@@ -48,6 +48,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 		"cross-build (darwin/amd64)", "cross-build (darwin/arm64)", "cross-build",
 	},
 	localci.SuiteComputerSmoke: {"computer-smoke"},
+	localci.Suite("next"):      {"next"},
 	localci.SuiteGo: {
 		"frontend test (0)", "frontend test (1)", "frontend test (2)", "frontend test (3)", "frontend test (4)", "frontend test (5)", "frontend",
 		"frontend-check", "go-static", "desktop", "go-test",
@@ -59,7 +60,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 
 // expectedTrials is the suite set a merge trial must run.
 var expectedTrials = []localci.Suite{
-	localci.SuiteRelay, localci.Suite("pi"), localci.SuiteGo, localci.SuiteCross, localci.SuiteComputerSmoke,
+	localci.SuiteRelay, localci.Suite("pi"), localci.SuiteGo, localci.SuiteCross, localci.SuiteComputerSmoke, localci.Suite("next"),
 }
 
 // reportedChecks is what a run of one suite leaves in a saved result: the name of
