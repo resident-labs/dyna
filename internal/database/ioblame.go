@@ -89,6 +89,14 @@ func ioBlame() string {
 		name  string
 		bytes uint64
 	}
+	// A writer that exited since the last reading leaves no write_bytes to
+	// read, so it cannot be ranked. The line reports how many were lost.
+	exited := 0
+	for pid := range prev.written {
+		if _, ok := cur.written[pid]; !ok {
+			exited++
+		}
+	}
 	var top []delta
 	for pid, w := range cur.written {
 		// A process missing from the earlier reading started since then.
@@ -101,12 +109,13 @@ func ioBlame() string {
 		top = top[:topWriters]
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "io: stalled %d ms since the last slow checkpoint; top writers:", (cur.stallMicros-prev.stallMicros)/1000)
+	fmt.Fprintf(&b, "io: stalled %d ms since the last slow checkpoint; top visible writers:", (cur.stallMicros-prev.stallMicros)/1000)
 	if len(top) == 0 {
 		b.WriteString(" none")
 	}
 	for _, d := range top {
 		fmt.Fprintf(&b, " %s[%d] %d KB", d.name, d.pid, d.bytes>>10)
 	}
+	fmt.Fprintf(&b, "; %d earlier processes exited and are not ranked", exited)
 	return b.String()
 }
