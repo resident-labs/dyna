@@ -48,6 +48,7 @@ type Event struct {
 	Room     string `json:"room,omitempty"`
 	Name     string `json:"name,omitempty"`
 	Snapshot bool   `json:"snapshot,omitempty"`
+	Force    bool   `json:"force,omitempty"`
 }
 
 type document struct {

@@ -273,7 +273,7 @@ func bindings(s services) []websvc.Binding {
 				if err != nil {
 					return hooks.Run{}, err
 				}
-				return runUpdate(ctx, s.hooks, cfg.Source, cfg.ToolPath)
+				return runUpdate(ctx, s.hooks, cfg.Source, cfg.ToolPath, true)
 			}
 			return s.hooks.RunBuiltin(ctx, hooks.Event{Session: by}, name)
 		}},
