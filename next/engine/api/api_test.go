@@ -166,3 +166,47 @@ func TestEnginePrincipalCannotCallBoxMethod(t *testing.T) {
 		t.Fatalf("status = %d", w.Code)
 	}
 }
+
+func TestRestartReplacesStaleSockets(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "boxes"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(dir, "owner.sock"), filepath.Join(dir, "boxes", "box-a.sock")} {
+		l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.SetUnlinkOnClose(false)
+		if err := l.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewSockets(New(&fakeService{}, nil), dir, uint32(os.Getuid()), nil)
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.OpenOwner(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddBox("box-a", "session-a", "room-a"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeLockProtectsLiveSockets(t *testing.T) {
+	dir := t.TempDir()
+	first := NewSockets(New(&fakeService{}, nil), dir, uint32(os.Getuid()), nil)
+	t.Cleanup(func() { _ = first.Close() })
+	if err := first.OpenOwner(); err != nil {
+		t.Fatal(err)
+	}
+	second := NewSockets(New(&fakeService{}, nil), dir, uint32(os.Getuid()), nil)
+	t.Cleanup(func() { _ = second.Close() })
+	if err := second.OpenOwner(); err == nil {
+		t.Fatal("second engine acquired live runtime")
+	}
+	c, err := net.Dial("unix", filepath.Join(dir, "owner.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close()
+}

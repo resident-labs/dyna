@@ -76,6 +76,7 @@ type Sockets struct {
 	uid     uint32
 	peer    PeerUID
 	owner   *socket
+	lock    *os.File
 	boxes   map[contract.BoxID]*socket
 }
 
@@ -91,6 +92,9 @@ func (s *Sockets) OpenOwner() error {
 	defer s.mu.Unlock()
 	if s.owner != nil {
 		return fmt.Errorf("owner socket already open")
+	}
+	if err := s.acquire(); err != nil {
+		return err
 	}
 	path := filepath.Join(s.runtime, "owner.sock")
 	l, err := listen(path)
@@ -114,6 +118,9 @@ func (s *Sockets) AddBox(id contract.BoxID, session contract.SessionID, room con
 	if _, ok := s.boxes[id]; ok {
 		return fmt.Errorf("box socket already open")
 	}
+	if err := s.acquire(); err != nil {
+		return err
+	}
 	path := filepath.Join(s.runtime, "boxes", string(id)+".sock")
 	l, err := listen(path)
 	if err != nil {
@@ -126,8 +133,58 @@ func (s *Sockets) AddBox(id contract.BoxID, session contract.SessionID, room con
 	return nil
 }
 
+// acquire serializes socket cleanup across engine processes. The lock file is
+// never unlinked, so a second process cannot lock a replacement inode.
+func (s *Sockets) acquire() error {
+	if s.lock != nil {
+		return nil
+	}
+	if err := os.MkdirAll(s.runtime, 0700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(s.runtime, "sockets.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("socket runtime is in use: %w", err)
+	}
+	s.lock = f
+	return nil
+}
+
 func listen(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, err
+	}
+	// A crashed process can leave a socket inode. Never remove a live
+	// listener or a non-socket file. The runtime lock excludes other engines.
+	info, err := os.Lstat(path)
+	if err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("socket path is not a socket: %s", path)
+		}
+		conn, dialErr := net.Dial("unix", path)
+		if dialErr == nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("socket is already in use: %s", path)
+		}
+		if !errors.Is(dialErr, syscall.ECONNREFUSED) && !errors.Is(dialErr, syscall.ENOENT) {
+			return nil, dialErr
+		}
+		current, statErr := os.Lstat(path)
+		if statErr == nil {
+			if !os.SameFile(info, current) {
+				return nil, fmt.Errorf("socket path changed: %s", path)
+			}
+			if err := os.Remove(path); err != nil {
+				return nil, err
+			}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return nil, statErr
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	l, err := net.Listen("unix", path)
@@ -178,6 +235,12 @@ func (s *Sockets) Close() error {
 			first = err
 		}
 		delete(s.boxes, id)
+	}
+	if s.lock != nil {
+		if err := s.lock.Close(); first == nil {
+			first = err
+		}
+		s.lock = nil
 	}
 	return first
 }
