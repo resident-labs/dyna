@@ -213,20 +213,46 @@ func (x Executor) sshOptions() []string {
 	if !filepath.IsAbs(runtime) {
 		runtime = filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
 	}
-	dir := filepath.Join(runtime, "dyna", "ssh")
+	return x.sshOptionsIn(runtime, filepath.Join("/tmp", fmt.Sprintf("dyna-ssh-%d", os.Getuid())))
+}
+
+// sshOptionsIn chooses a short, private socket directory. The fallback is a
+// single user-owned directory under /tmp, not a path supplied by SSH config.
+func (x Executor) sshOptionsIn(runtime, fallback string) []string {
 	key := sha256.Sum256([]byte(x.Node.Name + "\x00" + x.Node.SSH))
-	socket := filepath.Join(dir, fmt.Sprintf("%x.sock", key[:8]))
+	name := fmt.Sprintf("%x.sock", key[:8])
+	dir := filepath.Join(runtime, "dyna", "ssh")
+	socket := filepath.Join(dir, name)
+	err := error(nil)
 	if len(socket) >= 104 {
-		dir = filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "dyna", "ssh")
-		socket = filepath.Join(dir, fmt.Sprintf("%x.sock", key[:8]))
+		err = errors.New("runtime socket path is too long")
+	} else {
+		err = os.MkdirAll(dir, 0700)
+		if err == nil {
+			err = os.Chmod(dir, 0700)
+		}
+	}
+	if err != nil {
+		socket = filepath.Join(fallback, name)
+		err = os.Mkdir(fallback, 0700)
+		if os.IsExist(err) {
+			err = nil
+		}
+		if err == nil {
+			var info os.FileInfo
+			info, err = os.Lstat(fallback)
+			if err == nil {
+				stat, ok := info.Sys().(*syscall.Stat_t)
+				if !ok || !info.IsDir() || stat.Uid != uint32(os.Geteuid()) || len(socket) >= 104 {
+					err = errors.New("unsafe SSH socket directory")
+				}
+			}
+		}
+		if err == nil {
+			err = os.Chmod(fallback, 0700)
+		}
 	}
 	options := []string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(x.Node.SSHConnectTimeout)}
-	// A host without a usable runtime folder must still be able to use SSH.
-	// Explicitly disable sharing there, independent of the owner's config.
-	err := os.MkdirAll(dir, 0700)
-	if err == nil {
-		err = os.Chmod(dir, 0700)
-	}
 	if err != nil {
 		options = append(options, "-o", "ControlMaster=no", "-o", "ControlPath=none")
 	} else {
