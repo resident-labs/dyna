@@ -69,8 +69,9 @@ type nodeCheck struct {
 	resources checkResources
 	// event is the GitHub event a job check runs, and branch the ref a push
 	// event names. A cache-warming job is scoped to the default branch.
-	event  string
-	branch string
+	event   string
+	branch  string
+	runKind string
 }
 
 // sccachePortBase is the first port a check's own sccache server may use. A
@@ -217,6 +218,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		// report and the command agree on what the run granted.
 		for i := range checks {
 			checks[i].resources = clampCheckResources(checks[i], node)
+			if req.Source.Trial {
+				checks[i].runKind = "trial"
+			} else if req.Source.Kind == jobs.CheckKindPullRequest {
+				checks[i].runKind = "pr"
+			}
 		}
 		return nil
 	}
@@ -1476,11 +1482,11 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		// act sees no host environment: a session token, an account key or a
 		// harness variable on this machine must never reach a job container. The
-		// allow-list is the act.env file next to the event, which is empty unless
-		// a repository needs one.
+		// allow-list is the act.env file next to the event, which holds only
+		// the run metadata.
 		actHome := path.Join(reportDir, "home")
 		allowList := path.Join(reportDir, "act.env")
-		setup += "mkdir -p " + q(actHome) + "; : > " + q(allowList) + "; "
+		setup += "mkdir -p " + q(actHome) + "; printf '%s\\n' " + q("DYNA_CI_RUN="+check.runKind) + " " + q("DYNA_CI_BASE="+baseCommit) + " > " + q(allowList) + "; "
 		// The runtime socket is the machine's setting, not the host environment:
 		// a rootless Podman machine names its own socket and act talks to it.
 		if containerSocket == "" {
@@ -1543,6 +1549,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		for key, value := range check.env {
 			environment[key] = value
 		}
+		environment["DYNA_CI_RUN"], environment["DYNA_CI_BASE"] = check.runKind, baseCommit
 		serverPort := ""
 		if _, set := environment["SCCACHE_SERVER_PORT"]; !set {
 			serverPort = " SCCACHE_SERVER_PORT=" + strconv.Itoa(sccachePortBase+port)
@@ -1633,6 +1640,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	for key, value := range check.env {
 		environment[key] = value
 	}
+	environment["DYNA_CI_RUN"], environment["DYNA_CI_BASE"] = check.runKind, baseCommit
 	// A check that starts sccache must not lose it to another check's cleanup:
 	// the port follows the queue index this check holds, and the cache directory
 	// stays where the repository put it.

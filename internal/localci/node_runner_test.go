@@ -1663,3 +1663,19 @@ func TestQueuedRunMovesBeforeAnyCheckStarts(t *testing.T) {
 		t.Fatalf("queue after move: %d running, %d waiting, %v", running, waiting, err)
 	}
 }
+
+func TestCheckScriptsExposeRunMetadata(t *testing.T) {
+	base := strings.Repeat("b", 40)
+	for _, check := range []nodeCheck{
+		{id: "host", host: true, runKind: "trial"},
+		{id: "container", image: "image", runKind: "trial"},
+		{id: "job", job: &JobRef{Name: "test"}, runKind: "trial"},
+	} {
+		script := nodeCheckScript(Node{Name: "local"}, "/base", "/cache", "/run", "run", strings.Repeat("a", 40), base, check, time.Minute, 0, false, DefaultActImage, "", "")
+		for _, value := range []string{"DYNA_CI_RUN=trial", "DYNA_CI_BASE=" + base} {
+			if !strings.Contains(script, value) {
+				t.Errorf("%s script does not pass %s", check.id, value)
+			}
+		}
+	}
+}
