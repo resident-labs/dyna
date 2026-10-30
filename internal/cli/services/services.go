@@ -1,15 +1,14 @@
-// Package services reads and changes Dyna's services: the librarian, the PR
-// reviewers and the voice session. A service is not a session in the room's
-// hierarchy, so it never appears in `dyna room members` or `@children`; this
-// command is the way to list, enable, profile, restart and read one.
+// Package services reads and changes Dyna's services: the work Dyna does by
+// itself, such as the PR reviewers, the librarian, Voice and the machine's
+// background passes. A service is not a session in the room's hierarchy, so it
+// never appears in `dyna room members` or `@children`.
 //
-// Every value here comes from an engine call that the Services page also
-// makes, so the two front ends cannot disagree about what a service is.
+// The list comes from one engine call, ServiceRegistry, which the Services page
+// also reads, so the two front ends cannot disagree about what a service is.
 package services
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,29 +20,30 @@ import (
 
 	"dyna-agent/internal/cli/jsonout"
 	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/librarian"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/repoid"
-	"dyna-agent/internal/room"
-	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/serviceregistry"
 )
 
 // ServiceID names one Dyna service. The set is closed, so a mistyped service
 // is an error and never a new one.
-type ServiceID string
+type ServiceID = serviceregistry.ID
 
-// The services this command manages.
+// The services that run an agent or hold a session.
 const (
-	Library  ServiceID = "library"
-	Reviewer ServiceID = "reviewer"
-	Voice    ServiceID = "voice"
+	Library  = serviceregistry.IDLibrary
+	Reviewer = serviceregistry.IDReviews
+	Voice    = serviceregistry.IDVoice
 )
 
-// serviceIDs is every service, in the order `list` shows them.
-var serviceIDs = []ServiceID{Library, Reviewer, Voice}
-
 // aliases accept the words people and prompts use for a service.
-var aliases = map[string]ServiceID{"librarian": Library, "reviewers": Reviewer, "review": Reviewer, "voice-call": Voice}
+var aliases = map[string]ServiceID{
+	"librarian": Library, "reviewers": Reviewer, "review": Reviewer, "reviews": Reviewer,
+	"voice-call": Voice, "merge": serviceregistry.IDMergeQueue, "checkins": serviceregistry.IDParentCheckIns,
+	"update": serviceregistry.IDUpdates, "usage": serviceregistry.IDAccountUsage,
+}
 
 // ParseServiceID accepts a service id or a common alias.
 func ParseServiceID(text string) (ServiceID, error) {
@@ -54,7 +54,7 @@ func ParseServiceID(text string) (ServiceID, error) {
 	if alias, ok := aliases[string(id)]; ok {
 		return alias, nil
 	}
-	for _, known := range serviceIDs {
+	for _, known := range serviceregistry.IDs() {
 		if id == known {
 			return id, nil
 		}
@@ -63,30 +63,12 @@ func ParseServiceID(text string) (ServiceID, error) {
 }
 
 func serviceIDNames() []string {
-	names := make([]string, len(serviceIDs))
-	for i, id := range serviceIDs {
+	ids := serviceregistry.IDs()
+	names := make([]string, len(ids))
+	for i, id := range ids {
 		names[i] = string(id)
 	}
 	return names
-}
-
-// Row is one service as `dyna services list` and `show` show it. Switch is the
-// command that turns the service on or off, and is empty when it has none.
-type Row struct {
-	ID       ServiceID `json:"id"`
-	Name     string    `json:"name"`
-	Enabled  bool      `json:"enabled"`
-	Switch   string    `json:"switch,omitempty"`
-	State    string    `json:"state"`
-	Detail   string    `json:"detail,omitempty"`
-	Profile  string    `json:"profile"`
-	Pinned   string    `json:"pinned,omitempty"`
-	Source   string    `json:"source,omitempty"`
-	LastRun  string    `json:"lastRun,omitempty"`
-	NextRun  string    `json:"nextRun,omitempty"`
-	Session  string    `json:"session,omitempty"`
-	Profiles []string  `json:"profiles,omitempty"`
-	Error    string    `json:"error,omitempty"`
 }
 
 // engineCaller is the engine client a command uses. Its shape mirrors
@@ -105,66 +87,6 @@ type serviceRow struct {
 	Source   string   `json:"source"`
 	Reason   string   `json:"reason"`
 	Profiles []string `json:"profiles"`
-}
-
-type reviewerSlot struct {
-	Session *struct {
-		Address string `json:"address"`
-		Status  string `json:"status"`
-	} `json:"session"`
-	Current *struct {
-		PR    int    `json:"pr"`
-		Title string `json:"title"`
-	} `json:"current"`
-}
-
-type reviewerStatus struct {
-	Enabled bool `json:"enabled"`
-	// Profile is the one the next review uses; it backs the profile column
-	// when the service list cannot be read.
-	Profile   string         `json:"profile"`
-	LastError string         `json:"lastError"`
-	Reviewers []reviewerSlot `json:"reviewers"`
-	Queue     []struct {
-		PR int `json:"pr"`
-	} `json:"queue"`
-	Recent []struct {
-		PR      int       `json:"pr"`
-		Verdict string    `json:"verdict"`
-		At      time.Time `json:"at"`
-	} `json:"recent"`
-}
-
-type settingRow struct {
-	Key   string          `json:"key"`
-	Value json.RawMessage `json:"value"`
-	// Display is the value as the app shows it, used when Value has no text.
-	Display string `json:"display"`
-}
-
-type hookRow struct {
-	Name         string `json:"name"`
-	Event        string `json:"event"`
-	EveryMinutes int    `json:"everyMinutes"`
-	Disabled     bool   `json:"disabled"`
-}
-
-type hookRunRow struct {
-	Result    string    `json:"result"`
-	StartedAt time.Time `json:"startedAt"`
-}
-
-type hookSummaryRow struct {
-	Hook    hookRow     `json:"hook"`
-	LastRun *hookRunRow `json:"lastRun"`
-}
-
-type voiceStatus struct {
-	Available   bool   `json:"available"`
-	Unavailable string `json:"unavailable"`
-	Live        bool   `json:"live"`
-	Room        string `json:"room"`
-	Error       string `json:"error"`
 }
 
 type roomRow struct {
@@ -213,59 +135,6 @@ func resolveRefs(roomFlag, repoFlag string) refs {
 	return out
 }
 
-// facts is everything the reads said. A read that failed keeps its message so
-// the row can say why instead of showing a wrong value.
-type facts struct {
-	refs     refs
-	services []serviceRow
-	reviewer reviewerStatus
-	settings []settingRow
-	hooks    []hookSummaryRow
-	// deferred is when the librarian's deferred wake is due; nil when none is deferred.
-	deferred *time.Time
-	voice    voiceStatus
-	errs     map[string]string
-}
-
-func (f facts) err(method string) string {
-	if f.errs == nil {
-		return ""
-	}
-	return f.errs[method]
-}
-
-// readFacts asks the engine for the values a row shows. It returns no error:
-// a service the engine could not describe keeps its row, with the reason.
-func readFacts(ctx context.Context, call engineCaller, r refs) facts {
-	r = resolve(ctx, call, r)
-	out := facts{refs: r, errs: map[string]string{}}
-	if out.refs.Room != "" {
-		// A service list that cannot be read leaves the profile columns empty;
-		// the call that owns each profile reports its own error.
-		_ = call.Call(ctx, "ListServices", []any{out.refs.Room}, &out.services)
-		if err := call.Call(ctx, "ReviewerStatus", []any{out.refs.Room}, &out.reviewer); err != nil {
-			out.errs["ReviewerStatus"] = err.Error()
-		}
-	} else {
-		out.errs["room"] = "no room; pass --room <room>"
-	}
-	if err := call.Call(ctx, "Settings", nil, &out.settings); err != nil {
-		out.errs["Settings"] = err.Error()
-	}
-	if out.refs.Repo != "" {
-		if err := call.Call(ctx, "HookSummary", []any{out.refs.Repo}, &out.hooks); err != nil {
-			out.errs["HookSummary"] = err.Error()
-		}
-		if err := call.Call(ctx, "LibrarianDeferred", []any{out.refs.Repo}, &out.deferred); err != nil {
-			out.errs["LibrarianDeferred"] = err.Error()
-		}
-	}
-	if err := call.Call(ctx, "VoiceStatus", nil, &out.voice); err != nil {
-		out.errs["VoiceStatus"] = err.Error()
-	}
-	return out
-}
-
 // resolve names the room and the repository a command works in. The engine
 // names the room, so a flag or stamp that carries an ID still gives the name a
 // session address needs, and the room's own repository applies unless --repo
@@ -306,222 +175,16 @@ func resolveRoom(ctx context.Context, call engineCaller, r refs) (roomRow, bool)
 	return roomRow{}, false
 }
 
-// textSetting reads a settings value that is one string.
-func (f facts) textSetting(key string) (string, bool) {
-	for _, item := range f.settings {
-		if item.Key != key {
-			continue
-		}
-		var text string
-		if err := json.Unmarshal(item.Value, &text); err == nil {
-			return text, true
-		}
-		return item.Display, true
-	}
-	return "", false
-}
-
-// listSetting reads a settings value that is a JSON list of strings.
-func (f facts) listSetting(key string) ([]string, bool) {
-	for _, item := range f.settings {
-		if item.Key != key {
-			continue
-		}
-		var list []string
-		if err := json.Unmarshal(item.Value, &list); err != nil {
-			return nil, false
-		}
-		return list, true
-	}
-	return nil, false
-}
-
-// service finds one ListServices row.
-func (f facts) service(id ServiceID) (serviceRow, bool) {
-	role := string(id)
-	if id == Library {
-		role = subagent.RoleLibrarian
-	}
-	for _, row := range f.services {
-		if row.Role == role {
-			return row, true
-		}
-	}
-	return serviceRow{}, false
-}
-
-// Rows builds one row per service from the engine's reads.
-func Rows(f facts) []Row {
-	return []Row{libraryRow(f), reviewerRow(f), voiceRow(f)}
-}
-
-func libraryRow(f facts) Row {
-	row := Row{ID: Library, Name: "Librarian", Switch: "dyna services enable|disable " + string(Library)}
-	if listed, ok := f.service(Library); ok {
-		row.Pinned, row.Source, row.Profiles = listed.Pinned, listed.Source, listed.Profiles
-	}
-	repos, known := f.listSetting("library.enabled")
-	// ListServices owns the room pin, including the global default when the
-	// room has no pin. Settings is only the fallback when that list is missing.
-	if listed, ok := f.service(Library); ok {
-		row.Profile = listed.Profile
-		if listed.Pinned != "" || listed.Source != "" {
-			row.Pinned, row.Source = listed.Pinned, listed.Source
-		}
-	} else if profile, ok := f.textSetting("library.profile"); ok {
-		row.Profile, row.Pinned = profile, profile
-		row.Source = "pinned"
-		if profile == "" {
-			row.Source = "auto"
-		}
-	}
-	if !known {
-		row.Error = f.errOr("Settings", "librarian settings could not be read")
-		row.State = "unknown"
-		return row
-	}
-	if f.refs.Repo == "" {
-		row.Error = "no repository; run this inside one or pass --repo <path>"
-		row.State = "unknown"
-		return row
-	}
-	for _, path := range repos {
-		if filepath.Clean(path) == filepath.Clean(f.refs.Repo) {
-			row.Enabled = true
-		}
-	}
-	if f.refs.Room != "" {
-		row.Session = f.refs.Room + ":" + subagent.LibrarianName
-	}
-	// The librarian's own hook runs every wake. Its newest run is the last pass.
-	main := f.hookNamed("librarian-main")
-	switch {
-	case !row.Enabled:
-		row.State, row.Detail = "off", "Off for "+f.refs.Repo
-	case main.LastRun != nil && main.LastRun.Result == "pending":
-		row.State, row.Detail = "running", "Keeps the feature map current"
-	default:
-		row.State, row.Detail = "idle", "Keeps the feature map current"
-	}
-	if main.LastRun != nil {
-		row.LastRun = stamp(main.LastRun.StartedAt)
-	}
-	// The next pass is the engine's deferred wake. It is empty when none is deferred.
-	if row.Enabled && f.deferred != nil {
-		row.NextRun = stamp(*f.deferred)
-	}
-	if listed, ok := f.service(Library); ok && strings.HasPrefix(listed.Reason, "waiting:") {
-		row.State, row.Detail = "waiting", listed.Reason
-	}
-	return row
-}
-
-func reviewerRow(f facts) Row {
-	row := Row{ID: Reviewer, Name: "PR reviewers", Switch: "dyna services enable|disable " + string(Reviewer)}
-	if listed, ok := f.service(Reviewer); ok {
-		row.Profile, row.Pinned, row.Source, row.Profiles, row.Error = listed.Profile, listed.Pinned, listed.Source, listed.Profiles, listed.Reason
-	}
-	st := f.reviewer
-	if row.Profile == "" && st.Profile != "" {
-		row.Profile, row.Source = st.Profile, "pinned"
-	}
-	switch {
-	case f.errs["room"] != "":
-		row.State, row.Error = "unknown", f.errs["room"]
-	case f.errs["ReviewerStatus"] != "":
-		row.State, row.Error = "unknown", f.errs["ReviewerStatus"]
-	case !st.Enabled:
-		row.State, row.Detail = "off", "Reviews are off for this room"
-	case st.LastError != "":
-		row.State, row.Detail = "error", st.LastError
-	case len(st.Reviewers) > 0:
-		row.State = "running"
-		if current := st.Reviewers[0].Current; current != nil {
-			row.Detail = fmt.Sprintf("reviewing #%d · %s", current.PR, current.Title)
-		}
-	default:
-		row.State, row.Detail = "waiting", "nothing to review now"
-	}
-	row.Enabled = st.Enabled && f.errs["ReviewerStatus"] == ""
-	for _, slot := range st.Reviewers {
-		if slot.Session != nil && slot.Session.Address != "" {
-			row.Session = slot.Session.Address
-			break
-		}
-	}
-	if len(st.Recent) > 0 {
-		row.LastRun = stamp(st.Recent[len(st.Recent)-1].At)
-	}
-	if len(st.Queue) > 0 {
-		row.NextRun = fmt.Sprintf("%d waiting for review", len(st.Queue))
-	}
-	if listed, ok := f.service(Reviewer); ok && strings.HasPrefix(listed.Reason, "waiting:") {
-		row.State, row.Detail = "waiting", listed.Reason
-		if listed.Pinned != "" {
-			row.Profile, row.Pinned, row.Source = listed.Pinned, listed.Pinned, "pinned"
-		}
-	}
-	return row
-}
-
-func voiceRow(f facts) Row {
-	row := Row{ID: Voice, Name: "Voice"}
-	v := f.voice
-	switch {
-	case f.errs["VoiceStatus"] != "":
-		row.State, row.Error = "unknown", f.errs["VoiceStatus"]
-	case !v.Available:
-		row.State, row.Detail = "off", strings.TrimSpace(v.Unavailable)
-	default:
-		row.Enabled = true
-		row.State, row.Detail = "idle", "Started and stopped per call"
-		if v.Live {
-			row.State, row.Detail = "in a call", "In a call in "+v.Room
-			row.Session = v.Room + ":" + room.VoiceAgent
-		}
-		if v.Error != "" {
-			row.Detail = v.Error
-		}
-	}
-	return row
-}
-
-// errOr returns the recorded read error, or a fallback sentence.
-func (f facts) errOr(method, fallback string) string {
-	if err := f.err(method); err != "" {
-		return err
-	}
-	return fallback
-}
-
-// hookNamed finds one repository hook summary. A hook the repository does not
-// have reports as an empty summary.
-func (f facts) hookNamed(name string) hookSummaryRow {
-	for _, row := range f.hooks {
-		if row.Hook.Name == name {
-			return row
-		}
-	}
-	return hookSummaryRow{}
-}
-
-// stamp is a stored time as the local clock reads it. A zero time is empty.
-func stamp(at time.Time) string {
-	if at.IsZero() {
-		return ""
-	}
-	return at.Local().Format("2006-01-02 15:04")
-}
-
 // NewCommand is `dyna services`: the services list, and the commands that
 // change or read one service.
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "services",
-		Short: "List and manage Dyna's services: the librarian, the PR reviewers and Voice",
-		Long: "A service is not a session in the room's hierarchy: the librarian, the PR reviewers\n" +
-			"and Voice never appear in `dyna room members`, `@children` or a parent check-in.\n" +
-			"Read or change one here or on the app's Services page.\n\n" +
+		Short: "List and manage what Dyna runs by itself: reviews, the librarian, Voice and background passes",
+		Long: "A service is work Dyna does by itself. A hook is a command you add. Services are not\n" +
+			"sessions in the room's hierarchy, so they never appear in `dyna room members`,\n" +
+			"`@children` or a parent check-in. `list` shows all of them in the groups the app's\n" +
+			"Services page uses; both read the same engine list.\n\n" +
 			"Change a service's profile here or there, never as part of a bulk move of sessions.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error { return c.Help() },
@@ -554,7 +217,10 @@ func listCmd() *cobra.Command {
 		Short: "Show each service, its switch, profile, state and next run",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			rows := Rows(readFacts(c.Context(), client(), resolveRefs(o.room, o.repo)))
+			rows, err := readRegistry(c.Context(), client(), resolveRefs(o.room, o.repo))
+			if err != nil {
+				return err
+			}
 			if o.asJSON {
 				return jsonout.Write(c.OutOrStdout(), rows)
 			}
@@ -577,7 +243,7 @@ func showCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			row, err := findRow(readFacts(c.Context(), client(), resolveRefs(o.room, o.repo)), id)
+			row, err := findRow(c.Context(), client(), resolveRefs(o.room, o.repo), id)
 			if err != nil {
 				return err
 			}
@@ -656,9 +322,39 @@ func setEnabled(ctx context.Context, call engineCaller, r refs, id ServiceID, on
 		}
 		fmt.Fprintf(out, "the librarian is on for %s in room %s\n", enabled.Repo.Main, enabled.Room)
 		return nil
+	case serviceregistry.IDMergeQueue:
+		if r.Room == "" {
+			return fmt.Errorf("no room; pass --room <room>")
+		}
+		if err := call.Call(ctx, "SetMergePaused", []any{r.Room, !on}, nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "the merge queue is %s for room %s\n", stateWord(on), r.Room)
+		return nil
+	case serviceregistry.IDUpdates:
+		if r.Repo == "" {
+			return fmt.Errorf("no repository; run this inside one or pass --repo <path>")
+		}
+		off := !on
+		if err := call.Call(ctx, "EditHook", []any{r.Repo, updateHook, hooks.Patch{Disabled: &off}}, nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "updates are %s for %s\n", stateWord(on), r.Repo)
+		return nil
+	case serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
+		off := !on
+		if err := call.Call(ctx, "EditGlobalHook", []any{string(id), hooks.Patch{Disabled: &off}}, nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s is %s\n", id, stateWord(on))
+		return nil
 	}
-	return fmt.Errorf("voice has no switch: it runs one call at a time, so `dyna services enable voice` changes nothing")
+	return fmt.Errorf("%s has no switch: it always runs", id)
 }
+
+// updateHook is the repository hook that installs a new Dyna build; the
+// Updates service reads and switches it.
+const updateHook = "self-update"
 
 func stateWord(on bool) string {
 	if on {
@@ -727,8 +423,8 @@ func setProfile(ctx context.Context, call engineCaller, r refs, id ServiceID, pr
 		if err := call.Call(ctx, "SetServiceProfile", []any{r.Room, string(id), profile}, nil); err != nil {
 			return err
 		}
-	case Voice:
-		return fmt.Errorf("voice has no profile of its own: its calls use the voice provider settings")
+	default:
+		return fmt.Errorf("%s runs no agent of its own, so it has no profile", id)
 	}
 	chosen := profile
 	if chosen == "" {
@@ -741,8 +437,8 @@ func setProfile(ctx context.Context, call engineCaller, r refs, id ServiceID, pr
 // setProfileAll writes one service profile in every room. The engine refuses
 // a caller that is not the owner before it writes.
 func setProfileAll(ctx context.Context, call engineCaller, id ServiceID, profile string, out io.Writer) error {
-	if id == Voice {
-		return fmt.Errorf("voice has no profile of its own: its calls use the voice provider settings")
+	if id != Reviewer && id != Library {
+		return fmt.Errorf("%s runs no agent of its own, so it has no profile", id)
 	}
 	if err := call.Call(ctx, "SetServiceProfileAll", []any{string(id), profile}, nil); err != nil {
 		return err
@@ -818,7 +514,7 @@ func restart(ctx context.Context, call engineCaller, r refs, id ServiceID, out i
 		fmt.Fprintf(out, "librarian %s %s\n", result.Action, result.Reason)
 		return nil
 	}
-	return fmt.Errorf("voice has nothing to restart: it starts and stops with each call")
+	return fmt.Errorf("%s has nothing to restart; only the reviewers and the librarian take a turn on request", id)
 }
 
 func logCmd() *cobra.Command {
@@ -849,12 +545,12 @@ func showLog(ctx context.Context, call engineCaller, r refs, id ServiceID, turn 
 		fmt.Fprintln(out, "Voice keeps no session: each call ends with the call. Its posts are in `dyna room log <room>`.")
 		return nil
 	}
-	row, err := findRow(readFacts(ctx, call, r), id)
+	row, err := findRow(ctx, call, r, id)
 	if err != nil {
 		return err
 	}
 	if row.Session == "" {
-		return fmt.Errorf("%s has no session now: %s", id, firstNonEmpty(row.Detail, "it has not started"))
+		return fmt.Errorf("%s has no session now; only services that run an agent have one", id)
 	}
 	var session struct {
 		Turns []struct {
@@ -888,72 +584,114 @@ func showLog(ctx context.Context, call engineCaller, r refs, id ServiceID, turn 
 	return nil
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
+// readRegistry reads the service list the Services page reads.
+func readRegistry(ctx context.Context, call engineCaller, r refs) ([]serviceregistry.Service, error) {
+	r = resolve(ctx, call, r)
+	if r.Room == "" {
+		return nil, fmt.Errorf("no room; pass --room <room>")
 	}
-	return ""
+	var rows []serviceregistry.Service
+	if err := call.Call(ctx, "ServiceRegistry", []any{r.Room}, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
-// findRow builds the rows once and returns the requested one.
-func findRow(f facts, id ServiceID) (Row, error) {
-	for _, row := range Rows(f) {
+func findRow(ctx context.Context, call engineCaller, r refs, id ServiceID) (serviceregistry.Service, error) {
+	rows, err := readRegistry(ctx, call, r)
+	if err != nil {
+		return serviceregistry.Service{}, err
+	}
+	for _, row := range rows {
 		if row.ID == id {
 			return row, nil
 		}
 	}
-	return Row{}, fmt.Errorf("unknown service %q", id)
+	return serviceregistry.Service{}, fmt.Errorf("unknown service %q", id)
 }
 
-func printRows(out io.Writer, rows []Row) {
-	fmt.Fprintf(out, "%-9s %-4s %-12s %-12s %-16s %-16s %s\n", "SERVICE", "ON", "PROFILE", "STATE", "LAST RUN", "NEXT RUN", "SESSION")
+var groupTitles = map[serviceregistry.Group]string{
+	serviceregistry.GroupPullRequests: "Pull requests",
+	serviceregistry.GroupAgents:       "Agents",
+	serviceregistry.GroupThisComputer: "This computer",
+}
+
+// printRows prints the rows in the groups the Services page uses.
+func printRows(out io.Writer, rows []serviceregistry.Service) {
+	var group serviceregistry.Group
 	for _, row := range rows {
-		fmt.Fprintf(out, "%-9s %-4s %-12s %-12s %-16s %-16s %s\n", row.ID, yesNo(row.Enabled), profileText(row), row.State, dash(row.LastRun), dash(row.NextRun), dash(row.Session))
+		if row.Group != group {
+			group = row.Group
+			fmt.Fprintf(out, "\n%s\n", groupTitles[group])
+			fmt.Fprintf(out, "  %-18s %-7s %-11s %-13s %-17s %-17s %s\n", "SERVICE", "SWITCH", "STATE", "PROFILE", "LAST RUN", "NEXT RUN", "NOTE")
+		}
+		fmt.Fprintf(out, "  %-18s %-7s %-11s %-13s %-17s %-17s %s\n", row.ID, switchText(row), row.State, dash(row.Profile), stamp(row.LastRun), stamp(row.NextRun), detailText(row))
 	}
 }
 
-// profileText is the profile column: the pinned profile, auto for a service
-// that ranks one each turn, and a dash for a service with none.
-func profileText(row Row) string {
-	if row.Profile != "" {
-		return row.Profile
-	}
-	if row.ID == Voice {
-		return "-"
-	}
-	return "auto"
-}
-
-func printRow(out io.Writer, row Row) {
-	fmt.Fprintf(out, "service: %s\nname:    %s\nenabled: %s\nstate:   %s\nprofile: %s", row.ID, row.Name, yesNo(row.Enabled), row.State, profileText(row))
-	if row.Source != "" {
-		fmt.Fprintf(out, " (%s)", row.Source)
-	}
-	fmt.Fprintln(out)
+func printRow(out io.Writer, row serviceregistry.Service) {
+	fmt.Fprintf(out, "service:     %s\nname:        %s\ngroup:       %s\nabout:       %s\nstate:       %s\n", row.ID, row.Label, groupTitles[row.Group], row.Description, row.State)
 	for _, line := range []struct{ label, value string }{
-		{"switch", row.Switch},
-		{"detail", row.Detail},
-		{"last", row.LastRun},
-		{"next", row.NextRun},
+		{"note", detailText(row)},
+		{"switch", switchText(row)},
+		{"profile", row.Profile},
 		{"session", row.Session},
-		{"error", row.Error},
+		{"last run", stamp(row.LastRun)},
+		{"next run", stamp(row.NextRun)},
+		{"settings", strings.Join(row.SettingsKeys, ", ")},
 	} {
-		if line.value != "" {
-			fmt.Fprintf(out, "%-9s%s\n", line.label+":", line.value)
+		if line.value != "" && line.value != "-" {
+			fmt.Fprintf(out, "%-13s%s\n", line.label+":", line.value)
 		}
 	}
-	if len(row.Profiles) > 0 {
-		fmt.Fprintf(out, "profiles: %s\n", strings.Join(row.Profiles, ", "))
-	}
 }
 
-func yesNo(on bool) string {
-	if on {
-		return "yes"
+// switchText is the service's switch as the list shows it: on, off, or a dash
+// for a service the owner cannot turn off.
+func switchText(row serviceregistry.Service) string {
+	switch {
+	case row.Switch == nil:
+		return "-"
+	case row.Switch.On:
+		return "on"
 	}
-	return "no"
+	return "off"
+}
+
+// detailText words a service's typed detail.
+func detailText(row serviceregistry.Service) string {
+	switch row.Detail {
+	case serviceregistry.DetailLastRunFailed:
+		return "last run failed"
+	case serviceregistry.DetailNoRunYet:
+		return "has not run yet"
+	case serviceregistry.DetailProfileWaiting:
+		return "waiting for its profile"
+	case serviceregistry.DetailWorking:
+		if row.Count > 0 {
+			return fmt.Sprintf("working, %d waiting", row.Count)
+		}
+		return "working"
+	case serviceregistry.DetailQueued:
+		return fmt.Sprintf("%d waiting", row.Count)
+	case serviceregistry.DetailPaused:
+		return "paused"
+	case serviceregistry.DetailInCall:
+		return "in a call"
+	case serviceregistry.DetailUnavailable:
+		return "not available on this computer"
+	case serviceregistry.DetailUnreadable:
+		return "could not be read"
+	}
+	return ""
+}
+
+// stamp is a stored time as the local clock reads it; a missing time is a dash.
+func stamp(at *time.Time) string {
+	if at == nil || at.IsZero() {
+		return "-"
+	}
+	return at.Local().Format("2006-01-02 15:04")
 }
 
 func dash(text string) string {

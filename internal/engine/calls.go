@@ -235,6 +235,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetGitHubAccess", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyPR, Method: s.rooms.PRs.SetGitHubAccess},
 		{Name: "SetReviewPublishing", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyPR, Method: s.rooms.PRs.SetReviewPublishing},
 		{Name: "ListServices", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ListServices},
+		{Name: "ServiceRegistry", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.serviceRegistry},
 		{Name: "SetServiceProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetServiceProfile},
 		{Name: "SetServiceProfileAll", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetServiceProfileAll},
 		{Name: "RestartReviewer", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyPR, Method: s.rooms.PRs.RestartReviewer},
