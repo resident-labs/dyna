@@ -20,11 +20,11 @@ func TestUnwrapShellAndSummaries(t *testing.T) {
 	}{
 		{ev("tool", "command", "started", `dyna post @parent "Done"`), "messaged", "@parent"},
 		{ev("tool", "command", "started", `dyna post -h`), "ran", "dyna post -h"},
-		{ev("tool", "command", "started", `dyna run --help`), "ran", "dyna run --help"},
+		{ev("tool", "command", "started", `dyna workflow run --help`), "ran", "dyna workflow run --help"},
 		{ev("tool", "command", "started", `dyna post @parent -- --help`), "messaged", "@parent"},
 		{ev("tool", "command", "started", `dyna post @parent "Use --help to see usage"`), "messaged", "@parent"},
 		{ev("tool", "command", "started", `dyna post @parent 'Use -h to see usage'`), "messaged", "@parent"},
-		{ev("tool", "command", "started", `dyna post @parent "Done"; dyna run --help`), "messaged", "@parent"},
+		{ev("tool", "command", "started", `dyna post @parent "Done"; dyna workflow run --help`), "messaged", "@parent"},
 		{ev("tool", "command", "started", `dyna post "--help"`), "ran", `dyna post "--help"`},
 		{ev("tool", "command", "started", `dyna msg @parent "Done"`), "messaged", "@parent"},
 		{ev("tool", "command", "started", `"$DYNA_BIN" post @parent "Done"`), "messaged", "@parent"},
