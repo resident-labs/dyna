@@ -3,7 +3,7 @@ import test from 'node:test'
 import { SERVICE_KEYS, REVIEWER_KEY, serviceTitles, reviewerItem } from './models.ts'
 import type { ServiceView } from '../api/service.ts'
 
-const reviewer = (over: Partial<ServiceView> = {}): ServiceView => ({ role: 'reviewer', name: 'PR reviewers', page: '', profile: 'sol', pinned: '', source: '', reason: '', scope: 'room', sessions: 0, profiles: ['sol', 'opus'], ...over })
+const reviewer = (over: Partial<ServiceView> = {}): ServiceView => ({ role: 'reviewer', name: 'PR reviewers', page: '', profile: 'sol', pinned: '', source: '', reason: '', waiting: false, scope: 'room', sessions: 0, profiles: ['sol', 'opus'], ...over })
 
 test('the Services group holds the reviewers, the librarian and Voice, each with a title', () => {
   assert.deepEqual([...SERVICE_KEYS], [REVIEWER_KEY, 'library.profile', 'voice.provider'])

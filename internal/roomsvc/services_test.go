@@ -287,7 +287,7 @@ func TestListServicesShowsAPinnedLibrarianWaiting(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := servicesByRole(t, e, rec.Name)["librarian"]
-	if got.Profile != "sonnet" || got.Pinned != "sonnet" || !strings.HasPrefix(got.Reason, "waiting:") || !strings.Contains(got.Reason, "sonnet") {
+	if got.Profile != "sonnet" || got.Pinned != "sonnet" || !got.Waiting || !strings.HasPrefix(got.Reason, "waiting:") || !strings.Contains(got.Reason, "sonnet") {
 		t.Fatalf("enabled library = %+v, want the pin and a waiting reason", got)
 	}
 	if err = v.Set(settings.KeyLibraryEnabled, `[]`); err != nil {
@@ -297,7 +297,7 @@ func TestListServicesShowsAPinnedLibrarianWaiting(t *testing.T) {
 		t.Fatal(err)
 	}
 	off := servicesByRole(t, e, rec.Name)["librarian"]
-	if strings.HasPrefix(off.Reason, "waiting:") {
+	if off.Waiting {
 		t.Fatalf("library off still waits: %+v", off)
 	}
 }
