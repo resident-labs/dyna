@@ -200,6 +200,7 @@ type SessionStarted struct {
 	Parent  SessionID   `json:"parent,omitempty"` // empty for root
 	Profile ProfileName `json:"profile"`
 	Goal    string      `json:"goal,omitempty"`
+	Brief   string      `json:"brief,omitempty"`
 }
 
 type SessionClosed struct {
