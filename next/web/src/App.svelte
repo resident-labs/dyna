@@ -26,12 +26,16 @@
     path = window.location.pathname;
   }
   let draft = $state("");
+  let sendError = $state("");
+  let pending = $derived([...(store?.pendingPosts ?? [])].filter(post => post.home.session === session));
   function send(event: KeyboardEvent) {
     if (event.key !== "Enter" || event.shiftKey || event.isComposing || !store || !room || !draft.trim()) return;
     event.preventDefault();
     const text = draft;
     draft = "";
-    store.post({ room, text, home: session ? { kind: "dm", session } : undefined }).catch(() => { draft = text; });
+    sendError = "";
+    store.post({ room, text, home: session ? { kind: "dm", session } : undefined })
+      .catch(() => { draft = text; sendError = "Your message was not sent. Press Enter to try again."; });
   }
   let rail: HTMLElement;
   let feed: HTMLElement;
@@ -63,11 +67,13 @@
   <main>
     <header><span>{title}</span></header>
     <section class="feed" aria-label="Feed" tabindex="-1" bind:this={feed}>
-      <p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>
+      {#each pending as post}<p class="pending">{post.text}</p>
+      {:else}<p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>{/each}
     </section>
     {#if room && !unavailable}
       <textarea class="composer" rows="1" aria-label="Message" bind:this={composer} bind:value={draft} onkeydown={send}
         placeholder={"Message " + title}></textarea>
+      {#if sendError}<p class="hint">{sendError}</p>{/if}
     {/if}
   </main>
   {#if room}
