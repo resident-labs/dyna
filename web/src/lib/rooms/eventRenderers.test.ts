@@ -965,8 +965,7 @@ test('a failed merge card says its failing checks once and names every member PR
   }
   const view = renderMergeCard(batch)
   assert.match(view.summary, /2 PRs: #350, #352 into main/, `the title did not name the batch: ${view.summary}`)
-  assert.match(view.summary, /1 failed check/, `the summary did not keep a short failure count: ${view.summary}`)
-  assert.doesNotMatch(view.summary, /go-test/, 'the one-line summary clips the check name')
+  assert.match(view.summary, /Failed checks: go-test/, 'the summary must name the failed check')
   assert.match(view.detail, /Failed checks: go-test/, 'the expanded row lost the failed-check name')
   assert.doesNotMatch(view.text, /checks failed:/i, `the card repeated the cause: ${view.text}`)
   // A kind with no named check still says the cause, worded from the kind.
