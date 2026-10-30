@@ -50,15 +50,33 @@ func TestRejectsOtherRooms(t *testing.T) {
 	}
 }
 
+type packReader struct {
+	header  string
+	drained bool
+}
+
+func (r *packReader) Read(p []byte) (int, error) {
+	if r.header != "" {
+		n := copy(p, r.header)
+		r.header = r.header[n:]
+		return n, nil
+	}
+	if !r.drained {
+		r.drained = true
+		return copy(p, "PACK"), nil
+	}
+	return 0, io.EOF
+}
+
 func TestRejectsUnownedPushBeforeUpstream(t *testing.T) {
 	target, _ := url.Parse("https://github.com")
 	called := false
 	transport := roundTrip(func(*http.Request) (*http.Response, error) { called = true; return nil, nil })
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/main\x00report-status\n"
-	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
+	body := &packReader{header: fmt.Sprintf("%04x%s0000", len(line)+4, line)}
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
-	if called || !strings.Contains(w.Body.String(), "ng refs/heads/main not owned by this session") {
+	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", body))
+	if called || !body.drained || !strings.Contains(w.Body.String(), "ng refs/heads/main not owned by this session") {
 		t.Fatalf("upstream called %v, response %q", called, w.Body.String())
 	}
 }
