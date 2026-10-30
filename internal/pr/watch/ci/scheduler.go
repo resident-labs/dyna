@@ -173,11 +173,21 @@ const (
 // SavedResultActionFor picks what to do with a complete saved result of a head
 // whose local run is the only provider, such as a merge trial.
 func SavedResultActionFor(result localci.Result) SavedResultAction {
-	if result.Resumed {
+	if result.Resumed || result.RetriedFrom != "" {
 		// This result is already the replacement for a run that proved nothing, so
 		// its retry is spent whatever failure it hit. Settling here keeps admission
 		// and the gate agreeing instead of one refusing to run and the other
 		// waiting for a retry that will never start.
+		return SettleSavedResult
+	}
+	// A real failed check is evidence about the commit, even when another
+	// check was interrupted by the engine or a machine failure.
+	for _, check := range result.Checks {
+		if !check.Aggregate && check.Status == localci.OutcomeFailed {
+			return SettleSavedResult
+		}
+	}
+	if result.Status == localci.OutcomeFailed && len(result.Checks) == 0 {
 		return SettleSavedResult
 	}
 	if MachineFailureRetryFrom(result) != "" {

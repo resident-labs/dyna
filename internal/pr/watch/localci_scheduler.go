@@ -499,7 +499,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		// cause keeps a trial from reporting it as a failed test, and the marker
 		// says whether this was already the retry: a second failure of the same
 		// kind is spent, so admission stops instead of retrying for ever.
-		result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: chosen.Name, Started: s.now(), Status: localci.OutcomeError, Cause: localci.CauseScheduling, Error: Sanitize(err.Error()), Resumed: resumed}
+		result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: chosen.Name, Started: s.now(), Status: localci.OutcomeError, Cause: localci.CauseScheduling, Error: Sanitize(err.Error()), Resumed: resumed, RetriedFrom: retriedFrom}
 		if saveErr := registry.SaveResult(ctx, result); saveErr != nil {
 			log.Printf("save local CI preparation failure: %v", saveErr)
 		}
