@@ -11,6 +11,7 @@ import (
 type Harness interface {
 	Start(context.Context, contract.TurnID, []contract.TurnInput) (contract.TurnEnded, error)
 	Continue(context.Context, contract.TurnID) (contract.TurnEnded, error)
+	Recover(contract.TurnID, []contract.TurnInput) (contract.TurnEnded, bool, error)
 	Steer(context.Context, contract.TurnInput) error
 	FollowUp(context.Context, contract.TurnInput) error
 	Abort(context.Context) error
