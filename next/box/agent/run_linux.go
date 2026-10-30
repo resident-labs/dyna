@@ -49,7 +49,7 @@ func Run(ctx context.Context, version string) error {
 	defer cancel()
 	client := NewClient(engineSocket)
 	errs := make(chan error, 3)
-	go func() { errs <- client.Run(ctx) }()
+	go client.Run(ctx)
 	hello, err := client.Hello(ctx, version)
 	if err != nil {
 		return err
