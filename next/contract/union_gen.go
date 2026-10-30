@@ -118,3 +118,56 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 }
 
 var eventBodyTypes = []EventType{"box.changed", "post.created", "session.closed", "session.started", "turn.ended", "turn.started"}
+
+func (m BoxMessage) MarshalJSON() ([]byte, error) {
+	if m.Body == nil {
+		return nil, fmt.Errorf("box message body is nil")
+	}
+	return json.Marshal(struct {
+		Type BoxMessageType `json:"type"`
+		Body BoxMessageBody `json:"body"`
+	}{m.Body.BoxMessageType(), m.Body})
+}
+func (m *BoxMessage) UnmarshalJSON(data []byte) error {
+	var w struct {
+		Type BoxMessageType  `json:"type"`
+		Body json.RawMessage `json:"body"`
+	}
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	switch w.Type {
+	case "turn.start":
+		var v TurnStart
+		if err := json.Unmarshal(w.Body, &v); err != nil {
+			return err
+		}
+		m.Body = v
+		return nil
+	case "turn.steer":
+		var v TurnSteer
+		if err := json.Unmarshal(w.Body, &v); err != nil {
+			return err
+		}
+		m.Body = v
+		return nil
+	case "turn.stop":
+		var v TurnStop
+		if err := json.Unmarshal(w.Body, &v); err != nil {
+			return err
+		}
+		m.Body = v
+		return nil
+	case "upgrade":
+		var v Upgrade
+		if err := json.Unmarshal(w.Body, &v); err != nil {
+			return err
+		}
+		m.Body = v
+		return nil
+	default:
+		return fmt.Errorf("unknown box message type %q", w.Type)
+	}
+}
+
+var boxMessageTypes = []BoxMessageType{"turn.start", "turn.steer", "turn.stop", "upgrade"}
