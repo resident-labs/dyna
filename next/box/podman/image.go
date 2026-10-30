@@ -37,10 +37,10 @@ func (h *Host) BuildBase(ctx context.Context, containerfile, piTarball []byte) (
 	if err := tw.Close(); err != nil {
 		return "", err
 	}
-	return tag, h.Build(ctx, tag, contextTar.Bytes())
+	return tag, h.Build(ctx, tag, "", contextTar.Bytes())
 }
 
-func (h *Host) Build(ctx context.Context, tag string, contextTar []byte) error {
+func (h *Host) Build(ctx context.Context, tag, base string, contextTar []byte) error {
 	select {
 	case h.buildGate <- struct{}{}:
 		defer func() { <-h.buildGate }()
@@ -55,6 +55,11 @@ func (h *Host) Build(ctx context.Context, tag string, contextTar []byte) error {
 	if !errors.As(err, &exit) || exit != 1 {
 		return err
 	}
-	_, err = h.runInput(ctx, contextTar, "podman", "build", "-t", tag, "-")
+	args := []string{"podman", "build", "-t", tag}
+	if base != "" {
+		args = append(args, "--build-arg", "DYNA_BASE="+base)
+	}
+	args = append(args, "-")
+	_, err = h.runInput(ctx, contextTar, args...)
 	return err
 }
