@@ -13,6 +13,7 @@ type fakeRunner struct {
 	calls  [][]string
 	fail   string
 	remote string
+	head   string
 }
 
 func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -29,7 +30,14 @@ func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte,
 		return []byte("ref: refs/heads/new-default\tHEAD\nabc\tHEAD\n"), nil
 	}
 	if len(args) > 2 && args[2] == "symbolic-ref" {
-		return []byte("main\n"), nil
+		if args[3] == "HEAD" {
+			r.head = strings.TrimPrefix(args[4], "refs/heads/")
+			return nil, nil
+		}
+		if r.head == "" {
+			r.head = "main"
+		}
+		return []byte(r.head + "\n"), nil
 	}
 	return nil, nil
 }
@@ -71,14 +79,14 @@ func TestPrepareRefreshesDefaultBranch(t *testing.T) {
 	}
 	r := &fakeRunner{}
 	m := &Mirror{Data: dir, Token: "secret", Runner: r}
-	_, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1", true)
-	if err != nil {
-		t.Fatal(err)
+	result, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1", true)
+	if err != nil || result.Base != "new-default" {
+		t.Fatalf("base %q, error %v", result.Base, err)
 	}
 	var fetched, changed bool
 	for _, call := range r.calls {
 		args := strings.Join(call, " ")
-		if strings.Contains(args, "fetch --prune origin +refs/heads/*:refs/heads/*") {
+		if strings.Contains(args, "fetch --prune --no-tags origin +refs/heads/*:refs/heads/*") {
 			fetched = true
 		}
 		if strings.Contains(args, "symbolic-ref HEAD refs/heads/new-default") {

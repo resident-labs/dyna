@@ -70,9 +70,24 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, r
 		remote := "https://github.com/" + string(repo) + ".git"
 		_, err = os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			_, err = m.Runner.Run(ctx, env, "clone", "--bare", remote, path)
+			_, err = m.Runner.Run(ctx, env, "clone", "--bare", "--no-tags", remote, path)
 		} else if err == nil {
-			_, err = m.Runner.Run(ctx, env, "--git-dir", path, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+			_, err = m.Runner.Run(ctx, env, "--git-dir", path, "fetch", "--prune", "--no-tags", "origin", "+refs/heads/*:refs/heads/*")
+			if err != nil {
+				return contract.BoxRepo{}, err
+			}
+			out, err := m.Runner.Run(ctx, env, "--git-dir", path, "ls-remote", "--symref", "origin", "HEAD")
+			if err != nil {
+				return contract.BoxRepo{}, err
+			}
+			fields := strings.Fields(string(out))
+			if len(fields) < 3 || fields[0] != "ref:" || !strings.HasPrefix(fields[1], "refs/heads/") || fields[2] != "HEAD" {
+				return contract.BoxRepo{}, errors.New("remote default branch not found")
+			}
+			_, err = m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "HEAD", fields[1])
+			if err != nil {
+				return contract.BoxRepo{}, err
+			}
 		}
 		if err != nil {
 			return contract.BoxRepo{}, err
