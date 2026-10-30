@@ -112,6 +112,18 @@ func roundTrip[T interface {
 	}
 }
 
+func TestBundleRefusesTrailingData(t *testing.T) {
+	data, err := json.Marshal(filledGlobalBundle())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tail := range []string{"]", "}", "{}", "x"} {
+		if _, err := DecodeBundle[GlobalBundle](strings.NewReader(string(data) + tail)); err == nil {
+			t.Errorf("trailing %q decoded without error", tail)
+		}
+	}
+}
+
 func TestBundleRefusesUnknownFields(t *testing.T) {
 	data, err := json.Marshal(filledRoomBundle())
 	if err != nil {
