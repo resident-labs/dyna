@@ -205,7 +205,14 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 		return byAuthor(ItemIssue, p.positional)
 	case "pr close", "pr reopen":
 		return byAuthor(ItemPR, p.positional)
-	case "run rerun", "run cancel":
+	case "run rerun":
+		// Rerunning failed jobs on the room's own repository only retries CI, so any
+		// account may do it. The upstream repository still goes by run author.
+		if _, failed := p.flags["--failed"]; failed && !strings.EqualFold(in.Host+"/"+in.Repo, in.Upstream) {
+			return approvals.ClassAgent
+		}
+		return byAuthor(ItemRun, p.positional)
+	case "run cancel":
 		return byAuthor(ItemRun, p.positional)
 	case "repo fork":
 		if _, org := p.flags["--org"]; org || in.Upstream == "" {
