@@ -19,7 +19,12 @@ func SnapshotTree(ctx context.Context, dir string) (string, string, string, erro
 	run := func(env []string, args ...string) (string, error) {
 		c := exec.CommandContext(ctx, "git", args...)
 		c.Dir = dir
-		c.Env = append(os.Environ(), env...)
+		for _, entry := range os.Environ() {
+			if !strings.HasPrefix(entry, "GIT_") {
+				c.Env = append(c.Env, entry)
+			}
+		}
+		c.Env = append(c.Env, env...)
 		b, err := c.Output()
 		if err != nil {
 			return "", err
