@@ -662,9 +662,10 @@ func TestACancelledRequestSurvivesAnOwnerRestart(t *testing.T) {
 	// carries the request to the end.
 	ownerGone := make(chan struct{})
 	defer close(ownerGone)
+	launched := make(chan struct{})
 	dead := owner.poller(Conn{Name: "here"})
 	recorded := dead.Launched
-	dead.Launched = func(spec RunSpec) { recorded(spec); <-ownerGone }
+	dead.Launched = func(spec RunSpec) { recorded(spec); close(launched); <-ownerGone }
 	// A nil channel parks the owner's claim loop, so no scheduling luck - a
 	// slow runner whose five seconds pass before the next engine starts -
 	// lets the owner end the job itself.
@@ -676,6 +677,10 @@ func TestACancelledRequestSurvivesAnOwnerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-onNode
+	// The node accepts the unit before the owner records its launch. The
+	// cancel must wait for that record, or the next engine finds a row that
+	// was never launched and starts it afresh, with no stop.
+	<-launched
 	standby, _, standbyReporter, _ := newIdleService(t, legacy)
 	standby.Store = owner.Store
 	standby.Machines = owner.Machines
