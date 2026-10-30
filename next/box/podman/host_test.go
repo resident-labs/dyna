@@ -111,7 +111,7 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		suffix string
 	}{
 		{3, "'systemctl' '--user' 'set-property' '--runtime' 'dyna-aaa-bbb-ccc.slice' 'CPUQuota=200%' 'MemoryHigh=4' 'MemoryMax=6' 'TasksMax=8'"},
-		{5, "'podman' '--cgroup-manager=systemd' 'create' '--name' 'a' '--userns=keep-id:uid=1000,gid=1000' '--user' '1000:1000' '--label' 'dyna.box=a' '--cgroup-parent=dyna-aaa-bbb-ccc.slice' '--cgroupns=private' '--systemd=always' '--stop-signal' 'SIGTERM' '--entrypoint' '/usr/bin/tini' '--tmpfs' '/run/dyna' '--env' 'HOME=/box/home' '--env' 'PI_CODING_AGENT_DIR=/box/pi' '--volume' 'dyna-box-a:/box' '--volume' '/host/sock/a:/run/dyna/engine:ro' 'image' '--' '/opt/dyna/bin/current/dyna' 'box-agent'"},
+		{5, "'podman' '--cgroup-manager=systemd' 'create' '--name' 'a' '--userns=keep-id:uid=1000,gid=1000' '--user' '1000:1000' '--label' 'dyna.box=a' '--cgroup-parent=dyna-aaa-bbb-ccc.slice' '--cgroupns=private' '--systemd=always' '--stop-signal' 'SIGTERM' '--entrypoint' '/usr/bin/tini' '--tmpfs' '/run/dyna:mode=1777' '--env' 'HOME=/box/home' '--env' 'PI_CODING_AGENT_DIR=/box/pi' '--volume' 'dyna-box-a:/box' '--volume' '/host/sock/a:/run/dyna/engine:ro' 'image' '--' '/opt/dyna/bin/current/dyna' 'box-agent'"},
 	} {
 		args := r.calls[tc.call]
 		if !strings.HasSuffix(args[len(args)-1], tc.suffix) {
