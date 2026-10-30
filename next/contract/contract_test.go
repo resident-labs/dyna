@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract/internal/contractgen"
@@ -72,5 +73,26 @@ func TestUnknownOperationKind(t *testing.T) {
 	var op Operation
 	if err := json.Unmarshal([]byte(`{"kind":"unknown.kind","args":{}}`), &op); err == nil {
 		t.Fatal("unknown operation accepted")
+	}
+}
+
+func TestGeneratedWireTypes(t *testing.T) {
+	data, err := os.ReadFile("../web/src/lib/contract.gen.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := string(data)
+	if !strings.Contains(ts, "export type HostName = string;") {
+		t.Fatal("registered hosts must be accepted")
+	}
+	response, err := json.Marshal(EventsListResponse{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(response), `"events":null`) {
+		t.Fatalf("unexpected response: %s", response)
+	}
+	if !strings.Contains(ts, "events: Array<Event> | null;") {
+		t.Fatal("events must allow null")
 	}
 }
