@@ -130,7 +130,10 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 	if class == approvals.ClassAuto && checkedNumber != 0 {
 		in.Argv = ghclient.PinRoutinePR(in.Argv, checkedRef, checkedNumber)
 	}
-	class, auto := mediaApprovalClass(class, len(in.Media) > 0)
+	auto := class == approvals.ClassAuto && len(in.Media) == 0
+	if class == approvals.ClassAuto {
+		class = approvals.ClassAgent
+	}
 	var destination approvals.MediaDestination
 	if len(in.Media) > 0 {
 		cmd := ghclient.Command(ctx, "", in.Cwd, in.Argv...)
@@ -158,18 +161,6 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 		Kind: approvals.KindGH, Class: class, Auto: auto, Payload: payload, Repository: in.Repo,
 		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: body,
 	})
-}
-
-// mediaApprovalClass decides whether a classified GitHub write may run automatically.
-func mediaApprovalClass(class approvals.Class, hasMedia bool) (approvals.Class, bool) {
-	if hasMedia {
-		return approvals.ClassOwner, false
-	}
-	auto := class == approvals.ClassAuto
-	if auto {
-		class = approvals.ClassAgent
-	}
-	return class, auto
 }
 
 func approvalArgument(argv []string, flag string) string {
