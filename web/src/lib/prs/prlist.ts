@@ -352,7 +352,7 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
   const m = state ?? mergeState(c, merge)
   const icon = MERGE_ICON[m.tone] ?? 'wait'
   const action = nextAction(c, merge)
-  const isCI = action.kind === 'ci'
+  const isCI = !isDone(c) && action.kind === 'ci'
   const note = action.others.length
     ? [action.others.join(' · '), m.reason].filter(Boolean).join(' · ')
     : isCI ? ''
