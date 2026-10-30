@@ -5,7 +5,7 @@ import { isSessionReference } from '../api/guards.ts'
 import { isNote, noteData } from '../ui/notices.ts'
 import { shellEvent, systemEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
-import { duration, short, tokens } from '../ui/format.ts'
+import { short, tokens } from '../ui/format.ts'
 
 type Time = string | number
 
@@ -704,8 +704,8 @@ export function modelName(model?: string | null): string {
   return (model || '').split('/').filter(Boolean).pop() ?? ''
 }
 
-// A turn opens with a short divider, "Turn 1 · sol", and a finished turn
-// closes with a footer: its status, then turnTail, "1m00s · 30 tokens".
+// A turn opens with a divider and duration. A finished turn closes with
+// its status and token count.
 // The profile is the display name, so the raw model slug only stands in when
 // a turn has no profile.
 export function turnHead(t: Pick<DmTurn, 'n' | 'profile' | 'model' | 'wrapUp'>): string {
@@ -713,5 +713,5 @@ export function turnHead(t: Pick<DmTurn, 'n' | 'profile' | 'model' | 'wrapUp'>):
 }
 export function turnTail(t: { started: string; ended?: string; usage?: Usage | null }): string {
   const output = t.usage?.outputTokens
-  return [duration(t.started, t.ended), output && `${tokens((t.usage?.inputTokens ?? 0) + output)} tokens`].filter(Boolean).join(' · ')
+  return output ? `${tokens((t.usage?.inputTokens ?? 0) + output)} tokens` : ''
 }
