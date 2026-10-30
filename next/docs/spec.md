@@ -895,7 +895,7 @@ The engine sets the surface and the reply channel of each delivery from its sour
 - **post**: nothing is delivered. The session posts only if the sender must act.
 - **none**: the final response stays in the transcript. The frame tells the session to end with one line.
 
-A turn with several inputs owes one reply per distinct `final` target.
+A turn with several inputs owes one reply per distinct `final` target and home. An owner DM and an owner feed post are two replies: one in the DM, one in the feed.
 
 ### 7.6 Rooms and repositories
 
