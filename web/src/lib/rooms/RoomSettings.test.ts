@@ -219,10 +219,11 @@ test('the room menu opens the modal, for another room after selecting it, and Es
   const app = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
   const opener = /openRoomSettings: (async \(target\) => \{.*\}),\n/.exec(app)?.[1]
   assert.ok(opener, 'App has openRoomSettings')
-  const mount = /\{#if (showRoomSettings && room)\}\n(?:.*\n)*?\s*<RoomSettings [^\n]*onclose=\{(\(\) => \(showRoomSettings = false\))\} \/>/.exec(app)
+  const mount = /\{#if (settingsPanel\.showRoomSettings && room)\}\n(?:.*\n)*?\s*<RoomSettings [^\n]*onclose=\{(\(\) => \(settingsPanel\.closeRoomSettings\(\)\))\} \/>/.exec(app)
   assert.ok(mount, 'App mounts RoomSettings with its close handler')
   const selected: string[] = []
   const state = vm.createContext({ roomId: 'room-1', room, showRoomSettings: false, roomSettingsAt: null, roomSettingsKey: 0, selectRoom: async (id: string) => { selected.push(id); state.roomId = id; return true } })
+  Reflect.set(state, 'settingsPanel', { get showRoomSettings() { return state.showRoomSettings }, openRoomSettings() { state.showRoomSettings = true }, closeRoomSettings() { state.showRoomSettings = false } })
   const { actions, roomMenu } = await import('../ui/actions.ts')
   // The menu reads only the room and its settings opener.
   const openRoomSettings = vm.runInContext(stripTypes(opener), state)
