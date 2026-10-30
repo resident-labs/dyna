@@ -343,11 +343,17 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 			targetRoom := req.Room
 			if address.Room != "" {
 				targetRoom, err = s.store.RoomByName(ctx, address.Room)
+				if errors.Is(err, sql.ErrNoRows) {
+					return contract.PostResponse{}, invalid("unknown room")
+				}
 				if err != nil {
 					return contract.PostResponse{}, failure(err)
 				}
 			}
 			session, err := s.store.SessionByName(ctx, targetRoom, address.Name)
+			if errors.Is(err, sql.ErrNoRows) {
+				return contract.PostResponse{}, invalid("unknown session @" + address.Name)
+			}
 			if err != nil {
 				return contract.PostResponse{}, failure(err)
 			}
