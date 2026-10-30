@@ -379,7 +379,21 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		var runErr error
 		var shell, stderrPath string
 		for attempt := 1; ; attempt++ {
+			if e.opts.Run != nil {
+				if err := runstore.StepIntent(e.ctx, e.runID(), key, id, attempt); err != nil {
+					res = nil
+					runErr = fmt.Errorf("record command intent: %w", err)
+					break
+				}
+			}
 			res, shell, stderrPath, runErr = e.execAttempt(argv, o, id, label, line, attempt, attach, attachStderr, journal)
+			if e.opts.Run != nil {
+				if err := runstore.StepResult(context.WithoutCancel(e.ctx), e.runID(), key, id, attempt, shell, res, runErr); err != nil {
+					res = nil
+					runErr = fmt.Errorf("record command result: %w", err)
+					break
+				}
+			}
 			attach, attachStderr = "", ""
 			if runErr == nil || attempt > o.retries || e.ctx.Err() != nil || !retryable(runErr) {
 				if res != nil {
