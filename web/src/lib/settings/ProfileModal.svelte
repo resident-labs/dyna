@@ -15,7 +15,9 @@
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, agentExpedited, goalExpedited } from '../rooms/expedite.ts'
   import { goalAgo, goalParts, goalTone } from '../goals/goals.ts'
-  import { markdown, stamp, tokens, roomLabel } from '../ui/format.ts'
+  import { ago, markdown, stamp, tokens, roomLabel } from '../ui/format.ts'
+  import StatusPill from '../ui/StatusPill.svelte'
+  import { changeName, changeTitle, prAttention, prStory, type Facts } from '../prs/pr.ts'
 
   import type { Attachment, Member, PostDetail, Room } from '../api/room.ts'
   import type { Goal } from '../api/goal.ts'
@@ -24,6 +26,9 @@
   interface Props {
     profile?: MemberProfile | null
     goals?: Goal[]
+    // prs are the session's open PRs, newest first.
+    prs?: Facts[]
+    onpr?: ((number: number) => void) | null
     older?: boolean
     loadingOlder?: boolean
     onolder?: () => void
@@ -37,7 +42,7 @@
     onpost?: ((postId: string) => void) | null
     onopenfile: (attachment: Attachment) => void
   }
-  let { profile = null, goals = [], older = false, loadingOlder = false, onolder = () => {}, error = '', room, ongoal = null, onclose, onmessage, onmention, ondetail, onpost = null, onopenfile }: Props = $props()
+  let { profile = null, goals = [], prs = [], onpr = null, older = false, loadingOlder = false, onolder = () => {}, error = '', room, ongoal = null, onclose, onmessage, onmention, ondetail, onpost = null, onopenfile }: Props = $props()
 
   let m = $derived(profile?.member)
   let held = $derived(goals.filter((g) => !g.shared && (g.holders ?? []).includes(m?.id ?? '')))
@@ -80,11 +85,32 @@
         <dl class="facts">
           <div><dt>State</dt><dd class="st {m.state}">{sessionStatus(m)}</dd></div>
           <div><dt>Profile</dt><dd>{m.profile}</dd></div>
-          <div><dt>Turns</dt><dd>{m.turns}</dd></div>
+          <div><dt>Last turn</dt><dd>{m.turns ? `${m.turns} · ${ago(m.lastActivity)}` : 'None yet'}</dd></div>
           <div><dt>Tokens</dt><dd>{tokens((profile.usage?.inputTokens || 0) + (profile.usage?.outputTokens || 0))}</dd></div>
           <div><dt>Parent</dt><dd>{profile.parent || 'root'}</dd></div>
           <div><dt>Started</dt><dd>{stamp(m.created)}</dd></div>
         </dl>
+
+        {#if prs.length}
+          <section>
+            <Card title="Pull requests" count={prs.length}>
+              <div class="goals">
+              {#each prs as pr (pr.key ?? pr.changeId)}
+                {@const story = prStory(pr)}
+                {@const attention = prAttention(pr)}
+                {@const n = pr.number}
+                <Row text={changeTitle(pr)} onclick={onpr && n ? () => onpr(n) : null}>
+                  {#snippet lead()}<span class="num mono">{changeName(pr)}</span>{/snippet}
+                  {#snippet detail()}
+                    <span class="story"><b>Review</b><span>{#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}{story.review}</span></span>
+                    <span class="story"><b>CI</b><span>{story.ci}</span></span>
+                  {/snippet}
+                </Row>
+              {/each}
+              </div>
+            </Card>
+          </section>
+        {/if}
 
         <section>
           <Card title="Goals" count={open.length}>
@@ -210,6 +236,11 @@
   .when { display: block; margin-top: 6px; color: var(--ink-2); font-size: var(--t-ui); line-height: 1.45; overflow-wrap: anywhere; }
   .when.clamp { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .when b { color: var(--muted); font-weight: 600; margin-right: var(--s1); }
+  .num { font-size: var(--t-sm); color: var(--muted); }
+  /* A label column keeps wrapped sentences aligned on a phone. */
+  .story { display: grid; grid-template-columns: 56px 1fr; margin-top: var(--s1); color: var(--ink-2); font-size: var(--t-ui); line-height: var(--leading); overflow-wrap: anywhere; }
+  .story b { color: var(--muted); font-weight: 600; }
+  .story :global(.mark-only) { vertical-align: -2px; margin-left: -3px; }
   .none { margin: 0; color: var(--faint); font-size: var(--t-body); }
   .post { padding: 10px 0; border-top: 1px solid var(--line-soft); }
   .post:first-of-type { border-top: 0; padding-top: 0; }
