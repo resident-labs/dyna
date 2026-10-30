@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,11 +40,28 @@ func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principa
 	return contract.HostAddResponse{}, nil
 }
 
+func loadPi(executable string) ([]byte, error) {
+	path := filepath.Join(filepath.Dir(executable), "pi.tgz")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read Pi package %s: %w", path, err)
+	}
+	return data, nil
+}
+
 type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
 }
 
 func Run(ctx context.Context, cfg Config) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	pi, err := loadPi(executable)
+	if err != nil {
+		return err
+	}
 	st, err := store.Open(cfg.Data, time.Now)
 	if err != nil {
 		return err
@@ -62,7 +80,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer proxy.Shutdown(context.Background())
-	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version}
+	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi}
 	service := engine.New(st, boxes, profiles, time.Now)
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes}, func(c api.Caller) http.Handler {
 		session, err := st.Session(ctx, c.Principal.Session)
@@ -85,6 +103,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer sockets.Close()
+	if err := service.Recover(ctx); err != nil {
+		return err
+	}
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
