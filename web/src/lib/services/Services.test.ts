@@ -29,12 +29,15 @@ export const api = {
     row('updates', 'this-computer', { state: 'error', detail: 'last-run-failed', switch: { on: true }, hook: 'self-update' }),
     row('maintenance', 'this-computer', { switch: { on: true }, schedule: { everyMinutes: 60, timeout: '10m0s' } }),
   ]),
-  editService: (name, patch) => { record('edit ' + name + ' ' + JSON.stringify(patch)); return Promise.resolve(null) },
+  settings: () => Promise.resolve([]),
+  globalHookRuns: () => Promise.resolve([]),
+  hookRuns: () => Promise.resolve([]),
+  runService: (name) => { record('run ' + name); return Promise.resolve({ result: 'pass' }) },
 }
 export const openExternal = () => {}
 `
 
-test('the page shows the registry groups in order with Not set up last; only the failed service has a pill', async () => {
+test('the page shows the registry groups in order with Not set up last; only the failed service has a pill; Run now runs the pass', async () => {
   globalThis.__writes = []
   const dom = installDom()
   const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/Services', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/Services')
@@ -53,10 +56,13 @@ test('the page shows the registry groups in order with Not set up last; only the
     assert.ok(rowOf('updates').querySelector('.status.pill.danger'))
     assert.match(rowOf('library').textContent ?? '', /Idle · glm-flash/)
     assert.doesNotMatch(rowOf('maintenance').querySelector('.status')?.textContent ?? '', /\bOn\b/)
-    // A switch writes through its call and the row reads the registry again.
-    need(rowOf('maintenance').querySelector<HTMLElement>('[role="switch"]')).click()
+    // A click on the row opens its detail in place, where Run now runs the pass.
+    need(rowOf('maintenance').querySelector<HTMLElement>('button.toggle')).click()
+    flushSync()
+    const run = need([...rowOf('maintenance').querySelectorAll<HTMLElement>('button')].find((b) => b.textContent === 'Run now'))
+    run.click()
     await settle()
-    assert.deepEqual(globalThis.__writes, ['edit maintenance {"disabled":true}'])
+    assert.deepEqual(globalThis.__writes, ['run maintenance'])
   } finally {
     unmount(need(app))
     dom.window.close()
