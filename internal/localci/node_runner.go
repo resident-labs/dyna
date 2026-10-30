@@ -1317,9 +1317,16 @@ func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) 
 		// nothing left to stop, and one that a lost poll left behind dies here. A
 		// unit that survives, or whose state cannot be read, fails the teardown.
 		script += "bash -c " + q(jobs.StopScript) + " dyna-ci " + q(detachedDir(runDir, check.id)) + " " + q(checkUnit(runID, check.id)) + "; "
+	}
+	// Setup may not have created the cache or even its parent. Walk up to a
+	// searchable directory before treating absence as certain; a dangling link
+	// or inaccessible ancestor is not proof that cleanup is complete.
+	script += "cache=" + q(cache) + `; probe="$cache"; while [ ! -e "$probe" ] && [ ! -L "$probe" ]; do parent=$(dirname -- "$probe"); if [ "$parent" = "$probe" ]; then echo 'cache status unavailable' >&2; exit 69; fi; probe="$parent"; done; `
+	script += `if [ "$probe" != "$cache" ]; then if [ ! -d "$probe" ] || [ ! -r "$probe" ] || [ ! -x "$probe" ]; then echo 'cache status unavailable' >&2; exit 69; fi; else `
+	for _, check := range checks {
 		script += nodeWorktreeCommand(cache, "remove --force "+q(nodeCheckWorkPath(runDir, runID, check))) + " >/dev/null 2>&1 || true; "
 	}
-	return script + nodeWorktreeCommand(cache, "prune")
+	return script + nodeWorktreeCommand(cache, "prune") + "; fi"
 }
 
 // nodeSetupScript prepares one run on its node. The prepare stage repairs a
