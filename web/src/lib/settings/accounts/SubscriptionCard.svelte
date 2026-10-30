@@ -28,6 +28,7 @@
   let { group, compact = false, roomScope = false, busy = false, onopen = null, onuse = null, onsignin = null, onsaverepos = null }: Props = $props()
   const accounts = $derived(group.accounts ?? [])
   const pools = $derived(poolWindows(accounts))
+  const single = $derived(accounts.length === 1 ? accounts[0] : undefined)
   // One wake for the card: the first account block that ends, or the next
   // minute while a window counts down, so the headline and pace stay current.
   const now = deadlineClock(() => {
@@ -55,6 +56,8 @@
   }
 </script>
 
+<div class="card-wrap" class:clickable={!!onopen && !!single}>
+{#if onopen && single}<button class="card-link" aria-label="Open {providerName(group.provider)} account details for {accountLabel(single)}" onclick={(event) => onopen?.(single, event)}></button>{/if}
 <Card title={providerName(group.provider)} count={accounts.length > 1 ? accounts.length : null}>
   {#snippet leading()}<span class="provider-dot" style:background={providerColor(group.provider)}></span>{/snippet}
   {#if pools.length}
@@ -70,7 +73,9 @@
           </div>
           <div class="segments">
             {#each pool.segments as segment (segment.account.id)}
-              <UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} />
+              {#if accounts.length > 1 && onopen}
+                <button class="segment-link" aria-label="Open details for {accountLabel(segment.account)}" onclick={(event) => onopen?.(segment.account, event)}><UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} /></button>
+              {:else}<UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} showAccount={false} showValue={mean === null && segmentRemaining(segment, now()) !== null} />{/if}
             {/each}
           </div>
         </div>
@@ -85,16 +90,16 @@
       <div class="account">
         <div class="row">
           <div class="identity">
+            {#if accounts.length > 1 && onopen}<button class="identity-link" aria-label="Open details for {accountLabel(account)}" onclick={(event) => onopen?.(account, event)}></button>{/if}
             <b>{accountLabel(account)}</b>
-            <span class="facts">{[signIn || block ? '' : accountStatus(account, '', now()), accountKindLabel(account.kind), account.servesHere ? '' : 'Other repos only', roomScope && account.active && !account.activeHere ? 'Global choice' : ''].filter(Boolean).join(' · ')}</span>
-            {#if account.activeHere}<StatusPill label="In use" />{/if}
+            <span class="facts">{[signIn || block ? '' : accountStatus(account, '', now(), ''), accountKindLabel(account.kind), account.servesHere ? '' : 'Other repos only', roomScope && account.active && !account.activeHere ? 'Global choice' : ''].filter(Boolean).join(' · ')}</span>
+            {#if accounts.length > 1 && account.activeHere}<span class="facts">In use</span>{/if}
             {#if signIn}<StatusPill label="Needs sign-in" tone="danger" />
             {:else if block}<StatusPill label={block.ids.includes('seven_day') ? 'Weekly limit reached' : 'Session limit reached'} tone="warning" detail={block.reset ? `Resets ${dateTime(block.reset)}` : ''} />{/if}
           </div>
           <div class="actions">
             {#if !compact && signIn && onsignin}<button class="btn pri" disabled={busy} onclick={() => onsignin?.(account)}>Sign in</button>{/if}
             {#if !compact && !account.activeHere && onuse}<button class="btn" disabled={busy} onclick={() => onuse?.(account)}>Use</button>{/if}
-            {#if onopen}<button class="btn quiet" onclick={(event) => onopen?.(account, event)}>Details</button>{/if}
             {#if !compact && onsaverepos}<button class="btn quiet" disabled={busy} aria-expanded={scoping === account.id} onclick={() => editRepos(account)}>Repos<span class="repos-label"> · {reposLabel(account)}</span></button>{/if}
           </div>
         </div>
@@ -118,8 +123,22 @@
     {/each}
   </div>
 </Card>
+</div>
 
 <style>
+  .card-wrap { position: relative; min-width: 0; }
+  .card-wrap :global([data-ui-card]) { height: 100%; }
+  .card-link { position: absolute; inset: 0; z-index: 1; width: 100%; border: 0; border-radius: var(--r-card); background: transparent; cursor: pointer; transition: background-color var(--motion-fast) var(--ease); }
+  .card-link:focus-visible { outline: 2px solid var(--iris); outline-offset: 2px; }
+  .actions, .repos { position: relative; z-index: 2; }
+  .identity-link { position: absolute; inset: 0; border: 0; border-radius: var(--r-xs); background: transparent; cursor: pointer; transition: background-color var(--motion-fast) var(--ease); }
+  .identity-link:focus-visible, .segment-link:focus-visible { outline: 2px solid var(--iris); outline-offset: 2px; }
+  .segment-link { min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+  @media (hover: hover) {
+    .card-link:hover, .identity-link:hover { background: var(--hover); }
+    .segment-link:hover { filter: brightness(1.2); }
+  }
+  .card-link:active, .identity-link:active { background: var(--select); }
   .provider-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
   .pools { container-type: inline-size; display: grid; gap: var(--s3); margin-top: var(--s1); }
   .pool { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: var(--s2) var(--s4); align-items: center; }
@@ -139,8 +158,8 @@
   .account { min-width: 0; padding: var(--s2) 0; }
   .account + .account { border-top: 1px solid var(--border-soft); }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
-  .identity { flex: 1 1 14rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); }
-  b { font-size: var(--t-ui); font-weight: var(--w-medium); overflow-wrap: anywhere; }
+  .identity { position: relative; flex: 1 1 14rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); }
+  b { flex-basis: 100%; font-size: var(--t-ui); font-weight: var(--w-medium); overflow-wrap: anywhere; }
   .facts { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
   .repos-label { color: var(--muted); }

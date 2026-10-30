@@ -82,3 +82,44 @@ test('a second account still drops its limit after an earlier deadline has passe
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('account cards open the selected account and only mark use in a multi-account card', async () => {
+  const { rm } = await import('node:fs/promises')
+  const dom = installDom()
+  const { dir, default: Card, mount, unmount, flushSync }: Harness = await importBundle(cardCode, 'SubscriptionCard')
+  const target = document.getElementById('app')
+  assert.ok(target)
+  const opened: string[] = []
+  const account = (id: string, activeHere: boolean) => ({ id, label: id, status: 'ready', activeHere, servesHere: true, windows: [{ id: 'week', label: 'Weekly', usedPercent: 30 }] })
+  let app: object | undefined
+  try {
+    flushSync(() => { app = mount(Card, { target, props: { group: { provider: 'zai', accounts: [account('one', true), account('two', false)] }, onopen: (a: { id: string }) => opened.push(a.id) } }) })
+    assert.doesNotMatch(target.textContent ?? '', /Plan not reported/)
+    assert.match(target.textContent ?? '', /In use/)
+    assert.match(target.querySelector('[role=meter]')?.textContent ?? '', /one.*70%/)
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>('button[aria-label="Open details for two"]')]
+    assert.equal(buttons.length, 2)
+    for (const button of buttons) button.click()
+    assert.deepEqual(opened, ['two', 'two'])
+    assert.ok(app)
+    await unmount(app)
+    app = undefined
+    flushSync(() => { app = mount(Card, { target, props: { group: { provider: 'zai', accounts: [account('one', true)] }, onopen: (a: { id: string }) => opened.push(a.id) } }) })
+    assert.doesNotMatch(target.textContent ?? '', /In use|Plan not reported|Details/)
+    assert.doesNotMatch(target.querySelector('[role=meter]')?.textContent ?? '', /one|70%/)
+    assert.match(target.querySelector('[role=meter]')?.getAttribute('aria-label') ?? '', /one.*70%/)
+    target.querySelector<HTMLButtonElement>('button[aria-label="Open Z.ai account details for one"]')?.click()
+    assert.deepEqual(opened, ['two', 'two', 'one'])
+    assert.ok(app)
+    await unmount(app)
+    app = undefined
+    flushSync(() => { app = mount(Card, { target, props: { group: { provider: 'zai', accounts: [{ ...account('one', true), servesHere: false }] } } }) })
+    assert.match(target.textContent ?? '', /Not reported/)
+    assert.match(target.querySelector('[role=meter]')?.textContent ?? '', /70%/)
+  } finally {
+    if (app) await unmount(app)
+    dom.window.close()
+    for (const name of domNames) Reflect.deleteProperty(globalThis, name)
+    await rm(dir, { recursive: true, force: true })
+  }
+})
