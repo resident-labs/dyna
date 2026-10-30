@@ -7,7 +7,7 @@ const (
 	SurfaceDM      Surface = "dm"      // the owner, in this session's DM
 	SurfaceCard    Surface = "card"    // the owner, through an HTML card
 	SurfaceSession Surface = "session" // the engine, from another session's turn: a brief or a result
-	SurfaceService Surface = "service" // a reviewer or helper service (M3)
+	SurfaceService Surface = "service" // a helper service (M3)
 	SurfaceEngine  Surface = "engine"  // a system event
 )
 
