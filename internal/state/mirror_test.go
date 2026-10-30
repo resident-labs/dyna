@@ -4,12 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -82,20 +79,14 @@ func (f *mirrorFixture) mirror() {
 	}
 }
 
-// importFile imports the copy when another binary wrote it, as the record.
-func (f *mirrorFixture) importFile() bool {
+// foreign reports whether another binary wrote the copy.
+func (f *mirrorFixture) foreign() bool {
 	f.t.Helper()
-	imported, err := f.w.ImportIfForeign(context.Background(), "test/record", f.path, func(conn *sql.Conn, raw []byte) error {
-		if _, err := conn.ExecContext(context.Background(), "DELETE FROM things"); err != nil {
-			return err
-		}
-		_, err := conn.ExecContext(context.Background(), "INSERT INTO things(name) VALUES (?)", string(raw))
-		return err
-	})
+	foreign, err := f.w.Foreign(context.Background(), "test/record", f.path)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return imported
+	return foreign
 }
 
 // oldBinaryWrites replaces the copy the way the previous release does: a new
@@ -129,7 +120,7 @@ func TestMirrorWritesTheCommittedRecordAndNeverImportsIt(t *testing.T) {
 	if got := f.file(); got != "v1" {
 		t.Fatalf("copy = %q, want v1", got)
 	}
-	if f.importFile() {
+	if f.foreign() {
 		t.Fatal("our own copy was imported")
 	}
 }
@@ -141,25 +132,11 @@ func TestCrashBeforeTheCopyKeepsTheRecord(t *testing.T) {
 	f.commit("v1")
 	f.mirror()
 	f.commit("v2") // The process stops before Mirror.
-	if f.importFile() {
+	if f.foreign() {
 		t.Fatal("the stale copy replaced the newer record")
 	}
 	if got := f.record(); got != "v2" {
 		t.Fatalf("record = %q, want v2", got)
-	}
-}
-
-// An old binary's write is imported once.
-func TestForeignWriteIsImportedOnce(t *testing.T) {
-	f := newMirrorFixture(t)
-	f.commit("v1")
-	f.mirror()
-	f.oldBinaryWrites("old")
-	if !f.importFile() || f.record() != "old" {
-		t.Fatalf("foreign write not imported: record = %q", f.record())
-	}
-	if f.importFile() {
-		t.Fatal("the foreign write was imported twice")
 	}
 }
 
@@ -197,7 +174,7 @@ func TestCrashBeforeTheRenameKeepsTheRecord(t *testing.T) {
 	f.commit("v2")
 	stopMirrorAt(t, "pending")
 	f.mirrorCrashes()
-	if f.importFile() || f.record() != "v2" {
+	if f.foreign() || f.record() != "v2" {
 		t.Fatalf("the old copy replaced the record: record = %q", f.record())
 	}
 }
@@ -213,89 +190,8 @@ func TestCrashAfterTheRenameKeepsANewerRecord(t *testing.T) {
 	stopMirrorAt(t, "renamed")
 	f.mirrorCrashes()
 	f.commit("v3") // Another writer, before its own Mirror.
-	if f.importFile() || f.record() != "v3" {
+	if f.foreign() || f.record() != "v3" {
 		t.Fatalf("our own copy replaced a newer record: record = %q", f.record())
-	}
-}
-
-// An old binary's write at either crash point is imported once: Mirror
-// neither renames over it nor stamps it as ours.
-func TestForeignWriteAtEitherCrashPointIsImportedOnce(t *testing.T) {
-	for _, step := range []string{"pending", "renamed"} {
-		t.Run(step, func(t *testing.T) {
-			f := newMirrorFixture(t)
-			f.commit("v1")
-			f.mirror()
-			f.commit("v2")
-			t.Cleanup(func() { mirrorStep = func(string, string) error { return nil } })
-			mirrorStep = func(at, _ string) error {
-				if at == step {
-					f.oldBinaryWrites("old")
-				}
-				return nil
-			}
-			f.mirror()
-			if !f.importFile() || f.record() != "old" {
-				t.Fatalf("the old binary's write was lost: record = %q", f.record())
-			}
-			if f.importFile() {
-				t.Fatal("the old binary's write was imported twice")
-			}
-		})
-	}
-}
-
-// Two readers that race over one foreign write import it once.
-func TestRacingReadersImportOnce(t *testing.T) {
-	f := newMirrorFixture(t)
-	f.commit("v1")
-	f.mirror()
-	f.oldBinaryWrites("old")
-	var wg sync.WaitGroup
-	imports := make(chan bool, 2)
-	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			imported, err := f.w.ImportIfForeign(context.Background(), "test/record", f.path, func(conn *sql.Conn, raw []byte) error {
-				_, err := conn.ExecContext(context.Background(), "UPDATE things SET name = ?", string(raw))
-				return err
-			})
-			if err != nil {
-				t.Error(err)
-			}
-			imports <- imported
-		}()
-	}
-	wg.Wait()
-	close(imports)
-	n := 0
-	for imported := range imports {
-		if imported {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Fatalf("%d imports, want 1", n)
-	}
-}
-
-// A symlink or other non-regular file is refused, not followed.
-func TestImportRefusesANonRegularFile(t *testing.T) {
-	f := newMirrorFixture(t)
-	f.commit("v1")
-	target := filepath.Join(t.TempDir(), "elsewhere")
-	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, f.path); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.w.ImportIfForeign(context.Background(), "test/record", f.path, func(*sql.Conn, []byte) error {
-		t.Fatal("a symlink was read")
-		return nil
-	}); err == nil {
-		t.Fatal("a symlink was accepted")
 	}
 }
 
@@ -320,7 +216,7 @@ func TestForgetMirrorsDropsAKeyAndItsChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]bool{"test/record": true, "test/record/child": true, "test/recorder": false} {
-		imported, err := f.w.ImportIfForeign(context.Background(), key, copies[key], func(*sql.Conn, []byte) error { return nil })
+		imported, err := f.w.Foreign(context.Background(), key, copies[key])
 		if err != nil || imported != want {
 			t.Errorf("%s: imported = %v, %v; want %v", key, imported, err, want)
 		}
@@ -346,43 +242,6 @@ func TestMirrorsNeedTheEngineMigration(t *testing.T) {
 	var n int
 	if err := w.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name = 'state_mirrors'").Scan(&n); err != nil || n != 0 {
 		t.Fatalf("state_mirrors tables = %d, %v; want none", n, err)
-	}
-}
-
-// A file the read cannot use is skipped: the record stays, the file is
-// logged once and stamped, so it is not tried again, and a later write by
-// another binary is still imported.
-func TestSkippedForeignFileIsStampedAndLoggedOnce(t *testing.T) {
-	f := newMirrorFixture(t)
-	// Only the skip line counts: a busy host also logs slow writes.
-	var logged []string
-	f.w.Logf = func(format string, args ...any) {
-		if line := fmt.Sprintf(format, args...); strings.HasPrefix(line, "state: skipped ") {
-			logged = append(logged, line)
-		}
-	}
-	f.commit("v1")
-	f.mirror()
-	f.oldBinaryWrites("damaged")
-	skip := func(conn *sql.Conn, raw []byte) error {
-		if string(raw) == "damaged" {
-			return fmt.Errorf("%w: not usable", ErrSkipForeign)
-		}
-		_, err := conn.ExecContext(context.Background(), "UPDATE things SET name = ?", string(raw))
-		return err
-	}
-	for range 2 {
-		imported, err := f.w.ImportIfForeign(context.Background(), "test/record", f.path, skip)
-		if err != nil || imported {
-			t.Fatalf("damaged file: imported %v, %v; want skipped", imported, err)
-		}
-	}
-	if f.record() != "v1" || len(logged) != 1 {
-		t.Fatalf("record %q after %d logs %q; want v1, logged once", f.record(), len(logged), logged)
-	}
-	f.oldBinaryWrites("v2")
-	if imported, err := f.w.ImportIfForeign(context.Background(), "test/record", f.path, skip); err != nil || !imported || f.record() != "v2" {
-		t.Fatalf("a later valid write: imported %v, %v, record %q; want v2", imported, err, f.record())
 	}
 }
 
