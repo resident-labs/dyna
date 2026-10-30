@@ -62,3 +62,45 @@ func TestRecordPROpenIsAtomic(t *testing.T) {
 		t.Fatalf("deliveries = %d, want 1", deliveries)
 	}
 }
+
+func TestCloseHandsPRsThroughSubtree(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1000, 0)
+	s, err := Open(t.TempDir(), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateRoom(ctx, "room", "room", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES ('root','room','root',NULL,'p','ready','',0),('parent','room','parent','root','p','ready','',0),('leaf','room','leaf','parent','p','ready','',0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := func(id string) contract.Event {
+		return contract.Event{ID: contract.EventID(id), Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Text: id}}
+	}
+	if err := s.RecordPROpen(ctx, "owner/repo", 1, "leaf", event("open-leaf"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPROpen(ctx, "owner/repo", 2, "parent", event("open-parent"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CloseSession(ctx, "leaf", event("close-leaf")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CloseSession(ctx, "parent", event("close-parent")); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM pr_owners WHERE session='root'").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("handed off %d PRs: %v", count, err)
+	}
+	if err := s.RecordPROpen(ctx, "owner/repo", 3, "leaf", event("late-open"), nil); err == nil {
+		t.Fatal("recorded a PR for a closed session")
+	}
+}
