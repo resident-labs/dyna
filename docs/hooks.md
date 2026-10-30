@@ -73,8 +73,8 @@ dyna services set updates --interval 60m
 
 The service runs when the configured checkout's default branch changes and at
 its interval. The first branch observation sets a baseline. A scheduled run
-defers while a merge trial or local CI run is active, or during the restart
-cooldown; running it from the Services page forces it. It uses the same
+defers while a hook run, a merge trial or a local CI run is active, or during
+the restart cooldown; running it from the Services page forces it. It uses the same
 detached installer, logs and durable receipts as the former update hook. The
 installer fetches the default branch, builds in a separate autoinstall checkout,
 and restarts the engine after a successful install. Its 75-minute limit includes
