@@ -568,8 +568,10 @@ const removeParallelism = 8
 // inspectTTL is how long a cleanup scan reuses a tree's inspection. A cleanup
 // scan only reports trees and picks removal candidates; remove rechecks each
 // candidate with a single-tree scan, which never reads the cache, and a fresh
-// Fingerprint. A reused result can only keep a tree one pass longer.
-const inspectTTL = 10 * time.Minute
+// Fingerprint. A reused result can only keep a tree one pass longer. It spans
+// the hourly maintenance pass, whose full scan otherwise used most of the pass
+// time and left removals deferred.
+const inspectTTL = 2 * time.Hour
 
 // inspection is one tree's inspected state as a cleanup scan saw it.
 type inspection struct {

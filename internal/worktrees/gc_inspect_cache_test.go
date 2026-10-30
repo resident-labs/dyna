@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // A cleanup scan reuses a tree's inspection, so a minute-by-minute pass does
@@ -39,6 +40,19 @@ func TestCleanupScanReusesInspectionButRecheckReadsFresh(t *testing.T) {
 	}
 	if find(trees).Dirty {
 		t.Fatal("cleanup scan inspected the tree again inside the reuse window")
+	}
+	// The next hourly maintenance pass still reuses the inspection.
+	inspections.Lock()
+	c := inspections.byPath[path]
+	c.at = c.at.Add(-70 * time.Minute)
+	inspections.byPath[path] = c
+	inspections.Unlock()
+	trees, err = GC(context.Background(), repo, GCOptions{DryRun: true, OwnerClosed: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if find(trees).Dirty {
+		t.Fatal("hourly cleanup scan inspected the tree again")
 	}
 	trees, err = GC(context.Background(), repo, GCOptions{DryRun: true, Path: path, OwnerClosed: open})
 	if err != nil {
