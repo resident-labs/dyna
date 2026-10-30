@@ -20,6 +20,8 @@ type HookRun struct {
 type HookFacts struct {
 	Found    bool
 	Disabled bool
+	// Schedule is set when the hook is a built-in whose timing the owner edits.
+	Schedule *Schedule
 	Runs     []HookRun
 	NextRun  *time.Time
 }
@@ -245,6 +247,7 @@ func hookService(s *Service, h HookFacts) {
 		return
 	}
 	s.Switch = &Switch{On: !h.Disabled}
+	s.Schedule = h.Schedule
 	s.NextRun = h.NextRun
 	var newest *HookRun
 	for i := range h.Runs {

@@ -107,9 +107,34 @@ func (s Service) Seed(ctx context.Context) error {
 	})
 }
 
-// Reset restores the seeded settings of a built-in hook. A hook the owner
+// ServicePatch is what the owner may change on a built-in service: its switch,
+// its interval and its run time limit. Its command stays fixed.
+type ServicePatch struct {
+	Disabled     *bool
+	EveryMinutes *int
+	Timeout      *string
+}
+
+// EditBuiltin changes a built-in service's switch, interval or time limit.
+func (s Service) EditBuiltin(ctx context.Context, name, editor string, p ServicePatch) error {
+	if err := s.requireBuiltin(ctx, name, true, "", "dyna git hooks edit --global "+name); err != nil {
+		return err
+	}
+	return s.Edit(ctx, "", name, editor, Patch{Disabled: p.Disabled, EveryMinutes: p.EveryMinutes, Timeout: p.Timeout})
+}
+
+// EditGlobal changes a global hook the owner added. A built-in service is
+// edited with EditBuiltin.
+func (s Service) EditGlobal(ctx context.Context, name, editor string, patch Patch) error {
+	if err := s.requireBuiltin(ctx, name, false, "dyna services set "+name, ""); err != nil {
+		return err
+	}
+	return s.Edit(ctx, "", name, editor, patch)
+}
+
+// ResetBuiltin restores the seeded settings of a built-in hook. A hook the owner
 // added has no defaults, so it has nothing to reset.
-func (s Service) Reset(ctx context.Context, name, editor string) error {
+func (s Service) ResetBuiltin(ctx context.Context, name, editor string) error {
 	if err := authority.Check("git hooks edit", authority.Of(ctx), nil); err != nil {
 		return err
 	}

@@ -189,7 +189,7 @@ func NewCommand() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
-	cmd.AddCommand(listCmd(), showCmd(), enableCmd(), disableCmd(), profileCmd(), runCmd(), restartCmd(), logCmd())
+	cmd.AddCommand(listCmd(), showCmd(), enableCmd(), disableCmd(), profileCmd(), setCmd(), resetCmd(), runCmd(), restartCmd(), logCmd())
 	return cmd
 }
 
@@ -343,7 +343,7 @@ func setEnabled(ctx context.Context, call engineCaller, r refs, id ServiceID, on
 		return nil
 	case serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
 		off := !on
-		if err := call.Call(ctx, "EditGlobalHook", []any{string(id), hooks.Patch{Disabled: &off}}, nil); err != nil {
+		if err := call.Call(ctx, "EditService", []any{string(id), hooks.ServicePatch{Disabled: &off}}, nil); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s is %s\n", id, stateWord(on))
@@ -468,6 +468,90 @@ func serviceProfiles(ctx context.Context, call engineCaller, r refs) ([]string, 
 		}
 	}
 	return nil, fmt.Errorf("no profile can run a service; run `dyna profiles set <profile> --use services`")
+}
+
+// builtinService is true for a service the engine runs on a timer that the
+// owner can retime: its switch, interval and time limit.
+func builtinService(id ServiceID) bool {
+	switch id {
+	case serviceregistry.IDParentCheckIns, serviceregistry.IDHarnessVersions, serviceregistry.IDAccountUsage, serviceregistry.IDLoadDoctor, serviceregistry.IDMaintenance:
+		return true
+	}
+	return false
+}
+
+func setCmd() *cobra.Command {
+	var interval, timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "set <service> [--interval <duration>] [--timeout <duration>]",
+		Short: "Change how often a background service runs and how long one run may take",
+		Long: "Change the interval or the run time limit of parent-checkins, harness-versions,\n" +
+			"account-usage, doctor or maintenance. The interval is whole minutes, such as 30m.\n" +
+			"`dyna services reset` restores both defaults.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			id, err := ParseServiceID(args[0])
+			if err != nil {
+				return err
+			}
+			return setSchedule(c.Context(), client(), id, interval, timeout, c.Flags().Changed("interval"), c.Flags().Changed("timeout"), c.OutOrStdout())
+		},
+	}
+	cmd.Flags().DurationVar(&interval, "interval", 0, "time between runs, in whole minutes")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "longest time one run may take")
+	return cmd
+}
+
+// setSchedule writes the interval or time limit the caller changed.
+func setSchedule(ctx context.Context, call engineCaller, id ServiceID, interval, timeout time.Duration, setInterval, setTimeout bool, out io.Writer) error {
+	if !builtinService(id) {
+		return fmt.Errorf("%s has no interval or time limit to set", id)
+	}
+	if !setInterval && !setTimeout {
+		return fmt.Errorf("pass --interval or --timeout")
+	}
+	var patch hooks.ServicePatch
+	if setInterval {
+		if interval < time.Minute || interval%time.Minute != 0 {
+			return fmt.Errorf("--interval must be a whole number of minutes, such as 30m")
+		}
+		minutes := int(interval / time.Minute)
+		patch.EveryMinutes = &minutes
+	}
+	if setTimeout {
+		if timeout <= 0 {
+			return fmt.Errorf("--timeout must be longer than zero")
+		}
+		text := timeout.String()
+		patch.Timeout = &text
+	}
+	if err := call.Call(ctx, "EditService", []any{string(id), patch}, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s timing changed\n", id)
+	return nil
+}
+
+func resetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset <service>",
+		Short: "Restore a background service's default interval, time limit and switch",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			id, err := ParseServiceID(args[0])
+			if err != nil {
+				return err
+			}
+			if !builtinService(id) {
+				return fmt.Errorf("%s has no defaults to restore", id)
+			}
+			if err := client().Call(c.Context(), "ResetService", []any{string(id)}, nil); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "%s is back to its defaults\n", id)
+			return nil
+		},
+	}
 }
 
 func runCmd() *cobra.Command {
@@ -683,12 +767,28 @@ func printRow(out io.Writer, row serviceregistry.Service) {
 		{"session", row.Session},
 		{"last run", stamp(row.LastRun)},
 		{"next run", stamp(row.NextRun)},
+		{"runs every", scheduleText(row)},
+		{"time limit", timeoutText(row)},
 		{"settings", strings.Join(row.SettingsKeys, ", ")},
 	} {
 		if line.value != "" && line.value != "-" {
 			fmt.Fprintf(out, "%-13s%s\n", line.label+":", line.value)
 		}
 	}
+}
+
+func scheduleText(row serviceregistry.Service) string {
+	if row.Schedule == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d min", row.Schedule.EveryMinutes)
+}
+
+func timeoutText(row serviceregistry.Service) string {
+	if row.Schedule == nil {
+		return ""
+	}
+	return row.Schedule.Timeout
 }
 
 // switchText is the service's switch as the list shows it: on, off, or a dash
