@@ -12,12 +12,12 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 
 1. **Room events move into SQLite.** Posts and system events become rows in one `events` table, because delivery, wake rules, the web app and `dyna room log` all query them. Rule r1 keeps room messages as JSONL files today; v2 changes that for events only. Transcripts and large outputs stay files (section 4).
 2. **Leads are placement roots.** A cgroup cannot span machines. A child therefore runs on its parent's host. Root's direct children (leads) each get their own budget on any host, and the engine enforces the room limit by accounting. Below each lead, budgets nest as cgroups (section 5.5).
-3. **CLIProxyAPI owns the model sign-ins.** It holds the Claude and ChatGPT sign-ins and refreshes them. The engine never refreshes a model token. The owner signs in again once at the cutover. The engine reads usage per account from the providers, because the proxy does not pass rate-limit headers by default (M0b).
+3. **CLIProxyAPI owns the model sign-ins.** It holds the Claude and ChatGPT sign-ins and refreshes them. The engine never refreshes a model token. M1 and M2 checks use a copied access token with no refresh token, as M0 did. From the self-hosting trial on, the owner signs in to CLIProxyAPI with separate logins. Each login has its own tokens, so v1's sign-ins keep working. The engine reads usage per account from the providers, because the proxy does not pass rate-limit headers by default (M0b).
 4. **Pi reaches ChatGPT through an `openai-responses` provider** that points at the model route. The native Pi `openai-codex` provider did not work through the proxy (M0b).
 5. **A dormant session stops its box.** The container stops, and its volume stays. Its request no longer counts on the host. A wake starts it again (section 5.3).
 6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. The engine refuses owner-only calls from host-exec processes (section 6).
 7. **Root is a position in the tree.** Any session above another may approve its agent-class operations and start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
-8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1, with its own data folder (`store.db`, so it never touches v1's `dyna.db`). The cutover follows only after that works and a dry-run import passes (section 11).
+8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The cutover follows only after the trial works and a dry-run import passes (section 11).
 9. **Some v1 features wait until after the cutover.** Voice, workflows, web search through Dyna, computers and the librarian's updates come back after the cutover. The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs in a box. Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
 
@@ -83,6 +83,7 @@ Third-party Go dependencies are allowed only with a reason in the PR. Expected: 
 ### 3.1 Rules
 
 - `contract/` holds every type that crosses a process boundary or is stored as a typed body: API calls, events, operations, grants, deliveries and the bundle.
+- Times are `time.Time` (RFC 3339 in JSON, Unix milliseconds in the store). Durations are `DurationMS`, an `int64` of milliseconds, so Go, JSON, TypeScript and the store use one unit.
 - Closed sets are named string types with constants. No `any`, no `map[string]any`, and no `json.RawMessage` outside the two generated union codecs (r7).
 - Values are checked once, where they enter: the API handler or the bundle import. Code further in trusts the types (u3).
 - `go generate ./contract` writes `contract/union_gen.go` (the decode switches for event bodies and operation arguments) and `web/src/lib/contract.gen.ts` (all types and a typed API client). CI fails when either file is stale.
@@ -105,6 +106,7 @@ type (
 	HostName       string // a registered host, such as "hermeslab"
 	RepoName       string // "owner/name" on GitHub
 	ProfileName    string // a registered profile, such as "terra"
+	DurationMS     int64  // a duration in milliseconds
 )
 
 // ControlPlane is the reserved host name of the engine's own machine.
@@ -245,10 +247,10 @@ The engine stores an event once. It then writes one delivery per recipient. A de
 type Surface string
 
 const (
-	SurfaceFeed    Surface = "feed"    // the owner, in the room feed
+	SurfaceFeed    Surface = "feed"    // a post in the room feed, by anyone
 	SurfaceDM      Surface = "dm"      // the owner, in this session's DM
 	SurfaceCard    Surface = "card"    // the owner, through an HTML card
-	SurfaceSession Surface = "session" // another agent
+	SurfaceSession Surface = "session" // the engine, from another session's turn: a brief or a result
 	SurfaceService Surface = "service" // a reviewer or helper service (M3)
 	SurfaceEngine  Surface = "engine"  // a system event
 )
@@ -365,7 +367,7 @@ Decision rules (engine/approve):
 
 1. The owner's own operations run at once, at every class.
 2. `auto` runs at once.
-3. `agent` runs at once for a session with no parent (root). Otherwise it waits until any session above the caller in the tree, or the owner, approves. A member's `agent` operation waits for the room's root or the owner.
+3. `agent` runs at once for a session with no parent (root). Otherwise it waits until any session above the caller in the tree, or the owner, approves. A member's `agent` operation waits for the room's root or the owner. A member with the `approve` grant may approve `agent` operations in its own room only, never `owner` class.
 4. `owner` waits for the owner, also for root.
 5. The check runs again just before the executor. A card whose `Old` values no longer match fails with `stale`, and nothing runs.
 6. A pending operation expires after 24 hours (setting `approvals.expiry`). The same caller, kind and arguments while one is pending returns the pending one.
@@ -478,7 +480,7 @@ M1 methods: `room.create`, `session.start`, `session.close`, `post`, `events.lis
 - **No JSON state.** JSON appears only as the typed body columns (`events.body`, `operations.args`, `operations.card`), which only `contract` decodes. Settings, profiles and harness config stay JSON config files (r1).
 - **Files.** Transcripts are append-only JSONL files per session. Attachments and large outputs are files stored by SHA-256. Rows hold the hash and the size.
 - **Backups.** Each day the engine runs `VACUUM INTO` from a read connection to `backups/`, and keeps 3. Relocation copies the latest backup (section 5.10).
-- **Budget.** `dyna.db` stays under 1 GiB. An archiver moves events older than 180 days for closed sessions to monthly JSONL files under `archive/`. It lands after the cutover, when the growth rate is measured.
+- **Budget.** `store.db` stays under 1 GiB. An archiver moves events older than 180 days for closed sessions to monthly JSONL files under `archive/`. It lands after the cutover, when the growth rate is measured.
 
 ### 4.2 Tables
 
@@ -580,16 +582,16 @@ type BoxSize struct {
 }
 
 type Box struct {
-	ID      contract.BoxID
-	Session contract.SessionID
-	Parent  contract.BoxID // empty for root and for leads (5.5)
-	Host    contract.HostName
-	Image   string // dyna-img-<name>:<hash>
-	Size    BoxSize
-	State   BoxState
-	Reason  string // pending, failed and lost only
-	Slice   string // the systemd slice of this box's budget
-	Updated time.Time
+	ID           contract.BoxID
+	Session      contract.SessionID
+	BudgetParent contract.BoxID // the box whose slice holds this one; empty for root and leads (5.5)
+	Host         contract.HostName
+	Image        string // dyna-img-<name>:<hash>
+	Size         BoxSize
+	State        BoxState
+	Reason       string // pending, failed and lost only
+	Slice        string // the systemd slice of this box's budget
+	Updated      time.Time
 }
 ```
 
@@ -600,12 +602,16 @@ type Box struct {
 | starting | ready | the box agent sent `hello` on the box socket within 60 s |
 | ready | stopped | the session went dormant: no running turn, shell job or wake |
 | stopped | starting | a delivery wakes the session, and admission fits it again |
+| stopped | pending | a delivery wakes the session, but the host has no room now |
+| pending | starting | admission fits a box that already has its container |
 | ready, stopped | closing | the session closes, or its parent closes |
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
 | creating, starting | failed | a step failed, or `hello` timed out |
-| ready, closing | lost | the host is unreachable (5.10) |
+| ready, stopped, closing | lost | the host is unreachable (5.10) |
 | lost | ready | the host is back, the container still runs, and the box agent reconnected |
 | lost | failed | the host is back without the container, or the owner removes the host |
+
+A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way keeps its last checkpoint ref as its archive.
 
 `BoxState` and `BoxSize` live in `contract`, because events and the API carry them. `Host` and `Box` are engine records.
 
@@ -627,7 +633,9 @@ Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `s
 
 ### 5.5 Budgets and placement
 
-Budget slices follow the tree with systemd's naming, where each dash adds a level: a lead is `dyna-<l>.slice`, its child `dyna-<l>-<c>.slice`, a grandchild `dyna-<l>-<c>-<g>.slice`. The parts are short hex suffixes of box IDs. A child's box starts with `podman run --cgroup-parent=<child slice>`, so its use counts against every ancestor below the lead.
+Budget slices follow the tree with systemd's naming, where each dash adds a level: a lead is `dyna-<l>.slice`, its child `dyna-<l>-<c>.slice`, a grandchild `dyna-<l>-<c>-<g>.slice`. Each part is 12 hex characters from the box ID, and admission checks that it is unique on the host. A unit name has at most 255 characters, so this allows about 18 levels. A child's box starts with `podman run --cgroup-parent=<child slice>`, so its use counts against every ancestor below the lead.
+
+Every budget sits under the host slice `dyna.slice`, whose `memory.max` is the host's `MemBytes`. Admission counts sizes, but budgets may grow to 1.5 times their size. The host limit keeps any memory kill inside Dyna's boxes, away from sshd and the master.
 
 A cgroup nests only inside one kernel, so a child runs on its parent's host. Therefore:
 
@@ -636,7 +644,9 @@ A cgroup nests only inside one kernel, so a child runs on its parent's host. The
 - **A lead's subtree never splits across hosts.** A child that does not fit on its lead's host waits in `pending`.
 - **M1** uses one host, hermeslab.
 
-### 5.6 Repository copy and shared caches
+### 5.6 Repository copy and shared caches (M3)
+
+Repositories, git through the engine, checkpoints and the archive on close (5.6 to 5.9) land in M3. In M1 and M2, a box has no repository, so close has nothing to archive.
 
 Each host keeps one bare cache per repository at `<hostdata>/git/<owner>/<repo>.git`. **Hosts never talk to GitHub and hold no GitHub credentials.** The control plane fetches from GitHub and pushes into the host cache over the master, before it creates a box and when it sees the default branch move.
 
@@ -656,11 +666,11 @@ If a master dies, the engine starts it again and adds every forward again. The b
 
 **Model route.** The box agent listens on `127.0.0.1:7781` inside the box. It starts Claude Code with `ANTHROPIC_BASE_URL=http://127.0.0.1:7781` and `ANTHROPIC_AUTH_TOKEN=box`, a placeholder that is not a secret. Pi gets the same origin for its `anthropic` provider, and `http://127.0.0.1:7781/v1` for an `openai-responses` provider for ChatGPT models (M0b). The box agent forwards each request unchanged over the box socket to `/model/`. The engine checks that the session's profile allows the model, replaces the placeholder with the CLIProxyAPI client key, and streams to CLIProxyAPI on the control-plane loopback. Server-sent events pass through without buffering.
 
-**Git.** `git-remote-dyna` (a link to `dyna box-agent git-remote`) carries smart HTTP over the box socket to `/git/<repo>/`. The engine checks the session's repositories and proxies to GitHub with its own token. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>` and `refs/dyna/checkpoint/<session>`. Fetches are allowed for the room's repositories.
+**Git (M3).** `git-remote-dyna` (a link to `dyna box-agent git-remote`) carries smart HTTP over the box socket to `/git/<repo>/`. The engine checks the session's repositories and proxies to GitHub with its own token. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>` and `refs/dyna/checkpoint/<session>`. Fetches are allowed for the room's repositories.
 
-**Network.** Boxes have outbound internet for package installs. They have no route to the control plane except the box socket.
+**Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
 
-### 5.8 Box agent
+### 5.8 Box agent (M1; checkpoint in M3)
 
 `dyna box-agent` runs under tini as the only child of PID 1. It has four parts:
 
@@ -669,11 +679,11 @@ If a master dies, the engine starts it again and adds every forward again. The b
 - **Process guard.** Each shell job runs in its own child cgroup. Stopping a job kills its cgroup. At turn end, the guard stops jobs that the harness did not ask to keep.
 - **Transcript stream.** It tails the harness transcript and posts append-only chunks `{Path, Offset, Bytes}`. The engine acknowledges each offset and keeps the copy. After a reconnect, the box agent resends from the last acknowledged offset.
 
-**Checkpoint.** After each turn, the box agent commits the working tree, with untracked files that are not ignored, through a temporary index and `commit-tree` (the v1 #1246 method). It pushes the commit to `refs/dyna/checkpoint/<session>`, and skips the push when nothing changed. The session branch and the index do not change.
+**Checkpoint (M3).** After each turn, the box agent commits the working tree, with untracked files that are not ignored, through a temporary index and `commit-tree` (the v1 #1246 method). It pushes the commit to `refs/dyna/checkpoint/<session>`, and skips the push when nothing changed. The session branch and the index do not change.
 
 **Release skew.** `hello` carries the binary version. When it differs from the engine's, the engine sends `Upgrade` once the box is idle, and the box agent runs `/opt/dyna/bin/current/dyna box-agent` in its place.
 
-### 5.9 Close
+### 5.9 Close (archive in M3)
 
 Close runs depth first: children are closed and deleted first. Then, for the box itself:
 
@@ -709,7 +719,7 @@ A host-exec grant is a `contract.Grant` with `Kind: hostexec` (3.5).
 
 - **Matching is by argv**, never by a shell string. `sh -c "..."` matches only a rule whose `Program` is `sh` or `*`. An exact rule refuses extra arguments; a prefix rule accepts them.
 - When several grants match, `preapproved` wins over `approve`. When none matches, the call fails with `no-grant`, and nothing runs.
-- `preapproved` runs at once. `approve` makes the operation `hostexec.run` wait for the owner.
+- The class of `hostexec.run` comes from the grant that matched: `auto` when a `preapproved` grant matches, and `owner` when only an `approve` grant matches. A member can never submit it.
 
 Tables: `grant_hosts` (`grant`, `host`), `grant_commands` (`grant`, `idx`, `program`, `prefix`) and `grant_command_args` (`grant`, `idx`, `pos`, `arg`).
 
@@ -732,7 +742,7 @@ Tables: `grant_hosts` (`grant`, `host`), `grant_commands` (`grant`, `idx`, `prog
 
 Every run emits `op.requested` (when it waits), `op.decided` (when someone decides), and `op.ran` with the exit code. No command runs without these events.
 
-Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `ended_at`, `exit_code`, `output_bytes`, `output_file`, `stopped`), where `stopped` is empty, `timeout` or `revoked`.
+Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout` or `revoked`. The exit code and output file stay on the operation.
 
 ### 6.4 Control-plane safety and accepted risks
 
@@ -742,7 +752,7 @@ Accepted risks (owner, 2026-10-30):
 
 - `*` on a host is full access to that host. On the control plane, that includes the CLIProxyAPI sign-ins and the owner's files. Root's default grant relies on root's judgment.
 - A command can leave its scope, for example with `systemd-run --user`. The scope check stops mistakes, not a hostile command.
-- A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. Hosts hold no model or GitHub credentials.
+- A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. It can also connect to any box's forwarded socket under `<hostdata>/sock/` and act as that box's session, with its model route and git push rights. Hosts hold no model or GitHub credentials, and only we have admin on them.
 - Output can contain host secrets. Only room members can see it.
 
 ## 7. Identity, rooms and the tree
@@ -807,11 +817,12 @@ The engine sets the surface and the reply channel of each delivery from its sour
 | Owner post in the feed with no mention (root gets it) | feed | final | owner, feed, reply to that post |
 | Owner post in the session's DM | dm | final | owner, `dm:<session>`. The parent does not wake. |
 | Brief from `session start` | session | final | parent |
-| Parent post that mentions the session | session | final | parent, feed |
+| Parent post that mentions the session | feed | final | parent, feed |
 | Card submit | card | final | owner, feed, reply to the card post |
-| Member post that mentions the session | session | final | member, its inbox and the feed |
-| Child result, sibling post, other-room post | session | post | the sender |
-| Group mention only (`@children`, `@siblings`) | session | none | none |
+| Member post that mentions the session | feed | final | member, its inbox and the feed |
+| Child result | session | post | the child |
+| Sibling post, other-room post | feed | post | the sender |
+| Group mention only (`@children`, `@siblings`) | feed | none | none |
 | Check-in, engine notice, service event, shell or job end | engine or service | none | none |
 | Voice dispatch (after voice is ported) | voice | final | owner, the call; the feed if the call ended |
 
@@ -849,7 +860,7 @@ type RepoSettings struct {
 	MergePolicy     MergePolicy      `json:"mergePolicy"`
 	CIMode          CIMode           `json:"ciMode"`
 	ReviewerProfile ProfileName      `json:"reviewerProfile"`
-	TestBudget      time.Duration    `json:"testBudget"`
+	TestBudget      DurationMS       `json:"testBudget"`
 	Attribution     []AttributionLine `json:"attribution,omitempty"`
 }
 ```
@@ -862,7 +873,16 @@ Drafted by dyna:code-architectural.
 
 ### 8.1 Bundle parts
 
-The bundle folder has mode 0700. It holds no raw secret, but it holds device token hashes, so it is never posted or attached. Senders map to principals once, in the exporter: the owner to `owner`, `<room>:<name>` to that session, engine senders to `engine`, and `<room>:root` to the room's root. No v1 name string reaches v2 code.
+The bundle folder has mode 0700. It holds no raw secret, but it holds device token hashes, so it is never posted or attached.
+
+v1 sessions are not imported, so their IDs do not exist in v2. Each imported record therefore carries its author as `ImportedAuthor{Kind, Label}`: the kind is `owner`, `session` or `engine`, and the label is the v1 address as text, such as `dyna:code-architectural`. The store keeps the label as text. Only each room's new root gets a real session ID. An unanswered question whose asker is gone goes to the room's root.
+
+```go
+type ImportedAuthor struct {
+	Kind  PrincipalKind `json:"kind"`  // owner, session or engine
+	Label string        `json:"label"` // the v1 address, for display only
+}
+```
 
 ```go
 type GlobalBundle struct {
@@ -941,7 +961,7 @@ The external Opus agent runs steps 3 to 10 from a prompt we write. The owner doe
 8. **Install v2** from the cutover commit, built on hermeslab. Its store is `~/.local/share/dyna/store.db`.
 9. **Import.** `dyna import <bundle>` writes the store in one transaction and records the bundle hash. It copies the Connect secrets (`machine.key`, `jwks.json`, `link.json`, `tunnel-token`) file to file with mode 0600, so they never enter the bundle. It then moves the v1 files to `~/.local/share/dyna-v1/`. The owner deletes that folder after the first good week.
 10. **Start.** `dyna engine` starts each room's root in a box. Each root gets one `migrate.handoff` event with its open goals, PRs, questions, issue count and handoff cards.
-11. **Owner checks.** The owner signs in to CLIProxyAPI again, opens a room from a paired device, and turns auto-update back on.
+11. **Owner checks.** The owner checks that the CLIProxyAPI sign-ins from the trial work (the auth folder moves with the engine), opens a room from a paired device, and turns auto-update back on.
 
 ### 8.4 Upgrade guard and other installs
 
@@ -964,15 +984,21 @@ type Subscription struct {
 	Room    RoomID            `json:"room,omitempty"`
 	Session SessionID         `json:"session,omitempty"`
 	On      []EventType       `json:"on,omitempty"`    // or Every
-	Every   time.Duration     `json:"every,omitempty"` // or On
+	Every   DurationMS        `json:"every,omitempty"` // or On
 	Wake    *Principal        `json:"wake,omitempty"`  // wake this principal with the event, or
 	Run     *RunSpec          `json:"run,omitempty"`   // run a command in a small box
 }
 
 type RunSpec struct {
-	Command []string `json:"command"`
-	Image   string   `json:"image"`
-	Size    string   `json:"size"` // a box size name
+	Command []string  `json:"command"`
+	Image   string    `json:"image"`
+	Size    string    `json:"size"`            // a box size name
+	Files   []RunFile `json:"files,omitempty"` // written into the box before the command
+}
+
+type RunFile struct {
+	Path string `json:"path"` // inside the box
+	Body string `json:"body"`
 }
 ```
 
@@ -981,12 +1007,16 @@ Exactly one of `On` and `Every`, and exactly one of `Wake` and `Run`, is set. A 
 | v1 hooks | Count | v2 form |
 |---|---|---|
 | Engine timers: doctor, account usage, check-ins, maintenance, harness versions | 5 | engine scheduled tasks; not subscriptions |
-| Librarian on main-updated, pr-merged, every 10 min | 7 | `Wake` the librarian on `repo.main_updated` and `pr.merged` |
+| Librarian on main-updated, pr-merged, every 10 min | 7 | not imported, because the librarian comes after the cutover. They are listed on the dyna room's handoff card and made again with the librarian. |
 | Owner self-update script | 1 | the built-in updater |
-| horizon upstream-watch | 1 | `Run` in a small box in room horizon, every 30 min |
+| horizon upstream-watch | 1 | `Run` in a small box in room horizon, every 30 min. The bundle carries the script as a `RunFile`. |
 | Notices to root | new | default room subscription: `Wake` root on `notice.posted` and unowned repository events |
 
-Tables: `subscriptions` (`id` PK, `scope`, `room`, `session`, `every_ms`, `wake_kind`, `wake_id`, `run_image`, `run_size`, `created_at`), `subscription_events` (`sub`, `event_type`), `subscription_args` (`sub`, `pos`, `arg`) and `imports` (`bundle_sha256` PK, `version`, `source_commit`, `imported_at`).
+Tables: `subscriptions` (`id` PK, `scope`, `room`, `session`, `every_ms`, `wake_kind`, `wake_id`, `run_image`, `run_size`, `created_at`), `subscription_events` (`sub`, `event_type`), `subscription_args` (`sub`, `pos`, `arg`), `subscription_files` (`sub`, `path`, `body`) and `imports` (`bundle_sha256` PK, `version`, `source_commit`, `imported_at`).
+
+### 8.6 Open points
+
+- horizon's root confirms that `upstream-watch` needs no desktop state other than its script. If it does, that state moves into the room or the script changes before the cutover.
 
 ## 9. Feature map
 
@@ -1003,7 +1033,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | nodes | M1 hermeslab; M3 Boat and pve | renamed hosts |
 | settings | M1 store; M3 import and daily backups | backups are required at the gate |
 | approvals | M2 | one Submit |
-| sessions | M1 one session; M2 the tree, children and dormancy | dormant boxes must stop, or host memory fills |
+| sessions, session-dormancy | M1 one session; M2 the tree, children and session dormancy | dormant boxes must stop, or host memory fills |
 | web-app, web-server, room-feed, session-view | M2 | the room view, ported |
 | files-visuals | M2 cards and files; after: the Chromium visual check | cards carry owner decisions |
 | goals, goal-service, parent-checkins | M3 | leads and builders build v2 in v2 |
@@ -1073,7 +1103,7 @@ A test that needs a real Podman, SSH, harness, GitHub or browser is a manual san
 
 ### 10.4 Where tests run
 
-- Until v2 self-hosts, builders run tests on hermeslab with `dyna job run --node hermeslab --commit HEAD --workspace -- go test ./...` from `next/` (r19). Locally, only one focused package with `-p 2`.
+- Until v2 self-hosts, builders run tests on hermeslab with v1's job runner: `dyna job run --node hermeslab --commit HEAD --workspace -- go test ./...` from `next/` (r19). Locally, only one focused package with `-p 2`.
 - CI has one GitHub Actions workflow for `next/**`: `go vet`, `go test ./... -count=1`, the generated-file check, the dependency-direction check, and `pnpm check` for the web app. The whole Go suite stays under 60 seconds on CI. A slow test is fixed at once (r11).
 - After self-hosting, tests run inside the builder's own box.
 
@@ -1114,8 +1144,8 @@ Acceptance:
 2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. Close moves goals and children to the parent. Close of root fails.
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
-5. unit: `box.grow` is auto within the parent's remainder, agent beyond it, and owner for root.
-6. unit: host-exec argv matching, mode precedence, `no-grant`, revoke, expiry, and the `hostexec-scope` refusal.
+5. unit: `box.grow` is auto within the parent's remainder, agent beyond it, and owner for root. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
+6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no-grant`, revoke, expiry, and the `hostexec-scope` refusal.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
 9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves an agent-class operation in the approvals panel.
@@ -1130,7 +1160,7 @@ Scope: rooms with repositories, git through the engine, checkpoints and close wi
 The order inside M3:
 
 1. Build the features. Each has its unit tests.
-2. **Self-hosting trial.** v2 runs beside v1 with its own data folder, sockets and ports, in a trial room for the `dyna` repository. v2 sessions make the remaining M3 changes through v2 PRs.
+2. **Self-hosting trial.** v2 runs beside v1 with its own data, runtime and SSH control folders (decision 8), in a trial room for the `dyna` repository. v2 sessions make the remaining M3 changes through v2 PRs. While v1 still tracks the same repository, v2 names session branches `v2/<session>`, acts only on PRs that v2 sessions opened, and does not wake on unowned repository events. v1 does not track `v2/` branches.
 3. **Dry run.** Export from a copy of the latest v1 backup, and import into a scratch v2 store. Compare the counts.
 4. **Cutover** (section 8).
 
