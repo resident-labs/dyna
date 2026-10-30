@@ -13,6 +13,7 @@ type BoxSpec struct {
 	Host    contract.HostName
 	Slice   string
 	Size    contract.BoxSize
+	Repos   []contract.BoxRepo
 }
 
 // BoxAdapter performs host work after the service records admission.

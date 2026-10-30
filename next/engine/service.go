@@ -22,10 +22,17 @@ type Profiles interface {
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
 }
 
+// Repositories reads room repositories and prepares their host caches.
+type Repositories interface {
+	List(context.Context, contract.RoomID, contract.SessionID, contract.HostName) ([]contract.BoxRepo, error)
+	Prepare(context.Context, contract.RoomID, contract.SessionID, contract.HostName) ([]contract.BoxRepo, error)
+}
+
 type Service struct {
 	store     *store.Store
 	boxes     BoxAdapter
 	profiles  Profiles
+	repos     Repositories
 	now       func() time.Time
 	mu        sync.Mutex
 	channels  map[contract.SessionID]*boxChannel
@@ -43,6 +50,9 @@ type boxRun struct {
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
 	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
 }
+
+// SetRepositories configures repository lookup before the service starts.
+func (s *Service) SetRepositories(repos Repositories) { s.repos = repos }
 
 func (s *Service) lockBox(id contract.SessionID) func() {
 	s.boxLockMu.Lock()
@@ -259,7 +269,15 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return response, failure(err)
 	}
-	image, createErr := s.boxes.Create(createCtx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size})
+	var repos []contract.BoxRepo
+	var createErr error
+	if s.repos != nil {
+		repos, createErr = s.repos.Prepare(createCtx, session.Room, session.ID, current.Host)
+	}
+	var image string
+	if createErr == nil {
+		image, createErr = s.boxes.Create(createCtx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size, Repos: repos})
+	}
 	if createErr != nil {
 		s.boxLockMu.Lock()
 		closing := run.closing
@@ -463,7 +481,18 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	return contract.BoxHelloResponse{Session: session.ID, Box: session.Box, Model: model}, nil
+	var repos []contract.BoxRepo
+	if s.repos != nil {
+		current, err := s.store.Box(ctx, session.Box)
+		if err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+		repos, err = s.repos.List(ctx, session.Room, session.ID, current.Host)
+		if err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+	}
+	return contract.BoxHelloResponse{Session: session.ID, Box: session.Box, Model: model, Repos: repos}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
