@@ -443,6 +443,14 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 		}
 		defaultRef = prefix + resolved.Name
 	}
+	// A tree's merged state and ahead count follow the default branch, so a
+	// reused inspection is only valid while that branch stays put.
+	defaultHead := ""
+	if defaultRef != "" {
+		if out, err := gitOutput(ctx, repo, "rev-parse", "--verify", "-q", defaultRef); err == nil {
+			defaultHead = strings.TrimSpace(string(out))
+		}
+	}
 	var trees []Tree
 	for index, block := range blocks {
 		t := Tree{Ahead: -1}
@@ -516,12 +524,13 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 	// so run a bounded number at once; one slow tree must not serialize the rest.
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, scanParallelism)
+	now := time.Now()
 	for i := range trees {
 		wg.Add(1)
 		slots <- struct{}{}
 		go func() {
 			defer func() { <-slots; wg.Done() }()
-			inspectTree(ctx, repo, defaultRef, opts, &trees[i])
+			inspectCached(ctx, repo, defaultRef, defaultHead, opts, &trees[i], now)
 		}()
 	}
 	wg.Wait()
@@ -547,8 +556,74 @@ func (h *runHistory) clone() *runHistory {
 	return c
 }
 
-// scanParallelism bounds concurrent per-tree git and file inspection.
-const scanParallelism = 8
+// scanParallelism bounds concurrent per-tree git and file inspection. Each
+// tree costs a git status and maybe a full file walk, so a wide scan saturates
+// the disk that every session shares.
+const scanParallelism = 2
+
+// removeParallelism bounds concurrent removal rechecks. Removals are rare and
+// each one rechecks its tree right before deletion, so they keep their width.
+const removeParallelism = 8
+
+// inspectTTL is how long a cleanup scan reuses a tree's inspection. A cleanup
+// scan only reports trees and picks removal candidates; remove rechecks each
+// candidate with a single-tree scan, which never reads the cache, and a fresh
+// Fingerprint. A reused result can only keep a tree one pass longer.
+const inspectTTL = 10 * time.Minute
+
+// inspection is one tree's inspected state as a cleanup scan saw it.
+type inspection struct {
+	at          time.Time
+	head        string
+	defaultHead string
+	walked      bool
+	merged      bool
+	ahead       int
+	dirty       bool
+	dirtyFiles  []string
+	size        int64
+	touched     time.Time
+}
+
+var inspections = struct {
+	sync.Mutex
+	byPath map[string]inspection
+}{byPath: map[string]inspection{}}
+
+// inspectCached is inspectTree for cleanup scans of many trees. It reuses a
+// tree's inspection while its HEAD is the same and the inspection is younger
+// than inspectTTL and the default branch has not moved, unless this pass needs
+// a file walk the reused one lacks.
+// Inventory (nil options) and single-tree rechecks always inspect afresh.
+func inspectCached(ctx context.Context, repo, defaultRef, defaultHead string, opts *GCOptions, tp *Tree, now time.Time) {
+	if opts == nil || opts.Path != "" {
+		inspectTree(ctx, repo, defaultRef, opts, tp)
+		return
+	}
+	inspections.Lock()
+	c, ok := inspections.byPath[tp.Path]
+	inspections.Unlock()
+	if ok && c.head == tp.head && c.defaultHead == defaultHead && now.Sub(c.at) < inspectTTL {
+		t := *tp
+		t.Merged, t.Ahead, t.Dirty, t.DirtyFiles, t.Size, t.touched = c.merged, c.ahead, c.dirty, slices.Clone(c.dirtyFiles), c.size, c.touched
+		t.Age = max(now.Sub(c.touched), 0)
+		if c.walked || !usageNeeded(t, opts) {
+			*tp = t
+			return
+		}
+	}
+	inspectTree(ctx, repo, defaultRef, opts, tp)
+	t := *tp
+	inspections.Lock()
+	defer inspections.Unlock()
+	if t.protected != "" || ctx.Err() != nil {
+		delete(inspections.byPath, t.Path)
+		return
+	}
+	// Drop expired entries, so removed trees do not stay in memory.
+	maps.DeleteFunc(inspections.byPath, func(_ string, c inspection) bool { return now.Sub(c.at) >= inspectTTL })
+	inspections.byPath[t.Path] = inspection{at: now, head: t.head, defaultHead: defaultHead, walked: usageNeeded(t, opts), merged: t.Merged, ahead: t.Ahead, dirty: t.Dirty, dirtyFiles: slices.Clone(t.DirtyFiles), size: t.Size, touched: t.touched}
+}
 
 // inspectTree fills in the git state and file activity of one tree.
 func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, tp *Tree) {
@@ -860,7 +935,7 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	}
 	jobs := make(chan int)
 	var wg sync.WaitGroup
-	for range min(scanParallelism, len(pending)) {
+	for range min(removeParallelism, len(pending)) {
 		wg.Add(1)
 		history := opts.history.clone()
 		go func() {
