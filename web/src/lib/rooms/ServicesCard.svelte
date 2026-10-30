@@ -1,51 +1,44 @@
 <script lang="ts">
-  // The Home Services card: every service and machine hook with its state and
+  // The Home Services card: machine services and hooks with their state and
   // last result. Failing rows come first. Healthy rows fold into one line that
   // opens on a click. A hook row opens its last run's log in the card; a
-  // service row opens its room's Services page.
+  // service row opens the Services pane in Settings.
   import { onMount, untrack } from 'svelte'
   import { api } from '../../api.ts'
   import { errorText } from '../errorText.ts'
   import { ago } from '../ui/format.ts'
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
-  import type { Room } from '../api/room.ts'
-  import type { ServiceView } from '../api/service.ts'
-  import { groupRows, healthyLine, hookRows, logKey, readLog, serviceRows, settleReads, type ServiceCardRow } from './servicesCard.ts'
+  import { readRegistry } from '../services/read.ts'
+  import { groupRows, healthyLine, hookRows, logKey, readLog, serviceRows, type ServiceCardRow } from './servicesCard.ts'
 
-  let { rooms = [], onroom }: { rooms?: Room[]; onroom: (id: string, view?: string) => void } = $props()
+  let { onsettings }: { onsettings: (pane: string) => void } = $props()
 
   let rows = $state<ServiceCardRow[]>([])
-  let loaded = $state(false)
   let error = $state('')
   let folded = $state(true) // the healthy line is closed
   let open = $state('') // id of the hook row whose log shows
   let logs = $state<Record<string, string>>({}) // hook/run id -> log text
-  let kept: Record<string, readonly ServiceView[]> = {} // room id -> its last good service list
 
   let groups = $derived(groupRows(rows))
-  const live = (room: Room) => !room.archived
 
   // A part that fails to load leaves the other parts on screen.
   async function load() {
     try {
       const hooks = hookRows((await api.globalHookSummary()) ?? [])
-      const active = rooms.filter(live)
-      const reads = await Promise.all(active.map(async (room) => ({ room: room.id, services: (await api.listServices(room.id).catch((): null => null)) ?? null })))
-      const settled = settleReads(kept, reads)
-      kept = settled.kept
-      rows = [...serviceRows(settled.byRoom), ...hooks]
+      const registry = readRegistry(await api.serviceRegistry('', ''))
+      if (!registry) throw new Error('The service registry returned an invalid list.')
+      rows = [...serviceRows(registry), ...hooks]
       error = ''
     } catch (e) {
       error = errorText(e)
     }
-    loaded = true
   }
 
   async function show(row: ServiceCardRow) {
     const log = row.log
     if (!log) return
-    if (log.kind === 'room') return onroom(log.room, 'services')
+    if (log.kind === 'settings') return onsettings('services')
     open = open === row.id ? '' : row.id
   }
 
@@ -58,9 +51,8 @@
     if (untrack(() => logs[key]) === undefined) readLog(api.globalHookRunLog, log).then((text) => { logs[key] = text })
   })
 
-  // The first read, and a read again when the room list changes.
-  $effect(() => { void rooms.length; load() })
   onMount(() => {
+    load()
     const timer = setInterval(load, 60 * 1000)
     return () => clearInterval(timer)
   })
