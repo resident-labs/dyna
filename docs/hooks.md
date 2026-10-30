@@ -23,6 +23,7 @@ to a turn at once instead of at its next interval.
 Only `before-land` allows `onFail: block`. A failed blocking hook prevents publication.
 Before-land hooks run against the trial merge and receive its SHA.
 Detached alert hooks get a separate trial worktree, which Dyna removes after the run.
+`worktree-created` hooks run in the foreground: worktree creation waits for each one and names any hook that fails.
 Other events launch detached workers and do not wait for shell commands.
 
 Hook commands receive these environment variables:
