@@ -79,8 +79,8 @@ type BoxHelloRequest struct {
 type ModelProvider string
 
 const (
-	ProviderAnthropic ModelProvider = "anthropic"
-	ProviderOpenAI    ModelProvider = "openai"
+	ModelProviderAnthropic ModelProvider = "anthropic"
+	ModelProviderOpenAI    ModelProvider = "openai"
 )
 
 type ThinkingLevel string
