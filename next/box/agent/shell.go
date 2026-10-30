@@ -90,8 +90,23 @@ type initializeResult struct {
 	ServerInfo      serverInfo        `json:"serverInfo"`
 }
 
+type ShellExecutor interface {
+	Run(context.Context, string, string) (string, error)
+}
+
+type GuardedShell struct{ Guard *Guard }
+
+func (s GuardedShell) Run(_ context.Context, command, cwd string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	job, err := s.Guard.Start(command, cwd, &stdout, &stderr)
+	if err == nil {
+		err = job.Wait()
+	}
+	return stdout.String() + stderr.String(), err
+}
+
 // Shell serves the box-local MCP shell over newline-delimited JSON-RPC.
-func Shell(ctx context.Context, guard *Guard, input io.Reader, output io.Writer) error {
+func Shell(ctx context.Context, executor ShellExecutor, input io.Reader, output io.Writer) error {
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), 4<<20)
 	encoder := json.NewEncoder(output)
@@ -130,12 +145,7 @@ func Shell(ctx context.Context, guard *Guard, input io.Reader, output io.Writer)
 				}
 				continue
 			}
-			var stdout, stderr bytes.Buffer
-			job, err := guard.Start(req.Params.Arguments.Command, req.Params.Arguments.Cwd, &stdout, &stderr)
-			if err == nil {
-				err = job.Wait()
-			}
-			text := stdout.String() + stderr.String()
+			text, err := executor.Run(ctx, req.Params.Arguments.Command, req.Params.Arguments.Cwd)
 			if err != nil {
 				text += "\n" + err.Error()
 			}
