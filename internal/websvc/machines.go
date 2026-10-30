@@ -365,6 +365,18 @@ func (a MachineAPI) SaveNode(ctx context.Context, ref string, patch MachinePatch
 	if err != nil {
 		return MachineDetail{}, err
 	}
+	if patch.Mounts != nil || patch.Devices != nil || patch.RemoveMounts != nil || patch.RemoveDevices != nil {
+		// Registration edits read the latest lists inside the store transaction.
+		// A concurrent node save cannot restore the lists this patch replaces.
+		if _, err := a.Store.UpdateContainerRegistrations(ctx, saved.ID, func(stored machines.Machine) ([]machines.NamedMount, []machines.DeviceGrant, error) {
+			if err := applyContainerPatch(&stored, patch); err != nil {
+				return nil, nil, err
+			}
+			return stored.Mounts, stored.Devices, nil
+		}); err != nil {
+			return MachineDetail{}, err
+		}
+	}
 	if patch.AllowHostChecks != nil {
 		// The grant changes inside the store's writer transaction, so this
 		// answer cannot restore a grant that another caller refused meanwhile.
@@ -381,7 +393,7 @@ func (a MachineAPI) SaveNode(ctx context.Context, ref string, patch MachinePatch
 	return a.machine(ctx, stored, a.ciRuns()), nil
 }
 
-// applyMachinePatch writes the fields the patch names.
+// applyMachinePatch writes the non-registration fields the patch names.
 func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Name != nil {
 		name := strings.TrimSpace(*patch.Name)
@@ -420,6 +432,11 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Resources != nil {
 		m.Resources = *patch.Resources
 	}
+	return nil
+}
+
+// applyContainerPatch applies registration edits to the fresh transaction read.
+func applyContainerPatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.Mounts != nil {
 		for _, update := range *patch.Mounts {
 			at := slices.IndexFunc(m.Mounts, func(stored machines.NamedMount) bool {
