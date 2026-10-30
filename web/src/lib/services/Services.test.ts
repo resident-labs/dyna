@@ -37,6 +37,9 @@ const api = `
 const now = ${now}
 const iso = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString()
 export const api = {
+  serviceRegistry: () => Promise.resolve([
+    { id: 'reviewer', group: 'pull-requests', label: 'Reviews', description: 'Reviews each ready change', state: 'waiting', detail: 'queued', count: 2, profile: 'sol', session: '', settingsKeys: [] },
+  ]),
   listServices: () => Promise.resolve([
     { role: 'reviewer', name: 'PR reviewer', profile: 'sol', pinned: 'sol', reason: '', profiles: ['luna', 'sol'] },
   ]),
@@ -125,7 +128,7 @@ test('the merges tab groups a trial with its publish, and the librarian tab fold
   } finally { await page.done() }
 })
 
-test('the reviews tab states a provider limit once and keeps its controls on the header line', async () => {
+test('the reviews tab states the registry state once and keeps its controls on the header line', async () => {
   globalThis.__writes = []
   const page = await mountPage({
     changes: [{ number: 1918, title: 'skip repeated Watch work', verdict: 'approve', reviewAt: new Date(now - 60000).toISOString(), reviewerSession: 'ses_r' }],
@@ -134,8 +137,7 @@ test('the reviews tab states a provider limit once and keeps its controls on the
     await settle(page)
     const panel = open(page, 'Reviews')
     const head = textOf(need(panel.querySelector('.row'), 'reviewer line'))
-    assert.match(head, /Rate-limited/)
-    assert.equal((head.match(/rate-limited/gi) ?? []).length, 1)
+    assert.match(head, /Waiting · 2 waiting/)
     assert.match(textOf(panel), /approve #1918/)
     const toggle = need(panel.querySelector<HTMLElement>('[role="switch"]'), 'reviewer switch')
     toggle.click()

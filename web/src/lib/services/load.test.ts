@@ -4,6 +4,7 @@ import { emptyData, loadServiceData, type ServiceApi } from './load.ts'
 
 const ok = (v: unknown) => () => Promise.resolve(v)
 const api: ServiceApi = {
+  serviceRegistry: ok([]),
   listServices: ok([{ role: 'reviewer', profile: 'sonnet', pinned: '', reason: '', profiles: [] }]),
   reviewerStatus: ok({ enabled: true, profile: 'opus', lastError: '', queue: [], reviewers: [] }),
   mergeControlStatus: ok({ queue: [], paused: false }),
@@ -47,7 +48,7 @@ test('a failed call keeps what was loaded before', async () => {
 })
 
 test('every part is pending until its call answers, and each part arrives on its own', async () => {
-  assert.equal(emptyData.pending.length, 13)
+  assert.equal(emptyData.pending.length, 14)
   let release: () => void = () => {}
   const slow = new Promise<unknown>((resolve) => { release = () => resolve({ queue: [], paused: false }) })
   const seen: string[][] = []

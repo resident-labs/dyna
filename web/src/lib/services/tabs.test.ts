@@ -1,3 +1,4 @@
+import type { RegistryService } from '../api/service.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { HookRow, Inputs, MergeHistoryRow } from './model.ts'
@@ -31,10 +32,13 @@ test('passing runs fold into one row a day, and a failure keeps its own row', ()
   assert.equal(hookEntries({ hook, lastRun: run(2) }, [], now, {})[0]?.text, 'Librarian · passed in 1 s')
 })
 
+const service = (id: RegistryService['id'], state: RegistryService['state'], description: string): RegistryService =>
+  ({ id, group: 'agents', label: id, description, state, detail: '', count: 0, profile: '', session: '', settingsKeys: [] })
+
 test('each tab gets its own one-line state and results', () => {
   const inputs: Inputs = {
     reviewer: { enabled: true, profile: 'sol', lastError: '', current: null, queued: 0, lastVerdictAt: '' }, queue: [], mergePaused: false,
-    history: [merge({ outcome: 'failed', detail: 'go-test failed' })], services: null, notices: null,
+    history: [merge({ outcome: 'failed', detail: 'go-test failed' })], registry: [service('reviewer', 'idle', 'nothing to review now'), { ...service('library', 'on', 'Keeps the feature map current'), nextRun: new Date(now + 20 * 60000).toISOString() }, service('merge-queue', 'waiting', ''), service('updates', 'on', 'Keeps Dyna current')], services: null, notices: null,
     hooks: [{ hook, lastRun: run(1) }, { hook: { ...hook, name: 'self-update', label: 'Update Dyna', event: 'main-updated' }, lastRun: run(5) }],
     runs: { 'librarian-main': [run(1), run(11)] }, reasons: {}, settings: { 'library.enabled': '["/repo"]' }, budget: null, accounts: null, usage: null, voice: null,
     changes: [{ number: 3, title: 'Fix it', verdict: 'approve', reviewAt: new Date(now - 60000).toISOString() }], testHealth: { count: 2, limitMs: 2000 }, laneSync: null, deferred: new Date(now + 20 * 60000).toISOString(), repo: '/repo',
@@ -48,7 +52,7 @@ test('each tab gets its own one-line state and results', () => {
   assert.deepEqual(by('reviews')?.entries.map((e) => e.text), ['approve #3 · Fix it'])
   assert.deepEqual(by('librarian')?.entries.map((e) => e.text), ['Librarian · 2 runs passed today'])
   assert.deepEqual(by('updates')?.entries.map((e) => e.text), ['Update Dyna · passed in 1 s'])
-  assert.match(by('librarian')?.line ?? '', /^On · last passed · next in \d+ m$/)
+  assert.match(by('librarian')?.line ?? '', /^On · Keeps the feature map current · next in \d+ m$/)
   assert.equal(by('ci')?.line, '2 tests over 2 s')
 })
 
@@ -56,7 +60,7 @@ test('each tab gets its own one-line state and results', () => {
 test('an older failed run does not mark Updates failed once a newer run passed', () => {
   const update: HookRow = { hook: { ...hook, name: 'self-update', label: 'Update Dyna', event: 'main-updated' }, lastRun: run(5) }
   const inputs: Inputs = {
-    reviewer: null, queue: [], mergePaused: false, history: [], services: null, notices: null, hooks: [update],
+    reviewer: null, queue: [], mergePaused: false, history: [], registry: null, services: null, notices: null, hooks: [update],
     runs: { 'self-update': [run(120, 'error'), run(5)] }, reasons: {}, settings: null, budget: null, accounts: null, usage: null, voice: null,
     changes: [], testHealth: null, laneSync: null, deferred: null, repo: '/repo',
   }
