@@ -610,7 +610,7 @@ type Box struct {
 | stopped | starting | a delivery wakes the session, and admission fits it again |
 | stopped | pending | a delivery wakes the session, but the host has no room now |
 | pending | starting | admission fits a box that already has its container |
-| pending, creating, starting, ready, stopped, failed | closing | the session closes, or its parent closes; a step in progress is cancelled first |
+| pending, creating, starting, ready, stopped, failed | closing | the session closes, or its parent closes |
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
 | creating, starting | failed | a step failed, or `hello` timed out |
 | ready, stopped, closing | lost | the host is unreachable (5.10) |
@@ -619,7 +619,7 @@ type Box struct {
 | lost | ready | the host is back, the container still runs, and the box agent reconnected |
 | lost | failed | the host is back without the container, or the owner removes the host |
 
-The owner can close a session in any box state. Removal treats a part that is already gone (forward, container, slice) as done, so a close during `creating` or `starting` removes only what exists. A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way has no archive: work that was not pushed is lost.
+The owner can close a session in any box state. A close cancels a step in progress first. Removal treats a part that is already gone (forward, container, slice) as done, so a close during `creating` or `starting` removes only what exists. A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way has no archive: work that was not pushed is lost.
 
 `BoxState` and `BoxSize` live in `contract`, because events and the API carry them. `Host` and `Box` are engine records.
 
