@@ -66,6 +66,54 @@ esac
 	}
 }
 
+// gh run view has no actor JSON field, so the run author comes from REST.
+func TestClassifyForApprovalReadsRunActorThroughREST(t *testing.T) {
+	script := func(actor string) string {
+		return `#!/bin/sh
+case "$*" in
+"auth status"*) echo '{"hosts":{"github.com":[{"login":"writer"}]}}';;
+"auth token"*) echo writer-secret;;
+"run view"*) echo 'Unknown JSON field: "actor"' >&2; exit 1;;
+"api --hostname github.com repos/upstream/project/actions/runs/41") echo '{"actor":{"login":"` + actor + `"}}';;
+"api --hostname"*) echo '{"permissions":{"push":false}}';;
+esac
+`
+	}
+	for _, tc := range []struct {
+		name    string
+		actor   string
+		class   approvals.Class
+		wantErr bool
+	}{
+		{name: "room account", actor: "writer", class: approvals.ClassAgent},
+		{name: "other account", actor: "someone", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			records := setupRooms(t, "fork/project")
+			if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+				t.Fatal(err)
+			}
+			if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+				t.Fatal(err)
+			}
+			exe := filepath.Join(t.TempDir(), "gh")
+			if err := os.WriteFile(exe, []byte(script(tc.actor)), 0700); err != nil {
+				t.Fatal(err)
+			}
+			class, err := ClassifyForApproval(context.Background(), exe, records[0].Repo, []string{"run", "rerun", "41", "--failed", "--repo", "upstream/project"})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("class = %q, want refusal", class)
+				}
+				return
+			}
+			if err != nil || class != tc.class {
+				t.Fatalf("class = %q, %v; want %q", class, err, tc.class)
+			}
+		})
+	}
+}
+
 func TestRoutineCreatePinsRepositoryAfterRemoteChanges(t *testing.T) {
 	records := setupRooms(t, "owner/project")
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
