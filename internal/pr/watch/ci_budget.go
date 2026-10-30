@@ -138,11 +138,23 @@ func (s *Service) enforceCIBudget(ctx context.Context, gh GitHub, r Record, snap
 			if end, err := time.Parse(time.RFC3339, job.Completed); err == nil && end.Before(until) {
 				until = end
 			}
-			for _, step := range job.Steps {
+			for i, step := range job.Steps {
 				if runnerOwnedSteps[step.Name] {
 					continue
 				}
-				if interval, ok := stepExecution(step, until); ok {
+				// GitHub can report an earlier step as still running after a later
+				// step started. Steps in one job run in sequence, so the later
+				// start bounds the stale open interval.
+				stepUntil := until
+				for _, later := range job.Steps[i+1:] {
+					if later.Status == "pending" || later.Status == "queued" || later.Status == "waiting" || later.Conclusion == "skipped" {
+						continue
+					}
+					if at, err := time.Parse(time.RFC3339, later.Started); err == nil && at.Before(stepUntil) {
+						stepUntil = at
+					}
+				}
+				if interval, ok := stepExecution(step, stepUntil); ok {
 					executed = append(executed, interval)
 					intervals = append(intervals, interval)
 					timings = append(timings, timing{Sanitize(job.Name + " / " + step.Name), interval.end.Sub(interval.start), true})
