@@ -23,7 +23,7 @@ const (
 
 func modelArgs(model contract.ModelChoice) ([]string, error) {
 	switch model.Provider {
-	case contract.ProviderAnthropic, contract.ProviderOpenAI:
+	case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
 	default:
 		return nil, fmt.Errorf("unsupported model provider %q", model.Provider)
 	}
