@@ -19,13 +19,14 @@ import (
 )
 
 type Boxes struct {
-	Store    *store.Store
-	Sockets  *api.Sockets
-	Runtime  string
-	HostData string
-	Version  string
-	mu       sync.Mutex
-	hosts    map[contract.HostName]*podman.Host
+	Store     *store.Store
+	Sockets   *api.Sockets
+	Runtime   string
+	HostData  string
+	Version   string
+	PiTarball []byte
+	mu        sync.Mutex
+	hosts     map[contract.HostName]*podman.Host
 }
 
 func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host, error) {
@@ -134,11 +135,7 @@ func (b *Boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 	if err = h.InstallBinary(ctx, b.HostData, b.Version, binary); err != nil {
 		return "", err
 	}
-	tarball, err := os.ReadFile(filepath.Join(filepath.Dir(executable), "pi.tgz"))
-	if err != nil {
-		return "", fmt.Errorf("Pi image input: %w", err)
-	}
-	image, err := h.BuildBase(ctx, images.BaseContainerfile, tarball)
+	image, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
 	if err != nil {
 		return "", err
 	}

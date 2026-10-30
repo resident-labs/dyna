@@ -14,7 +14,7 @@ import (
 func addEngine(root *cobra.Command) {
 	var data, runtimeDir, hostData, profiles string
 	home, _ := os.UserConfigDir()
-	cmd := &cobra.Command{Use: "engine", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "engine", Long: "Run the engine. From the repository root, build both required files:\n  (cd next && go build -o \"$HOME/dyna-m1/bin/dyna\" ./cmd/dyna)\n  next/third_party/pi/scripts/pi-pack.sh \"$HOME/dyna-m1/bin/pi.tgz\"\nCreate the output directory first. Keep pi.tgz beside dyna.", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		for _, path := range []string{data, runtimeDir, hostData, profiles} {
 			if !filepath.IsAbs(path) {
 				return fmt.Errorf("engine paths must be absolute")
