@@ -235,10 +235,12 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&parent, "parent", "", "Parent session ID")
 	start.Flags().StringVar(&goal, "goal", "", "Goal")
 	start.Flags().StringVar(&brief, "brief", "", "Brief")
+	var discard bool
 	closeCmd := &cobra.Command{Use: "close SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().SessionClose(cmd.Context(), contract.SessionCloseRequest{Session: contract.SessionID(args[0])})
+		_, err := getClient().SessionClose(cmd.Context(), contract.SessionCloseRequest{Session: contract.SessionID(args[0]), Discard: discard})
 		return err
 	}}
+	closeCmd.Flags().BoolVar(&discard, "discard", false, "Close without archiving")
 	session.AddCommand(start, closeCmd)
 	root.AddCommand(session)
 	var postRoom string
