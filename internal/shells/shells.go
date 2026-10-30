@@ -456,7 +456,7 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 			defer ticker.Stop()
 			publisher.run(ticker.C, func(signal activity.Signal) error { return s.publishActivity(db, id, signal) })
 		}()
-		observer := &activityReader{Reader: pr, now: time.Now, publish: publisher.send}
+		observer := &activityReader{Reader: pr, now: time.Now, deadline: pr.SetReadDeadline, publish: publisher.send}
 		observer.start()
 		defer close(publisher.updates)
 		r := bufio.NewReaderSize(observer, 64*1024)

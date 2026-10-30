@@ -36,7 +36,7 @@ func (e *engine) observeActivity(ev runstore.Event) {
 	}
 	a := e.shared.activities[key]
 	if start {
-		r := activity.Record{Signal: activity.Signal{Copier: activity.CopierRunning, CPU: activity.CPUUnsupported}, Lifecycle: activity.CopierRunning}
+		r := activity.Record{Signal: activity.Signal{Copier: activity.CopierUnknown, CPU: activity.CPUUnsupported}, Lifecycle: activity.CopierRunning, Reason: activity.ReasonObserverLivenessUnproven}
 		if kind == activity.CommandStep {
 			r.Reason = activity.ReasonStderrUnobserved
 			r.Signal.Copier = activity.CopierUnknown
@@ -56,9 +56,6 @@ func (e *engine) observeActivity(ev runstore.Event) {
 	}
 	if end {
 		a.record.Lifecycle = activity.CopierEnded
-		if kind == activity.AgentStep {
-			a.record.Signal.Copier = activity.CopierEnded
-		}
 	}
 	a.publisher.Update(a.record)
 	if end {
