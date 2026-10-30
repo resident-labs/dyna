@@ -187,16 +187,37 @@ func workflowInput(workflow workflowcatalog.Info, text string) (json.RawMessage,
 		}
 	}
 	required := 0
+	positional := ""
 	for _, arg := range workflow.Args {
 		if arg.Required {
 			required++
+			positional = arg.Name
 		}
 	}
-	if len(matches) == 0 && required <= 1 {
-		return json.Marshal(text)
+	if required == 0 && len(workflow.Args) == 1 {
+		positional = workflow.Args[0].Name
 	}
-	if len(matches) == 0 || matches[0][0] != 0 {
-		return nil, errors.New("provide workflow arguments as name=value pairs")
+	named := false
+	if len(matches) > 0 && matches[0][0] == 0 {
+		name := text[matches[0][2]:matches[0][3]]
+		for _, arg := range workflow.Args {
+			if arg.Name == name {
+				named = true
+				break
+			}
+		}
+	}
+	if !named {
+		if required > 1 || (positional == "" && len(workflow.Args) > 0) {
+			return nil, errors.New("provide workflow arguments as name=value pairs")
+		}
+		if positional == "" {
+			return json.Marshal(text)
+		}
+		if text == "" && required > 0 {
+			return nil, fmt.Errorf("provide the %s argument", positional)
+		}
+		return json.Marshal(map[string]string{positional: text})
 	}
 	fields := make(map[string]json.RawMessage, len(matches))
 	for i, match := range matches {
