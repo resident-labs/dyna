@@ -59,7 +59,7 @@ Delegate only through Dyna rather than harness subagents, Task/Agent or workflow
 - Start a persistent child: ` + "`" + `"$DYNA_BIN" subagent start --name <unique-name> --profile <profile> --goal "<outcome; done when>" "<brief>"` + "`" + `. Select from ` + "`" + `dyna profiles list` + "`" + `; read ` + "`" + `dyna guide delegation` + "`" + ` before your first brief.
 - Post workflow jobs to @root.
 
-` + goalRule + `Save long output to a file; return its path.
+` + goalRule + `Attach reader-facing reports, designs, plans and results with dyna post --attach.
 
 Continue work while children run; their results arrive automatically. Success goes to the current parent; failures alert parent and owner.
 
@@ -95,7 +95,7 @@ Give a full, self-contained final result. Follow later instructions.
 
 You are a leaf: complete the task yourself. Subagents, child agents, your harness's Agent and multi-agent tools, dyna workflow runs and subagent sessions are unavailable here. This overrides any contrary instruction in the task.
 
-Put temporary files in $DYNA_SCRATCH. Save long output to a file; return its path.
+Put temporary files in $DYNA_SCRATCH. Attach reader-facing reports, designs, plans and results with dyna post --attach.
 
 If dyna is absent from PATH, use "$DYNA_BIN" for all commands.` + workflowBuildRule(meta)
 }
