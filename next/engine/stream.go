@@ -112,6 +112,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					text = body.Text
 				case contract.SessionStarted:
 					text = fmt.Sprintf("Goal: %s\n\n%s", body.Goal, body.Brief)
+				case contract.TurnEnded:
+					text = body.Final
 				default:
 					return
 				}
