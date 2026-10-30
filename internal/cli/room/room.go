@@ -102,7 +102,7 @@ func upstreamOrOff(upstream string) string {
 
 // setCmd is `dyna room set`: one room setting, shown without a value.
 func setCmd() *cobra.Command {
-	var placement, kind string
+	var placement, kind, color string
 	cmd := &cobra.Command{
 		Use:   "set <room> <setting> [<value>]",
 		Short: "Change a room setting",
@@ -114,8 +114,20 @@ func setCmd() *cobra.Command {
 			"upstream is the parent repository of this room's fork, such as github.com/owner/repo, so that `pr track`\n" +
 			"accepts a PR opened on that parent; off clears it.\n" +
 			"attribution is the one line that PR and issue text written by agents ends with; off clears it.",
-		Args: cobra.RangeArgs(2, 3),
+		Args: cobra.RangeArgs(1, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("color") {
+				if len(args) != 1 {
+					return fmt.Errorf("--color takes one room")
+				}
+				if err := engineClient().Call(cmd.Context(), "SetRoomColor", []any{args[0], color}, nil); err != nil {
+					return fmt.Errorf("the room was not updated: %w", err)
+				}
+				return nil
+			}
+			if len(args) < 2 {
+				return fmt.Errorf("a setting is required")
+			}
 			if args[1] != "checkInInterval" && args[1] != "upstream" && args[1] != "attribution" && !strings.HasPrefix(args[1], "limits.") {
 				return fmt.Errorf("unknown room setting %q; checkInInterval, upstream, attribution and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
 			}
@@ -196,6 +208,7 @@ func setCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&color, "color", "", "room color")
 	cmd.Flags().StringVar(&placement, "placement", "line", "attribution placement: line, end or prefix")
 	cmd.Flags().StringVar(&kind, "kind", "", "attribution kind: pr, issue, review or comment")
 	return cmd
