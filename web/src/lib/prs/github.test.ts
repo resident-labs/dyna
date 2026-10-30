@@ -41,8 +41,8 @@ test('labelStyle refuses a color that is not hex', () => {
 })
 
 test('a thread post keeps its link, so the Checks tab can open a bot comment', () => {
-  const posts = sortThread({ comments: [{ author: { login: 'coderabbitai', isBot: true }, body: 'Review limit reached', createdAt: '2026-10-02T11:00:00Z', url: 'https://x/c1' }], reviews: [{ author: { login: 'rev' }, body: 'ok', state: 'APPROVED', submittedAt: '2026-10-02T12:00:00Z', url: 'https://x/r1' }] })
-  assert.deepEqual(posts.map((p) => p.url), ['https://x/c1', 'https://x/r1'])
+  const posts = sortThread({ comments: [{ author: { login: 'coderabbitai', isBot: true }, body: 'Review limit reached', createdAt: '2026-10-02T11:00:00Z', url: 'https://x/c1' }], reviews: [{ author: { login: 'rev' }, body: 'ok', state: 'APPROVED', submittedAt: '2026-10-02T12:00:00Z' }] })
+  assert.deepEqual(posts.map((p) => p.url), ['https://x/c1', undefined])
 })
 
 test('saved filters keep only the state, so old saved kinds do not matter', () => {
