@@ -539,3 +539,32 @@ func TestEditsForkPullRequiresTheOriginHost(t *testing.T) {
 		}
 	}
 }
+
+// A child works outside the fork checkout, so the room's fork comes from the room record.
+// The upstream pull request may also be named by its URL, but only on that upstream.
+func TestEditsForkPullFromAnyDirectoryAcceptsUpstreamURL(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	previous := pullHeadRepo
+	pullHeadRepo = func(_ context.Context, _ *exec.Cmd, _ repository, number string) (string, bool) {
+		return map[string]string{"7": "fork/project", "8": "someone/project"}[number], true
+	}
+	t.Cleanup(func() { pullHeadRepo = previous })
+	upstream := repository{"github.com", "upstream/project"}
+	outside := t.TempDir()
+	for _, tt := range []struct {
+		name string
+		arg  string
+		want bool
+	}{
+		{"number", "7", true},
+		{"upstream URL", "https://github.com/upstream/project/pull/7", true},
+		{"URL of another head", "https://github.com/upstream/project/pull/8", false},
+		{"URL on another repository", "https://github.com/other/project/pull/7", false},
+		{"URL on another host", "https://ghe.example/upstream/project/pull/7", false},
+	} {
+		got := editsForkPull(context.Background(), records[0], outside, upstream, []string{"pr", "edit", tt.arg})
+		if got != tt.want {
+			t.Errorf("%s: editsForkPull = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
