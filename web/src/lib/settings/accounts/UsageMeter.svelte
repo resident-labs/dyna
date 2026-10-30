@@ -52,7 +52,7 @@
 </div>
 
 <style>
-  .window { min-width: 0; }
+  .window { min-width: 0; container-type: inline-size; }
   .top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); font-size: var(--t-sm); margin-bottom: 6px; color: var(--ink-2); }
   .top.reset { line-height: 1.7; margin-bottom: 0; overflow-wrap: anywhere; }
   .meter-row { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) 9rem; gap: 4px var(--s3); align-items: center; font-size: var(--t-sm); }
@@ -69,5 +69,10 @@
   .pace.ahead { color: var(--gold); }
   .pace.on { color: var(--sage); }
   .pace.under { color: var(--muted); }
+  @container (max-width: 480px) {
+    .meter-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .bar { grid-column: 1 / -1; grid-row: 2; }
+    .when { grid-column: 2; grid-row: 1; }
+  }
   p { margin: 6px 0 0; font-size: var(--t-cap); color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
 </style>
