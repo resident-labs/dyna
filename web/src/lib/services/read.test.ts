@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readHookSummary, readMergeState, readTestHealth, readAccounts, readHistory, readQueue, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
+import { readHookSummary, readMergeState, readTestHealth, readAccounts, readHistory, readQueue, readRegistry, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
 
 test('readers keep the engine fields the page uses and drop the rest', () => {
   assert.deepEqual(readServices([{ role: 'librarian', profile: 'sonnet', pinned: '', profiles: ['sonnet'], extra: 1 }]), [{ role: 'librarian', name: '', profile: 'sonnet', pinned: '', reason: '', profiles: ['sonnet'] }])
@@ -49,4 +49,10 @@ test('test health counts only regressions over the limit and account readings ke
   assert.equal(readAccounts({ accounts: [] }), null, 'the retired account list shape is not read')
   assert.equal(readHookSummary({}), null)
   assert.equal(readTestHealth({}), null)
+})
+
+test('a registry row with an empty detail is kept', () => {
+  const row = { id: 'updates', group: 'this-computer', label: 'Updates', description: 'Keeps Dyna current', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [] }
+  assert.deepEqual(readRegistry([row, { ...row, id: 'nonsense' }])?.map((r) => r.id), ['updates'])
+  assert.equal(readRegistry(null), null)
 })
