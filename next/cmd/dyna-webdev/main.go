@@ -29,8 +29,7 @@ import (
 	"github.com/resident-labs/dyna/web"
 )
 
-// devService fills the HostAdd method that api.Service needs; engine/runtime adds the real one.
-type devService struct{ *engine.Service }
+type devService struct{ *engine.Service } // api.Service needs HostAdd; engine/runtime adds the real one.
 
 func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only the fake host"}
@@ -45,18 +44,14 @@ func (profiles) Model(contract.ProfileName) (contract.ModelChoice, []string, err
 type scripted struct{ fakeharness.Harness }
 
 func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
-	text := inputs[0].Text
-	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(text, "\n", "\n> ")}
-	if strings.Contains(text, "[fail]") {
-		result.Outcome = contract.TurnFailed
-		result.Final = ""
-		result.Error = "Scripted development failure"
+	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(inputs[0].Text, "\n", "\n> ")}
+	if strings.Contains(inputs[0].Text, "[fail]") {
+		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure"}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
 	return h.Harness.Start(ctx, id, inputs, started)
 }
 
-// boxes runs each box agent in this process on the box socket, with no container.
 type boxes struct {
 	ctx     context.Context
 	st      *store.Store
@@ -93,8 +88,7 @@ func (b *boxes) Remove(_ context.Context, id contract.BoxID) error {
 func (b *boxes) run(ctx context.Context, id contract.BoxID) {
 	c := agent.NewClient(filepath.Join(b.dir, "boxes", string(id)+".sock"))
 	go c.Run(ctx)
-	// Creation returns before the engine moves the box to starting.
-	for _, err := c.Hello(ctx, "dev"); err != nil && ctx.Err() == nil; _, err = c.Hello(ctx, "dev") {
+	for _, err := c.Hello(ctx, "dev"); err != nil && ctx.Err() == nil; _, err = c.Hello(ctx, "dev") { // Create returns before the box is starting.
 		time.Sleep(50 * time.Millisecond)
 	}
 	runner := &agent.Runner{Harness: &scripted{}, Sink: c}
@@ -113,7 +107,6 @@ func main() {
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	// The data folder is always temporary, so no box outlives a run.
 	data, err := os.MkdirTemp("", "dyna-webdev-")
 	fatal(err)
 	defer os.RemoveAll(data)
@@ -175,17 +168,13 @@ func seedRoom(ctx context.Context, s *engine.Service) {
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
 	post(owner, contract.PostRequest{Text: "[fail] Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	files := []struct{ name, media, body string }{{"preview.png", "image/png", "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"}, {"card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"}}
-	var attachments []contract.Attachment
-	for _, f := range files {
-		// Upload through the real files handler so the seed matches web uploads.
+	attachments := make([]contract.Attachment, len(files))
+	for i, f := range files {
 		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+f.name, strings.NewReader(f.body))
 		req.Header.Set("Content-Type", f.media)
 		rec := httptest.NewRecorder()
 		s.Files(owner, room.Room).ServeHTTP(rec, req)
-		var a contract.Attachment
-		fatal(json.Unmarshal(rec.Body.Bytes(), &a))
-		attachments = append(attachments, a)
+		fatal(json.Unmarshal(rec.Body.Bytes(), &attachments[i]))
 	}
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: attachments})
-	// Seed a pending hostexec.run here when its contract arguments exist.
 }
