@@ -375,6 +375,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 	}()
 	if resume == nil {
+		// Record the run before remote setup creates its keeper. A restarted
+		// engine can then find and tear down a setup that did not launch checks.
+		if err := localStore.saveAttachment(control, attachKey, sha, node.Name, attached); err != nil {
+			return result, fmt.Errorf("record local CI setup: %w", err)
+		}
 		// A machine that is close to a full disk cleans Dyna's own caches first, so
 		// the checks do not die on a full disk halfway through.
 		if e := r.cleanBeforeRun(control, node); e != nil {
