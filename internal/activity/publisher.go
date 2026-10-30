@@ -80,27 +80,14 @@ func (p *Publisher) run(dataDir string, key Key) {
 
 // publishLoop renews the observer lease even when no new output arrives.
 func (p *Publisher) publishLoop(ticks <-chan time.Time, write func(Record)) {
-	for {
-		var tick time.Time
-		select {
-		case <-p.pending:
-		case tick = <-ticks:
-		}
+	runPublisher(ticks, p.pending, true, func(_ struct{}) (Record, bool) {
 		p.mu.Lock()
-		closed := p.closed
-		r := p.record
-		p.mu.Unlock()
-		if closed || !tick.IsZero() {
-			if tick.IsZero() {
-				tick = time.Now()
-			}
-			r.Signal.LeaseUntil = tick.Add(Lease)
-			write(r)
-		}
-		if closed {
-			return
-		}
-	}
+		defer p.mu.Unlock()
+		return p.record, p.closed
+	}, func(r Record, tick time.Time) Record {
+		r.Signal.LeaseUntil = tick.Add(Lease)
+		return r
+	}, func(r Record) error { write(r); return nil })
 }
 
 // Done closes after the final publication attempt.

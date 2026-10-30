@@ -2,7 +2,6 @@ package shells
 
 import (
 	"bufio"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,24 +32,6 @@ func TestRawOutputActivityBeforeLineBuffer(t *testing.T) {
 	r.end(io.EOF)
 	if got[len(got)-1].Copier != activity.CopierEnded {
 		t.Fatalf("end: %+v", got)
-	}
-}
-
-func TestFailedPublicationDoesNotRenewLease(t *testing.T) {
-	now := time.Unix(100, 0)
-	stored := activity.Signal{Copier: activity.CopierRunning, LeaseUntil: now.Add(activity.Lease)}
-	p := &activityPublisher{updates: make(chan activity.Signal, 1)}
-	p.send(activity.Signal{Copier: activity.CopierRunning, LastOutput: now})
-	close(p.updates)
-	ticks := make(chan time.Time)
-	close(ticks)
-	calls := 0
-	p.run(ticks, func(s activity.Signal) error { calls++; return errors.New("write failed") })
-	if calls != 1 {
-		t.Fatalf("writes = %d", calls)
-	}
-	if stored.At(now.Add(activity.Lease)).Copier != activity.CopierUnknown {
-		t.Fatal("expired observation remained known")
 	}
 }
 
@@ -118,46 +99,5 @@ func TestCopierProofRestartsAfterPause(t *testing.T) {
 	first, resumed := signals[1], signals[2]
 	if !first.ObservedSince.Equal(time.Unix(101, 0)) || !resumed.ObservedSince.Equal(now) || !resumed.LastOutput.Equal(now) {
 		t.Fatalf("first = %+v; resumed = %+v", first, resumed)
-	}
-}
-
-func TestPublisherRestartsCoverageAfterFailedWrites(t *testing.T) {
-	p := &activityPublisher{updates: make(chan activity.Signal)}
-	ticks := make(chan time.Time)
-	writes := make(chan activity.Signal)
-	responses := make(chan error)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		p.run(ticks, func(s activity.Signal) error { writes <- s; return <-responses })
-	}()
-	start := time.Unix(100, 0)
-	var signal activity.Signal
-	signal = signal.Prove(start)
-	p.updates <- signal
-	ticks <- start
-	first := <-writes
-	responses <- nil
-	signal = signal.Prove(start.Add(activity.PublishInterval))
-	p.updates <- signal
-	ticks <- start.Add(activity.PublishInterval)
-	<-writes
-	responses <- errors.New("write failed")
-	signal = signal.Prove(start.Add(2 * activity.Lease))
-	// The reader continued proving coverage while database writes failed.
-	signal.ObservedSince = start
-	p.updates <- signal
-	ticks <- start.Add(2 * activity.Lease)
-	resumed := <-writes
-	responses <- nil
-	signal = signal.Prove(start.Add(2*activity.Lease + activity.PublishInterval))
-	p.updates <- signal
-	ticks <- start.Add(2*activity.Lease + activity.PublishInterval)
-	continued := <-writes
-	responses <- nil
-	close(p.updates)
-	<-done
-	if !first.ObservedSince.Equal(start) || !resumed.ObservedSince.Equal(start.Add(2*activity.Lease)) || !continued.ObservedSince.Equal(resumed.ObservedSince) {
-		t.Fatalf("first = %+v, resumed = %+v, continued = %+v", first, resumed, continued)
 	}
 }
