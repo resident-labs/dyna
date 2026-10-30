@@ -43,5 +43,9 @@ func newRootCmd() *cobra.Command {
 			return agent.Run(ctx, version)
 		},
 	})
+	var socket string
+	root.PersistentFlags().StringVar(&socket, "socket", defaultSocket(), "Engine socket")
+	addCLI(root, func() client { return newClient(socket) })
+	addEngine(root)
 	return root
 }
