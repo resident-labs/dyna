@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,31 @@ func captureRun(t *testing.T, args ...string) callspec.RunJobInput {
 		t.Fatal(err)
 	}
 	return captured
+}
+
+func TestRunWithoutImageRunsOnHost(t *testing.T) {
+	request := captureRun(t, "--", "true")
+	if request.Image != "" {
+		t.Fatalf("image = %q, want none: a job without --image runs on the host", request.Image)
+	}
+}
+
+func TestRunRejectsRemovedHostFlag(t *testing.T) {
+	previous := callRunJob
+	callRunJob = func(context.Context, callspec.RunJobInput, *jobs.Job) error {
+		t.Fatal("a job with --host was submitted")
+		return nil
+	}
+	t.Cleanup(func() { callRunJob = previous })
+	cmd := runCmd()
+	cmd.SetArgs([]string{"--host", "--", "true"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	if err == nil || err.Error() != "unknown flag: --host" {
+		t.Fatalf("err = %v, want unknown flag: --host", err)
+	}
 }
 
 func TestRunNetworkNoneFlag(t *testing.T) {
