@@ -79,7 +79,7 @@ test('a mouse click does not undo its hover, and controls and nested parts keep 
 })
 
 // PRCard with the real component: one bar per notice, shown only for the selected notice.
-const FORMAT = "export const markdown = (t) => t || ''; export const stamp = () => '08:56'; export const clock = () => '08:56'; export const short = (a) => a"
+const FORMAT = "export const markdown = (t) => t || ''; export const stamp = () => '08:56'; export const durationMs = () => ''; export const clock = () => '08:56'; export const short = (a) => a"
 const built = await bundle({ component: 'PRCard', format: FORMAT, api: 'export const api = {}; export const openExternal = () => {}; export const copyText = () => Promise.resolve()' })
 const notice = (id: string, n: number) => ({ id, kind: 'pr', from: 'pr:watch', to: ['work:voice'], ts: '2026-10-20T08:56:00Z', text: `https://github.com/o/r/pull/${n}\nHead: 0366830\n\nPR merged. Watching stopped.` })
 
