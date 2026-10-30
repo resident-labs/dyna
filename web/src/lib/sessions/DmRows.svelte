@@ -13,7 +13,7 @@
   import { rendererFor } from '../rooms/eventRenderers.ts'
   import UnknownEventRow from '../rooms/UnknownEventRow.svelte'
   import { done, plain, turnHead, turnTail } from './dm.ts'
-  import { stamp, short, ago } from '../ui/format.ts'
+  import { stamp, short, ago, duration } from '../ui/format.ts'
   import type { Attachment, Member, Room } from '../api/room.ts'
   import type { ShellJob } from '../api/terminal.ts'
   import type { PostSelection } from '../ui/postSelect.ts'
@@ -49,6 +49,12 @@
     const turn = dm.rows.findLast((r) => r.kind === 'turn')
     return dm.rows.findLast((r) => r.kind === 'timeline' && r.turn?.n === turn?.turn.n)?.key ?? ''
   })
+  let now = $state(Date.now())
+  $effect(() => {
+    if (!dm.rows.some((row) => row.kind === 'turn' && row.turn.status === 'running')) return
+    const timer = setInterval(() => now = Date.now(), 1000)
+    return () => clearInterval(timer)
+  })
   const turnText: Record<string, string> = { ok: 'finished', error: 'failed', stopped: 'stopped', running: 'running', queued: 'queued' }
 </script>
 
@@ -56,7 +62,7 @@
   {#each rendered as row (row.key)}
     {#if row.kind === 'turn'}
       {@const t = row.turn}
-      <div class="rule" id="turn-{t.n}"><span>{turnHead(t)} · {stamp(t.started)}{#if !done.includes(t.status ?? '')}{' · '}<b class={t.status}>{turnText[t.status ?? ''] || t.status}</b>{/if}</span></div>
+      <div class="rule" id="turn-{t.n}"><span>{turnHead(t)} · {stamp(t.started)}{#if duration(t.started, t.status === 'running' ? now : t.ended)}{' · '}{duration(t.started, t.status === 'running' ? now : t.ended)}{/if}{#if !done.includes(t.status ?? '')}{' · '}<b class={t.status}>{turnText[t.status ?? ''] || t.status}</b>{/if}</span></div>
       {#if t.wake?.line}<p class="wake-line">{t.wake.line}</p>{/if}
     {:else if row.kind === 'turnEnd'}
       <p class="turn-end" class:enter={isNew(row.key)}><b class={row.turn.status}>{turnText[row.turn.status ?? ''] || row.turn.status}</b>{turnTail(row.turn) ? ` · ${turnTail(row.turn)}` : ''}</p>
@@ -122,7 +128,7 @@
   :is(.rule, .turn-end) b { font-weight: 600; }
   :is(.rule, .turn-end) b.ok { color: var(--sage); }
   :is(.rule, .turn-end) b.error { color: var(--coral); }
-  .rule b.running, .rule b.queued { color: var(--gold); }
+  .rule b.running, .rule b.queued { color: var(--faint); }
   .thought { margin: var(--s1) 0; font-size: var(--t-ui); font-style: italic; color: var(--faint); }
   .thought .aside { margin-left: var(--s2); font-style: normal; }
   .error { margin: 6px 0; font-size: var(--t-ui); color: var(--coral); }
