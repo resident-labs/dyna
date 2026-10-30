@@ -2,7 +2,7 @@
 // data and returns a typed value, or null where the call failed or the shape
 // is wrong. Nothing here changes data.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
-import { IDReviews, IDMergeQueue, IDLocalCI, IDPRWatcher, IDLaneSync, IDIssueWatch, IDLibrary, IDParentCheckIns, IDVoice, IDUpdates, IDLoadDoctor, IDMaintenance, IDAccountUsage, IDHarnessVersions, GroupPullRequests, GroupAgents, GroupThisComputer, type ID, type Group, StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp, DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, type Detail, type State } from '../api/service.gen.ts'
+import { IDReviews, IDMergeQueue, IDLocalCI, IDPRWatcher, IDLaneSync, IDIssueWatch, IDLibrary, IDParentCheckIns, IDVoice, IDUpdates, IDLoadDoctor, IDMaintenance, IDAccountUsage, IDHarnessVersions, GroupPullRequests, GroupAgents, GroupThisComputer, type ID, type Group, StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp, DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, DetailUpdateSourceInvalid, DetailMultipleUpdateHooks, type Detail, type State } from '../api/service.gen.ts'
 import type { RegistryService } from '../api/service.ts'
 import type { HookRunRow, MergeHistoryRow, RunReason } from './activity.ts'
 
@@ -29,7 +29,7 @@ export function readHookLog(v: unknown): RunReason | null {
 }
 
 const states: readonly State[] = [StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp]
-const details: readonly Detail[] = [DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable]
+const details: readonly Detail[] = [DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, DetailUpdateSourceInvalid, DetailMultipleUpdateHooks]
 const ids: readonly ID[] = [IDReviews, IDMergeQueue, IDLocalCI, IDPRWatcher, IDLaneSync, IDIssueWatch, IDLibrary, IDParentCheckIns, IDVoice, IDUpdates, IDLoadDoctor, IDMaintenance, IDAccountUsage, IDHarnessVersions]
 const groups: readonly Group[] = [GroupPullRequests, GroupAgents, GroupThisComputer]
 
