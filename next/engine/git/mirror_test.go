@@ -56,10 +56,19 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 		}
 	}
 }
+func TestPrepareRejectsMissingToken(t *testing.T) {
+	m := &Mirror{Data: t.TempDir(), Runner: &fakeRunner{}}
+	_, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1")
+	var missing MissingTokenError
+	if !errors.As(err, &missing) {
+		t.Fatalf("expected missing-token error, got %v", err)
+	}
+}
+
 func TestPrepareDoesNotPushWhenCloneFails(t *testing.T) {
 	r := &fakeRunner{fail: "clone"}
 	c := &fakeCache{}
-	m := &Mirror{Data: t.TempDir(), Runner: r}
+	m := &Mirror{Data: t.TempDir(), Token: "secret", Runner: r}
 	_, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1")
 	if err == nil || c.called {
 		t.Fatalf("error %v, cache called %v", err, c.called)

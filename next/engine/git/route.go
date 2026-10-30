@@ -4,6 +4,7 @@ package git
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,6 +54,12 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 		}
 		if !allowed {
 			http.Error(w, "repository not in room", http.StatusForbidden)
+			return
+		}
+		if token == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(contract.Error{Code: contract.ErrUnavailable, Message: (MissingTokenError{}).Error()})
 			return
 		}
 		if r.Method == http.MethodPost && parts[2] == "git-receive-pack" {
