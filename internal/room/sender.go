@@ -11,6 +11,11 @@ func (m Message) SenderKindFor(roomName string) SenderKind {
 	switch {
 	case m.EngineEvent():
 		return SenderEngine
+	// A plain engine post, such as a close hand-off forward, names the engine
+	// as its sender. In the room that shares the engine's name, only the
+	// forward tells it apart from the owner.
+	case m.From == EngineSender && !m.Human && (roomName != EngineSender || m.Forward != nil):
+		return SenderEngine
 	case m.Human || m.From == roomName:
 		return SenderOwner
 	case strings.HasPrefix(m.From, "run:"):
