@@ -165,7 +165,7 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		}
 	}
 	if j.Hook == updaterservice.RunName && !j.Force {
-		ready, guardErr := s.updateGuard(ctx, s.now())
+		ready, guardErr := s.updateGuard(ctx, s.now(), c.Main)
 		if guardErr != nil {
 			return guardErr
 		}
@@ -226,7 +226,7 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		return err
 	}
 	if j.Hook == updaterservice.RunName && !j.Force {
-		ready, guardErr := s.updateGuard(ctx, s.now())
+		ready, guardErr := s.updateGuard(ctx, s.now(), c.Main)
 		if guardErr != nil {
 			return guardErr
 		}
