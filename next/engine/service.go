@@ -30,10 +30,16 @@ type Service struct {
 	admit     sync.Mutex
 	boxLockMu sync.Mutex
 	boxLocks  map[contract.SessionID]*sync.Mutex
+	boxRuns   map[contract.SessionID]*boxRun
+}
+
+type boxRun struct {
+	cancel  context.CancelFunc
+	closing bool
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex)}
+	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
 }
 
 func (s *Service) lockBox(id contract.SessionID) func() {
@@ -167,6 +173,17 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	}
 	unlock := s.lockBox(session.ID)
 	defer unlock()
+	createCtx, cancel := context.WithCancel(ctx)
+	run := &boxRun{cancel: cancel}
+	s.boxLockMu.Lock()
+	s.boxRuns[session.ID] = run
+	s.boxLockMu.Unlock()
+	defer func() {
+		cancel()
+		s.boxLockMu.Lock()
+		delete(s.boxRuns, session.ID)
+		s.boxLockMu.Unlock()
+	}()
 	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
 	s.admit.Lock()
 	hosts, err := s.store.Hosts(ctx)
@@ -207,8 +224,14 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return response, failure(err)
 	}
-	image, createErr := s.boxes.Create(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size})
+	image, createErr := s.boxes.Create(createCtx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size})
 	if createErr != nil {
+		s.boxLockMu.Lock()
+		closing := run.closing
+		s.boxLockMu.Unlock()
+		if closing {
+			return response, nil
+		}
 		_, err = s.transition(writeCtx, session.Room, current, contract.BoxFailed, createErr.Error())
 		if err != nil {
 			return response, failure(err)
@@ -233,6 +256,12 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
 		return contract.SessionCloseResponse{}, e
 	}
+	s.boxLockMu.Lock()
+	if run := s.boxRuns[session.ID]; run != nil {
+		run.closing = true
+		run.cancel()
+	}
+	s.boxLockMu.Unlock()
 	unlock := s.lockBox(session.ID)
 	defer unlock()
 	current, err := s.store.Box(ctx, session.Box)
