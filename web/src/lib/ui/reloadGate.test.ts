@@ -210,15 +210,14 @@ test('App PR events use the real gated loaders and skip the closed PR view', asy
   assert.deepEqual(calls, ['changes'])
   assert.equal(c.prError, '')
   calls.length = 0
-  c.view = 'channel:general'
-  c.showRoomSettings = true
+  c.view = 'rules'
   c.loadGoals = () => {}
   c.loadRules = () => reload('rules', async () => { calls.push('rules') })
   callFunction(c, 'handle', { kind: 'goals', roomId: 'a' })
   await new Promise(setImmediate)
   assert.deepEqual(calls, ['rules'])
   calls.length = 0
-  c.showRoomSettings = false
+  c.view = 'channel:general'
   callFunction(c, 'handle', { kind: 'goals', roomId: 'a' })
   await new Promise(setImmediate)
   assert.deepEqual<string[]>(calls, [])

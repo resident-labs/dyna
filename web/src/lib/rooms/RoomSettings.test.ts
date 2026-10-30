@@ -36,14 +36,12 @@ const text = (html: string) => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/
 const room = { id: 'room-1', name: 'dyna-agent', displayName: 'Dyna', repo: '/repo', pinned: true }
 
 test('the modal uses the Settings shell with the room sections in order', async () => {
-  const { dir, component, render, createRawSnippet } = await load()
+  const { dir, component, render } = await load()
   try {
-    const rules = createRawSnippet(() => ({ render: () => '<p>the rules list</p>' }))
-    const html = render(component, { props: { room, rules, onclose() {} } }).body
+    const html = render(component, { props: { room, onclose() {} } }).body
     assert.match(html, /class="shell[^"]*" role="dialog" aria-modal="true" aria-label="Dyna settings"/)
-    assert.match(text(html), /^ Dyna settings General Review &amp; landing CI time Rules Hooks Bot noise rules General /)
+    assert.match(text(html), /^ Dyna settings General Review &amp; landing CI time Hooks Bot noise rules General /)
     assert.match(html, /aria-label="Close dyna settings"/)
-    assert.match(text(render(component, { props: { room, rules, start: 'rules', onclose() {} } }).body), /Bot noise rules the rules list/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
