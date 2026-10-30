@@ -6,6 +6,7 @@ package cliproxy
 import (
 	"context"
 	"fmt"
+	"net"
 
 	configaccess "github.com/router-for-me/CLIProxyAPI/v8/internal/access/config_access"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api"
@@ -161,6 +162,12 @@ func (b *Builder) WithCooldownStateStore(store coreauth.CooldownStateStore) *Bui
 // WithPluginHost overrides the dynamic plugin host used by the service.
 func (b *Builder) WithPluginHost(host *pluginhost.Host) *Builder {
 	b.pluginHost = host
+	return b
+}
+
+// WithListener supplies an already-bound listener to the HTTP server.
+func (b *Builder) WithListener(listener net.Listener) *Builder {
+	b.serverOptions = append(b.serverOptions, api.WithListener(listener))
 	return b
 }
 

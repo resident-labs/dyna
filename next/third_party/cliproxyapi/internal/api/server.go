@@ -48,6 +48,7 @@ type Server struct {
 	// muxBaseListener is the shared TCP listener used to serve both HTTP and Redis protocol traffic.
 	listenerMu      sync.Mutex
 	muxBaseListener net.Listener
+	listener        net.Listener
 
 	// muxHTTPListener receives HTTP connections selected by the multiplexer.
 	muxHTTPListener *muxListener
@@ -158,6 +159,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Create server instance
 	s := &Server{
 		engine:                       engine,
+		listener:                     optionState.listener,
 		handlers:                     handlers.NewBaseAPIHandlers(effectiveSDKConfig(cfg), authManager),
 		cfg:                          cfg,
 		accessManager:                accessManager,
@@ -301,9 +303,13 @@ func (s *Server) Start() error {
 	}
 
 	addr := s.server.Addr
-	listener, errListen := net.Listen("tcp", addr)
-	if errListen != nil {
-		return fmt.Errorf("failed to start HTTP server: %v", errListen)
+	listener := s.listener
+	if listener == nil {
+		var errListen error
+		listener, errListen = net.Listen("tcp", addr)
+		if errListen != nil {
+			return fmt.Errorf("failed to start HTTP server: %v", errListen)
+		}
 	}
 
 	cfg := s.getConfig()
