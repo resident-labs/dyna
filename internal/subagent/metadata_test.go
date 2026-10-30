@@ -90,6 +90,24 @@ func TestListMetaSkipsUnassignedLegacyHistory(t *testing.T) {
 	}
 }
 
+// Retained sessions of the removed global room keep their global:<name>
+// addresses.
+func TestLegacyGlobalAddressesResolve(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	for _, meta := range []Meta{
+		{ID: "ses_20261017-120000-abcdef12", Name: "lead", RoomID: "global", Room: "global"},
+		{ID: "ses_20261017-120001-abcdef13", Name: "done", RoomID: "global", Room: "global", Closed: time.Now()},
+	} {
+		recordtest.Write(t, s.Root, meta.ID, meta)
+	}
+	if info, err := s.Resolve("global:lead"); err != nil || info.Name != "lead" {
+		t.Fatalf("Resolve(global:lead) = %+v, %v", info, err)
+	}
+	if info, err := s.ResolveClosed("global:done"); err != nil || info.Name != "done" {
+		t.Fatalf("ResolveClosed(global:done) = %+v, %v", info, err)
+	}
+}
+
 func TestInternalRootAddressResolvesForReadCommands(t *testing.T) {
 	s := &Store{Root: t.TempDir()}
 	for _, name := range []string{"work", "other"} {
