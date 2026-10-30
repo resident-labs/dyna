@@ -85,6 +85,19 @@ func TestTransportFallsBackWhenRuntimeUnavailable(t *testing.T) {
 	}
 }
 
+func TestTransportReservesSSHSocketSuffix(t *testing.T) {
+	base := testsafe.ShortTempDir(t)
+	const socketName = "0123456789abcdef.sock"
+	suffix := len("/dyna/ssh/") + len(socketName)
+	runtime := filepath.Join(base, strings.Repeat("r", 95-len(base)-1-suffix))
+	fallback := filepath.Join(base, "fallback")
+	x := Executor{Node: Conn{Name: "node", SSH: "node"}}
+	options := strings.Join(x.sshOptionsIn(runtime, fallback), " ")
+	if !strings.Contains(options, "ControlPath="+fallback+"/") {
+		t.Fatalf("ssh options = %q, want fallback for a near-limit socket", options)
+	}
+}
+
 func TestRemoteFrameStreamsBodyAndStatus(t *testing.T) {
 	cmd := exec.Command("bash", "-o", "pipefail", "-c", remoteFrame, "dyna-frame", `cat; exit 7`)
 	cmd.Stdin = strings.NewReader("DYNA-IN 00000000000000000005\nhello")

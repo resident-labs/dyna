@@ -224,7 +224,9 @@ func (x Executor) sshOptionsIn(runtime, fallback string) []string {
 	dir := filepath.Join(runtime, "dyna", "ssh")
 	socket := filepath.Join(dir, name)
 	err := error(nil)
-	if len(socket) >= 104 {
+	// OpenSSH appends a dot and a 16-character random suffix while it creates
+	// the master socket. Reserve that space within the Unix socket limit.
+	if len(socket)+17 >= 104 {
 		err = errors.New("runtime socket path is too long")
 	} else {
 		err = os.MkdirAll(dir, 0700)
@@ -243,7 +245,7 @@ func (x Executor) sshOptionsIn(runtime, fallback string) []string {
 			info, err = os.Lstat(fallback)
 			if err == nil {
 				stat, ok := info.Sys().(*syscall.Stat_t)
-				if !ok || !info.IsDir() || stat.Uid != uint32(os.Geteuid()) || len(socket) >= 104 {
+				if !ok || !info.IsDir() || stat.Uid != uint32(os.Geteuid()) || len(socket)+17 >= 104 {
 					err = errors.New("unsafe SSH socket directory")
 				}
 			}
