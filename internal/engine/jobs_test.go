@@ -50,6 +50,28 @@ func TestJobEventDescribesResults(t *testing.T) {
 	}
 }
 
+func TestJobLogsReportsTruncatedTail(t *testing.T) {
+	dir := t.TempDir()
+	logPath := dir + "/log"
+	if err := os.WriteFile(logPath, []byte(strings.Repeat("x", 65537)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := jobs.Store{DataDir: dir}
+	job := jobs.Job{ID: "job_log", State: jobs.StatePassed, LogPath: logPath}
+	if err := store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	s := services{jobs: &jobs.Service{Store: store}}
+	view, err := s.jobLogs(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(view)
+	if err != nil || !strings.Contains(string(data), `"truncated":true`) {
+		t.Fatalf("job log response = %s, %v; want truncation reported", data, err)
+	}
+}
+
 func TestWaitJobReturnsAfterJobsEvent(t *testing.T) {
 	store := jobs.Store{DataDir: t.TempDir()}
 	queued := jobs.Job{ID: "job_wait", Command: []string{"true"}, State: jobs.StateQueued}
