@@ -151,18 +151,10 @@
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
   import type { ModelSelection } from './lib/settings/profiles/state.ts'
   import type { RunAgent } from './lib/api/workflow.ts'
+  import { resolveAgent } from './lib/app/agentRef.ts'
+  import type { AgentRef } from './lib/app/agentRef.ts'
 
   // A member the open view drills into. The root conversation is one made from the seat.
-  // AgentRef is the part of a session that opening its view needs. The member
-  // list gives a Member and a machine's usage rows give a load owner.
-  interface AgentRef {
-    id?: string
-    name: string
-    hue: number
-    address?: string
-    room?: string
-    roomId?: string
-  }
   interface PromptSpec {
     title: string
     lines?: string[]
@@ -1024,7 +1016,8 @@
       const request = detailRequest
       if (!await selecting || request !== detailRequest) return
     }
-    openSession(m)
+    // A usage row names only the session, so the roster supplies its computer.
+    openSession(resolveAgent(m, hierarchy))
   }
 
   // chooseCloseRow opens the work a failed close step left behind, where the
