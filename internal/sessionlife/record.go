@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
@@ -453,6 +454,9 @@ func Delete(sessions, id string) error {
 	}
 	if err := state.For(db).Write(context.Background(), Changed(id), func(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(context.Background(), "DELETE FROM session_records WHERE id = ?", id); err != nil {
+			return err
+		}
+		if err := activity.DeleteOwner(context.Background(), conn, activity.Turn, id); err != nil {
 			return err
 		}
 		if err := deleteTurnsAndQueue(conn, id); err != nil {

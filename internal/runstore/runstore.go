@@ -270,8 +270,9 @@ type Run struct {
 	// dirs is the path of the list of every worker directory that the run's
 	// events and journal name, so worktree owner lookup reads it instead of
 	// the large journals. It is "" when the run keeps no list.
-	dirs     string
-	dirsSeen map[string]bool
+	dirs         string
+	dirsSeen     map[string]bool
+	activityDone []<-chan struct{}
 	// dirsStale: a list write failed and the list could not be deleted yet.
 	dirsStale bool
 }
