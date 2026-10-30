@@ -27,7 +27,7 @@ func TestGoalScanSkipsUnchangedRoomsAndPreservesDeletes(t *testing.T) {
 	}
 	type scanner struct {
 		rows, work map[string]string
-		version    string
+		version    int64
 		events     []Event
 	}
 	scans := []*scanner{{rows: map[string]string{}, work: map[string]string{}}, {rows: map[string]string{}, work: map[string]string{}}}

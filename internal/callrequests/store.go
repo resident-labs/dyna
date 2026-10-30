@@ -21,6 +21,8 @@ const Topic = "call-requests"
 
 var errUnchanged = errors.New("call request unchanged")
 
+const revisionCounter database.Counter = "callrequests.revision"
+
 type Request struct {
 	ID             string     `json:"id"`
 	Room           string     `json:"room"`
@@ -60,17 +62,24 @@ func (s *Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "callrequests.schema", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "callrequests.schema", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, schema); err != nil {
 				return err
 			}
 		}
-		_, err := conn.ExecContext(ctx, `CREATE TABLE call_requests_revision (
-   id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL
-  ); INSERT INTO call_requests_revision VALUES(1,0);`)
-		return err
+		if err := database.CreateRevisions(ctx, conn); err != nil {
+			return err
+		}
+		if old == 2 {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT ?,revision FROM call_requests_revision", revisionCounter); err != nil {
+				return err
+			}
+			_, err := conn.ExecContext(ctx, "DROP TABLE call_requests_revision")
+			return err
+		}
+		return nil
 	})
 	return db, err
 }
@@ -111,7 +120,7 @@ func setChange(conn *sql.Conn, event *listchange.Event, row Request) error {
 		return err
 	}
 	event.Change = listchange.Change{Op: "upsert", ID: row.ID, Item: raw}
-	_, err = conn.ExecContext(context.Background(), "UPDATE call_requests_revision SET revision=revision+1 WHERE id=1")
+	_, err = revisionCounter.Bump(context.Background(), conn)
 	return err
 }
 
@@ -170,9 +179,7 @@ func (s *Store) Revision() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	var revision int64
-	err = db.QueryRow("SELECT revision FROM call_requests_revision WHERE id=1").Scan(&revision)
-	return revision, err
+	return revisionCounter.Read(context.Background(), db)
 }
 
 // List returns history for one room, or all rooms when no room is supplied.

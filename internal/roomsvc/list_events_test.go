@@ -23,7 +23,7 @@ func TestOldGoalUpdateCarriesItemOutsideTheHead(t *testing.T) {
 	if _, err := store.Finish(rec.ID, goal.ID, "owner", "Done", false); err != nil {
 		t.Fatal(err)
 	}
-	snapshots, version := map[string]string{}, ""
+	snapshots, version := map[string]string{}, int64(-1)
 	var events []Event
 	emit := func(ev Event) { events = append(events, ev) }
 	goalRows := map[string]string{}

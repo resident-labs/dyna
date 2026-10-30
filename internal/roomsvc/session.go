@@ -563,10 +563,10 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 	questionSig := map[string]string{}
 	callRequestSig := map[string]string{}
 	var callRequestVersion int64
-	var questionVersion string
+	questionVersion := int64(-1)
 	prSig, prVersion := map[string]string{}, ""
 	prWork := map[string]string{}
-	goalVersion, noticeVersion := "", ""
+	goalVersion, noticeVersion := int64(-1), ""
 	goalWork := map[string]string{}
 	goalRows := map[string]string{}
 	hookVersion := ""

@@ -288,7 +288,7 @@ func writeItem(conn *sql.Conn, room, goal string, it Item) error {
 // bumpItemsRevision moves the item revision inside the caller's writer
 // transaction. The row is created on first use, so no migration seeds it.
 func bumpItemsRevision(conn *sql.Conn) error {
-	_, err := conn.ExecContext(context.Background(), "INSERT INTO meta(key,value) VALUES ('goal_items.revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
+	_, err := itemsRevisionCounter.Bump(context.Background(), conn)
 	return err
 }
 
