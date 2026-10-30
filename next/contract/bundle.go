@@ -20,7 +20,6 @@ const BundleV1 BundleVersion = 1
 
 // V1 labels, as the owner knows them.
 type (
-	GoalLabel     string // "g1084"
 	RuleLabel     string // "r17"
 	QuestionLabel string // "q33"
 	RoomName      string // "dyna"
@@ -275,7 +274,7 @@ type GoalNote struct {
 
 // GoalBundle is an active goal. It imports with no holder.
 type GoalBundle struct {
-	Label      GoalLabel        `json:"label"`
+	Label      GoalID           `json:"label"`
 	Text       string           `json:"text"`
 	Detail     string           `json:"detail,omitempty"`
 	Setter     ImportedAuthor   `json:"setter"`
@@ -303,7 +302,7 @@ type IssueBundle struct {
 	Files     []IssueFile    `json:"files,omitempty"`
 	Filer     ImportedAuthor `json:"filer"`
 	Filed     time.Time      `json:"filed"`
-	Goal      GoalLabel      `json:"goal,omitempty"`
+	Goal      GoalID         `json:"goal,omitempty"`
 	Assignee  V1Address      `json:"assignee,omitempty"`
 	GitHubURL string         `json:"githubUrl,omitempty"`
 	Notes     []IssueNote    `json:"notes,omitempty"`
@@ -322,30 +321,39 @@ type TrackedPR struct {
 	Number       int            `json:"number"`
 	Author       ImportedAuthor `json:"author"`
 	Branch       string         `json:"branch"`
-	Goal         GoalLabel      `json:"goal,omitempty"`
+	Goal         GoalID         `json:"goal,omitempty"`
 	Fixes        []string       `json:"fixes,omitempty"` // "D-5", "#207"
 	Dependencies []string       `json:"dependencies,omitempty"`
 	Hold         *PRHold        `json:"hold,omitempty"`
 }
 
-// QuestionBundle is an unanswered question.
+type QuestionKind string
+
+const (
+	QuestionAsk      QuestionKind = "question"
+	QuestionTerminal QuestionKind = "terminal"
+)
+
+// QuestionBundle is an unanswered question or terminal request.
 type QuestionBundle struct {
 	Label     QuestionLabel  `json:"label"`
+	Kind      QuestionKind   `json:"kind"`
 	Asker     ImportedAuthor `json:"asker"`
 	Text      string         `json:"text"`
 	Options   []string       `json:"options,omitempty"`
 	Meanwhile string         `json:"meanwhile,omitempty"`
+	Command   string         `json:"command,omitempty"` // terminal requests only
 	Asked     time.Time      `json:"asked"`
 }
 
 // SessionHandoff tells root about one session that was open in v1.
 type SessionHandoff struct {
-	Name       V1Address   `json:"name"`
-	Profile    string      `json:"profile"`
-	Parent     V1Address   `json:"parent,omitempty"`
-	Goals      []GoalLabel `json:"goals,omitempty"`
-	ArchiveRef string      `json:"archiveRef,omitempty"` // refs/dyna/archive/<session>
-	LastPost   string      `json:"lastPost"`             // cut to 2,000 characters
+	Name       V1Address `json:"name"`
+	Profile    string    `json:"profile"`
+	Parent     V1Address `json:"parent,omitempty"`
+	Goals      []GoalID  `json:"goals,omitempty"`
+	ArchiveRef string    `json:"archiveRef,omitempty"` // refs/dyna/archive/<session>
+	LastPost   string    `json:"lastPost"`             // cut to 2,000 characters
 }
 
 type SubscriptionScope string
