@@ -150,6 +150,9 @@ func TestSessionCannotGrantHostChecks(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "owner only") || !strings.Contains(err.Error(), hostChecksCommand) {
 		t.Fatalf("a session allowing host checks = %v, want an owner-only refusal that names %s", err, hostChecksCommand)
 	}
+	if !strings.Contains(err.Error(), "dyna request terminal -- "+hostChecksCommand) {
+		t.Fatalf("a session allowing host checks = %v, want a refusal that names the terminal request for %s", err, hostChecksCommand)
+	}
 	if len(*patches) != 0 {
 		t.Fatalf("saved patches = %+v, want none", *patches)
 	}
