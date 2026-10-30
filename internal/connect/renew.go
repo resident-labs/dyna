@@ -71,5 +71,5 @@ func (s *Service) renew(w http.ResponseWriter, r *http.Request, rt websvc.Route,
 		return
 	}
 	s.setCookie(w, rt, tok, int(x.End.Sub(now)/time.Second))
-	websvc.JSONReply(w, http.StatusOK, map[string]any{"expires": x.Access, "grantEnd": x.End, "grace": grace})
+	websvc.JSONReply(w, http.StatusOK, Renewal{Expires: x.Access, GrantEnd: x.End, Grace: grace})
 }
