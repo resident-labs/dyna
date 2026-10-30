@@ -6,6 +6,98 @@ import (
 	"dyna-agent/internal/account/store"
 )
 
+// QuotaAvailability describes the evidence for accounts permitted in a repo.
+type QuotaAvailability string
+
+const (
+	QuotaAvailable   QuotaAvailability = "available"
+	QuotaUnavailable QuotaAvailability = "unavailable"
+	QuotaUnknown     QuotaAvailability = "unknown"
+)
+
+// QuotaEvidence records availability and its saved evidence time.
+type QuotaEvidence struct {
+	State      QuotaAvailability
+	ObservedAt time.Time
+}
+
+// QuotaAvailability reads saved account evidence without a cache.
+func (a *Accounts) QuotaAvailability(harness string, provider store.Provider, repo string, now time.Time) (QuotaEvidence, error) {
+	unknown := QuotaEvidence{State: QuotaUnknown}
+	h, err := canonicalAccountHarness(harness)
+	if err != nil {
+		return unknown, err
+	}
+	if provider == "" {
+		return unknown, nil
+	}
+	scopes, err := a.scopes()
+	if err != nil {
+		return unknown, err
+	}
+	limits, err := scopes.Limits(now)
+	if err != nil {
+		return unknown, err
+	}
+	recorded, err := scopes.LimitRecordedAt(now)
+	if err != nil {
+		return unknown, err
+	}
+	rules, err := scopes.Rules()
+	if err != nil {
+		return unknown, err
+	}
+	all, problems, err := a.ListWithProblems()
+	if err != nil {
+		return unknown, err
+	}
+	var open []NativeAccount
+	var ids []string
+	for _, n := range all {
+		if accountRuns(h, n, provider) && n.Status == "ready" && rules.Allows(n.ID, repo) {
+			open = append(open, n)
+			ids = append(ids, n.ID)
+		}
+	}
+	if len(open) == 0 {
+		return unknown, nil
+	}
+	readings, err := a.readObservations(ids)
+	if err != nil {
+		return unknown, err
+	}
+	uncertain := len(problems) > 0
+	var evidence time.Time
+	for _, n := range open {
+		o := readings[n.ID]
+		if _, limited := limits[n.ID]; limited {
+			if recorded[n.ID].After(evidence) {
+				evidence = recorded[n.ID]
+			}
+			continue
+		}
+		if o == nil || o.Unavailable || o.ObservedAt.IsZero() || o.ObservedAt.After(now) || now.Sub(o.ObservedAt) > store.SavedUsageWindow {
+			uncertain = true
+			continue
+		}
+		if _, spent := readingOutOfQuota(o, now); spent {
+			if o.ObservedAt.After(evidence) {
+				evidence = o.ObservedAt
+			}
+			continue
+		}
+		if !readingHasQuotaLeft(o, time.Unix(0, 1), now) {
+			uncertain = true
+			continue
+		}
+		return QuotaEvidence{State: QuotaAvailable, ObservedAt: o.ObservedAt}, nil
+	}
+	if uncertain {
+		return unknown, nil
+	}
+	return QuotaEvidence{State: QuotaUnavailable, ObservedAt: evidence}, nil
+}
+
 // QuotaHeldOut reports when every account that may run harness h for provider
 // p in repo is out of quota. A saved failover limit counts, and so does a
 // saved usage reading that says the account has no quota left. A ranking that
