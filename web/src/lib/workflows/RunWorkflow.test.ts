@@ -10,7 +10,7 @@ test('filtering out the selection prevents starting it', async () => {
     <RunWorkflow room={{id:'room', name:'room'}} onstarted={() => {}} oncancel={() => {}} />`
   const result = await build({ bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['browser', 'production'], logLevel: 'silent',
     stdin: { contents: compileSvelte(source, 'PickerFixture.svelte') + '\nexport { mount, unmount, flushSync } from "svelte"', resolveDir: new URL('.', import.meta.url).pathname },
-    plugins: [svelteEsbuildPlugin(), { name: 'picker-api', setup(b) { b.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: `export const api = { listWorkflows: async () => [{name:'audit',scope:'bundled',description:'Audit'}], startNamedRun: async () => { throw Error('unexpected start') } }`, loader: 'js' })) } }],
+    plugins: [svelteEsbuildPlugin(), { name: 'picker-api', setup(b) { b.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: `export const api = { listWorkflows: async () => [{name:'audit',scope:'bundled',description:'Audit',args:[{name:'what',required:true,description:'What to audit'}]}], startNamedRun: async () => { throw Error('unexpected start') } }`, loader: 'js' })) } }],
   })
   const output = result.outputFiles?.[0]
   assert.ok(output)
