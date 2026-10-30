@@ -410,3 +410,16 @@ func TestExplicitOwnerTrackReplacesOnlyDiscoveryAuthor(t *testing.T) {
 		}
 	}
 }
+
+func TestInheritedWorktreeUserClaimsDiscoveredPR(t *testing.T) {
+	e, tree := autoTrackEnv(t)
+	child := subagent.Meta{ID: "ses_20261026-000001-cccccccc", Name: "child", RoomID: e.author.RoomID, Room: e.author.Room, ParentSession: e.author.ID, Dir: tree, Status: subagent.StatusRunning}
+	recordtest.Write(t, e.s.Notify.Sessions.Store.Root, child.ID, child)
+	e.tick()
+	ref := Ref{"github.com", "owner/repo", 18}
+	info := subagent.Info{Meta: child, Status: subagent.StatusRunning}
+	got, _, err := e.s.Track(t.Context(), authority.Actor{Role: authority.Owner, Session: child.ID}, ref, info, tree)
+	if err != nil || got.Author != child.ID || got.AuthorSource != prstate.AuthorSourceExplicit {
+		t.Fatalf("track inherited worktree: author=%s source=%s err=%v", got.Author, got.AuthorSource, err)
+	}
+}
