@@ -17,6 +17,8 @@ import (
 type fakeCaller struct {
 	results map[string]json.RawMessage
 	writes  []write
+	// registryArgs are the arguments of the last ServiceRegistry read.
+	registryArgs []any
 }
 
 type write struct {
@@ -33,6 +35,9 @@ var readMethods = map[string]bool{
 func (f *fakeCaller) Call(_ context.Context, method string, args []any, out any) error {
 	if !readMethods[method] {
 		f.writes = append(f.writes, write{method: method, args: args})
+	}
+	if method == "ServiceRegistry" {
+		f.registryArgs = args
 	}
 	raw, ok := f.results[method]
 	if !ok {
@@ -222,5 +227,17 @@ func TestEnableSwitchesBuiltinHook(t *testing.T) {
 	}
 	if err := setEnabled(context.Background(), reader, refs{Room: "dyna"}, serviceregistry.IDLocalCI, false, &out); err == nil {
 		t.Fatal("a service without a switch accepted one")
+	}
+}
+
+// An explicit --repo reaches the registry call, so a list shows the repository
+// that a switch will change.
+func TestListReadsTheChosenRepository(t *testing.T) {
+	reader := readerWith(t, map[string]any{"ServiceRegistry": []serviceregistry.Service{}})
+	if _, err := readRegistry(context.Background(), reader, refs{Room: "dyna", Repo: "/other", RepoExplicit: true}); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(reader.registryArgs) != "[dyna /other]" {
+		t.Fatalf("registry args = %v", reader.registryArgs)
 	}
 }
