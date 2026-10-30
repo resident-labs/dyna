@@ -241,6 +241,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ListHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.List},
 		{Name: "ListGlobalHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.ListGlobal},
 		{Name: "HookSummary", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Summaries},
+		{Name: "LibrarianLastRun", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.librarianLastRun},
 		{Name: "LibrarianDeferred", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.librarianDeferred},
 		{Name: "GlobalHookSummary", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.SummariesGlobal},
 		{Name: "HookRuns", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Runs},

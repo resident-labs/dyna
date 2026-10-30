@@ -109,6 +109,10 @@ type Service struct {
 	// Checkouts lists the room checkouts that follow their default branch; tests
 	// replace it. The default reads the repositories of every room.
 	Checkouts func(context.Context) ([]string, error)
+	// MainUpdated observes a default branch change without a repository hook.
+	MainUpdated func(context.Context, Event) error
+	// ExtraRepositories adds repositories that need default branch observation.
+	ExtraRepositories func(context.Context) ([]string, error)
 }
 
 // New returns a hook service that seeds and runs the given automatic hooks.

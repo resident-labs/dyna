@@ -243,15 +243,6 @@ func (s Service) clearNotices(id string, h Hook) {
 	})
 }
 
-// LibrarianHooks wake the repository's librarian when its default branch moves.
-// A merge always moves that branch. A wake that waits for the librarian's
-// interval is deferred by the engine, so no schedule hook is needed.
-// dyna library enable adds it; disable removes it.
-func LibrarianHooks(exe, main string) []Hook {
-	command := shellquote.Quote(exe) + " library wake --repo " + shellquote.Quote(main)
-	return []Hook{{Name: "librarian-main", Label: "Librarian", Event: MainUpdated, Command: command, Cwd: "main", Timeout: "2m", OnFail: "alert"}}
-}
-
 // SettleInterrupted finishes the hook runs that an earlier engine left running.
 // The self-update hook restarts the engine in the middle of its own run, so the
 // engine that posted the start never posts a result, and the card would stay

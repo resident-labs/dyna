@@ -89,6 +89,7 @@ func TestListShowsEachServiceAndItsOwnState(t *testing.T) {
 			"hook":    map[string]any{"name": "librarian-main", "event": "main-updated"},
 			"lastRun": map[string]any{"result": "pass", "startedAt": "2026-10-23T09:50:00Z"},
 		}},
+		"LibrarianLastRun":  "2026-10-23T09:50:00Z",
 		"LibrarianDeferred": "2026-10-23T10:20:00Z",
 		"VoiceStatus":       map[string]any{"available": true, "live": false},
 	})

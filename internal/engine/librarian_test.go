@@ -63,7 +63,7 @@ func TestLibrarianSharedHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks, err := s.hooks.List(ctx, repo)
-	if err != nil || len(hooks) != 1 || hooks[0].Name != "librarian-main" {
+	if err != nil || len(hooks) != 0 {
 		t.Fatalf("hooks = %+v, %v", hooks, err)
 	}
 	for _, hook := range hooks {
@@ -89,6 +89,56 @@ func TestLibrarianSharedHooks(t *testing.T) {
 	var result librarian.Result
 	if err := client.Call(ctx, "WakeLibrarian", []any{repo}, &result); err != nil || result.Action != "off" {
 		t.Fatalf("wake = %+v, %v", result, err)
+	}
+}
+
+func TestMainUpdateWakesEnabledLibrarianWithoutHook(t *testing.T) {
+	storetest.Isolate(t)
+	s := testServices(t, false)
+	repo := librarianRepo(t)
+	owner := localCallerContext(t, websvc.Caller{Kind: websvc.Owner}, authority.Actor{Role: authority.Owner})
+	enabled, err := s.enableLibrarian(owner, repo, "", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := (librarianstate.Store{DataDir: store.DataDir()}).Update(enabled.Repo.ID, false, func(st *librarianstate.State) error {
+		st.LastRun, st.SmellLastRun = now, now
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.timers = newTimers(t.Context(), func() time.Time { return now }, func(time.Duration, func()) func() bool { return func() bool { return true } })
+	h := s.librarianMainUpdates(s.hooks)
+	repos, err := h.TickRepositories(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range repos {
+		if p == repo {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("enabled repo missing: %v", repos)
+	}
+	if rows, err := h.List(t.Context(), repo); err != nil || len(rows) != 0 {
+		t.Fatalf("hooks = %v, %v", rows, err)
+	}
+	if err := h.Tick(t.Context(), repo, now); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "next")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git: %v %s", err, out)
+	}
+	if err := h.Tick(t.Context(), repo, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	at, err := s.librarianDeferred(t.Context(), repo)
+	if err != nil || at == nil || !at.Equal(now.Add(librarian.Interval)) {
+		t.Fatalf("deferred = %v, %v", at, err)
 	}
 }
 
