@@ -82,6 +82,17 @@ func (l *ResourceLease) Bind(reference json.RawMessage) error {
 	l.record.Reference = append(json.RawMessage(nil), reference...)
 	return store.WriteJSON(l.path+".json", l.record, 0600)
 }
+
+// SetData replaces the lease data that removal and other scans read.
+func (l *ResourceLease) SetData(data json.RawMessage) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed || !json.Valid(data) {
+		return errors.New("Native process protection could not be bound.")
+	}
+	l.record.Data = append(json.RawMessage(nil), data...)
+	return store.WriteJSON(l.path+".json", l.record, 0600)
+}
 func (l *ResourceLease) Close() error {
 	if l == nil {
 		return nil
@@ -169,15 +180,22 @@ func resourceLeasePaths(root, prefix string) ([]string, error) {
 	return paths, nil
 }
 func resourceLeaseCount(root string) (int, error) {
+	return resourceLeaseCountWhere(root, func(resourceUse) bool { return true })
+}
+
+// resourceLeaseCountWhere counts live leases in root that match.
+func resourceLeaseCountWhere(root string, match func(resourceUse) bool) (int, error) {
 	paths, err := resourceLeasePaths(root, "")
 	if err != nil {
 		return 0, err
 	}
 	count := 0
 	for _, path := range paths {
-		live, _, e := resourceLeaseState(path)
+		live, record, e := resourceLeaseState(path)
 		if live {
-			count++
+			if match(record) {
+				count++
+			}
 		} else if e == nil {
 			removeResourceLease(path)
 		}
