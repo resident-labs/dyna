@@ -11,7 +11,7 @@ import (
 )
 
 func TestEventPublishedAfterCommit(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestEventPublishedAfterCommit(t *testing.T) {
 	}
 }
 func TestEventsPublishInCommitOrder(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestEventsPublishInCommitOrder(t *testing.T) {
 	}
 }
 func TestRolledBackEventIsNotPublished(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestRolledBackEventIsNotPublished(t *testing.T) {
 	_ = s.Close()
 }
 func TestMachineEventReplay(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestMachineEventReplay(t *testing.T) {
 }
 
 func TestEventsReplay(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestEventsReplay(t *testing.T) {
 }
 
 func TestEventsBefore(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
