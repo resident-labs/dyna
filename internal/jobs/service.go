@@ -827,7 +827,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	x := s.executor(conn)
 	if launch && job.SHA != "" {
 		cache := path.Join(NodeBase(machine.Name), RepoKey(job.Repo)+".git")
-		if err := x.PushCommit(ctx, job.Repo, cache, job.SHA); err != nil {
+		if err := x.PushCommit(ctx, job.Repo, cache, job.SHA, ""); err != nil {
 			s.finish(&job, err)
 			return
 		}
