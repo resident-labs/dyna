@@ -585,7 +585,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	}
 	dropDynaEnv()
 	rooms := roomsvc.New(nil)
-	rooms.Approvals.Register(approvals.KindGH, ghApprovalExecutor(rooms.Notify.Rooms))
+	rooms.Approvals.Register(approvals.KindGH, ghApprovalExecutor(rooms.Notify.Rooms, rooms.PRs.Watcher().ClaimIssueComment))
 	rooms.Approvals.SetLifetime(ctx)
 	rooms.Notify.Sessions.CloseApprovals = func(ctx context.Context, info, heir subagent.Info) error {
 		return rooms.Approvals.CloseSession(ctx, info.RoomID, info.ID, heir.ID)

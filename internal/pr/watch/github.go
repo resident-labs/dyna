@@ -1049,16 +1049,20 @@ func (s *Service) Comment(ctx context.Context, r Ref, session, body string, publ
 	if created.ID < 1 {
 		return fmt.Errorf("the comment is posted, but GitHub returned no comment ID; do not post it again")
 	}
-	posted := created.ID
-	err = s.Store.update(func(st *State) error {
-		claimComment(st, "issue-comments", posted, session)
-		return nil
-	})
-	if err != nil {
+	if err := s.ClaimIssueComment(session, created.ID); err != nil {
 		return err
 	}
-	log.Printf("PR %s: recorded comment %d for session %s", r.Key(), posted, session)
+	log.Printf("PR %s: recorded comment %d for session %s", r.Key(), created.ID, session)
 	return nil
+}
+
+// ClaimIssueComment records which session posted a PR issue comment, so its
+// replies route back to that session.
+func (s *Service) ClaimIssueComment(session string, id int64) error {
+	return s.Store.update(func(st *State) error {
+		claimComment(st, "issue-comments", id, session)
+		return nil
+	})
 }
 
 // ReviewComment is one inline comment inside a published review.
