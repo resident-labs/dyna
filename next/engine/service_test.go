@@ -294,6 +294,39 @@ func TestFailedResultReachesParent(t *testing.T) {
 	}
 }
 
+func TestFailedTurnConsumesInputs(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channelCtx, cancel := context.WithCancel(ctx)
+	channel, e := s.BoxChannel(channelCtx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	start := (<-channel).Body.(contract.TurnStart)
+	cancel()
+	for range channel {
+	}
+	if _, e := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnFailed, Error: "setup failed"}); e != nil {
+		t.Fatal(e)
+	}
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, inputs, err := s.store.Dispatch(ctx, session, "retry", event, false)
+	if err != nil || turn != "" || len(inputs) != 0 {
+		t.Fatalf("failure retried: turn %q inputs %+v error %v", turn, inputs, err)
+	}
+	var pending int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id=? AND state IN ('pending','taken')", session).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("unconsumed deliveries %d: %v", pending, err)
+	}
+	events, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"turn.started"}})
+	if e != nil || len(events.Events) != 1 {
+		t.Fatalf("started events %+v: %v", events.Events, e)
+	}
+}
+
 func TestFailedTurnRecordsError(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
