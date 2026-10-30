@@ -31,7 +31,7 @@ const bodies: Record<string, Check> = {
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string })))) }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), brief: optional(string) }),
   "session.closed": object({ session: string, archive: optional(string), unheld: optional(nullable(array(string))) }),
-  "box.changed": object({ box: string, session: string, host: optional(string), from: boxState, to: boxState, reason: optional(string) }),
+  "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, reason: optional(string) }),
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),
   "turn.ended": object({ session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string),
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string) }),

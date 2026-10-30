@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { RoomStore } from "./room.svelte.ts";
+import { PAGE, RoomStore, WINDOW } from "./room.svelte.ts";
 import type { Event, EventBody } from "./contract.gen.ts";
 
 function event(seq: number, body: EventBody): Event {
@@ -43,4 +43,56 @@ test("folds sessions, box, turns and pending operations", () => {
   room.apply(event(7, { type: "session.closed", body: { session: "s" } }));
   assert.equal(room.operations.size, 0);
   assert.equal(room.sessions.has("s"), false);
+});
+
+// A fake engine with posts 1..count; it records each events.list range.
+function engine(count: number) {
+  const requests: string[] = [];
+  const posts = Array.from({ length: count }, (_, i) => event(i + 1, { type: "post.created", body: { text: String(i + 1), home: { kind: "feed" } } }));
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const method = String(input).replace("/v1/", "");
+    const request: { afterSeq?: number; beforeSeq?: number; limit?: number } = JSON.parse(String(init?.body));
+    if (method !== "events.list") return new Response(JSON.stringify({}));
+    const limit = request.limit ?? PAGE;
+    if (request.beforeSeq) {
+      requests.push(`before ${request.beforeSeq}`);
+      const before = posts.filter(post => post.seq < Number(request.beforeSeq));
+      return new Response(JSON.stringify({ events: before.slice(-limit), next: 0 }));
+    }
+    requests.push(`after ${request.afterSeq}`);
+    return new Response(JSON.stringify({ events: posts.filter(post => post.seq > Number(request.afterSeq)).slice(0, limit), next: 0 }));
+  };
+  return { requests, posts, restore: () => { globalThis.fetch = original; } };
+}
+
+test("releases the far end of the window and refetches it by the boundary seq", async () => {
+  const server = engine(1500);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    for (let i = 0; i < 5; i++) await room.loadOlder();
+    assert.equal(room.seqs.length, WINDOW);
+    assert.deepEqual([room.oldest, room.newest], [301, 1300]);
+    assert.equal(room.atPresent, false);
+    await room.loadNewer();
+    await room.loadNewer();
+    assert.deepEqual(server.requests.slice(-2), ["after 1300", "after 1500"]);
+    assert.deepEqual([room.oldest, room.newest, room.atPresent], [501, 1500, true]);
+  } finally { server.restore(); }
+});
+
+test("holds live events while the window is away from the present", async () => {
+  const server = engine(1500);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    for (let i = 0; i < 5; i++) await room.loadOlder();
+    room.apply(event(1501, { type: "session.started", body: { session: "s", name: "Agent", profile: "p" } }));
+    assert.equal(room.events.has(1501), false);
+    assert.equal(room.sessions.get("s")?.name, "Agent");
+    server.posts.push(event(1501, { type: "post.created", body: { text: "new", home: { kind: "feed" } } }));
+    await room.jumpToPresent();
+    assert.deepEqual([room.newest, room.atPresent], [1501, true]);
+  } finally { server.restore(); }
 });
