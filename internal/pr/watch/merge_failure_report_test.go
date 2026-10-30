@@ -304,3 +304,39 @@ func TestMergeFailureLinesStripsColorsAndKeepsOneName(t *testing.T) {
 		t.Fatalf("frontend = %q, want %q", frontend, want)
 	}
 }
+
+// A node can fail before it starts any check. Its run-level cause must reach root.
+func TestMergeFailureReportIncludesRunInfrastructureCause(t *testing.T) {
+	ctx := t.Context()
+	f := mergeTrialEnv(t, 1)
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
+		t.Fatalf("init: %v: %s", err, raw)
+	}
+	registry := localci.Store{DataDir: t.TempDir()}
+	f.e.s.LocalCIRegistry = registry
+	repo, err := localci.CanonicalRepo(ctx, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.SaveResult(ctx, localci.Result{Repo: repo, SHA: f.head, Node: "worker", Status: localci.OutcomeError, Cause: localci.CauseSSHDrop, Error: "connection lost during setup"}); err != nil {
+		t.Fatal(err)
+	}
+	member, err := f.e.s.Store.Get("github.com/owner/repo#1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member.RepoPath = repoDir
+	report, err := f.e.s.mergeFailureReport(ctx, member, state.MergeTrial{Branch: "trial", Head: f.head, Changes: []state.MergeTrialChange{{Key: member.Key, Head: member.Head}}}, trialCI{Status: VerdictFailed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"SSH connection lost", "connection lost during setup"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("missing %q in report: %s", want, report)
+		}
+	}
+	if strings.Contains(report, "job evidence unavailable") {
+		t.Errorf("report discarded infrastructure evidence: %s", report)
+	}
+}
