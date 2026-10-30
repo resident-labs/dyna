@@ -13,7 +13,7 @@ import (
 func TestQuotaReportReplaysFrozenCandidates(t *testing.T) {
 	e := newTestEnv(t, withImmediateTurns)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	profiles := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{Name: "other", Disabled: true}}}
+	profiles := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{Name: "disabled", Disabled: true}, {Name: "service", Uses: []string{profile.UseServices}}, {Name: "possible"}}}
 	if err := profiles.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -33,10 +33,10 @@ func TestQuotaReportReplaysFrozenCandidates(t *testing.T) {
 		t.Fatal("expected acknowledgement failure")
 	}
 	event, ok := first.Message.TurnResult()
-	if !ok || len(event.Candidates) != 1 || event.Candidates[0].State != room.CandidateUnknown {
+	if !ok || len(event.Candidates) != 3 || event.Candidates[0].State != room.CandidateUnavailable || event.Candidates[1].State != room.CandidateUnknown || event.Candidates[2].State != room.CandidateUnavailable {
 		t.Fatalf("candidate event = %+v", event)
 	}
-	profiles.Remove("other")
+	profiles.Remove("disabled")
 	if err := profiles.Save(); err != nil {
 		t.Fatal(err)
 	}

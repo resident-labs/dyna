@@ -1381,13 +1381,14 @@ func (s *Service) turnEvent(meta subagent.Meta, turn subagent.Turn) (room.TurnEv
 		} else {
 			repo := runtime.RepoIdentity(context.Background(), meta.Dir)
 			failed, _ := effectiveTurnProfile(meta, turn)
-			for _, candidate := range rolesession.SessionAvailability(registry.Store.Profiles, repo, s.sessionStore(), time.Now()) {
+			for i, candidate := range rolesession.SessionAvailability(registry.Store.Profiles, repo, s.sessionStore(), time.Now()) {
 				if candidate.Profile == failed {
 					continue
 				}
 				state := room.CandidateState(candidate.State)
-				if repo == "" {
+				if repo == "" && !registry.Store.Profiles[i].Disabled && registry.Store.Profiles[i].ForSubagents() {
 					state = room.CandidateUnknown
+					candidate.EvidenceAt = time.Time{}
 				}
 				if candidate.Error != nil {
 					ev.CandidatesError = true
