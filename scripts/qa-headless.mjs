@@ -57,34 +57,19 @@ export function parseConfig(text) {
   }
   if (!isRecord(raw)) throw new Error('QA config must be a JSON object');
   if (!Array.isArray(raw.Steps)) throw new Error('QA config needs a Steps list');
-  const reads = raw.ReadMethods === undefined ? [] : raw.ReadMethods;
-  if (!Array.isArray(reads) || reads.some(name => typeof name !== 'string')) {
-    throw new Error('QA ReadMethods must be a list of names');
-  }
   return {
     module: nonEmpty(raw.Module, 'Module'),
     executable: nonEmpty(raw.Chromium, 'Chromium'),
     origin: parseOrigin(raw.Origin),
     cookie: nonEmpty(raw.Cookie, 'Cookie'),
-    reads,
     steps: raw.Steps.map(parseStep),
   };
 }
 
-// Only read requests reach Origin. Every other request fails inside the browser.
-const isRead = (method, url, reads) => method === 'GET' || method === 'HEAD' ||
-  (method === 'POST' && url.pathname.startsWith('/api/') && reads.includes(url.pathname.slice(5)));
-
+// Requests reach only Origin, including its API. Every other request fails inside the browser.
 const restrict = (route, config) => {
-  const request = route.request();
-  const url = new URL(request.url());
-  if (url.origin !== config.origin) return route.abort('blockedbyclient');
-  if (isRead(request.method(), url, config.reads)) return route.continue();
-  // The reply names no URL, header or cookie, so it cannot leak credentials.
-  return route.fulfill({
-    status: 403, contentType: 'application/json',
-    body: JSON.stringify({ error: 'read-only QA mode' }),
-  });
+  const url = new URL(route.request().url());
+  return url.origin === config.origin ? route.continue() : route.abort('blockedbyclient');
 };
 
 const runStep = async (page, step, origin, log) => {
