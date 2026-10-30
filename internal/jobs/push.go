@@ -9,11 +9,12 @@ import (
 	"dyna-agent/internal/shellquote"
 )
 
-// DropCIRef removes the commit ref a previous job of the same commit left on
-// the node. An interrupted job can leave one that points at a missing object,
-// and neither a plain nor a forced push can replace such a ref.
+// DropCIRef repairs a ref left pointing at a missing object by an interrupted
+// job. Healthy refs must remain available to other jobs using the same base.
 func DropCIRef(cache, sha string) string {
-	return "git --git-dir=" + shellquote.Quote(cache) + " update-ref -d " + shellquote.Quote("refs/dyna/ci/"+sha) + " 2>/dev/null || true"
+	git := "git --git-dir=" + shellquote.Quote(cache)
+	ref := shellquote.Quote("refs/dyna/ci/" + sha)
+	return git + " rev-parse --verify -q " + ref + " >/dev/null 2>&1 && ! " + git + " cat-file -e " + ref + "^{commit} 2>/dev/null && " + git + " update-ref -d " + ref + " 2>/dev/null || true"
 }
 
 // PushCommit gives the node the commit under its own ref, so a second job of
