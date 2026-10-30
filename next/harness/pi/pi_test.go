@@ -28,7 +28,7 @@ func TestRecordedTurnAndSteer(t *testing.T) {
 	result := make(chan contract.TurnEnded, 1)
 	errs := make(chan error, 1)
 	go func() {
-		r, err := h.Start(context.Background(), "turn_test", []contract.TurnInput{{Delivery: 21, Text: "start"}})
+		r, err := h.Start(context.Background(), "turn_test", []contract.TurnInput{{Delivery: 21, Text: "start"}}, func() {})
 		if err != nil {
 			errs <- err
 			return
