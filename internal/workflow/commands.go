@@ -374,13 +374,24 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 				attach, attachStderr = prior.Shell, prior.Stderr
 			}
 		}
+		if e.opts.RecordManifest {
+			if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallCommand, key, id); err != nil {
+				e.manifestWriteFailed()
+				recordErr := fmt.Errorf("record command manifest intent: %w", err)
+				emit(runstore.Event{T: "exec_end", Status: "error", Error: recordErr.Error()})
+				reject(recordErr)
+				return
+			}
+		}
 		start := time.Now()
 		var res map[string]any
 		var runErr error
 		var shell, stderrPath string
+		recordFailed := false
 		for attempt := 1; ; attempt++ {
 			if e.opts.Run != nil {
 				if err := runstore.StepIntent(e.ctx, e.runID(), key, id, attempt); err != nil {
+					recordFailed = true
 					res = nil
 					runErr = fmt.Errorf("record command intent: %w", err)
 					break
@@ -389,6 +400,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			res, shell, stderrPath, runErr = e.execAttempt(argv, o, id, label, line, attempt, attach, attachStderr, journal)
 			if e.opts.Run != nil {
 				if err := runstore.StepResult(context.WithoutCancel(e.ctx), e.runID(), key, id, attempt, shell, res, runErr); err != nil {
+					recordFailed = true
 					res = nil
 					runErr = fmt.Errorf("record command result: %w", err)
 					break
@@ -411,6 +423,17 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			tail = tailText(fmt.Sprint(res["stdout"]) + fmt.Sprint(res["stderr"]))
 			c := res["code"].(int)
 			exitCode = &c
+		}
+		if e.opts.RecordManifest && !recordFailed && e.ctx.Err() == nil {
+			resultErr := runErr
+			if !o.check && res != nil {
+				resultErr = nil
+			}
+			if err := runstore.CompleteWorkflowCall(context.WithoutCancel(e.ctx), e.runID(), runstore.WorkflowCallCommand, key, id, shell, res, resultErr); err != nil {
+				e.manifestWriteFailed()
+				res = nil
+				runErr = fmt.Errorf("record command manifest result: %w", err)
+			}
 		}
 		if runErr != nil && o.check || runErr != nil && res == nil {
 			journal("error", shell, stderrPath, nil, runErr.Error())
