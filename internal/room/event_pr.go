@@ -93,3 +93,14 @@ func (p PREvent) eventSubject() string { return p.ChangeID }
 func (p PREvent) eventDedupe() string {
 	return strings.Join([]string{string(p.Type), p.Head, p.CommentID, p.Key}, "\x00")
 }
+
+// eventThread groups only lifecycle facts. Comments and other actionable facts stay separate.
+func (p PREvent) eventThread() string {
+	switch p.Type {
+	case PRUpdate, PRReady, PRCIFailed, PRMerged, PRClosed:
+		if p.ChangeID != "" {
+			return "pr:" + p.ChangeID
+		}
+	}
+	return ""
+}
