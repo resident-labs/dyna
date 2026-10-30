@@ -7,9 +7,15 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -99,6 +105,29 @@ func (x Executor) Run(ctx context.Context, dir string, out io.Writer, name strin
 	return fn(ctx, dir, nil, out, out, name, args...)
 }
 
+// remoteFrame runs only after the whole input arrived. The output trailer is
+// emitted after the command and its byte count finish, not after ssh exits.
+const remoteFrame = `set -u
+tmp=$(mktemp -d) || exit 254
+trap 'rm -rf "$tmp"' EXIT
+IFS= read -r header || exit 254
+case "$header" in "DYNA-IN "*) size=${header#DYNA-IN } ;; *) exit 254 ;; esac
+case "$size" in *[!0-9]*|'') exit 254 ;; esac
+[ "${#size}" = 20 ] || exit 254
+size=$((10#$size))
+head -c "$size" > "$tmp/in" || exit 254
+[ "$(wc -c < "$tmp/in")" -eq "$size" ] || exit 254
+script=$1; shift
+mkfifo "$tmp/out" || exit 254
+{
+  cat "$tmp/out" >&3 & forward=$!
+  n=$( { bash -o pipefail -c "$script" dyna-ci "$@" < "$tmp/in"; echo $? > "$tmp/status"; } | tee "$tmp/out" | wc -c )
+  wait "$forward" || exit 254
+} 3>&1
+[ -s "$tmp/status" ] || exit 254
+printf 'DYNA-END %020d %03d\n' "$n" "$(cat "$tmp/status")"
+`
+
 // NodeExec runs a script on the node once, with positional arguments and
 // input. The script is the argument of bash, and every call is short.
 func (x Executor) NodeExec(ctx context.Context, in io.Reader, out, stderr io.Writer, script string, args ...string) error {
@@ -106,12 +135,46 @@ func (x Executor) NodeExec(ctx context.Context, in io.Reader, out, stderr io.Wri
 	if fn == nil {
 		fn = RunCommand
 	}
-	argv := []string{"-o", "pipefail", "-c", script}
-	if len(args) > 0 {
-		argv = append(append(argv, "dyna-ci"), args...)
+	if x.Node.SSH == "" {
+		argv := []string{"-o", "pipefail", "-c", script}
+		if len(args) > 0 {
+			argv = append(append(argv, "dyna-ci"), args...)
+		}
+		return fn(ctx, "", in, out, stderr, "bash", argv...)
 	}
+	var input []byte
+	var err error
+	if in != nil {
+		input, err = io.ReadAll(in)
+		if err != nil {
+			return err
+		}
+	}
+	framedInput := io.MultiReader(strings.NewReader(fmt.Sprintf("DYNA-IN %020d\n", len(input))), bytes.NewReader(input))
+	argv := append([]string{"-o", "pipefail", "-c", remoteFrame, "dyna-frame", script}, args...)
 	name, argv := x.NodeProgram("bash", argv)
-	return fn(ctx, "", in, out, stderr, name, argv...)
+	frame := &trailerWriter{out: out}
+	err = fn(ctx, "", framedInput, frame, stderr, name, argv...)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if frame.err != nil {
+		return frame.err
+	}
+	status, frameErr := frame.finish()
+	if frameErr != nil {
+		return frameErr
+	}
+	// Once the complete trailer arrived, SSH's exit status cannot contradict
+	// the verified command status. Local write errors still matter.
+	var exit *exec.ExitError
+	if err != nil && !errors.As(err, &exit) {
+		return err
+	}
+	if status != 0 {
+		return &remoteExit{status}
+	}
+	return nil
 }
 
 // NodeCommand runs a short, repeatable script on the node and retries it while
@@ -129,14 +192,9 @@ func (x Executor) NodeCommand(ctx context.Context, out, stderr io.Writer, script
 	return err
 }
 
-// NodeProgram wraps a program in ssh when the node is another machine. The
-// dial deadline is the machine's own connect timeout, the same one its probe
-// uses, so a node that does not answer costs the same bounded wait everywhere
-// instead of whatever an ambient ssh config happens to set. The executor also
-// never shares a multiplexed connection: an alias with ControlMaster can hand
-// a command a stream the shared master truncated after the remote exit status
-// arrived, which ssh reports as success. Each command owns its end-to-end
-// connection, so a transport death fails the command with a drop instead
+// NodeProgram uses a Dyna-owned master, independent of the owner's SSH
+// sharing settings. NodeExec verifies the reply trailer, so a master that
+// dies after the remote status cannot turn a truncated reply into success
 // (D-166).
 func (x Executor) NodeProgram(name string, args []string) (string, []string) {
 	if x.Node.SSH == "" {
@@ -146,8 +204,84 @@ func (x Executor) NodeProgram(name string, args []string) (string, []string) {
 	for _, arg := range args {
 		remote += " " + shellquote.Quote(arg)
 	}
-	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(x.Node.SSHConnectTimeout), "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}, x.Node.SSH, remote)
+	return "ssh", append(x.sshOptions(), x.Node.SSH, remote)
 }
+
+// sshOptions gives git and node commands the same private control socket.
+func (x Executor) sshOptions() []string {
+	runtime := os.Getenv("XDG_RUNTIME_DIR")
+	if !filepath.IsAbs(runtime) {
+		runtime = filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
+	}
+	dir := filepath.Join(runtime, "dyna", "ssh")
+	key := sha256.Sum256([]byte(x.Node.Name + "\x00" + x.Node.SSH))
+	socket := filepath.Join(dir, fmt.Sprintf("%x.sock", key[:8]))
+	if len(socket) >= 104 {
+		dir = filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "dyna", "ssh")
+		socket = filepath.Join(dir, fmt.Sprintf("%x.sock", key[:8]))
+	}
+	// SSH reports a connection failure if this private directory cannot be made.
+	if os.MkdirAll(dir, 0700) == nil {
+		_ = os.Chmod(dir, 0700)
+	}
+	return []string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(x.Node.SSHConnectTimeout), "-o", "ControlMaster=auto", "-o", "ControlPath=" + socket, "-o", "ControlPersist=10m", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}
+}
+
+const trailerLen = len("DYNA-END ") + 20 + 1 + 3 + 1
+
+// trailerWriter streams all but the fixed-size trailer to its destination.
+type trailerWriter struct {
+	out   io.Writer
+	tail  []byte
+	count int64
+	err   error
+}
+
+func (w *trailerWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	data := append(w.tail, p...)
+	if len(data) <= trailerLen {
+		w.tail = data
+		return n, nil
+	}
+	cut := len(data) - trailerLen
+	written, err := w.out.Write(data[:cut])
+	w.count += int64(written)
+	w.tail = append(w.tail[:0], data[cut:]...)
+	if err == nil && written != cut {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.err = err
+		return 0, err
+	}
+	return n, nil
+}
+
+func (w *trailerWriter) finish() (int, error) {
+	s := string(w.tail)
+	if len(s) != trailerLen || !strings.HasPrefix(s, "DYNA-END ") || s[29] != ' ' || s[33] != '\n' {
+		return 0, errors.New("node transport: missing or invalid reply trailer")
+	}
+	for _, c := range s[9:29] + s[30:33] {
+		if c < '0' || c > '9' {
+			return 0, errors.New("node transport: invalid reply trailer")
+		}
+	}
+	n, err := strconv.ParseInt(s[9:29], 10, 64)
+	if err != nil || n != w.count {
+		return 0, errors.New("node transport: truncated reply")
+	}
+	status, _ := strconv.Atoi(s[30:33])
+	if status > 255 {
+		return 0, errors.New("node transport: invalid reply status")
+	}
+	return status, nil
+}
+
+type remoteExit struct{ code int }
+
+func (e *remoteExit) Error() string { return fmt.Sprintf("node command exited with status %d", e.code) }
 
 // sleepContext waits for d or until the context ends, so a cancelled run stops
 // waiting between ssh dial retries.

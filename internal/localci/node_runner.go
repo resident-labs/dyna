@@ -169,13 +169,8 @@ func nodeCacheNames(checks []nodeCheck) []string {
 // argument, because a loud failure on an old systemd is better than a script
 // that was quietly rewritten.
 func (r Runner) systemdNeedsNoExpandFlag(ctx context.Context) bool {
-	name, args := r.exec().NodeProgram("systemd-run", []string{"--version"})
-	fn := r.Command
-	if fn == nil {
-		fn = jobs.RunCommand
-	}
 	var out bytes.Buffer
-	if err := fn(ctx, "", nil, &out, io.Discard, name, args...); err != nil {
+	if err := r.exec().NodeExec(ctx, nil, &out, io.Discard, "systemd-run --version"); err != nil {
 		return true
 	}
 	major, ok := systemdver.Major(out.String())
