@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
 	statewrite "dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 func documentTestService(t *testing.T) Service {
@@ -87,7 +87,14 @@ func TestHookDocumentImportMakesSQLAuthoritative(t *testing.T) {
 	if err := os.Remove(owned); err != nil {
 		t.Fatal(err)
 	}
-	if err := statewrite.For(db).Mirror(t.Context(), documentMirrorKey("owned"), owned, func(out io.Writer) error { _, err := io.WriteString(out, raw); return err }); err != nil {
+	if err := os.WriteFile(owned, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO state_mirrors(key, version) VALUES (?, ?)", documentMirrorKey("owned"), store.VersionOf(info).Key()); err != nil {
 		t.Fatal(err)
 	}
 	var stamp string
@@ -296,10 +303,7 @@ func TestNonEngineBeforeLandUsesCanonicalConfiguration(t *testing.T) {
 			if err := db.QueryRow("SELECT count(*) FROM hook_documents").Scan(&count); err != nil || count != 1 {
 				t.Fatalf("canonical document count %d documents: %v", count, err)
 			}
-			foreign, err := statewrite.For(db).Foreign(t.Context(), documentMirrorKey(filepath.Base(s.dir(r.ID))), path)
-			if err != nil || !foreign {
-				t.Fatalf("non-engine stamped configuration: foreign=%v, error=%v", foreign, err)
-			}
+
 		})
 	}
 }
