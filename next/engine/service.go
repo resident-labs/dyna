@@ -547,6 +547,9 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	return contract.SessionCloseResponse{}, nil
 }
 
+// noAgentReason is the closing reason of a box that closed before its agent connected.
+const noAgentReason = "no agent"
+
 func (s *Service) closeSession(ctx context.Context, caller contract.Principal, session store.Session, discard bool) *contract.Error {
 	s.admit.Lock()
 	if e := s.closeGuard(ctx, session.Box); e != nil {
@@ -558,10 +561,14 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		s.admit.Unlock()
 		return failure(err)
 	}
-	// A pending or creating box has no agent yet, so it has no transcript bytes and never acknowledges an archive.
-	noAgent := current.State == contract.BoxPending || current.State == contract.BoxCreating
+	// A box that never reached its agent has no transcript bytes and never acknowledges an archive. The reason marks such a close on the box, so a restart keeps it.
+	noAgent := current.Reason == noAgentReason || current.State == contract.BoxPending || current.State == contract.BoxCreating || current.State == contract.BoxStarting
 	if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
-		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+		reason := ""
+		if noAgent {
+			reason = noAgentReason
+		}
+		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, reason)
 		if err != nil {
 			s.admit.Unlock()
 			return failure(err)
