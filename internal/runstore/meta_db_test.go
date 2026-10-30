@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -134,6 +135,36 @@ func TestRemoveDeletesTheRow(t *testing.T) {
 	}
 	if _, err := ReadMeta(run.Meta.ID); !os.IsNotExist(err) {
 		t.Fatalf("ReadMeta after Remove = %v; want not exist", err)
+	}
+}
+
+// Removing a run removes its step records without touching other runs.
+func TestRemoveDeletesStepRecords(t *testing.T) {
+	run := newTestRun(t, "wf_step-rm")
+	ctx := context.Background()
+	for _, id := range []string{run.Meta.ID, "wf_other"} {
+		if err := StepIntent(ctx, id, "call", 1, 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := StepResult(ctx, id, "call", 1, 1, "shell", "output", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := run.Finish("ok", "null", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	db, err := runsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]int{run.Meta.ID: 0, "wf_other": 1} {
+		var count int
+		if err := db.QueryRow("SELECT count(*) FROM workflow_step_records WHERE run_id=?", id).Scan(&count); err != nil || count != want {
+			t.Fatalf("records for %s = %d, %v; want %d", id, count, err, want)
+		}
 	}
 }
 
