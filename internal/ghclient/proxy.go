@@ -134,21 +134,15 @@ func Submit(ctx context.Context, roomID, dir string, args []string) error {
 		if err != nil {
 			return err
 		}
-		name := filepath.Base(path)
-		req := mediaPostRequest{Quiet: true, Mentions: []string{"@root"}, Text: "Media for a GitHub approval.", Claim: mediaPostClaim{Room: roomID}, Files: []mediaPostFile{{Name: name, Data: data}}}
-		var result mediaPostResult
-		if err := engineclient.New("", engineclient.Notices(nil)).Call(ctx, "Post", []any{req}, &result); err != nil {
-			return err
-		}
-		if len(result.Message.Attachments) != 1 {
-			return errors.New("media post did not return an attachment")
-		}
 		sum := sha256.Sum256(data)
-		media = append(media, approvals.Media{Path: path, Name: name, PostID: result.Message.ID, AttachmentID: result.Message.Attachments[0].ID, SHA256: fmt.Sprintf("%x", sum)})
+		media = append(media, approvals.Media{Path: path, Name: filepath.Base(path), Data: data, SHA256: fmt.Sprintf("%x", sum)})
 	}
 	request, err := requestApproval(ctx, approvals.RequestInput{Argv: args, Cwd: cmd.Dir, Repo: repository.name, Files: files, Media: media})
 	if err != nil {
 		return err
+	}
+	if request.ID == "" {
+		return approvalResult(request, os.Stdout, os.Stderr)
 	}
 	result, err := waitApproval(ctx, roomID, request.ID, 0)
 	if err != nil {
@@ -188,23 +182,3 @@ func approvalResult(request approvals.Request, stdout, stderr io.Writer) error {
 	}
 	return &sessionExitError{code: 75, message: fmt.Sprintf("GitHub write held for approval as %s (waiting on %s). You will be woken with the result; do not retry.", request.ID, request.At)}
 }
-
-// These structs mirror the Post RPC fields without importing notify, which depends on ghclient.
-type mediaPostClaim struct{ Room string }
-type mediaPostFile struct {
-	Name string
-	Data []byte
-}
-type mediaPostRequest struct {
-	Quiet    bool
-	Mentions []string
-	Text     string
-	Claim    mediaPostClaim
-	Files    []mediaPostFile
-}
-type mediaPostAttachment struct{ ID string }
-type mediaPostMessage struct {
-	ID          string
-	Attachments []mediaPostAttachment
-}
-type mediaPostResult struct{ Message mediaPostMessage }
