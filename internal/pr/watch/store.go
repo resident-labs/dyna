@@ -234,6 +234,9 @@ func noticeKind(token string) string {
 	if strings.HasPrefix(token, "required-review:") {
 		return "required-review"
 	}
+	if strings.HasPrefix(token, "review-assignment:") {
+		return "review-assignment"
+	}
 	for _, p := range ciNoticeTokens {
 		if strings.HasPrefix(token, p) {
 			return "ci"
@@ -365,7 +368,7 @@ func typeOfToken(r Record, token string) room.PRType {
 		return room.PRChanges
 	case strings.HasPrefix(token, "owner-comments:"), strings.HasPrefix(token, "review-comments:"):
 		return room.PRComment
-	case strings.HasPrefix(token, "transfer:reviewer:"), strings.HasPrefix(token, "required-review:"):
+	case strings.HasPrefix(token, "transfer:reviewer:"), strings.HasPrefix(token, "required-review:"), strings.HasPrefix(token, "review-assignment:"):
 		return room.PRReviewAssigned
 	case strings.HasPrefix(token, "ci-budget:"), strings.HasPrefix(token, "test-budget"),
 		strings.HasPrefix(token, "test-report-error:"), strings.HasPrefix(token, "no-junit-report"):
