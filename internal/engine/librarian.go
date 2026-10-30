@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -76,18 +77,19 @@ func (s services) librarianMainUpdates(h hooks.Service) hooks.Service {
 		if err != nil {
 			return err
 		}
+		var errs []error
 		for _, path := range v.LibraryEnabled {
 			r, err := repoid.Resolve(ctx, path)
 			if err != nil {
+				errs = append(errs, fmt.Errorf("resolve enabled library %s: %w", path, err))
 				continue
 			}
 			if r.ID == changed.ID {
-				if _, err := s.librarianService().Wake(ctx, path); err != nil {
-					return err
-				}
+				_, err := s.librarianService().Wake(ctx, path)
+				errs = append(errs, err)
 			}
 		}
-		return nil
+		return errors.Join(errs...)
 	}
 	return h
 }
