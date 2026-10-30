@@ -33,6 +33,10 @@ export const api = {
   globalHookRuns: () => Promise.resolve([{ id: 'r1', result: 'error', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }]),
   globalHookRunLog: () => Promise.reject(new Error('log gone')),
   hookRuns: () => Promise.resolve([]),
+  listHooks: () => Promise.resolve([{ name: 'self-update', label: 'Update Dyna', event: 'main-updated', command: 'x' }, { name: 'lint', event: 'schedule', everyMinutes: 60, command: 'make lint' }]),
+  hookSummary: () => Promise.resolve([]),
+  listGlobalHooks: () => Promise.resolve([]),
+  globalHookSummary: () => Promise.resolve([]),
   runService: (name) => { record('run ' + name); return Promise.resolve({ result: 'pass' }) },
   runHook: (repo, name) => { record('hook ' + repo + ' ' + name); return Promise.resolve({ result: 'pass' }) },
   hookRunLog: () => Promise.resolve(null),
@@ -40,7 +44,7 @@ export const api = {
 export const openExternal = () => {}
 `
 
-test('the page shows the registry groups in order with Not set up last; only the failed service has a pill; Run now runs the pass', async () => {
+test('the page shows the registry groups in order, Not set up last, then Hooks without service hooks; only the failed service has a pill', async () => {
   globalThis.__writes = []
   const dom = installDom()
   const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/Services', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/Services')
@@ -51,7 +55,7 @@ test('the page shows the registry groups in order with Not set up last; only the
   try {
     await settle()
     const titles = [...root.querySelectorAll('section.section > header h2')].map((h) => h.textContent)
-    assert.deepEqual(titles, ['Pull requests', 'Agents', 'This computer', 'Not set up'])
+    assert.deepEqual(titles, ['Pull requests', 'Agents', 'This computer', 'Not set up', 'Hooks'])
     const rowOf = (label: string): HTMLElement => need([...root.querySelectorAll<HTMLElement>('.setting')].find((r) => r.querySelector('h3')?.textContent === label), label)
     // r16: one danger pill for the failed run; a healthy row says no "On".
     const pills = [...root.querySelectorAll('.status.pill')]
@@ -59,6 +63,9 @@ test('the page shows the registry groups in order with Not set up last; only the
     assert.ok(rowOf('updates').querySelector('.status.pill.danger'))
     assert.match(rowOf('library').textContent ?? '', /Idle · glm-flash/)
     assert.doesNotMatch(rowOf('maintenance').querySelector('.status')?.textContent ?? '', /\bOn\b/)
+    // The Update Dyna hook does the Updates service's work, so it shows only there.
+    const hookRows = [...need(root.querySelector('#hooks')).querySelectorAll('.setting h3')].map((h) => h.textContent)
+    assert.deepEqual(hookRows, ['lint'])
     // A click on the row opens its detail in place, where Run now runs the pass.
     need(rowOf('maintenance').querySelector<HTMLElement>('button.toggle')).click()
     await settle()
