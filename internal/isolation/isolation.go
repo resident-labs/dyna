@@ -2,6 +2,7 @@
 package isolation
 
 import (
+	"os"
 	"path/filepath"
 	"time"
 
@@ -14,6 +15,11 @@ import (
 func CopyTime(dataDir string) (time.Time, error) {
 	if filepath.Clean(dataDir) == filepath.Clean(store.OwnerDataDir()) {
 		return time.Time{}, nil
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "dyna.db")); os.IsNotExist(err) {
+		return time.Time{}, nil
+	} else if err != nil {
+		return time.Time{}, err
 	}
 	return database.CopyTime(dataDir)
 }
