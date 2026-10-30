@@ -243,7 +243,7 @@ func (s *Service) Decide(ctx context.Context, actor authority.Actor, in Decision
 		if n != 1 {
 			return ErrNotPending
 		}
-		return insertDecision(ctx, conn, r.ID, actorID, in.Action, strings.TrimSpace(in.Reason), now)
+		return insertDecision(ctx, conn, r.Room, r.ID, actorID, in.Action, strings.TrimSpace(in.Reason), now)
 	})
 	if err != nil {
 		return Request{}, err

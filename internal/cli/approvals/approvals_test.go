@@ -20,7 +20,7 @@ func (f *fakeClient) Call(_ context.Context, method string, args []any, out any)
 		if args[0] != "alpha" || args[1] != 24*time.Hour {
 			panic("bad log filter")
 		}
-		*out.(*[]core.LogEntry) = []core.LogEntry{{Actor: "alpha:root", Kind: "github.write", Target: "o/r", State: core.StateDone}, {Actor: "alpha:parent", Kind: "github.write", Target: "o/r", State: core.StateDenied}}
+		*out.(*[]core.LogEntry) = []core.LogEntry{{Actor: "alpha:root", Kind: "github.write", Target: "o/r", State: core.StateDone}, {Actor: "alpha:parent", Kind: "github.write", Target: "o/r", Action: core.ActionDeny}}
 		return nil
 	}
 	if method != "ApprovalSettings" {
@@ -44,7 +44,7 @@ func TestLogListsInlineAndDecidedWrites(t *testing.T) {
 	if err := cmd.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"alpha:root", "alpha:parent", "done", "denied"} {
+	for _, text := range []string{"alpha:root", "alpha:parent", "done", "deny"} {
 		if !strings.Contains(out.String(), text) {
 			t.Fatalf("log %q lacks %q", out.String(), text)
 		}
