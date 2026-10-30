@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"time"
 )
 
@@ -48,7 +47,7 @@ type ModelsConfig struct {
 }
 
 func Models() ModelsConfig {
-	origin := (&url.URL{Scheme: "http", Host: "127.0.0.1:7781"}).String()
+	origin := "http://127.0.0.1:7781"
 	return ModelsConfig{Providers: map[string]ModelProvider{
 		"anthropic": {BaseURL: origin, APIKey: "box"},
 		"openai":    {BaseURL: origin + "/v1", APIKey: "box"},
