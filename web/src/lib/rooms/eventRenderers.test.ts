@@ -1108,3 +1108,15 @@ test('folded check-in history exposes the focused earlier child facts', () => {
   web.unmount(mounted)
   target.remove()
 })
+
+test('an unavailable librarian pass names the pass without a profile', () => {
+  const post = postFor('service', 'waiting', { service: 'librarian', pass: 'smell', reason: 'no service profile is available' })
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.ServiceWaitCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  assert.match(target.textContent ?? '', /Librarian smell pass is waiting/)
+  assert.match(target.textContent ?? '', /no service profile is available/)
+  web.unmount(mounted)
+  target.remove()
+})
