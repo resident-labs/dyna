@@ -707,8 +707,10 @@ func TestPromptPolicyAndResult(t *testing.T) {
 	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", ""); err == nil {
 		t.Fatal("missing required argument accepted")
 	}
-	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "subject=value wrong=value"); err == nil {
-		t.Fatal("unknown argument accepted")
+	for _, input := range []string{"subject=value wrong=value", "unknown=value"} {
+		if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", input); err == nil {
+			t.Fatalf("unknown argument accepted: %s", input)
+		}
 	}
 	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "subject=ghp_abcdefghijklmnopqrstuvwxyz0123456789"); err == nil {
 		t.Fatal("token accepted")
@@ -758,6 +760,19 @@ func TestPromptArgumentsAndServerError(t *testing.T) {
 	}
 	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", `subject="unfinished`); err == nil {
 		t.Fatal("unclosed quote accepted")
+	}
+}
+
+func TestPromptRejectsNonTextContent(t *testing.T) {
+	f := newFixture(t)
+	f.server.promptEnabled = true
+	f.server.promptGet = func(w http.ResponseWriter, _ json.RawMessage) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"messages":[{"role":"user","content":{"type":"image","data":"abc","mimeType":"image/png"}}]}}`))
+	}
+	f.ready(t)
+	result, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "hello")
+	if err == nil || result != "" {
+		t.Fatalf("non-text content returned an incomplete prompt: %q, %v", result, err)
 	}
 }
 
