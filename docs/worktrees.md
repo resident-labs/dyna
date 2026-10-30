@@ -37,6 +37,8 @@ Dyna removes a worktree only when:
 3. Its HEAD is an ancestor of `origin/main`, after a successful fetch.
 
 Dyna keeps the main checkout, bare repositories, locked trees, and trees it cannot inspect.
+It also keeps every tree an open tracked change uses, and keeps them all when it cannot
+read the tracked-change state.
 It never deletes the branch. It runs `git worktree prune` after cleanup.
 Ignored generated files, such as `node_modules`, do not make a worktree dirty.
 Their modification times still count as activity for an unknown owner.
