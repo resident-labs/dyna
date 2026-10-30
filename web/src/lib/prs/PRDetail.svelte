@@ -16,7 +16,6 @@
   import { ago } from '../ui/format.ts'
   import { scrollFade } from '../ui/scrollFade.ts'
   import MergeBox from './MergeBox.svelte'
-  import PRChip from './PRChip.svelte'
   import Chip from '../ui/Chip.svelte'
   import { fixesLabel } from './fixes.ts'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
@@ -139,8 +138,7 @@
       {#if onmention}<MentionInChat {onmention} />{/if}
     </div>
     <p class="meta">
-      {#if !isLocal(change)}<span class="badge {gh.tone}"><PRGlyph it={change} size={14} />{gh.label}</span>{/if}
-      {#if change.state === 'open'}<PRChip pr={change} meta={merged} number={false} badge={false} />{/if}
+      {#if !isLocal(change) && change.state !== 'open'}<Chip outline>{gh.label}</Chip>{:else if change.isDraft}<Chip outline>Draft</Chip>{/if}
       {#if change.fixes?.length}<Chip outline title="Merging this change closes these issues">Fixes {fixesLabel(change.fixes)}</Chip>{/if}
       {#if prExpedited($expedite, change)}<ExpediteBadge />{/if}
       <span class="facts">{factsLine(change, { byline: false, size, ago })}</span>

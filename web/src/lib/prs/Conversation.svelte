@@ -71,7 +71,7 @@
   {@const isLatest = r.round === latest?.round}
   {@const expanded = isShown(r)}
   <div class="it" id={isLatest ? 'latest-round' : undefined}>
-    <span class="av"><Chip tone={vm?.tone === 'ok' ? 'success' : 'warning'}>R{r.round}</Chip></span>
+    <span class="av">Round {r.round}</span>
     <div class="rcard" class:ok={vm?.tone === 'ok'}>
       <header><strong>{reviewer}</strong> {vm ? vm.label.toLowerCase() : 'reviewed'} · round {r.round} · {n} {n === 1 ? 'finding' : 'findings'}{r.head ? ` · at ${shortSha(r.head)}` : ''} · {ago(r.at)}</header>
       <div class="rbody">
