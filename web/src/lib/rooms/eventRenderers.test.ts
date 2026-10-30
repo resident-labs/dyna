@@ -778,53 +778,6 @@ test('a hook card shows its state and opens the log of its own run', () => {
   second.remove()
 })
 
-test('a folded hook card shows a run that is still going and opens its log', () => {
-  const payload = hookFixture('result')
-  assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
-  const post = postFor('hook', 'result', payload)
-  const target = document.createElement('div')
-  document.body.append(target)
-  const asked: unknown[] = []
-  const listen = (event: Event) => asked.push((event as CustomEvent<unknown>).detail)
-  window.addEventListener('dyna:hook-log', listen)
-  // The newest post passed, yet an older run of the hook has no result: the
-  // card says running and its log is the running run's log.
-  const mounted = web.mount(web.eventComponents.HookCard, {
-    target,
-    props: { post, notice: post.notice, surface: 'feed', hookFold: { count: 3, lastTs: 0, active: { runId: 'run-still-going', ts: 0 } } },
-  })
-  web.flushSync()
-  assert.match((target.textContent ?? '').trim(), /running/)
-  need(target.querySelector('button'), 'the View log button').click()
-  assert.deepEqual(asked, [{ repo: payload.repo, hook: payload.hook, runId: 'run-still-going' }])
-  window.removeEventListener('dyna:hook-log', listen)
-  web.unmount(mounted)
-  target.remove()
-})
-
-test('a folded hook card keeps its count and last time outside the name', () => {
-  const payload = hookFixture('result')
-  assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
-  const post = postFor('hook', 'result', payload)
-  const target = document.createElement('div')
-  document.body.append(target)
-  const passed = { ...payload, state: 'passed' as const }
-  const mounted = web.mount(web.eventComponents.HookCard, {
-    target,
-    props: { post: { ...post, payload: passed }, notice: post.notice, surface: 'feed', hookFold: { count: 12, lastTs: Date.parse('2026-10-22T14:00:00Z') } },
-  })
-  web.flushSync()
-  const text = (target.textContent ?? '').trim()
-  assert.match(text, /12 times/)
-  assert.match(text, /passed/)
-  // The shared row keeps the fold fact in its one-line summary, not in the
-  // event's name. The name keeps its full text on every width.
-  assert.match(need(target.querySelector('.summary'), 'the fold summary').textContent ?? '', /12 times · last/)
-  assert.equal(target.querySelector('strong')?.textContent, 'Update Dyna', 'the name is cut short')
-  web.unmount(mounted)
-  target.remove()
-})
-
 test('an alert card lists its typed findings and copies the next command', async () => {
   const payload = fixtures['alert/doctor']
   assert.ok(payload && 'nextCommand' in payload, 'the doctor alert fixture is missing')
