@@ -4,9 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 // upgrade applies each future numbered step in the same transaction as its version.
 func upgrade(db *sql.DB, floor int, commit string) error {
@@ -20,6 +21,38 @@ func upgrade(db *sql.DB, floor int, commit string) error {
 	}
 	if version < floor {
 		return &Error{Code: StoreTooOld, Message: fmt.Sprintf("This store is too old. Update through commit %s first.", commit)}
+	}
+	if version == 1 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		var definition string
+		for _, statement := range strings.Split(schema, ";") {
+			if strings.HasPrefix(strings.TrimSpace(statement), "CREATE TABLE deliveries ") {
+				definition = strings.Replace(strings.TrimSpace(statement), "CREATE TABLE deliveries ", "CREATE TABLE deliveries_new ", 1)
+				break
+			}
+		}
+		for _, statement := range []string{
+			definition,
+			"INSERT INTO deliveries_new SELECT *, NULL FROM deliveries",
+			"DROP TABLE deliveries",
+			"ALTER TABLE deliveries_new RENAME TO deliveries",
+		} {
+			if _, err = tx.Exec(statement); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec("UPDATE meta SET value='2' WHERE key='schema_version'"); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		version = 2
 	}
 	if version != schemaVersion {
 		return fmt.Errorf("unsupported schema version %d", version)
