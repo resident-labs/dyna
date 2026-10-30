@@ -20,6 +20,7 @@ import (
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/watch"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runstore"
@@ -717,7 +718,24 @@ func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSign
 			info, err := sessions.Store.Inspect(id)
 			return info.Turns, err
 		},
+		idle: func() ([]idleSession, error) {
+			metas, err := sessions.Store.ListOpenMeta()
+			var idle []idleSession
+			for _, m := range metas {
+				if m.Status != subagent.StatusIdle || m.Turns == 0 || m.ContextTokens < profile.IdleCompactMinTokens {
+					continue
+				}
+				last, err := sessions.Store.ReadTurn(m.ID, m.Turns)
+				if err == nil && !last.Ended.IsZero() {
+					idle = append(idle, idleSession{m.ID, m.Turns, last.Ended})
+				}
+			}
+			return idle, err
+		},
 		compact: func(id string, turn int) error { return sessions.CompactIdle(ctx, id, turn) },
+	}
+	if err := signals.idleCompaction.restore(); err != nil {
+		report("idle compaction restore", err)
 	}
 	workerSet := engineWorkers(ctx, rooms, signals, load, events, hookService, started)
 	workerSet.jobsStart = func() {
