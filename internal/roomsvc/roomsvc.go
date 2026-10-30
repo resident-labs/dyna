@@ -19,6 +19,7 @@ import (
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/computers"
 	"dyna-agent/internal/listpage"
+	"dyna-agent/internal/memo"
 	"dyna-agent/internal/notify"
 	prview "dyna-agent/internal/pr/view"
 	"dyna-agent/internal/room"
@@ -65,8 +66,7 @@ type Service struct {
 	results     *resultCache
 	ownerMu     sync.Mutex
 	ownerIDs    map[string]*ownerPostIDs
-	unreadMu    sync.Mutex
-	unreadCache map[string]unreadEntry
+	unreadCache *memo.Memo[string, unreadRevision, int]
 	snap        sessionSnapshot
 	// prWake asks Watch to scan PRs now, after the engine's own PR state
 	// write. It holds one pending wake.
@@ -109,11 +109,10 @@ type Service struct {
 	onUnreadScan func(roomID string)
 }
 
-type unreadEntry struct {
+type unreadRevision struct {
 	version room.LogVersion
 	ids     []string
 	reads   map[string]bool
-	count   int
 }
 
 type ownerPostIDs struct {
@@ -231,7 +230,9 @@ func New(n *notify.Service) *Service {
 	if n == nil {
 		n = notify.Default()
 	}
-	s := &Service{Notify: n, results: newResultCache(), prWake: make(chan struct{}, 1), storeWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
+	s := &Service{unreadCache: memo.NewFunc[string, unreadRevision, int](4096, func(a, b unreadRevision) bool {
+		return a.version == b.version && slices.Equal(a.ids, b.ids) && maps.Equal(a.reads, b.reads)
+	}), Notify: n, results: newResultCache(), prWake: make(chan struct{}, 1), storeWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
 	s.PRs = &prview.Service{Notify: n, SessionInRoom: s.SessionInRoom, WorkspaceRoot: s.files().WorkspaceRoot}
 	s.Approvals = approvals.New(n.Rooms, n.Sessions.Store.Root)
 	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]sessionclose.Outcome, error) {
@@ -332,16 +333,13 @@ func (s *Service) Rooms() ([]Room, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.unreadMu.Lock()
-		cached, ok := s.unreadCache[rec.ID]
-		if ok && cached.version == version && slices.Equal(cached.ids, ids) && maps.Equal(cached.reads, reads) {
-			r.Unread = cached.count
-			s.unreadMu.Unlock()
+		rev := unreadRevision{version, ids, reads}
+		if cached, ok := s.unreadCache.Lookup(rec.ID, rev); ok {
+			r.Unread = cached
 			r.Members, r.Running = counts[rec.ID].Members, counts[rec.ID].Running
 			out = append(out, r)
 			continue
 		}
-		s.unreadMu.Unlock()
 		eligible := make(map[string]bool, len(ids))
 		for _, id := range ids {
 			eligible[id] = true
@@ -370,12 +368,7 @@ func (s *Service) Rooms() ([]Room, error) {
 			return nil, err
 		}
 		if after == version {
-			s.unreadMu.Lock()
-			if s.unreadCache == nil {
-				s.unreadCache = make(map[string]unreadEntry)
-			}
-			s.unreadCache[rec.ID] = unreadEntry{version, slices.Clone(ids), maps.Clone(reads), page.Unread}
-			s.unreadMu.Unlock()
+			s.unreadCache.Put(rec.ID, unreadRevision{version, slices.Clone(ids), maps.Clone(reads)}, page.Unread)
 		}
 		r.Members, r.Running = counts[rec.ID].Members, counts[rec.ID].Running
 		out = append(out, r)
