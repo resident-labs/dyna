@@ -91,26 +91,8 @@ const prPost = (id: string, number = 542, repo = 'acme/app', extra: Partial<Feed
   text: `https://github.com/${repo}/pull/${number}\nHead: 3bc9bc0b55e28c82dd4eacd8ba063315c223ea0e\n\nPR merged.`, ...extra,
 })
 
-test('consecutive notices for one PR update a stable row and retain each post', () => {
-  const a = prPost('p1'), b = prPost('p2')
-  const rows = content(feedRows([a, b]))
-  assert.equal(rows.length, 1)
-  assert.equal(need(rows[0]).key, a.id)
-  assert.equal(rowPost(need(rows[0])), b)
-  assert.deepEqual(rowPosts(need(rows[0])), [a, b])
-})
-
-test('PR folding stops at other messages, repos, days, unread markers and post context', () => {
-  const a = prPost('p1'), b = prPost('p2')
-  for (const posts of [
-    [a, prPost('p2', 543)], [a, prPost('p2', 542, 'other/app')],
-    [a, { id: 'chat', from: 'test-room', ts: start, text: 'Hello' }, b],
-    [a, { ...b, ts: start + 86400000 }],
-    [a, { ...b, replyTo: 'chat' }], [a, { ...b, attachments: [{ id: 'file' }] }],
-    [a, { ...b, forward: { id: 'forward' } }],
-    [{ ...a, text: 'unknown PR' }, { ...b, text: 'unknown PR' }],
-  ]) assert.equal(content(feedRows(posts)).length, posts.length)
-  assert.equal(content(feedRows([a, b], b.id)).length, 2)
+test('old PR posts stay separate without thread keys', () => {
+  assert.equal(content(feedRows([prPost('p1'), prPost('p2')])).length, 2)
 })
 
 test('feed PR rows name the repositories of the page', () => {
@@ -322,26 +304,19 @@ test('old and mixed merge history fold across unrelated posts', () => {
   assert.deepEqual(rows[2]?.posts?.map((post) => post.id), ['d', 'e', 'f'])
 })
 
-// A review result is one card per PR head: a re-review of the same head keeps
-// one card, and a new head starts a new one.
-const reviewPost = (id: string, kind: 'approve' | 'changes' | 'approve-fast' | 'stop-early', head: string, ts = start): FeedInput => ({
-  id, ts, from: 'dyna', kind: 'review', text: 'review result',
-  notice: { kind: 'result' },
-  payload: {
-    kind, changeId: 'github.com/acme/app#542', number: 542, label: 'PR #542',
-    location: 'https://github.com/acme/app/pull/542', head,
-  },
+const prThread = (id: string, kind: string, ts: number): FeedInput => ({
+  id, ts, from: 'dyna', kind: 'pr', notice: { kind, thread: 'pr:change' },
 })
 
-test('review results fold per PR head', () => {
-  const rows = content(feedRows([
-    reviewPost('r1', 'approve', 'a'),
-    reviewPost('r2', 'changes', 'a', start + 60_000),
-    reviewPost('r3', 'approve', 'b', start + 120_000),
-  ]))
-  assert.equal(rows.length, 2)
-  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['r1', 'r2'])
-  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['r3'])
+test('PR lifecycle folds across an unrelated post', () => {
+  const rows = content(feedRows([prThread('a', 'ready', start), { id: 'chat', ts: start + 1, from: 'owner' }, prThread('b', 'merged', start + 2)]))
+  assert.deepEqual(rows.map((row) => row.post.id), ['chat', 'b'])
+  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['a', 'b'])
+})
+
+test('a CI failure remains visible after a later success', () => {
+  const rows = content(feedRows([prThread('a', 'ci-failed', start), prThread('b', 'ready', start + 1)]))
+  assert.deepEqual(rows.map((row) => row.post.id), ['a', 'b'])
 })
 
 test('thread posts fold across unrelated posts at the newest position', () => {
