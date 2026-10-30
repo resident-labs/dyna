@@ -441,6 +441,10 @@ func TestQuestionImportPreservesRawSourceAndCanonicalState(t *testing.T) {
 					if err != nil || revision != want {
 						t.Fatalf("revision %d, %v; want %d", revision, err, want)
 					}
+					var oldCount int
+					if err := db.QueryRow("SELECT count(*) FROM meta WHERE key='questions.revision'").Scan(&oldCount); err != nil || oldCount != 0 {
+						t.Fatalf("old revision rows=%d err=%v", oldCount, err)
+					}
 				}
 				if err := s.update(func(st *State) error { st.Next = map[string]int{}; st.Questions = map[string]Question{}; return nil }); err != nil {
 					t.Fatal(err)
