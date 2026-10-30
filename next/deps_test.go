@@ -28,7 +28,7 @@ var layoutRules = map[string]layoutRule{
 	"room":     {imports: []string{"contract"}},
 	"harness":  {imports: []string{"contract"}},
 	"box":      {imports: []string{"contract", "harness"}},
-	"engine":   {imports: []string{"room", "box", "harness", "contract"}},
+	"engine":   {imports: []string{"room", "box", "harness", "contract", "web"}},
 	"migrate":  {imports: []string{"contract", "engine/store"}},
 }
 
