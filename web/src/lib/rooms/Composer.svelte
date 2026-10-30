@@ -6,6 +6,7 @@
   import { api } from '../../api.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
+  import { commandOptions, matchCommand } from './slashCompletion.ts'
   import { mentionOptions, matchMentions, fileMentionDirectory, fileMentionOptions, fileMentionText } from './mentions.ts'
   import { loadReferences, matchReferences, referenceKey, referenceLabel } from './references.ts'
   import { modelLabel, profileHint } from './profileLabels.ts'
@@ -186,16 +187,7 @@
   }
   let appCommands = $derived(commands.filter((c) => !profiles.some((p) => p.name === c.name)))
   let availableRoomCommands = $derived(roomCommands.filter((c) => (c.source === 'skill' || c.source === 'mcp-prompt') && !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
-  let roomCommand = $derived.by(() => {
-    // Names come from the command catalog, not a restricted identifier grammar.
-    // Prefer the longest match when one name is a prefix of another.
-    const item = availableRoomCommands.reduce<typeof availableRoomCommands[number] | undefined>((best, c) => {
-      const prefix = '/' + c.name
-      if (!draft.startsWith(prefix) || (draft.length > prefix.length && !/\s/.test(draft.charAt(prefix.length)))) return best
-      return !best || c.name.length > best.name.length ? c : best
-    }, undefined)
-    return item ? { item, text: draft.slice(item.name.length + 1).trim() } : null
-  })
+  let roomCommand = $derived(matchCommand(availableRoomCommands, draft))
   let command = $derived.by(() => {
     const m = draft.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/)
     const c = m && appCommands.find((x) => x.name === m[1])
@@ -214,8 +206,7 @@
     token?.slash ? [
       ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: profileHint(p) })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
-      ...availableRoomCommands.filter((c) => c.source === 'skill').map((c) => ({ value: '/' + c.name, group: 'Skills', arg: 'message', hint: c.description })),
-      ...availableRoomCommands.filter((c) => c.source === 'mcp-prompt').map((c) => ({ value: '/' + c.name, group: 'MCP prompts', arg: c.args.map((arg) => arg.name).join(', '), hint: c.description })),
+      ...commandOptions(availableRoomCommands),
     ] :
     [...mentionOptions(choices).map((option) => ({ ...option, group: 'Sessions' })), ...fileMentionOptions(fileEntries, token?.text || '@')]
   )
