@@ -774,9 +774,9 @@ Every PR that changes what the owner sees has one more required step (owner rule
 
 Opus builders write the code under `next/web`, and an opus reviewer reviews it (owner rule). Terra may write and review the Go side of web features.
 
-Builders and reviewers design for the user first, with T3 Code's approach as the reference. A reviewer requests changes when a PR breaks one of these rules:
+Builders and reviewers design for the user first (owner rule). T3 Code guides the approach: restraint, polish and folded agent work. It does not set the layout. The base layout is Discord's: a room is a project and shows as a channel in the left list, each room has one shared feed with the composer under it, and the session tree sits in the right panel like Discord's member list. A reviewer requests changes when a PR breaks one of these rules:
 
-- **The conversation is the product.** The owner's posts are soft blocks on the right. A session's post is plain text under a muted name line, with no avatar and no border.
+- **The feed is the product.** Every post is left-aligned under a muted line with the sender's name and the time, and posts in a row from one sender share that line, as in Discord. Posts have no bubbles and no borders.
 - **Agent work is folded.** Turn, box, shell job and operation events between two posts fold into one muted line that expands in place. A failed turn stays visible as its own row.
 - **Color only for attention.** A session shows at most one status: Working (the only animation), Pending approval, or Failed. Other facts are muted text.
 - **Decisions in place.** An approval shows in the feed and in the approvals panel, with one shared component. The app has no modal dialogs, and the card send confirm is its only confirm step.
