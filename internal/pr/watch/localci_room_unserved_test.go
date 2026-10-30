@@ -41,6 +41,47 @@ func TestGateFailsTrialWhenFleetHasNoEnabledCIMachine(t *testing.T) {
 	}
 }
 
+func TestSkippedPRHeadIgnoresSavedFailureWithDisabledFleet(t *testing.T) {
+	ctx := t.Context()
+	dataDir := t.TempDir()
+	repoDir, _ := changeRepo(t)
+	writeTrialDefinition(t, repoDir, `version: 1
+trial: [test]
+pr: []
+checks:
+  - id: test
+    image: test
+    command: "true"
+suites:
+  - id: test
+    checks: [test]
+`)
+	base := changeCommit(t, repoDir, "base")
+	head := changeCommit(t, repoDir, "head")
+	registry := localci.Store{DataDir: dataDir}
+	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := localci.CanonicalRepo(ctx, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.SaveResult(ctx, localci.Result{Repo: repo, SHA: head, Node: "worker", Status: localci.OutcomeFailed}); err != nil {
+		t.Fatal(err)
+	}
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Base: base, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true}
+	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
+	snap := Snapshot{}
+	snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = head, r.Repo
+	got, err := s.withRegisteredCI(ctx, r, snap, ChangePolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.localCI != nil && got.localCI.Status == VerdictFailed {
+		t.Fatalf("skipped head retained saved failure: %+v", got.localCI)
+	}
+}
+
 // A room that no enabled CI machine serves never gets a run, so the trial fails
 // with the cause and the fix instead of waiting for local CI for ever.
 func TestTrialFailsWhenNoCIMachineServesTheRoom(t *testing.T) {

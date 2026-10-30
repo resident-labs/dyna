@@ -290,6 +290,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	var plan localCIPlan
 	var result localci.Result
 	conclusiveLocal := false
+	skipHead := false
 	if mode == localci.ModeLocal || mode == localci.ModeBoth {
 		result, err = registry.LoadResult(ctx, repo, r.Head)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -301,11 +302,21 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		conclusiveLocal = result.Node != "" && (result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError)
 	}
 	if mode == localci.ModeLocal || mode == localci.ModeBoth {
-		if !conclusiveLocal {
+		if !conclusiveLocal || !job.trial {
 			plan, err = s.planRegisteredCI(ctx, job)
-			if err != nil {
+			if err != nil && !conclusiveLocal {
 				return snap, err
 			}
+		}
+		if mode == localci.ModeLocal && !job.trial && plan.runnable() {
+			if suites, set := plan.required.ExplicitPRSuites(); set && len(suites) == 0 {
+				result = localci.Result{}
+				conclusiveLocal = false
+				skipHead = true
+			}
+		}
+		if conclusiveLocal {
+			plan = localCIPlan{}
 		}
 		if plan.bootstrapErr != nil && !hostedFallback {
 			return snap, plan.bootstrapErr
@@ -360,7 +371,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		// same gates as a fresh one, so a hosted failure still vetoes it and a
 		// partial or unproven suite cannot release a merge. GitHub mode keeps the
 		// hosted fallback untouched.
-		if mode == localci.ModeLocal || mode == localci.ModeBoth {
+		if !skipHead && (mode == localci.ModeLocal || mode == localci.ModeBoth) {
 			if local, ok := savedLocalResult(ctx, registry, repo, r.Head); ok && s.savedLocalSettles(plan, local, policy) {
 				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local, job.trial, hostedFallback)
 				return snap, nil

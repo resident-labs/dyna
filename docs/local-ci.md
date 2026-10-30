@@ -23,9 +23,11 @@ A changed required set takes effect for later changes after that change merges.
 Merge trials use the same rule. The base of a merge trial is the default-branch
 commit frozen into that trial.
 
-In `local` and `both` modes a pull request head needs no local result of its
-own. The merge queue runs local CI on the merge trial instead: the head merged
-into the frozen default-branch commit. A batch of changes runs once, on its tip.
+In `local` mode Dyna schedules local CI for each pull request head. By default,
+it selects trial suites whose file patterns match the changes. Set `pr` in the
+base definition to choose head suites, or `pr: []` to skip head runs. The merge
+queue also runs local CI on the merge trial: the head merged into the frozen
+default-branch commit. A batch of changes runs once, on its tip.
 The first conclusive local or hosted result on the trial releases the merge, and
 a failure from either provider vetoes it. A local pass must cover every required
 suite. When no CI node is enabled, hosted trial CI decides, as in `github`
@@ -73,6 +75,9 @@ unknown keys, duplicate identities, invalid references, and files over 1 MiB.
   eligible for pull-request file selection and their order. A node can limit
   itself to some of these suites; see
   [Registered CI nodes](pr-tracking.md#registered-ci-nodes).
+- `pr` optionally lists suite IDs to run on pull request heads in local mode.
+  Omit it to select trial suites by changed files. Set `pr: []` to skip head
+  runs and let the merge trial decide. Dyna reads this list from the base commit.
 - `caches` declares managed caches that checks can reference.
 - `checks` declares executable commands.
 - `suites` groups checks for selection, manual runs, and aggregates.
@@ -411,8 +416,8 @@ Each item in `suites` has:
 - `group`, an optional aggregate check name. Every check in the suite feeds
   this aggregate, and a complete result must include it.
 
-Suites outside `trial` are available for focused manual runs. A suite with no
-`files` patterns is not selected by a pull-request diff.
+Suites outside `trial` are available for focused manual runs and explicit `pr`
+selection. A suite with no `files` patterns is not selected by a pull-request diff.
 
 Examples:
 

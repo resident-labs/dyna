@@ -219,6 +219,50 @@ suites:
 	}
 }
 
+func TestPRHeadSuitesUseBaseDefinition(t *testing.T) {
+	for _, tc := range []struct {
+		name, field string
+		want        []localci.Suite
+	}{
+		{"absent", "", []localci.Suite{"full"}},
+		{"list", "pr: [light]", []localci.Suite{"light"}},
+		{"empty", "pr: []", []localci.Suite{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, _ := changeRepo(t)
+			definition := `version: 1
+trial: [full]
+%s
+checks:
+  - id: test
+    image: test
+    command: "true"
+suites:
+  - id: full
+    files: ['.*']
+    checks: [test]
+  - id: light
+    checks: [test]
+`
+			writeTrialDefinition(t, repo, fmt.Sprintf(definition, tc.field))
+			base := changeCommit(t, repo, "base")
+			writeTrialDefinition(t, repo, fmt.Sprintf(definition, "pr: []"))
+			head := changeCommit(t, repo, "head")
+			plan, err := (&Service{}).planRegisteredCI(t.Context(), registeredCIJob{record: Record{RepoPath: repo}, base: base, head: head})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(plan.suites, tc.want) {
+				t.Fatalf("head suites = %v, want %v", plan.suites, tc.want)
+			}
+			trial, err := (&Service{}).planRegisteredCI(t.Context(), registeredCIJob{record: Record{RepoPath: repo}, base: base, head: head, trial: true, wholeSuite: true})
+			if err != nil || !slices.Equal(trial.suites, []localci.Suite{"full"}) {
+				t.Fatalf("trial suites = %v, error %v", trial.suites, err)
+			}
+		})
+	}
+}
+
 func TestLocalTrialUsesFrozenBaseForRequiredChecks(t *testing.T) {
 	repo, _ := changeRepo(t)
 	writeTrialDefinition(t, repo, `version: 1
