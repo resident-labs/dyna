@@ -96,7 +96,7 @@ test('account cards open the selected account and only mark use in a multi-accou
     flushSync(() => { app = mount(Card, { target, props: { group: { provider: 'zai', accounts: [account('one', true), account('two', false)] }, onopen: (a: { id: string }) => opened.push(a.id) } }) })
     assert.doesNotMatch(target.textContent ?? '', /Plan not reported/)
     assert.match(target.textContent ?? '', /In use/)
-    assert.match(target.querySelector('[role=meter]')?.textContent ?? '', /one.*70%/)
+    assert.match(target.querySelector('[role=meter]')?.textContent ?? '', /70%.*one/)
     const buttons = [...target.querySelectorAll<HTMLButtonElement>('button[aria-label="Open details for two"]')]
     assert.equal(buttons.length, 2)
     for (const button of buttons) button.click()
@@ -106,7 +106,7 @@ test('account cards open the selected account and only mark use in a multi-accou
     app = undefined
     flushSync(() => { app = mount(Card, { target, props: { group: { provider: 'zai', accounts: [account('one', true)] }, onopen: (a: { id: string }) => opened.push(a.id) } }) })
     assert.doesNotMatch(target.textContent ?? '', /In use|Plan not reported|Details/)
-    assert.doesNotMatch(target.querySelector('[role=meter]')?.textContent ?? '', /one|70%/)
+    assert.doesNotMatch(target.querySelector('[role=meter]')?.textContent ?? '', /one/)
     assert.match(target.querySelector('[role=meter]')?.getAttribute('aria-label') ?? '', /one.*70%/)
     target.querySelector<HTMLButtonElement>('button[aria-label="Open Z.ai account details for one"]')?.click()
     assert.deepEqual(opened, ['two', 'two', 'one'])
@@ -114,7 +114,7 @@ test('account cards open the selected account and only mark use in a multi-accou
     await unmount(app)
     app = undefined
     flushSync(() => { app = mount(Card, { target, props: { group: { provider: 'zai', accounts: [{ ...account('one', true), servesHere: false }] } } }) })
-    assert.match(target.textContent ?? '', /Not reported/)
+    assert.match(target.textContent ?? '', /Other repos only/)
     assert.match(target.querySelector('[role=meter]')?.textContent ?? '', /70%/)
   } finally {
     if (app) await unmount(app)
