@@ -62,6 +62,10 @@ func TestAbandonRunReleasesAStaleRunsReservations(t *testing.T) {
 	previousClock := resultClock
 	t.Cleanup(func() { resultClock = previousClock })
 	resultClock = func() time.Time { return time.Now().Add(4 * time.Hour) }
+	orphans, err := store.OrphanedAttachments(t.Context())
+	if err != nil || len(orphans) != 1 || !orphans[0].Expired {
+		t.Fatalf("expired orphan = %v, error = %v", orphans, err)
+	}
 	got, err := runner.AbandonRun(t.Context(), store, run, nil)
 	if err != nil {
 		t.Fatal(err)
