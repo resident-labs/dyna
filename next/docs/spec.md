@@ -728,7 +728,7 @@ Close ends the whole subtree, as the card decided: each child is closed and dele
 
 The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
 
-Table: `archives` (`session` PK, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`).
+Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`, PK `(session, repo)`).
 
 ### 5.10 Host failure and relocation
 

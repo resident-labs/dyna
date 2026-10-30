@@ -120,6 +120,9 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
+	if problem := service.ResumeClosures(ctx); problem != nil {
+		return fmt.Errorf("resume close: %s", problem.Message)
+	}
 	done := make(chan error, 1)
 	go func() { done <- proxy.Run(ctx) }()
 	ticker := time.NewTicker(10 * time.Second)
