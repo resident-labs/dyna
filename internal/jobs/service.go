@@ -1137,7 +1137,7 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 	}
 	// Resolve symlinks before entering a requested subdirectory.
 	if job.Subdir != "" && job.Subdir != "." {
-		inner += "root=$(realpath " + q(work) + "); target=$(realpath " + q(path.Join(work, job.Subdir)) + "); case \"$target/\" in \"$root/\"*) ;; *) echo 'job subdir escapes checkout' >&2; exit 1;; esac; "
+		inner += "root=$(realpath " + q(work) + "); target=$(realpath -m " + q(path.Join(work, job.Subdir)) + "); case \"$target/\" in \"$root/\"*) ;; *) echo 'job subdir escapes checkout' >&2; exit 1;; esac; mkdir -p -- \"$target\"; "
 	}
 	// Each word is quoted on its own, so the shell that runs the script builds
 	// exactly the argv the submitter passed: no boundary moves, no
