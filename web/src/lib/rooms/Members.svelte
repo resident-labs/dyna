@@ -147,11 +147,13 @@
   {@const attention = prAttention(pr)}
   {@const shells = m.responsibilities?.shell ?? 0}
   {@const live = isLive(pc)}
-  {@const tail = (shells ? 1 : 0) + (live ? 1 : 0) + (row.folded ? 1 : 0)}
+  {@const tail = (shells ? 1 : 0) + (live ? 1 : 0)}
   <div class="item" style="--depth:{m.depth}">
   {#if row.hasChildren && !selecting}
-    <button class="fold" aria-expanded={!row.folded} aria-label="{row.folded ? 'Show' : 'Hide'} subagents of {m.name}" title={row.folded ? 'Show subagents' : 'Hide subagents'} onclick={() => toggleFold(m.id)}>
-      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+    <!-- A folded row counts its hidden subagents beside the chevron, so the
+         chevron and its count are one target. -->
+    <button class="fold" aria-expanded={!row.folded} aria-label="{row.folded ? `Show ${row.hidden} subagent${row.hidden === 1 ? '' : 's'}` : 'Hide subagents'} of {m.name}" title={row.folded ? `${row.hidden} subagent${row.hidden === 1 ? '' : 's'} folded` : 'Hide subagents'} onclick={() => toggleFold(m.id)}>
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>{#if row.folded}<span class="kids">{row.hidden}</span>{/if}
     </button>
   {/if}
   <button class="row" class:sel={selecting ? pickedSet.has(m.id ?? '') : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:tailed={tail > 0} style="--marks:{tail}" onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id ?? '') : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.name} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
@@ -169,13 +171,12 @@
           <button type="button" class="row-action" disabled={!!dismissing} onclick={(e) => { e.stopPropagation(); ondismiss(m) }}>{dismissing === m.id ? 'Dismissing…' : 'Dismiss'}</button>
         </div>
       {/if}
-  <!-- Activity marks sit in one column at the right, in a fixed order, so a
-       subagent count is always in the same spot. Each shows only while true. -->
+  <!-- Activity marks sit at the right in a fixed order: shell, then computer.
+       Each shows only while it runs. -->
   {#if tail}
     <span class="tail">
       {#if shells}<span class="mark-icon" role="img" aria-label={shellTip(shells, m.shell)} title={shellTip(shells, m.shell)}><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3" /><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg></span>{/if}
       {#if live}<button class="mark-icon" aria-label="Open {m.name}'s computer" title={computerTip(pc)} onclick={() => onopencomputer(m)}><MonitorGlyph size={15} live /></button>{/if}
-      {#if row.folded}<button class="kids" aria-label="Show {row.hidden} subagent{row.hidden === 1 ? '' : 's'} of {m.name}" title="{row.hidden} subagent{row.hidden === 1 ? '' : 's'} folded" onclick={() => toggleFold(m.id)}><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 2.5v6.5a2 2 0 0 0 2 2h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="12" cy="11" r="1.8" fill="currentColor" /></svg>{row.hidden}</button>{/if}
     </span>
   {/if}
   <button class="more" aria-label="Actions for {m.name}" title="Actions" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const anchor = e.currentTarget.previousElementSibling; onmenu(m, r.left, r.bottom + 4, anchor instanceof HTMLElement ? anchor : undefined) }}>
@@ -296,7 +297,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 5px 8px 5px calc(18px + var(--depth, 0) * 18px);
+    padding: 5px 8px 5px calc(30px + var(--depth, 0) * 18px);
     border-radius: 5px;
     text-align: left;
     margin: 1px 0;
@@ -315,7 +316,7 @@
   .row.finished { opacity: 0.72; }
   .row.off { opacity: 0.6; }
   .row.finished .name { color: var(--muted); }
-  .row-actions { display: flex; align-items: center; gap: var(--s3); margin: -2px 28px var(--s2) 52px; }
+  .row-actions { display: flex; align-items: center; gap: var(--s3); margin: -2px 28px var(--s2) 64px; }
   .row-action { font-size: var(--t-cap); color: var(--muted); padding: 1px 0; }
   .row-action:not(:disabled) { transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
@@ -323,30 +324,33 @@
   }
   .row-action:disabled { color: var(--faint); cursor: default; }
   .item { position: relative; }
-  /* The activity column: shell, computer, then folded subagents, right
-     aligned left of the actions button. The row keeps room for each mark. */
+  /* The activity marks: shell, then computer, right aligned left of the
+     actions button. The row keeps room for each mark. */
   .row.tailed { padding-right: calc(34px + var(--marks) * 26px); }
   .tail { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 2px; color: var(--faint); }
   .mark-icon { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 5px; color: var(--muted); }
-  .kids { height: 22px; min-width: 24px; display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 0 var(--s1); border-radius: 5px; font-size: var(--t-cap); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
-  button.mark-icon, .kids { transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+  button.mark-icon { transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
-    button.mark-icon:hover, .kids:hover { background: var(--hover); color: var(--ink); }
+    button.mark-icon:hover { background: var(--hover); color: var(--ink); }
   }
-  button.mark-icon:active, .kids:active {
+  button.mark-icon:active {
     background: var(--select);
 }
-  /* The chevron sits in the gutter left of the avatar. */
+  /* The chevron, and on a folded row its subagent count, sit in the gutter
+     left of the avatar. The gutter fits two digits. */
   .fold {
     position: absolute;
     z-index: 1;
     left: calc(var(--depth, 0) * 18px + 2px);
     top: 50%;
     transform: translateY(-50%);
-    width: 16px;
+    min-width: 16px;
     height: 24px;
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    padding: 0 2px 0 0;
     border-radius: 4px;
     color: var(--faint);
     transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease);
@@ -381,11 +385,11 @@
   @media (hover: none) {
     .more { display: grid; width: 40px; height: 40px; }
     .tail { right: 46px; }
-    button.mark-icon, .kids { height: 40px; min-width: 40px; }
+    button.mark-icon { height: 40px; min-width: 40px; }
     .row.tailed { padding-right: calc(46px + var(--marks) * 40px); }
     /* The chevron keeps its 12 px glyph and takes a taller target in the
        gutter left of the avatar. */
-    .fold { width: 24px; height: 44px; }
+    .fold { min-width: 24px; height: 44px; }
     .select-mode, .room-actions { min-width: 44px; min-height: 44px; }
     .group-toggle, .group-clear, .toggle { min-height: 44px; }
     .row { -webkit-touch-callout: none; user-select: none; }
@@ -398,7 +402,7 @@
   @keyframes fresh { from { background: color-mix(in srgb, var(--sage) 28%, transparent); } }
   .guide {
     position: absolute;
-    left: calc(var(--depth) * 18px + 8px);
+    left: calc(var(--depth) * 18px + 20px);
     top: -4px;
     width: 10px;
     height: 24px;
@@ -423,6 +427,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .kids { font-size: var(--t-cap); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
   .sub { font-size: var(--t-sm); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* The owner-display grant is quiet plain text: it names a capability, not a state. */
   /* The PR number sits on the status line, so the name keeps the first line. */
