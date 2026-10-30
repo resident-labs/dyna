@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/updaterservice"
 )
@@ -47,6 +48,10 @@ func TestQASeedFixtures(t *testing.T) {
 	prs, err := state.Read(state.Root(dir))
 	if err != nil || len(prs.Records) != 1 {
 		t.Fatalf("PRs = %v, %v", prs.Records, err)
+	}
+	history, err := (&watch.Service{Store: &watch.Store{Root: state.Root(dir)}}).RoomMergeHistory(rec.ID)
+	if err != nil || len(history) != 1 || history[0].Outcome != "published" || len(history[0].Changes) != 1 {
+		t.Fatalf("merge history = %v, %v", history, err)
 	}
 	install := hookinstall.Store{Root: filepath.Join(dir, "hooks", "install")}
 	runs, err := install.Recent(updaterservice.RunName)
