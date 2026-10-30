@@ -9,7 +9,29 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
-import { createTestResourceLoader } from "./utilities.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
+
+it("rejects a delivery batch when an extension handles the first input", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-handled-delivery-"));
+	const extensionsResult = await createTestExtensionsResult([
+		(pi) => pi.on("input", () => ({ action: "handled" })),
+	]);
+	const agent = new Agent({});
+	const registry = await createModelRegistry(AuthStorage.inMemory(), dir);
+	const session = new AgentSession({
+		agent, sessionManager: SessionManager.create(dir), settingsManager: SettingsManager.create(dir, dir),
+		cwd: dir, modelRuntime: getModelRuntime(registry), resourceLoader: createTestResourceLoader({ extensionsResult }),
+	});
+	try {
+		await session.bindExtensions({});
+		await expect(session.prompt("handled", {
+			deliveryId: "42", additionalInputs: [{ message: "second", deliveryId: "43" }],
+		})).rejects.toThrow("Delivery input was handled by an extension");
+	} finally {
+		session.dispose();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 it("persists a batch of delivery IDs before the first model call", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-delivery-"));
