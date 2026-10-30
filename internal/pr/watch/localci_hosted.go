@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"dyna-agent/internal/localci"
 )
@@ -35,9 +37,52 @@ func hostedRunMatches(job registeredCIJob, run Run) bool {
 	return strings.EqualFold(job.record.HeadRepo, job.record.Repo) && run.Event == "pull_request"
 }
 
+type hostedCancelKey struct {
+	repo string
+	head string
+}
+
+type hostedCancelGate struct {
+	mu     sync.Mutex
+	next   map[hostedCancelKey]time.Time
+	active map[hostedCancelKey]bool
+}
+
+const hostedCancelInterval = 30 * time.Second
+
 // Cancellation is limited to queued exact-head runs. Started hosted jobs race
 // local CI. Main pushes and fork PRs cannot enter this path.
 func (s *Service) cancelQueuedHostedCI(ctx context.Context, job registeredCIJob, repo string) error {
+	localCIInit.Lock()
+	if s.hostedCancel == nil {
+		s.hostedCancel = &hostedCancelGate{}
+	}
+	gate := s.hostedCancel
+	localCIInit.Unlock()
+	key := hostedCancelKey{repo: repo, head: job.head}
+	gate.mu.Lock()
+	now := s.now()
+	for k, next := range gate.next {
+		if !now.Before(next) && !gate.active[k] {
+			delete(gate.next, k)
+		}
+	}
+	if gate.active[key] || now.Before(gate.next[key]) {
+		gate.mu.Unlock()
+		return nil
+	}
+	if gate.active == nil {
+		gate.active = make(map[hostedCancelKey]bool)
+		gate.next = make(map[hostedCancelKey]time.Time)
+	}
+	gate.active[key] = true
+	gate.mu.Unlock()
+	defer func() {
+		gate.mu.Lock()
+		delete(gate.active, key)
+		gate.next[key] = s.now().Add(hostedCancelInterval)
+		gate.mu.Unlock()
+	}()
 	gh := s.github(job.record.RoomID)
 	runs, err := gh.readCommitRuns(ctx, refRecord(job.record), job.head)
 	if err != nil {

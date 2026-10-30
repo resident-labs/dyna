@@ -150,7 +150,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					if err != nil {
 						return
 					}
-					text = fmt.Sprintf("Approval requested: %s\n%s", body.ID, card)
+					text = fmt.Sprintf("Approval requested: %s\n%s\nDecide with dyna op approve %s or dyna op deny %s --reason \"...\"", body.ID, card, body.ID, body.ID)
+				case contract.PrOpened:
+					text = fmt.Sprintf("PR opened: %s", body.URL)
 				case contract.OpDecided:
 					text = fmt.Sprintf("Operation %s: %s. %s", body.ID, body.State, body.Decision.Reason)
 				case contract.OpRan:
