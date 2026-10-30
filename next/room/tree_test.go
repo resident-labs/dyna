@@ -7,6 +7,9 @@ import (
 )
 
 func TestTree(t *testing.T) {
+	if _, err := NewTree(nil).ParentFor(contract.Principal{Kind: contract.PrincipalOwner}, ""); err == nil || err.Error() != "room has no root" {
+		t.Fatalf("empty tree: %v", err)
+	}
 	tree := NewTree([]Node{{ID: "root"}, {ID: "a", Parent: "root"}, {ID: "b", Parent: "a"}, {ID: "c", Parent: "root"}})
 	legacy := NewTree([]Node{{ID: "first"}, {ID: "second"}})
 	parent, err := legacy.ParentFor(contract.Principal{Kind: contract.PrincipalOwner}, "")
