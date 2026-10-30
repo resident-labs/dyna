@@ -836,7 +836,8 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		if e = s.Store.update(func(current *State) error {
 			applied = assignReview(current, r, id, cfg)
 			if applied && reuseID != "" {
-				systemReviewNotice(current.Records[r.Key], id, task, "required-review:"+r.Head)
+				retireSessionReviewNotices(current.Records[r.Key], id, "review-reassigned")
+				systemReviewNotice(current.Records[r.Key], id, task, "review-assignment:"+r.Head)
 			}
 			return nil
 		}); e != nil {

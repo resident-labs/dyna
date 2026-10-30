@@ -15,6 +15,7 @@ func TestLiveReviewerReassignedAfterHeadChange(t *testing.T) {
 	old := *st.Records[keys[0]]
 	head := strings.Repeat("b", 40)
 	if err := e.s.Store.update(func(st *State) error {
+		st.Records[old.Key].RequiredReviewers = []string{old.Reviewer}
 		resetReview(st.Records[old.Key], head)
 		st.Records[old.Key].Polling.PullHead = head
 		return nil
