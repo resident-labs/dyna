@@ -32,9 +32,16 @@ func qaSeedFixtures(dataDir string) error {
 	if err != nil {
 		return err
 	}
+	// A second room's root posts here, so the feed shows a sender from
+	// another room.
+	other, err := rooms.Create(room.CreateInput{Name: "qa-lab", CreatedBy: "owner"})
+	if err != nil {
+		return err
+	}
 	for _, post := range []room.PostInput{
 		{From: "owner", Human: true, To: []string{rec.Name}, Text: "Please check the sample change."},
 		{From: rec.Name + ":root", To: []string{rec.Name}, Text: "The sample change is ready for review."},
+		{From: other.Name + ":root", To: []string{rec.Name}, Text: "The lab build of the sample change passed."},
 	} {
 		if _, err := rooms.Post(rec.ID, post); err != nil {
 			return err
