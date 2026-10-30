@@ -12,8 +12,8 @@ import (
 )
 
 func TestEventRegistry(t *testing.T) {
-	bodies := []EventBody{PostCreated{Text: "hello"}, SessionStarted{Name: "agent"}, SessionClosed{Session: "ses_a"}, TurnStarted{Turn: "turn_a"}, TurnEnded{Final: "done"}, BoxChanged{To: BoxReady}}
-	want := []EventType{"post.created", "session.started", "session.closed", "turn.started", "turn.ended", "box.changed"}
+	bodies := []EventBody{PostCreated{Text: "hello"}, SessionStarted{Name: "agent"}, SessionClosed{Session: "ses_a"}, TurnStarted{Turn: "turn_a"}, TurnEnded{Final: "done"}, BoxChanged{To: BoxReady}, ImageBuilt{Host: "host", Repo: "owner/repo", Seconds: 1.5}, ImageFailed{Host: "host", Repo: "owner/repo", Reason: "failed", LogTail: "log"}}
+	want := []EventType{"post.created", "session.started", "session.closed", "turn.started", "turn.ended", "box.changed", "image.built", "image.failed"}
 	if len(eventBodyTypes) != len(bodies) {
 		t.Fatalf("registry has %d entries, want %d", len(eventBodyTypes), len(bodies))
 	}
@@ -98,8 +98,8 @@ func TestGeneratedWireTypes(t *testing.T) {
 }
 
 func TestBoxMessageRegistry(t *testing.T) {
-	bodies := []BoxMessageBody{TurnStart{Turn: "turn_a"}, TurnSteer{Queue: QueueSteer}, TurnStop{Reason: "stop"}, Upgrade{Version: "v2"}}
-	want := []BoxMessageType{"turn.start", "turn.steer", "turn.stop", "upgrade"}
+	bodies := []BoxMessageBody{TurnStart{Turn: "turn_a"}, TurnSteer{Queue: QueueSteer}, TurnStop{Reason: "stop"}, Upgrade{Version: "v2"}, Archive{}}
+	want := []BoxMessageType{"turn.start", "turn.steer", "turn.stop", "upgrade", "archive"}
 	if len(boxMessageTypes) != len(bodies) {
 		t.Fatalf("registry has %d entries, want %d", len(boxMessageTypes), len(bodies))
 	}
