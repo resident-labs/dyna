@@ -24,6 +24,7 @@ test("merges sorted events and replaces a pending post", async () => {
     assert.deepEqual(room.seqs, [1, 2]);
     assert.equal(room.pendingPosts.size, 0);
     assert.equal(room.posts({ kind: "feed" }).length, 1);
+    assert.equal(room.sessions.get("s")?.name, "Agent");
   } finally { globalThis.fetch = original; }
 });
 

@@ -24,8 +24,7 @@ export function stream(
   function connect() {
     source = factory(`/v1/events?${new URLSearchParams({ room, after: String(after()) })}`);
     source.onmessage = message => {
-      const event = decodeEvent(message.data);
-      apply(event);
+      apply(decodeEvent(JSON.parse(message.data)));
       delay = 500;
     };
     source.onerror = () => {
