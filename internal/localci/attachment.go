@@ -81,6 +81,7 @@ func (s Store) HasActiveAttachments(ctx context.Context) (bool, error) {
 type OrphanedAttachment struct {
 	Repo, SHA, Node, RunID string
 	Source                 jobs.CheckSource
+	Expired                bool
 }
 
 // attachmentRow is one stored run record and its owner.
@@ -93,7 +94,7 @@ type attachmentRow struct {
 }
 
 func (r attachmentRow) orphaned() bool {
-	return !ownerAlive(r.ownerPID, r.ownerStart) && resultClock().Sub(r.saved) <= attachmentTTL
+	return !ownerAlive(r.ownerPID, r.ownerStart)
 }
 
 // saveAttachment records the started checks of a run on a machine, owned by this
@@ -245,7 +246,7 @@ func (s Store) OrphanedAttachments(ctx context.Context) ([]OrphanedAttachment, e
 		}
 		row.saved = time.Unix(saved, 0)
 		if row.orphaned() {
-			out = append(out, OrphanedAttachment{Repo: row.Repo, SHA: row.SHA, Node: row.Node, RunID: row.RunID, Source: row.Source})
+			out = append(out, OrphanedAttachment{Repo: row.Repo, SHA: row.SHA, Node: row.Node, RunID: row.RunID, Source: row.Source, Expired: resultClock().Sub(row.saved) > attachmentTTL})
 		}
 	}
 	return out, errors.Join(rows.Err(), rows.Close())
