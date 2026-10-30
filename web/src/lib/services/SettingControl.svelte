@@ -14,7 +14,9 @@
 
   async function commit() {
     if (draft === null || draft === settingDisplay(item)) { draft = null; return }
-    await onsave(draft).then(() => { draft = null }, () => {})
+    // Only the text that was saved clears, so an edit typed meanwhile stays.
+    const sent = draft
+    await onsave(sent).then(() => { if (draft === sent) draft = null }, () => {})
   }
 
   // A choice saves at once; the row shows a refusal, and the control keeps
