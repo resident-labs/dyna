@@ -21,6 +21,7 @@ import (
 	prview "dyna-agent/internal/pr/view"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionclose"
+	"dyna-agent/internal/slashcmd"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/transcript"
 	"dyna-agent/internal/workeroutput"
@@ -42,6 +43,11 @@ const (
 // as the dyna CLI.
 type Service struct {
 	Notify *notify.Service
+	// Prompts supplies room MCP commands.
+	Prompts interface {
+		Prompts(context.Context, string) ([]slashcmd.Command, error)
+		RunPrompt(context.Context, string, string, string) (string, error)
+	}
 	// PRs supplies PR views used by room events and service composition.
 	PRs *prview.Service
 	// Approvals owns held agent writes and their room events.
