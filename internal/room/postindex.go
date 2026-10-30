@@ -144,6 +144,12 @@ func (s *Store) postIndexDB() (*sql.DB, error) {
 		return nil
 	})
 	if err == nil {
+		err = database.Migrate(db, "room.workflow_post_reservations", 1, func(conn *sql.Conn, _ int) error {
+			_, err := conn.ExecContext(context.Background(), `CREATE TABLE workflow_post_reservations (step_key TEXT PRIMARY KEY, room_id TEXT NOT NULL, post_id TEXT NOT NULL UNIQUE, delivered INTEGER NOT NULL DEFAULT 0)`)
+			return err
+		})
+	}
+	if err == nil {
 		err = migrateSenderPolicy(db)
 	}
 	return db, err
