@@ -1,42 +1,27 @@
-// The Services page's controls. Each control names the call it uses, so the
-// page never carries its own copy of a write path.
+// The Services page's writes. Each names the call that owns it, so the page
+// never carries its own copy of a write path. A refused write throws the
+// engine's message, which the row shows inline.
+import type { api } from '../../api.ts'
+import type { RegistryService } from '../api/service.ts'
+
+// Select the real browser API methods so unsupported adapters fail the type check.
+export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setMergePaused' | 'editHook' | 'editService'>
 
 export interface ControlHost {
   room: string
   repo: string
 }
 
-import type { api } from '../../api.js'
-
-// Select the real browser API methods so unsupported adapters fail the type check.
-export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setMergePaused' | 'runHook' | 'editHook' | 'editService' | 'resetService'>
-
-// applyControl writes one control and resolves when the engine has it. It
-// throws the engine's message, which the row shows inline.
-export async function applyControl(api: ControlApi, host: ControlHost, id: string, value: string | boolean): Promise<unknown> {
-  const on = value === true
-  switch (id) {
-    case 'review.enabled':
-      return api.setReviewEnabled(host.room, on)
-    case 'merge.paused':
-      return api.setMergePaused(host.room, on)
-    // A hook switch keeps the hook's settings and stops its automatic runs.
-    case 'update.enabled':
-      return api.editHook(host.repo, 'self-update', { disabled: !on })
-    case 'update.run':
-      return api.runHook(host.repo, 'self-update')
+// switchWrite is the call behind a service's switch, or null when the app has
+// no write for it: the librarian turns on with `dyna library enable` inside
+// its repository. A service run by a repository hook switches that hook, and
+// every other switch belongs to a built-in pass.
+export function switchWrite(api: ControlApi, host: ControlHost, s: RegistryService): ((on: boolean) => Promise<unknown>) | null {
+  if (s.hook) return (on) => api.editHook(host.repo, s.hook, { disabled: !on })
+  switch (s.id) {
+    case 'reviewer': return (on) => api.setReviewEnabled(host.room, on)
+    case 'merge-queue': return (on) => api.setMergePaused(host.room, !on)
+    case 'library': return null
+    default: return (on) => api.editService(s.id, { disabled: !on })
   }
-  // A built-in service's controls name the service after a colon.
-  const [control, service = ''] = id.split(':')
-  switch (control) {
-    case 'service.enabled':
-      return api.editService(service, { disabled: !on })
-    case 'service.every':
-      return api.editService(service, { everyMinutes: Number(value) })
-    case 'service.timeout':
-      return api.editService(service, { timeout: String(value) })
-    case 'service.reset':
-      return api.resetService(service)
-  }
-  throw new Error(`unknown control ${id}`)
 }

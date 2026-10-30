@@ -80,6 +80,10 @@ type Facts struct {
 	Hooks map[ID]HookFacts
 }
 
+// UpdatesHook is the repository hook that installs a new Dyna build; the
+// Updates service reads and switches it.
+const UpdatesHook = "self-update"
+
 type definition struct {
 	id       ID
 	group    Group
@@ -149,6 +153,9 @@ func Build(f Facts) []Service {
 			library(&s, f.Library)
 		case IDVoice:
 			voice(&s, f.Voice)
+		case IDUpdates:
+			s.Hook = UpdatesHook
+			hookService(&s, f.Hooks[d.id])
 		default:
 			hookService(&s, f.Hooks[d.id])
 		}
