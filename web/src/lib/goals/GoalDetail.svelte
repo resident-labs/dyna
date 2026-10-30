@@ -109,6 +109,7 @@
       <textarea aria-label="Edit goal text" maxlength="2000" rows="5" bind:value={text}></textarea>
       <div class="buttons"><button disabled={busy || !text.trim()} onclick={() => perform(() => api.editGoal(roomId, g.id, text, g.holders ?? [], g.shared))}>Save</button><button onclick={() => (editing = false)}>Cancel</button></div>
     {/if}
+    {#if g.state !== 'active'}<p class="quiet">{g.state === 'done' ? 'Done' : 'Dropped'}{g.done?.summary ? ` · ${g.done.summary}` : ''}</p>{/if}
     {#if statusState === 'loading'}<p class="quiet" role="status">Loading status…</p>
     {:else if statusState === 'failed'}<p class="read-error" role="alert">Status unavailable: {statusError} <button onclick={() => loadStatus()}>Retry status</button></p>{/if}
     {#if status}
