@@ -194,11 +194,14 @@ func TestOwnerColumnsImport(t *testing.T) {
 	}
 }
 
-// Cached rows are reused until their revision changes; newly read rows still
-// fail closed if their stored metadata no longer matches the digest.
-func TestOwnersCachesVerifiedRevisions(t *testing.T) {
+// Raw edits must invalidate warm ownership evidence, and a reused revision
+// after a raw delete must not reuse the old owner's directory.
+func TestOwnersDetectsRawEditsAfterCacheWarm(t *testing.T) {
 	sessions := ownersStore(t)
 	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/tree"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(sessions, "other", map[string]any{"id": "other"}); err != nil {
 		t.Fatal(err)
 	}
 	visit := func(OwnerRow) error { return nil }
@@ -209,19 +212,22 @@ func TestOwnersCachesVerifiedRevisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("UPDATE session_records SET meta = 'x' || substr(meta, 2) WHERE id = 'owner'"); err != nil {
-		t.Fatal(err)
-	}
-	if err := Owners(sessions, visit); err != nil {
-		t.Fatalf("unchanged revision was read again: %v", err)
-	}
-	if _, err := db.Exec("UPDATE session_records SET revision = revision + 1 WHERE id = 'owner'"); err != nil {
+	if _, err := db.Exec("UPDATE session_records SET meta = ? WHERE id = 'owner'", `{"id":"owner","dir":"/other"}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := Owners(sessions, visit); err == nil {
-		t.Fatal("changed revision with bad metadata must fail closed")
+		t.Fatal("raw edit of warm metadata must fail closed")
 	}
-	if err := Delete(sessions, "owner"); err != nil {
+	if _, err := db.Exec("DELETE FROM session_records"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Owners(sessions, visit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DELETE FROM session_records WHERE id = 'owner'"); err != nil {
 		t.Fatal(err)
 	}
 	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/new"}); err != nil {

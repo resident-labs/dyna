@@ -96,7 +96,7 @@ func Migrate(dataDir string) error {
 	return err
 }
 
-const recordSchemaVersion = 6
+const recordSchemaVersion = 7
 
 // records opens dyna.db for the sessions folder and prepares the table, for
 // writes. It takes the database writer when the table is new.
@@ -108,7 +108,8 @@ func records(sessions string) (*sql.DB, error) {
 	// Version 2 adds session_records_closed, version 3
 	// session_records_effective_name, version 4 the ownership columns, and
 	// version 6 the return to inline instruction texts, which undoes the
-	// version 5 blob split; the schema is idempotent.
+	// version 5 blob split. Version 7 adds ownership-cache invalidation
+	// triggers; the schema is idempotent.
 	err = database.Migrate(db, "sessions.records", recordSchemaVersion, func(conn *sql.Conn, old int) error {
 		if _, err := conn.ExecContext(context.Background(), recordSchema); err != nil {
 			return err
@@ -119,9 +120,24 @@ func records(sessions string) (*sql.DB, error) {
 			}
 		}
 		if old < 6 {
-			return restoreInstructionBodies(context.Background(), conn)
+			if err := restoreInstructionBodies(context.Background(), conn); err != nil {
+				return err
+			}
 		}
-		return nil
+		_, err := conn.ExecContext(context.Background(), `
+CREATE TRIGGER IF NOT EXISTS session_records_owner_revision
+AFTER UPDATE OF meta, meta_digest, meta_id, dir, service, closed, room, name ON session_records
+WHEN NEW.revision = OLD.revision
+BEGIN
+  UPDATE session_records SET revision = (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records) WHERE id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS session_records_owner_delete
+AFTER DELETE ON session_records
+BEGIN
+  INSERT INTO meta(key, value) VALUES ('sessions.deletes', '1')
+  ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1;
+END;`)
+		return err
 	})
 	if err != nil {
 		return nil, err
