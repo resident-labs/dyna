@@ -892,7 +892,7 @@ var eventSpecs = []EventSpec{
 		Wake:              WakeTarget,
 		Once:              true,
 		RootOnOwnerReport: true,
-		Text:              "Shell job {label} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
+		Text:              "Shell job {label} started by {session} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
 		Producers:         []EventProducer{ProducerShell},
 	},
 	// A job's life belongs to the session that submitted it: the queued wait
