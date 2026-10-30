@@ -127,6 +127,9 @@ var migrations = []func(dataDir string) error{
 
 // Migrate prepares every store in dataDir before the engine serves calls.
 func Migrate(dataDir string) error {
+	if err := CheckFloor(dataDir); err != nil {
+		return err
+	}
 	for _, migrate := range migrations {
 		if err := migrate(dataDir); err != nil {
 			return fmt.Errorf("migrate dyna.db: %w", err)
