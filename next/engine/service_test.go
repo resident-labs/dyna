@@ -715,10 +715,22 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 			t.Fatalf("placement: %+v", spec)
 		}
 	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e == nil || e.Code != contract.ErrConflict {
+		t.Fatalf("close while child starts: %v", e)
+	}
 	close(adapter.unblock)
 	for _, id := range []contract.SessionID{a.Session, b.Session} {
 		unlock := s.lockBox(id)
 		unlock()
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e != nil {
+		t.Fatal(e)
+	}
+	for _, id := range []contract.SessionID{a.Session, b.Session, parent.Session} {
+		if _, err := s.store.Session(ctx, id); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("session remains open: %v", err)
+		}
 	}
 }
 
