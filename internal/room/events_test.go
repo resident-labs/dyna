@@ -55,6 +55,7 @@ type familyFacts struct {
 
 // eventFamilyFacts is the table of every family in eventSpecs.
 var eventFamilyFacts = []familyFacts{
+	{Family: FamilyGitHubWrite, Renderers: []string{"GitHubWriteRefusedCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyWorktree, Renderers: []string{"WorktreeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceSession}},
 	{Family: FamilyHook, Renderers: []string{"HookCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyIssue, Renderers: []string{"IssueCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
