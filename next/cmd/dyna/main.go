@@ -4,6 +4,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/resident-labs/dyna/box/agent"
 
 	"github.com/spf13/cobra"
 )
@@ -29,6 +33,14 @@ func newRootCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, _ []string) {
 			fmt.Fprintln(cmd.OutOrStdout(), version)
+		},
+	})
+	root.AddCommand(&cobra.Command{
+		Use: "box-agent", Short: "Run the box agent", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+			return agent.Run(ctx, version)
 		},
 	})
 	return root
