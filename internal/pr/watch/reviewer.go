@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/servicewait"
 	"dyna-agent/internal/subagent"
 )
 
@@ -50,20 +52,20 @@ func (s *Service) reviewRepoIdentity(ctx context.Context, r Record) string {
 	return harnessruntime.RepoIdentity(ctx, dir)
 }
 
-// noticePinnedWait tells root once that the reviewer pin cannot run. The
-// pool does not start on another profile.
-func (s *Service) noticePinnedWait(ctx context.Context, roomID, pin, reason string) {
+// noticeReviewerWait tells root that the reviewer cannot run.
+func (s *Service) noticeReviewerWait(ctx context.Context, roomID, pin, reason, token string) error {
 	if s.Notify == nil || s.Notify.Rooms == nil {
-		return
+		return nil
 	}
 	rec, err := s.Notify.Rooms.Resolve(roomID)
 	if err != nil {
-		return
+		return err
 	}
-	_, _ = s.Notify.Rooms.PostEventInput(room.PostEventInput{
-		RoomID: rec.ID, Event: room.ServiceWaitEvent{Service: room.ServiceReviewer, Profile: pin, Reason: reason},
+	_, err = s.Notify.Rooms.PostEventInput(room.PostEventInput{
+		RoomID: rec.ID, Event: room.ServiceWaitEvent{Service: room.ServiceReviewer, Profile: pin, Reason: reason, Transition: token},
 		Producer: room.ProducerReviewer, To: []string{rec.Name}, NeedsRoot: true,
 	})
+	return err
 }
 
 func (s *Service) chooseProfile(cfg Reviewer, repo string) (rolesession.Choice, error) {
@@ -705,13 +707,28 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		}
 		cfg := st.Reviewers[roomID]
 		choice, e := s.chooseProfile(cfg, s.reviewRepoIdentity(ctx, *candidate))
-		if e != nil {
+		var unavailable *rolesession.NoProfileError
+		if e != nil && !errors.As(e, &unavailable) {
 			return s.reviewBlocked(roomID, Sanitize(e.Error()))
 		}
-		if cfg.Profile != "" && choice.Cause != "" {
-			s.noticePinnedWait(ctx, roomID, cfg.Profile, choice.Reason)
-			// The pin is room-wide, so no other change in this room can launch either.
-			return nil
+		waiting := e != nil || (cfg.Profile != "" && choice.Cause != "")
+		reason := choice.Reason
+		if e != nil {
+			reason = e.Error()
+		}
+		waitState := ""
+		if waiting {
+			waitState = cfg.Profile + "\x00" + reason
+		}
+		token, stateErr := servicewait.Observe(filepath.Dir(s.Store.Root), "reviewer\x00"+roomID, waitState)
+		if stateErr != nil {
+			return stateErr
+		}
+		if waiting {
+			if err := s.noticeReviewerWait(ctx, roomID, cfg.Profile, reason, token); err != nil {
+				return err
+			}
+			return s.reviewBlocked(roomID, Sanitize(reason))
 		}
 		name := choice.Name
 		if busy >= reviewerProfileCap(name, profiles) {
