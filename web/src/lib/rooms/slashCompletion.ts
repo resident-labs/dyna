@@ -5,7 +5,7 @@ export function commandOptions(commands: SlashCommand[]) {
   return commands.map((c) => ({
     value: '/' + c.name,
     group: c.source === 'workflow' ? 'Workflows' : c.source === 'skill' ? 'Skills' : 'MCP prompts',
-    arg: c.source === 'skill' ? 'message' : c.args.map((arg) => arg.name).join(', '),
+    arg: c.source === 'skill' ? 'message' : c.args.map((arg) => c.source === 'workflow' && c.args.length > 1 ? `${arg.name}=…` : arg.name).join(' '),
     hint: c.description,
     order: order[c.source],
   })).sort((a, b) => a.order - b.order)

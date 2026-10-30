@@ -2,6 +2,7 @@ package roomsvc
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	harnessconfig "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/slashcmd"
+	"dyna-agent/internal/workflowcatalog"
 )
 
 func TestRunSkillAddressesMentionAndFramesInstruction(t *testing.T) {
@@ -108,6 +110,9 @@ func TestWorkflowCommandListsAndUsesDMTarget(t *testing.T) {
 	for _, command := range commands {
 		if command.Name == "deep-research" && command.Source == slashcmd.Workflow {
 			found = true
+			if len(command.Args) != 1 || command.Args[0].Name != "question" || !command.Args[0].Required {
+				t.Fatalf("wrong args: %+v", command.Args)
+			}
 		}
 	}
 	if !found {
@@ -117,4 +122,32 @@ func TestWorkflowCommandListsAndUsesDMTarget(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "result target must belong") {
 		t.Fatalf("wrong target error: %v", err)
 	}
+}
+
+func TestWorkflowInputNamedFields(t *testing.T) {
+	workflows, err := workflowcatalog.List(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, workflow := range workflows {
+		if workflow.Name != "audit" {
+			continue
+		}
+		raw, err := workflowInput(workflow, `what="check x=y" paths=["src/a", "src/b"]`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			What  string   `json:"what"`
+			Paths []string `json:"paths"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil || got.What != "check x=y" || len(got.Paths) != 2 {
+			t.Fatalf("input %s: %+v, %v", raw, got, err)
+		}
+		if _, err := workflowInput(workflow, "what=check"); err == nil {
+			t.Fatal("missing paths accepted")
+		}
+		return
+	}
+	t.Fatal("audit missing")
 }

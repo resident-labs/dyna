@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	harnessconfig "dyna-agent/internal/harness/config"
@@ -36,7 +37,11 @@ func (s *Service) Commands(ctx context.Context, roomRef string) ([]slashcmd.Comm
 	seen := make(map[string]bool)
 	for _, workflow := range workflows {
 		if !seen[workflow.Name] {
-			commands = append(commands, slashcmd.Command{Name: workflow.Name, Source: slashcmd.Workflow, Description: workflow.Description, Args: []slashcmd.Arg{}})
+			args := make([]slashcmd.Arg, 0, len(workflow.Args))
+			for _, arg := range workflow.Args {
+				args = append(args, slashcmd.Arg{Name: arg.Name, Required: arg.Required, Description: arg.Description})
+			}
+			commands = append(commands, slashcmd.Command{Name: workflow.Name, Source: slashcmd.Workflow, Description: workflow.Description, Args: args})
 			seen[workflow.Name] = true
 		}
 	}
@@ -78,7 +83,7 @@ func (s *Service) RunCommand(ctx context.Context, roomRef, name, text, target st
 	}
 	for _, workflow := range workflows {
 		if workflow.Name == name {
-			input, err := json.Marshal(strings.TrimSpace(text))
+			input, err := workflowInput(workflow, text)
 			if err != nil {
 				return CommandResult{}, err
 			}
@@ -147,4 +152,87 @@ func (s *Service) RunCommand(ctx context.Context, roomRef, name, text, target st
 		err = nil
 	}
 	return CommandResult{PostResult: out}, err
+}
+
+// workflowInput maps key=value text to JSON fields. JSON values allow arrays,
+// numbers and quoted strings; unquoted values remain strings.
+func workflowInput(workflow workflowcatalog.Info, text string) (json.RawMessage, error) {
+	text = strings.TrimSpace(text)
+	keyPattern := regexp.MustCompile(`(?:^|\s)([A-Za-z_][A-Za-z0-9_-]*)=`)
+	candidates := keyPattern.FindAllStringSubmatchIndex(text, -1)
+	matches := make([][]int, 0, len(candidates))
+	quoted, escaped, depth, pos := false, false, 0, 0
+	for _, candidate := range candidates {
+		for pos < candidate[0] {
+			c := text[pos]
+			if quoted {
+				if escaped {
+					escaped = false
+				} else if c == '\\' {
+					escaped = true
+				} else if c == '"' {
+					quoted = false
+				}
+			} else if c == '"' {
+				quoted = true
+			} else if c == '[' || c == '{' {
+				depth++
+			} else if (c == ']' || c == '}') && depth > 0 {
+				depth--
+			}
+			pos++
+		}
+		if !quoted && depth == 0 {
+			matches = append(matches, candidate)
+		}
+	}
+	required := 0
+	for _, arg := range workflow.Args {
+		if arg.Required {
+			required++
+		}
+	}
+	if len(matches) == 0 && required <= 1 {
+		return json.Marshal(text)
+	}
+	if len(matches) == 0 || matches[0][0] != 0 {
+		return nil, errors.New("provide workflow arguments as name=value pairs")
+	}
+	fields := make(map[string]json.RawMessage, len(matches))
+	for i, match := range matches {
+		name := text[match[2]:match[3]]
+		known := false
+		for _, arg := range workflow.Args {
+			if arg.Name == name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, fmt.Errorf("unknown workflow argument %q", name)
+		}
+		if _, exists := fields[name]; exists {
+			return nil, fmt.Errorf("workflow argument %q is repeated", name)
+		}
+		end := len(text)
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		}
+		value := strings.TrimSpace(text[match[1]:end])
+		if value == "" {
+			return nil, fmt.Errorf("provide a value for %s", name)
+		}
+		if json.Valid([]byte(value)) {
+			fields[name] = json.RawMessage(value)
+		} else {
+			encoded, _ := json.Marshal(value)
+			fields[name] = encoded
+		}
+	}
+	for _, arg := range workflow.Args {
+		if arg.Required && len(fields[arg.Name]) == 0 {
+			return nil, fmt.Errorf("provide the %s argument", arg.Name)
+		}
+	}
+	return json.Marshal(fields)
 }
