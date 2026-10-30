@@ -23,7 +23,6 @@ type Host struct {
 	State               HostState
 	CPUs                int
 	MemBytes, DiskBytes int64
-	NoReflink           bool
 	Labels              []string
 	CheckedAt           time.Time
 }

@@ -542,7 +542,6 @@ type Host struct {
 	CPUs      int   // schedulable, after the host reserve
 	MemBytes  int64 // schedulable, after the host reserve
 	DiskBytes int64 // free in the host data folder at the last check
-	NoReflink bool
 	Labels    []string // owner labels, such as "gpu"
 	CheckedAt time.Time
 }
