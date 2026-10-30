@@ -1098,12 +1098,12 @@ if [ "$count" -eq 1 ]; then printf '"invalid"'; else printf '{"n":7}'; fi
 
 // These fixture helpers exercise the same allocation path as the engine.
 func (m *Manager) beginTurn(id, prompt, schema string, owe []string) (Turn, error) {
-	turn, _, err := m.beginTurnConfigured(id, prompt, schema, owe, "", "", false, time.Time{})
+	turn, _, err := m.beginTurnConfigured(id, prompt, schema, owe, "", "", false, false, time.Time{})
 	return turn, err
 }
 
 func (m *Manager) beginTurnForPost(id, prompt, schema string, owe []string, messageID string) (Turn, bool, error) {
-	return m.beginTurnConfigured(id, prompt, schema, owe, messageID, "", false, time.Time{})
+	return m.beginTurnConfigured(id, prompt, schema, owe, messageID, "", false, false, time.Time{})
 }
 
 // A repaired turn wakes input it never handed to its harness, and leaves input it

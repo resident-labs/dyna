@@ -30,6 +30,8 @@ const (
 	timerRequests            = "requests"
 	timerApprovals           = "approvals"
 	timerMigrationRetry      = "migration-retry"
+	// timerIdleCompact is followed by a session id: each session has its own deadline.
+	timerIdleCompact = "idle-compact:"
 )
 
 // timers holds the engine's one-shot deadlines by key. Each fires at its real

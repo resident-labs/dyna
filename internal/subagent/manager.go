@@ -603,7 +603,7 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	// The session and its goal exist now. A later turn-start failure leaves
 	// the worktree owned by the session, so close cleans it up normally.
 	created = nil
-	turn, _, err = m.beginTurnConfigured(id, task, opts.Schema, []string{store.ReportTarget(meta)}, opts.MessageID, "", false, opts.Deadline)
+	turn, _, err = m.beginTurnConfigured(id, task, opts.Schema, []string{store.ReportTarget(meta)}, opts.MessageID, "", false, false, opts.Deadline)
 	if err != nil {
 		return Info{}, Turn{}, err
 	}
@@ -669,7 +669,7 @@ func lockNamesContext(ctx context.Context, store *Store) (func(), error) {
 
 // beginTurnConfigured allocates and starts a turn through the shared path.
 // Stored post IDs are checked again under the turn lock and cancellation gate.
-func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, messageID, transferID string, wrapUp bool, deadline time.Time) (Turn, bool, error) {
+func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, messageID, transferID string, wrapUp, compactOnly bool, deadline time.Time) (Turn, bool, error) {
 	store := m.store()
 	var turn Turn
 	alreadyDelivered := false
@@ -744,9 +744,9 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 			turn = Turn{
 				Deadline: deadline,
 				RoomHeld: roomPause.Paused || roomPause.ResumePending,
-				N:        meta.Turns, Prompt: prompt, Schema: schema, WrapUp: wrapUp, Status: TurnQueued, Created: time.Now(),
+				N:        meta.Turns, Prompt: prompt, Schema: schema, WrapUp: wrapUp, CompactOnly: compactOnly, Status: TurnQueued, Created: time.Now(),
 				Profile: meta.Profile, Model: meta.Model, TransferID: transferID,
-				Wake:     m.wakeCause(meta, messageID, transferID, wrapUp, first),
+				Wake:     m.wakeCause(meta, messageID, transferID, wrapUp, compactOnly, first),
 				RawStart: fileSize(raw), NormStart: fileSize(norm),
 			}
 			for _, addr := range owe {
@@ -828,6 +828,7 @@ type WakeOptions struct {
 	// Internal continuations share Wake checks and the same turn delivery path.
 	continuation string
 	wrapUp       bool
+	compactOnly  bool
 	Schema       string
 	// MessageID identifies the post already stored by the caller. A late or
 	// repeated wake returns its delivery turn instead of starting an empty turn.
@@ -935,7 +936,7 @@ func (m *Manager) Wake(ctx context.Context, ref string, opts WakeOptions) (WakeR
 	}
 	// Without a harness session the first turn never started one, so the
 	// next turn opens a fresh conversation instead of resuming.
-	turn, delivered, err := m.beginTurnConfigured(info.ID, opts.continuation, opts.Schema, nil, opts.MessageID, "", opts.wrapUp, opts.Deadline)
+	turn, delivered, err := m.beginTurnConfigured(info.ID, opts.continuation, opts.Schema, nil, opts.MessageID, "", opts.wrapUp, opts.compactOnly, opts.Deadline)
 	if errors.Is(err, errRoomPaused) {
 		return WakeResult{Session: info.ID, Paused: true}, nil
 	}
