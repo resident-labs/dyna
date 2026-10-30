@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	harnessconfig "dyna-agent/internal/harness/config"
+	"dyna-agent/internal/plan"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/slashcmd"
 	"dyna-agent/internal/workflowcatalog"
@@ -177,4 +178,13 @@ func TestWorkflowInputPositional(t *testing.T) {
 		return
 	}
 	t.Fatal("fix-until missing")
+}
+
+func TestWorkflowInputOptionalDefaults(t *testing.T) {
+	for _, args := range [][]plan.WorkflowArg{{{Name: "limit"}}, {{Name: "limit"}, {Name: "mode"}}} {
+		raw, err := workflowInput(workflowcatalog.Info{Args: args}, "")
+		if err != nil || string(raw) != "{}" {
+			t.Fatalf("input = %s, error = %v", raw, err)
+		}
+	}
 }
