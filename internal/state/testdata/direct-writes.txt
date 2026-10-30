@@ -255,3 +255,5 @@ not-state internal/harness/home/login_path.go loginPathFrom 1 # a temporary file
 not-state internal/scratch/scratch.go NewRunTemp 1 # makes a throwaway temporary folder for one hook run or check; not shared state
 not-state internal/scratch/scratch.go Sweep 1 # removes a closed session's temporary folder next to its scratch folder
 not-state internal/cli/voice/voice.go writeAudio 3 # writes the audio file the user asked for with --out, not Dyna state
+
+not-state internal/workflowcatalog/catalog.go Save 1 # workflow source files are user-authored project or personal files, not runtime state

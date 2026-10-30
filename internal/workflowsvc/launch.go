@@ -85,7 +85,7 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	if failed.Session != "" && envValue(childEnv, mode.EnvMode) == mode.Subagent {
 		failed.ParentSession = failed.Session
 	}
-	if target := envValue(childEnv, "DYNA_RUN_RESULT_TO"); runstore.IsSessionDirID(target) {
+	if target := envValue(childEnv, mode.EnvRunResultTo); runstore.IsSessionDirID(target) {
 		failed.ParentSession = target
 	}
 	rowCommitted := false

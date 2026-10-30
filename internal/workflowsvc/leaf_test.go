@@ -22,8 +22,8 @@ func TestLeafSessionExecuteRefusesRunStart(t *testing.T) {
 	t.Setenv(mode.EnvMode, mode.Subagent)
 	t.Setenv(mode.EnvSession, id)
 	_, err := Execute(context.Background(), Options{}, nil, Observer{})
-	if err == nil || err.Error() != subagent.ErrLeafStart.Error() {
-		t.Fatalf("Execute as a leaf session = %v; want %q", err, subagent.ErrLeafStart)
+	if err == nil || err.Error() != "dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root." {
+		t.Fatalf("Execute as a leaf session = %v", err)
 	}
 }
 
