@@ -1,6 +1,7 @@
 package processguard
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -18,6 +20,39 @@ func TestExecuteBoundsProcessDescendants(t *testing.T) {
 	err := Execute(context.Background(), Process{Args: []string{"/bin/sh", "-c", "sleep 30 & wait"}, Env: MetadataEnv(), Timeout: 50 * time.Millisecond, Output: &output})
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
 		t.Fatalf("timeout did not bound descendants: %v", err)
+	}
+}
+
+// gatedWriter blocks its first Write until open is closed, like a log on a saturated disk.
+type gatedWriter struct {
+	entered chan struct{}
+	open    chan struct{}
+	once    sync.Once
+	buf     bytes.Buffer
+}
+
+func (w *gatedWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.entered)
+		<-w.open
+	})
+	return w.buf.Write(p)
+}
+
+func TestExecuteDrainTimeoutKeepsSlowOutput(t *testing.T) {
+	out := &gatedWriter{entered: make(chan struct{}), open: make(chan struct{})}
+	go func() {
+		<-out.entered
+		// Outlast the one-second default drain, so only a longer DrainTimeout passes.
+		time.Sleep(1500 * time.Millisecond)
+		close(out.open)
+	}()
+	err := Execute(context.Background(), Process{Args: []string{"echo", "installed"}, Env: MetadataEnv(), Timeout: time.Minute, DrainTimeout: time.Minute, Output: out})
+	if err != nil {
+		t.Fatalf("a slow output drain failed a successful command: %v", err)
+	}
+	if got := out.buf.String(); got != "installed\n" {
+		t.Fatalf("output = %q, want the full line", got)
 	}
 }
 
