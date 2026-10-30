@@ -86,8 +86,6 @@ type RoomBundle struct {
 	NextIssue     int              `json:"nextIssue"`
 	PRs           []TrackedPR      `json:"prs"`
 	Questions     []QuestionBundle `json:"questions"`
-	MCPServers    []RoomMCPServer  `json:"mcpServers"`
-	IssueWatches  []IssueWatch     `json:"issueWatches"`
 	Subscriptions []Subscription   `json:"subscriptions"` // room and session scope
 	Handoff       []SessionHandoff `json:"handoff"`
 	Counts        BundleCounts     `json:"counts"`
@@ -330,37 +328,14 @@ type TrackedPR struct {
 	Hold         *PRHold        `json:"hold,omitempty"`
 }
 
-type QuestionKind string
-
-const (
-	QuestionAsk      QuestionKind = "question"
-	QuestionTerminal QuestionKind = "terminal"
-)
-
-// QuestionBundle is an unanswered question or terminal request.
+// QuestionBundle is an unanswered question.
 type QuestionBundle struct {
 	Label     QuestionLabel  `json:"label"`
-	Kind      QuestionKind   `json:"kind"`
 	Asker     ImportedAuthor `json:"asker"`
 	Text      string         `json:"text"`
 	Options   []string       `json:"options,omitempty"`
 	Meanwhile string         `json:"meanwhile,omitempty"`
-	Command   string         `json:"command,omitempty"` // terminal requests only
 	Asked     time.Time      `json:"asked"`
-}
-
-// RoomMCPServer holds no token; the owner adds it again.
-type RoomMCPServer struct {
-	Name         string   `json:"name"`
-	URL          string   `json:"url"`
-	AllowedTools []string `json:"allowedTools,omitempty"`
-}
-
-type IssueWatch struct {
-	Host   string   `json:"host"` // "github.com"
-	Repo   RepoName `json:"repo"`
-	Number int      `json:"number"`
-	Title  string   `json:"title"`
 }
 
 // SessionHandoff tells root about one session that was open in v1.
