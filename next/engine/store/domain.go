@@ -97,6 +97,9 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		if n != 1 {
 			return sql.ErrNoRows
 		}
+		if _, err := tx.ExecContext(ctx, "UPDATE pr_owners SET session=(SELECT parent FROM sessions WHERE id=?) WHERE session=? AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND parent IS NOT NULL)", id, id, id); err != nil {
+			return err
+		}
 		_, err = s.AppendEvent(tx, event)
 		return err
 	})
