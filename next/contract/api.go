@@ -131,3 +131,21 @@ type DeliveryDoneRequest struct {
 	Delivery DeliverySeq `json:"delivery"`
 }
 type DeliveryDoneResponse struct{}
+
+type BoxMessageType string
+type BoxMessageBody interface {
+	BoxMessageType() BoxMessageType
+	isBoxMessageBody()
+}
+type BoxMessage struct {
+	Body BoxMessageBody `json:"body"`
+}
+
+func (TurnStart) BoxMessageType() BoxMessageType { return "turn.start" }
+func (TurnStart) isBoxMessageBody()              {}
+func (TurnSteer) BoxMessageType() BoxMessageType { return "turn.steer" }
+func (TurnSteer) isBoxMessageBody()              {}
+func (TurnStop) BoxMessageType() BoxMessageType  { return "turn.stop" }
+func (TurnStop) isBoxMessageBody()               {}
+func (Upgrade) BoxMessageType() BoxMessageType   { return "upgrade" }
+func (Upgrade) isBoxMessageBody()                {}

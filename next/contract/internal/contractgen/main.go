@@ -24,7 +24,7 @@ func Generate(dir, output string) error {
 		return err
 	}
 	var decls []ast.Decl
-	var bodies, ops []body
+	var bodies, ops, messages []body
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "union_gen.go" {
 			continue
@@ -36,7 +36,7 @@ func Generate(dir, output string) error {
 		decls = append(decls, f.Decls...)
 		for _, d := range f.Decls {
 			fn, ok := d.(*ast.FuncDecl)
-			if !ok || fn.Recv == nil || fn.Name.Name != "EventType" && fn.Name.Name != "OpKind" {
+			if !ok || fn.Recv == nil || fn.Name.Name != "EventType" && fn.Name.Name != "OpKind" && fn.Name.Name != "BoxMessageType" {
 				continue
 			}
 			recv, ok := fn.Recv.List[0].Type.(*ast.Ident)
@@ -60,8 +60,10 @@ func Generate(dir, output string) error {
 			}
 			if fn.Name.Name == "EventType" {
 				bodies = append(bodies, body{recv.Name, kind})
-			} else {
+			} else if fn.Name.Name == "OpKind" {
 				ops = append(ops, body{recv.Name, kind})
+			} else {
+				messages = append(messages, body{recv.Name, kind})
 			}
 		}
 	}
@@ -75,6 +77,12 @@ func Generate(dir, output string) error {
 	for i, b := range ops {
 		if i > 0 && ops[i-1].kind == b.kind {
 			return fmt.Errorf("duplicate operation kind %s", b.kind)
+		}
+	}
+	sort.Slice(messages, func(i, j int) bool { return messages[i].kind < messages[j].kind })
+	for i, b := range messages {
+		if i > 0 && messages[i-1].kind == b.kind {
+			return fmt.Errorf("duplicate box message type %s", b.kind)
 		}
 	}
 	var g bytes.Buffer
@@ -128,6 +136,28 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs,error) {
 		fmt.Fprintf(&g, "%q,", b.kind)
 	}
 	g.WriteString("}\n")
+	g.WriteString(`
+func (m BoxMessage) MarshalJSON() ([]byte,error) {
+ if m.Body == nil { return nil,fmt.Errorf("box message body is nil") }
+ return json.Marshal(struct { Type BoxMessageType @json:"type"@; Body BoxMessageBody @json:"body"@ }{m.Body.BoxMessageType(),m.Body})
+}
+func (m *BoxMessage) UnmarshalJSON(data []byte) error {
+ var w struct { Type BoxMessageType @json:"type"@; Body json.RawMessage @json:"body"@ }
+ if err := json.Unmarshal(data,&w); err != nil {return err}
+ switch w.Type {
+`)
+	for _, b := range messages {
+		fmt.Fprintf(&g, "case %q: var v %s; if err := json.Unmarshal(w.Body,&v); err != nil { return err }; m.Body = v; return nil\n", b.kind, b.name)
+	}
+	g.WriteString(`default: return fmt.Errorf("unknown box message type %q",w.Type)
+ }
+}
+`)
+	g.WriteString("\nvar boxMessageTypes = []BoxMessageType{")
+	for _, b := range messages {
+		fmt.Fprintf(&g, "%q,", b.kind)
+	}
+	g.WriteString("}\n")
 	source := strings.ReplaceAll(g.String(), "@", "`")
 	source = strings.Replace(source, `"fmt")`, `"fmt"; "time")`, 1)
 	formatted, err := format.Source([]byte(source))
@@ -169,7 +199,11 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs,error) {
 			if !ast.IsExported(t.Name.Name) {
 				continue
 			}
-			if t.Name.Name == "EventBody" || t.Name.Name == "OpArgs" {
+			if t.Name.Name == "EventBody" || t.Name.Name == "OpArgs" || t.Name.Name == "BoxMessageBody" {
+				continue
+			}
+			if t.Name.Name == "BoxMessage" {
+				ts.WriteString("export type BoxMessage = BoxMessageBody;\n")
 				continue
 			}
 			if t.Name.Name == "Event" {
@@ -197,6 +231,10 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs,error) {
 			}
 			ts.WriteString(b.name)
 		}
+	}
+	ts.WriteString(";\nexport type BoxMessageBody =\n")
+	for _, b := range messages {
+		fmt.Fprintf(&ts, "  | { type: %q; body: %s }\n", b.kind, b.name)
 	}
 	ts.WriteString(";\n")
 	ts.WriteString("export interface MethodMap {\n")
