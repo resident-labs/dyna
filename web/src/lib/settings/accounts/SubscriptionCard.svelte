@@ -24,7 +24,7 @@
   // One wake for the card: it starts at the first account block that ends, and
   // the clock asks for the next deadline after each wake.
   const now = deadlineClock(() => {
-    const deadlines = group.accounts.map((account) => blockUntil(account)).filter((at) => Number.isFinite(at))
+    const deadlines = (group.accounts ?? []).map((account) => blockUntil(account)).filter((at) => Number.isFinite(at))
     return deadlines.length ? Math.min(...deadlines) : Number.NaN
   })
   // The row whose repo list is open, and the list being edited.
@@ -47,7 +47,7 @@
 </script>
 
 <Card title={providerName(group.provider)}>
-  {#each group.accounts as account (account.id)}
+  {#each group.accounts ?? [] as account (account.id)}
     {@const status = [accountStatus(account, '', now()), accountKindLabel(account.kind)].filter(Boolean).join(' · ')}
     <div class="account" class:compact>
       <div class="heading">

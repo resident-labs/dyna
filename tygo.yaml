@@ -10,6 +10,15 @@ type_mappings:
   subagent.TransferState: TransferState
   subagent.CloseRecovery: Recovery
   harnessruntime.Pin: Pin
+  store.Provider: Provider
+  store.Kind: Kind
+  store.UsageReason: UsageReason
+  store.Renewal: Renewal
+  store.Plan: Plan
+  store.Window: Window
+  runtime.AccountProblem: AccountProblem
+  profile.CompactRule: CompactRule
+  adapters.Effort: Effort
 
 packages:
   - path: dyna-agent/internal/transcript
@@ -54,6 +63,41 @@ packages:
   - path: dyna-agent/internal/roomsvc
     output_path: web/src/lib/api/session.gen.ts
     include_files: [session_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/account/store
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [api_types.go, renewal_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/harness/runtime
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [account_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/profile
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [compact_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/account/service/adapters
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [effort_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/account/service
+    output_path: web/src/lib/api/account.gen.ts
+    include_files: [api_types.go, snapshot_types.go]
     fallback_type: unknown
     preserve_comments: types
     enum_style: union

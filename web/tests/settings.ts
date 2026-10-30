@@ -18,7 +18,7 @@ import type { Capability, HarnessAccount, HarnessConfig, HarnessSnapshot, Bundle
 import type { HarnessSupport } from '../src/lib/settings/support.ts'
 import type { ProfileList, ProfileUsageStats, ProfileView } from '../src/lib/api/profile.ts'
 import type { ProfileSave } from '../src/lib/api/engine.ts'
-import type { ScopeAccount } from '../src/lib/api/account.ts'
+import type { AccountsSnapshot, ScopeAccount } from '../src/lib/api/account.ts'
 import type { ActivityRollup } from '../src/lib/settings/accounts/activity.ts'
 import type { Device, Hook, HookSummary, SettingItem } from '../src/lib/api/settings.ts'
 
@@ -134,7 +134,7 @@ const savedAccounts: ScopeAccount[] = [
   { ...account({ id: 'chatgpt-1', harness: 'pi', provider: 'chatgpt', kind: 'oauth', label: 'ChatGPT account', active: true, plan: { id: 'plus', label: 'Plus' }, source: 'ChatGPT account report', observedAt: minutes(5), profiles: ['sol'], windows: [window5('short', '5-hour window', 18), window5('weekly', 'Weekly window', 41)] }), activeHere: true },
   { ...account({ id: 'go', harness: 'pi', provider: 'opencode-go', kind: 'api_key', label: 'OpenCode Go · Personal', active: true, source: 'OpenCode Console usage', observedAt: minutes(9), profiles: ['mimo'], windows: [{ ...window5('short', '5-hour window', 20), used: 2.4, limit: 12, unit: 'USD' }, { ...window5('weekly', 'Weekly window', 30), used: 9, limit: 30, unit: 'USD' }] }), activeHere: true },
 ]
-const accountsSnapshot = (scope = '') => {
+const accountsSnapshot = (scope = ''): AccountsSnapshot => {
   const providers = [...new Set(savedAccounts.map((a) => a.provider ?? ''))]
   return { scope, providers: empty ? [] : providers.map((provider) => ({ provider, accounts: savedAccounts.filter((a) => (a.provider ?? '') === provider) })), problems: [], checkedAt: minutes(1) }
 }
