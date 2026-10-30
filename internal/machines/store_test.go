@@ -249,6 +249,36 @@ func TestRegistryEditKeepsHostChecksGrants(t *testing.T) {
 	}
 }
 
+func TestUpdateReadsFreshMachine(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	pve, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A registration patch resolved the node here. The owner disables it before
+	// the patch's writer transaction starts.
+	if err := s.SetEnabled(ctx, pve.Name, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, pve.ID, func(m *Machine) error {
+		if m.Enabled {
+			t.Fatal("patch read the node before the concurrent disable")
+		}
+		m.Mounts = append(m.Mounts, NamedMount{Name: "data", Source: "/srv/data", Room: "room_a", Mode: MountRO})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.GetByID(ctx, pve.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Enabled || len(stored.Mounts) != 1 {
+		t.Fatalf("concurrent edit = enabled %v, mounts %#v", stored.Enabled, stored.Mounts)
+	}
+}
+
 func TestRegistryEditKeepsContainerRegistrations(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
@@ -260,17 +290,19 @@ func TestRegistryEditKeepsContainerRegistrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := pve
-	if _, err := s.UpdateContainerRegistrations(ctx, pve.ID, func(m Machine) ([]NamedMount, []DeviceGrant, error) {
-		return nil, nil, nil
+	if _, err := s.Update(ctx, pve.ID, func(m *Machine) error {
+		m.Mounts, m.Devices = nil, nil
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdateContainerRegistrations(ctx, pve.ID, func(m Machine) ([]NamedMount, []DeviceGrant, error) {
+	if _, err := s.Update(ctx, pve.ID, func(m *Machine) error {
 		if len(m.Mounts) != 0 || len(m.Devices) != 0 {
 			t.Fatalf("transaction read stale registrations: %#v, %#v", m.Mounts, m.Devices)
 		}
-		return []NamedMount{{Name: "other", Source: "/srv/other", Room: "room_b", Mode: MountRO}},
-			[]DeviceGrant{{Path: "/dev/other", Room: "room_b"}}, nil
+		m.Mounts = []NamedMount{{Name: "other", Source: "/srv/other", Room: "room_b", Mode: MountRO}}
+		m.Devices = []DeviceGrant{{Path: "/dev/other", Room: "room_b"}}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
