@@ -95,7 +95,7 @@
       {@const thread = row.thread}
       {@const person = members.find((p) => p.address === thread.key)}
       <div class="thread-row">
-        <ThreadChip glyph="▱" name={short(thread.key, room.name)} avatar={person?.avatar ?? thread.posts.at(-1)?.avatar} hue={person?.hue} badge={`${row.posts.length} message${row.posts.length === 1 ? '' : 's'}`} queued={row.queued} snippet={plain(row.posts.at(-1)?.text)} time={ago(row.posts.at(-1)?.ts)} selected={selectedKey === thread.key} enter={isNew(row.key)} onopen={() => onthread(thread.key)} />
+        <ThreadChip glyph="▱" name={short(thread.key, room.name)} avatar={person?.avatar} here={room.name} hue={person?.hue} badge={`${row.posts.length} message${row.posts.length === 1 ? '' : 's'}`} queued={row.queued} snippet={plain(row.posts.at(-1)?.text)} time={ago(row.posts.at(-1)?.ts)} selected={selectedKey === thread.key} enter={isNew(row.key)} onopen={() => onthread(thread.key)} />
       </div>
     {:else if row.kind === 'instructions'}
       <SystemNote notes={row.notes ?? [{ ...row.note, id: row.note?.id ?? row.key, target: member.name, text: row.text, ts: row.ts }]} roomId={room.id} {onopenfile} />
