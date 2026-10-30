@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -144,8 +145,11 @@ func closeSocket(s *socket) error {
 	// Close the listener even if Serve has not started yet.
 	err := s.listener.Close()
 	serverErr := s.server.Close()
-	if err != nil {
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
+	}
+	if errors.Is(serverErr, net.ErrClosed) {
+		return nil
 	}
 	return serverErr
 }
