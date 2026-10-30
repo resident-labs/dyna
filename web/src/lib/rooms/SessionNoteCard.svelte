@@ -72,7 +72,7 @@
   }
 
   // sections is the instruction change, one row per changed section.
-  let sections = $derived(payload?.sections ?? [])
+  let sections = $derived(kind === 'instructions' ? posts.flatMap((step) => sessionEvent(step)?.sections ?? []) : payload?.sections ?? [])
   let changedParts = $derived([...new Set(posts.flatMap((step) => (sessionEvent(step)?.sections ?? []).map((section) => section.name)))])
 </script>
 
@@ -87,20 +87,17 @@
   {#snippet icon()}✦{/snippet}
   {#snippet footer()}
   <EventSteps steps={posts.map((step) => ({ id: step.id, time: clock(step.ts), label: (sessionEvent(step)?.sections ?? []).map((section) => section.name).join(' · ') }))}>
-    {#snippet detail(index)}
+    {#snippet row(index)}
       {@const step = posts[index]}
       {#if step}
-        <ul class="sections">
-          {#each sessionEvent(step)?.sections ?? [] as section, i (i)}
-            <li>
-              <span class="name">{section.name}</span>
-              <span class="action">{actionWords[section.action]}</span>
-              {#if section.body}<span class="item" title={section.body}>{section.body}</span>{/if}
-              {#each section.added ?? [] as item (item)}<span class="item add" title={item}>+ {item}</span>{/each}
-              {#each section.removed ?? [] as item (item)}<span class="item remove" title={item}>− {item}</span>{/each}
-            </li>
-          {/each}
-        </ul>
+        {#each sessionEvent(step)?.sections ?? [] as section, i (i)}
+          <div class="step-heading"><time>{clock(step.ts)}</time> · {section.name} {actionWords[section.action]}</div>
+          <div class="step-details">
+            {#if section.body}<span title={section.body}>{section.body}</span>{/if}
+            {#each section.added ?? [] as item (item)}<span class="add" title={item}>+ {item}</span>{/each}
+            {#each section.removed ?? [] as item (item)}<span class="remove" title={item}>− {item}</span>{/each}
+          </div>
+        {/each}
       {/if}
     {/snippet}
   </EventSteps>
@@ -137,11 +134,16 @@
 </EventRow>
 
 <style>
+  .step-heading { color: var(--muted); }
+  .step-details { display: grid; margin-left: 1em; }
+  .step-details span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+  .step-details .add { color: var(--sage); }
+  .step-details .remove { color: var(--coral); }
   .sections { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
   .sections li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: var(--t-cap); }
   .name { color: var(--ink-2); font-weight: 600; }
   .action { color: var(--faint); }
-  .item { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item { overflow-wrap: anywhere; white-space: pre-wrap; }
   .item.add { color: var(--sage); }
   .item.remove { color: var(--coral); }
   .more { margin: 4px 0 0; }

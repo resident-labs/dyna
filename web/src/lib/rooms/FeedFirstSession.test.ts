@@ -81,6 +81,6 @@ test('an instruction thread shows all parts and its steps', () => {
   assert.match(body, /Room rules · Skills/)
   assert.match(body, /Show steps \(2\)/)
   const steps = body.split('Show steps (2)')[1]
-  assert.match(steps, /class="name [^"]*">Room rules<\/span>.*?\+ A rule/s)
-  assert.match(steps, /class="name [^"]*">Skills<\/span>.*?\+ A rule/s)
+  assert.match(steps, /Room rules changed<\/div>.*?\+ A rule/s)
+  assert.match(steps, /Skills changed<\/div>.*?\+ A rule/s)
 })
