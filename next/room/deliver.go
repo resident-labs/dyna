@@ -20,12 +20,15 @@ type DeliveryInput struct {
 
 func (t Tree) Deliveries(in DeliveryInput) []contract.Delivery {
 	recipients := in.Recipients
-	if !in.HasMentions && len(recipients) == 0 && in.Surface == contract.SurfaceFeed && in.Event.From.Kind == contract.PrincipalOwner {
+	if !in.HasMentions && len(recipients) == 0 && in.Surface == contract.SurfaceFeed && in.Event.From.Kind == contract.PrincipalOwner && t.root != "" {
 		recipients = []Recipient{{Session: t.root, Explicit: true}}
 	}
 	var out []contract.Delivery
 	seen := make(map[contract.SessionID]int)
 	for _, r := range recipients {
+		if in.Event.From.Kind == contract.PrincipalSession && r.Session == in.Event.From.Session {
+			continue
+		}
 		if i, ok := seen[r.Session]; ok {
 			if !r.Explicit {
 				continue
@@ -69,16 +72,21 @@ type FinalReply struct {
 	Posted  contract.EventID
 }
 
-// FinalReplies returns one response for each distinct final target.
+// FinalReplies returns one response for each distinct final target and home.
 func FinalReplies(inputs []contract.Delivery, posts map[contract.Principal]contract.EventID) []FinalReply {
-	seen := make(map[contract.Principal]bool)
+	type destination struct {
+		target contract.Principal
+		home   contract.Conversation
+	}
+	seen := make(map[destination]bool)
 	var replies []FinalReply
 	for _, input := range inputs {
 		channel := input.Reply
-		if channel.Kind != contract.ReplyFinal || seen[channel.Target] {
+		key := destination{target: channel.Target, home: channel.Home}
+		if channel.Kind != contract.ReplyFinal || seen[key] {
 			continue
 		}
-		seen[channel.Target] = true
+		seen[key] = true
 		post := posts[channel.Target]
 		replies = append(replies, FinalReply{Channel: channel, Wake: post == "", Posted: post})
 	}
