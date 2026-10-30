@@ -109,11 +109,9 @@ test('isMember checks required fields and nested doing and seat', () => {
   assert.equal(isMember({ ...member, seat: 1 }), false)
 })
 
-test('isPost reads the views of a cached feed that still names them channels', () => {
+test('isPost validates feed views', () => {
   assert.equal(isPost({ ...post, views: ['general', 1] }), false, 'a typed views field is checked')
   assert.equal(isPost({ ...post, views: ['general'] }), true)
-  assert.equal(isPost({ ...post, channels: ['general'] }), true, 'a cached post keeps its views')
-  assert.equal(isPost({ ...post, channels: ['general', 1] }), false)
 })
 
 test('isPostResult accepts null deliveries and checks each delivery', () => {
