@@ -161,7 +161,7 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 		IdempotencyKey: in.IdempotencyKey, RequestHash: in.RequestHash, Node: in.Node, Labels: labels, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		Network: jobs.NetworkMode(in.Network), Mounts: mounts, Devices: in.Devices,
-		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second, Idle: idle,
+		Lane: jobs.Lane(in.Lane), CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second, Idle: idle,
 		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources, Workspace: in.Workspace,
 	}
 	if in.IO != "" && in.IO != "heavy" && in.IO != "light" {

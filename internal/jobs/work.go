@@ -93,5 +93,8 @@ func (a Admission) Work(ctx context.Context, m machines.Machine) (NodeWork, erro
 // lock is not a resource the owner declared, so it never lists.
 func jobWorkItem(job Job, m machines.Machine) WorkItem {
 	demand := jobDemand(job, m)
-	return WorkItem{Kind: WorkJob, ID: job.ID, Label: strings.Join(job.Command, " "), Room: job.RoomID, Session: job.Session, CPUs: demand.CPUs, MemoryMiB: demand.MemoryMiB, Heavy: job.Heavy, Resources: slices.DeleteFunc(slices.Clone(job.Resources), isWorkspaceResource), Since: job.Created}
+	if job.Lane == LaneQuick {
+		demand.CPUs, demand.MemoryMiB = 0, 0
+	}
+	return WorkItem{Kind: WorkJob, Lane: job.Lane, ID: job.ID, Label: strings.Join(job.Command, " "), Room: job.RoomID, Session: job.Session, CPUs: demand.CPUs, MemoryMiB: demand.MemoryMiB, Heavy: job.Heavy, Resources: slices.DeleteFunc(slices.Clone(job.Resources), isWorkspaceResource), Since: job.Created}
 }

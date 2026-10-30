@@ -147,6 +147,7 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "Name:     %s\n", m.Name)
 			fmt.Fprintf(out, "ID:       %s\n", m.ID)
 			fmt.Fprintf(out, "SSH:      %s\n", ssh)
+			fmt.Fprintf(out, "Quick slots: %d\n", m.QuickSlotLimit())
 			if !m.Local {
 				fmt.Fprintf(out, "SSH connect timeout: %s\n", m.ConnectTimeout())
 			}
@@ -350,7 +351,7 @@ func addCommand() *cobra.Command {
 
 func editCommand() *cobra.Command {
 	var rename, ssh string
-	var maxIOHeavy, maxDiskPercent int
+	var maxIOHeavy, maxDiskPercent, quickSlots int
 	var resourceEdits, labels, unlabels, mountEdits, deviceEdits, unmountEdits, undeviceEdits []string
 	var registrationRoom string
 	var enable, disable bool
@@ -411,6 +412,9 @@ func editCommand() *cobra.Command {
 			}
 			if c.Flags().Changed("check-tmp") {
 				patch.CheckTmp, changed = &checkTmp, true
+			}
+			if c.Flags().Changed("quick-slots") {
+				patch.QuickSlots, changed = &quickSlots, true
 			}
 			if c.Flags().Changed("max-io-heavy") {
 				patch.MaxIOHeavy, changed = &maxIOHeavy, true
@@ -525,6 +529,7 @@ func editCommand() *cobra.Command {
 	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
 	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the node, such as 60s (0 restores the default of 10s)")
 	cmd.Flags().StringVar(&checkTmp, "check-tmp", "", "folder that holds each host check's temporary folder, such as /dev/shm (empty uses the node's TMPDIR, else /tmp)")
+	cmd.Flags().IntVar(&quickSlots, "quick-slots", 0, "quick jobs this node runs at once (0: one per 4 CPUs, at least 4)")
 	cmd.Flags().IntVar(&maxIOHeavy, "max-io-heavy", 0, "IO-heavy jobs and checks this node runs at once (0: one per 16 CPUs, at least 1)")
 	cmd.Flags().IntVar(&maxDiskPercent, "max-disk-percent", 0, "used-disk percent above which the node admits no new work (0: keep at least 20 GiB and 5% of the disk free, capped at 10% of the disk)")
 	cmd.Flags().StringArrayVar(&resourceEdits, "resource", nil, "set a named resource count, such as ghidra=1 (repeatable; NAME=0 removes it)")

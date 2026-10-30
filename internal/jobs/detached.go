@@ -70,7 +70,7 @@ const (
 // the script enables lingering first. Without a user manager, or without
 // lingering, the check starts under setsid and nohup and runs without a unit.
 const StartScript = `set -eu
-d=$1; unit=$2; cpu=$3; mem=$4; tasks=$5
+d=$1; unit=$2; cpu=$3; mem=$4; tasks=$5; io=$6
 umask 077
 mkdir -p "$(dirname "$d")"
 exec 8>"$d.lock"
@@ -122,9 +122,11 @@ if command -v systemd-run >/dev/null 2>&1 && systemctl --user show-environment >
 fi
 if [ "$unitOK" = 1 ]; then
   if [ -n "$cpu" ]; then set -- -p "CPUQuota=$cpu" -p "MemoryMax=$mem" -p "TasksMax=$tasks"; else set --; fi
+  if [ -n "$io" ]; then set -- "$@" -p "IOWeight=$io"; fi
   if [ -n "$login_path" ]; then set -- "$@" "--setenv=PATH=$login_path"; fi
   systemd-run --user --quiet --collect --unit "$unit" "$@" -- nice -n 10 bash "$d/wrap.sh" "$d" 8>&- || { rm -rf "$d"; exit 1; }
 else
+  if [ -n "$io" ]; then echo 'quick jobs need systemd user units for resource limits' >&2; exit 1; fi
   if [ -n "$login_path" ]; then PATH=$login_path; export PATH; fi
   setsid nohup nice -n 10 bash "$d/wrap.sh" "$d" 8>&- >/dev/null 2>&1 </dev/null &
   echo $! > "$d/pid"
@@ -373,11 +375,14 @@ func (x Executor) Retry(ctx context.Context, timeout time.Duration, attempt func
 
 // StartDetached launches a check on the node. The launch is safe to repeat.
 func (x Executor) StartDetached(ctx context.Context, spec RunSpec) error {
-	args := []string{spec.Dir, spec.Unit, "", "", ""}
+	args := []string{spec.Dir, spec.Unit, "", "", "", ""}
 	if spec.Limits != nil {
 		args[2] = strconv.Itoa(spec.Limits.CPUs*100) + "%"
 		args[3] = SystemdMemory(spec.Limits.MemoryMiB)
 		args[4] = strconv.Itoa(spec.Limits.TasksMax)
+		if spec.Limits.IOWeight > 0 {
+			args[5] = strconv.Itoa(spec.Limits.IOWeight)
+		}
 	}
 	return x.Retry(ctx, CallTimeout, func(ctx context.Context) error {
 		var stderr TailBuffer
