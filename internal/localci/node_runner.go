@@ -302,6 +302,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// A trial must report an infrastructure failure rather than wait forever.
 	recoveryCtx, stopRecovery := context.WithTimeout(ctx, 5*time.Minute)
 	resume, err := r.resumeRun(recoveryCtx, localStore, attachKey, sha, cache, checks)
+	if err == nil {
+		err = recoveryCtx.Err()
+		if err != nil && resume != nil {
+			if releaseErr := localStore.releaseAttachment(context.WithoutCancel(ctx), attachKey, sha, node.Name, resume.RunID); releaseErr != nil {
+				err = errors.Join(err, releaseErr)
+			}
+		}
+	}
 	recoveryTimedOut := errors.Is(recoveryCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 	stopRecovery()
 	if err != nil {

@@ -545,3 +545,13 @@ func TestStaleRecoveryBoundsTeardown(t *testing.T) {
 		t.Fatalf("teardown attempted = %v, error = %v", saw, err)
 	}
 }
+
+func TestCancelledRecoveryDoesNotStartFresh(t *testing.T) {
+	f := newReattachFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := f.runner.resumeRun(ctx, Store{DataDir: f.runner.DataDir}, f.request.Repo, strings.Repeat("a", 40), "cache", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("recovery error = %v, want cancellation", err)
+	}
+}
