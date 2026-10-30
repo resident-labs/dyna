@@ -315,11 +315,26 @@ func (s *Service) Rooms() ([]Room, error) {
 		if err != nil {
 			return nil, err
 		}
+		eligible := make(map[string]bool, len(ids))
 		for _, id := range ids {
-			if !reads[id] {
-				r.Unread++
-			}
+			eligible[id] = true
 		}
+		seen := map[string]bool{}
+		page, err := store.ReadPage(rec.ID, "", 1, room.PageFilter{Unread: func(m room.Message) bool {
+			thread := m.Notice.Thread
+			unread := eligible[m.ID] && !reads[m.ID] && (thread == "" || !seen[thread])
+			if unread && thread != "" {
+				seen[thread] = true
+			}
+			if thread != "" && room.ThreadEnded(m) {
+				delete(seen, thread)
+			}
+			return unread
+		}})
+		if err != nil {
+			return nil, err
+		}
+		r.Unread = page.Unread
 		r.Members, r.Running = counts[rec.ID].Members, counts[rec.ID].Running
 		out = append(out, r)
 	}
@@ -672,6 +687,8 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	}
 	views := newFeedViews(members)
 	counts := map[string]int{}
+	seen := map[string]bool{}
+	viewSeen := map[string]map[string]bool{}
 	// The page selects and counts only the room's own posts, before it pages:
 	// a run of DM posts never leaves a page empty or repeats a cursor.
 	page, err := read(rec.ID, cursor, keep, room.PageFilter{
@@ -680,12 +697,31 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 		},
 		Unread: func(m room.Message) bool {
 			unread := countsUnread(m, rec.Name) && !reads[m.ID]
+			thread := m.Notice.Thread
 			if unread {
 				for _, view := range views.viewsFor(m, homeOf(elsewhere, m.ID)) {
-					counts[view]++
+					if viewSeen[view] == nil {
+						viewSeen[view] = map[string]bool{}
+					}
+					if thread == "" || !viewSeen[view][thread] {
+						counts[view]++
+					}
+					if thread != "" {
+						viewSeen[view][thread] = true
+					}
 				}
 			}
-			return unread
+			count := unread && (thread == "" || !seen[thread])
+			if unread && thread != "" {
+				seen[thread] = true
+			}
+			if thread != "" && room.ThreadEnded(m) {
+				delete(seen, thread)
+				for _, threads := range viewSeen {
+					delete(threads, thread)
+				}
+			}
+			return count
 		},
 	})
 	if err != nil {

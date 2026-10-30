@@ -317,3 +317,31 @@ func TestShellResultBelongsToItsSession(t *testing.T) {
 		}
 	}
 }
+
+func TestUnreadThreadIncludesFailureAfterReadStep(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	post := func(kind string) room.Message {
+		m, err := e.svc.rooms().Post(rec.ID, room.PostInput{From: rec.Name + ":lead", To: []string{rec.Name}, Text: kind, Notice: room.EventNotice{Kind: kind, Thread: "trial"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	first := post("queued")
+	second := post("trial")
+	if got := roomUnreadCount(t, e.svc, rec.ID); got != 1 {
+		t.Fatalf("unread = %d, want one thread", got)
+	}
+	if err := e.svc.MarkReadMany(rec.ID, []string{first.ID, second.ID}); err != nil {
+		t.Fatal(err)
+	}
+	post("failed")
+	feed, err := e.svc.FeedTail(rec.ID, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if feed.Unread != 1 || roomUnreadCount(t, e.svc, rec.ID) != 1 {
+		t.Fatalf("unread feed = %d, want one thread", feed.Unread)
+	}
+}
