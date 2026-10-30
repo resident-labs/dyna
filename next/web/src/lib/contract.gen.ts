@@ -8,18 +8,18 @@ export type SessionStartRequest = { room: RoomID; name: string; parent?: Session
 export type SessionStartResponse = { session: SessionID; box: BoxID; };
 export type SessionCloseRequest = { session: SessionID; };
 export type SessionCloseResponse = { };
-export type PostRequest = { room: RoomID; text: string; mentions?: Array<string>; };
+export type PostRequest = { room: RoomID; text: string; mentions?: Array<string> | null; };
 export type PostResponse = { event: EventID; seq: number; };
-export type EventsListRequest = { room: RoomID; afterSeq: number; limit: number; types?: Array<EventType>; };
-export type EventsListResponse = { events: Array<Event>; next: number; };
+export type EventsListRequest = { room: RoomID; afterSeq: number; limit: number; types?: Array<EventType> | null; };
+export type EventsListResponse = { events: Array<Event> | null; next: number; };
 export type BoxHelloRequest = { version: string; };
 export type BoxHelloResponse = { session: SessionID; box: BoxID; upgrade?: string; };
-export type TurnOutputRequest = { turn: TurnID; outcome: TurnOutcome; final?: string; model: string; usage: Usage; };
+export type TurnOutputRequest = { error?: string; turn: TurnID; outcome: TurnOutcome; final?: string; model: string; usage: Usage; };
 export type TurnOutputResponse = { };
-export type TranscriptAppendRequest = { path: string; offset: number; bytes: string; };
+export type TranscriptAppendRequest = { path: string; offset: number; bytes: string | null; };
 export type TranscriptAppendResponse = { ackedOffset: number; };
 export type TurnInput = { delivery: DeliverySeq; surface: Surface; reply: ReplyChannel; text: string; };
-export type TurnStart = { turn: TurnID; inputs: Array<TurnInput>; };
+export type TurnStart = { turn: TurnID; inputs: Array<TurnInput> | null; };
 export type TurnQueue = "steer" | "follow_up";
 export type TurnSteer = { input: TurnInput; queue: TurnQueue; };
 export type TurnStop = { turn: TurnID; reason: string; };
@@ -27,6 +27,8 @@ export type Upgrade = { version: string; };
 export type DeliverySeq = number;
 export type DeliveryDoneRequest = { delivery: DeliverySeq; };
 export type DeliveryDoneResponse = { };
+export type BoxMessageType = string;
+export type BoxMessage = BoxMessageBody;
 export type Surface = "feed" | "dm" | "card" | "session" | "service" | "engine";
 export type ConversationKind = "feed" | "dm";
 export type Conversation = { kind: ConversationKind; session?: SessionID; };
@@ -35,13 +37,13 @@ export type ReplyChannel = { kind: ReplyKind; target?: Principal; home?: Convers
 export type Delivery = { seq: number; to: Principal; surface: Surface; reply: ReplyChannel; wake: boolean; };
 export type EventType = string;
 export type Event = { seq: number; id: EventID; at: string; room?: RoomID; from: Principal } & EventBody;
-export type PostCreated = { text: string; mentions?: Array<Principal>; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment>; };
+export type PostCreated = { text: string; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; };
 export type Attachment = { name: string; media: string; bytes: number; sha256: string; };
 export type SessionStarted = { session: SessionID; name: string; parent?: SessionID; profile: ProfileName; goal?: string; };
-export type SessionClosed = { session: SessionID; archive?: string; unheld?: Array<GoalID>; };
-export type TurnStarted = { session: SessionID; turn: TurnID; inputs: Array<EventID>; };
+export type SessionClosed = { session: SessionID; archive?: string; unheld?: Array<GoalID> | null; };
+export type TurnStarted = { session: SessionID; turn: TurnID; inputs: Array<EventID> | null; };
 export type TurnOutcome = "completed" | "failed" | "stopped";
-export type TurnEnded = { session: SessionID; turn: TurnID; outcome: TurnOutcome; final?: string; replies?: Array<ReplyChannel>; usage: Usage; error?: string; };
+export type TurnEnded = { session: SessionID; turn: TurnID; outcome: TurnOutcome; final?: string; replies?: Array<ReplyChannel> | null; usage: Usage; error?: string; };
 export type Usage = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; };
 export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from: BoxState; to: BoxState; reason?: string; };
 export type BoxState = "pending" | "creating" | "starting" | "ready" | "stopped" | "closing" | "deleted" | "failed" | "lost";
@@ -49,8 +51,8 @@ export type BoxSizeName = "small" | "medium" | "large";
 export type BoxSize = { name: BoxSizeName; cpus: number; memBytes: number; pids: number; };
 export type GrantKind = "hostexec" | "ask-owner" | "read" | "post" | "approve";
 export type GrantMode = "approve" | "preapproved";
-export type Grant = { id: GrantID; kind: GrantKind; to: Principal; room: RoomID; hosts?: Array<HostName>; commands?: Array<CommandRule>; mode?: GrantMode; expires?: string; by: Principal; created: string; revoked?: string; };
-export type CommandRule = { program: string; args?: Array<string>; prefix: boolean; };
+export type Grant = { id: GrantID; kind: GrantKind; to: Principal; room: RoomID; hosts?: Array<HostName> | null; commands?: Array<CommandRule> | null; mode?: GrantMode; expires?: string; by: Principal; created: string; revoked?: string; };
+export type CommandRule = { program: string; args?: Array<string> | null; prefix: boolean; };
 export type RoomID = string;
 export type SessionID = string;
 export type MemberID = string;
@@ -62,7 +64,7 @@ export type TurnID = string;
 export type DeviceID = string;
 export type SubscriptionID = string;
 export type GoalID = string;
-export type HostName = "control-plane" | "*";
+export type HostName = string;
 export type RepoName = string;
 export type ProfileName = string;
 export type DurationMS = number;
@@ -74,7 +76,7 @@ export type OpState = "pending" | "approved" | "denied" | "expired" | "withdrawn
 export type Operation = { id: OpID; kind: OpKind; room: RoomID; by: Principal; class: Class; card: Card; args: OpArgs; state: OpState; created: string; expires: string; decision?: Decision | null; result?: OpResult | null; };
 export type TargetKind = "repo" | "room" | "host" | "session" | "account";
 export type ChangeField = string;
-export type Card = { title: string; body?: string; target: Target; changes?: Array<Change>; command?: Array<string>; };
+export type Card = { title: string; body?: string; target: Target; changes?: Array<Change> | null; command?: Array<string> | null; };
 export type Target = { kind: TargetKind; name: string; };
 export type Change = { field: ChangeField; old: string; new: string; };
 export type Decision = { by: Principal; approved: boolean; reason?: string; at: string; };
@@ -88,6 +90,12 @@ export type EventBody =
   | { type: "turn.started"; body: TurnStarted }
 ;
 export type OpArgs = never;
+export type BoxMessageBody =
+  | { type: "turn.start"; body: TurnStart }
+  | { type: "turn.steer"; body: TurnSteer }
+  | { type: "turn.stop"; body: TurnStop }
+  | { type: "upgrade"; body: Upgrade }
+;
 export interface MethodMap {
   "delivery.done": { request: DeliveryDoneRequest; response: DeliveryDoneResponse };
   "room.create": { request: RoomCreateRequest; response: RoomCreateResponse };
