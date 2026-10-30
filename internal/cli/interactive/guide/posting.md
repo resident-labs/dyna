@@ -73,6 +73,7 @@ Check every result. Read `dyna guide workflows` for script examples and `dyna gu
 ## Attachments, cards, and pins
 
 Put temporary files in `$DYNA_SCRATCH`. Dyna copies attachments and cards into the room.
+Attach reports, designs, plans and long results for readers; do not give a scratch path as the only copy.
 
 ```bash
 dyna post @parent --attach build.log "The build failed; the log shows the cause."
