@@ -10,6 +10,7 @@
   import type { InstructionAction, SessionChange } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
+  import EventSteps from './EventSteps.svelte'
   import { clock } from '../ui/format.ts'
 
   let { post, notice = post.notice, surface = 'feed', posts = [post] }: { post: EventPost; notice?: EventNotice; surface?: EventSurface; posts?: EventPost[] } = $props()
@@ -85,11 +86,10 @@
 >
   {#snippet icon()}✦{/snippet}
   {#snippet footer()}
-  {#if posts.length > 1}
-    <details>
-      <summary>Show steps ({posts.length})</summary>
-      {#each posts as step (step.id)}
-        <div class="step"><time>{clock(step.ts)}</time> · {(sessionEvent(step)?.sections ?? []).map((section) => section.name).join(' · ')}</div>
+  <EventSteps steps={posts.map((step) => ({ id: step.id, time: clock(step.ts), label: (sessionEvent(step)?.sections ?? []).map((section) => section.name).join(' · ') }))}>
+    {#snippet detail(index)}
+      {@const step = posts[index]}
+      {#if step}
         <ul class="sections">
           {#each sessionEvent(step)?.sections ?? [] as section, i (i)}
             <li>
@@ -101,9 +101,9 @@
             </li>
           {/each}
         </ul>
-      {/each}
-    </details>
-  {/if}
+      {/if}
+    {/snippet}
+  </EventSteps>
   {/snippet}
   {#snippet detail()}
   {#if sections.length}
@@ -137,7 +137,6 @@
 </EventRow>
 
 <style>
-  .step { color: var(--muted); }
   .sections { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
   .sections li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: var(--t-cap); }
   .name { color: var(--ink-2); font-weight: 600; }
