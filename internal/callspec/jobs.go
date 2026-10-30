@@ -21,10 +21,16 @@ type RunJobInput struct {
 	Ref         string   `json:"ref"`
 	Host        bool     `json:"host"`
 	Image       string   `json:"image"`
-	CPUs        int      `json:"cpus"`
-	Memory      string   `json:"memory"`
-	Timeout     int      `json:"timeoutSec"`
-	Idle        *int     `json:"idleSec"`
+	// Network supports none for an isolated container. Mounts select named
+	// node registrations as NAME:CONTAINER_PATH[:ro|rw]. Devices must be on
+	// the selected node's allow list for the caller's room.
+	Network string   `json:"network,omitempty"`
+	Mounts  []string `json:"mounts,omitempty"`
+	Devices []string `json:"devices,omitempty"`
+	CPUs    int      `json:"cpus"`
+	Memory  string   `json:"memory"`
+	Timeout int      `json:"timeoutSec"`
+	Idle    *int     `json:"idleSec"`
 	// Artifacts are paths of the job's work folder to keep after it ends.
 	Artifacts []string `json:"artifacts"`
 	// IO is heavy or light: an IO-heavy job shares a node with only a few

@@ -1,9 +1,12 @@
 package job
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/callspec"
 
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
@@ -22,5 +25,43 @@ func TestViewPrintsResources(t *testing.T) {
 func TestViewShowsIdleTimeout(t *testing.T) {
 	if got := view(jobs.Job{Idle: 20 * time.Minute}).Idle; got != "20m0s" {
 		t.Fatalf("idle = %q, want 20m0s", got)
+	}
+}
+
+func captureRun(t *testing.T, args ...string) callspec.RunJobInput {
+	t.Helper()
+	previous := callRunJob
+	var captured callspec.RunJobInput
+	callRunJob = func(_ context.Context, request callspec.RunJobInput, _ *jobs.Job) error {
+		captured = request
+		return nil
+	}
+	t.Cleanup(func() { callRunJob = previous })
+	cmd := runCmd()
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	return captured
+}
+
+func TestRunNetworkNoneFlag(t *testing.T) {
+	request := captureRun(t, "--image", "alpine", "--network", "none", "--", "true")
+	if request.Network != "none" {
+		t.Fatalf("network = %q, want none", request.Network)
+	}
+}
+
+func TestRunMountFlag(t *testing.T) {
+	request := captureRun(t, "--image", "alpine", "--mount", "data:/data:ro", "--mount", "cache:/cache", "--", "true")
+	if strings.Join(request.Mounts, ",") != "data:/data:ro,cache:/cache" {
+		t.Fatalf("mounts = %v", request.Mounts)
+	}
+}
+
+func TestRunDeviceFlag(t *testing.T) {
+	request := captureRun(t, "--image", "alpine", "--device", "/dev/dri", "--", "true")
+	if strings.Join(request.Devices, ",") != "/dev/dri" {
+		t.Fatalf("devices = %v", request.Devices)
 	}
 }
