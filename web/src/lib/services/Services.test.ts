@@ -30,7 +30,8 @@ export const api = {
     row('maintenance', 'this-computer', { switch: { on: true }, schedule: { everyMinutes: 60, timeout: '10m0s' } }),
   ]),
   settings: () => Promise.resolve([]),
-  globalHookRuns: () => Promise.resolve([]),
+  globalHookRuns: () => Promise.resolve([{ id: 'r1', result: 'error', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }]),
+  globalHookRunLog: () => Promise.reject(new Error('log gone')),
   hookRuns: () => Promise.resolve([]),
   runService: (name) => { record('run ' + name); return Promise.resolve({ result: 'pass' }) },
   runHook: (repo, name) => { record('hook ' + repo + ' ' + name); return Promise.resolve({ result: 'pass' }) },
@@ -60,7 +61,9 @@ test('the page shows the registry groups in order with Not set up last; only the
     assert.doesNotMatch(rowOf('maintenance').querySelector('.status')?.textContent ?? '', /\bOn\b/)
     // A click on the row opens its detail in place, where Run now runs the pass.
     need(rowOf('maintenance').querySelector<HTMLElement>('button.toggle')).click()
-    flushSync()
+    await settle()
+    // A failed run whose log cannot be read still shows.
+    assert.match(rowOf('maintenance').textContent ?? '', /maintenance · failed/)
     const run = need([...rowOf('maintenance').querySelectorAll<HTMLElement>('button')].find((b) => b.textContent === 'Run now'))
     run.click()
     await settle()
@@ -92,6 +95,30 @@ test('a refused setting keeps the typed text so the owner can correct it', async
     input.dispatchEvent(new window.Event('blur'))
     for (let i = 0; i < 3; i++) { await new Promise((r) => setTimeout(r, 0)); flushSync() }
     assert.equal(input.value, '2 weeks')
+  } finally {
+    unmount(need(app))
+    dom.window.close()
+    for (const n of domNames) Reflect.deleteProperty(globalThis, n)
+  }
+})
+
+test('an edit typed while a save is pending survives that save', async () => {
+  const dom = installDom()
+  const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/SettingControl', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/SettingControl')
+  const root = need(document.getElementById('app'))
+  let app: Mounted | undefined
+  let done = (): void => {}
+  const item = { key: 'worktrees.root', value: '~/a', kind: 'string', source: 'file', liveVsRestart: '', help: '' }
+  flushSync(() => { app = mount(C, { target: root, props: { item, label: 'Folder for new worktrees', onsave: () => new Promise<void>((r) => { done = r }) } }) })
+  try {
+    const input = need(root.querySelector('input'))
+    const type = (text: string): void => { input.value = text; input.dispatchEvent(new window.Event('input')) }
+    type('~/b')
+    input.dispatchEvent(new window.Event('blur'))
+    type('~/c')
+    done()
+    for (let i = 0; i < 3; i++) { await new Promise((r) => setTimeout(r, 0)); flushSync() }
+    assert.equal(input.value, '~/c')
   } finally {
     unmount(need(app))
     dom.window.close()
