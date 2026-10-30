@@ -88,26 +88,7 @@ func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]
 	}
 	voice := s.voice.Status()
 	f.Voice = &serviceregistry.VoiceFacts{Available: voice.Available, Live: voice.Live}
-	if cfg, err := (updaterservice.Store{DataDir: store.DataDir()}).Get(ctx); err == nil {
-		u := &serviceregistry.UpdateFacts{Source: cfg.Source, Enabled: cfg.Enabled, EveryMinutes: cfg.EveryMinutes, MultipleHooks: cfg.MultipleHooks}
-		if cfg.Source != "" {
-			_, err := repoid.Resolve(ctx, cfg.Source)
-			u.SourceInvalid = err != nil
-		}
-		if jobs, err := hookinstall.DefaultStore().Recent(); err == nil {
-			for _, job := range jobs {
-				if job.Hook != updaterservice.RunName {
-					continue
-				}
-				result := job.Result
-				if job.Status != "finished" {
-					result = "pending"
-				}
-				u.Runs = append(u.Runs, serviceregistry.HookRun{Result: result, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt})
-			}
-		}
-		f.Updates = u
-	}
+	f.Updates = updateFacts(ctx)
 
 	f.Hooks = map[serviceregistry.ID]serviceregistry.HookFacts{}
 	global := s.hookFacts(ctx, "")
@@ -121,6 +102,28 @@ func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]
 		f.Library = s.libraryFacts(ctx, repo, rec.Name, view)
 	}
 	return serviceregistry.Build(f), nil
+}
+
+func updateFacts(ctx context.Context) *serviceregistry.UpdateFacts {
+	cfg, err := (updaterservice.Store{DataDir: store.DataDir()}).Get(ctx)
+	if err != nil {
+		return nil
+	}
+	u := &serviceregistry.UpdateFacts{Source: cfg.Source, Enabled: cfg.Enabled, EveryMinutes: cfg.EveryMinutes, MultipleHooks: cfg.MultipleHooks}
+	if cfg.Source != "" {
+		_, err := repoid.Resolve(ctx, cfg.Source)
+		u.SourceInvalid = err != nil
+	}
+	if jobs, err := hookinstall.DefaultStore().Recent(updaterservice.RunName); err == nil {
+		for _, job := range jobs {
+			result := job.Result
+			if job.Status != "finished" {
+				result = "pending"
+			}
+			u.Runs = append(u.Runs, serviceregistry.HookRun{Result: result, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt})
+		}
+	}
+	return u
 }
 
 // hookFacts reads every hook of one scope (the machine when repo is empty)

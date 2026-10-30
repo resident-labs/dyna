@@ -109,7 +109,7 @@ func (s services) librarianMainUpdates(h hooks.Service) hooks.Service {
 			if err != nil {
 				errs = append(errs, err)
 			} else if source.Root == changed.Root {
-				_, err := h.StartUpdate(ctx, event, cfg.Source)
+				_, err := h.StartUpdate(ctx, event, cfg.Source, cfg.ToolPath)
 				errs = append(errs, err)
 			}
 		}

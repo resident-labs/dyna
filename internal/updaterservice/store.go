@@ -17,6 +17,7 @@ const RunName = "updates-service"
 // Config is the source updater's machine-wide configuration.
 type Config struct {
 	Source        string
+	ToolPath      string
 	Enabled       bool
 	EveryMinutes  int
 	MultipleHooks bool
@@ -31,7 +32,7 @@ func (s Store) Get(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 	var c Config
-	err = db.QueryRowContext(ctx, `SELECT source,enabled,every_minutes,multiple_hooks FROM updater_service WHERE id=1`).Scan(&c.Source, &c.Enabled, &c.EveryMinutes, &c.MultipleHooks)
+	err = db.QueryRowContext(ctx, `SELECT source,enabled,every_minutes,multiple_hooks,tool_path FROM updater_service WHERE id=1`).Scan(&c.Source, &c.Enabled, &c.EveryMinutes, &c.MultipleHooks, &c.ToolPath)
 	return c, err
 }
 
@@ -45,7 +46,7 @@ func (s Store) ClaimInterval(ctx context.Context, now time.Time) (Config, bool, 
 	var due string
 	claimed := false
 	err = statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		if err := conn.QueryRowContext(ctx, `SELECT source,enabled,every_minutes,multiple_hooks,next_due FROM updater_service WHERE id=1`).Scan(&c.Source, &c.Enabled, &c.EveryMinutes, &c.MultipleHooks, &due); err != nil {
+		if err := conn.QueryRowContext(ctx, `SELECT source,enabled,every_minutes,multiple_hooks,tool_path,next_due FROM updater_service WHERE id=1`).Scan(&c.Source, &c.Enabled, &c.EveryMinutes, &c.MultipleHooks, &c.ToolPath, &due); err != nil {
 			return err
 		}
 		if !c.Enabled || c.Source == "" || c.MultipleHooks {
@@ -75,7 +76,7 @@ func (s Store) Update(ctx context.Context, change func(*Config) error) error {
 	}
 	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		var c Config
-		if err := conn.QueryRowContext(ctx, `SELECT source,enabled,every_minutes,multiple_hooks FROM updater_service WHERE id=1`).Scan(&c.Source, &c.Enabled, &c.EveryMinutes, &c.MultipleHooks); err != nil {
+		if err := conn.QueryRowContext(ctx, `SELECT source,enabled,every_minutes,multiple_hooks,tool_path FROM updater_service WHERE id=1`).Scan(&c.Source, &c.Enabled, &c.EveryMinutes, &c.MultipleHooks, &c.ToolPath); err != nil {
 			return err
 		}
 		old := c
@@ -83,7 +84,7 @@ func (s Store) Update(ctx context.Context, change func(*Config) error) error {
 			return err
 		}
 		if c.Source != old.Source || c.EveryMinutes != old.EveryMinutes || c.Enabled != old.Enabled {
-			_, err := conn.ExecContext(ctx, `UPDATE updater_service SET source=?, enabled=?, every_minutes=?, multiple_hooks=?, next_due='' WHERE id=1`, c.Source, c.Enabled, c.EveryMinutes, c.MultipleHooks)
+			_, err := conn.ExecContext(ctx, `UPDATE updater_service SET source=?, enabled=?, every_minutes=?, multiple_hooks=?, tool_path=?, next_due='' WHERE id=1`, c.Source, c.Enabled, c.EveryMinutes, c.MultipleHooks, c.ToolPath)
 			return err
 		}
 		_, err := conn.ExecContext(ctx, `UPDATE updater_service SET multiple_hooks=? WHERE id=1`, c.MultipleHooks)

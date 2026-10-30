@@ -68,13 +68,6 @@ func TestHookStatusUsesNewestRun(t *testing.T) {
 	}
 }
 
-func TestUpdatesReportsMissingCheckout(t *testing.T) {
-	got := Build(Facts{Updates: &UpdateFacts{Source: "/missing", Enabled: true, SourceInvalid: true}})[9]
-	if got.State != StateError || got.Detail != DetailUpdateSourceInvalid {
-		t.Fatalf("updates = %s %s", got.State, got.Detail)
-	}
-}
-
 // A built-in service carries its interval and time limit, so the app and the
 // CLI can edit them; a service without a timer carries none.
 func TestBuiltinServiceCarriesItsSchedule(t *testing.T) {

@@ -19,7 +19,7 @@ func MigrateUpdateRecipe(dataDir string) error {
 	}
 	return database.Migrate(db, "updater.service", 1, func(conn *sql.Conn, _ int) error {
 		ctx := context.Background()
-		if _, err := conn.ExecContext(ctx, `CREATE TABLE updater_service (id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL, enabled INTEGER NOT NULL, every_minutes INTEGER NOT NULL, multiple_hooks INTEGER NOT NULL, next_due TEXT NOT NULL DEFAULT '')`); err != nil {
+		if _, err := conn.ExecContext(ctx, `CREATE TABLE updater_service (id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL, enabled INTEGER NOT NULL, every_minutes INTEGER NOT NULL, multiple_hooks INTEGER NOT NULL, tool_path TEXT NOT NULL DEFAULT '', next_due TEXT NOT NULL DEFAULT '')`); err != nil {
 			return err
 		}
 		rows, err := conn.QueryContext(ctx, `SELECT repo, body FROM hook_documents WHERE repo <> ? ORDER BY repo`, globalKey)
@@ -33,6 +33,7 @@ func MigrateUpdateRecipe(dataDir string) error {
 			index  int
 			hook   Hook
 			source string
+			tools  string
 		}
 		var matches []match
 		for rows.Next() {
@@ -60,8 +61,8 @@ func MigrateUpdateRecipe(dataDir string) error {
 					rows.Close()
 					return err
 				}
-				if source, ok := updateRecipeSource(h); ok {
-					matches = append(matches, match{key, doc, list, i, h, source})
+				if source, tools, ok := updateRecipeSource(h); ok {
+					matches = append(matches, match{key, doc, list, i, h, source, tools})
 				}
 			}
 		}
@@ -81,7 +82,7 @@ func MigrateUpdateRecipe(dataDir string) error {
 		if interval == 0 {
 			interval = 60
 		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO updater_service(id,source,enabled,every_minutes,multiple_hooks) VALUES(1,?,?,?,0)`, m.source, !m.hook.Disabled, interval); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO updater_service(id,source,enabled,every_minutes,multiple_hooks,tool_path) VALUES(1,?,?,?,0,?)`, m.source, !m.hook.Disabled, interval, m.tools); err != nil {
 			return err
 		}
 		m.hooks = append(m.hooks[:m.index], m.hooks[m.index+1:]...)
@@ -102,20 +103,20 @@ func MigrateUpdateRecipe(dataDir string) error {
 // syntax so an owner-edited command can never be removed by the migration.
 var updateRecipeCommand = regexp.MustCompile(`^('(?:[^']|'\\'')*') git hooks _install --main ('(?:[^']|'\\'')*') --name ('(?:[^']|'\\'')*') --tool-path ('(?:[^']|'\\'')*')$`)
 
-func updateRecipeSource(h Hook) (string, bool) {
+func updateRecipeSource(h Hook) (string, string, bool) {
 	if h.Label != "Update Dyna" {
-		return "", false
+		return "", "", false
 	}
 	words := updateRecipeCommand.FindStringSubmatch(strings.TrimSpace(h.Command))
 	if len(words) != 5 {
-		return "", false
+		return "", "", false
 	}
 	unquote := func(s string) string {
 		return strings.ReplaceAll(s[1:len(s)-1], `'\''`, `'`)
 	}
 	exe, source, name, tools := unquote(words[1]), unquote(words[2]), unquote(words[3]), unquote(words[4])
 	if exe == "" || source == "" || tools == "" || name != h.Name {
-		return "", false
+		return "", "", false
 	}
-	return source, true
+	return source, tools, true
 }

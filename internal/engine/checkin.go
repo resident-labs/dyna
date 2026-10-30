@@ -28,6 +28,9 @@ func (s services) setSetting(ctx context.Context, key, value string) (configsvc.
 			return configsvc.Item{}, fmt.Errorf("updater.source must be an absolute path")
 		}
 		err := (updaterservice.Store{DataDir: store.DataDir()}).Update(ctx, func(c *updaterservice.Config) error {
+			if c.Source != value {
+				c.ToolPath = ""
+			}
 			c.Source = value
 			c.MultipleHooks = false
 			if value == "" {
