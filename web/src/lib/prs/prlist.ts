@@ -327,7 +327,7 @@ export interface BoxRow {
   note: string
   link: string
 }
-export function mergeBox(c: Row, { merge = null, state = null, review = true, names = {} }: { merge?: MergeItem | null; state?: MergeState | null; review?: boolean; names?: Record<string, string> } = {}): { rows: BoxRow[]; status: StatusBox } {
+export function mergeBox(c: Row, { merge = null, state = null, review = true, names = {} }: { merge?: MergeItem | null; state?: MergeState | null; review?: boolean; names?: Record<string, string> } = {}): { rows: BoxRow[]; status: StatusBox; isCI: boolean } {
   const box = statusBox(c, { merge, review })
   const sum = checkSummary(c.checks)
   const checkNames = (list: { name?: string }[]) => list.slice(0, 3).map((k) => k.name).join(', ')
@@ -352,9 +352,10 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
   const m = state ?? mergeState(c, merge)
   const icon = MERGE_ICON[m.tone] ?? 'wait'
   const action = nextAction(c, merge)
+  const isCI = !isDone(c) && action.kind === 'ci'
   const note = action.others.length
     ? [action.others.join(' · '), m.reason].filter(Boolean).join(' · ')
-    : ['Waiting for CI', 'CI missing', 'Blocked: CI failed'].includes(action.label) ? ''
+    : isCI ? ''
     : m.id === 'next' ? 'The merge service will test this PR in the next batch.' : m.reason || box.say
   const missing = prTracks(c).missing
   // Required reviewers show only when the PR has requirements; the names come from the room.
@@ -372,6 +373,7 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
       { id: 'merge', icon, title: isDone(c) ? m.label : action.label, note, link: '' },
     ],
     status: box,
+    isCI,
   }
 }
 
