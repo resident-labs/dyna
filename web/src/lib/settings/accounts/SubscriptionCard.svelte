@@ -1,14 +1,20 @@
 <script lang="ts">
   import Card from '../../ui/Card.svelte'
-  import InlineConfirm from '../../ui/InlineConfirm.svelte'
+  import StatusPill from '../../ui/StatusPill.svelte'
   import UsageMeter from './UsageMeter.svelte'
-  import { accountKindLabel, accountLabel, accountStatus, needsSignIn, observation, parseRepoList, providerColor, providerName, repoChips, reposLabel, remainingPercent, selectionText, usageUnavailableText } from './state.ts'
+  import UsageSegment from './UsageSegment.svelte'
+  import { accountKindLabel, accountLabel, accountStatus, amountWindow, blockedNow, dateTime, needsSignIn, parseRepoList, percent, poolMean, poolsHere, poolWindows, providerColor, providerName, repoChips, reposLabel, segmentRemaining, usageUnavailableText } from './state.ts'
   import { blockUntil } from './reset.ts'
+  import { meterWake, poolPace, type PaceStatus } from './pace.ts'
   import { deadlineClock } from './clock.svelte.ts'
   import type { ProviderAccounts, ScopeAccount } from '../../api/account.ts'
 
-  // One provider and every account saved for it. The pane reads and writes the
-  // accounts, so this only shows them and reports the button the owner pressed.
+  // One provider and every account saved for it. Each usage window shows a
+  // headline over the accounts that can serve this scope and one segment per
+  // account; a row per account below holds its actions. The pane reads and
+  // writes the accounts, so this only shows them and reports the button the
+  // owner pressed. compact is the room home: the same windows, and rows that
+  // only open details.
   interface Props {
     group: ProviderAccounts
     compact?: boolean
@@ -18,15 +24,18 @@
     onuse?: ((account: ScopeAccount) => void) | null
     onsignin?: ((account: ScopeAccount) => void) | null
     onsaverepos?: ((account: ScopeAccount, repos: string[]) => Promise<boolean>) | null
-    onremove?: ((account: ScopeAccount) => void) | null
   }
-  let { group, compact = false, roomScope = false, busy = false, onopen = null, onuse = null, onsignin = null, onsaverepos = null, onremove = null }: Props = $props()
-  // One wake for the card: it starts at the first account block that ends, and
-  // the clock asks for the next deadline after each wake.
+  let { group, compact = false, roomScope = false, busy = false, onopen = null, onuse = null, onsignin = null, onsaverepos = null }: Props = $props()
+  const accounts = $derived(group.accounts ?? [])
+  const pools = $derived(poolWindows(accounts))
+  // One wake for the card: the first account block that ends, or the next
+  // minute while a window counts down, so the headline and pace stay current.
   const now = deadlineClock(() => {
-    const deadlines = (group.accounts ?? []).map((account) => blockUntil(account)).filter((at) => Number.isFinite(at))
+    const at = Date.now()
+    const deadlines = accounts.flatMap((account) => [blockUntil(account, at), ...(account.windows ?? []).map((window) => meterWake(window.resetsAt, at))]).filter((deadline) => Number.isFinite(deadline))
     return deadlines.length ? Math.min(...deadlines) : Number.NaN
   })
+  const paceWords: Record<PaceStatus, string> = { ahead: '▲ ahead of pace', on: '● on pace', under: '▼ under pace' }
   // The row whose repo list is open, and the list being edited.
   let scoping = $state('')
   let scopeText = $state('')
@@ -46,40 +55,53 @@
   }
 </script>
 
-<Card title={providerName(group.provider)}>
+<Card title={providerName(group.provider)} count={accounts.length > 1 ? accounts.length : null}>
   {#snippet leading()}<span class="provider-dot" style:background={providerColor(group.provider)}></span>{/snippet}
-  {#each group.accounts ?? [] as account (account.id)}
-    {@const status = [accountStatus(account, '', now()), accountKindLabel(account.kind)].filter(Boolean).join(' · ')}
-    <div class="account" class:compact>
-      <div class="heading">
-        <div class="identity">
-          <b>{accountLabel(account)}</b>
-          {#if status}<p class="status">{status}</p>{/if}
+  {#if pools.length}
+    <div class="pools">
+      {#each pools as pool (pool.key)}
+        {@const mean = poolMean(pool, now())}
+        {@const pace = poolPace(pool.segments.filter((segment) => poolsHere(segment.account) && segmentRemaining(segment, now()) !== null).map((segment) => segment.window), now())}
+        <div class="pool">
+          <div class="headline">
+            <span class="micro-label">{pool.label}</span>
+            {#if mean === null}<span class="none">Not reported</span>{:else}<strong class="ui-num" class:low={mean < 20}>{percent(mean)}</strong>{/if}
+            {#if pace}<span class="pace" class:ahead={pace === 'ahead'}>{paceWords[pace]}</span>{/if}
+          </div>
+          <div class="segments">
+            {#each pool.segments as segment (segment.account.id)}
+              <UsageSegment name={accountLabel(segment.account)} window={segment.window} observedAt={segment.account.observedAt} provider={group.provider} active={segment.account.activeHere} muted={!poolsHere(segment.account)} />
+            {/each}
+          </div>
         </div>
-        {#if account.activeHere}<span class="in-use">{selectionText(account, roomScope)}</span>
-        {:else if roomScope && account.active}<span class="inherited">{selectionText(account, roomScope)}</span>{/if}
-      </div>
-      {#if account.windows?.length}
-        <div class="windows">{#each account.windows as window (window.id || window.label)}<UsageMeter {window} provider={group.provider} observedAt={account.observedAt} compact={compact && remainingPercent(window) !== null} />{/each}</div>
-      {:else}<p class="note">{usageUnavailableText(account)}</p>{/if}
-      {#if repoChips(account).length}<div class="chips">{#each repoChips(account) as repo (repo)}<span class="chip">{repo}</span>{/each}</div>{/if}
-      {#if !compact && observation(account)}<p class="note">{observation(account)}</p>{/if}
-      {#if compact && onopen}<div class="actions"><button class="btn quiet" onclick={(event) => onopen?.(account, event)}>Details</button></div>{/if}
-      {#if !compact}
-        <div class="actions">
-          {#if needsSignIn(account) && onsignin}<button class="btn pri" disabled={busy} onclick={() => onsignin?.(account)}>Sign in</button>{/if}
-          {#if !account.activeHere && onuse}<button class="btn" disabled={busy} onclick={() => onuse?.(account)}>Use</button>{/if}
-          {#if onopen}<button class="btn quiet" onclick={(event) => onopen?.(account, event)}>Details</button>{/if}
-          {#if onsaverepos}<button class="btn quiet" disabled={busy} aria-expanded={scoping === account.id} onclick={() => editRepos(account)}>Repos<span class="repos-label"> · {reposLabel(account)}</span></button>{/if}
-          {#if onremove}
-            {#if scoping === 'remove:' + account.id}
-              <InlineConfirm ask="Remove this account?" {busy} onconfirm={() => onremove?.(account)} oncancel={() => (scoping = '')} />
-            {:else}
-              <button class="btn quiet" disabled={busy} onclick={() => (scoping = 'remove:' + account.id)}>Remove</button>
-            {/if}
-          {/if}
+      {/each}
+    </div>
+  {/if}
+  <div class="accounts" class:compact>
+    {#each accounts as account (account.id)}
+      {@const block = blockedNow(account, now())}
+      {@const signIn = needsSignIn(account) || account.usageReason === 'expired'}
+      {@const amounts = (account.windows ?? []).filter(amountWindow)}
+      <div class="account">
+        <div class="row">
+          <div class="identity">
+            <b>{accountLabel(account)}</b>
+            <span class="facts">{[signIn || block ? '' : accountStatus(account, '', now()), accountKindLabel(account.kind), account.servesHere ? '' : 'Other repos only', roomScope && account.active && !account.activeHere ? 'Global choice' : ''].filter(Boolean).join(' · ')}</span>
+            {#if account.activeHere}<StatusPill label="In use" />{/if}
+            {#if signIn}<StatusPill label="Needs sign-in" tone="danger" />
+            {:else if block}<StatusPill label={block.ids.includes('seven_day') ? 'Weekly limit reached' : 'Session limit reached'} tone="warning" detail={block.reset ? `Resets ${dateTime(block.reset)}` : ''} />{/if}
+          </div>
+          <div class="actions">
+            {#if !compact && signIn && onsignin}<button class="btn pri" disabled={busy} onclick={() => onsignin?.(account)}>Sign in</button>{/if}
+            {#if !compact && !account.activeHere && onuse}<button class="btn" disabled={busy} onclick={() => onuse?.(account)}>Use</button>{/if}
+            {#if onopen}<button class="btn quiet" onclick={(event) => onopen?.(account, event)}>Details</button>{/if}
+            {#if !compact && onsaverepos}<button class="btn quiet" disabled={busy} aria-expanded={scoping === account.id} onclick={() => editRepos(account)}>Repos<span class="repos-label"> · {reposLabel(account)}</span></button>{/if}
+          </div>
         </div>
-        {#if scoping === account.id && onsaverepos}
+        {#if amounts.length}<div class="amounts">{#each amounts as window (window.id || window.label)}<UsageMeter {window} provider={group.provider} observedAt={account.observedAt} {compact} />{/each}</div>
+        {:else if !account.windows?.length}<p class="note">{usageUnavailableText(account)}</p>{/if}
+        {#if !compact && repoChips(account).length}<div class="chips">{#each repoChips(account) as repo (repo)}<span class="chip">{repo}</span>{/each}</div>{/if}
+        {#if !compact && scoping === account.id && onsaverepos}
           <form class="repos" onsubmit={(e) => { e.preventDefault(); void saveRepos(account) }}>
             <label>
               <span class="muted small">Only use this account in these repos (one per line, empty for any)</span>
@@ -92,32 +114,45 @@
             </div>
           </form>
         {/if}
-      {/if}
-    </div>
-  {/each}
+      </div>
+    {/each}
+  </div>
 </Card>
 
 <style>
-  .provider-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .account { min-width: 0; padding-top: var(--s2); }
-  .account + .account { border-top: 1px solid var(--line); margin-top: var(--s2); }
-  .heading { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
-  .identity { flex: 1; min-width: 0; }
-  b { font-size: var(--t-body); font-weight: 500; overflow-wrap: anywhere; }
-  .status { margin: var(--s1) 0 0; color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
-  .in-use { background: var(--sage); color: var(--main); border-radius: 4px; padding: 2px 8px; font-size: var(--t-cap); font-weight: 600; white-space: nowrap; }
-  .inherited { color: var(--muted); font-size: var(--t-cap); white-space: nowrap; }
-  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s3); }
+  .provider-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
+  .pools { container-type: inline-size; display: grid; gap: var(--s3); margin-top: var(--s1); }
+  .pool { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: var(--s2) var(--s4); align-items: center; }
+  .headline { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .headline strong { font-size: var(--t-stat); font-weight: var(--w-strong); line-height: var(--leading-tight); color: var(--ink); }
+  .headline strong.low { color: var(--tone-warning-fg); }
+  .none { font-size: var(--t-sm); color: var(--muted); }
+  .pace { font-size: var(--t-cap); color: var(--muted); white-space: nowrap; }
+  .pace.ahead { color: var(--tone-warning-fg); }
+  .segments { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--s1); min-width: 0; }
+  @container (max-width: 30rem) {
+    .pool { grid-template-columns: minmax(0, 1fr); }
+    .headline { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s2); }
+  }
+  .accounts { display: flex; flex-direction: column; margin-top: var(--s2); border-top: 1px solid var(--border-soft); }
+  .accounts:first-child { margin-top: 0; border-top: 0; }
+  .account { min-width: 0; padding: var(--s2) 0; }
+  .account + .account { border-top: 1px solid var(--border-soft); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+  .identity { flex: 1 1 14rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); }
+  b { font-size: var(--t-ui); font-weight: var(--w-medium); overflow-wrap: anywhere; }
+  .facts { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
   .repos-label { color: var(--muted); }
-  .windows { display: grid; gap: var(--s3); margin-top: var(--s3); }
-  .note { margin: var(--s2) 0 0; color: var(--muted); font-size: var(--t-sm); line-height: 1.7; }
+  .amounts { display: grid; gap: var(--s2); margin-top: var(--s2); }
+  .note { margin: var(--s1) 0 0; color: var(--muted); font-size: var(--t-sm); line-height: var(--leading); }
   .chips { display: flex; flex-wrap: wrap; gap: var(--s1); margin-top: var(--s2); }
-  .chip { background: var(--raise); border-radius: 4px; padding: 2px 7px; font-size: var(--t-cap); color: var(--ink-2); overflow-wrap: anywhere; }
-  .repos { display: grid; gap: var(--s2); margin-top: 10px; padding: 10px; background: var(--main); border: 1px solid var(--line-soft); border-radius: 6px; }
+  .chip { background: var(--raise); border-radius: var(--r-badge); padding: 2px 7px; font-size: var(--t-cap); color: var(--ink-2); overflow-wrap: anywhere; }
+  .repos { display: grid; gap: var(--s2); margin-top: 10px; padding: 10px; background: var(--main); border: 1px solid var(--line-soft); border-radius: var(--r-xs); }
   .repos label { display: grid; gap: var(--s1); }
-  .repos textarea { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; font-size: var(--t-sm); color: var(--ink); resize: vertical; min-width: 0; }
+  .repos textarea { background: var(--field); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 5px 9px; font: inherit; font-size: var(--t-sm); color: var(--ink); resize: vertical; min-width: 0; }
+  .repos .actions { margin-top: var(--s1); }
   .muted { color: var(--muted); }
   .small { font-size: var(--t-sm); }
-  .compact .windows { gap: var(--s2); margin-top: var(--s2); }
   @media (pointer: coarse) { .actions .btn { min-height: 44px; } }
 </style>

@@ -13,7 +13,7 @@ import { need } from '../test/need.ts'
 
 const now = new Date().toISOString()
 const windowFor = (id: string, label: string, used: number) => fixtureWindow(id, label, used, '2026-10-21T14:00:00Z')
-const row = (fields: Parameters<typeof account>[0]): ScopeAccount => ({ ...account({ observedAt: now, ...fields }), activeHere: fields.active ?? false })
+const row = (fields: Parameters<typeof account>[0]): ScopeAccount => ({ ...account({ observedAt: now, ...fields }), activeHere: fields.active ?? false, servesHere: true })
 const savedAccounts: ScopeAccount[] = [
   row({ id: 'claude-personal', harness: 'pi', provider: 'anthropic', label: 'Claude · Personal', active: true, plan: { id: 'max', label: 'Max 5x' }, source: 'Claude account report', profiles: ['reviewer'], windows: [windowFor('short', '5-hour window', 32), windowFor('weekly', 'Weekly window', 59)] }),
   row({ id: 'claude-work', harness: 'pi', provider: 'anthropic', label: 'Claude · Work', plan: { id: 'max', label: 'Max 20x' }, source: 'Claude account report', windows: [windowFor('short', '5-hour window', 26), windowFor('weekly', 'Weekly window', 37)] }),

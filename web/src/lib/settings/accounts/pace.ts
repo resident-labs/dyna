@@ -34,9 +34,24 @@ export function paceOf(window: PaceWindow, now: number): Pace | null {
   const end = Date.parse(window.resetsAt ?? '')
   if (length === null || window.usedPercent === undefined || !Number.isFinite(end) || end <= now) return null
   const elapsed = Math.min(100, Math.max(0, ((length - (end - now)) / length) * 100))
-  const gap = window.usedPercent - elapsed
-  const status: PaceStatus = gap > 5 ? 'ahead' : gap < -5 ? 'under' : 'on'
-  return { status, expectedRemaining: 100 - elapsed }
+  return { status: statusOf(window.usedPercent - elapsed), expectedRemaining: 100 - elapsed }
+}
+
+function statusOf(gap: number): PaceStatus {
+  return gap > 5 ? 'ahead' : gap < -5 ? 'under' : 'on'
+}
+
+// poolPace compares the mean used share of a pool's windows with the mean
+// elapsed share. Windows with no known length or reading do not count.
+export function poolPace(windows: readonly PaceWindow[], now: number): PaceStatus | null {
+  let gap = 0, n = 0
+  for (const window of windows) {
+    const pace = paceOf(window, now)
+    if (!pace || window.usedPercent === undefined) continue
+    gap += window.usedPercent - (100 - pace.expectedRemaining)
+    n++
+  }
+  return n ? statusOf(gap / n) : null
 }
 
 // meterWake is the next time a meter's countdown or pace can change: the next whole minute, or the reset when it comes first.
