@@ -123,10 +123,10 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	var next time.Time
 	for _, repo := range repos {
 		next = s.now().Add(pollEvery)
+		seen[repo] = true
 		if roomID != "" && !trialHasRoom(st, *st.MergeTrials[repo], roomID) {
 			continue
 		}
-		seen[repo] = true
 		if err := s.confirmTrialProbes(st, probes, *st.MergeTrials[repo]); err != nil {
 			failures = append(failures, err)
 			continue
