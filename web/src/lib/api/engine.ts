@@ -323,6 +323,7 @@ export interface Engine {
   Settings(): Promise<SettingItem[] | null>
   SetSetting(key: string, value: string): Promise<SettingItem>
   OwnerProfile(): Promise<Owner>
+  SetOwnerProfile(owner: Owner): Promise<Owner>
   UpdateNotice(): Promise<UpdateNotice>
   UpdateDyna(): Promise<null>
   Notices(): Promise<Notice[] | null>
