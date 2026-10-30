@@ -766,7 +766,7 @@ func TestVerdictsPushesAndMerge(t *testing.T) {
 	e.tick()
 	e.tick()
 	r = e.record()
-	if len(e.launches) != 1 || !strings.Contains(e.launches[0], "--head "+r.Head) || !strings.Contains(e.launches[0], "Read GitHub without posting") {
+	if len(e.launches) != 1 || !strings.Contains(e.launches[0], "--head "+r.Head) || !strings.Contains(e.launches[0], "Use GitHub for reading only; publish reviews and comments only in Dyna") {
 		t.Fatalf("review task: %+v", e.launches)
 	}
 	e.addTrustedComment(10, "reviews", Marker(r.Reviewer)+" Fix the parser.", "owner")
