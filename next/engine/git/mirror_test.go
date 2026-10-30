@@ -51,7 +51,7 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.calls) != 2 || r.calls[0][0] != "clone" || !c.called || c.mirror != filepath.Join(dir, "git/owner/repo.git") || result.Cache != "/host/git/owner/repo.git" || result.Base != "main" || len(c.refs) != 1 || c.refs[0] != "+refs/heads/*:refs/heads/*" {
+	if len(r.calls) != 2 || r.calls[0][0] != "clone" || r.calls[0][1] != "--bare" || !c.called || c.mirror != filepath.Join(dir, "git/owner/repo.git") || result.Cache != "/host/git/owner/repo.git" || result.Base != "main" || len(c.refs) != 1 || c.refs[0] != "+refs/heads/*:refs/heads/*" {
 		t.Fatalf("calls %v, repo %+v, host %+v", r.calls, result, c)
 	}
 	for _, call := range r.calls {
