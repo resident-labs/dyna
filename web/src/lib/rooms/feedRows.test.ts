@@ -344,3 +344,23 @@ test('a terminal failure is not folded beneath a later post', () => {
     spec.threadEnd = previous
   }
 })
+
+test('instruction notes fold across an unrelated post, including older notes', () => {
+  const instruction = (id: string, thread?: string): FeedInput => ({
+    id, ts: start, from: 'dyna', kind: 'session', notice: { kind: 'instructions', thread },
+    payload: { type: 'instructions', session: 'room:worker' },
+  })
+  const rows = content(feedRows([instruction('a'), { id: 'note', ts: start, from: 'user' }, instruction('b', 'instructions:room:worker')]))
+  assert.deepEqual(rows.map((row) => row.post.id), ['note', 'b'])
+  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['a', 'b'])
+})
+
+test('a failure between instruction notes remains a separate card', () => {
+  const instruction = (id: string): FeedInput => ({
+    id, ts: start, from: 'dyna', kind: 'session', notice: { kind: 'instructions', thread: 'instructions:room:worker' },
+    payload: { type: 'instructions', session: 'room:worker' },
+  })
+  const rows = content(feedRows([instruction('a'), mergePost('failure', 'failed', 'trial'), instruction('b')]))
+  assert.deepEqual(rows.map((row) => row.post.id), ['failure', 'b'])
+  assert.equal(rowPost(rows[0])?.notice?.kind, 'failed')
+})

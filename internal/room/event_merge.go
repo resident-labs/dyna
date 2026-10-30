@@ -160,5 +160,8 @@ func (m Message) ThreadKey() string {
 	if event, ok := m.Merge(); ok && event.TrialID != "" {
 		return event.eventThread()
 	}
+	if event, ok := m.Session(); ok {
+		return event.eventThread()
+	}
 	return ""
 }
