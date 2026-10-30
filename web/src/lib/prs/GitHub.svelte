@@ -67,6 +67,7 @@
     onexportissue?: (issue: RoomIssue) => void
     ondismississue?: (issue: RoomIssue) => void
     mergeVersion?: number
+    issuesVersion?: number
     older?: boolean
     loadingOlder?: boolean
     failedOlder?: boolean
@@ -98,7 +99,7 @@
   // kind is 'pr' or 'issue': the Pull requests tab and the Issues tab each mount this view.
   // onpr opens a PR by number in the Pull requests tab, from an issue's linked PRs.
   // link is a PR link ({pr, tab}) or issue link ({issue}) to open, from the address bar.
-  let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, session = '', active = true, kind = 'pr', integration = null, changes = null, members = [], link = null, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
+  let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, issuesVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, session = '', active = true, kind = 'pr', integration = null, changes = null, members = [], link = null, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
   let listKind: ListKind = $derived(kind === 'pr' ? 'pr' : 'issue')
@@ -225,12 +226,13 @@
     load()
   }
 
-  // A session that starts or ends changes which issues have live room work,
-  // so the tracked issue list follows the room's live sessions.
+  // Which issues have live room work changes when a session ends, and when
+  // new issue work is committed (issuesVersion). A starting session shows up
+  // before its work record, so the committed change is what adds the issue.
   let liveSessions = $derived(members.filter((m) => m.id && !m.closed && m.status !== 'dormant' && m.status !== 'closed').map((m) => m.id).sort().join(' '))
   let liveVersion: string | null = null
   $effect(() => {
-    const live = liveSessions
+    const live = `${liveSessions}|${issuesVersion}`
     if (liveVersion !== null && liveVersion !== live && !inPRs && tracked && active) untrack(loadWatched)
     liveVersion = live
   })

@@ -23,7 +23,7 @@ test('issueGroups orders the groups and puts older closed issues in Closed', () 
 })
 
 // memberState holds the room's members as Svelte state, so a test can change them on a mounted view.
-const MEMBERS = compileModule('export const memberState = $state({ list: [] }); globalThis.memberState = memberState;', { filename: 'members.svelte.js', dev: false }).js.code
+const MEMBERS = compileModule('export const memberState = $state({ list: [], issues: 0 }); globalThis.memberState = memberState;', { filename: 'members.svelte.js', dev: false }).js.code
 const API = MEMBERS + `
 export const api = {
   feedAround: () => Promise.resolve({ posts: [{ id: 'msg_local', text: 'Local body text' }] }),
@@ -369,15 +369,19 @@ test('a failed tracked issues call shows Retry instead of the raw error', async 
   } finally { await r.done() }
 })
 
-// Work that starts while the tab is open shows up: a new live session reloads
-// the tracked issues, so the issue it works on joins the list.
-test('a session that starts work refreshes the tracked issues', async () => {
+// Work that starts while the tab is open shows up. StartIssueWork shows the
+// session before it saves the issue work, so the member change alone finds
+// nothing; the committed issue change (issuesVersion) then adds the issue.
+test('issue work that starts while the tab is open joins the tracked issues', async () => {
   Object.assign(globalThis, { issueWatched: [] })
-  const r = await render([], { get members() { return Reflect.get(globalThis, 'memberState').list } }, microtasks, 'tracked')
+  const r = await render([], { get members() { return Reflect.get(globalThis, 'memberState').list }, get issuesVersion() { return Reflect.get(globalThis, 'memberState').issues } }, microtasks, 'tracked')
   try {
     assert.match(element(r.target, '.empty').textContent, /No tracked issues/)
-    Object.assign(globalThis, { issueWatched: [issue(77, 'needs-owner', { title: 'Worked issue' })] })
     Reflect.get(globalThis, 'memberState').list = [{ id: 's1', name: 'builder', status: 'running' }]
+    await microtasks()
+    assert.match(element(r.target, '.empty').textContent, /No tracked issues/, 'the work record is not saved yet')
+    Object.assign(globalThis, { issueWatched: [issue(77, 'needs-owner', { title: 'Worked issue' })] })
+    Reflect.get(globalThis, 'memberState').issues++
     await microtasks()
     assert.deepEqual(elements(r.target, '.row .title').map((t) => t.textContent), ['Worked issue'])
   } finally { await r.done(); Reflect.deleteProperty(globalThis, 'memberState') }
