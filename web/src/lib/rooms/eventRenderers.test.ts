@@ -1106,6 +1106,30 @@ test('denial reason appears only in the decision row', () => {
   web.unmount(a); web.unmount(b); target.remove()
 })
 
+test('a denied result explains the decision in the requester DM', () => {
+  const target = document.createElement('div')
+  document.body.append(target)
+  const post = postFor('approval', 'result', { requestId: 'A-12', state: 'denied', reason: 'wrong branch' })
+  const mounted = web.mount(web.eventComponents.ApprovalResultCard, { target, props: { post, surface: 'dm' } })
+  web.flushSync()
+  assert.match(target.textContent ?? '', /Write denied/)
+  assert.match(target.textContent ?? '', /wrong branch/)
+  web.unmount(mounted); target.remove()
+})
+
+test('result output preserves standalone and embedded URLs exactly', () => {
+  const target = document.createElement('div')
+  document.body.append(target)
+  const url = 'https://example.com/pr/1'
+  const output = [url, `${url}23`, `See ${url} for details`]
+  const post = postFor('approval', 'result', { requestId: 'A-12', state: 'done', url, output })
+  const mounted = web.mount(web.eventComponents.ApprovalResultCard, { target, props: { post } })
+  web.flushSync()
+  assert.equal(target.querySelector('pre')?.textContent, output.join('\n'))
+  assert.equal(target.querySelectorAll(`a[href="${url}"]`).length, 1)
+  web.unmount(mounted); target.remove()
+})
+
 test('an interrupted workflow explains its typed replay decision', () => {
   const post = postFor('run', 'result', { ...fixtures['run/result'], state: 'interrupted', replayReason: 'input_mismatch' } as EventPayload)
   const target = document.createElement('div')

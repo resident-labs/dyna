@@ -20,31 +20,30 @@
   let shown = $derived(open || result?.state === 'failed')
   let failed = $derived(result?.state === 'failed')
   let url = $derived(result?.url && /^https?:\/\//i.test(result.url) ? result.url : '')
-  let outputText = $derived(output.join('\n'))
-  let parts = $derived(url ? outputText.split(url) : [outputText])
+  let urlLine = $derived(url ? output.indexOf(url) : -1)
 </script>
 
 {#snippet body()}
-  {#if output.length}<pre class="output">{parts.join('')}</pre>{/if}
+  {#if output.length}<pre class="output">{#each output as line, i}{#if i > 0}{'\n'}{/if}{#if i === urlLine}<a href={url} target="_blank" rel="noopener noreferrer">{line}</a>{:else}{line}{/if}{/each}</pre>{/if}
 {/snippet}
 
 {#snippet resultLink()}<a href={url} target="_blank" rel="noopener noreferrer">{url}</a>{/snippet}
 
-{#if result && result.state !== 'denied'}
+{#if result && (result.state !== 'denied' || surface === 'dm')}
   <EventRow
     id={post.id}
     ts={post.ts}
     {surface}
-    title={`Approved write ${words[result.state]}`}
+    title={result.state === 'denied' ? 'Write denied' : `Approved write ${words[result.state]}`}
     chips={result.exitCode ? [{ label: `exit ${result.exitCode}` }] : []}
     summary={[result.reason ?? '', output.length ? `${output.length} output line${output.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
-    summaryExtra={url ? resultLink : undefined}
+    summaryExtra={url && urlLine < 0 ? resultLink : undefined}
     open={shown}
     ontoggle={(value) => (open = value)}
     detail={output.length ? body : undefined}
   >
-    {#snippet icon()}<span aria-hidden="true">{failed ? '✕' : '✓'}</span>{/snippet}
-    {#snippet headline()}{#if failed}<strong>Approved write</strong> <StatusPill tone="danger" label="failed" />{:else}<strong>{result.state === 'denied' ? 'Write not run' : `Approved write ${words[result.state]}`}</strong>{/if}{/snippet}
+    {#snippet icon()}<span aria-hidden="true">{failed || result.state === 'denied' ? '✕' : '✓'}</span>{/snippet}
+    {#snippet headline()}{#if failed}<strong>Approved write</strong> <StatusPill tone="danger" label="failed" />{:else}<strong>{result.state === 'denied' ? 'Write denied' : `Approved write ${words[result.state]}`}</strong>{/if}{/snippet}
   </EventRow>
 {/if}
 
