@@ -70,6 +70,10 @@ func SessionAvailability(profiles []profile.Profile, repo string, sessions *suba
 				a.Error = err
 				break
 			}
+			// A missing repository identity cannot establish which accounts may run.
+			if repo == "" {
+				break
+			}
 			evidence, err := accounts.QuotaAvailability(p.Harness, runtime.ProviderForModel(p.Harness, p.Model), repo, now)
 			a.State, a.EvidenceAt, a.Error = evidence.State, evidence.ObservedAt, errors.Join(a.Error, err)
 		}
