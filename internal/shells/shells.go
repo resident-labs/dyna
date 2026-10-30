@@ -445,7 +445,7 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	grew := &outputEvents{send: func() { s.Notify(id) }}
 	go func() {
 		defer close(copied)
-		publisher := &activityPublisher{updates: make(chan activity.Signal, 1)}
+		publisher := activity.NewSignalPublisher()
 		go func() {
 			defer close(activityDone)
 			db, err := s.db()
@@ -454,11 +454,11 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 			}
 			ticker := time.NewTicker(activity.PublishInterval)
 			defer ticker.Stop()
-			publisher.run(ticker.C, func(signal activity.Signal) error { return s.publishActivity(db, id, signal) })
+			publisher.Run(ticker.C, func(signal activity.Signal) error { return s.publishActivity(db, id, signal) })
 		}()
-		observer := &activityReader{Reader: pr, now: time.Now, deadline: pr.SetReadDeadline, publish: publisher.send}
+		observer := &activityReader{Reader: pr, now: time.Now, deadline: pr.SetReadDeadline, publish: publisher.Send}
 		observer.start()
-		defer close(publisher.updates)
+		defer publisher.Close()
 		r := bufio.NewReaderSize(observer, 64*1024)
 		var written int64
 		capped := false
