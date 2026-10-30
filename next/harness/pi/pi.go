@@ -54,6 +54,9 @@ type event struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error"`
 	Aborted bool   `json:"aborted"`
+	Data    struct {
+		SessionFile string `json:"sessionFile"`
+	} `json:"data"`
 	Message struct {
 		Role          string        `json:"role"`
 		Model         string        `json:"model"`
@@ -102,6 +105,18 @@ func Open(ctx context.Context, executable string, args []string, session string)
 	}
 	h := &Harness{cmd: cmd, stdin: stdin, session: session, pending: make(map[string]chan event), events: make(chan event, 256), done: make(chan struct{}), stop: make(chan struct{})}
 	go h.read(stdout)
+	if session == "" {
+		state, err := h.request(ctx, "get_state", nil, nil)
+		if err != nil {
+			_ = h.Close()
+			return nil, err
+		}
+		h.session = state.Data.SessionFile
+		if h.session == "" {
+			_ = h.Close()
+			return nil, errors.New("pi returned no session file")
+		}
+	}
 	return h, nil
 }
 
@@ -134,6 +149,11 @@ func (h *Harness) read(r io.Reader) {
 }
 
 func (h *Harness) send(ctx context.Context, typ string, input *contract.TurnInput, inputs []contract.TurnInput) error {
+	_, err := h.request(ctx, typ, input, inputs)
+	return err
+}
+
+func (h *Harness) request(ctx context.Context, typ string, input *contract.TurnInput, inputs []contract.TurnInput) (event, error) {
 	id := strconv.FormatUint(h.sequence.Add(1), 10)
 	c := command{ID: id, Type: typ}
 	for _, item := range inputs {
@@ -152,18 +172,18 @@ func (h *Harness) send(ctx context.Context, typ string, input *contract.TurnInpu
 	err := json.NewEncoder(h.stdin).Encode(c)
 	h.writeMu.Unlock()
 	if err != nil {
-		return err
+		return event{}, err
 	}
 	select {
 	case result := <-ch:
 		if !result.Success {
-			return fmt.Errorf("pi %s: %s", typ, result.Error)
+			return event{}, fmt.Errorf("pi %s: %s", typ, result.Error)
 		}
-		return nil
+		return result, nil
 	case <-h.done:
-		return h.readerError()
+		return event{}, h.readerError()
 	case <-ctx.Done():
-		return ctx.Err()
+		return event{}, ctx.Err()
 	}
 }
 
@@ -239,6 +259,8 @@ func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error 
 	return h.send(ctx, "follow_up", &input, nil)
 }
 func (h *Harness) Abort(ctx context.Context) error { return h.send(ctx, "abort", nil, nil) }
+
+func (h *Harness) SessionFile() string { return h.session }
 
 func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	file, err := os.Open(h.session)

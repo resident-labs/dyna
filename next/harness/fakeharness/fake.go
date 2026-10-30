@@ -69,6 +69,10 @@ func (h *Harness) Continue(ctx context.Context, id contract.TurnID) (contract.Tu
 	return h.Start(ctx, id, nil)
 }
 
+func (h *Harness) Recover(id contract.TurnID, _ []contract.TurnInput) (contract.TurnEnded, bool, error) {
+	return contract.TurnEnded{Turn: id}, false, nil
+}
+
 func (h *Harness) Steer(_ context.Context, input contract.TurnInput) error {
 	return h.queue(input, contract.QueueSteer)
 }
