@@ -385,7 +385,8 @@
   }
 
   async function send() {
-    if (draft.startsWith('/') && !draft.startsWith('//')) {
+    if (busy) return
+    if (draft.startsWith('/') && !draft.startsWith('//') && !command && !selectedProfile) {
       const original = draft
       busy = true
       const loaded = await loadCommands()
