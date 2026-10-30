@@ -2,7 +2,7 @@
 
 This is v2's fork from v1 at commit `8b26ffbd25e4bd804f71acd2fc994d76cd9eb57d`. It evolves independently from this copy onward.
 
-The v2 delivery-ID patch accepts an optional string `deliveryId` on RPC prompt, steer and follow_up commands. Pi persists it on the consumed user message, not when it queues the input. OpenAI Responses records the upstream response model when it differs from the requested model. The pack level is `1.4.0-dyna.12` with `dynaFork: 12`. This removes no Dyna code.
+The v2 delivery-ID patch accepts an optional string `deliveryId` on RPC prompt, steer and follow_up commands. Pi persists it on the consumed user message, not when it queues the input. RPC prompt also accepts a batch of delivery inputs, which become separate user messages before the first model call. RPC continue resumes a recovered context and records unknown results for interrupted tool calls without running them again. OpenAI Responses records the upstream response model when it differs from the requested model. The pack level is `1.4.0-dyna.12` with `dynaFork: 12`. This removes no Dyna code.
 
 The v2 effort fix sends the active mapped effort in the top-level `output_config` for managed models. Mid-conversation markers remain unchanged. The pack level is `1.4.0-dyna.11` with `dynaFork: 11`. This removes no Dyna code.
 

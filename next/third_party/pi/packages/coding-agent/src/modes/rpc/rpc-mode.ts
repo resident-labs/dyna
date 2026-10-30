@@ -392,7 +392,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "prompt": {
-				if (command.inputs && (command.inputs.length === 0 || command.message !== undefined)) {
+				if (command.inputs && (!Array.isArray(command.inputs) || command.inputs.length === 0 || command.message !== undefined || command.inputs.some((input) => !input || typeof input.message !== "string" || typeof input.deliveryId !== "string"))) {
 					return error(id, "prompt", "Provide either message or a nonempty inputs array");
 				}
 				const first = command.inputs?.[0];
@@ -429,6 +429,17 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "follow_up": {
 				const disposition = await session.followUp(command.message, command.images, { source: "rpc", deliveryId: command.deliveryId });
 				return success(id, "follow_up", { disposition });
+			}
+
+			case "continue": {
+				let started = false;
+				void session.continueRun(() => {
+					started = true;
+					output(success(id, "continue"));
+				}).catch((e) => {
+					if (!started) output(error(id, "continue", e.message));
+				});
+				return undefined;
 			}
 
 			case "abort": {
