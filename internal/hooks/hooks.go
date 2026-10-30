@@ -103,6 +103,9 @@ type Service struct {
 	// Fetch refreshes the remote default branch; tests replace it with a
 	// local fake.
 	Fetch func(context.Context, string) error
+	// Checkouts lists the room checkouts that follow their default branch; tests
+	// replace it. The default reads the repositories of every room.
+	Checkouts func(context.Context) ([]string, error)
 }
 
 // New returns a hook service that seeds and runs the given automatic hooks.
