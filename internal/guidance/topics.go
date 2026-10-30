@@ -15,7 +15,7 @@ const RootTopic = "external-orchestration"
 var Topics = []Topic{
 	{"sessions", "session lifecycle and dormancy"},
 	{"delegation", "before you write a brief; depth, schema results, goals and finishing"},
-	{"workflows", "before you write a workflow"},
+	{"workflows", "root's tool for large parallel jobs (sweeps, migrations, audits, ports)"},
 	{"steering", "when a post arrives during your turn; replies, reports and silent turns"},
 	{"posting", "before you attach files, post a card, pin a post or start a build, test run or dev server"},
 	{"nodes", "before you use another node for builds or tests: run dyna node list; use the SSH column as the exact user@host"},
