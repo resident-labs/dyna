@@ -114,14 +114,16 @@ func updateFacts(ctx context.Context) *serviceregistry.UpdateFacts {
 		_, err := repoid.Resolve(ctx, cfg.Source)
 		u.SourceInvalid = err != nil
 	}
-	if jobs, err := hookinstall.DefaultStore().Recent(updaterservice.RunName); err == nil {
-		for _, job := range jobs {
-			result := job.Result
-			if job.Status != "finished" {
-				result = "pending"
-			}
-			u.Runs = append(u.Runs, serviceregistry.HookRun{Result: result, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt})
+	jobs, err := hookinstall.DefaultStore().Recent(updaterservice.RunName)
+	if err != nil {
+		return nil
+	}
+	for _, job := range jobs {
+		result := job.Result
+		if job.Status != "finished" {
+			result = "pending"
 		}
+		u.Runs = append(u.Runs, serviceregistry.HookRun{Result: result, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt})
 	}
 	return u
 }
