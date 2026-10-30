@@ -403,6 +403,8 @@ func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
 		s.o.Files.ServeHTTP(w, r)
 	case p == "/api/terminal/attach":
 		s.terminalAttach(w, r, rt, tok, pr)
+	case strings.HasPrefix(p, "/api/rooms/"):
+		s.commands(w, r, rt, pr)
 	case strings.HasPrefix(p, "/api/computers/"):
 		s.computers(w, r, rt, tok, pr)
 	case p == "/api/voice/realtime":
