@@ -5,7 +5,7 @@ import { account } from '../../../test/account-fixtures.ts'
 import type { ScopeAccount } from '../api/account.ts'
 
 // One row of a provider group, with every account field its type requires.
-const row = (fields: Partial<ScopeAccount> & Pick<ScopeAccount, 'id'>): ScopeAccount => ({ ...account({ id: fields.id, harness: 'pi' }), activeHere: true, ...fields })
+const row = (fields: Partial<ScopeAccount> & Pick<ScopeAccount, 'id'>): ScopeAccount => ({ ...account({ id: fields.id, harness: 'pi' }), activeHere: true, servesHere: true, ...fields })
 
 test('working accounts with a usage reading are cards of their provider; login and quota problems are alert rows', () => {
   const { cards, alerts } = accountRows({ providers: [
