@@ -384,6 +384,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ApprovalDecide", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.approvalDecide},
 		{Name: "ApprovalCancel", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.approvalCancel},
 		{Name: "ApprovalWait", Access: websvc.Read, Scope: websvc.ScopeOperate, Method: s.approvalWait},
+		{Name: "ApprovalLog", Access: websvc.Read, Scope: websvc.ScopeOperate, Method: s.approvalLog},
 		{Name: "ApprovalSettings", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.approvalSettings},
 		{Name: "AskQuestion", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.askQuestion},
 		{Name: "FileTerminalRequest", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.fileTerminalRequest},
