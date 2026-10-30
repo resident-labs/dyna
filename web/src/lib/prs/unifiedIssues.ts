@@ -25,7 +25,7 @@ export interface IssueReference { kind: 'pr' | 'issue' | 'room_issue'; number: n
 // falls back to the message ID, like the Go Label.
 export const roomIssueLabel = (i: RoomIssue): string => i.number > 0 ? `D-${i.number}` : i.id
 export const issueReference = (i: IssueRow): IssueReference => ({ kind: i.number ? 'issue' : 'room_issue', number: i.number || (i.local ? roomIssueLabel(i.local) : ''), title: i.title, state: i.state, url: i.url })
-export type IssueRow = GitHubItem & { local?: RoomIssue; source?: 'Dyna' | 'GitHub' }
+export type IssueRow = GitHubItem & { local?: RoomIssue; source?: 'Dyna' | 'GitHub'; fixPR?: number }
 
 export type IssueWork = 'unhandled' | 'in-progress' | 'other'
 
