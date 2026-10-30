@@ -23,7 +23,7 @@
   {#if footer}<footer>{@render footer()}</footer>{/if}
 </section>
 <style>
-  .card { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; padding: var(--s3) var(--s4); background: var(--side); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--hair); }
+  .card { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); }
   h4 { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: var(--t-sm); font-weight: 600; color: var(--muted); }
   .n { color: var(--faint); font-weight: 500; }
   .act { margin-left: auto; font-weight: 500; }
@@ -33,5 +33,5 @@
   .flush { gap: 0; padding: 0; }
   .flush > h4 { padding: var(--s3) var(--s4); }
   .flush > footer { margin: 0; }
-  .card :global([data-ui-card]) { background: transparent; box-shadow: none; }
+  .card :global([data-ui-card]) { background: transparent; border-color: transparent; }
 </style>
