@@ -257,11 +257,12 @@ node has: the node's last probe bounds both, and a request above the bound
 is clamped. The check's result and its log say so:
 
 ```
-Dyna clamped cpus from 32 to 16 and memory from 64 GiB to 32 GiB
+Dyna clamped cpus from 32 to 16 and memory from 64 GiB to 32 GiB (quick lane reserve)
 ```
 
-A default is never clamped, so a small node keeps the limits its checks
-already had. A container check keeps 1 GiB above its own memory limit in the
+A probed node takes the quick lane's memory reserve before it clamps, so even
+a default can be clamped on a small node. A node with no probe never clamps a
+default. A container check keeps 1 GiB above its own memory limit in the
 systemd scope, so the docker client fits in the scope. A host check's scope is
 its only memory bound, so it gets exactly the granted memory.
 
