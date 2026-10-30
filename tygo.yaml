@@ -262,3 +262,10 @@ packages:
     fallback_type: unknown
     preserve_comments: types
     enum_style: union
+
+  - path: dyna-agent/internal/goals
+    output_path: web/src/lib/api/goal.gen.ts
+    include_files: [goal_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
