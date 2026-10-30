@@ -1325,11 +1325,11 @@ Acceptance:
 | Spec, contract, engine core (store, API, approvals, model route), integration | dyna:lead-rewrite | opus-rewrite (r20) | `docs/`, `contract/`, `engine/` |
 | Boxes, hosts, images, box agent, harness adapters, host exec | dyna:node-shell | opus | `box/`, `harness/`, `engine/hostexec` |
 | Room rules, identity, migration, exporter, feature map | dyna:code-architectural | opus | `room/`, `migrate/`, old `cmd/dyna-export` |
-| Web port | a web lead, from M2; design and taste approval by dyna:lead-rewrite (5.13) | sonnet | `web/` |
+| Web port | dyna:next-web-lead, from M2; design and taste approval by dyna:lead-rewrite (5.13) | opus | `web/` |
 
-- **Builders** are terra (r13), started by the area owner after the owner approves this spec. Small work goes to haiku. When terra is out of quota, kimi-max or glm. Each folder has one writer at a time.
+- **Builders** are terra (r13), started by the area owner after the owner approves this spec. Small work goes to haiku. When terra is out of quota, kimi-max or glm. Each folder has one writer at a time. **Exception (owner rule, 5.13):** UI code in `web/` is written only by opus builders, before and after the cutover. Terra may still build the Go side of web features.
 - **Design check first.** For each milestone, each area owner writes a one-page plan. The lead checks it before builders start (r13).
-- **Reviews** use the v1 review service with terra reviewers until the cutover. After it, a lead approves with `dyna pr approve`, or starts a reviewer session that approves (decision 13).
+- **Reviews** use the v1 review service with terra reviewers until the cutover. After it, a lead approves with `dyna pr approve`, or starts a reviewer session that approves (decision 13). UI code in `web/` gets an opus reviewer instead, before and after the cutover (5.13).
 - **Manual checks** are run by one terra agent per milestone, in a sandbox box.
 - **v1 is frozen.** Only blocking bugs are fixed there. The old side gets only `cmd/dyna-export`.
 - **Reporting.** Area owners report to the lead. The lead reports to @root for decisions, blockers and milestone results.
