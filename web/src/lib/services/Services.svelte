@@ -1,9 +1,10 @@
 <script lang="ts">
   // The Services page: everything Dyna runs by itself, in the sections the
-  // engine's service registry gives. One page, no tabs. Each row says what the
-  // service does and, as muted text, when it ran and runs next; a colored pill
-  // appears only when it needs attention. A click opens the service's settings
-  // and recent runs in place.
+  // engine's service registry gives, then the hooks the owner added. One page,
+  // no tabs. Each row says what the service does and, as muted text, when it
+  // ran and runs next; a colored pill appears only when it needs attention. A
+  // click opens the service's settings and recent runs in place.
+  import { tick } from 'svelte'
   import { api } from '../../api.ts'
   import { errorText } from '../errorText.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
@@ -14,6 +15,7 @@
   import Switch from '../ui/Switch.svelte'
   import Skeleton from '../ui/Skeleton.svelte'
   import ServiceDetail from './ServiceDetail.svelte'
+  import HooksSection from './HooksSection.svelte'
   import { factsOf, pillOf, sections, setupHint } from './model.ts'
   import { switchWrite } from './control.ts'
   import { readRegistry } from './read.ts'
@@ -21,12 +23,14 @@
   import type { Member } from '../api/room.ts'
   import type { RegistryService } from '../api/service.ts'
   import type { SettingItem } from '../api/settings.ts'
+  import type { HooksFocus } from '../app/settingsPanel.svelte.ts'
 
-  let { roomId, repo = '', members = [], changes = [], onopen, onpr }: {
+  let { roomId, repo = '', members = [], changes = [], hooks = null, onopen, onpr }: {
     roomId: string
     repo?: string
     members?: Member[]
     changes?: ChangeRow[]
+    hooks?: HooksFocus | null
     onopen?: (m: Member) => void
     onpr?: (pr: number) => void
   } = $props()
@@ -79,13 +83,26 @@
     if (m && onopen) onopen(m)
   }
   const toggle = (id: string): void => { open = open === id ? '' : id }
+
+  // A hook that does a service's work shows under that service, so the hook
+  // list leaves it out, and a feed card's log of that hook opens the service.
+  const serviceHooks = $derived((registry ?? []).flatMap((s) => (s.hook ? [s.hook] : [])))
+  const focused = $derived(registry?.find((s) => s.hook && s.hook === hooks?.run?.hook))
+  let handled = 0
+  $effect(() => {
+    const s = focused
+    if (!s || !hooks || hooks.request === handled) return
+    handled = hooks.request
+    open = s.id
+    tick().then(() => document.getElementById(`service-${s.id}`)?.scrollIntoView({ block: 'start' }))
+  })
 </script>
 
 {#snippet serviceRow(s: RegistryService)}
   {@const pill = pillOf(s)}
   {@const write = s.switch ? switchWrite(api, host, s) : null}
   {#snippet detail()}
-    <ServiceDetail service={s} {host} {settings} {changes} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
+    <ServiceDetail service={s} {host} {settings} {changes} focus={focused?.id === s.id ? (hooks?.run ?? null) : null} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
   {/snippet}
   <SettingRow inline id="service-{s.id}" title={s.label} description={s.description} expanded={open === s.id} ontoggle={() => toggle(s.id)} children={open === s.id ? detail : undefined}>
     {#snippet status()}
@@ -122,6 +139,7 @@
         </Card>
       </Section>
     {/each}
+    <HooksSection {repo} hide={serviceHooks} focus={registry && !focused ? hooks : null} />
   </div>
 </section>
 

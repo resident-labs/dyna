@@ -4,7 +4,15 @@ import type { ModelSelection } from '../settings/profiles/state.ts'
 export interface SettingsPanelHost {
   hasRoom(): boolean
   closeNav(): void
-  roomRequired(): void
+  // openServices shows the open room's Services page.
+  openServices(): void
+}
+
+// HooksFocus asks the Services page to show its Hooks section. request counts
+// the asks, so each one scrolls there again; run is the hook run to open.
+export interface HooksFocus {
+  request: number
+  run: HookLogTarget | null
 }
 
 export function createSettingsPanel(host: SettingsPanelHost) {
@@ -13,7 +21,7 @@ export function createSettingsPanel(host: SettingsPanelHost) {
   let settingsKey = $state(0)
   let roomSettingsKey = $state(0)
   let settingsAt = $state<{ start: string; pairNow: boolean; profile?: string; accountId?: string; initialSelection?: ModelSelection }>({ start: 'profiles', pairNow: false })
-  let roomSettingsAt = $state<{ start: string; hookRun?: HookLogTarget | null }>({ start: 'general' })
+  let hooksAt = $state<HooksFocus>({ request: 0, run: null })
 
   return {
     get showSettings() { return showSettings },
@@ -21,7 +29,7 @@ export function createSettingsPanel(host: SettingsPanelHost) {
     get settingsKey() { return settingsKey },
     get roomSettingsKey() { return roomSettingsKey },
     get settingsAt() { return settingsAt },
-    get roomSettingsAt() { return roomSettingsAt },
+    get hooksAt() { return hooksAt },
     closeSettings() { showSettings = false },
     closeRoomSettings() { showRoomSettings = false },
     openSettings(start = 'profiles', pairNow = false, profile = '', accountId = '') {
@@ -31,17 +39,24 @@ export function createSettingsPanel(host: SettingsPanelHost) {
       showSettings = true
     },
     openRoomSettings() {
-      roomSettingsAt = { start: 'general' }
       roomSettingsKey++
       showRoomSettings = true
     },
-    openHookLog(target: HookLogTarget) {
+    // openHooks closes the settings panels and shows Services > Hooks, with
+    // one hook run open when a feed card asked for it. With no room open,
+    // Settings shows this computer's hooks instead.
+    openHooks(run: HookLogTarget | null = null) {
       host.closeNav()
-      if (!host.hasRoom()) { host.roomRequired(); return }
+      if (!host.hasRoom()) {
+        settingsAt = { start: 'hooks', pairNow: false }
+        settingsKey++
+        showSettings = true
+        return
+      }
       showSettings = false
-      roomSettingsAt = { start: 'hooks', hookRun: target }
-      roomSettingsKey++
-      showRoomSettings = true
+      showRoomSettings = false
+      hooksAt = { request: hooksAt.request + 1, run }
+      host.openServices()
     },
     createProfile(selection: ModelSelection) {
       settingsAt = { start: 'profiles', pairNow: false, initialSelection: selection }
