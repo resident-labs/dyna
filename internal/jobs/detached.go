@@ -70,7 +70,7 @@ const (
 // the script enables lingering first. Without a user manager, or without
 // lingering, the check starts under setsid and nohup and runs without a unit.
 const StartScript = `set -eu
-d=$1; unit=$2; cpu=$3; mem=$4; tasks=$5; io=$6
+d=$1; unit=$2; cpu=$3; mem=$4; tasks=$5; io=${6:-}
 umask 077
 mkdir -p "$(dirname "$d")"
 exec 8>"$d.lock"

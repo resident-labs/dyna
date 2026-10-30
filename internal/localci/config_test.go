@@ -226,23 +226,23 @@ suites:
 	// request; the node queue holds the rest until capacity frees.
 	node := Node{Name: "arch", Enabled: true, CPUs: 20, MemoryBytes: 32 << 30}
 	granted := clampCheckResources(checks[0], node)
-	if granted.CPUs != 20 || granted.MemoryMiB != 32*1024 {
-		t.Fatalf("granted %+v, want 20 cpus and 32 GiB", granted)
+	if granted.CPUs != 20 || granted.MemoryMiB != 28*1024 {
+		t.Fatalf("granted %+v, want 20 cpus and 28 GiB", granted)
 	}
-	if want := "Dyna clamped cpus from 32 to 20 and memory from 64 GiB to 32 GiB"; granted.Note != want {
+	if want := "Dyna clamped cpus from 32 to 20 and memory from 64 GiB to 28 GiB (quick lane reserve)"; granted.Note != want {
 		t.Fatalf("note %q, want %q", granted.Note, want)
 	}
 	// The granted size is what the container command runs with, and the note
 	// reaches the check's own log.
 	checks[0].resources = granted
 	script := nodeCheckScript(node, "/base", "/cache", "/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), checks[0], time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	for _, want := range []string{"--cpus=20", "--memory=32g", "--memory-swap=32g", granted.Note} {
+	for _, want := range []string{"--cpus=20", "--memory=28g", "--memory-swap=28g", granted.Note} {
 		if !strings.Contains(script, want) {
 			t.Errorf("container check lacks %q", want)
 		}
 	}
 	// A probe of the machine that fits the request changes nothing.
-	roomy := clampCheckResources(checks[0], Node{Name: "hermeslab", Enabled: true, CPUs: 32, MemoryBytes: 64 << 30})
+	roomy := clampCheckResources(checks[0], Node{Name: "hermeslab", Enabled: true, CPUs: 32, MemoryBytes: 72 << 30})
 	if roomy != (checkResources{CPUs: 32, MemoryMiB: 64 * 1024}) {
 		t.Fatalf("roomy machine granted %+v, want the request unchanged", roomy)
 	}
@@ -273,8 +273,8 @@ suites:
 	}
 	// A container keeps the GiB above its own limit that it always had, so the
 	// docker client fits in the scope.
-	if got := granted.Scope(false).MemoryMiB; got != 33*1024 {
-		t.Fatalf("container scope memory = %d MiB, want 33 GiB", got)
+	if got := granted.Scope(false).MemoryMiB; got != 29*1024 {
+		t.Fatalf("container scope memory = %d MiB, want 29 GiB", got)
 	}
 	// A reader cannot mean these, so the parse says so.
 	for _, body := range []string{
