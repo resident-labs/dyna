@@ -165,6 +165,46 @@ func TestExpiryAndPendingDedup(t *testing.T) {
 		t.Fatalf("old: %+v %v", old, err)
 	}
 }
+func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
+	f := setup(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	entry := f.s.Kinds["test.run"]
+	entry.Execute = func(ctx context.Context, _ contract.OpArgs, _ contract.Principal) contract.OpResult {
+		close(started)
+		<-release
+		if ctx.Err() != nil {
+			return contract.OpResult{Error: "executor context canceled"}
+		}
+		return contract.OpResult{}
+	}
+	f.s.Kinds["test.run"] = entry
+	op := f.submit(t, principal("worker"))
+	sub, cancel := f.s.Store.Subscribe()
+	defer cancel()
+	ctx, stop := context.WithCancel(context.Background())
+	if err := f.s.Decide(ctx, principal("lead"), op.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	<-started
+	close(release)
+	for {
+		record, err := f.s.Store.Operation(context.Background(), op.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.Operation.State == contract.OpDone {
+			break
+		}
+		<-sub
+	}
+	var count int
+	err := f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='op.ran' AND d.wake=1", "worker").Scan(&count)
+	if err != nil || count != 1 {
+		t.Fatalf("wakes %d, error %v", count, err)
+	}
+}
+
 func TestInterruptedExecutionIsNotRetried(t *testing.T) {
 	f := setup(t)
 	op := f.submit(t, principal("worker"))
