@@ -18,10 +18,11 @@ import (
 // MachineLive is what this engine's own machine uses now. The engine fills
 // only what it can read, so a figure without a sample stays nil.
 type MachineLive struct {
-	CPU       *int
-	Agents    *int
-	Computers *int
-	Harnesses []MachineHarness
+	CPU           *int
+	MemoryPercent *int
+	Agents        *int
+	Computers     *int
+	Harnesses     []MachineHarness
 }
 
 // MachineAPI answers the machine calls: the list Home shows and one machine's
@@ -377,7 +378,7 @@ func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[stri
 	out.DynaVersion = a.Version
 	if a.Live != nil {
 		live := a.Live(ctx)
-		out.CPU, out.Agents, out.Computers = live.CPU, live.Agents, live.Computers
+		out.CPU, out.MemoryPercent, out.Agents, out.Computers = live.CPU, live.MemoryPercent, live.Agents, live.Computers
 		out.Harnesses = live.Harnesses
 	}
 	if a.Running != nil {
@@ -445,6 +446,11 @@ func machineSummary(m machines.Machine) MachineSummary {
 		cpu := int(math.Round(*m.Load.CPUPercent))
 		out.CPU = &cpu
 	}
+	if !m.Local && m.Load.MemTotal > 0 {
+		used := m.Load.MemTotal - min(m.Load.MemAvailable, m.Load.MemTotal)
+		percent := int(math.Round(float64(used) * 100 / float64(m.Load.MemTotal)))
+		out.MemoryPercent = &percent
+	}
 	return out
 }
 
@@ -467,6 +473,8 @@ func (a MachineAPI) capabilitiesView(m machines.Machine) *MachineCapabilities {
 	if c.Disk.Total > 0 {
 		free := int64(c.Disk.Free)
 		out.FreeDisk = &free
+		floor := machines.KeepFreeBytes(m.MaxDiskPercent, c.Disk.Total)
+		out.DiskFloor = &floor
 		out.DiskKeeps = m.DiskKeeps()
 		out.DiskBlock = m.DiskBlock()
 	}

@@ -85,11 +85,12 @@ type MachineSummary struct {
 	// Labels are the owner's placement labels; the ci label runs local CI.
 	Labels []string `json:"labels,omitempty"`
 	// ProbedLabels come from the last good probe and are read-only.
-	ProbedLabels []string       `json:"probedLabels,omitempty"`
-	CPU          *int           `json:"cpu,omitempty"`
-	Agents       *int           `json:"agents,omitempty"`
-	Computers    *int           `json:"computers,omitempty"`
-	CI           *MachineCIWork `json:"ci,omitempty"`
+	ProbedLabels  []string       `json:"probedLabels,omitempty"`
+	CPU           *int           `json:"cpu,omitempty"`
+	MemoryPercent *int           `json:"memoryPercent,omitempty"`
+	Agents        *int           `json:"agents,omitempty"`
+	Computers     *int           `json:"computers,omitempty"`
+	CI            *MachineCIWork `json:"ci,omitempty"`
 }
 
 // MachineWorkItem is one unit of work on a machine, with the names the page
@@ -167,9 +168,10 @@ type MachineCapabilities struct {
 	// space the node's disk rule keeps while it admits work, and DiskBlock is
 	// the queue's words for why it admits none. All three stay absent when the
 	// probe could not read the disk.
-	FreeDisk  *int64 `json:"freeDisk,omitempty"`
-	DiskKeeps string `json:"diskKeeps,omitempty"`
-	DiskBlock string `json:"diskBlock,omitempty"`
+	FreeDisk  *int64  `json:"freeDisk,omitempty"`
+	DiskFloor *uint64 `json:"diskFloor,omitempty"`
+	DiskKeeps string  `json:"diskKeeps,omitempty"`
+	DiskBlock string  `json:"diskBlock,omitempty"`
 }
 
 // MachineLoad is the last load reading of a machine. CPUPercent stays absent
