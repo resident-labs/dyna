@@ -35,7 +35,7 @@ func TestSetupRepos(t *testing.T) {
 			if !reflect.DeepEqual(calls[0], []string{"clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, filepath.Join(root, "owner/.repo.setup")}) {
 				t.Fatal(calls[0])
 			}
-			base := "main"
+			base := "refs/remotes/origin/main"
 			if existingBranch {
 				base = "refs/remotes/origin/v2/s"
 			}
