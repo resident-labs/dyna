@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/store"
 )
 
@@ -109,7 +110,7 @@ func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]
 			continue
 		}
 		if !found {
-			account, err = a.Accounts.CreateProvider("pi", provider, piEntryKind(entries[id]), id+" login")
+			account, err = a.Accounts.CreateProvider("pi", provider, piEntryKind(entries[id]), native.PiDefaultLabel(id, entries[id]))
 			if err != nil {
 				firstErr = errors.Join(firstErr, err)
 				continue
