@@ -35,7 +35,7 @@ export function blockState(job: ShellJob): BlockState {
 }
 
 // commandOf is the bash -c script; a wrapper such as env puts it last.
-export const commandOf = (job: ShellJob): string => job.command.at(-1) ?? ''
+export const commandOf = (job: ShellJob): string => job.command?.at(-1) ?? ''
 
 export const titleOf = (job: ShellJob): string => job.name || commandOf(job)
 
