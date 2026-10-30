@@ -47,6 +47,7 @@
   let isExpanded = $derived(expanded ?? localExpanded)
   let script = $derived(scriptSender(post))
   let name = $derived(script ? scriptLabel(script) : speaker(post, room.name))
+  let headerName = $derived(post.avatar?.room && post.avatar.room !== room.name && name.startsWith(`${post.avatar.room}:`) ? name.slice(post.avatar.room.length + 1) : name)
   let parts = $derived(postParts(post))
   let preview = $derived(postPreview(parts.text))
   // Root's ordinary posts always stay open. A turn result is not an ordinary
@@ -74,7 +75,7 @@
     {#if !cont}
       <header>
         {#if script}<a class="name run-name" href={scriptHref(post.roomId ?? '', script)} title="Open workflow run {script.runId}">{name}</a><span class="tag">workflow</span>
-        {:else}<button class="name hue-{post.fromHue}" onclick={() => onaddress?.(post.from ?? '')}>{name}</button>{/if}{#if post.avatar?.room && post.avatar.room !== room.name}<span class="room-tag" style="--room:var(--room-{post.avatar.color})"><i></i>{post.avatar.room}</span>{/if}{#if post.source === 'card'}<span class="tag" title="A card wrote this text. You confirmed it before it was sent.">card</span>{/if}
+        {:else}<button class="name hue-{post.fromHue}" onclick={() => onaddress?.(post.from ?? '')}>{headerName}</button>{/if}{#if post.avatar?.room && post.avatar.room !== room.name}<span class="room-tag" style="--room:var(--room-{post.avatar.color})"><i></i>{post.avatar.room}</span>{/if}{#if post.source === 'card'}<span class="tag" title="A card wrote this text. You confirmed it before it was sent.">card</span>{/if}
         {#if post.fromRoom}<span class="tag" title="The owner sent this from the {post.fromRoom} room. Your reply goes back there.">from room {post.fromRoom}</span>{/if}
         <time title={new Date(post.ts ?? 0).toLocaleString()}>{stamp(post.ts)}</time>
         {#if recipients}

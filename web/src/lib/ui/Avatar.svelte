@@ -19,7 +19,7 @@
   let { name = '', hue = 0, size = 40, state = '', status = '', dotGap = 'var(--main)', avatar, label = '', here = '' }: Props = $props()
 </script>
 
-<span class="avatar bg-{hue}" class:room-ring={!!avatar?.room && !!avatar.color && avatar.room !== here} class:workflow={avatar?.kind === 'workflow'} style="--s:{size}px; --gap:{dotGap}; --room:var(--room-{avatar?.color ?? 'crimson'})">
+<span class="avatar bg-{hue}" class:room-ring={!!avatar?.room && !!avatar.color && avatar.room !== here} class:owner={avatar?.kind === 'owner'} class:workflow={avatar?.kind === 'workflow'} style="--s:{size}px; --gap:{dotGap}; --room:var(--room-{avatar?.color ?? 'crimson'})">
   {#if avatar?.kind === 'workflow'}
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6.5 14 10M6 13.5 14 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="5.5" cy="6" r="2.2" fill="currentColor" /><circle cx="5.5" cy="14" r="2.2" fill="currentColor" /><circle cx="14.5" cy="10" r="2.6" fill="currentColor" /></svg>
   {:else if avatar?.emoji}
@@ -58,6 +58,7 @@
     font-size: calc(var(--s) * 0.56);
     line-height: 1;
   }
+  .owner .letters { font-size: calc(var(--s) * 0.3); }
   .dot {
     position: absolute;
     right: -2px;
