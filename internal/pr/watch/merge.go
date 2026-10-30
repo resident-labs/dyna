@@ -36,6 +36,16 @@ func trialStatus(st State, b *state.MergeTrial) *MergeTrialStatus {
 	return status
 }
 
+// Main wait names remain available to existing Go callers.
+const (
+	MainWaitNoPushCI = MainWaitKindNoPushCI
+	MainWaitNoHead   = MainWaitKindNoHead
+	MainWaitPassed   = MainWaitKindPassed
+	MainWaitFailed   = MainWaitKindFailed
+	MainWaitPending  = MainWaitKindPending
+	MainWaitPaused   = MainWaitKindPaused
+)
+
 // MergeQueueSnapshot derives queue facts from a saved PR snapshot without GitHub
 // requests. where says which rooms evaluate their merge trials on local CI, so a
 // room without hosted push CI can still take a trial; a nil report keeps the
