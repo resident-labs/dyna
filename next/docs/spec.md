@@ -479,7 +479,7 @@ M1 methods: `room.create`, `session.start`, `session.close`, `post`, `events.lis
 - **Checkpoints off the writer path (D-582).** The writer connection sets `wal_autocheckpoint=0`. A checkpointer goroutine with its own connection runs `PRAGMA wal_checkpoint(PASSIVE)` when the WAL passes 64 MiB or 30 seconds pass, and `TRUNCATE` when the writer is idle. A `COMMIT` never waits for a checkpoint.
 - **No JSON state.** JSON appears only as the typed body columns (`events.body`, `operations.args`, `operations.card`), which only `contract` decodes. Settings, profiles and harness config stay JSON config files (r1).
 - **Files.** Transcripts are append-only JSONL files per session. Attachments and large outputs are files stored by SHA-256. Rows hold the hash and the size.
-- **Backups.** Each day the engine runs `VACUUM INTO` from a read connection to `backups/`, and keeps 3. Relocation copies the latest backup (section 5.10).
+- **Backups.** Each day the engine runs `VACUUM INTO` from a read connection to `backups/`, and keeps 3. Daily backups are for disasters only. Relocation never uses them; it takes a fresh snapshot after writes stop (section 5.10).
 - **Budget.** `store.db` stays under 1 GiB. An archiver moves events older than 180 days for closed sessions to monthly JSONL files under `archive/`. It lands after the cutover, when the growth rate is measured.
 
 ### 4.2 Tables
@@ -685,7 +685,7 @@ If a master dies, the engine starts it again and adds every forward again. The b
 
 ### 5.9 Close (archive in M3)
 
-Close runs depth first: children are closed and deleted first. Then, for the box itself:
+Close ends the whole subtree, as the card decided: each child is closed and deleted, deepest first, with its own archive. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
 
 1. Stop the harness and every shell job.
 2. Archive each repository. Push HEAD and a snapshot of the dirty tree (the checkpoint method) to `refs/dyna/archive/<session>`. The ref points at the snapshot, whose first parent is HEAD. Skip this when the tree is clean and HEAD is already on the remote.
@@ -701,7 +701,15 @@ Table: `archives` (`session` PK, `repo`, `ref`, `commit_sha`, `created_at`, `exp
 
 **Host failure.** The engine sends a heartbeat over each master every 10 s. After 3 misses, the host is `unreachable`, and its boxes are `lost`. When the host returns, the engine reconciles by the container label `dyna.box=<id>`: a running container goes back to `ready` when its box agent reconnects, and a missing one becomes `failed`. `box.restart` starts a new box on any host that fits, from the last checkpoint and the engine's transcript copy. A lost host therefore loses at most one unfinished turn. `dyna host drain` stops new placement on a host.
 
-**Control-plane relocation.** Stop the engine; boxes keep running, and box agents buffer. Copy the latest backup and the config to the new host (`dyna engine export-state` and `import-state`). Start the engine there. It opens the masters, adds every forward again, and the box agents reconnect. The new host must reach every host over SSH, and CLIProxyAPI moves with the engine.
+**Control-plane relocation.** Boxes keep running throughout, and their box agents buffer.
+
+1. `dyna engine export-state <dir>` stops the API and the writer, so no write can follow the snapshot. It then runs `PRAGMA wal_checkpoint(TRUNCATE)` and copies `store.db` to `<dir>` with the SQLite backup API. Daily backups are never used here.
+2. It copies, in the same stopped state, all file-backed state: the transcripts, the attachment and output files (by hash), the config files, the CLIProxyAPI auth folder, and the Connect secrets. It writes a manifest of each file's path, size and SHA-256, plus the store's last event `seq`.
+3. The engine on the old host stays stopped. It refuses to start again while the export marker is in its data folder, so two engines never serve the same boxes.
+4. `dyna engine import-state <dir>` on the new host checks every hash in the manifest and runs `PRAGMA integrity_check` on the store. It refuses to start on any mismatch.
+5. The new engine starts. It opens the masters, adds every forward again, and the box agents reconnect and resend from their last acknowledged offsets.
+
+The new host must reach every host over SSH. The export holds secrets, so it moves only over SSH between our hosts and is deleted after the import.
 
 ### 5.11 Carried from D-585
 
@@ -804,8 +812,11 @@ An external member is a message channel. It has no box, no wake, no quota and no
 
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
-- **Close** hands the session's open goals, tracked PRs, children and archive ref to its parent, then deletes the box (5.9). Root cannot be closed. It can be restarted in a new box with the same session ID, grants and history.
-- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle or a move to another room.
+- **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The open goals, tracked PRs and archive refs of every closed session go to the closing session's parent. Root cannot be closed. It can be restarted in a new box with the same session ID, grants and history.
+- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle or a move to another room. A child's box sits in its parent's budget slice, so a move changes the box's budget:
+  - The move waits until the session's turn ends. The engine then stops the container and creates it again from the same volume under the new parent's slice. A moved session that becomes a lead gets a top-level slice (5.5).
+  - The move needs the same host as the new parent. In M2, a move to a parent on another host is refused. From M3, such a move archives the box and starts a new one from the archive ref on the new parent's host.
+  - The moved session's own children move with it, and their boxes are created again under the new slices, deepest last.
 
 ### 7.5 Reply channels (D-579)
 
@@ -1141,7 +1152,7 @@ Scope: the ported web room view (feed, DMs, composer, cards and files, session t
 Acceptance:
 
 1. unit: each decision rule in 3.5, including expiry on the injected clock and the stale check. A session above the caller can approve, a session beside it cannot, and no test uses a root flag.
-2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. Close moves goals and children to the parent. Close of root fails.
+2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move re-creates the box under the new parent's slice, and a move to another host is refused. Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. Close of root fails.
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
 5. unit: `box.grow` is auto within the parent's remainder, agent beyond it, and owner for root. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
@@ -1172,12 +1183,13 @@ Acceptance:
 4. unit: an unowned `repo.main_updated` for a repository in rooms A (default) and B makes one delivery per room, and only A's root wakes. `repo.settings.set` from a session waits for the owner.
 5. unit: a member token reads its inbox, a removed member's token gets `forbidden`, and a member cannot submit `hostexec.run`.
 6. unit: the git route refuses a push to a branch that the session does not own. Close archives before it deletes, and stays in `closing` when the archive push fails.
-7. manual: during the trial, a v2 session in a box changes `next/`, opens a PR through an operation, CI passes, the review approves, and the merge lands.
-8. manual: the dry-run import matches the inventory's keep list for every part, and old CI shows the same `go list -m all` except the `github.com/resident-labs/dyna` line.
-9. manual: after the cutover, each room's root starts from its `migrate.handoff` event, and every open goal, PR, issue and question from the bundle is present.
-10. manual: Connect works with the copied secrets, and a paired phone opens a room without pairing again. Its posts come from the owner with its `DeviceID`.
-11. manual: with a host powered off, its boxes go `lost`. `box.restart` on another host resumes from the checkpoint and the transcript copy.
-12. manual: one full working day in all rooms on v2 with no blocking failure.
+7. unit: `export-state` refuses while the writer runs, and its manifest's last `seq` equals the store's. `import-state` refuses a changed file or a failed integrity check. The old engine refuses to start after an export.
+8. manual: during the trial, a v2 session in a box changes `next/`, opens a PR through an operation, CI passes, the review approves, and the merge lands.
+9. manual: the dry-run import matches the inventory's keep list for every part, and old CI shows the same `go list -m all` except the `github.com/resident-labs/dyna` line.
+10. manual: after the cutover, each room's root starts from its `migrate.handoff` event, and every open goal, PR, issue and question from the bundle is present.
+11. manual: Connect works with the copied secrets, and a paired phone opens a room without pairing again. Its posts come from the owner with its `DeviceID`.
+12. manual: with a host powered off, its boxes go `lost`. `box.restart` on another host resumes from the checkpoint and the transcript copy.
+13. manual: one full working day in all rooms on v2 with no blocking failure.
 
 ## 12. Team and ownership
 
