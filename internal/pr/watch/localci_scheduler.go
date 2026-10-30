@@ -339,8 +339,11 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 			case orphan.Source.Kind == jobs.CheckKindLocalChange:
 				// A standalone command with no live owner cannot resume its checks.
 			default:
-				// Legacy rows may still have a caller that resumes them.
-				continue
+				// A legacy caller may resume a recent record. Once its keeper
+				// lifetime ends, stop it rather than retaining reservations forever.
+				if !orphan.Expired {
+					continue
+				}
 			}
 			if !wanted {
 				abandon = append(abandon, orphan)
