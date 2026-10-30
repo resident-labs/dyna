@@ -299,10 +299,14 @@ func (s Store) runnerFor(ctx context.Context, node string) (Runner, error) {
 	return Runner{}, fmt.Errorf("node %s: %w", node, os.ErrNotExist)
 }
 
+// ErrAttachmentBusy means a run exists but another process still owns it, or
+// its old record cannot safely be claimed.
+var ErrAttachmentBusy = errors.New("local CI attachment is not claimable")
+
 // claimAttachment takes over the newest record of a commit on a machine whose run
 // has no live process, and returns it. It returns os.ErrNotExist when there is
 // none. A record of a run that another engine or command is executing is not
-// taken. The take-over is one conditional write, so two processes never both
+// taken and returns ErrAttachmentBusy. The take-over is one conditional write, so two processes never both
 // win.
 func (s Store) claimAttachment(ctx context.Context, repo, sha, node string) (attachment, error) {
 	return s.claimAttachmentRun(ctx, repo, sha, node, "")
@@ -320,8 +324,13 @@ func (s Store) claimAttachmentRun(ctx context.Context, repo, sha, node, runID st
 		return attachment{}, err
 	}
 	pid, start := attachmentOwner()
+	matched := false
 	for _, row := range rows {
-		if row.Node != node || runID != "" && row.RunID != runID || !row.orphaned() {
+		if row.Node != node || runID != "" && row.RunID != runID {
+			continue
+		}
+		matched = true
+		if !row.orphaned() {
 			continue
 		}
 		taken := false
@@ -342,22 +351,28 @@ func (s Store) claimAttachmentRun(ctx context.Context, repo, sha, node, runID st
 			return row.attachment, nil
 		}
 	}
+	if matched {
+		return attachment{}, ErrAttachmentBusy
+	}
 	return attachment{}, os.ErrNotExist
 }
 
 // AttachedNode names the machine that still holds checks of an earlier engine for
 // this commit, so the scheduler places the run there. It returns an empty name
-// when there is none. A record whose run another process executes is not a
-// candidate.
+// when there is none. A record whose run another process executes returns
+// ErrAttachmentBusy, so admission waits rather than running it elsewhere.
 func (s Store) AttachedNode(ctx context.Context, repo, sha string) (string, error) {
 	rows, err := s.attachmentRows(ctx, repo, sha)
 	if err != nil {
 		return "", err
 	}
 	for _, row := range rows {
-		if row.orphaned() {
-			return row.Node, nil
+		if !row.orphaned() {
+			return "", ErrAttachmentBusy
 		}
+	}
+	if len(rows) > 0 {
+		return rows[0].Node, nil
 	}
 	return "", nil
 }
