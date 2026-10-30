@@ -574,7 +574,12 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), RepoDir: t.TempDir(), Suites: []Suite{"go", "cross-build"}, Parallelism: slots + 1, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
+		result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), RepoDir: t.TempDir(), Suites: []Suite{"go", "cross-build"}, Parallelism: slots + 1, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }, OnQueue: func(context.Context) *Node {
+			if peak.Load() > 0 {
+				return &Node{Name: "other", Enabled: true}
+			}
+			return nil
+		}})
 		done <- outcome{result, err}
 	}()
 	select {
@@ -1619,5 +1624,42 @@ exit 0
 	data, _ := os.ReadFile(removed)
 	if got := strings.TrimSpace(string(data)); got != "docker c-root" {
 		t.Fatalf("removed %q, want the container only sudo docker lists", got)
+	}
+}
+
+func TestQueuedRunMovesBeforeAnyCheckStarts(t *testing.T) {
+	node := Node{Name: "local", Enabled: true, CPUs: 2, MemoryBytes: 8 << 30}
+	runner := Runner{DataDir: t.TempDir(), Node: &node}
+	var launched atomic.Bool
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		if strings.Contains(script, "df -Pk") {
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x 1048576 1 104857600 1% /var/tmp")
+			return nil
+		}
+		if name == "systemd-run" || strings.Contains(script, "systemd-run") {
+			launched.Store(true)
+		}
+		return nil
+	}
+	newFakeMachine(t, legacy).attach(&runner)
+	if _, err := runner.queue().Hold(t.Context(), jobs.Demand{ID: "holder", Node: node.Name, CPUs: 2, MemoryMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	next := Node{Name: "other", Enabled: true}
+	_, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, OnQueue: func(context.Context) *Node { return &next }})
+	var moved *RelocateError
+	if !errors.As(err, &moved) || moved.Node.Name != next.Name {
+		t.Fatalf("move = %v", err)
+	}
+	if launched.Load() {
+		t.Fatal("check started before relocation")
+	}
+	running, waiting, err := runner.queue().Snapshot(t.Context(), node.Name)
+	if err != nil || running != 1 || waiting != 0 {
+		t.Fatalf("queue after move: %d running, %d waiting, %v", running, waiting, err)
 	}
 }
