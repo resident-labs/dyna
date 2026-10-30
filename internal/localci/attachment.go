@@ -409,6 +409,13 @@ func (r Runner) abandonClaimed(ctx context.Context, store Store, orphan Orphaned
 // A machine that does not answer fails the run with the ssh-drop cause, and the
 // record stays for the next try.
 func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache string, checks []nodeCheck) (*attachment, error) {
+	attachedNode, err := store.AttachedNode(ctx, repo, sha)
+	if err != nil {
+		return nil, err
+	}
+	if attachedNode != "" && attachedNode != r.Node.Name {
+		return nil, ErrAttachmentBusy
+	}
 	att, err := store.claimAttachment(ctx, repo, sha, r.Node.Name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
