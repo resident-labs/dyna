@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box/computer"
+	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
 )
@@ -77,10 +78,19 @@ func Run(ctx context.Context, version string) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: ModelRoute(engineSocket)}
+	jobs := shell.New(shell.Config{Dir: "/box/work", After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }})
+	defer jobs.Close()
+	mux := http.NewServeMux()
+	mux.Handle("/shell/", http.StripPrefix("/shell", jobs.Handler()))
+	mux.Handle("/", ModelRoute(engineSocket))
+	mcpPath := filepath.Join(piDir, "mcp.json")
+	if err = pi.WriteMCPConfig(mcpPath, "shell", "http://127.0.0.1:7781/shell/"); err != nil {
+		return err
+	}
+	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
-	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--continue")
+	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--exclude-tools", "bash", "--continue")
 	h, err := pi.Open(ctx, "pi", args, "")
 	if err != nil {
 		return err
