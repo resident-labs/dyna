@@ -919,7 +919,7 @@ func TestGCKeepsWorktreeUsedByOpenTrackedPR(t *testing.T) {
 	path := gcTree(t, repo, "tracked-pr", "closed-owner")
 	root := prstate.Root(store.DataDir())
 	if err := prstate.Update(t.Context(), root, func(st *prstate.State) error {
-		st.Records["github.com/example/repo#1"] = &prstate.Record{Key: "github.com/example/repo#1", RepoPath: path, State: prstate.PROpen, Watching: true}
+		st.Records["github.com/example/repo#1"] = &prstate.Record{Key: "github.com/example/repo#1", RepoPath: repo, LookupDir: repo, Dir: path, State: prstate.PROpen, Watching: true}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
