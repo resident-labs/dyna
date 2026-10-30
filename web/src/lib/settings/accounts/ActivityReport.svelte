@@ -96,9 +96,9 @@
 {#snippet value(text: string)}{#if text === 'unknown'}<span class="unk">unknown</span>{:else}{text}{/if}{/snippet}
 
 <style>
-  /* Model families share the color of their provider; MiMo has no account provider. */
-  .c0, .c4 { background: var(--provider-unknown); } .c1, .c2 { background: var(--provider-anthropic); } .c3 { background: var(--provider-chatgpt); } .c5 { background: var(--provider-xai); }
-  svg .c0, svg .c4 { fill: var(--provider-unknown); } svg .c1, svg .c2 { fill: var(--provider-anthropic); } svg .c3 { fill: var(--provider-chatgpt); } svg .c5 { fill: var(--provider-xai); }
+  /* Keep model families distinct within a provider in the chart legend. */
+  .c0 { background: var(--provider-unknown); } .c1 { background: var(--provider-anthropic); } .c2 { background: #f2b59f; } .c3 { background: var(--provider-chatgpt); } .c4 { background: #c98500; } .c5 { background: var(--provider-xai); }
+  svg .c0 { fill: var(--provider-unknown); } svg .c1 { fill: var(--provider-anthropic); } svg .c2 { fill: #f2b59f; } svg .c3 { fill: var(--provider-chatgpt); } svg .c4 { fill: #c98500; } svg .c5 { fill: var(--provider-xai); }
   rect { stroke: var(--main); stroke-width: 2px; vector-effect: non-scaling-stroke; }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
   .hatch { background: repeating-linear-gradient(135deg, var(--faint) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--faint); }
