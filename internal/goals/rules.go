@@ -2,6 +2,8 @@ package goals
 
 import (
 	"crypto/sha256"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	"encoding/json"
@@ -144,7 +146,7 @@ func (s *Store) AddRule(scope, by, byName, text string) (Rule, error) {
 	if err != nil {
 		return out, err
 	}
-	err = s.UpdateOpen(func(st *State) error {
+	err = s.updateTxEvent(hub.Event{Topic: "goals", Key: instructionqueue.Topic}, func(w *wake, st *State) error {
 		prefix := "r"
 		r := st.rules(scope)
 		if scope == Global {
@@ -166,8 +168,8 @@ func (s *Store) AddRule(scope, by, byName, text string) (Rule, error) {
 		now := s.now()
 		out = Rule{ID: fmt.Sprintf("%s%d", prefix, r.NextRuleID), Text: text, Setter: by, SetterName: byName, CreatedAt: now, UpdatedAt: now}
 		r.Rules[out.ID] = &out
-		return nil
-	})
+		return instructionqueue.InsertTx(w.conn, RoomOfScope(scope))
+	}, openGoals)
 	return out, err
 }
 
@@ -200,7 +202,7 @@ func (s *Store) RemoveRule(scope, id, by string) (Rule, error) {
 
 func (s *Store) changeRule(scope, id, by string, fn func(*RuleSet, *Rule) error) (Rule, error) {
 	var out Rule
-	err := s.UpdateOpen(func(st *State) error {
+	err := s.updateTxEvent(hub.Event{Topic: "goals", Key: instructionqueue.Topic}, func(w *wake, st *State) error {
 		r := st.rules(scope)
 		if r == nil || r.Rules[id] == nil {
 			if scope == Global {
@@ -216,8 +218,8 @@ func (s *Store) changeRule(scope, id, by string, fn func(*RuleSet, *Rule) error)
 			return err
 		}
 		out = *rule
-		return nil
-	})
+		return instructionqueue.InsertTx(w.conn, RoomOfScope(scope))
+	}, openGoals)
 	return out, err
 }
 

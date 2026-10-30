@@ -41,6 +41,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/localci"
@@ -285,6 +286,9 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 				wakeWorker(signals.channels["merges"])
 			}
 			return
+		case instructionqueue.Topic:
+			wakeWorker(signals.channels["instructions"])
+			return
 		case "call-requests":
 			wakeWorker(signals.channels["call-requests"])
 			rooms.CallRequestsChanged()
@@ -297,6 +301,9 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 			rooms.PostsChanged(ev.Room)
 			return
 		case "goals", "questions", "notices", "sync":
+			if ev.Topic == "goals" && ev.Key == instructionqueue.Topic {
+				wakeWorker(signals.channels["instructions"])
+			}
 			rooms.StoreChanged(ev.Topic)
 			return
 		case machines.Topic:

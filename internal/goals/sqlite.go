@@ -18,6 +18,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
@@ -109,6 +110,9 @@ func Migrate(dataDir string) error {
 }
 
 func (s *Store) open() (*sql.DB, error) {
+	if err := instructionqueue.Migrate(filepath.Dir(s.Root)); err != nil {
+		return nil, err
+	}
 	db, err := database.Open(filepath.Dir(s.Root))
 	if err != nil {
 		return nil, err
@@ -532,6 +536,10 @@ func (w *wake) check(id string) error { return sessionlife.CheckTx(w.conn, w.ses
 
 // updateTx is update for changes that wake goal holders.
 func (s *Store) updateTx(fn func(*wake, *State) error, where string, args ...any) error {
+	return s.updateTxEvent(hub.Event{Topic: "goals"}, fn, where, args...)
+}
+
+func (s *Store) updateTxEvent(event hub.Event, fn func(*wake, *State) error, where string, args ...any) error {
 	db, err := s.open()
 	if err != nil {
 		return err
@@ -544,7 +552,7 @@ func (s *Store) updateTx(fn func(*wake, *State) error, where string, args ...any
 		}
 		var need []string
 		err := sessionlife.WithSessionLocks(s.sessions(), ids, func() error {
-			return state.For(db).Write(context.Background(), hub.Event{Topic: "goals"}, func(conn *sql.Conn) error {
+			return state.For(db).Write(context.Background(), event, func(conn *sql.Conn) error {
 				st, stored, err := readState(conn, where, args...)
 				if err != nil {
 					return err
