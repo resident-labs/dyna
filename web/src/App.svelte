@@ -1,6 +1,5 @@
 <script lang="ts">
   import { refreshHeldComments } from './lib/prs/heldComments.ts'
-  import { actions, actionItems, roomMenu as roomActionItems } from './lib/ui/actions.ts'
   import { createReloadGate, listVisible, reconcileRows } from './lib/ui/reloadGate.ts'
   import Skeleton from './lib/ui/Skeleton.svelte'
   import { untrack } from 'svelte'
@@ -51,6 +50,7 @@
   import Members from './lib/rooms/Members.svelte'
   import Toast from './lib/ui/Toast.svelte'
   import { clipText } from './lib/ui/toast.ts'
+  import { createPalette } from './lib/app/palette.svelte.ts'
   import { createSessionActions } from './lib/app/sessionActions.svelte.ts'
   import { createRoomControls } from './lib/app/roomControls.svelte.ts'
   import Pins from './lib/rooms/Pins.svelte'
@@ -125,7 +125,6 @@
   import { bindRouter, router } from './lib/app/router.svelte.ts'
   import { bundleReloadSafe, createBundleReload } from './lib/app/bundleReload.ts'
   import type { Drill } from './lib/app/router.svelte.ts'
-  import { paletteTargets } from './lib/ui/paletteTargets.ts'
   import MachinePage from './lib/machines/MachinePage.svelte'
   import { machinesSub } from './lib/machines/machines.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
@@ -143,7 +142,6 @@
   import type { Page } from './lib/api/wire.ts'
   import type { FeedMember } from './lib/rooms/feedViews.ts'
   import type { Receipt } from './lib/sessions/dm.ts'
-  import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
   import type { CallRequest } from './lib/voice/callRequests.ts'
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
@@ -448,14 +446,12 @@
   let runsError = $state('')
   let runDetail = $state<RunDetail | null>(null)
   let runError = $state('')
-  let palettePath = $state<string | null>(null)
   const settingsPanel = createSettingsPanel({
     hasRoom: () => !!room,
     closeNav: () => { navOpen = false },
     roomRequired: () => say({ tone: 'info', subject: 'Open a room first', text: 'Hook runs belong to a room repository.' }),
   })
   const { openSettings, openHookLog, createProfile } = settingsPanel
-  let showPalette = $state(false) // Ctrl+K, or the search button on a phone
   let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
   let sessionTab = $state('chat') // the open tab of a session view
@@ -505,6 +501,36 @@
   }
 
   let current = $derived(rooms.find((r) => r.id === roomId))
+
+  const palette = createPalette({
+    room: () => current ?? room, roomId: () => roomId, rooms: () => rooms,
+    runs: () => runs, members: () => hierarchy, changes: () => changes,
+    session: () => drill, sessionPRs: () => prMap[drill?.id ?? ''],
+    narrow: () => narrow, hasTerminal: () => hasTerminal,
+    openView: (v) => (v === 'terminal' ? dockRequest++ : openView(v)),
+    openSettings: (section, pairNow) => openSettings(section, pairNow),
+    renameRoom: (r) => roomActions.rename(r), deleteRoom: (r) => roomActions.delete(r),
+    roomAction: (run, note) => roomActions.action(run, note), say: (message) => sayLine(message),
+    loadRooms: () => loadRooms(), selectRoom: (id) => selectRoom(id),
+    openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
+    openPins: () => { showPins = true; if (narrow) showMembers = false },
+    openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) settingsPanel.openRoomSettings() },
+    openSessionPRs: () => openReview('prs'),
+    cancelRun: (run) => askConfirm({ kind: 'cancelrun', run }),
+    toggleSidebar: () => (narrow ? (navOpen = !navOpen) : (showSide = !showSide)),
+    startWorkflowDialog: () => { starting = true },
+    openSession: (member) => openSession(member),
+    openRun: (run) => showRun(run),
+    openPR: (pr) => openPR(pr),
+  })
+  const showPalette = $derived(palette.show)
+  const palettePath = $derived(palette.path)
+  const searchText = $derived(palette.query)
+  const paletteCommands = $derived(palette.paletteCommands)
+  const composerCommands = $derived(palette.composerCommands)
+  const targets = $derived(palette.targets)
+  const { openSearch, closeSearch, openNewRoom, openTarget: openPaletteTarget, openRoom: paletteRoom } = palette
+
   // Where a file dropped on the window goes, as the drop line words it.
   const dropTarget = $derived(drill ? '@' + drill.name : roomLabel(current ?? room))
   let feedViews = $derived(feedModel(hierarchy))
@@ -1074,7 +1100,7 @@
   // Room menu: everyday actions first, then Delete in coral, which asks for
   // the room's name.
   function roomMenuItems(r: Room) {
-    return roomActionItems(actionRegistry(r))
+    return palette.roomMenu(r)
   }
 
   // openRunAgent opens the session that ran an agent: its transcript and its composer.
@@ -1311,35 +1337,6 @@
     }
   }
 
-  let searchText = $state('')
-  function openSearch(query = '') {
-    searchText = query
-    showPalette = true
-  }
-  function closeSearch() {
-    showPalette = false
-    palettePath = null
-    searchText = ''
-  }
-
-  // The palette's own commands. "New room" is built into the palette.
-  // Icons for palette commands, as SVG paths on a 20 px grid.
-  const ICON = {
-    files: 'M3 5.5a1.5 1.5 0 0 1 1.5-1.5h3.4l1.6 1.8h6a1.5 1.5 0 0 1 1.5 1.5v7.2a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5Z',
-    terminal: 'M3.5 4h13a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM6 8l2.5 2L6 12M10.5 12.5H14',
-    github: 'M6 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM6 15.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM17 15.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM4.5 6v8M15.5 14V8.5a2.5 2.5 0 0 0-2.5-2.5h-3M11.5 4 9.5 6l2 2',
-    run: 'M6.5 4.5v11l9-5.5Z',
-    stop: 'M5.5 5.5h9v9h-9Z',
-    flows: 'M3.5 4h5v4.5h-5ZM11.5 11.5h5V16h-5ZM6 8.5v2.5a1.5 1.5 0 0 0 1.5 1.5h4',
-    pin: 'M8 3.5h4l-.6 4.2 2.6 2.3H6l2.6-2.3ZM10 10v6.5',
-    rename: 'M4 16h3l8.5-8.5-3-3L4 13Z',
-    archive: 'M3.5 4.5h13v3h-13ZM4.5 7.5v8h11v-8M8 10.5h4',
-    trash: 'M4.5 6h11M8 6V4.5h4V6M6 6l.7 10h6.6L14 6',
-    device: 'M7 3h6a1.5 1.5 0 0 1 1.5 1.5v11A1.5 1.5 0 0 1 13 17H7a1.5 1.5 0 0 1-1.5-1.5v-11A1.5 1.5 0 0 1 7 3ZM9 14.5h2',
-    gear: 'M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4',
-    side: 'M3.5 4.5h13v11h-13ZM8 4.5v11',
-  }
-
   // shellParent is the session a shell result names, empty when the owner started it.
   function shellParent(post: { payload?: unknown }): string {
     const payload = post.payload
@@ -1417,52 +1414,8 @@
     }
   }
 
-  function openNewRoom(arg = '') {
-    palettePath = arg
-    showPalette = true
-  }
-  function actionRegistry(r = current ?? room) {
-    return actions({
-      room: r, rooms, icons: ICON, hasTerminal, narrow, runs, session: drill, sessionPRs: prMap[drill?.id ?? ''],
-      openView: (v) => (v === 'terminal' ? dockRequest++ : openView(v)), openSettings, renameRoom: roomActions.rename, deleteRoom: roomActions.delete, roomAction: roomActions.action, say: sayLine, loadRooms,
-      openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
-      openPins: () => { showPins = true; if (narrow) showMembers = false },
-      openSearch: (arg) => openSearch(arg || ''),
-      openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) { settingsPanel.openRoomSettings() } },
-      openSessionPRs: () => openReview('prs'),
-      cancelRun: (run) => askConfirm({ kind: 'cancelrun', run }),
-      toggleSidebar: () => (narrow ? (navOpen = !navOpen) : (showSide = !showSide)),
-      roomOptions: () => rooms.filter((x) => x.id !== r?.id).map((x) => ({ value: x.name, hint: x.displayName && x.displayName !== x.name ? x.displayName : x.repo || '' })),
-      switchRoom: (arg) => {
-        if (!arg) return void (showPalette = true)
-        const a = arg.toLowerCase()
-        const hit = rooms.find((x) => x.name.toLowerCase() === a || roomLabel(x).toLowerCase() === a) ?? rooms.find((x) => `${x.name} ${roomLabel(x)}`.toLowerCase().includes(a))
-        if (!hit) return `No room matches "${arg}".`
-        selectRoom(hit.id)
-      },
-      newRoom: openNewRoom,
-      startWorkflow: () => { openView('runs'); starting = true },
-    })
-  }
-  let registry = $derived(actionRegistry())
-  let paletteCommands = $derived(actionItems(registry, 'palette'))
-  let composerCommands = $derived(actionItems(registry, 'slash'))
-
-  // The palette also finds the open room's sessions, runs and PRs. The runs
-  // list loads only for the Runs view, so an open palette loads it too.
-  let targets = $derived(showPalette && roomId ? paletteTargets(hierarchy.filter((m): m is Member & { id: string } => !!m.id), runs?.runs ?? [], (changes ?? []).filter((c): c is ChangeRow & { changeId: string } => !!c.changeId)) : [])
+  // Load workflow targets only while the palette is open.
   $effect(() => { if (showPalette && roomId && runs === null) untrack(loadRuns) })
-  function openPaletteTarget(t: PaletteTarget) {
-    if (t.kind === 'session') openSession(t.session)
-    else if (t.kind === 'run') showRun(t.run)
-    else openPR(t.pr)
-  }
-
-  // A room chosen in the palette. A room just made is not in the list yet.
-  async function paletteRoom(id: string) {
-    await loadRooms()
-    selectRoom(id)
-  }
 
   // openFirst picks the room to show at start: a link's room, else the room
   // the owner had open, else the first active room. The saved room opens
@@ -1789,7 +1742,7 @@
 {#if settingsPanel.showRoomSettings && room}
   {#key settingsPanel.roomSettingsKey}
   {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} start={settingsPanel.roomSettingsAt.start} hookRun={settingsPanel.roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { settingsPanel.closeRoomSettings(); openSettings('hooks') }} onclose={() => (settingsPanel.closeRoomSettings())} />
+  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} start={settingsPanel.roomSettingsAt.start} hookRun={settingsPanel.roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => palette.registry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { settingsPanel.closeRoomSettings(); openSettings('hooks') }} onclose={() => (settingsPanel.closeRoomSettings())} />
   {/key}
 {/if}
 {#if roomMenu}
