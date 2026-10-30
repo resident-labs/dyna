@@ -107,6 +107,16 @@ case "$suite" in
   next)
     # next/ is a separate Go module with its own go.mod, so the root ./... skips it.
     # The check's golang image matches the go line in next/go.mod.
+    # Format runs first and skips next/third_party, which keeps upstream formatting.
+    mapfile -d '' files < <(git ls-files -z -- 'next/*.go' ':(exclude)next/third_party')
+    if ((${#files[@]})); then
+      unformatted=$(gofmt -l "${files[@]}")
+      if [[ -n $unformatted ]]; then
+        echo "These Go files are not gofmt-formatted; fix them with gofmt -w <files>:" >&2
+        echo "$unformatted" >&2
+        exit 1
+      fi
+    fi
     cd next
     go vet ./...
     go test -count=1 ./...
