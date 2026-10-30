@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { ownerIdentity } from '../ui/avatar.ts'
   import type { Member, Room } from '../api/room.ts'
   import type { ComputerInfo } from '../api/computer.ts'
   import type { MachineSummary } from '../api/machine.ts'
   import type { RunList } from '../api/workflow.ts'
-  import type { RouteNotice } from '../settings/link.ts'
+  import type { Snippet } from 'svelte'
   import type { Facts } from '../prs/pr.ts'
   import { flip } from 'svelte/animate'
   import { fade } from 'svelte/transition'
@@ -36,22 +35,21 @@
     onmachine?: ((id: string) => void) | null
     selected?: string
     onroom?: ((id: string) => void) | null
-    route?: RouteNotice | null
     room?: Room | null
     view?: string
     viewUnread?: Record<string, number>
     requests?: number
     live?: Member[]
     runs?: RunList | null
-    dataDir?: string
-    ownerHue?: number
     prs?: Record<string, Facts[]>
     computers?: ComputerInfo[] | null
     onroommenu?: ((x: number, y: number, anchor?: HTMLElement) => void) | null
     onview: (view: string) => void
     onmember: (member: Member) => void
+    // bar is the owner bar at the foot of the sidebar.
+    bar?: Snippet
   }
-  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, viewUnread = {}, requests = 0, live = [], runs = null, dataDir = '', ownerHue = 0, prs = {}, computers = null, onroommenu = null, onview, onmember }: Props = $props()
+  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, room = null, view = GENERAL, viewUnread = {}, requests = 0, live = [], runs = null, prs = {}, computers = null, onroommenu = null, onview, onmember, bar }: Props = $props()
   // Gold marks only what needs the owner or runs now; no totals.
   let liveComputers = $derived(new Set((computers ?? []).filter(isLive).map((c) => c.session)).size)
   let running = $derived(runningWork(runs))
@@ -129,14 +127,7 @@
       {/if}
     </div>
   {/if}
-  <footer class="me">
-    <Avatar avatar={ownerIdentity} name="you" hue={ownerHue} size={32} dotGap="#18171a" />
-    <div class="who">
-      <strong>you</strong>
-      <span title={dataDir}>{room ? `owner of ${roomLabel(room)}` : 'room owner'}</span>
-      {#if route}<span class="route" title={route.better ? `A nearer route is open: ${route.better}` : ''}>via {route.label}{route.better ? ' · nearer: ' + route.better : ''}</span>{/if}
-    </div>
-  </footer>
+  {@render bar?.()}
 </aside>
 
 <style>
@@ -242,17 +233,4 @@
   .sub { margin: 3px 0 0; font-size: var(--t-cap); color: var(--faint); }
   .empty { margin: var(--s2); font-size: var(--t-ui); color: var(--faint); }
   .turn { flex: none; font-size: var(--t-sm); color: var(--faint); }
-  .me {
-    height: 56px;
-    flex: none;
-    background: #18171a;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 var(--s3);
-  }
-  .who { display: flex; flex-direction: column; min-width: 0; line-height: var(--leading-tight); flex: 1; }
-  .who strong { font-size: var(--t-body); font-weight: 600; }
-  .who .route { font-size: var(--t-cap); }
-  .who span { font-size: var(--t-cap); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>

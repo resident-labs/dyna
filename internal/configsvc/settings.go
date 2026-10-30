@@ -50,6 +50,8 @@ var help = map[string]string{
 	settings.KeyPiCodeMode:             "Pi code mode: only routes tools through codemode; off restores Pi's previous behavior. Applies to new processes.",
 	settings.KeyIdleUnloadMinutes:      "Minutes before an idle Pi or Claude process unloads to free memory. Its next turn starts a new process. 0 keeps processes loaded.",
 	settings.KeySteeringToolWait:       "How long a message to a busy session waits for a running tool before it interrupts the tool.",
+	settings.KeyOwnerName:              "The name the web app shows for you, up to 32 characters. Empty shows \"you\". Agents still see you as the owner.",
+	settings.KeyOwnerAvatar:            "One emoji for your avatar in the web app. Empty shows your name's initials.",
 }
 
 // Items lists every settings key, in the order `dyna settings list` prints.
@@ -114,6 +116,8 @@ func Items() ([]Item, error) {
 		{Key: settings.KeyPiCodeMode, Value: v.PiCodeMode, Source: v.Source(settings.KeyPiCodeMode), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyIdleUnloadMinutes, Value: v.HarnessIdleUnloadMinutes, Source: v.Source(settings.KeyIdleUnloadMinutes), LiveVsRestart: settings.LiveNextOperation, Kind: "int"},
 		{Key: settings.KeySteeringToolWait, Value: v.SteeringMaxToolWait.String(), Source: v.Source(settings.KeySteeringToolWait), LiveVsRestart: settings.LiveNextOpen, Kind: "duration"},
+		{Key: settings.KeyOwnerName, Value: v.OwnerName, Source: v.Source(settings.KeyOwnerName), LiveVsRestart: settings.LiveNextOpen, Kind: "string"},
+		{Key: settings.KeyOwnerAvatar, Value: v.OwnerAvatar, Source: v.Source(settings.KeyOwnerAvatar), LiveVsRestart: settings.LiveNextOpen, Kind: "string"},
 		{Key: settings.KeyVoiceProvider, Value: v.VoiceProvider, Source: v.Source(settings.KeyVoiceProvider), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: settings.VoiceProviders, OptionNotes: voiceNeeds},
 		{Key: settings.KeyVoiceModel, Value: v.VoiceModel, Source: v.Source(settings.KeyVoiceModel), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyVoiceURL, Value: v.VoiceURL, Source: v.Source(settings.KeyVoiceURL), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
@@ -142,6 +146,38 @@ func Items() ([]Item, error) {
 		}
 	}
 	return items, nil
+}
+
+// OwnerProfile returns how front ends show the owner. Every paired device
+// reads it, so it needs only the read scope, unlike the full settings list.
+func OwnerProfile() (Owner, error) {
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		return Owner{}, err
+	}
+	return Owner{Name: v.OwnerName, Avatar: v.OwnerAvatar}, nil
+}
+
+// SetOwnerProfile validates both owner keys, then saves them in one write,
+// so a rejected avatar never leaves a new name behind.
+func SetOwnerProfile(ctx context.Context, owner Owner) (Owner, error) {
+	if err := authority.Check("settings set", authority.Of(ctx), nil); err != nil {
+		return Owner{}, err
+	}
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		return Owner{}, err
+	}
+	if err := v.Set(settings.KeyOwnerName, owner.Name); err != nil {
+		return Owner{}, err
+	}
+	if err := v.Set(settings.KeyOwnerAvatar, owner.Avatar); err != nil {
+		return Owner{}, err
+	}
+	if err := v.Save(); err != nil {
+		return Owner{}, err
+	}
+	return Owner{Name: v.OwnerName, Avatar: v.OwnerAvatar}, nil
 }
 
 // Set validates and writes one settings key, then returns its new item.

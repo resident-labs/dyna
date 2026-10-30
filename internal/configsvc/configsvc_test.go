@@ -127,10 +127,23 @@ func TestDefaultDisableRemove(t *testing.T) {
 	}
 }
 
+func TestSetOwnerProfileSavesNothingWhenTheAvatarIsRejected(t *testing.T) {
+	isolate(t)
+	if _, err := SetOwnerProfile(t.Context(), Owner{Name: "Ari", Avatar: "not an emoji"}); err == nil {
+		t.Fatal("an invalid avatar was accepted")
+	}
+	if got, err := OwnerProfile(); err != nil || got != (Owner{}) {
+		t.Fatalf("after a rejected save the profile is %+v, %v", got, err)
+	}
+	if got, err := SetOwnerProfile(t.Context(), Owner{Name: " Ari ", Avatar: "🦊"}); err != nil || got != (Owner{Name: "Ari", Avatar: "🦊"}) {
+		t.Fatalf("SetOwnerProfile = %+v, %v", got, err)
+	}
+}
+
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 39 {
+	if err != nil || len(items) != 41 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
