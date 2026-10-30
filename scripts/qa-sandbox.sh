@@ -33,8 +33,10 @@ binds+=(--ro-bind "$command_path" "$command_path")
 shift
 mkdir -p "$root"/{home,config,data,cache,runtime,tmp}
 chmod 700 "$root" "$root"/{home,config,data,cache,runtime,tmp}
+lib64=usr/lib
+if [[ -d /usr/lib64 ]]; then lib64=usr/lib64; fi
 exec bwrap --die-with-parent --new-session --unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts \
-  --clearenv --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib /lib64 \
+  --clearenv --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink "$lib64" /lib64 \
   --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run \
   --ro-bind /etc/fonts /etc/fonts --ro-bind /etc/ssl /etc/ssl \
   --bind "$root" "$root" --bind "$root" /qa "${binds[@]}" \
