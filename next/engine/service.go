@@ -307,9 +307,6 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
 	}
-	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
-		return contract.SessionCloseResponse{}, e
-	}
 	s.boxLockMu.Lock()
 	if run := s.boxRuns[session.ID]; run != nil {
 		run.closing = true
@@ -322,45 +319,53 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
 	}
-	if current.State != contract.BoxDeleted {
-		if current.State != contract.BoxClosing {
-			current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
-			if err != nil {
-				return contract.SessionCloseResponse{}, failure(err)
-			}
+	if current.State != contract.BoxDeleted && current.State != contract.BoxClosing {
+		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+		if err != nil {
+			return contract.SessionCloseResponse{}, failure(err)
 		}
-		if !req.Discard {
+	}
+	if !req.Discard && current.State != contract.BoxDeleted {
+		repos, err := s.store.RoomRepos(ctx, session.Room)
+		if err != nil {
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+		if len(repos) != 0 {
 			if current.Reason != "" {
-				if err = s.archiveReason(ctx, session.Room, current, ""); err != nil {
+				if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
 					return contract.SessionCloseResponse{}, failure(err)
 				}
 			}
-			if err = s.waitArchives(ctx, session); err != nil {
-				return contract.SessionCloseResponse{}, failure(err)
-			}
+			return contract.SessionCloseResponse{}, nil
 		}
-		if err = s.boxes.Remove(ctx, session.Box); err != nil {
+	}
+	return contract.SessionCloseResponse{}, s.finishClose(ctx, session, current)
+}
+
+func (s *Service) finishClose(ctx context.Context, session store.Session, current box.Box) *contract.Error {
+	if current.State != contract.BoxDeleted {
+		if err := s.boxes.Remove(ctx, session.Box); err != nil {
 			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
 			if transitionErr != nil {
-				return contract.SessionCloseResponse{}, failure(transitionErr)
+				return failure(transitionErr)
 			}
-			return contract.SessionCloseResponse{}, failure(err)
+			return failure(err)
 		}
-		if _, err = s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
-			return contract.SessionCloseResponse{}, failure(err)
+		if _, err := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
+			return failure(err)
 		}
 	}
 	s.mu.Lock()
 	delete(s.archives, session.ID)
 	s.mu.Unlock()
-	event, err := s.event(session.Room, caller, contract.SessionClosed{Session: session.ID})
+	event, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionClosed{Session: session.ID})
 	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+		return failure(err)
 	}
-	if err = s.store.CloseSession(ctx, session.ID, event); err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+	if err := s.store.CloseSession(ctx, session.ID, event); err != nil {
+		return failure(err)
 	}
-	return contract.SessionCloseResponse{}, nil
+	return nil
 }
 
 func (s *Service) Post(ctx context.Context, caller contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
