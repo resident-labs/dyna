@@ -486,6 +486,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Settings", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.settingsItems},
 		{Name: "SetSetting", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.setSetting},
 		{Name: "OwnerProfile", Access: websvc.Read, Scope: websvc.ScopeRead, Method: configsvc.OwnerProfile},
+		{Name: "SetOwnerProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: configsvc.SetOwnerProfile},
 		{Name: "UpdateNotice", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.config.UpdateNotice},
 		{Name: "Notices", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Notices},
 		{Name: "DismissNotice", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.rooms.DismissNotice},

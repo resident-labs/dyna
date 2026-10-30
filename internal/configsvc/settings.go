@@ -158,6 +158,28 @@ func OwnerProfile() (Owner, error) {
 	return Owner{Name: v.OwnerName, Avatar: v.OwnerAvatar}, nil
 }
 
+// SetOwnerProfile validates both owner keys, then saves them in one write,
+// so a rejected avatar never leaves a new name behind.
+func SetOwnerProfile(ctx context.Context, owner Owner) (Owner, error) {
+	if err := authority.Check("settings set", authority.Of(ctx), nil); err != nil {
+		return Owner{}, err
+	}
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		return Owner{}, err
+	}
+	if err := v.Set(settings.KeyOwnerName, owner.Name); err != nil {
+		return Owner{}, err
+	}
+	if err := v.Set(settings.KeyOwnerAvatar, owner.Avatar); err != nil {
+		return Owner{}, err
+	}
+	if err := v.Save(); err != nil {
+		return Owner{}, err
+	}
+	return Owner{Name: v.OwnerName, Avatar: v.OwnerAvatar}, nil
+}
+
 // Set validates and writes one settings key, then returns its new item.
 func Set(ctx context.Context, key, value string) (Item, error) {
 	if err := authority.Check("settings set", authority.Of(ctx), nil); err != nil {

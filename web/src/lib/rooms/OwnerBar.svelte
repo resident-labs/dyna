@@ -47,9 +47,7 @@
     busy = true
     note = ''
     try {
-      await api.setSetting('owner.name', name)
-      await api.setSetting('owner.avatar', avatar)
-      setOwnerProfile({ name: name.trim(), avatar: avatar.trim() })
+      setOwnerProfile(await api.setOwnerProfile({ name, avatar }))
       editing = false
     } catch (err) {
       note = errorText(err)
