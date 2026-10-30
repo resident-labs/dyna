@@ -33,3 +33,8 @@ type CommandRule struct {
 	Args    []string `json:"args,omitempty"` // exact leading arguments
 	Prefix  bool     `json:"prefix"`         // more arguments may follow
 }
+
+const (
+	GrantModeApprove     GrantMode = "approve"
+	GrantModePreapproved GrantMode = "preapproved"
+)
