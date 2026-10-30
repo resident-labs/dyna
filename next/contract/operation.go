@@ -1,0 +1,72 @@
+package contract
+
+import "time"
+
+// OpKind is "family.verb", such as "hostexec.run" or "repo.settings.set".
+type OpKind string
+
+type Class string
+
+const (
+	ClassAuto  Class = "auto"  // runs at once
+	ClassAgent Class = "agent" // a session above the caller, or the owner, approves
+	ClassOwner Class = "owner" // only the owner approves
+)
+
+type OpState string // "pending" | "approved" | "denied" | "expired" | "withdrawn" | "done" | "failed"
+
+type Operation struct {
+	ID       OpID      `json:"id"`
+	Kind     OpKind    `json:"kind"`
+	Room     RoomID    `json:"room"`
+	By       Principal `json:"by"`
+	Class    Class     `json:"class"`
+	Card     Card      `json:"card"`
+	Args     OpArgs    `json:"args"` // sealed union, one struct per kind
+	State    OpState   `json:"state"`
+	Created  time.Time `json:"created"`
+	Expires  time.Time `json:"expires"`
+	Decision *Decision `json:"decision,omitempty"`
+	Result   *OpResult `json:"result,omitempty"`
+}
+
+type OpArgs interface {
+	OpKind() OpKind
+	isOpArgs()
+}
+
+type TargetKind string  // "repo" | "room" | "host" | "session" | "account"
+type ChangeField string // declared per operation kind
+
+type Card struct {
+	Title   string   `json:"title"`
+	Body    string   `json:"body,omitempty"`
+	Target  Target   `json:"target"`
+	Changes []Change `json:"changes,omitempty"`
+	Command []string `json:"command,omitempty"` // argv, for host exec
+}
+
+type Target struct {
+	Kind TargetKind `json:"kind"`
+	Name string     `json:"name"`
+}
+
+type Change struct {
+	Field ChangeField `json:"field"`
+	Old   string      `json:"old"`
+	New   string      `json:"new"`
+}
+
+type Decision struct {
+	By       Principal `json:"by"`
+	Approved bool      `json:"approved"`
+	Reason   string    `json:"reason,omitempty"`
+	At       time.Time `json:"at"`
+}
+
+type OpResult struct {
+	ExitCode   int    `json:"exitCode"`
+	Error      string `json:"error,omitempty"`
+	Output     string `json:"output,omitempty"`     // up to 64 KiB inline
+	OutputFile string `json:"outputFile,omitempty"` // the rest, by hash
+}
