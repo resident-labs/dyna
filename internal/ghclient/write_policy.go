@@ -130,9 +130,6 @@ func parseAPIWrite(w Write, args []string) Write {
 	}
 	w.Ref = ItemRef{Host: w.Host, Repo: w.Repo}
 	if c, ok := ownCommentCall(args); ok {
-		if c.method == "PATCH" && (call.input || !slices.Contains(call.keys, "body")) {
-			return w
-		}
 		w.Ref.Kind, w.Ref.Target, w.ValidItem = ItemComment, c.kind+"/comments/"+c.id, true
 		if c.method == "PATCH" {
 			w.Verb = "comment.edit"

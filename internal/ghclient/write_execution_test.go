@@ -30,9 +30,14 @@ esac
 	}
 	t.Setenv(BinaryEnv, exe)
 	ctx := WithApprovedClass(WithRoom(context.Background(), records[0].ID), approvals.ClassOwner)
-	cmd := Command(ctx, exe, records[0].Repo, "api", "repos/owner/project/issues/comments/7", "-X", "DELETE")
-	err := RunWithAccount(ctx, cmd, nil)
-	if err == nil || !strings.Contains(err.Error(), string(ReasonForeignComment)) {
-		t.Fatalf("approved foreign comment: %v", err)
+	for _, args := range [][]string{
+		{"api", "repos/owner/project/issues/comments/7", "-X", "DELETE"},
+		{"api", "repos/owner/project/issues/comments/7", "-X", "PATCH", "--input", "body.json"},
+	} {
+		cmd := Command(ctx, exe, records[0].Repo, args...)
+		err := RunWithAccount(ctx, cmd, nil)
+		if err == nil || !strings.Contains(err.Error(), string(ReasonForeignComment)) {
+			t.Fatalf("approved foreign comment %q: %v", args, err)
+		}
 	}
 }
