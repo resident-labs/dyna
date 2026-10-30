@@ -20,6 +20,7 @@ func TestPiLabelMigration(t *testing.T) {
 	ctx := context.Background()
 	const generated = "00112233445566778899aabbccddeeff"
 	const custom = "ffeeddccbbaa99887766554433221100"
+	const keyAccount = "11223344556677889900aabbccddeeff"
 	if err := database.Migrate(db, "account.registry", 10, func(conn *sql.Conn, _ int) error {
 		if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
 			return err
@@ -27,6 +28,7 @@ func TestPiLabelMigration(t *testing.T) {
 		for _, row := range []Metadata{
 			{ID: generated, Harness: "pi", Identity: "pi:openai-codex", Label: "pi native login"},
 			{ID: custom, Harness: "pi", Identity: "pi:openai-codex", Label: "My account"},
+			{ID: keyAccount, Harness: "pi", Provider: ProviderChatGPT, Kind: KindAPIKey, Identity: "pi:openai-codex", Label: "chatgpt key"},
 		} {
 			raw, err := json.Marshal(row)
 			if err != nil {
@@ -40,7 +42,7 @@ func TestPiLabelMigration(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{generated, custom} {
+	for _, id := range []string{generated, custom, keyAccount} {
 		dir := filepath.Join(dataDir, "accounts", "pi", id)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -58,6 +60,7 @@ func TestPiLabelMigration(t *testing.T) {
 	}{
 		{generated, "openai-codex · 1234", LabelDefault},
 		{custom, "My account", LabelOwner},
+		{keyAccount, "chatgpt · 1234", LabelDefault},
 	} {
 		var raw []byte
 		if err := db.QueryRowContext(ctx, "SELECT metadata FROM accounts WHERE id = ?", tc.id).Scan(&raw); err != nil {
