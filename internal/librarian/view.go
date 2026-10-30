@@ -4,24 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
-	"time"
 
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/settings"
 )
-
-// LibraryView is the read-only feature map the web client shows.
-type LibraryView struct {
-	Repo    string            `json:"repo"`
-	Enabled bool              `json:"enabled"`
-	Head    string            `json:"head,omitempty"`
-	LastRun time.Time         `json:"lastRun,omitempty"`
-	Entries []library.Entry   `json:"entries"`
-	Stale   []string          `json:"stale"`
-	Lint    []library.Finding `json:"lint"`
-}
 
 // View returns the live map of a repository with its stale ids and lint
 // findings. Both read the librarian's checkout of main when it exists.
