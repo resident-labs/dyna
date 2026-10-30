@@ -50,6 +50,7 @@
   import Members from './lib/rooms/Members.svelte'
   import Toast from './lib/ui/Toast.svelte'
   import { clipText } from './lib/ui/toast.ts'
+  import { createShortcut } from './lib/app/shortcuts.ts'
   import { createPalette } from './lib/app/palette.svelte.ts'
   import { createSessionActions } from './lib/app/sessionActions.svelte.ts'
   import { createRoomControls } from './lib/app/roomControls.svelte.ts'
@@ -1311,31 +1312,15 @@
     if ((ev.kind === 'members' && !item) || ['rooms', 'posts', 'room.paused', 'room.resumed'].includes(ev.kind)) soonRooms()
   }
 
-  // Ctrl+B toggles the room sidebar, as in most editors. It works from the
-  // composer too; a textarea has no use for the key.
-  function shortcut(e: KeyboardEvent) {
-    const inside = (selector: string) => !!(e.target as Element | null)?.closest?.(selector)
-    if (e.key === 'Escape' && (e.defaultPrevented || inside('[role="menu"], [role="dialog"], [role="alertdialog"]'))) return
-    if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      if (showPalette) closeSearch()
-      else openSearch()
-      return
-    }
-    if (e.key.toLowerCase() === 'b' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      showSide = !showSide
-    }
-    if (e.key === 'Escape' && selectingSessions) { e.preventDefault(); toggleSessionSelection(); return }
-    if (e.key === 'Escape' && drill && threadsOpen && !viewing && !card && !showPalette) { threadsOpen = false; return }
-    // Esc closes the panel unless a modal on top of it owns the key.
-    if (e.key === 'Escape' && goalId && !viewing && !card && !showPalette) goalId = ''
-    if (e.key === 'Escape' && showPins && !viewing && !card && !showPalette) showPins = false
-    if (e.key === 'Escape' && narrow) {
-      navOpen = false
-      showMembers = false
-    }
-  }
+  const shortcut = createShortcut({
+    paletteOpen: () => showPalette, openSearch, closeSearch,
+    toggleSidebar: () => { showSide = !showSide },
+    selectingSessions: () => selectingSessions, toggleSessionSelection,
+    drillOpen: () => !!drill, threadsOpen: () => threadsOpen, closeThreads: () => { threadsOpen = false },
+    viewing: () => !!viewing, cardOpen: () => !!card, goalOpen: () => !!goalId,
+    closeGoal: () => { goalId = '' }, pinsOpen: () => showPins, closePins: () => { showPins = false },
+    narrow: () => narrow, closePhonePanels: () => { navOpen = false; showMembers = false },
+  })
 
   // shellParent is the session a shell result names, empty when the owner started it.
   function shellParent(post: { payload?: unknown }): string {
