@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+
+	"dyna-agent/internal/repoid"
 )
 
 // checkoutDir returns a checkout of the record's repository that is still on
@@ -12,11 +14,16 @@ import (
 // file or directory" for the missing command directory (D-131; processguard
 // rewrites the kernel's exec-shaped wording).
 //
-// Stored checkout paths can become stale or be replaced. A GitHub record proves
-// each candidate still matches its repository before using it. The room
-// repository outlives every session and is the last fallback, with the same proof.
+// RepoPath was matched when stored, but the worktree may have since been
+// removed while its directory remains. Check that Git can still use it. The
+// unproven session directories and room fallback must match the repository.
 func (s *Service) checkoutDir(ctx context.Context, r Record) (string, error) {
-	for _, dir := range []string{r.RepoPath, r.LookupDir, r.Dir} {
+	if isDirectory(r.RepoPath) {
+		if _, err := repoid.Git(ctx, r.RepoPath, "rev-parse", "--git-dir"); err == nil {
+			return r.RepoPath, nil
+		}
+	}
+	for _, dir := range []string{r.LookupDir, r.Dir} {
 		if !isDirectory(dir) {
 			continue
 		}
