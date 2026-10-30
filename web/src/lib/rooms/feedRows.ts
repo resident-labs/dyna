@@ -267,7 +267,10 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
   }
   for (const group of openThreads.values()) closeThread(group)
   const markerGroup = [...threadRows.values()].find((group) => group.some((post) => post.id === unreadFrom))
-  const marker = markerGroup?.[markerGroup.length - 1]?.id ?? unreadFrom
+  const unreadIndex = posts.findIndex((post) => post.id === unreadFrom)
+  const marker = markerGroup && unreadIndex >= 0
+    ? posts.slice(unreadIndex).find((post) => !hidden.has(post.id))?.id ?? unreadFrom
+    : unreadFrom
   let prev: P | null = null
   let prevDay = ''
   const waiting = calls.map((call) => ({ call, ts: Date.parse(call.askedAt) })).sort((a, b) => a.ts - b.ts)
@@ -293,8 +296,8 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
       continue
     }
     if (!post) continue
-    // A thread moves its unread marker to the card at its newest post.
-    // Other hidden posts retain the existing marker behavior.
+    // Move a folded thread marker to the first visible unread row, so an
+    // unrelated unread post never appears above the divider.
     if (post.id === marker) {
       out.push({ kind: 'new', key: 'new' })
       prev = null
