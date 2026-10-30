@@ -196,7 +196,7 @@ func TestStoreImportsResultOnceAndUsesCanonicalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := strings.Repeat("a", 40)
-	result := Result{Repo: repo, SHA: sha, Status: "passed", Suites: []SuiteResult{{Suite: "go", Status: "passed"}}}
+	result := Result{Repo: repo, SHA: sha, Status: "passed", Suites: []SuiteResult{{Suite: "go", Status: OutcomePassed, LogTail: strings.Repeat("log", 2000)}}}
 	raw, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +209,7 @@ func TestStoreImportsResultOnceAndUsesCanonicalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, err := s.LoadResult(ctx, alias, sha)
+	result.Suites[0].LogTail = ""
 	if err != nil || !reflect.DeepEqual(loaded, result) {
 		t.Fatalf("imported result = %#v, %v", loaded, err)
 	}

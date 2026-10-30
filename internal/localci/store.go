@@ -404,7 +404,7 @@ func (s Store) LoadResult(ctx context.Context, repo, sha string) (Result, error)
 		return Result{}, fmt.Errorf("legacy CI result SHA does not match %s", sha)
 	}
 	result.Repo = repo
-	raw, err = json.Marshal(result)
+	raw, err = json.Marshal(trimForStorage(result))
 	if err != nil {
 		return Result{}, err
 	}
@@ -420,6 +420,7 @@ func (s Store) LoadResult(ctx context.Context, repo, sha string) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
+	result = Result{}
 	err = s.loadPayload(ctx, "local_ci_results", repo, sha, &result)
 	return result, err
 }
