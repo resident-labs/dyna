@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -110,6 +111,9 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 			if text, ok := strings.CutPrefix(arg, "body="); ok {
 				return text
 			}
+			if text, ok := strings.CutPrefix(arg, "--comment="); ok {
+				return text
+			}
 			if path, ok := strings.CutPrefix(arg, "--body-file="); ok {
 				data, err := os.ReadFile(path)
 				if err != nil {
@@ -150,6 +154,8 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		"edit no body":   {[]string{"pr", "edit", "1", "--title", "t"}, ""},
 		"not a body":     {[]string{"pr", "view", "1"}, ""},
 		"issue comment":  {[]string{"issue", "comment", "3", "--body", "Hi"}, "Opened by an agent.\n\nHi\n"},
+		"issue close":    {[]string{"issue", "close", "3", "--reason", "completed", "--comment", "Done"}, "Opened by an agent.\n\nDone"},
+		"issue reopen":   {[]string{"issue", "reopen", "3", "--comment=Done"}, "Opened by an agent.\n\nDone"},
 		"pr comment":     {[]string{"pr", "comment", "3", "-F", "body.md"}, "Opened by an agent.\n\nBody text\n"},
 		"review comment": {[]string{"pr", "review", "3", "--comment", "-b", "Fine"}, "Opened by an agent.\n\nFine\n"},
 		"approve":        {[]string{"pr", "review", "3", "--approve"}, ""},
@@ -212,5 +218,27 @@ func TestAgentCommentEditsNeedTheRoomAccountsComment(t *testing.T) {
 	}
 	if err := refuseForeignComment(ctx, cmd, repository{"github.com", "up/project"}, "token", "someone-else"); err == nil {
 		t.Fatal("a comment of another author was allowed")
+	}
+}
+
+func TestAttributedCloseKeepsTerminator(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "Opened by an agent."); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
+	own := repository{"github.com", "fork/project"}
+	for _, verb := range []string{"close", "reopen"} {
+		cmd := exec.Command("gh", "issue", verb, "--comment", "Done", "--", "7")
+		cmd.Dir = records[0].Repo
+		cleanup, err := withAttribution(ctx, cmd, own)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+		want := []string{"gh", "issue", verb, "--comment=Opened by an agent.\n\nDone", "--", "7"}
+		if !slices.Equal(cmd.Args, want) {
+			t.Fatalf("%s args = %q, want %q", verb, cmd.Args, want)
+		}
 	}
 }

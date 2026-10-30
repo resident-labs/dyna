@@ -59,6 +59,24 @@ var ownerIdentities = func() ([]string, error) {
 // them name a file instead of holding the text.
 var textFlags = map[string]bool{"--title": false, "-t": false, "--body": false, "-b": false, "--body-file": true, "-F": true}
 
+// closeTextFlags are the comment flags of issue close and reopen. On pr review
+// -c and --comment are switches, so they stay out of textFlags.
+var closeTextFlags = map[string]bool{"--comment": false, "-c": false}
+
+// closesIssue reports whether command is gh issue close or reopen, whose comment
+// flag takes the text itself and no file.
+func closesIssue(command []string) bool {
+	return len(command) >= 2 && command[0] == "issue" && (command[1] == "close" || command[1] == "reopen")
+}
+
+// bodyFlagsFor returns the text flags of a command.
+func bodyFlagsFor(command []string) map[string]bool {
+	if closesIssue(command) {
+		return closeTextFlags
+	}
+	return textFlags
+}
+
 // generatedTextFlags make gh build the title or body from commits, a template
 // or an editor, so the text cannot be read before gh publishes it.
 var generatedTextFlags = map[string]bool{
@@ -71,7 +89,7 @@ var generatedTextFlags = map[string]bool{
 // attribution line alone, a comment or an edit without a body stays as it is.
 var bodyCommands = map[string]bool{
 	"issue create": true, "pr create": true,
-	"issue edit": false, "pr edit": false, "issue comment": false, "pr comment": false, "pr review": false,
+	"issue edit": false, "pr edit": false, "issue comment": false, "issue close": false, "issue reopen": false, "pr comment": false, "pr review": false,
 }
 
 // shortFlag splits a short flag that carries its value, such as -bTEXT or
@@ -105,6 +123,7 @@ func publicText(cmd *exec.Cmd) (string, error) {
 		// Comment and review flags such as -r and -a take no value.
 		valueFlags = nil
 	}
+	flags := bodyFlagsFor(args)
 	var text strings.Builder
 	for i := 2; i < len(args); i++ {
 		if args[i] == "--" {
@@ -123,7 +142,7 @@ func publicText(cmd *exec.Cmd) (string, error) {
 		if generatedTextFlags[name] {
 			return "", errUninspectableText
 		}
-		isFile, known := textFlags[name]
+		isFile, known := flags[name]
 		if !known {
 			if valueFlags[name] && !attached {
 				i++
@@ -264,15 +283,22 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 	if command[1] != "create" && command[1] != "edit" {
 		valueFlags = nil
 	}
+	flags := bodyFlagsFor(command)
 	start := len(args) - len(command) + 2
 	body, rest := "", append([]string(nil), args[:start]...)
 	found := false
+	// Arguments after "--" are positional, so the attributed flag goes before them.
+	var tail []string
 	for i := start; i < len(args); i++ {
+		if args[i] == "--" {
+			tail = args[i:]
+			break
+		}
 		name, value, attached := strings.Cut(args[i], "=")
 		if flag, rest, ok := shortFlag(args[i]); ok {
 			name, value, attached = flag, strings.TrimPrefix(rest, "="), true
 		}
-		isFile, text := textFlags[name]
+		isFile, text := flags[name]
 		if !text || name == "--title" || name == "-t" {
 			rest = append(rest, args[i])
 			if valueFlags[name] && !attached && i+1 < len(args) {
@@ -299,6 +325,10 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 		return none, nil
 	}
 	body = withAttributionFirst(body, rec.Attribution)
+	if closesIssue(command) {
+		cmd.Args = append([]string{cmd.Args[0]}, append(append(rest, "--comment="+body), tail...)...)
+		return none, nil
+	}
 	file, err := os.CreateTemp("", "dyna-gh-body-")
 	if err != nil {
 		return none, err
@@ -309,6 +339,6 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 		cleanup()
 		return none, errors.Join(werr, cerr)
 	}
-	cmd.Args = append([]string{cmd.Args[0]}, append(rest, "--body-file="+file.Name())...)
+	cmd.Args = append([]string{cmd.Args[0]}, append(append(rest, "--body-file="+file.Name()), tail...)...)
 	return cleanup, nil
 }
