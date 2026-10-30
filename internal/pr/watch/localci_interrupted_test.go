@@ -308,3 +308,32 @@ func TestResumedReplacementThatLosesSSHFailsTheTrial(t *testing.T) {
 		t.Fatal("a spent retry started another run")
 	}
 }
+
+// A machine retry can itself stop with the engine. That is still the one
+// replacement, not permission to start a third run.
+func TestTrialInfrastructureRetryIsSpentAcrossDifferentCauses(t *testing.T) {
+	first := localci.Result{Repo: "repo", SHA: "head", Node: "first", Status: localci.OutcomeError, Cause: localci.CauseSSHDrop}
+	verdict, _, _, err := localCIStatus(first, "repo", "head", nil, nil)
+	if err != nil || verdict != VerdictPending || cisched.SavedResultActionFor(first) != cisched.RetryOnAnotherMachine {
+		t.Fatalf("first failure: verdict=%s action=%v err=%v", verdict, cisched.SavedResultActionFor(first), err)
+	}
+	second := first
+	second.Node, second.RetriedFrom, second.Cause = "second", "first", localci.CauseEngineStop
+	verdict, _, _, err = localCIStatus(second, "repo", "head", nil, nil)
+	if err != nil || verdict != VerdictFailed || cisched.SavedResultActionFor(second) != cisched.SettleSavedResult {
+		t.Fatalf("replacement failure: verdict=%s action=%v err=%v", verdict, cisched.SavedResultActionFor(second), err)
+	}
+	resumed := first
+	resumed.Resumed = true
+	verdict, _, _, err = localCIStatus(resumed, "repo", "head", nil, nil)
+	if err != nil || verdict != VerdictFailed || cisched.SavedResultActionFor(resumed) != cisched.SettleSavedResult {
+		t.Fatalf("resumed machine failure: verdict=%s action=%v err=%v", verdict, cisched.SavedResultActionFor(resumed), err)
+	}
+	mixed := first
+	mixed.Cause = localci.CauseEngineStop
+	mixed.Checks = []localci.SuiteResult{{CheckName: "test", Status: localci.OutcomeFailed, Cause: localci.CauseTestFailure}}
+	verdict, _, _, err = localCIStatus(mixed, "repo", "head", nil, nil)
+	if err != nil || verdict != VerdictFailed || cisched.SavedResultActionFor(mixed) != cisched.SettleSavedResult {
+		t.Fatalf("test failure beside interruption: verdict=%s action=%v err=%v", verdict, cisched.SavedResultActionFor(mixed), err)
+	}
+}
