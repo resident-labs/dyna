@@ -98,24 +98,15 @@ type Rule struct {
 	Updated time.Time      `json:"updated"`
 }
 
-type OutsideComments string
-
-const (
-	OutsideCommentsHold  OutsideComments = "hold"
-	OutsideCommentsAdmit OutsideComments = "admit"
-)
-
 // SettingsBundle keeps only the v1 settings that v2 uses.
 type SettingsBundle struct {
-	OwnerName         string          `json:"ownerName"`
-	RootProfile       ProfileName     `json:"rootProfile"`
-	RulesMaxChars     int             `json:"rulesMaxChars"`
-	SubagentMaxDepth  int             `json:"subagentMaxDepth"`
-	CheckInInterval   DurationMS      `json:"checkInInterval"`
-	ShellSilence      DurationMS      `json:"shellSilence"`
-	PRTrustedBots     []string        `json:"prTrustedBots"`
-	PROutsideComments OutsideComments `json:"prOutsideComments"`
-	LibraryProfile    ProfileName     `json:"libraryProfile"`
+	OwnerName        string      `json:"ownerName"`
+	RootProfile      ProfileName `json:"rootProfile"`
+	RulesMaxChars    int         `json:"rulesMaxChars"`
+	SubagentMaxDepth int         `json:"subagentMaxDepth"`
+	CheckInInterval  DurationMS  `json:"checkInInterval"`
+	ShellSilence     DurationMS  `json:"shellSilence"`
+	LibraryProfile   ProfileName `json:"libraryProfile"`
 }
 
 type ProfileBundle struct {
@@ -226,7 +217,6 @@ type RepoBundle struct {
 	MergePolicy     MergePolicy       `json:"mergePolicy"`
 	CIMode          CIMode            `json:"ciMode"`
 	ReviewerProfile ProfileName       `json:"reviewerProfile,omitempty"`
-	TestBudget      DurationMS        `json:"testBudget"`
 	Attribution     []AttributionLine `json:"attribution,omitempty"`
 	Library         []LibraryEntry    `json:"library"`
 }
@@ -308,23 +298,13 @@ type IssueBundle struct {
 	Notes     []IssueNote    `json:"notes,omitempty"`
 }
 
-type PRHold struct {
-	Reason string         `json:"reason"`
-	By     ImportedAuthor `json:"by"`
-	At     time.Time      `json:"at"`
-}
-
-// TrackedPR is an open PR. Reviews, CI and mergeability are read again from
-// GitHub.
+// TrackedPR records only which session owns an open PR. Everything else,
+// such as branch, reviews and CI, is read from GitHub.
 type TrackedPR struct {
-	Repo         RepoName       `json:"repo"`
-	Number       int            `json:"number"`
-	Author       ImportedAuthor `json:"author"`
-	Branch       string         `json:"branch"`
-	Goal         GoalID         `json:"goal,omitempty"`
-	Fixes        []string       `json:"fixes,omitempty"` // "D-5", "#207"
-	Dependencies []string       `json:"dependencies,omitempty"`
-	Hold         *PRHold        `json:"hold,omitempty"`
+	Repo   RepoName       `json:"repo"`
+	Number int            `json:"number"`
+	Author ImportedAuthor `json:"author"`
+	Goal   GoalID         `json:"goal,omitempty"`
 }
 
 type QuestionKind string

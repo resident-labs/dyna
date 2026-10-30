@@ -20,8 +20,7 @@ func filledGlobalBundle() GlobalBundle {
 		Rules:    []Rule{{Label: "u1", Text: "report bugs to root", By: owner, Created: bundleTime, Updated: bundleTime}},
 		Settings: SettingsBundle{
 			OwnerName: "Ari", RootProfile: "opus", RulesMaxChars: 4000, SubagentMaxDepth: 3,
-			CheckInInterval: 900000, ShellSilence: 600000, PRTrustedBots: []string{"dependabot"},
-			PROutsideComments: OutsideCommentsHold, LibraryProfile: "haiku",
+			CheckInInterval: 900000, ShellSilence: 600000, LibraryProfile: "haiku",
 		},
 		Profiles: []ProfileBundle{{
 			Name: "terra", Description: "builder", Model: "gpt-5.5", Models: []string{"gpt-5.5"}, Fallback: "kimi-max",
@@ -34,7 +33,7 @@ func filledGlobalBundle() GlobalBundle {
 		}},
 		Repos: []RepoBundle{{
 			Repo: "resident-labs/dyna", DefaultRoom: "dyna", MergePolicy: MergeQueue, CIMode: CIBox, ReviewerProfile: "terra",
-			TestBudget: 1000, Attribution: []AttributionLine{{Kind: AttributionPR, Line: "Made with Dyna"}},
+			Attribution: []AttributionLine{{Kind: AttributionPR, Line: "Made with Dyna"}},
 			Library: []LibraryEntry{{
 				ID: "rooms", Name: "rooms", Kind: LibraryFeature, Parent: "", Summary: "feeds", Differs: "typed",
 				Owns: []string{"internal/room"}, Docs: []string{"docs/rooms.md"}, Tests: []string{"internal/room"},
@@ -70,10 +69,7 @@ func filledRoomBundle() RoomBundle {
 			Notes: []IssueNote{{At: bundleTime, By: root, Text: "note"}},
 		}},
 		NextIssue: 587,
-		PRs: []TrackedPR{{
-			Repo: "resident-labs/dyna", Number: 1283, Author: root, Branch: "rewrite/v2-spec", Goal: "g1084",
-			Fixes: []string{"D-584"}, Dependencies: []string{"1288"}, Hold: &PRHold{Reason: "wait", By: root, At: bundleTime},
-		}},
+		PRs:       []TrackedPR{{Repo: "resident-labs/dyna", Number: 1283, Author: root, Goal: "g1084"}},
 		Questions: []QuestionBundle{{
 			Label: "q33", Kind: QuestionTerminal, Asker: root, Text: "mount the drive", Options: []string{"yes"},
 			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Asked: bundleTime,
