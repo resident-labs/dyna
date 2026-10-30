@@ -17,8 +17,11 @@ type fakeAccess struct {
 	allowed bool
 }
 
-func (a fakeAccess) Allowed(context.Context, contract.SessionID, contract.RepoName) (bool, error) {
-	return a.allowed, nil
+func (a fakeAccess) RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error) {
+	if a.allowed {
+		return []contract.RoomRepo{{Repo: "owner/repo"}}, nil
+	}
+	return nil, nil
 }
 
 type roundTrip func(*http.Request) (*http.Response, error)
@@ -30,7 +33,7 @@ func TestRejectsOtherRooms(t *testing.T) {
 	called := false
 	transport := roundTrip(func(*http.Request) (*http.Response, error) { called = true; return nil, nil })
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", fakeAccess{}).ServeHTTP(w, httptest.NewRequest("GET", "/git/owner/repo.git/info/refs?service=git-upload-pack", nil))
+	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{}).ServeHTTP(w, httptest.NewRequest("GET", "/git/owner/repo.git/info/refs?service=git-upload-pack", nil))
 	if w.Code != http.StatusForbidden || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -43,9 +46,20 @@ func TestRejectsUnownedPushBeforeUpstream(t *testing.T) {
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/main\x00report-status\n"
 	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 	if called || !strings.Contains(w.Body.String(), "ng refs/heads/main not owned by this session") {
 		t.Fatalf("upstream called %v, response %q", called, w.Body.String())
+	}
+}
+
+func TestRejectsSidebandPushWithSidebandReport(t *testing.T) {
+	target, _ := url.Parse("https://github.com")
+	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/main\x00report-status side-band-64k\n"
+	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
+	w := httptest.NewRecorder()
+	Handler(target, roundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("upstream called"); return nil, nil }), "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	if len(w.Body.Bytes()) < 5 || w.Body.Bytes()[4] != 1 || !strings.Contains(w.Body.String(), "ng refs/heads/main") {
+		t.Fatalf("invalid sideband report %q", w.Body.String())
 	}
 }
 
@@ -64,7 +78,7 @@ func TestForwardsOwnedPushAndReplacesCredential(t *testing.T) {
 	req := httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body))
 	req.Header.Set("Authorization", "bad")
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", fakeAccess{allowed: true}).ServeHTTP(w, req)
+	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}

@@ -84,6 +84,19 @@ func TestHostAddRejectsBox(t *testing.T) {
 	}
 }
 
+func TestGitRouteUsesBoxListenerIdentity(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	var caller Caller
+	a.SetGitRoute(func(c Caller) http.Handler {
+		caller = c
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	})
+	w := request(a.handler(boxCaller()), "/git/owner/repo.git/git-upload-pack", "")
+	if w.Code != http.StatusNoContent || caller.Room != "room-a" || caller.Principal.Session != "session-a" {
+		t.Fatalf("status %d, caller %+v", w.Code, caller)
+	}
+}
+
 func TestOwnerOnlyMethodRejectsBox(t *testing.T) {
 	w := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/session.close", `{"session":"session-b"}`)
 	if w.Code != http.StatusForbidden {

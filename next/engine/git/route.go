@@ -4,7 +4,6 @@ package git
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,14 +15,9 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// Access checks room membership for a session.
-type Access interface {
-	Allowed(context.Context, contract.SessionID, contract.RepoName) (bool, error)
-}
-
 // Handler binds a smart-HTTP route to a session. The upstream and token belong
 // to the engine, not to the box.
-func Handler(upstream *url.URL, transport http.RoundTripper, token string, session contract.SessionID, access Access) http.Handler {
+func Handler(upstream *url.URL, transport http.RoundTripper, token string, session contract.SessionID, room contract.RoomID, rooms RoomRepositories) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Transport: transport,
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -45,10 +39,17 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 			http.NotFound(w, r)
 			return
 		}
-		allowed, err := access.Allowed(r.Context(), session, repo)
+		repos, err := rooms.RoomRepos(r.Context(), room)
 		if err != nil {
 			http.Error(w, "repository access unavailable", http.StatusServiceUnavailable)
 			return
+		}
+		allowed := false
+		for _, item := range repos {
+			if item.Repo == repo {
+				allowed = true
+				break
+			}
 		}
 		if !allowed {
 			http.Error(w, "repository not in room", http.StatusForbidden)
@@ -59,18 +60,28 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 				http.Error(w, "unsupported content encoding", http.StatusUnsupportedMediaType)
 				return
 			}
-			body, rejected, err := commands(r.Body, session)
+			body, rejected, sideband, err := commands(r.Body, session)
 			if err != nil {
 				http.Error(w, "invalid receive-pack commands", http.StatusBadRequest)
 				return
 			}
 			if len(rejected) != 0 {
 				w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
-				pkt(w, "unpack ok\n")
+				var report bytes.Buffer
+				pkt(&report, "unpack ok\n")
 				for _, ref := range rejected {
-					pkt(w, "ng "+ref+" not owned by this session\n")
+					pkt(&report, "ng "+ref+" not owned by this session\n")
 				}
-				io.WriteString(w, "0000")
+				io.WriteString(&report, "0000")
+				if sideband {
+					for report.Len() > 0 {
+						size := min(report.Len(), 65515)
+						pkt(w, "\x01"+string(report.Next(size)))
+					}
+					io.WriteString(w, "0000")
+				} else {
+					_, _ = report.WriteTo(w)
+				}
 				return
 			}
 			r.Body = body
@@ -95,32 +106,40 @@ func pkt(w io.Writer, value string) {
 	fmt.Fprintf(w, "%04x%s", len(value)+4, value)
 }
 
-func commands(body io.ReadCloser, session contract.SessionID) (io.ReadCloser, []string, error) {
+func commands(body io.ReadCloser, session contract.SessionID) (io.ReadCloser, []string, bool, error) {
 	reader := bufio.NewReader(body)
 	var prefix bytes.Buffer
 	var refs []string
-	var denied bool
+	var denied, sideband bool
 	for {
 		var hdr [4]byte
 		if _, err := io.ReadFull(reader, hdr[:]); err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		prefix.Write(hdr[:])
 		n, err := strconv.ParseUint(string(hdr[:]), 16, 16)
 		if err != nil || n > 65520 || (n != 0 && n < 4) || prefix.Len()+int(n) > 1<<20 {
-			return nil, nil, fmt.Errorf("bad packet")
+			return nil, nil, false, fmt.Errorf("bad packet")
 		}
 		if n == 0 {
 			break
 		}
 		line := make([]byte, int(n)-4)
 		if _, err := io.ReadFull(reader, line); err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		prefix.Write(line)
-		fields := strings.Fields(strings.SplitN(string(line), "\x00", 2)[0])
+		command, caps, hasCaps := strings.Cut(string(line), "\x00")
+		if hasCaps {
+			for _, cap := range strings.Fields(caps) {
+				if cap == "side-band-64k" {
+					sideband = true
+				}
+			}
+		}
+		fields := strings.Fields(command)
 		if len(fields) != 3 {
-			return nil, nil, fmt.Errorf("bad command")
+			return nil, nil, false, fmt.Errorf("bad command")
 		}
 		ref := fields[2]
 		allowed := ref == "refs/heads/v2/"+string(session) || ref == "refs/dyna/archive/"+string(session)
@@ -135,5 +154,5 @@ func commands(body io.ReadCloser, session contract.SessionID) (io.ReadCloser, []
 	return struct {
 		io.Reader
 		io.Closer
-	}{io.MultiReader(&prefix, reader), body}, refs, nil
+	}{io.MultiReader(&prefix, reader), body}, refs, sideband, nil
 }
