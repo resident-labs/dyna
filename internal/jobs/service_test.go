@@ -936,10 +936,10 @@ func TestStoreMigrationUpdatesVersionFour(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name IN ('idle_s','workspace','run','idempotency_key','request_hash','container')`).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name IN ('idle_s','workspace','run','idempotency_key','request_hash','container','subdir')`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 6 {
+	if count != 7 {
 		t.Fatal("the version 4 database did not gain all later job columns")
 	}
 	var version string
