@@ -63,7 +63,11 @@ func Command(o Options) *cobra.Command {
 			return err
 		}
 		for _, entry := range entries {
-			fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s  %s  %s", entry.Time.Format(time.RFC3339), entry.Actor, entry.Kind, entry.Target, entry.State)
+			status := string(entry.State)
+			if entry.Action != "" {
+				status = string(entry.Action)
+			}
+			fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s  %s  %s", entry.Time.Format(time.RFC3339), entry.Actor, entry.Kind, entry.Target, status)
 			if entry.ExitCode != nil {
 				fmt.Fprintf(c.OutOrStdout(), "  exit %d", *entry.ExitCode)
 			}

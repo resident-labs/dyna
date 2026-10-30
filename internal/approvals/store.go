@@ -42,6 +42,7 @@ CREATE INDEX approval_request_holder ON approval_requests(at,state);
 CREATE INDEX approval_request_expiry ON approval_requests(state,expires_at);
 CREATE TABLE approval_decisions (
  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+ room TEXT NOT NULL,
  request TEXT NOT NULL,
  actor TEXT NOT NULL,
  action TEXT NOT NULL,
@@ -76,6 +77,13 @@ func Migrate(dataDir string) error {
 			return err
 		}
 		if from < 4 {
+			if _, err := conn.ExecContext(context.Background(), `ALTER TABLE approval_decisions ADD COLUMN room TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+			// legacy/shim: IDs were room-local. Only unambiguous rows can be attributed safely.
+			if _, err := conn.ExecContext(context.Background(), `UPDATE approval_decisions SET room=(SELECT MIN(room) FROM approval_requests r WHERE r.id=approval_decisions.request) WHERE (SELECT COUNT(*) FROM approval_requests r WHERE r.id=approval_decisions.request)=1`); err != nil {
+				return err
+			}
 			_, err := conn.ExecContext(context.Background(), `CREATE TABLE approval_inline_log (seq INTEGER PRIMARY KEY, room TEXT NOT NULL, actor TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL, exit_code INTEGER, at INTEGER NOT NULL)`)
 			return err
 		}
@@ -229,8 +237,8 @@ func insertRequest(ctx context.Context, conn *sql.Conn, r *Request) error {
 	return err
 }
 
-func insertDecision(ctx context.Context, conn *sql.Conn, request, actor string, action Action, reason string, at time.Time) error {
-	_, err := conn.ExecContext(ctx, `INSERT INTO approval_decisions(request,actor,action,reason,at) VALUES(?,?,?,?,?)`, request, actor, action, reason, at.UnixNano())
+func insertDecision(ctx context.Context, conn *sql.Conn, room, request, actor string, action Action, reason string, at time.Time) error {
+	_, err := conn.ExecContext(ctx, `INSERT INTO approval_decisions(room,request,actor,action,reason,at) VALUES(?,?,?,?,?,?)`, room, request, actor, action, reason, at.UnixNano())
 	return err
 }
 

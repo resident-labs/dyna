@@ -178,7 +178,8 @@ type LogEntry struct {
 	Actor    string        `json:"actor"`
 	Kind     OperationKind `json:"kind"`
 	Target   string        `json:"target"`
-	State    State         `json:"state"`
+	State    State         `json:"state,omitempty"`
+	Action   Action        `json:"action,omitempty"`
 	Detail   string        `json:"detail,omitempty"`
 	ExitCode *int          `json:"exitCode,omitempty"`
 }
@@ -196,8 +197,8 @@ func (s *Service) Log(actor authority.Actor, roomRef string, since time.Duration
 	if since > 0 {
 		cutoff = s.now().Add(-since).UnixNano()
 	}
-	rows, err := db.Query(`SELECT at,room,actor,kind,target,state,result,exit_code FROM approval_inline_log WHERE room=? AND at>=?
-UNION ALL SELECT d.at,r.room,d.actor,r.kind,r.repository,r.state,d.reason,NULL FROM approval_decisions d JOIN approval_requests r ON r.id=d.request WHERE r.room=? AND d.at>=? ORDER BY 1 DESC`, rec.ID, cutoff, rec.ID, cutoff)
+	rows, err := db.Query(`SELECT at,room,actor,kind,target,state,'' AS action,result,exit_code FROM approval_inline_log WHERE room=? AND at>=?
+UNION ALL SELECT d.at,r.room,d.actor,r.kind,r.repository,'',d.action,d.reason,NULL FROM approval_decisions d JOIN approval_requests r ON r.id=d.request AND r.room=d.room WHERE r.room=? AND d.at>=? ORDER BY 1 DESC`, rec.ID, cutoff, rec.ID, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +207,7 @@ UNION ALL SELECT d.at,r.room,d.actor,r.kind,r.repository,r.state,d.reason,NULL F
 	for rows.Next() {
 		var e LogEntry
 		var at int64
-		if err := rows.Scan(&at, &e.Room, &e.Actor, &e.Kind, &e.Target, &e.State, &e.Detail, &e.ExitCode); err != nil {
+		if err := rows.Scan(&at, &e.Room, &e.Actor, &e.Kind, &e.Target, &e.State, &e.Action, &e.Detail, &e.ExitCode); err != nil {
 			return nil, err
 		}
 		e.Time = time.Unix(0, at).UTC()
