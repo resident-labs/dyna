@@ -489,7 +489,7 @@ sessions. Writers honor read-only mode.
 source: a template name or a host script path. Relative scripts resolve in
 the room's working directory. `input` is any JSON value, passed as `--args`,
 at most 256 KiB. Global uses your home folder; other rooms need a repo.
-Start uses `dyna run --detach --room --dir`; Cancel uses `dyna runs cancel`.
+Start uses `dyna workflow run --detach --room --dir`; Cancel uses `dyna workflow runs cancel`.
 A cancelled run shows "Canceled" in the feed. Failed runs still show their
 error. Each agent in RunDetail carries its `session` ID. Steer an agent
 with `SendToSession` on that ID; there is no run-wide broadcast or workflow

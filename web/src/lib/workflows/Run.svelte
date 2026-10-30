@@ -345,7 +345,7 @@
       {:else if loadError}<div class="retry-row"><p class="err">Could not load the result: {loadError}</p><button class="retry" aria-label="Retry run result" onclick={() => loadResult.retry(detail)}>Retry</button></div>
       {:else if loaded?.result}
       {#if resultMode === 'raw'}<pre class="raw mono">{loaded.result}</pre>{:else}<div class="result"><JsonView value={resultValue} /></div>{/if}
-      {#if loaded.truncatedKB}<p class="quiet">The result is truncated at {loaded.truncatedKB} KB; this shows its start. <span class="mono">dyna runs show {run.id}</span> prints all of it.</p>{/if}
+      {#if loaded.truncatedKB}<p class="quiet">The result is truncated at {loaded.truncatedKB} KB; this shows its start. <span class="mono">dyna workflow runs show {run.id}</span> prints all of it.</p>{/if}
       {/if}
     {/if}
   {/if}

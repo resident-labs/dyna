@@ -21,7 +21,7 @@ import (
 	"dyna-agent/internal/store"
 )
 
-// sweepArchivedRuns uses the same removal path as dyna runs remove.
+// sweepArchivedRuns uses the same removal path as dyna workflow runs remove.
 // Goals and PR records currently store session IDs, not source workflow run IDs;
 // there is no persisted source-run reference to guard here.
 func sweepArchivedRuns(ctx context.Context, now time.Time, retention time.Duration, logf func(string, ...any)) (Pruned, error) {

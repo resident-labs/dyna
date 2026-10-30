@@ -41,7 +41,7 @@ func TestCurrentRejectsIncompleteStamps(t *testing.T) {
 }
 
 func TestPR2RoleLimits(t *testing.T) {
-	for _, action := range []string{"git pr merge-fix", "SetRoomChangePolicy", "SetRoomCIBudget", "ResolveFinding", "library enable", "library disable", "room clear-dormant", "subagent dismiss-pending", "DismissSession", "ChangeIssue", "SetGitHubAccess", "post @voice-call"} {
+	for _, action := range []string{"workflow run", "git pr merge-fix", "SetRoomChangePolicy", "SetRoomCIBudget", "ResolveFinding", "library enable", "library disable", "room clear-dormant", "subagent dismiss-pending", "DismissSession", "ChangeIssue", "SetGitHubAccess", "post @voice-call"} {
 		for _, role := range []Role{Owner, Root, Session, Worker} {
 			want := role == Owner || role == Root
 			if action == "post @voice-call" {
@@ -80,7 +80,7 @@ func TestCurrentOwnerMaySelectRoom(t *testing.T) {
 			if actor.Role != Owner || actor.Room != tc.room {
 				t.Fatalf("actor = %+v", actor)
 			}
-			if err := Check("run", actor, nil); err != nil {
+			if err := Check("workflow run", actor, nil); err != nil {
 				t.Fatal(err)
 			}
 		})

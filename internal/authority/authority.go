@@ -152,10 +152,11 @@ func Current() Actor {
 }
 
 type Rule struct {
-	Action    string
-	Allowed   []Role
-	Relations []Relation
-	Instead   string
+	Action      string
+	Allowed     []Role
+	Relations   []Relation
+	Instead     string
+	FullRefusal bool
 }
 
 var Rules = []Rule{
@@ -188,7 +189,7 @@ var Rules = []Rule{
 	{Action: "subagent adopt", Allowed: []Role{Owner, Root}, Relations: []Relation{Parent}, Instead: "ask the session parent or root to move it"},
 	{Action: "subagent transfer", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control sessions"},
 	{Action: "subagent consolidate", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control sessions"},
-	{Action: "run", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
+	{Action: "workflow run", Allowed: []Role{Owner, Root}, FullRefusal: true, Instead: "dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root."},
 	{Action: "doctor examine", Allowed: []Role{Owner, Root, Session}, Instead: "post the problem to @root; root or a session runs the doctor"},
 	{Action: "doctor report", Allowed: []Role{Owner, Root, Session}, Instead: "post the problem to @root; root or a session reads doctor reports"},
 	{Action: "demo", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
@@ -314,6 +315,9 @@ func Check(action string, actor Actor, has func(Relation) bool) error {
 				return nil
 			}
 		}
+	}
+	if rule.FullRefusal {
+		return errors.New(rule.Instead)
 	}
 	return fmt.Errorf("%s is %s only; %s", action, who(rule), rule.Instead)
 }
