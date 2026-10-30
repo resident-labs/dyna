@@ -43,8 +43,8 @@ func (r *activityReader) end(err error) {
 }
 
 // activityPublisher coalesces observations without ever blocking the copier.
-// The publisher flushes at most once per tick. Failed writes cannot renew the
-// stored lease. An ended observation is best effort when the supervisor exits.
+// The publisher flushes at most once per tick, except for the final flush.
+// Failed writes cannot renew the stored lease.
 type activityPublisher struct {
 	updates chan activity.Signal
 }
@@ -72,8 +72,7 @@ func (p *activityPublisher) run(ticks <-chan time.Time, write func(activity.Sign
 		case s, ok := <-p.updates:
 			if !ok {
 				if dirty {
-					now := <-ticks
-					pending.LeaseUntil = now.Add(activity.Lease)
+					pending.LeaseUntil = time.Now().Add(activity.Lease)
 					_ = write(pending)
 				}
 				return

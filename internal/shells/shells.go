@@ -440,12 +440,14 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	}
 
 	copied := make(chan struct{})
+	activityDone := make(chan struct{})
 	var lines int
 	grew := &outputEvents{send: func() { s.Notify(id) }}
 	go func() {
 		defer close(copied)
 		publisher := &activityPublisher{updates: make(chan activity.Signal, 1)}
 		go func() {
+			defer close(activityDone)
 			db, err := s.db()
 			if err != nil {
 				return
@@ -527,7 +529,14 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	if err := s.saveExit(m, ex); err != nil {
 		return err
 	}
-	return errors.Join(s.setOutputLines(id, lines), os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600))
+	result := errors.Join(s.setOutputLines(id, lines), os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600))
+	// Give the final observation a bounded chance to reach SQLite before the
+	// supervisor exits. A failed or delayed write leaves the old lease to expire.
+	select {
+	case <-activityDone:
+	case <-time.After(writeWait):
+	}
+	return result
 }
 
 // exitSaveTries and exitSaveWait bound how long a supervisor keeps trying to
