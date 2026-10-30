@@ -7,6 +7,7 @@ import (
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/subagent"
 )
 
 // Profile reads a session's card with at most posts of its newest posts.
@@ -18,6 +19,11 @@ func (s *Service) Profile(ref string, posts int) (Profile, error) {
 	out := Profile{Member: s.member(info, 0, 0), Dir: info.Dir, Usage: info.Usage}
 	book := s.avatars(info.RoomID)
 	out.Member.Avatar = book.member(info.ID, info.Room)
+	// The profile lists what the member row no longer shows: the work that
+	// stops the session from finishing.
+	one := []Member{out.Member}
+	s.countResponsibilities(one, []subagent.Info{info})
+	out.Member = one[0]
 	if info.ParentSession != "" {
 		if parent, err := s.sessions().Inspect(info.ParentSession); err == nil {
 			out.Parent = parent.EffectiveName()

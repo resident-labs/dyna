@@ -27,7 +27,7 @@ func TestRosterRebuildBatchesResponsibilityCounts(t *testing.T) {
 
 	calls := 0
 	read := responsibilityCounts
-	responsibilityCounts = func(manager *subagent.Manager, ctx context.Context, infos []subagent.Info) (map[string]map[string]int, error) {
+	responsibilityCounts = func(manager *subagent.Manager, ctx context.Context, infos []subagent.Info) (map[string]subagent.RowCounts, error) {
 		calls++
 		if len(infos) != 2 {
 			t.Errorf("one count pass received %d sessions, want 2", len(infos))
