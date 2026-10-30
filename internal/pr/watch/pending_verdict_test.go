@@ -177,18 +177,25 @@ func TestPendingVerdictSurvivesFailedRefreshAndKeepsFindings(t *testing.T) {
 	}
 }
 
-func TestGitHubFailureWithoutWatcherPauseDoesNotSaveVerdict(t *testing.T) {
+func TestGitHubFailureSavesVerdictForReplay(t *testing.T) {
 	e := newEnv(t)
 	e.setCI("success", 1)
 	e.track()
 	e.tick()
 	r := e.record()
-	e.f.Fail = "/pulls/17"
+	e.f.Fail = "check-runs"
 	e.write()
-	if err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "approve", "Review complete", 0); err == nil {
-		t.Fatal("real GitHub error was hidden")
+	err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "approve", "Review complete", 0)
+	if _, ok := VerdictNotice(err); !ok {
+		t.Fatalf("verdict not saved: %v", err)
 	}
-	if e.record().PendingVerdict != nil {
-		t.Fatal("non-pause error saved a verdict")
+	if e.record().PendingVerdict == nil {
+		t.Fatal("verdict was lost")
+	}
+	e.f.Fail = ""
+	e.write()
+	e.tick()
+	if got := e.record(); got.PendingVerdict != nil || got.Verdict != "approve" {
+		t.Fatalf("replay failed: %+v", got)
 	}
 }
