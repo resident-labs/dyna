@@ -19,7 +19,7 @@ test('a late older page cannot replace the current room or its streamed row', as
   let room = 'a', visit = 1
   let resolvePage: (page: Lists.ListPage<Goal>) => void = () => { throw new Error('missing request') }
   const pending = new Promise<Lists.ListPage<Goal>>((resolve) => { resolvePage = resolve })
-  const goal = (id: string, text: string): Goal => ({ id, room, text, setter: '', holders: null, shared: false, parent: '', state: 'active', createdAt: '', updatedAt: '', edits: null })
+  const goal = (id: string, text: string): Goal => ({ id, room, text, setter: '', holders: null, shared: false, state: 'active', createdAt: '', updatedAt: '', edits: null })
   let shown: Goal[] = []
   lists.bindLists({
     current: () => ({ room, visit }),

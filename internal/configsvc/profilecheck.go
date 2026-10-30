@@ -9,14 +9,6 @@ import (
 	"dyna-agent/internal/profilecheck"
 )
 
-// ProfileCheck returns fresh support and health after an optional live probe.
-// ProbeError describes an unsuccessful probe without losing the observed evidence.
-type ProfileCheck struct {
-	Name       string         `json:"name"`
-	Support    HarnessSupport `json:"support"`
-	ProbeError string         `json:"probeError,omitempty"`
-}
-
 // CheckProfile is shared by the desktop, web client, and future profile test
 // controls. Only an explicit live request starts a model. Subagent-only profiles
 // are eligible. The probe enforces its own two-minute deadline.

@@ -436,25 +436,6 @@ func (s *Store) ReadUsageRollup(roomID, fromDay, toDay string) (UsageRollupSnaps
 	return out, nil
 }
 
-// ProfileUsageStats is measured activity for one profile. Cost and CachePaired
-// retain the rollup's coverage, so partial or unknown reports never become zero.
-type ProfileUsageStats struct {
-	Profile        string           `json:"profile"`
-	Turns          int              `json:"turns"`
-	MedianWallMs   *int64           `json:"medianWallMs"`
-	Cost           UsageCost        `json:"cost"`
-	CostPerTurnUSD *float64         `json:"costPerTurnUsd"`
-	CacheReadShare *float64         `json:"cacheReadShare"`
-	CachePaired    UsageCachePaired `json:"cachePaired"`
-}
-
-// ProfileUsageSnapshot answers profile activity for inclusive UTC days.
-type ProfileUsageSnapshot struct {
-	From     string              `json:"from"`
-	To       string              `json:"to"`
-	Profiles []ProfileUsageStats `json:"profiles"`
-}
-
 // ReadProfileUsage groups completed turns by profile. It uses the per-turn
 // durations in usage_turn for the median and the rollup for cost and cache sums.
 func (s *Store) ReadProfileUsage(fromDay, toDay string) (ProfileUsageSnapshot, error) {
