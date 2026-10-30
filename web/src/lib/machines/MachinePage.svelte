@@ -128,7 +128,7 @@
   .machine { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
   .top { padding: var(--s2) var(--s4) 0; }
   .back { color: var(--muted); padding: var(--s1) var(--s2); }
-  .body { padding: var(--s3) var(--s4) var(--s4); display: flex; flex-direction: column; gap: var(--s3); max-width: 900px; }
+  .body { padding: var(--s3) var(--s4) var(--s4); display: flex; flex-direction: column; gap: var(--s3); }
   .facts, .labels { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .facts strong { color: var(--ink); font-size: var(--t-title); }
   .note { color: var(--muted); margin: 0; }
