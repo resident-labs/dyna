@@ -1499,11 +1499,6 @@
 
   // Slash argument parsing stays here; menu and palette actions call the
   // same handlers with no argument.
-  let templates = $state<{ name: string; description?: string }[] | null>(null)
-  function loadTemplates() {
-    if (!templates) api.listTemplates().then((t: { name: string; description?: string }[] | null) => (templates = t ?? []), () => (templates = []))
-    return templates ?? []
-  }
   function openNewRoom(arg = '') {
     palettePath = arg
     showPalette = true
@@ -1528,7 +1523,6 @@
         selectRoom(hit.id)
       },
       newRoom: openNewRoom,
-      templateOptions: () => loadTemplates().map((t) => ({ value: t.name, hint: t.description || '' })),
       startWorkflow: async (arg) => {
         if (!arg) return void (openView('runs'), (starting = true))
         const name = arg.split(/\s+/)[0] ?? ''
@@ -1538,7 +1532,7 @@
           try { input = JSON.parse(text) } catch { input = text }
         }
         if (!r) return
-        const res = await api.startRun(r.id, { template: name }, input)
+        const res = await api.startRun(r.id, { script: name }, input)
         say({ tone: 'success', subject: `${name} started`, text: 'Its agents run now.', action: res?.id ? { label: 'Open', run: () => showRun({ id: res.id }) } : undefined })
         await loadRuns()
         if (res?.id) showRun({ id: res.id })
@@ -1834,7 +1828,7 @@
           <Feed {goals} {profiles} onnewprofile={() => openSettings('profiles')} bind:this={feedView} bind:stuck={feedAtBottom} label={viewLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} onreviewrequest={runTerminalRequest} ondeclinerequest={declineTerminalRequest} {approvals} ondecideapproval={decideApproval} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
           <!-- Keyed: staged files belong to one room and never follow a switch. -->
           {#key room.id + view}
-            <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={viewLabel} prepareText={(text: string) => prepareFeedText(text, viewLead ?? null, feedViews, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} onpending={(pending) => noteComposerWork('feed:' + room.id + ':' + view, pending)} />
+            <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={viewLabel} prepareText={(text: string) => prepareFeedText(text, viewLead ?? null, feedViews, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} onpending={(pending) => noteComposerWork('feed:' + room.id + ':' + view, pending)} />
           {/key}
         {/if}
         {/if}
