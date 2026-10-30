@@ -34,6 +34,7 @@ test('runs sort newest first and results map to tones', () => {
   assert.equal(runTone('fail'), 'bad')
   assert.equal(runTone('error'), 'bad')
   assert.equal(runTone('cancelled'), 'idle')
+  assert.equal(runTone('installing'), 'idle')
 })
 
 test('timeouts drop empty units', () => {
