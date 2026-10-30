@@ -22,7 +22,7 @@ func (r *fakeRepos) Ref(_ context.Context, repo contract.RepoName, _ string) (st
 	return "abc", r.err
 }
 
-func (r *fakeRepos) Get(_ context.Context, _ contract.RoomID, _ contract.SessionID, _ contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
+func (r *fakeRepos) Get(_ context.Context, _ contract.SessionID, _ contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
 	if fetch {
 		r.prepared = true
 	}
@@ -35,7 +35,7 @@ func (placementRepos) Ref(context.Context, contract.RepoName, string) (string, e
 	return "", nil
 }
 
-func (placementRepos) Get(_ context.Context, _ contract.RoomID, _ contract.SessionID, _ contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
+func (placementRepos) Get(_ context.Context, _ contract.SessionID, _ contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
 	if !fetch {
 		return nil, nil
 	}
