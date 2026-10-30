@@ -15,8 +15,7 @@
   import { tick } from 'svelte'
   import { ago, markdown } from '../ui/format.ts'
   import Card from '../ui/Card.svelte'
-  import Chip from '../ui/Chip.svelte'
-  import { toneOf } from '../ui/tone.ts'
+  import StatusPill from '../ui/StatusPill.svelte'
   import Thread from './Thread.svelte'
   import ChangeReview from './ChangeReview.svelte'
   import { checkSummary, verdictMeta, shortSha } from './pr.ts'
@@ -44,10 +43,10 @@
     const { state, total, passed, failed } = checkSummary(checks)
     return {
       none: null,
-      failed: { tone: 'coral', icon: '✗', line: `CI failed · ${failed.length} of ${total} checks` },
-      running: { tone: 'gold', icon: '●', line: `CI running · ${passed.length} of ${total} checks` },
-      incomplete: { tone: 'gold', icon: '●', line: `CI incomplete · ${passed.length} of ${total} checks passed` },
-      passed: { tone: 'sage', icon: '✓', line: `CI passed · ${passed.length} of ${total} checks` },
+      failed: { failed: true, icon: '✗', line: `CI failed · ${failed.length} of ${total} checks` },
+      running: { failed: false, icon: '●', line: `CI running · ${passed.length} of ${total} checks` },
+      incomplete: { failed: false, icon: '●', line: `CI incomplete · ${passed.length} of ${total} checks passed` },
+      passed: { failed: false, icon: '✓', line: `CI passed · ${passed.length} of ${total} checks` },
     }[state]
   })
   // The latest round is open until the user closes it, as GitHub shows a new
@@ -71,7 +70,7 @@
   {@const isLatest = r.round === latest?.round}
   {@const expanded = isShown(r)}
   <div class="it" id={isLatest ? 'latest-round' : undefined}>
-    <span class="av">Round {r.round}</span>
+    <span class="av" aria-hidden="true">·</span>
     <div class="rcard" class:ok={vm?.tone === 'ok'}>
       <header><strong>{reviewer}</strong> {vm ? vm.label.toLowerCase() : 'reviewed'} · round {r.round} · {n} {n === 1 ? 'finding' : 'findings'}{r.head ? ` · at ${shortSha(r.head)}` : ''} · {ago(r.at)}</header>
       <div class="rbody">
@@ -87,13 +86,13 @@
   </div>
 {/snippet}
 {#snippet after()}
-  {#if ci}<p class="it ev"><span class="av small"><Chip tone={toneOf(ci.tone)}>{ci.icon}</Chip></span>{ci.line}</p>{/if}
+  {#if ci}<p class="it ev"><span class="av small">{#if ci.failed}<StatusPill tone="danger" label={ci.icon} />{:else}<span class="round-label">{ci.icon}</span>{/if}</span>{ci.line}</p>{/if}
 {/snippet}
 
 {#if latest && open}
   <Card>
     <button class="pin" onclick={reveal}>
-      <span class="chip"><Chip tone="warning">{`Round ${latest.round} · ${open} open`}</Chip></span>
+      <span class="chip"><StatusPill tone="warning" label={`Round ${latest.round} · ${open} open`} /></span>
       <span class="why">Findings the author has not settled</span>
       <span class="go">View ›</span>
     </button>
@@ -105,6 +104,7 @@
 <Thread {detail} {opener} {events} {bots} {round} {after} />
 
 <style>
+  .round-label { color: var(--muted); font-size: var(--t-sm); white-space: nowrap; }
   .pin { display: flex; align-items: center; gap: var(--s2); width: 100%; text-align: left; font-size: 13px; color: var(--ink-2); }
   .pin .chip, .pin .go { flex: none; }
   .pin .why { min-width: 0; }
