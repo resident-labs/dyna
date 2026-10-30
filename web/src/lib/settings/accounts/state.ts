@@ -1,6 +1,6 @@
 // Presentation only. Account identity and allowance arithmetic belong to the host.
 import type { Account, AccountKind, AccountProblem, AccountRenewal, Provider, ScopeAccount, UsageWindow } from '../../api/account.ts'
-import { quotaBlock } from './reset.ts'
+import { quotaBlock, resetNotice } from './reset.ts'
 
 // The account fields these helpers read. The engine sends Account; a test or a
 // stand-in row names only the fields it has.
@@ -137,7 +137,7 @@ export function accountStatus(account?: AccountLike | null, plan = '', now = Dat
 // blockedNow reads the windows against the clock, so a page that stays open stops
 // showing a limit whose every blocking window has reset. A reading without
 // windows falls back to the host's own decision, which expires the same way.
-function blockedNow(account: AccountLike | null | undefined, now: number): { ids: string[]; reset: string } | null {
+export function blockedNow(account: AccountLike | null | undefined, now: number): { ids: string[]; reset: string } | null {
   const block = quotaBlock(account?.windows ?? undefined, now)
   if (block) return { ids: block.ids, reset: new Date(block.until).toISOString() }
   if (account?.windows?.length) return null
@@ -246,4 +246,57 @@ export function problemText(problem: AccountProblem): string {
 export function selectionText(account: ScopeAccount, roomScope: boolean): string {
   if (account.activeHere) return 'In use'
   return roomScope && account.active ? 'Global choice' : ''
+}
+
+// poolsHere says whether an account's usage counts toward its provider's pooled
+// headline: its repo limit lets it run in the scope and its sign-in works.
+export function poolsHere(account: ScopeAccount): boolean {
+  return account.servesHere && !needsSignIn(account) && account.usageReason !== 'expired'
+}
+
+// amountWindow says a window is money or an amount, not a percent meter: a
+// balance, or an allowance the provider reports only as used of a limit.
+export function amountWindow(window: UsageWindow): boolean {
+  return window.balance !== undefined || (remainingPercent(window) === null && allowanceLabel(window) !== '')
+}
+
+// A pool window is one usage window lined up across a provider's accounts,
+// with one segment for each account that reports it.
+export interface PoolSegment {
+  account: ScopeAccount
+  window: UsageWindow
+}
+export interface PoolWindow {
+  key: string
+  label: string
+  segments: PoolSegment[]
+}
+
+// poolWindows lines up the percent windows of a provider's accounts by window
+// id, or by label when a reader sends no id, in the order they first appear.
+export function poolWindows(accounts: readonly ScopeAccount[]): PoolWindow[] {
+  const pools = new Map<string, PoolWindow>()
+  for (const account of accounts) {
+    for (const window of account.windows ?? []) {
+      if (amountWindow(window)) continue
+      const key = window.id || shortLabel(window.label)
+      const pool = pools.get(key) ?? { key, label: shortLabel(window.label), segments: [] }
+      pool.segments.push({ account, window })
+      pools.set(key, pool)
+    }
+  }
+  return [...pools.values()]
+}
+
+// segmentRemaining is a segment's percent left, or null while its reading is
+// missing or has probably reset since it was taken.
+export function segmentRemaining(segment: PoolSegment, now: number): number | null {
+  return resetNotice(segment.window, segment.account.observedAt, now) ? null : remainingPercent(segment.window)
+}
+
+// poolMean is the headline: the mean percent left over the segments whose
+// account can serve this scope. It is null when no such segment has a reading.
+export function poolMean(pool: PoolWindow, now: number): number | null {
+  const values = pool.segments.filter((segment) => poolsHere(segment.account)).map((segment) => segmentRemaining(segment, now)).filter((value) => value !== null)
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
 }
