@@ -67,6 +67,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodTurnOutput, c, box, a.service.TurnOutput)
 	call(mux, contract.MethodDeliveryDone, c, box, a.service.DeliveryDone)
 	call(mux, contract.MethodArchiveDone, c, box, a.service.ArchiveDone)
+	call(mux, contract.MethodTranscriptAppend, c, box, a.service.TranscriptAppend)
 	mux.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
 		if !user(c) {
 			writeError(w, forbidden())

@@ -8,6 +8,7 @@ package ghquota
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -115,12 +116,28 @@ func countedCallers(counted map[string]int) string {
 	return "; counted by caller: " + strings.Join(parts, ", ")
 }
 
+// runListCaller names a workflow run list by the filter it asks for. Only the
+// filter name reaches the label, never its value, so no branch or SHA is logged.
+func runListCaller(query string) string {
+	values, err := url.ParseQuery(query)
+	if err != nil {
+		return "runs"
+	}
+	switch {
+	case values.Has("head_sha"):
+		return "runs-head-sha"
+	case values.Has("branch"), values.Has("event"):
+		return "runs-branch"
+	}
+	return "runs"
+}
+
 // ghQuotaCaller names the request class of one GitHub API path.
 func ghQuotaCaller(path string) string {
 	if path == "graphql" {
 		return "graphql"
 	}
-	endpoint, _, _ := strings.Cut(path, "?")
+	endpoint, query, _ := strings.Cut(path, "?")
 	rest, ok := strings.CutPrefix(endpoint, "repos/")
 	if !ok {
 		return "other"
@@ -157,7 +174,7 @@ func ghQuotaCaller(path string) string {
 		}
 		return "run"
 	case rest == "actions/runs":
-		return "runs"
+		return runListCaller(query)
 	case strings.HasPrefix(rest, "contents/"):
 		return "contents"
 	case rest == "statuses":
