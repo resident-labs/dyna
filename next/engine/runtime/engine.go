@@ -15,6 +15,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
+	"github.com/resident-labs/dyna/engine/archive"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
@@ -90,6 +91,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service := engine.New(st, boxes, profiles, time.Now)
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
+	service.SetArchiveVerifier(&archive.Verifier{Remote: mirror})
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes}, func(c api.Caller) http.Handler {
 		session, err := st.Session(ctx, c.Principal.Session)
 		if err != nil {
@@ -119,6 +121,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if err := boxes.Restore(ctx); err != nil {
 		return err
+	}
+	if problem := service.ResumeClosures(ctx); problem != nil {
+		return fmt.Errorf("resume close: %s", problem.Message)
 	}
 	done := make(chan error, 1)
 	go func() { done <- proxy.Run(ctx) }()
