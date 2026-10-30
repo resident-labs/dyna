@@ -126,6 +126,10 @@ func copyDatabase(ctx context.Context, db *sql.DB, dir string, keep int, parents
 		os.Remove(partial)
 		return "", err
 	}
+	if err := markCopy(ctx, partial); err != nil {
+		os.Remove(partial)
+		return "", err
+	}
 	// VACUUM INTO creates the file with the umask; dyna.db is private.
 	if err := os.Chmod(partial, 0600); err != nil {
 		return "", err

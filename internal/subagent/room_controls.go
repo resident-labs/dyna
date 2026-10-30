@@ -169,6 +169,9 @@ func (m *Manager) runRoomResume(ctx context.Context, id string, revision uint64)
 		return err
 	}
 	for _, meta := range members {
+		if !m.CopyTime.IsZero() && !meta.Created.After(m.CopyTime) {
+			continue
+		}
 		if err = ctx.Err(); err != nil {
 			return err
 		}
@@ -202,6 +205,9 @@ func (m *Manager) runRoomResume(ctx context.Context, id string, revision uint64)
 		return err
 	}
 	for _, meta := range members {
+		if !m.CopyTime.IsZero() && !meta.Created.After(m.CopyTime) {
+			continue
+		}
 		if meta.Turns == 0 {
 			continue
 		}

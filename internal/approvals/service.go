@@ -22,6 +22,8 @@ type Service struct {
 	Rooms       *room.Store
 	SessionRoot string
 	Now         func() time.Time
+	// CopyTime marks approvals inherited from copied engine state.
+	CopyTime time.Time
 
 	mu      sync.Mutex
 	changes map[string]chan struct{}
