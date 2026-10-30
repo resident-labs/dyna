@@ -183,6 +183,8 @@ export interface Row {
   nextText: string
   filterable: boolean
   settings?: { id: string; label: string; value: string; options?: string[] }[]
+  // schedule is set for a built-in service whose interval and time limit the owner edits.
+  schedule?: { service: string; everyMinutes: number; timeout: string }
 }
 
 const unknown = 'unknown'
@@ -337,11 +339,14 @@ export function buildRows(i: Inputs): Row[] {
   const base = { toggle: null, profile: null, value: '', last: '', nextAt: '', nextText: '', filterable: true }
   // The engine's service list gives each row its state, detail and times, so
   // this page and `dyna services` always agree. Without it a row says unreadable.
-  const reg = (id: RegistryServiceId): Pick<Row, 'state' | 'tone' | 'detail' | 'last' | 'nextAt'> => {
+  // A built-in service also brings its switch and its interval and time limit.
+  const reg = (id: RegistryServiceId): Pick<Row, 'state' | 'tone' | 'detail' | 'last' | 'nextAt'> & Partial<Pick<Row, 'toggle' | 'schedule'>> => {
     const s = i.registry?.find((r) => r.id === id)
-    return s
-      ? { state: s.state, tone: stateTone[s.state], detail: detailLine(s), last: s.lastRun ?? '', nextAt: s.nextRun ?? '' }
-      : { state: unknown, tone: 'off', detail: 'The service list could not be read', last: '', nextAt: '' }
+    if (!s) return { state: unknown, tone: 'off', detail: 'The service list could not be read', last: '', nextAt: '' }
+    return {
+      state: s.state, tone: stateTone[s.state], detail: detailLine(s), last: s.lastRun ?? '', nextAt: s.nextRun ?? '',
+      ...(s.schedule ? { schedule: { service: s.id, everyMinutes: s.schedule.everyMinutes, timeout: s.schedule.timeout }, toggle: s.switch ? { id: `service.enabled:${s.id}`, on: s.switch.on } : null } : {}),
+    }
   }
 
   // PR reviewers: one session per ready change, with a switch and a profile
@@ -411,8 +416,8 @@ export function buildRows(i: Inputs): Row[] {
     value: update && !updateRunning ? elapsed(update.lastRun?.startedAt ?? '', update.lastRun?.finishedAt ?? '') : '',
   })
 
-  // Maintenance and account usage run on their own. They carry no switch,
-  // because off would leave data on disk forever, or gain nothing at all.
+  // Maintenance, account usage and the three services below run on their own
+  // timers; the registry gives each its switch, interval and time limit.
   rows.push({
     ...base,
     ...reg('maintenance'),
@@ -425,6 +430,9 @@ export function buildRows(i: Inputs): Row[] {
     ] : [],
   })
   rows.push({ ...base, ...reg('account-usage'), id: 'usage', name: 'Account usage', nextText: 'on sign-in' })
+  rows.push({ ...base, ...reg('parent-checkins'), id: 'checkins', name: 'Parent check-ins' })
+  rows.push({ ...base, ...reg('harness-versions'), id: 'versions', name: 'Harness versions' })
+  rows.push({ ...base, ...reg('doctor'), id: 'doctor', name: 'Load doctor' })
 
   // CI admission decides what a run may cost; its budget is its control.
   rows.push({

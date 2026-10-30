@@ -66,3 +66,19 @@ func TestHookStatusUsesNewestRun(t *testing.T) {
 		t.Fatalf("newest failed run gave %s, want error", got.State)
 	}
 }
+
+// A built-in service carries its interval and time limit, so the app and the
+// CLI can edit them; a service without a timer carries none.
+func TestBuiltinServiceCarriesItsSchedule(t *testing.T) {
+	schedule := &Schedule{EveryMinutes: 15, Timeout: "5m0s"}
+	rows := Build(Facts{Hooks: map[ID]HookFacts{IDMaintenance: {Found: true, Schedule: schedule}}})
+	for _, s := range rows {
+		want := (*Schedule)(nil)
+		if s.ID == IDMaintenance {
+			want = schedule
+		}
+		if s.Schedule != want {
+			t.Errorf("%s schedule = %+v, want %+v", s.ID, s.Schedule, want)
+		}
+	}
+}

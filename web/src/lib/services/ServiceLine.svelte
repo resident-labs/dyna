@@ -5,6 +5,7 @@
   // and shows the engine's answer on the same line. A service's profile shows
   // as text, because Settings > Models sets it. A service with no control shows none.
   import type { Row } from './model.ts'
+  import ScheduleControls from './ScheduleControls.svelte'
 
   interface Props {
     rows: Row[]
@@ -55,7 +56,7 @@
     {@const more = details(row, shown)}
     <li class="row">
       <div class="top">
-        <button class="name" class:wrap aria-expanded={more.length ? open.includes(row.id) : undefined} disabled={!more.length} onclick={() => flip(row.id)}>
+        <button class="name" class:wrap aria-expanded={more.length || row.schedule ? open.includes(row.id) : undefined} disabled={!more.length && !row.schedule} onclick={() => flip(row.id)}>
           <span class="dot {row.tone}" aria-hidden="true"></span>
           <span class="txt"><span class="nm">{row.name}</span> <span class="st">{shown}</span></span>
         </button>
@@ -78,6 +79,9 @@
       </div>
       {#if open.includes(row.id) && more.length}
         <p class="more">{more.join(' · ')}</p>
+      {/if}
+      {#if open.includes(row.id) && row.schedule}
+        <ScheduleControls service={row.schedule.service} everyMinutes={row.schedule.everyMinutes} timeout={row.schedule.timeout} busy={isSaving(row.id)} onWrite={(id, value) => write(row, id, value)} />
       {/if}
       {#if errors[row.id]}<p class="err" role="alert">{errors[row.id]}</p>{/if}
     </li>
