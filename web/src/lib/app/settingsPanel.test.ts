@@ -32,7 +32,7 @@ test('hooks open on the Services page once per request, and in Settings with no 
   panel.openHooks(run)
   assert.equal(at().request, 2)
   assert.equal(services, 2)
-  // With no room there is no Services page; Settings shows this computer's hooks.
+  // With no room there is no Services page; Settings opens its Services pane.
   assert.equal(panel.showSettings, true)
-  assert.equal(panel.settingsAt.start, 'hooks')
+  assert.equal(panel.settingsAt.start, 'services')
 })

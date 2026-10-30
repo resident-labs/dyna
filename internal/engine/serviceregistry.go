@@ -22,6 +22,14 @@ import (
 // applies. A part the engine
 // cannot read leaves its service unreadable and does not hide the others.
 func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]serviceregistry.Service, error) {
+	if roomRef == "" {
+		voice := s.voice.Status()
+		f := serviceregistry.Facts{Voice: &serviceregistry.VoiceFacts{Available: voice.Available, Live: voice.Live}, Updates: updateFacts(ctx), Hooks: map[serviceregistry.ID]serviceregistry.HookFacts{}}
+		for id, h := range s.hookFacts(ctx, "") {
+			f.Hooks[serviceregistry.ID(id)] = h
+		}
+		return serviceregistry.Build(f), nil
+	}
 	rec, err := s.rooms.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return nil, err

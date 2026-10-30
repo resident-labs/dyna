@@ -83,3 +83,16 @@ func TestBuiltinServiceCarriesItsSchedule(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceScopes(t *testing.T) {
+	global := map[ID]bool{IDVoice: true, IDUpdates: true, IDLoadDoctor: true, IDMaintenance: true, IDAccountUsage: true, IDHarnessVersions: true}
+	for _, s := range Build(Facts{}) {
+		want := ScopeRoom
+		if global[s.ID] {
+			want = ScopeGlobal
+		}
+		if s.Scope != want {
+			t.Errorf("%s: scope %q, want %q", s.ID, s.Scope, want)
+		}
+	}
+}
