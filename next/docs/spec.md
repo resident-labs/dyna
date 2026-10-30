@@ -620,6 +620,7 @@ type Box struct {
 | pending | creating | admission placed it |
 | creating | starting | volume, repository copy and slice are ready, and `podman run` succeeded |
 | starting | ready | the box agent sent `hello` on the box socket within 60 s |
+| starting | stopped | the host start failed during a wake |
 | ready | stopped | the session went dormant: no running turn, shell job or wake |
 | stopped | starting | a delivery wakes the session, and admission fits it again |
 | stopped | pending | a delivery wakes the session, but the host has no room now |

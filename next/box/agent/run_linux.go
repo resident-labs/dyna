@@ -81,6 +81,7 @@ func Run(ctx context.Context, version string) error {
 	}
 	jobs := shell.New(shell.Config{Dir: "/box/work", After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }})
 	defer jobs.Close()
+	client.shellJobs = jobs.Running
 	mux := http.NewServeMux()
 	mux.Handle("/shell/", http.StripPrefix("/shell", jobs.Handler()))
 	mux.Handle("/", ModelRoute(engineSocket))
