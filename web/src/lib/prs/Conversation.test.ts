@@ -19,7 +19,7 @@ async function load() {
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
     plugins: [svelteEsbuildPlugin('server'), { name: 'conversation-fixture', setup(builder) {
       builder.onResolve({ filter: /ui[/\\]format\.ts$/ }, () => ({ path: 'format', namespace: 'stub' }))
-      builder.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const ago = () => '1m ago'; export const markdown = (s) => s", loader: 'js' }))
+      builder.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const ago = () => '1m ago'; export const markdown = (s) => s; export const durationMs = () => ''", loader: 'js' }))
       builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = {}', loader: 'js' }))
     } }],
   })
