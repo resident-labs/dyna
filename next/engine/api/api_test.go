@@ -15,6 +15,13 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func (f *fakeService) RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error) {
+	return contract.RoomListResponse{}, nil
+}
+func (f *fakeService) SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error) {
+	return contract.SessionListResponse{}, nil
+}
+
 type fakeService struct {
 	Service
 	caller  contract.Principal
