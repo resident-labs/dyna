@@ -139,7 +139,7 @@ func (m *Manager) TransferContext(ctx context.Context, ref string, opts Transfer
 // requestTransfer is the shared transfer path for a caller that has already
 // been checked: the CLI through TransferContext, and the engine's automatic
 // usage-limit fallback, which is the engine's own work.
-func (m *Manager) requestTransfer(ctx context.Context, ref string, opts TransferOptions) (TransferState, error) {
+func (m *transferCoordinator) requestTransfer(ctx context.Context, ref string, opts TransferOptions) (TransferState, error) {
 	if opts.WaitSeconds < 0 || opts.WaitSeconds > 120 {
 		return TransferState{}, errors.New("handoff wait must be between 0 and 120 seconds")
 	}
@@ -304,11 +304,7 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		return out, err
 	}
 	if out.Active() && !out.RootSeat {
-		launch := m.TransferLaunch
-		if launch == nil {
-			launch = goTransfer
-		}
-		if err := launch(m, info.ID, out.ID); err != nil {
+		if err := m.launch(info.ID, out.ID); err != nil {
 			_ = m.updateTransfer(info.ID, out.ID, func(_ *Meta, t *TransferState) error {
 				t.Error = "coordinator could not start: " + err.Error()
 				return nil
@@ -375,7 +371,7 @@ func hashPostID(seed string) string {
 	return fmt.Sprintf("msg_%016x", value)
 }
 
-func (m *Manager) TransferStatus(ref string) (*TransferState, error) {
+func (m *transferCoordinator) TransferStatus(ref string) (*TransferState, error) {
 	info, err := m.store().Resolve(ref)
 	if err != nil {
 		return nil, err
@@ -384,7 +380,7 @@ func (m *Manager) TransferStatus(ref string) (*TransferState, error) {
 	return meta.Transfer, err
 }
 
-func (m *Manager) updateTransfer(id, token string, fn func(*Meta, *TransferState) error) error {
+func (m *transferCoordinator) updateTransfer(id, token string, fn func(*Meta, *TransferState) error) error {
 	return m.store().withLock(id, func() error {
 		meta, err := m.store().ReadMeta(id)
 		if err != nil {
@@ -402,7 +398,7 @@ func (m *Manager) updateTransfer(id, token string, fn func(*Meta, *TransferState
 
 // SubmitHandoff records a written handoff, plus the task's actual worktree and
 // branch. A stale response can never satisfy a newer transfer.
-func (m *Manager) SubmitHandoff(ctx context.Context, ref, token, text, dir, branch string) error {
+func (m *transferCoordinator) SubmitHandoff(ctx context.Context, ref, token, text, dir, branch string) error {
 	if err := authority.Check("subagent transfer handoff", authority.Of(ctx), nil); err != nil {
 		return err
 	}
@@ -416,7 +412,7 @@ func (m *Manager) SubmitHandoff(ctx context.Context, ref, token, text, dir, bran
 // submitHandoff stores session id's handoff for transfer token. It checks
 // no caller: a transfer's coordinator calls it for the old agent's
 // [DYNA HANDOFF] answer, as the engine's own work.
-func (m *Manager) submitHandoff(id, token, text, dir, branch string) error {
+func (m *transferCoordinator) submitHandoff(id, token, text, dir, branch string) error {
 	var err error
 	if strings.TrimSpace(text) == "" || len(text) > 32*1024 {
 		return errors.New("handoff must contain 1 byte to 32 KiB")
@@ -442,7 +438,7 @@ func (m *Manager) submitHandoff(id, token, text, dir, branch string) error {
 	})
 }
 
-func (m *Manager) CancelTransfer(ctx context.Context, ref string) (TransferState, error) {
+func (m *transferCoordinator) CancelTransfer(ctx context.Context, ref string) (TransferState, error) {
 	if err := authority.Check("subagent transfer cancel", authority.Of(ctx), nil); err != nil {
 		return TransferState{}, err
 	}
@@ -494,7 +490,7 @@ func goTransfer(m *Manager, id, token string) error {
 // runTransfer resumes durable work under a per-session worker lock. It never
 // changes process-wide environment or starts two replacement turns. It is
 // the engine's own work, so it checks no caller.
-func (m *Manager) runTransfer(ctx context.Context, id, token string) error {
+func (m *transferCoordinator) runTransfer(ctx context.Context, id, token string) error {
 	meta, err := m.store().ReadMeta(id)
 	if err != nil {
 		return err
@@ -595,7 +591,7 @@ func (m *Manager) runTransfer(ctx context.Context, id, token string) error {
 	}
 }
 
-func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, error) {
+func (m *transferCoordinator) advanceTransfer(ctx context.Context, id, token string) (bool, error) {
 	meta, err := m.store().ReadMeta(id)
 	if err != nil {
 		return true, err
@@ -928,7 +924,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 	return false, nil
 }
 
-func (m *Manager) failTransfer(id, token string, cause error) error {
+func (m *transferCoordinator) failTransfer(id, token string, cause error) error {
 	err := m.updateTransfer(id, token, func(meta *Meta, t *TransferState) error {
 		if t.Phase == "starting" {
 			meta.Profile, meta.Model, meta.HarnessSession, meta.Resumable, meta.Dir = t.PreviousProfile, t.PreviousModel, t.PreviousHarness, t.PreviousResumable, t.PreviousDir
@@ -946,7 +942,7 @@ func (m *Manager) failTransfer(id, token string, cause error) error {
 }
 
 // beginTransferTurn owns an explicit token rather than faking a caller's parent.
-func (m *Manager) beginTransferTurn(id, prompt, token string) (Turn, bool, error) {
+func (m *transferCoordinator) beginTransferTurn(id, prompt, token string) (Turn, bool, error) {
 	meta, err := m.store().ReadMeta(id)
 	if err != nil {
 		return Turn{}, false, err

@@ -218,7 +218,7 @@ not-state internal/subagent/room_controls.go Manager.runRoomResume 1 # a non-blo
 # Item 2 exception: internal/subagent/runner.go Manager.RunTurn appends turn_end through state.Append after the turn lock closes, so completion sees an idle session.
 not-state internal/subagent/runner_calls.go Manager.recordCompaction 1 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/subagent/store.go Store.tryTurnLock 1 # turn.lock, held by a runner while it lives; the pidfd watch and the legacy probe read it
-not-state internal/subagent/transfer.go Manager.runTransfer 1 # a non-blocking flock for one transfer worker
+not-state internal/subagent/transfer_machine.go transferCoordinator.runTransfer 1 # a non-blocking flock for one transfer worker
 not-state internal/subagent/turngate.go writeGateState 1 # gate.json, the turn runner's identity and gate, written only by the runner for its steering hook and liveness probes; until g3458 moves the liveness readers to the SessionPid row and #1514's pidfd watch
 not-state internal/testsafe/testsafe.go init 1 # marks a temporary test root for child test binaries; test-only process coordination, not runtime state
 not-state internal/testsafe/testsafe.go ShortTempDir 1 # makes a short temporary folder for a test's socket; test-only, not runtime state
