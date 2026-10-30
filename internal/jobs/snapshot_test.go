@@ -28,6 +28,7 @@ func TestSnapshotTreePreservesIndexAndIncludesUntracked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(root, "wrong-index"))
 	gotRoot, sha, sub, err := SnapshotTree(t.Context(), filepath.Join(root, "sub"))
 	if err != nil {
 		t.Fatal(err)
@@ -40,6 +41,9 @@ func TestSnapshotTreePreservesIndexAndIncludesUntracked(t *testing.T) {
 	}
 	if got := gitTest(t, root, "show", sha+":tracked"); got != "working" {
 		t.Fatal(got)
+	}
+	if err := os.Unsetenv("GIT_INDEX_FILE"); err != nil {
+		t.Fatal(err)
 	}
 	after, err := os.ReadFile(filepath.Join(root, ".git", "index"))
 	if err != nil {
@@ -57,7 +61,7 @@ func TestSnapshotTreePreservesIndexAndIncludesUntracked(t *testing.T) {
 func TestJobScriptRunsInSubdirectory(t *testing.T) {
 	root := t.TempDir()
 	work := filepath.Join(root, "work")
-	if err := os.MkdirAll(filepath.Join(work, "sub"), 0755); err != nil {
+	if err := os.MkdirAll(work, 0755); err != nil {
 		t.Fatal(err)
 	}
 	// A source-less script creates its work directory; this exercises its cwd
@@ -71,5 +75,34 @@ func TestJobScriptRunsInSubdirectory(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != filepath.Join(work, "sub") {
 		t.Fatalf("cwd = %s", out)
+	}
+}
+
+func TestContainerJobCreatesMissingSubdirectory(t *testing.T) {
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	if err := os.MkdirAll(work, 0755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	docker := filepath.Join(bin, "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nif [ \"$1\" = run ]; then printf '%s\\n' \"$@\"; fi\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	job := Job{ID: "job_test", Dir: root, Workspace: work, Subdir: "empty", Image: "image", Command: []string{"pwd"}, Timeout: time.Second}
+	cmd := exec.Command("bash", "-c", jobScript(machines.Machine{Name: "local"}, job, Resources{CPUs: 1, MemoryMiB: 128}, ""))
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(work, "empty")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "-w\n/workspace/empty\n") {
+		t.Fatalf("container args: %s", out)
 	}
 }
