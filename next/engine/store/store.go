@@ -77,11 +77,7 @@ func open(dir string, now func() time.Time, floor int, commit string, checkpoint
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
-		if err != nil {
-			return nil, err
-		}
-		if err := f.Close(); err != nil {
+		if err := initialize(dir, path); err != nil {
 			return nil, err
 		}
 	}
@@ -92,42 +88,21 @@ func open(dir string, now func() time.Time, floor int, commit string, checkpoint
 	}
 	writer.SetMaxOpenConns(1)
 	fail := func(err error) (*Store, error) { writer.Close(); return nil, err }
-	if fresh {
-		if _, err = writer.Exec("PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_mode=WAL"); err != nil {
-			return fail(err)
-		}
-		tx, err := writer.Begin()
-		if err != nil {
-			return fail(err)
-		}
-		if _, err = tx.Exec(schema); err == nil {
-			var id [16]byte
-			_, err = rand.Read(id[:])
-			if err == nil {
-				_, err = tx.Exec("INSERT INTO meta(key,value) VALUES ('format','dyna-v2'),('schema_version',?),('store_id',?),('created_commit','')", strconv.Itoa(schemaVersion), hex.EncodeToString(id[:]))
-			}
-		}
-		if err != nil {
-			tx.Rollback()
-			return fail(err)
-		}
-		if err = tx.Commit(); err != nil {
-			return fail(err)
-		}
-	} else {
-		var format string
-		if err := writer.QueryRow("SELECT value FROM meta WHERE key='format'").Scan(&format); err != nil {
-			return fail(fmt.Errorf("invalid store format: %w", err))
-		}
-		if format != "dyna-v2" {
-			return fail(fmt.Errorf("invalid store format %q", format))
-		}
-		if err := upgrade(writer, floor, commit); err != nil {
-			return fail(err)
-		}
-		if err := compareSchema(writer); err != nil {
-			return fail(err)
-		}
+	var format string
+	if err := writer.QueryRow("SELECT value FROM meta WHERE key='format'").Scan(&format); err != nil {
+		return fail(fmt.Errorf("invalid store format: %w", err))
+	}
+	if format != "dyna-v2" {
+		return fail(fmt.Errorf("invalid store format %q", format))
+	}
+	if err := upgrade(writer, floor, commit); err != nil {
+		return fail(err)
+	}
+	if err := compareSchema(writer); err != nil {
+		return fail(err)
+	}
+	if _, err := writer.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return fail(err)
 	}
 	read, err := sql.Open("sqlite", dsn+"&mode=ro")
 	if err != nil {
@@ -147,6 +122,51 @@ func open(dir string, now func() time.Time, floor int, commit string, checkpoint
 	go s.writeLoop()
 	go s.checkLoop(path, now)
 	return s, nil
+}
+
+// initialize publishes only a complete database. A crash before publication
+// leaves an unrelated temporary file, not a partially initialized store.db.
+func initialize(dir, path string) error {
+	f, err := os.CreateTemp(dir, ".store-init-*")
+	if err != nil {
+		return err
+	}
+	temp := f.Name()
+	defer os.Remove(temp)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	db, err := sql.Open("sqlite", "file:"+url.PathEscape(temp))
+	if err != nil {
+		return err
+	}
+	if _, err = db.Exec("PRAGMA auto_vacuum=INCREMENTAL"); err == nil {
+		var tx *sql.Tx
+		tx, err = db.Begin()
+		if err == nil {
+			_, err = tx.Exec(schema)
+			if err == nil {
+				var id [16]byte
+				_, err = rand.Read(id[:])
+				if err == nil {
+					_, err = tx.Exec("INSERT INTO meta(key,value) VALUES ('format','dyna-v2'),('schema_version',?),('store_id',?),('created_commit','')", strconv.Itoa(schemaVersion), hex.EncodeToString(id[:]))
+				}
+			}
+			if err != nil {
+				_ = tx.Rollback()
+			} else {
+				err = tx.Commit()
+			}
+		}
+	}
+	closeErr := db.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Link(temp, path)
 }
 
 func compareSchema(db *sql.DB) error {
