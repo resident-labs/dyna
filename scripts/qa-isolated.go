@@ -57,7 +57,7 @@ func runIsolated(ctx context.Context, stepsPath string) error {
 	dataDir := os.Getenv("DYNA_DATA_DIR")
 	// This process owns schema creation only in the disposable sandbox.
 	database.OwnSchema()
-	if err := qaSeedFixtures(dataDir); err != nil {
+	if err := qaSeedFixtures(dataDir, os.Getenv("XDG_CONFIG_HOME")); err != nil {
 		return fmt.Errorf("seed QA fixtures: %w", err)
 	}
 	engine := exec.CommandContext(ctx, os.Getenv("DYNA_QA_ENGINE"), "engine", "run",
