@@ -547,8 +547,10 @@ type Post struct {
 	// Pinned marks a post in the room's pin list. PinnedAt (unix ms) and
 	// PinnedBy (an address) are set only on posts that Pins returns.
 	// Views lists the feed views the post shows in, the sender's home first.
-	// Only room feed pages and live posts set it.
-	Views []string `json:"views,omitempty"`
+	// Only room feed pages and live posts set it. Channels repeats Views for a
+	// browser tab still running the bundle from before the feed view rename.
+	Views    []string `json:"views,omitempty"`
+	Channels []string `json:"channels,omitempty"`
 	// ForRoot marks a post addressed to the room's root session. The owner
 	// reads it in the room chat as a post to them, so it gets the gold mark.
 	ForRoot bool `json:"forRoot,omitempty"`
@@ -560,9 +562,13 @@ type Post struct {
 	PinnedBy string       `json:"pinnedBy,omitempty"`
 }
 
-// setViews records the feed views a post shows in.
+// setViews records the feed views a post shows in, and repeats them under the
+// name an open tab still reads.
+//
+// TODO: legacy/shim remove later — stop sending Channels when a page reset
+// reloads every open tab onto the new bundle.
 func (p *Post) setViews(views []string) {
-	p.Views = views
+	p.Views, p.Channels = views, views
 }
 
 // PostDetail identifies the stored job, workflow, or session turn a post reports.
@@ -635,6 +641,10 @@ type Feed struct {
 	Unread      int            `json:"unread"`
 	FirstUnread string         `json:"firstUnread,omitempty"`
 	ViewUnread  map[string]int `json:"viewUnread"`
+	// TODO: legacy/shim remove later — ChannelUnread repeats ViewUnread for a
+	// browser tab still running the bundle from before the feed view rename,
+	// whose sidebar and voice transcript would otherwise lose their counts.
+	ChannelUnread map[string]int `json:"channelUnread"`
 }
 
 // FeedTail returns a bounded page in append order. An empty cursor selects
@@ -762,6 +772,7 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	out.Earlier, out.Newer, out.Cursor = page.Earlier, page.Newer, page.Cursor
 	out.Unread, out.FirstUnread = page.Unread, page.FirstUnread
 	out.ViewUnread = counts
+	out.ChannelUnread = counts
 	return out, err
 }
 
@@ -958,8 +969,7 @@ func (s *Service) MarkRoomRead(roomID string) error {
 
 // Member is one row of a room's member tree. The first row is the owner.
 type Member struct {
-	Service bool `json:"service,omitempty"`
-	// TODO: legacy/shim remove later — keep the finished API flag for older desktop clients until they use status=dormant.
+	Service   bool      `json:"service,omitempty"`
 	Resumable bool      `json:"resumable"`
 	Role      string    `json:"role,omitempty"`
 	Model     string    `json:"model,omitempty"`
