@@ -3,6 +3,7 @@ package ghclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -135,11 +136,13 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 	args := cmd.Args[1:]
 	command := commandArgs(args)
 	_, apiText := ownCommentCall(command)
+	kind := room.AttributionComment
 	if len(command) > 0 && command[0] == "api" {
 		call := parseAPICall(command)
 		positional := parseArgs(command[:1], command[1:]).positional
 		if len(positional) == 1 && apiReviewEndpoint.MatchString(positional[0]) && (call.method == "POST" || call.method == "" && call.fields) {
 			apiText = true
+			kind = room.AttributionReview
 		}
 	}
 	inspect := func() (string, error) {
@@ -223,6 +226,14 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 	publishesAlone, isText := false, false
 	if len(command) >= 2 {
 		publishesAlone, isText = bodyCommands[command[0]+" "+command[1]]
+		switch command[0] + " " + command[1] {
+		case "pr create", "pr edit":
+			kind = room.AttributionPR
+		case "issue create", "issue edit":
+			kind = room.AttributionIssue
+		case "pr review":
+			kind = room.AttributionReview
+		}
 	}
 	if !isText && !apiText {
 		return none, nil
@@ -231,10 +242,24 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 	if err != nil && !errors.Is(err, errNotInRoom) {
 		return none, err
 	}
-	if rec.Attribution == "" {
+	a := room.Attribution{Text: rec.Attribution, Placement: rec.AttributionPlacement}
+	if override, ok := rec.AttributionKinds[kind]; ok {
+		a = override
+	}
+	if a.Text == "" {
 		return none, nil
 	}
-	placement := rec.AttributionPlacement
+	if strings.Contains(a.Text, "{login}") {
+		login, err := AccountFor(ctx, cmd.Path, r.host, r.name)
+		if err != nil {
+			return none, fmt.Errorf("resolve attribution login: %w", err)
+		}
+		if login == "" {
+			return none, errors.New("resolve attribution login: no account")
+		}
+		a.Text = strings.ReplaceAll(a.Text, "{login}", login)
+	}
+	placement := a.Placement
 	format := func(body, line string) string {
 		first := ""
 		for _, candidate := range strings.Split(body, "\n") {
@@ -245,6 +270,16 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 		marker := strings.TrimLeft(attributionMarker(line), "> ")
 		if strings.HasPrefix(strings.TrimLeft(first, "> "), marker) {
 			return strings.Trim(body, "\n")
+		}
+		if placement == room.AttributionEnd {
+			body = strings.Trim(body, "\n")
+			if body == "" {
+				return line
+			}
+			if strings.HasSuffix(body, "\n\n"+line) {
+				return body
+			}
+			return body + "\n\n" + line
 		}
 		if placement == room.AttributionPrefix {
 			body = strings.Trim(body, "\n")
@@ -278,7 +313,7 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 		if err != nil || !found {
 			return none, err
 		}
-		cmd.Args = append(append([]string{cmd.Args[0]}, args[:len(args)-len(command)]...), append(rest, "--raw-field", "body="+format(body, rec.Attribution))...)
+		cmd.Args = append(append([]string{cmd.Args[0]}, args[:len(args)-len(command)]...), append(rest, "--raw-field", "body="+format(body, a.Text))...)
 		return none, nil
 	}
 	valueFlags := createValueFlags
@@ -326,7 +361,7 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 	if !found && !publishesAlone {
 		return none, nil
 	}
-	body = format(body, rec.Attribution)
+	body = format(body, a.Text)
 	if closesIssue(command) {
 		cmd.Args = append([]string{cmd.Args[0]}, append(append(rest, "--comment="+body), tail...)...)
 		return none, nil
