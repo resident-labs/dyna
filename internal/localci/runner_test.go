@@ -175,6 +175,9 @@ func TestOverBudgetTestIsNotATestFailure(t *testing.T) {
 func TestNodeRunArchivesOnlyRequiredReportFiles(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
+	prevRoot := localCacheRoot
+	localCacheRoot = t.TempDir()
+	t.Cleanup(func() { localCacheRoot = prevRoot })
 	wanted := map[string]string{
 		"relay/relay-test.xml":         `<testsuite><testcase name="fast" time="0.001"/></testsuite>`,
 		"relay/details.json":           `{"result":"kept"}`,
