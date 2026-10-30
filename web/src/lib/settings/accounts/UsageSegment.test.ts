@@ -10,5 +10,5 @@ const { default: Segment } = await vite.ssrLoadModule('/src/lib/settings/account
 test('a usage bar puts its percent in a chip inside the bar, with the pace word in its tooltip', () => {
   const window = { label: 'Weekly', usedPercent: 35, period: 'week', resetsAt: new Date(Date.now() + 3.5 * 86_400_000).toISOString() }
   const html = render(Segment, { props: { name: 'Work', window, observedAt: new Date().toISOString(), provider: 'anthropic' } }).body
-  assert.match(html, /title="65% left, (ahead of|on|under) pace"[^>]*>65%</)
+  assert.match(html, /title="65% left, (ahead of pace|on pace|under pace)"[^>]*>65%.*?<span class="pace[^"]*"[^>]*>· (ahead of pace|on pace|under pace)</)
 })
