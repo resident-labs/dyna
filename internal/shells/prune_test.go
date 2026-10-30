@@ -2,6 +2,9 @@ package shells
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,12 +72,28 @@ func TestPruneEndedRemovesOnlyOldEndedUnkeptJobsInBatches(t *testing.T) {
 	save("sh_20261022-120000-00000005", false, &recent) // ended recently
 	save("sh_20261022-120000-00000006", false, nil)     // still running
 
+	for i := 1; i <= 6; i++ {
+		id := fmt.Sprintf("sh_20261022-120000-%08d", i)
+		if err := os.MkdirAll(filepath.Join(s.Root, id), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(s.Root, id, "output.log"), []byte("output"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cutoff := now.Add(-3 * 24 * time.Hour)
 	if n, err := s.PruneEnded(context.Background(), cutoff, 2); err != nil || n != 2 {
 		t.Fatalf("first batch removed %d, %v; want 2", n, err)
 	}
 	if n, err := s.PruneEnded(context.Background(), cutoff, 2); err != nil || n != 1 {
 		t.Fatalf("second batch removed %d, %v; want 1", n, err)
+	}
+	for i := 1; i <= 6; i++ {
+		id := fmt.Sprintf("sh_20261022-120000-%08d", i)
+		_, err := os.Stat(filepath.Join(s.Root, id))
+		if i <= 3 && !os.IsNotExist(err) || i > 3 && err != nil {
+			t.Fatalf("directory %s: %v", id, err)
+		}
 	}
 	list, err := s.List(true)
 	if err != nil {
@@ -88,5 +107,43 @@ func TestPruneEndedRemovesOnlyOldEndedUnkeptJobsInBatches(t *testing.T) {
 		if !got[want] || len(got) != 3 {
 			t.Fatalf("jobs left = %v; want the kept, recent and running ones", got)
 		}
+	}
+}
+
+func TestPruneEndedRetriesDirectoryRemoval(t *testing.T) {
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
+	old := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	ids := []string{"sh_20261022-120000-00000001", "sh_20261022-120000-00000002"}
+	for _, id := range ids {
+		if err := s.Save(Meta{ID: id, Cmd: []string{"true"}, Cwd: "/", Started: old}, &Exit{Ended: old}); err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(s.Root, id)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "output.log"), []byte("output"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.removeDir = func(dir string) error {
+		if filepath.Base(dir) == ids[0] {
+			return errors.New("disk error")
+		}
+		return os.RemoveAll(dir)
+	}
+	if _, err := s.PruneEnded(context.Background(), old.Add(time.Hour), 10); err == nil {
+		t.Fatal("expected removal failure")
+	}
+	if _, err := os.Stat(filepath.Join(s.Root, ids[1])); !os.IsNotExist(err) {
+		t.Fatalf("second directory remains: %v", err)
+	}
+	// A new Store simulates a later maintenance run after restart.
+	s = &Store{Root: s.Root}
+	if _, err := s.PruneEnded(context.Background(), old.Add(time.Hour), 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Root, ids[0])); !os.IsNotExist(err) {
+		t.Fatalf("failed directory remains: %v", err)
 	}
 }
