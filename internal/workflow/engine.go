@@ -90,6 +90,11 @@ type Options struct {
 	ResumeFrom string
 	// RecordManifest records the calls accepted by this run for later safe replay.
 	RecordManifest bool
+	// Replay gates side effects until every recorded call is matched.
+	Replay *ReplayBarrier
+	// ReplaySources contains nested source hashes captured before execution.
+	ReplaySources      map[string]string
+	CheckReplaySources bool
 	// JobNamespace is the stable identity shared by every run in a resume
 	// chain. The workflow service sets it for durable job idempotency keys.
 	JobNamespace string
@@ -146,6 +151,9 @@ type preparedScript struct {
 }
 
 func execute(ctx context.Context, o Options, shared *sharedState, depth int, workflowID string, prepared *preparedScript) (result string, resultErr error) {
+	if depth == 0 && o.Replay != nil {
+		defer func() { resultErr = errors.Join(resultErr, o.Replay.Finish()) }()
+	}
 	maxConc := o.MaxConc
 	if maxConc <= 0 {
 		maxConc = runtime.NumCPU() - 2
@@ -308,6 +316,9 @@ type engine struct {
 	planStage      int
 	planItem       int
 	planIndexSet   bool
+	// asyncPending is accessed only on this engine's event-loop thread.
+	asyncPending  int
+	overlapMarked bool
 }
 
 type callPlan struct {
@@ -472,11 +483,24 @@ func (e *engine) emitLog(provenance, msg string) {
 func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	vm := e.vm // spawn always runs on the loop thread
 	promise, resolveFn, rejectFn := vm.NewPromise()
+	var release func()
 	resolve := func(v any) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { resolveFn(vm.ToValue(v)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			resolveFn(vm.ToValue(v))
+		})
 	}
 	reject := func(err error) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { rejectFn(vm.NewGoError(err)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			rejectFn(vm.NewGoError(err))
+		})
 	}
 
 	prompt := call.Argument(0).String()
@@ -616,6 +640,10 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		reject(fmt.Errorf("resolve worker cwd: %w", err))
 		return vm.ToValue(promise)
 	}
+	if err := e.checkReplayCwd(cwd); err != nil {
+		reject(err)
+		return vm.ToValue(promise)
+	}
 	key := callKey(prof, prompt, schemaJSON, cwd, cacheLabel, timeout)
 	cacheCwd := cwd
 	cp := e.snapshotCallPlan(planNodeID)
@@ -636,7 +664,28 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		e.emit(ev)
 	}
 	emitA(runstore.Event{T: "agent_start", ID: id, Label: label, Profile: prof.Name, Phase: phase, Preview: textutil.ClipOneLine(prompt, 160)})
+	release, err = e.beginReplayAsync()
+	if err != nil {
+		reject(err)
+		return vm.ToValue(promise)
+	}
 
+	if e.opts.Replay != nil {
+		matched, value, replayErr := e.replayCall(runstore.WorkflowCallAgent, key, id)
+		if matched || replayErr != nil {
+			if matched {
+				e.shared.mu.Lock()
+				e.shared.profCalls[prof.Name]++
+				e.shared.mu.Unlock()
+			}
+			if replayErr != nil {
+				reject(replayErr)
+			} else {
+				resolve(value)
+			}
+			return vm.ToValue(promise)
+		}
+	}
 	// Resume: replay a cached result without consuming a worker slot.
 	if e.opts.Cache != nil && isolation == "" {
 		if cached, ok := e.opts.Cache.pop(key); ok {
@@ -918,11 +967,24 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 func (e *engine) workflow(call goja.FunctionCall) goja.Value {
 	vm := e.vm
 	promise, resolveFn, rejectFn := vm.NewPromise()
+	var release func()
 	resolve := func(v any) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { resolveFn(vm.ToValue(v)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			resolveFn(vm.ToValue(v))
+		})
 	}
 	reject := func(err error) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { rejectFn(vm.NewGoError(err)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			rejectFn(vm.NewGoError(err))
+		})
 	}
 
 	if e.depth >= 1 {
@@ -936,6 +998,19 @@ func (e *engine) workflow(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(promise)
 	}
 
+	if e.opts.CheckReplaySources && e.opts.ReplaySources[path] != plan.SourceSHA256(src) {
+		sourceErr := fmt.Errorf("nested workflow %q was not captured before the run", ref)
+		if e.opts.Replay != nil {
+			reject(e.opts.Replay.fail(sourceErr))
+			return vm.ToValue(promise)
+		}
+		if err := runstore.MarkWorkflowManifestUnsafe(e.ctx, e.runID(), sourceErr.Error()); err != nil {
+			e.manifestWriteFailed()
+			reject(fmt.Errorf("mark nested workflow unsafe: %w", err))
+			return vm.ToValue(promise)
+		}
+	}
+
 	var workflowArgs any
 	if encoded := call.Argument(1); !goja.IsUndefined(encoded) {
 		if err := json.Unmarshal([]byte(encoded.String()), &workflowArgs); err != nil {
@@ -946,6 +1021,12 @@ func (e *engine) workflow(call goja.FunctionCall) goja.Value {
 	planNodeID := ""
 	if third := call.Argument(2); !goja.IsUndefined(third) && !goja.IsNull(third) {
 		planNodeID = strings.TrimSpace(third.String())
+	}
+
+	release, err = e.beginReplayAsync()
+	if err != nil {
+		reject(err)
+		return vm.ToValue(promise)
 	}
 
 	e.shared.mu.Lock()

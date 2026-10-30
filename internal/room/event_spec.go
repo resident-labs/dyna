@@ -1,6 +1,7 @@
 package room
 
 import (
+	"dyna-agent/internal/replayreason"
 	"reflect"
 	"slices"
 )
@@ -1024,6 +1025,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(ApprovalState("")), Values: enumValues([]ApprovalState{ApprovalDone, ApprovalFailed, ApprovalDenied, ApprovalExpired, ApprovalCancelled})},
 	{Type: reflect.TypeOf(ShellState("")), Values: enumValues(shellStates)},
 	{Type: reflect.TypeOf(RunState("")), Values: enumValues(runStates)},
+	{Type: reflect.TypeOf(replayreason.WorkflowReplayReason("")), Values: enumValues(replayreason.All)},
 	{Type: reflect.TypeOf(TurnState("")), Values: enumValues(turnStates)},
 	{Type: reflect.TypeOf(CandidateState("")), Values: enumValues(candidateStates)},
 	{Type: reflect.TypeOf(RuleVerb("")), Values: enumValues([]RuleVerb{RuleAdded, RuleEdited, RuleRemoved})},

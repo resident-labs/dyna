@@ -14,6 +14,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/notify"
+	"dyna-agent/internal/replayreason"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/state"
@@ -82,7 +83,7 @@ func TestUpdateInterruptedRunReportsOnce(t *testing.T) {
 		}
 		count++
 		decision, _ := room.RootContext(msg, rec.Name)
-		if ev.RunID != meta.ID || ev.State != room.RunInterrupted || !msg.Wake || decision != room.RootWake || !strings.Contains(ev.Detail, "--resume "+meta.ID) || !strings.Contains(ev.Detail, "repeat") {
+		if ev.RunID != meta.ID || ev.State != room.RunInterrupted || ev.ReplayReason != replayreason.Legacy || !msg.Wake || decision != room.RootWake || !strings.Contains(ev.Detail, "--resume "+meta.ID) || !strings.Contains(ev.Detail, "repeat") {
 			t.Fatalf("event = %+v, wake = %v; want a waking interrupted report and safe restart guidance", ev, msg.Wake)
 		}
 	}
