@@ -43,8 +43,8 @@ export interface Pill {
 // pillOf is the one colored mark a row may carry (rule r16): a failed last
 // run, or a service that cannot do its work. Every other state is muted text.
 export function pillOf(s: RegistryService): Pill | null {
-  if (s.detail === 'update-source-invalid') return { label: 'Source checkout is missing or invalid', tone: 'danger' }
-  if (s.detail === 'multiple-update-hooks') return { label: 'Several update hooks; choose a source', tone: 'warning' }
+  if (s.detail === 'update-source-invalid') return { label: 'Source checkout unavailable', tone: 'danger' }
+  if (s.detail === 'multiple-update-hooks') return { label: 'Choose an update source', tone: 'warning' }
   if (s.state === 'error') return { label: 'Last run failed', tone: 'danger' }
   if (s.detail === 'profile-waiting') return { label: 'Waiting for a profile', tone: 'warning' }
   if (s.detail === 'unreadable') return { label: 'Could not be read', tone: 'warning' }
@@ -94,7 +94,6 @@ export const switchHint: Partial<Record<RegistryServiceId, string>> = {
 // setupHint says how to set up a service that has no setting to change here.
 export const setupHint: Partial<Record<RegistryServiceId, string>> = {
   'issue-watch': 'Run dyna git issue watch <issue> in this room.',
-  updates: 'Set updater.source to a source checkout, then turn Updates on.',
 }
 
 // settingText names the settings keys the registry lists, in owner words; a
@@ -116,6 +115,7 @@ const settingText: Record<string, { title: string; description?: string }> = {
   'voice.provider': { title: 'Voice provider' },
   'voice.model': { title: 'Voice model', description: 'Empty uses the provider’s default' },
   'voice.url': { title: 'Voice server address', description: 'Needed for a self-hosted server' },
+  'updater.source': { title: 'Update source', description: 'Release installs new Dyna releases. Source checkout builds Dyna from a Git checkout when main changes.' },
   'updater.autoCheck': { title: 'Check for updates', description: 'At most once a day' },
   'doctor.condition': { title: 'When to examine this computer', description: 'Such as load>2/core for 5m or memory>85%; empty uses the default' },
   'runs.retention': { title: 'Keep finished runs', description: 'Off keeps them forever' },
