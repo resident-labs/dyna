@@ -413,8 +413,8 @@ func TestAttachedNodeNamesTheMachineThatHoldsTheChecks(t *testing.T) {
 	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{SuiteGoStatic}}); err != nil {
 		t.Fatal(err)
 	}
-	// A record whose run is alive is not a candidate: that run is executing.
-	if node, err := store.AttachedNode(t.Context(), repo, sha); err != nil || node != "" {
+	// A live run blocks admission until its owner hands the record back.
+	if node, err := store.AttachedNode(t.Context(), repo, sha); !errors.Is(err, ErrAttachmentBusy) || node != "" {
 		t.Fatalf("with a live run: %q %v", node, err)
 	}
 	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
@@ -440,7 +440,7 @@ func TestAttachmentIsTakenOnlyFromADeadOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	attachmentOwner = func() (int, uint64) { return 22, 1 }
-	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, ErrAttachmentBusy) {
 		t.Fatalf("a command took the record of a live engine: %v", err)
 	}
 	live[11] = false
@@ -451,7 +451,7 @@ func TestAttachmentIsTakenOnlyFromADeadOwner(t *testing.T) {
 	// A third process finds the record owned by a live one.
 	attachmentOwner = func() (int, uint64) { return 33, 1 }
 	live[33] = true
-	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, ErrAttachmentBusy) {
 		t.Fatalf("a record was taken twice: %v", err)
 	}
 }
