@@ -62,7 +62,7 @@ func runCommand(args, env []string, stdin io.Reader, stdout, stderr io.Writer) (
 	defer stop()
 	var lock *os.File
 	if cfg.TestSlots.Slots > 0 && os.Getenv(heldEnv) != "1" {
-		dir, err := slotDirectory(os.Getenv("XDG_RUNTIME_DIR"), "/tmp", os.Getuid())
+		dir, err := slotDirectory(os.Getenv("XDG_RUNTIME_DIR"), "/run/user", "/tmp", os.Getuid())
 		if err != nil {
 			return 1, err
 		}
@@ -113,12 +113,24 @@ func runCommand(args, env []string, stdin io.Reader, stdout, stderr io.Writer) (
 // slotDirectory shares one private fallback across all rooms when there is no
 // XDG runtime directory. Reject a pre-existing directory owned by another
 // user, a symlink, or a directory that other users can access.
-func slotDirectory(runtimeDir, temporaryRoot string, uid int) (string, error) {
+func slotDirectory(runtimeDir, runtimeRoot, temporaryRoot string, uid int) (string, error) {
 	if runtimeDir != "" {
 		if !filepath.IsAbs(runtimeDir) {
 			return "", fmt.Errorf("XDG_RUNTIME_DIR must be an absolute path")
 		}
 		return filepath.Join(runtimeDir, "dyna", "test-slots"), nil
+	}
+	// SSH sessions may lack XDG_RUNTIME_DIR while a local login uses the
+	// standard user runtime. Prefer it so both sessions share the same locks.
+	candidate := filepath.Join(runtimeRoot, strconv.Itoa(uid))
+	var runtimeStat unix.Stat_t
+	if err := unix.Lstat(candidate, &runtimeStat); err == nil {
+		if runtimeStat.Mode&unix.S_IFMT != unix.S_IFDIR || int(runtimeStat.Uid) != uid || runtimeStat.Mode&0077 != 0 {
+			return "", fmt.Errorf("unsafe user runtime directory %s", candidate)
+		}
+		return filepath.Join(candidate, "dyna", "test-slots"), nil
+	} else if !errors.Is(err, unix.ENOENT) {
+		return "", fmt.Errorf("inspect user runtime directory: %w", err)
 	}
 	root := filepath.Join(temporaryRoot, "dyna-test-slots-"+strconv.Itoa(uid))
 	if err := os.Mkdir(root, 0700); err != nil && !os.IsExist(err) {
