@@ -29,6 +29,19 @@ func (r *fakeRepos) Get(_ context.Context, _ contract.RoomID, _ contract.Session
 	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git"}}, nil
 }
 
+type placementRepos struct{}
+
+func (placementRepos) Ref(context.Context, contract.RepoName, string) (string, error) {
+	return "", nil
+}
+
+func (placementRepos) Get(_ context.Context, _ contract.RoomID, _ contract.SessionID, _ contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
+	if !fetch {
+		return nil, nil
+	}
+	return []contract.BoxRepo{{Name: "owner/repo"}}, nil
+}
+
 type checkingBoxes struct {
 	repos *fakeRepos
 	t     *testing.T

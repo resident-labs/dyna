@@ -29,7 +29,7 @@ func TestUpgradeAddsArchives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.writer.Exec("DROP TABLE archives; UPDATE meta SET value='3' WHERE key='schema_version'"); err != nil {
+	if _, err := s.writer.Exec("DROP TABLE archives; UPDATE meta SET value='4' WHERE key='schema_version'"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

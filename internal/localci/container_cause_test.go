@@ -161,5 +161,11 @@ func runWithCleanup(t *testing.T, cleanup func(attempt int) error) Result {
 	if err != nil {
 		t.Fatalf("a slow cleanup failed the run: %v", err)
 	}
+	if attempts > 0 && len(result.Warnings) > 0 {
+		orphans, err := (Store{DataDir: runner.DataDir}).OrphanedAttachments(t.Context())
+		if err != nil || len(orphans) != 1 {
+			t.Fatalf("failed cleanup must retain a recoverable run: orphans = %v, error = %v", orphans, err)
+		}
+	}
 	return result
 }
