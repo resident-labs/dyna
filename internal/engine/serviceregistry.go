@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"path/filepath"
-	"strings"
 
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
@@ -32,7 +31,7 @@ func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]
 	view := func(role string) (profile string, waiting bool) {
 		for _, v := range views {
 			if v.Role == role {
-				return v.Profile, strings.HasPrefix(v.Reason, "waiting:")
+				return v.Profile, v.Waiting
 			}
 		}
 		return "", false
