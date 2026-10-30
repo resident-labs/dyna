@@ -75,6 +75,13 @@ func SessionCommand(ctx context.Context, args []string) error {
 	return Run(ctx, cmd)
 }
 
+// PinnedReviewArgs returns the gh api call that posts a comment-only review
+// pinned to head. The REST reviews API takes commit_id, so the approved request
+// names the reviewed commit even if the branch moves during approval.
+func PinnedReviewArgs(host, repo string, number int, head, body string) []string {
+	return []string{"api", "--hostname", host, fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number), "--method", "POST", "--raw-field", "commit_id=" + head, "--raw-field", "event=COMMENT", "--raw-field", "body=" + body}
+}
+
 // PublishThroughApproval sends one agent-class GitHub write, such as a PR
 // comment, through the approval path that gh writes in a session use. The
 // room's root approves it at once; a child waits for its parent.

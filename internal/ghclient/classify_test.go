@@ -106,6 +106,7 @@ func TestClassify(t *testing.T) {
 		{"api POST pr merge", "api repos/o/r/pulls/5/merge -f merge_method=squash", owner},
 		{"api POST review", "api repos/o/r/pulls/5/reviews -f event=APPROVE", owner},
 		{"api POST comment review pinned to a commit", "api repos/o/r/pulls/5/reviews --hostname github.com -X POST --raw-field commit_id=abc -f event=COMMENT --raw-field body=hi", agent},
+		{"api POST comment review with nested inline comments", "api repos/o/r/pulls/5/reviews -X POST -f event=COMMENT -F comments[][path]=file.go -F comments[][body]=hi", owner},
 		{"api POST comment review with inline comments", "api repos/o/r/pulls/5/reviews -X POST -f event=COMMENT --input comments.json", owner},
 		{"api DELETE own comment", "api repos/o/r/issues/comments/55 -X DELETE", agent},
 		{"api DELETE another author comment", "api repos/o/r/issues/comments/56 -X DELETE", owner},
