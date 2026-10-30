@@ -262,8 +262,9 @@ func (s services) cancelJob(ctx context.Context, id string) (jobs.Job, error) {
 
 // jobLogsView is what JobLogs returns.
 type jobLogsView struct {
-	ID  string `json:"id"`
-	Log string `json:"log"`
+	ID        string `json:"id"`
+	Log       string `json:"log"`
+	Truncated bool   `json:"truncated"`
 }
 
 func (s services) jobLogs(ctx context.Context, id string) (jobLogsView, error) {
@@ -276,8 +277,9 @@ func (s services) jobLogs(ctx context.Context, id string) (jobLogsView, error) {
 		return jobLogsView{}, err
 	}
 	const tail = 64 << 10
-	if len(data) > tail {
+	truncated := len(data) > tail
+	if truncated {
 		data = data[len(data)-tail:]
 	}
-	return jobLogsView{ID: job.ID, Log: string(data)}, nil
+	return jobLogsView{ID: job.ID, Log: string(data), Truncated: truncated}, nil
 }
