@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
+	"github.com/resident-labs/dyna/engine/approve"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/model"
@@ -73,7 +74,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(cfg.Data, time.Now)
+	st, err := store.Open(cfg.Data)
 	if err != nil {
 		return err
 	}
@@ -91,15 +92,18 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer proxy.Shutdown(context.Background())
-	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi}
+	boxCtx, stopBoxes := context.WithCancel(ctx)
+	defer stopBoxes()
+	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
-	if err := service.ConfigureOperations(ctx, nil, cfg.ApprovalsExpiry); err != nil {
-		return err
-	}
+	boxes.Pressure = service
 	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
 	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
+	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport)}, cfg.ApprovalsExpiry); err != nil {
+		return err
+	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes}, func(c api.Caller) http.Handler {
