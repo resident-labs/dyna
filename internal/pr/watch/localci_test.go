@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/state"
+	cisched "dyna-agent/internal/pr/watch/ci"
 )
 
 func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) {
@@ -301,19 +302,19 @@ func TestRegisteredCICancellationKeepsItsQueuePlaceUntilExecutionStops(t *testin
 	}
 	r := &Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: strings.Repeat("a", 40), Branch: "feature", RepoPath: repo, Watching: true, State: "open"}
 	cancelled := 0
-	old := &registeredCIRun{node: "node", cancel: func() { cancelled++ }}
+	old := &registeredCIRun{Node: "node", Cancel: func() { cancelled++ }}
 	dataDir := t.TempDir()
 	// The run a newer head cancelled still executes, so its work still holds
 	// the node's whole queue.
 	if _, err := (jobs.Admission{DataDir: dataDir}).Hold(context.Background(), jobs.Demand{Node: "node", ID: "old", CPUs: 2}); err != nil {
 		t.Fatal(err)
 	}
-	s := &Service{Store: &Store{Root: filepath.Join(dataDir, "state.db")}, LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{"old-head": old}}}
+	s := &Service{Store: &Store{Root: filepath.Join(dataDir, "state.db")}, LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{Runs: map[string]*registeredCIRun{"old-head": old}}}
 	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{r.Key: r}}); err != nil {
 		t.Fatal(err)
 	}
-	if cancelled != 1 || len(s.registeredRuns.runs) != 1 || s.registeredRuns.runs["old-head"] != old {
-		t.Fatalf("cancellation freed a live place: cancelled=%d runs=%v", cancelled, s.registeredRuns.runs)
+	if cancelled != 1 || len(s.registeredRuns.Runs) != 1 || s.registeredRuns.Runs["old-head"] != old {
+		t.Fatalf("cancellation freed a live place: cancelled=%d runs=%v", cancelled, s.registeredRuns.Runs)
 	}
 }
 
@@ -368,13 +369,13 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 	r = Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "dyna/merge-trial/1", RepoPath: repo, Watching: true, State: "open", CI: "passed", Polling: Polling{PullHead: head}}
 	activeJob := registeredCIJob{record: r, head: head, branch: r.Branch, trial: true}
 	cancelled := false
-	active := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
-	s = &Service{LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{registeredJobKey(activeJob): active}}}
+	active := &registeredCIRun{Node: "node", Cancel: func() { cancelled = true }}
+	s = &Service{LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{Runs: map[string]*registeredCIRun{registeredJobKey(activeJob): active}}}
 	batch := &state.MergeTrial{Phase: state.MergeTrialPhaseRunning, Branch: r.Branch, Head: head, Changes: []state.MergeTrialChange{{Key: r.Key, Head: head}}}
 	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{r.Key: &r}, MergeTrials: map[string]*state.MergeTrial{defaultRepo(r): batch}}); err != nil {
 		t.Fatal(err)
 	}
-	if cancelled || s.registeredRuns.runs[registeredJobKey(activeJob)] != active {
+	if cancelled || s.registeredRuns.Runs[registeredJobKey(activeJob)] != active {
 		t.Fatal("settled hosted result stopped an active local run")
 	}
 }
@@ -496,13 +497,13 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 			registry := &savedCIRegistry{results: results}
 			key := registeredJobKey(registeredCIJob{record: *r, head: head})
 			cancelled := false
-			run := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
+			run := &registeredCIRun{Node: "node", Cancel: func() { cancelled = true }}
 			// The active run's work still holds the node's whole queue.
 			dataDir := t.TempDir()
 			if _, err := (jobs.Admission{DataDir: dataDir}).Hold(context.Background(), jobs.Demand{Node: "node", ID: "active", CPUs: 2}); err != nil {
 				t.Fatal(err)
 			}
-			s := &Service{Store: &Store{Root: filepath.Join(dataDir, "state.db")}, LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{key: run}}}
+			s := &Service{Store: &Store{Root: filepath.Join(dataDir, "state.db")}, LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{Runs: map[string]*registeredCIRun{key: run}}}
 			s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
 				t.Fatalf("a local CI result reached GitHub: %v", cmd.Args)
 				return nil
@@ -515,7 +516,7 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 			if err := s.scheduleRegisteredCI(context.Background(), st); err != nil {
 				t.Fatal(err)
 			}
-			if cancelled || len(s.registeredRuns.runs) != 1 || s.registeredRuns.runs[key] != run {
+			if cancelled || len(s.registeredRuns.Runs) != 1 || s.registeredRuns.Runs[key] != run {
 				t.Fatal("a saved local result changed the active slot reservation")
 			}
 		})
@@ -542,7 +543,7 @@ func TestRefreshSavedLocalResultForcesOneFullPoll(t *testing.T) {
 		t.Fatal(err)
 	}
 	refreshed := savedRecord(t, s, key)
-	if refreshed.Polling.LocalCI != savedLocalResultKey(result) {
+	if refreshed.Polling.LocalCI != cisched.SavedLocalResultKey(result) {
 		t.Fatalf("the PR did not record which local result it read: %+v", refreshed.Polling)
 	}
 	if !refreshed.Polling.Next.IsZero() || !refreshed.Polling.FullChecked.IsZero() {
@@ -587,112 +588,6 @@ func savedRecord(t *testing.T, s *Service, key string) Record {
 	return *r
 }
 
-func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
-	nodes := []localci.Node{
-		{Name: "local", Enabled: true},
-		{Name: "hermeslab", Enabled: true},
-		{Name: "disabled"},
-	}
-	for _, tc := range []struct {
-		free map[string]int
-		want string
-	}{
-		{map[string]int{"local": 1, "hermeslab": 8}, "hermeslab"},
-		{map[string]int{"local": 1, "hermeslab": 7}, "hermeslab"},
-		{map[string]int{"local": 1, "hermeslab": 1}, "local"},
-		{map[string]int{"local": 0, "hermeslab": 0}, ""},
-	} {
-		node := availableCINode(nodes, "", "", 0, func(n localci.Node) int { return tc.free[n.Name] })
-		got := ""
-		if node != nil {
-			got = node.Name
-		}
-		if got != tc.want {
-			t.Fatalf("free=%v: chose %q, want %q", tc.free, got, tc.want)
-		}
-	}
-}
-
-// A disk-blocked node admits no work, so it never wins the choice against a
-// node that can admit work, however free its CPUs read: work must not queue
-// behind a disk rule while a healthy node has room.
-func TestRegisteredCISkipsADiskBlockedNodeForANodeThatCanAdmit(t *testing.T) {
-	blocked := localci.Node{Name: "blocked", Enabled: true, CPUs: 8, Disk: machines.Disk{Total: 100 << 30, Free: 1 << 30}, MaxDiskPercent: 10}
-	healthy := localci.Node{Name: "healthy", Enabled: true, CPUs: 2}
-	free := func(n localci.Node) int {
-		if n.Name == "healthy" {
-			return 1
-		}
-		return 8
-	}
-	// A pull request head needs a node with room, and the blocked node reads
-	// as the roomiest: the healthy node still wins.
-	if node := availableCINode([]localci.Node{blocked, healthy}, "", "", 0, free); node == nil || node.Name != "healthy" {
-		t.Fatalf("pull request head chose %+v, want the healthy node", node)
-	}
-	// A trial joins a queue even on a full node, but not behind a disk rule
-	// while a healthy node can take the work.
-	if node := availableCINode([]localci.Node{blocked, healthy}, "", "", -1, free); node == nil || node.Name != "healthy" {
-		t.Fatalf("trial chose %+v, want the healthy node", node)
-	}
-	// A fleet with no healthy node still takes the blocked node, so the trial
-	// waits in its queue with the disk reason instead of waiting for a tick.
-	if node := availableCINode([]localci.Node{blocked}, "", "", -1, free); node == nil || node.Name != "blocked" {
-		t.Fatalf("trial chose %+v, want the blocked node as the only choice", node)
-	}
-	// A blocked node and a healthy but full node both have no room; the tie
-	// must not depend on node order, or a trial would wait behind a disk rule
-	// while the healthy node frees instead of joining its queue.
-	for _, order := range [][]localci.Node{{blocked, healthy}, {healthy, blocked}} {
-		if node := availableCINode(order, "", "", -1, func(localci.Node) int { return 0 }); node == nil || node.Name != "healthy" {
-			t.Fatalf("trial over a blocked and a full node chose %+v, want the healthy node", node)
-		}
-	}
-}
-
-// A machine that names rooms takes only those rooms' work, so the scheduler and
-// the merge trials that share it leave it to the room that owns it.
-func TestRegisteredCISkipsMachinesLimitedToOtherRooms(t *testing.T) {
-	nodes := []localci.Node{
-		{Name: "hermeslab", Enabled: true, Rooms: []string{"room_dyna"}},
-		{Name: "pve", Enabled: true, Rooms: []string{"room_fl-rea"}},
-		{Name: "arch", Enabled: true},
-	}
-	free := func(localci.Node) int { return 4 }
-	for _, tc := range []struct {
-		room string
-		full string
-		want string
-	}{
-		{"room_dyna", "", "hermeslab"},
-		{"room_fl-rea", "", "pve"},
-		// A full machine of the room hands work to a machine with no limit
-		// before another room's machine.
-		{"room_dyna", "hermeslab", "arch"},
-		// A machine with no room list takes every room's work.
-		{"room_other", "", "arch"},
-	} {
-		node := availableCINode(nodes, tc.room, "", 0, func(n localci.Node) int {
-			if n.Name == tc.full {
-				return 0
-			}
-			return free(n)
-		})
-		got := ""
-		if node != nil {
-			got = node.Name
-		}
-		if got != tc.want {
-			t.Fatalf("room=%s full=%q: chose %q, want %q", tc.room, tc.full, got, tc.want)
-		}
-	}
-	// A room that no machine allows waits for one, and takes no other room's
-	// machine.
-	if node := availableCINode(nodes[:2], "room_other", "", 0, free); node != nil {
-		t.Fatalf("room with no machine chose %q", node.Name)
-	}
-}
-
 type preparationCIRegistry struct {
 	occupiedCIRegistry
 	onSave func(localci.Result)
@@ -727,7 +622,7 @@ func TestRegisteredCIPreparationFailureDoesNotBlockLaterJobs(t *testing.T) {
 			close(validSaved)
 		}
 	}
-	s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{}}, RunningCIChanged: func() { changed <- struct{}{} }}
+	s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{Runs: map[string]*registeredCIRun{}}, RunningCIChanged: func() { changed <- struct{}{} }}
 	if err := s.Store.update(func(st *State) error {
 		st.Records[invalidRecord.Key] = invalidRecord
 		st.Records[validRecord.Key] = validRecord
@@ -774,7 +669,7 @@ func TestRegisteredCIPreparationFailureDoesNotBlockLaterJobs(t *testing.T) {
 	validKey := registeredJobKey(registeredCIJob{record: *validRecord, head: valid})
 	runs := s.nodeRuns()
 	runs.Lock()
-	_, running := runs.runs[validKey]
+	_, running := runs.Runs[validKey]
 	runs.Unlock()
 	if !running {
 		t.Fatal("the valid job was not admitted after the invalid job")
@@ -786,7 +681,7 @@ func TestRegisteredCIPreparationFailureDoesNotBlockLaterJobs(t *testing.T) {
 		<-changed
 		runs := s.nodeRuns()
 		runs.Lock()
-		_, running := runs.runs[validKey]
+		_, running := runs.Runs[validKey]
 		runs.Unlock()
 		if !running {
 			break
