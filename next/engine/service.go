@@ -475,6 +475,10 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	s.admit.Unlock()
 	unlock := s.lockBox(session.ID)
 	defer unlock()
+	current, err = s.store.Box(ctx, session.Box)
+	if err != nil {
+		return contract.SessionCloseResponse{}, failure(err)
+	}
 	if current.State != contract.BoxDeleted {
 		if err = s.boxes.Remove(ctx, session.Box); err != nil {
 			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
