@@ -425,7 +425,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			c := res["code"].(int)
 			exitCode = &c
 		}
-		if e.opts.RecordManifest && !recordFailed && e.ctx.Err() == nil {
+		if e.opts.RecordManifest && !recordFailed && e.ctx.Err() == nil && res != nil {
 			resultErr := runErr
 			if !o.check && res != nil {
 				resultErr = nil
@@ -503,12 +503,13 @@ func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, lin
 	if err != nil {
 		timedOut = errors.Is(wctx.Err(), context.DeadlineExceeded) && e.ctx.Err() == nil
 		// The command must not outlive the call that wanted it.
-		_ = e.opts.Commands.Stop(shell)
+		stopErr := e.opts.Commands.Stop(shell)
 		sctx, scancel := context.WithTimeout(context.WithoutCancel(e.ctx), commandStopWait)
-		exit, _ = e.opts.Commands.Wait(sctx, shell)
+		var waitErr error
+		exit, waitErr = e.opts.Commands.Wait(sctx, shell)
 		scancel()
-		if !timedOut {
-			return nil, shell, stderrPath, err
+		if !timedOut || stopErr != nil || waitErr != nil {
+			return nil, shell, stderrPath, errors.Join(err, stopErr, waitErr)
 		}
 	}
 	stdout, rerr := e.opts.Commands.Output(shell, commandParseLimit)

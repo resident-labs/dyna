@@ -118,3 +118,28 @@ func TestManifestIncludesAcceptedQueuedCalls(t *testing.T) {
 		t.Fatalf("seal queued calls = %v", err)
 	}
 }
+
+type uncertainCommands struct{ *fakeCommands }
+
+func (c uncertainCommands) Wait(context.Context, string) (CommandExit, error) {
+	return CommandExit{}, errors.New("lost command status")
+}
+
+func TestManifestDoesNotCompleteUncertainCommand(t *testing.T) {
+	t.Setenv("DYNA_DATA_DIR", t.TempDir())
+	t.Cleanup(func() { database.Close(store.DataDir()) })
+	run, err := runstore.Create("uncertain", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = executeWorkflowTest(t, `try { await run('true'); } catch (_) {} return 'done';`, Options{Store: mockWorkflowStore(0, 0), Run: run, Commands: uncertainCommands{newFakeCommands()}, WorkDir: t.TempDir(), RecordManifest: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstore.SealWorkflowManifest(t.Context(), run.Meta.ID); !errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		t.Fatalf("seal uncertain command = %v", err)
+	}
+}
