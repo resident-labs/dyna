@@ -20,10 +20,11 @@
   import { itemState, sortThread, timeline } from './github.ts'
   import { openExternal } from '../../api.ts'
   import type { Reference } from '../rooms/references.ts'
-  import type { GitHubDetail, GitHubItem } from '../api/github.ts'
+  import type { GitHubDetail } from '../api/github.ts'
+  import type { IssueRow } from './unifiedIssues.ts'
 
   interface Props {
-    it: GitHubItem
+    it: IssueRow
     detail?: GitHubDetail | null
     detailError?: string
     onmention?: (reference: Reference) => void
