@@ -11,7 +11,6 @@ import (
 type Node struct {
 	ID     contract.SessionID
 	Parent contract.SessionID
-	Room   contract.RoomID
 	Host   contract.HostName
 }
 
@@ -126,21 +125,19 @@ func (t Tree) Handoff(s contract.SessionID) (Handoff, error) {
 }
 
 // CheckMove rejects moving root, cycles, another room, and another host.
-func (t Tree) CheckMove(s contract.SessionID, parent Node) error {
+func (t Tree) CheckMove(s, parent contract.SessionID) error {
 	n, ok := t.nodes[s]
 	if !ok || s == t.root {
 		return errors.New("root or unknown session cannot move")
 	}
-	if parent.Room != n.Room {
-		return errors.New("parent is in another room")
-	}
-	if _, ok := t.nodes[parent.ID]; !ok {
+	p, ok := t.nodes[parent]
+	if !ok {
 		return errors.New("parent is not in the room tree")
 	}
-	if parent.ID == s || t.Above(s, parent.ID) {
+	if parent == s || t.Above(s, parent) {
 		return errors.New("move would make a cycle")
 	}
-	if n.Host != parent.Host {
+	if n.Host != p.Host {
 		return errors.New("parent is on another host")
 	}
 	return nil
