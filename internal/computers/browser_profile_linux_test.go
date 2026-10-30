@@ -648,3 +648,32 @@ func TestBrowserSQLiteStopsWhenTheCallerCancels(t *testing.T) {
 		t.Fatal("sqlite3 kept running after the caller cancelled")
 	}
 }
+
+// A save-back cut off by its budget keeps its lease and profile, so a later
+// cleanup can retry the save.
+func TestBrowserSaveBackKeepsProfileWhenBudgetEnds(t *testing.T) {
+	browserTestEnvironment(t)
+	ctx := context.Background()
+	browserTestSQL(t, filepath.Join(browserMaster(), "Default/Cookies"), browserCookieSchema+"INSERT INTO cookies VALUES ('site', 'session', 'master', 1);")
+	if err := prepareBrowserProfile(ctx, "stuck", settings.Defaults()); err != nil {
+		t.Fatal(err)
+	}
+	browserTestSQL(t, filepath.Join(computerBrowserProfile("stuck"), "Default/Cookies"), "UPDATE cookies SET value='new', last_update_utc=2;")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "sqlite3"), []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	budget := browserSaveBackBudget
+	browserSaveBackBudget = 50 * time.Millisecond
+	t.Cleanup(func() { browserSaveBackBudget = budget })
+	if err := saveBackBrowserProfile("stuck"); err == nil {
+		t.Fatal("a save-back cut off by its budget reported success")
+	}
+	if _, err := os.Stat(browserLeasePath("stuck")); err != nil {
+		t.Fatal("a cut-off save-back dropped its lease")
+	}
+	if _, err := os.Stat(computerBrowserProfile("stuck")); err != nil {
+		t.Fatal("a cut-off save-back removed the profile")
+	}
+}
