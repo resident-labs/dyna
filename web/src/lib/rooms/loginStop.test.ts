@@ -50,7 +50,7 @@ function mounted() {
     bulkControllers,
     // The selection module drops the batch controllers on stop.
     selectionView: { destroy: () => { for (const entry of bulkControllers.values()) entry.destroy() } },
-    roomSessionController: controller('controls'),
+    controls: controller('controls'),
     roomControlsVisit: 0, consolidationAlive: true,
     roomData: controller('rooms'), workflowData: controller('workflow'),
     // The open transcript's controller lives in lib/app/sessionView.svelte.ts now.
