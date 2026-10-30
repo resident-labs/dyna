@@ -366,8 +366,11 @@
     toggleSessionSelection()
     return true
   }
-  // rules is the list in the Room settings Rules section.
+  // rules is the list in the room's Rules view.
   const rules = $derived(goalView.rules)
+  // globalRulesVersion counts goals events, so the Settings Rules pane
+  // reloads global rules that another client changed.
+  let globalRulesVersion = $state(0)
   // An inline rules edit keeps the list it started from until the edit closes.
   $effect(() => { goalView.applyPendingRules() })
   let confirm = $derived(confirmView.confirm)
@@ -1369,7 +1372,8 @@
     setDataDir: (value) => { dataDir = value }, setHealth: (value) => { health = value },
     setUpdate: (value) => { update = value }, setRoute: (value) => { route = value }, setEngine: (value) => { engineStatus = value },
     loadProfiles, openFirst,
-    handle: (ev) => { handle(ev); if (ev.kind !== 'build') voiceHost?.event(ev) },
+    // A global rule change sends a goals event with no room; Settings reloads on it.
+    handle: (ev) => { handle(ev); if (ev.kind === 'goals') globalRulesVersion++; if (ev.kind !== 'build') voiceHost?.event(ev) },
     workerMessage: (e) => {
       if (e.data?.type !== 'open') return
       voiceHost?.openLink(callLink(e.data.room, e.data.call ?? null))
@@ -1502,6 +1506,8 @@
           {#key room.id}<Computers list={computers} error={computerError} onopen={(c: ComputerInfo) => { const m = hierarchy.find((x) => x.id === c.session); if (m) { openSession(m); sessionTab = 'computer' } else popOut(room.id, c.session) }} />{/key}
         {:else if view === 'goals'}
           {#key room.id}<Goals roomId={room.id} older={listView.pages.goals?.older} loadingOlder={listView.olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))} />{/key}
+        {:else if view === 'rules'}
+          {#key room.id}<Rules roomId={room.id} scope="room" view={rules} members={hierarchy} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
             {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => askConfirm({ kind: 'cancelrun', run })} onpause={pauseRun} onopen={openRunAgent} />{/key}
@@ -1562,13 +1568,12 @@
 {/if}
 {#if settingsPanel.showSettings}
   {#key settingsPanel.settingsKey}
-    <Settings start={settingsPanel.settingsAt.start} pairNow={settingsPanel.settingsAt.pairNow} profile={settingsPanel.settingsAt.profile ?? ''} accountId={settingsPanel.settingsAt.accountId ?? ''} initialSelection={settingsPanel.settingsAt.initialSelection} roomId={room?.id ?? ''} repo={room?.repo ?? ''} oncreateprofile={createProfile} onclose={() => { settingsPanel.closeSettings(); loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
+    <Settings rulesVersion={globalRulesVersion} start={settingsPanel.settingsAt.start} pairNow={settingsPanel.settingsAt.pairNow} profile={settingsPanel.settingsAt.profile ?? ''} accountId={settingsPanel.settingsAt.accountId ?? ''} initialSelection={settingsPanel.settingsAt.initialSelection} roomId={room?.id ?? ''} repo={room?.repo ?? ''} oncreateprofile={createProfile} onclose={() => { settingsPanel.closeSettings(); loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
   {/key}
 {/if}
 {#if settingsPanel.showRoomSettings && room}
   {#key settingsPanel.roomSettingsKey}
-  {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => palette.registry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onhooks={() => openHooks()} onclose={() => (settingsPanel.closeRoomSettings())} />
+  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => palette.registry(room).find((a) => a.id === id)?.run()} onhooks={() => openHooks()} onclose={() => (settingsPanel.closeRoomSettings())} />
   {/key}
 {/if}
 {#if roomMenu}

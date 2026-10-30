@@ -6,7 +6,6 @@
   // review field are one setting: the host keeps both in step, so the policy
   // reloads when the switch flips.
   import { tick, untrack } from 'svelte'
-  import type { Snippet } from 'svelte'
   import { api } from '../../api.ts'
   import { errorText } from '../errorText.ts'
   import { roomLabel } from '../ui/format.ts'
@@ -36,8 +35,7 @@
     // start: the first section. reviewer: the ReviewerStatus answer;
     // onreviewer reloads it. controls: the room session controls (pause
     // state); onsessions runs 'pause' or 'resume'. onaction runs a room action
-    // by id: rename, room-pin, room-archive or delete. rules draws the Rules
-    // section; busy is true while a rule edit is open, so Esc cancels the edit.
+    // by id: rename, room-pin, room-archive or delete.
     // onhooks shows Services > Hooks, where the repository's hooks live.
     room: Room
     profiles?: ProfileChoice[]
@@ -50,12 +48,10 @@
     controls?: Controls | null
     onsessions?: (action: string) => void
     onaction?: (id: string) => void
-    rules: Snippet
-    busy?: boolean
     onhooks?: () => unknown
     onclose: () => void
   }
-  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, onlimit = () => {}, start = 'general', reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onhooks = () => {}, onclose }: Props = $props()
+  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, onlimit = () => {}, start = 'general', reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, onhooks = () => {}, onclose }: Props = $props()
   let rootProfile = $state(untrack(() => room.rootProfile || ''))
   let rootProfileBusy = $state(false)
   let rootProfileError = $state('')
@@ -141,7 +137,6 @@
     { id: 'general', label: 'General' },
     { id: 'review', label: 'Review & landing' },
     { id: 'ci', label: 'CI time' },
-    { id: 'rules', label: 'Rules' },
     { id: 'hooks', label: 'Hooks' },
     { id: 'noise', label: 'Bot noise rules' },
   ]
@@ -316,7 +311,7 @@
   {/if}
 {/snippet}
 
-<SettingsShell label="{roomLabel(room)} settings" title="{roomLabel(room)} settings" {nav} pane={section} onselect={(id) => (id === 'hooks' ? onhooks() : (section = id))} busy={rulesBusy} {onclose}>
+<SettingsShell label="{roomLabel(room)} settings" title="{roomLabel(room)} settings" {nav} pane={section} onselect={(id) => (id === 'hooks' ? onhooks() : (section = id))} {onclose}>
 {#if section === 'general'}
   <Section title="General" lede="The room itself.">
     <Group>
@@ -417,8 +412,6 @@
     {/if}
     {@render policyError()}
   </Section>
-{:else if section === 'rules'}
-  {@render rules()}
 {:else if section === 'noise'}
   <Section title="Bot noise rules">
     {#if room.repo}<PRNoiseRules {roomId} />{:else}<p class="quiet">This room has no repository.</p>{/if}
