@@ -1,11 +1,13 @@
 package view
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
+	"dyna-agent/internal/pr/issuewatch"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/subagent"
 )
@@ -28,6 +30,29 @@ func IssueRepository(issueURL string) (string, error) {
 		return "", fmt.Errorf("invalid issue URL %q", issueURL)
 	}
 	return strings.ToLower(u.Host + "/" + parts[0] + "/" + parts[1]), nil
+}
+
+// IssueWatches lists the issues the room watches (dyna git issue watch) as
+// issue rows, with the facts the last read saved and the room's work facts.
+// It reads only dyna.db, so the Issues tab's Tracked view needs no GitHub call
+// to list them.
+func (s *Service) IssueWatches(roomRef string) ([]GitHubItem, error) {
+	rec, err := s.Notify.Rooms.Resolve(roomRef)
+	if err != nil {
+		return nil, err
+	}
+	watches, err := issuewatch.Store{DataDir: s.dataDir()}.Room(context.Background(), rec.ID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]GitHubItem, 0, len(watches))
+	for _, w := range watches {
+		// A watch saved before its first read has no update time yet.
+		updated, _ := time.Parse(time.RFC3339, w.Updated)
+		items = append(items, GitHubItem{Number: w.Number, Title: w.Title, State: strings.ToUpper(w.State), Labels: []GitHubLabel{},
+			UpdatedAt: updated, URL: fmt.Sprintf("https://%s/%s/issues/%d", w.Host, w.Repo, w.Number)})
+	}
+	return items, s.issueWork(rec.ID, items)
 }
 
 // IssueGroup gives closed issues priority, followed by open PRs and live sessions.
