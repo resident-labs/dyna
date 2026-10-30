@@ -89,16 +89,16 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 
 func TestDiscardSkipsArchive(t *testing.T) {
 	s, room, session, ctx := setup(t)
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
 	_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session, Discard: true})
 	if e != nil {
 		t.Fatal(e)
-	}
-	record, err := s.store.Session(ctx, session)
-	if err != nil {
-		t.Fatal(err)
 	}
 	box, err := s.store.Box(ctx, record.Box)
 	if err != nil || box.State != contract.BoxDeleted {
