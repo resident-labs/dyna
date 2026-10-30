@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, problemText, providerName, remainingPercent, renewalText, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
+import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, problemText, providerColor, providerName, remainingPercent, renewalText, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
 import { account } from '../../../../test/account-fixtures.ts'
 import type { UsageWindow } from '../../api/account.ts'
 
@@ -179,4 +179,9 @@ test('accountsOf flattens the provider groups in their engine order', () => {
   assert.deepEqual(accountsOf({ providers: [{ provider: 'anthropic', accounts: [{ ...work, activeHere: true }] }, { provider: 'zai', accounts: [{ ...home, activeHere: false }] }] }).map((a) => a.id), ['w', 'h'])
   assert.deepEqual(accountsOf(null), [])
   assert.deepEqual(accountsOf({ providers: null }), [])
+})
+
+test('provider colors use a neutral fallback for unknown IDs', () => {
+  assert.equal(providerColor('anthropic'), 'var(--provider-anthropic)')
+  assert.equal(providerColor('toString'), 'var(--provider-unknown)')
 })
