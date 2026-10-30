@@ -411,7 +411,7 @@ func showCommand(newManager func() *subagent.Manager) *cobra.Command {
 					}
 					completed = true
 					n := turn.UsageNormalization
-					if n.Version == 0 || n.Input != "unknown" || n.CachedInput != "unknown" || n.Output != "unknown" {
+					if n.Version == 0 || n.Input != workeroutput.CoverageUnknown || n.CachedInput != workeroutput.CoverageUnknown || n.Output != workeroutput.CoverageUnknown {
 						measured = true
 						break
 					}
