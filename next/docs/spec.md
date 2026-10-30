@@ -12,7 +12,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 
 1. **Room events move into SQLite.** Posts and system events become rows in one `events` table, because delivery, wake rules, the web app and `dyna room log` all query them. Rule r1 keeps room messages as JSONL files today; v2 changes that for events only. Transcripts and large outputs stay files (section 4).
 2. **Leads are placement roots.** A cgroup cannot span machines. A child therefore runs on its parent's host. Root's direct children (leads) each get their own budget on any host, and the engine enforces the room limit by accounting. Below each lead, budgets nest as cgroups (section 5.5).
-3. **CLIProxyAPI holds every model credential.** It holds the Claude, ChatGPT, Kimi and xAI sign-ins and refreshes them, and it holds the zai, opencode-go and deepseek keys as OpenAI-compatible upstreams (M0c). The engine holds no model credential and never refreshes a model token; it adds only the proxy's client key. Pi holds none either. Muse is not a v2 model account: its subscription key works only in Meta's own client (M0c). M1 and M2 checks use a copied access token with no refresh token, as M0 did. From M3 on, the owner signs in on the Accounts page (5.12), which drives CLIProxyAPI's own sign-in flows. Each login has its own tokens, so v1's sign-ins keep working. The engine reads quota without any model credential, only through CLIProxyAPI (5.12).
+3. **CLIProxyAPI holds every model credential.** It holds the Claude, ChatGPT, Kimi and xAI sign-ins and refreshes them, and it holds the zai, opencode-go and deepseek keys as OpenAI-compatible upstreams (M0c). The engine's own code never reads a model credential and never refreshes a model token; it adds only the proxy's client key. From M3, the proxy keeps its tokens in its own table in `store.db` (5.7). Pi holds none either. Muse is not a v2 model account: its subscription key works only in Meta's own client (M0c). M1 and M2 checks use a copied access token with no refresh token, as M0 did. From M3 on, the owner signs in on the Accounts page (5.12), which drives CLIProxyAPI's own sign-in flows. Each login has its own tokens, so v1's sign-ins keep working. The engine reads quota without any model credential, only through CLIProxyAPI (5.12).
 4. **Pi is the only harness.** The owner decided this on 2026-10-30; it replaces the card's "Claude Code and Pi". Claude models go through Pi's `anthropic` provider to the owner's Claude sign-ins in CLIProxyAPI, which presents the requests as Claude Code ("cloaking", M0c). ChatGPT goes through an `openai-responses` provider, because the native Pi `openai-codex` provider did not work through the proxy (M0b). In M0c, Pi with `claude-opus-5-5` passed tool turns, caching, compaction, steer, follow-up and abort. Pi sent effort `high` for every thinking level, so our Pi fork fixes the effort mapping in M1. Section 9.1 lists what we lose from Claude Code.
    - **Accepted risk.** Anthropic's terms allow Claude Free, Pro and Max sign-ins only in Claude Code and Claude.ai, and Anthropic blocks clients that pose as Claude Code. Pi's traffic can therefore get an account flagged, or be billed as extra usage instead of plan limits. The owner accepts this. The self-hosting trial uses one Claude account only, to limit the damage.
 5. **A dormant session stops its box.** The container stops, and its volume stays. Its request no longer counts on the host. A wake starts it again (section 5.3).
@@ -21,6 +21,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The cutover follows only after the trial works and a dry-run import passes (section 11).
 9. **Some v1 features wait until after the cutover.** Voice, workflows, web search through Dyna, computers and the librarian's updates come back after the cutover. The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs in a box. Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
+11. **CLIProxyAPI is vendored and runs inside the engine.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` runs it in-process through its Go SDK, on the control-plane loopback, so v2 stays one binary (5.7). It lands in M1, because the model route needs it.
 
 ## 1. Goals and non-goals
 
@@ -61,6 +62,7 @@ next/                    module github.com/resident-labs/dyna (go 1.26), no go.w
   migrate/               bundle import (removed after the migration, section 8)
   web/                   the ported Svelte app; types generated from contract/
   docs/                  this spec and the guides
+  third_party/cliproxyapi/  vendored CLIProxyAPI fork: its own Go module, our patches, DYNA.md
 ```
 
 The old module (`dyna-agent`) adds only `cmd/dyna-export`. It imports `next/contract` through a `replace` directive, so the exporter writes the exact bundle types (section 8).
@@ -69,7 +71,7 @@ The old module (`dyna-agent`) adds only `cmd/dyna-export`. It imports `next/cont
 
 | Command | Where it runs | What it does |
 |---|---|---|
-| `dyna engine` | control plane | serves the API, owns the store, runs CLIProxyAPI and the engine timers |
+| `dyna engine` | control plane | serves the API, owns the store, runs CLIProxyAPI in-process and the engine timers |
 | `dyna box-agent` | in each box | turn runner, shell server, process guard, transcript stream, model and git routes into the box |
 | `dyna <noun> <verb>` | anywhere | the CLI. In a box it uses the box socket. On the control plane it uses the owner socket. |
 
@@ -77,7 +79,7 @@ The old module (`dyna-agent`) adds only `cmd/dyna-export`. It imports `next/cont
 
 Sub-packages are the area lead's choice. The expected ones are `engine/store`, `engine/api`, `engine/approve`, `engine/model`, `engine/git`, `engine/sched`, `box/podman`, `box/fakehost`, `harness/pi` and `harness/fakeharness`.
 
-Third-party Go dependencies are allowed only with a reason in the PR. Expected: `modernc.org/sqlite` (pure Go, as in v1) and `github.com/spf13/cobra` for the CLI. The web app keeps Svelte 5, Vite and strict TypeScript (r7).
+Third-party Go dependencies are allowed only with a reason in the PR. Expected: `modernc.org/sqlite` (pure Go, as in v1), `github.com/spf13/cobra` for the CLI, and the vendored CLIProxyAPI with the modules it needs (5.7). The web app keeps Svelte 5, Vite and strict TypeScript (r7).
 
 ## 3. Contract
 
@@ -510,6 +512,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M3 | `room_repos`, `repos`, `repo_attribution`, `members`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
 | M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `prs`, `library_entries`, `accounts` (labels and limits only), `counters`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
+| M3 | `proxy_auths` | `id` PK, `provider`, `record` (the proxy's auth record, which holds tokens), `updated_at`. Only the embedded proxy's token store reads and writes it (5.7). |
 
 `counters` holds keyed counters (D-580), such as the next issue number per room. A counter update is one primary-key write with prebuilt SQL.
 
@@ -673,6 +676,14 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 
 **Cloaking.** For Claude sign-ins, CLIProxyAPI presents Pi's requests as Claude Code (M0c). It replaces Pi's first system block with Claude Code's identity and billing blocks and keeps Pi's prompt as a later system message. It renames tools to stable `mcp__` aliases and maps the calls back, adds a `metadata.user_id`, and may add a fallback model. `turn.ended` therefore records the model that actually served the turn. Strict cloak mode drops the caller's system prompt, so the engine never turns it on.
 
+**Vendored CLIProxyAPI (M1).** CLIProxyAPI is MIT-licensed Go. Its fork lives in `next/third_party/cliproxyapi`:
+
+- It is the upstream module `github.com/router-for-me/CLIProxyAPI/v8`, pinned to an upstream tag (v8.0.48 at the start), and brought in with `git subtree --squash`. `next/go.mod` points at it with a `replace` directive, and its `go` line follows the fork's.
+- `DYNA.md` in that folder records the upstream tag and commit, the sync command, and one entry per patch with its reason. Each patch is its own commit, as in v1's `third_party/pi/DYNA.md`.
+- The engine embeds it through the SDK packages only (`sdk/cliproxy`, `sdk/config`, `sdk/auth`): `cliproxy.NewBuilder().WithConfig(cfg).Build()`, then `Run` under the engine's context and `Shutdown` when the engine stops. The engine builds the config in code: listen on `127.0.0.1` only, `request-retry: 0`, strict cloak off, and the management API mounted only with the engine's key and never for remote access.
+- In M1 the proxy keeps its sign-ins in its own file store, `<data>/cliproxy/auth` (mode 0700). In M3 the engine registers a token store on `store.db` through the SDK's `Store` interface (`List`, `Save`, `Delete`), so no JSON state is left. `store.db` and its backups then hold tokens and stay 0600.
+- Accepted costs: the binary grows by the proxy's dependencies (gin, a Redis client, zeroconf and others), which later patches may trim. A panic in a proxy goroutine stops the engine; systemd restarts it, and box agents buffer meanwhile (5.7).
+
 **Git (M3).** `git-remote-dyna` (a link to `dyna box-agent git-remote`) carries smart HTTP over the box socket to `/git/<repo>/`. The engine checks the session's repositories and proxies to GitHub with its own token. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>` and `refs/dyna/checkpoint/<session>`. Fetches are allowed for the room's repositories.
 
 **Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
@@ -714,7 +725,7 @@ Table: `archives` (`session` PK, `repo`, `ref`, `commit_sha`, `created_at`, `exp
 **Control-plane relocation.** Boxes keep running throughout, and their box agents buffer.
 
 1. `dyna engine export-state <dir>` stops the API and the writer, so no write can follow the snapshot. It then runs `PRAGMA wal_checkpoint(TRUNCATE)` and copies `store.db` to `<dir>` with the SQLite backup API. Daily backups are never used here.
-2. It copies, in the same stopped state, all file-backed state: the transcripts, the attachment and output files (by hash), the config files, the CLIProxyAPI auth folder, and the Connect secrets. It writes a manifest of each file's path, size and SHA-256, plus the store's last event `seq`.
+2. It copies, in the same stopped state, all file-backed state: the transcripts, the attachment and output files (by hash), the config files, the CLIProxyAPI auth folder until M3 moves it into `store.db` (5.7), and the Connect secrets. It writes a manifest of each file's path, size and SHA-256, plus the store's last event `seq`.
 3. The engine on the old host stays stopped. It refuses to start again while the export marker is in its data folder, so two engines never serve the same boxes.
 4. `dyna engine import-state <dir>` on the new host checks every hash in the manifest and runs `PRAGMA integrity_check` on the store. It refuses to start on any mismatch.
 5. The new engine starts. It opens the masters, adds every forward again, and the box agents reconnect and resend from their last acknowledged offsets.
@@ -732,7 +743,7 @@ The new host must reach every host over SSH. The export holds secrets, so it mov
 
 The owner manages every model account on one page of the v2 web app. It has the features of cliproxyapi-dashboard, but not its look or code (5.13). The browser never talks to CLIProxyAPI. The engine calls CLIProxyAPI's management API on the control-plane loopback with the management key, which only the engine holds.
 
-- **Providers.** One row per provider and account, with its label, state and room limits. A provider with a sign-in has a "Connect" button, which starts CLIProxyAPI's own OAuth or device-code flow. The page shows the link or code, and the token goes straight to CLIProxyAPI. A provider with a key has a key field. The engine passes the key to CLIProxyAPI and never stores or shows it again.
+- **Providers.** One row per provider and account, with its label, state and room limits. A provider with a sign-in has a "Connect" button, which starts CLIProxyAPI's own OAuth or device-code flow. The page shows the link or code, and the token goes straight to CLIProxyAPI. A provider with a key has a key field. The engine passes the key to CLIProxyAPI and never shows it again; only the proxy's token store keeps it.
 - **Quota.** For each account and each provider: the usage against each limit window and the time of the next reset. The engine uses no model credential for this. It has two sources: the management API, and the rate-limit headers on responses that the model route already carries, when CLIProxyAPI passes them (`passthrough-headers`). When neither gives a limit for a provider, the page shows the usage that the proxy counted and marks the limit unknown. Such an account gets no `account.quota_low`, only `account.failed`.
 - **Alerts.** The events `account.quota_low` (below 10% of a window, or an owner-set floor) and `account.failed` (sign-in rejected or refresh failed) are typed and carry the account and the reason. Only these two states get a colored chip, through the shared `StatusPill` (r8, r16). Every other value is muted text.
 - **Methods.** `accounts.list`, `accounts.connect`, `accounts.set_key`, `accounts.remove` and `accounts.set_limits` are owner-class operations (3.5). The quota view reads `accounts.quota`.
@@ -1178,7 +1189,7 @@ M0c result: **yes for Claude, with one fix.** Pi 1.4.0-dyna.10 with `claude-opus
 
 ### M1: the thin slice
 
-Scope: `contract` (3.2 to 3.4, the `Operation` types, `GlobalBundle`, `RoomBundle` and their parts, the M1 methods), `engine/store`, the owner socket and box sockets, the model route to CLIProxyAPI, one host (hermeslab) with admission, `dyna-base`, the box lifecycle without children, the box agent with the Pi adapter, `dyna post` and `dyna room log`.
+Scope: `contract` (3.2 to 3.4, the `Operation` types, `GlobalBundle`, `RoomBundle` and their parts, the M1 methods), `engine/store`, the owner socket and box sockets, the vendored CLIProxyAPI in-process and the model route to it, one host (hermeslab) with admission, `dyna-base`, the box lifecycle without children, the box agent with the Pi adapter, `dyna post` and `dyna room log`.
 
 Acceptance:
 
@@ -1188,7 +1199,7 @@ Acceptance:
 4. unit: the model route replaces the placeholder key, refuses a model the profile does not allow, and streams server-sent events in order (fake upstream).
 5. unit: admission places a box only when requests fit, and otherwise emits `box.changed` to `pending` with a reason (fake host).
 6. unit: every refused box transition returns an error, and every allowed one emits one `box.changed`.
-7. unit: a reply without a valid `DYNA-END` trailer is a transport error, even when ssh exits 0.
+7. unit: a reply without a valid `DYNA-END` trailer is a transport error, even when ssh exits 0. The generated proxy config listens only on `127.0.0.1`, sets `request-retry: 0`, keeps strict cloak off, and mounts management only with the engine's key.
 8. unit: the Pi adapter turns a recorded RPC event stream into `turn.ended` with the final text and usage, and it sends a steer command while a turn runs.
 9. manual: on the desktop, `dyna engine` starts with a fresh store. `dyna session start` puts a Pi session with `claude-opus-5-5` in a box on hermeslab. Its turn runs `dyna post` with a tool and ends. `dyna room log` on the desktop shows `session.started`, `post.created` from the session, and `turn.ended`. With thinking levels xhigh and low, the proxy's request log shows effort `xhigh` and `low` (the fork fix, M0c).
 10. manual: inside that box, the environment and the files hold no OAuth token and no CLIProxyAPI client key.
@@ -1239,7 +1250,7 @@ Acceptance:
 10. manual: after the cutover, each room's root starts from its `migrate.handoff` event, and every open goal, PR, issue and question from the bundle is present.
 11. manual: Connect works with the copied secrets, and a paired phone opens a room without pairing again. Its posts come from the owner with its `DeviceID`.
 12. manual: with a host powered off, its boxes go `lost`. `box.restart` on another host is refused until the owner removes the host. It then resumes from the checkpoint and the transcript copy, and an interrupted tool call is marked, not run again.
-13. unit: with a fake CLIProxyAPI management API, `accounts.connect` returns the proxy's link or code, and the store keeps no token or key. A quota below the floor emits one `account.quota_low`, and no second one until the quota recovers and drops again. A provider with no limit from either source shows its counted usage with the limit unknown, and it never emits `account.quota_low`.
+13. unit: with a fake CLIProxyAPI management API, `accounts.connect` returns the proxy's link or code, and the store keeps no token or key outside the proxy's token-store table. The SQLite token store round-trips a proxy auth record through `Save`, `List` and `Delete`. A quota below the floor emits one `account.quota_low`, and no second one until the quota recovers and drops again. A provider with no limit from either source shows its counted usage with the limit unknown, and it never emits `account.quota_low`.
 14. manual: one full working day in all rooms on v2 with no blocking failure.
 
 ## 12. Team and ownership
