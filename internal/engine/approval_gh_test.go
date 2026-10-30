@@ -1,11 +1,15 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -115,14 +119,84 @@ func TestRootMediaApprovalChecksItsAttachment(t *testing.T) {
 	}
 }
 
-func TestMediaOnRoutinePRRequiresOwnerApproval(t *testing.T) {
-	args := []string{"pr", "create", "--attach", "image.png"}
-	classified := ghclient.Classify(t.Context(), args, ghclient.ClassifyInput{Host: "github.com", Repo: "o/r", RoomRepository: true, OwnPR: func(context.Context, ghclient.ItemRef) bool { return true }})
-	if classified != approvals.ClassAuto {
-		t.Fatalf("fixture must be auto-eligible, got %s", classified)
+func TestMediaWritesRequireAgentApproval(t *testing.T) {
+	storetest.Isolate(t)
+	s := testServices(t, false)
+	rec, err := s.rooms.Notify.Rooms.Create(room.CreateInput{Name: "media-routing"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	class, auto := mediaApprovalClass(classified, true)
-	if class != approvals.ClassOwner || auto {
-		t.Fatalf("media approval = %s, auto %v; want owner and no auto", class, auto)
+	roomfixture.Repository(t, s.rooms.Notify.Rooms, rec.ID, "github.com", "owner/repo", "read-write")
+	root := subagent.Meta{ID: "ses_20261020-000000-abcde111", Name: "root", Room: rec.Name, RoomID: rec.ID, Role: subagent.RoleRoot}
+	child := subagent.Meta{ID: "ses_20261020-000000-abcde222", Name: "child", Room: rec.Name, RoomID: rec.ID, ParentSession: root.ID}
+	for _, m := range []subagent.Meta{root, child} {
+		if err := sessionlife.Save(s.rooms.Notify.Sessions.Store.Root, m.ID, m); err != nil {
+			t.Fatal(err)
+		}
 	}
+	fake := filepath.Join(t.TempDir(), "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"login":"writer"}]}}';;
+"auth token") echo token;;
+"pr view") echo '{"number":7,"url":"https://github.com/owner/repo/pull/7","headRepository":{"name":"repo"},"headRepositoryOwner":{"login":"owner"}}';;
+"api --hostname") echo '{"full_name":"owner/repo","private":false,"visibility":"public","permissions":{"push":true}}';;
+esac
+`
+	if err := os.WriteFile(fake, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ghclient.BinaryEnv, fake)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
+	attachment, err := s.rooms.Notify.Rooms.PutAttachment(rec.ID, "image.png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := s.rooms.Notify.Rooms.Post(rec.ID, room.PostInput{From: child.Name, To: []string{rec.Name}, Text: "media", SessionIDs: map[string]string{child.Name: child.ID}, Attachments: []room.Attachment{attachment}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	media := approvals.Media{Path: "image.png", Name: "image.png", PostID: msg.ID, AttachmentID: attachment.ID, SHA256: fmt.Sprintf("%x", sum)}
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "https://github.com/owner/repo.git"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git: %s: %v", out, err)
+		}
+	}
+	actor := authority.Actor{Role: authority.Session, Session: child.ID, Room: rec.ID}
+	for _, args := range [][]string{{"pr", "comment", "https://github.com/owner/repo/pull/7", "--attach", "image.png"}, {"pr", "create", "--repo", "owner/repo", "--head", "branch", "--attach", "image.png"}} {
+		in := approvals.RequestInput{Argv: args, Cwd: dir, Media: []approvals.Media{media}}
+		req, err := s.approvalRequest(authority.WithActor(t.Context(), actor), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.Class != approvals.ClassAgent || req.State != approvals.StatePending || req.At != root.Name {
+			t.Fatalf("%v: class %s state %s at %s; want agent pending at root", args, req.Class, req.State, req.At)
+		}
+		if !strings.Contains(req.Body, "Media destination:") {
+			t.Fatal("missing media destination")
+		}
+	}
+	rootMsg, err := s.rooms.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{rec.Name}, Text: "media", SessionIDs: map[string]string{rec.Name: root.ID}, Attachments: []room.Attachment{attachment}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	media.PostID = rootMsg.ID
+	rootActor := authority.Actor{Role: authority.Root, Session: root.ID, Room: rec.ID}
+	req, err := s.approvalRequest(authority.WithActor(t.Context(), rootActor), approvals.RequestInput{Argv: []string{"pr", "comment", "https://github.com/owner/repo/pull/7", "--attach", "image.png"}, Cwd: dir, Media: []approvals.Media{media}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.State != approvals.StateApproved {
+		t.Fatalf("root media: state %s; want approved", req.State)
+	}
+	if !strings.Contains(req.Body, "Media destination:") {
+		t.Fatal("missing root media destination")
+	}
+
 }
