@@ -4,7 +4,6 @@
   // no tabs. Each row says what the service does and, as muted text, when it
   // ran and runs next; a colored pill appears only when it needs attention. A
   // click opens the service's settings and recent runs in place.
-  import { tick } from 'svelte'
   import { api } from '../../api.ts'
   import { errorText } from '../errorText.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
@@ -84,30 +83,18 @@
   }
   const toggle = (id: string): void => { open = open === id ? '' : id }
 
-  // A hook that does a service's work shows under that service, so the hook
-  // list leaves it out, and a feed card's log of that hook opens the service.
-  const serviceHooks = $derived((registry ?? []).flatMap((s) => (s.hook ? [s.hook] : [])))
-  const focused = $derived(registry?.find((s) => s.hook && s.hook === hooks?.run?.hook))
-  let handled = 0
-  $effect(() => {
-    const s = focused
-    if (!s || !hooks || hooks.request === handled) return
-    handled = hooks.request
-    open = s.id
-    tick().then(() => document.getElementById(`service-${s.id}`)?.scrollIntoView({ block: 'start' }))
-  })
 </script>
 
 {#snippet serviceRow(s: RegistryService)}
   {@const pill = pillOf(s)}
   {@const write = s.switch ? switchWrite(api, host, s) : null}
   {#snippet detail()}
-    <ServiceDetail service={s} {host} {settings} {changes} focus={focused?.id === s.id ? (hooks?.run ?? null) : null} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
+    <ServiceDetail service={s} {host} {settings} {changes} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
   {/snippet}
   <SettingRow inline id="service-{s.id}" title={s.label} description={s.description} expanded={open === s.id} ontoggle={() => toggle(s.id)} children={open === s.id ? detail : undefined}>
     {#snippet status()}
       {#if pill}<StatusPill label={pill.label} tone={pill.tone} />{/if}
-      <span>{factsOf(s, now, !!write).join(' · ')}</span>
+      <span>{[...(s.id === 'updates' && settings && s.detail !== 'update-source-invalid' ? [String(settings.find((item) => item.key === 'updater.source')?.value || 'Release updater')] : []), ...factsOf(s, now, !!write)].join(' · ')}</span>
       {#if errors[s.id]}<span class="err" role="alert">{errors[s.id]}</span>{/if}
     {/snippet}
     {#snippet control()}
@@ -139,7 +126,7 @@
         </Card>
       </Section>
     {/each}
-    <HooksSection {repo} hide={serviceHooks} focus={registry && !focused ? hooks : null} />
+    <HooksSection {repo} focus={hooks} />
   </div>
 </section>
 

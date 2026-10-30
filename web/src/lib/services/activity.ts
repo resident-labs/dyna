@@ -3,6 +3,8 @@
 // entry; a failure keeps its own entry and names its reason. Nothing here
 // changes data.
 
+import { duration } from '../ui/format.ts'
+
 // EntryTone marks an entry's dot: work running now, a failure, or a quiet result.
 export type EntryTone = 'live' | 'failed' | 'done'
 
@@ -70,8 +72,7 @@ const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' 
 export function elapsed(from: string, to: string): string {
   const ms = new Date(to).getTime() - new Date(from).getTime()
   if (!Number.isFinite(ms) || ms < 0) return ''
-  const s = Math.round(ms / 1000)
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${s % 60} s`
+  return duration(from, to)
 }
 
 export const byNewest = (list: Entry[]): Entry[] => list.filter((e) => Number.isFinite(e.at) && e.at > 0).sort((a, b) => b.at - a.at)
@@ -141,7 +142,7 @@ export function hookEntries(hook: string, label: string, runs: HookRunRow[], now
     const took = run.result === 'pending' ? '' : elapsed(run.startedAt, run.finishedAt)
     out.push({
       key: `hook:${hook}:${run.startedAt}`, at,
-      text: `${label} · ${resultWord(run.result)}${why ? `: ${why}` : ''}${took && took !== '0 s' ? ` in ${took}` : ''}`,
+      text: `${label} · ${resultWord(run.result)}${why ? `: ${why}` : ''}${took && took !== '0s' ? ` in ${took}` : ''}`,
       tone: run.result === 'pending' ? 'live' : failed ? 'failed' : 'done', session: '',
       ...(failed && run.id ? { run: { hook, id: run.id } } : {}),
       steps: [],

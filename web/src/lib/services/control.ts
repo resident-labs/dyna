@@ -5,7 +5,7 @@ import type { api } from '../../api.ts'
 import type { RegistryService } from '../api/service.ts'
 
 // Select the real browser API methods so unsupported adapters fail the type check.
-export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setMergePaused' | 'editHook' | 'editService'>
+export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setMergePaused' | 'editService'>
 
 export interface ControlHost {
   room: string
@@ -17,7 +17,6 @@ export interface ControlHost {
 // its repository. A service run by a repository hook switches that hook, and
 // every other switch belongs to a built-in pass.
 export function switchWrite(api: ControlApi, host: ControlHost, s: RegistryService): ((on: boolean) => Promise<unknown>) | null {
-  if (s.hook) return (on) => api.editHook(host.repo, s.hook, { disabled: !on })
   switch (s.id) {
     case 'reviewer': return (on) => api.setReviewEnabled(host.room, on)
     case 'merge-queue': return (on) => api.setMergePaused(host.room, !on)

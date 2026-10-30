@@ -22,7 +22,7 @@ const run = (minutesAgo: number, result = 'pass') => ({ id: `run-${minutesAgo}`,
 
 test('passing runs fold into one row a day, and a failure keeps its own row with its reason', () => {
   const entries = hookEntries('maintenance', 'Maintenance', [run(1), run(11), run(21, 'error'), run(31), run(41, 'pending')], now, { 'run-21': { exitCode: 2, detail: '' } })
-  assert.deepEqual(entries.map((e) => e.text).sort(), ['Maintenance · 3 runs passed today', 'Maintenance · failed: exit 2 in 1 s', 'Maintenance · running'].sort())
+  assert.deepEqual(entries.map((e) => e.text).sort(), ['Maintenance · 3 runs passed today', 'Maintenance · failed: exit 2 in 1s', 'Maintenance · running'].sort())
   assert.deepEqual(entries.find((e) => e.tone === 'failed')?.run, { hook: 'maintenance', id: 'run-21' })
-  assert.equal(hookEntries('maintenance', 'Maintenance', [run(1)], now, {})[0]?.text, 'Maintenance · passed in 1 s')
+  assert.equal(hookEntries('maintenance', 'Maintenance', [run(1)], now, {})[0]?.text, 'Maintenance · passed in 1s')
 })

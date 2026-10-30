@@ -13,11 +13,12 @@
   interface Props {
     schedule: NonNullable<RegistryService['schedule']>
     busy: boolean
+    fixedLimit?: boolean
     // onsave resolves true when the engine took the change.
     onsave: (patch: ServicePatch) => Promise<boolean>
     onreset: () => Promise<unknown>
   }
-  let { schedule, busy, onsave, onreset }: Props = $props()
+  let { schedule, busy, fixedLimit = false, onsave, onreset }: Props = $props()
 
   let errors = $state<Record<string, string>>({})
   const field = (key: string, display: string): SettingItem => ({ key, value: display, display, kind: 'duration', source: 'file', liveVsRestart: '', help: '' })
@@ -39,15 +40,15 @@
   }
 </script>
 
-<SettingRow title="Runs every" description="Time between runs">
+<SettingRow title={fixedLimit ? 'Checks every' : 'Runs every'} description={fixedLimit ? 'Time between checks' : 'Time between runs'}>
   {#snippet control()}<SettingControl item={field('every', minutesText(schedule.everyMinutes))} label="Time between runs" onsave={(v: string) => save('every', v, every(v), 'Use whole minutes, such as 10m, 1h or 1d')} />{/snippet}
   {#snippet status()}{#if errors.every}<span class="err" role="alert">{errors.every}</span>{/if}{/snippet}
 </SettingRow>
-<SettingRow title="Time limit" description="Longest one run may take">
+{#if !fixedLimit}<SettingRow title="Time limit" description="Longest one run may take">
   {#snippet control()}<SettingControl item={field('limit', settingDisplay({ kind: 'duration', value: schedule.timeout }))} label="Time limit of one run" onsave={(v: string) => save('limit', v, limit(v), 'Use a time such as 30s, 10m or 1h')} />{/snippet}
   {#snippet status()}{#if errors.limit}<span class="err" role="alert">{errors.limit}</span>{/if}{/snippet}
-</SettingRow>
-<SettingRow title="Defaults" description="Restores the switch, the interval and the time limit">
+</SettingRow>{/if}
+<SettingRow title="Defaults" description={fixedLimit ? 'Restores the switch and interval' : 'Restores the switch, the interval and the time limit'}>
   {#snippet control()}<button class="btn" disabled={busy} onclick={onreset}>Reset</button>{/snippet}
 </SettingRow>
 
