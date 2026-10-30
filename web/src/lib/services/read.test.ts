@@ -7,7 +7,7 @@ test('the merge history reader keeps the fields a trial entry uses', () => {
 })
 
 test('a registry row with an empty detail is kept, and an unknown id is dropped', () => {
-  const row = { id: 'updates', group: 'this-computer', label: 'Updates', description: 'Keeps Dyna current', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [] }
+  const row = { id: 'updates', scope: 'global', group: 'this-computer', label: 'Updates', description: 'Keeps Dyna current', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [] }
   assert.deepEqual(readRegistry([row, { ...row, id: 'nonsense' }])?.map((r) => r.id), ['updates'])
   assert.equal(readRegistry(null), null)
 })
