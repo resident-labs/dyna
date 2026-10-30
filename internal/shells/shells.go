@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/processguard"
 
 	"dyna-agent/internal/callerid"
@@ -443,7 +444,20 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	grew := &outputEvents{send: func() { s.Notify(id) }}
 	go func() {
 		defer close(copied)
-		r := bufio.NewReaderSize(pr, 64*1024)
+		publisher := &activityPublisher{updates: make(chan activity.Signal, 1)}
+		go func() {
+			db, err := s.db()
+			if err != nil {
+				return
+			}
+			ticker := time.NewTicker(activity.PublishInterval)
+			defer ticker.Stop()
+			publisher.run(ticker.C, func(signal activity.Signal) error { return s.publishActivity(db, id, signal) })
+		}()
+		observer := &activityReader{Reader: pr, now: time.Now, publish: publisher.send}
+		observer.start()
+		defer close(publisher.updates)
+		r := bufio.NewReaderSize(observer, 64*1024)
 		var written int64
 		capped := false
 		for {
@@ -460,6 +474,7 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 				}
 			}
 			if err != nil {
+				observer.end(err)
 				return
 			}
 		}
