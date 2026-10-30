@@ -255,11 +255,24 @@ func execResult(code int, stdout, stderr string, parsed any, dur time.Duration, 
 func (e *engine) exec(call goja.FunctionCall) goja.Value {
 	vm := e.vm
 	promise, resolveFn, rejectFn := vm.NewPromise()
+	var release func()
 	resolve := func(v any) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { resolveFn(vm.ToValue(v)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			resolveFn(vm.ToValue(v))
+		})
 	}
 	reject := func(err error) {
-		e.loop.RunOnLoop(func(vm *goja.Runtime) { rejectFn(vm.NewGoError(err)) })
+		e.loop.RunOnLoop(func(vm *goja.Runtime) {
+			if release != nil {
+				release()
+				release = nil
+			}
+			rejectFn(vm.NewGoError(err))
+		})
 	}
 	argv, o, err := e.parseCommandCall(call)
 	if err == nil && e.opts.Commands == nil {
@@ -323,6 +336,11 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		e.emit(ev)
 	}
 	emit(runstore.Event{T: "exec_start", Command: textutil.ClipOneLine(line, 400)})
+	release, err = e.beginReplayAsync()
+	if err != nil {
+		reject(err)
+		return vm.ToValue(promise)
+	}
 	if e.opts.Replay != nil {
 		matched, value, replayErr := e.replayCall(runstore.WorkflowCallCommand, manifestKey, id)
 		if matched || replayErr != nil {

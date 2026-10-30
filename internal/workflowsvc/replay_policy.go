@@ -122,7 +122,7 @@ func TryAutomaticReplay(ctx context.Context, runID string) (string, ReplayReason
 	if err != nil {
 		return "", "", err
 	}
-	actor := authority.Actor{Role: authority.Owner}
+	var actor authority.Actor
 	if meta.Session != "" {
 		actor = authority.Actor{Role: authority.Session, Session: meta.Session}
 	}
