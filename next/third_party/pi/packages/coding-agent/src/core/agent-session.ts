@@ -326,6 +326,8 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Dyna delivery identity, recorded when the user message is consumed. */
 	deliveryId?: string;
+	/** Further delivery inputs to persist before the first model call. */
+	additionalInputs?: { message: string; deliveryId: string }[];
 	/** Internal hook used by RPC mode to observe how an accepted prompt was dispatched. Not called if the prompt is rejected. */
 	preflightResult?: (disposition: PromptDisposition) => void;
 }
@@ -1884,12 +1886,12 @@ export class AgentSession {
 	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
 	 * @param onStarted Called once the run's messages are prepared, before the first request.
 	 */
-	private async _startRun(trigger: BeforeAgentStartTrigger, onStarted?: () => void, deliveryId?: string): Promise<void> {
+	private async _startRun(trigger: BeforeAgentStartTrigger, onStarted?: () => void, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<void> {
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
 		try {
-			messages = await this._prepareRun(trigger, deliveryId);
+			messages = await this._prepareRun(trigger, deliveryId, additionalInputs);
 		} catch (error) {
 			this._isAgentRunActive = false;
 			this._flushPendingBashMessages();
@@ -1937,7 +1939,7 @@ export class AgentSession {
 	 * message followed by pending nextTurn messages (consumed here) and handler messages, with a
 	 * system patch first when the prompt changed.
 	 */
-	private async _prepareRun(trigger: BeforeAgentStartTrigger, deliveryId?: string): Promise<AgentMessage[]> {
+	private async _prepareRun(trigger: BeforeAgentStartTrigger, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<AgentMessage[]> {
 		// Check if we need to compact before sending (catches aborted responses).
 		// The starting message is sent below, so do not call agent.continue() here.
 		const lastAssistant = this._findLastAssistantMessage();
@@ -1971,6 +1973,7 @@ export class AgentSession {
 				timestamp: Date.now(),
 			});
 		}
+		messages.push(...additionalInputs);
 		// Inject any pending "nextTurn" messages as context alongside the starting message
 		messages.push(...this._pendingNextTurnMessages);
 		this._pendingNextTurnMessages = [];
@@ -2150,6 +2153,7 @@ export class AgentSession {
 
 		// If streaming, queue via steer() or followUp() based on option
 		if (this.isStreaming) {
+			if (options?.additionalInputs?.length) throw new Error("Batch input requires an idle session");
 			if (!options?.streamingBehavior) {
 				throw new Error(
 					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
@@ -2184,9 +2188,27 @@ export class AgentSession {
 			throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
 		}
 
+		const additionalInputs: AgentMessage[] = [];
+		for (const input of options?.additionalInputs ?? []) {
+			const processed = await this._runInputHandlers(input.message, undefined, options?.source ?? "interactive");
+			if (!processed) continue;
+			let text = processed.text;
+			if (expandPromptTemplates) {
+				text = expandPromptTemplate(this._expandSkillCommand(text), [...this.promptTemplates]);
+			}
+			const normalized = await this._normalizePromptImages(processed.images);
+			if (normalized.hints.length > 0) text += `\n\n${normalized.hints.join("\n")}`;
+			additionalInputs.push({
+				role: "user",
+				deliveryId: input.deliveryId,
+				content: [{ type: "text", text }, ...normalized.images],
+				timestamp: Date.now(),
+			});
+		}
 		await this._startRun({ messageType: "user", prompt: expandedText, images: currentImages }, () =>
 			preflightResult?.("started"),
 			options?.deliveryId,
+			additionalInputs,
 		);
 	}
 
