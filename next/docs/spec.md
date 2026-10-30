@@ -741,6 +741,12 @@ The owner manages every model account on one page of the v2 web app. It has the 
 
 The v2 web app stays Svelte 5 and is ported view by view. Each ported or new view follows T3 Code's design approach: quiet and dense, with few borders and few badges. T3 Code is a reference for the approach only; no code is copied.
 
+Every PR that adds or changes a view has one required step (owner rule):
+
+- The builder attaches one side-by-side image to the PR. The left half is the new or changed view in the v2 app. The right half is the T3 Code page that is most similar to it. Both use the same window size and theme.
+- The reviewer checks the PR against that image and requests changes when the view is louder or less dense than the T3 Code page, or when the image is missing.
+- Each UI builder's brief repeats this step.
+
 ## 6. Host exec
 
 Drafted by dyna:node-shell. Host exec runs one command outside every box: on a capacity host or on the control-plane host. Examples: `podman system prune`, a service restart, or reading host logs. It is an operation, and it always needs a grant.
