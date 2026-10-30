@@ -82,6 +82,7 @@ type BoxHelloResponse struct {
 	Upgrade string    `json:"upgrade,omitempty"`
 }
 type TurnOutputRequest struct {
+	Error   string      `json:"error,omitempty"`
 	Turn    TurnID      `json:"turn"`
 	Outcome TurnOutcome `json:"outcome"`
 	Final   string      `json:"final,omitempty"`
