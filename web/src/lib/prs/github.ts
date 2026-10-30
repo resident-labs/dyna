@@ -83,7 +83,7 @@ export function sortThread(d?: Partial<Pick<GitHubDetail, 'comments' | 'reviews'
     if (r.state === 'COMMENTED' && !r.body?.trim()) continue
     if (r.state === 'PENDING') continue
     const m = REVIEW[r.state] ?? { word: r.state.toLowerCase(), tone: 'quiet' }
-    out.push({ author: r.author, body: r.body, at: r.submittedAt, review: m.word, tone: m.tone, url: r.url })
+    out.push({ author: r.author, body: r.body, at: r.submittedAt, review: m.word, tone: m.tone })
   }
   return out.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
 }
