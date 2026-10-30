@@ -56,6 +56,13 @@ class ChangesTest(unittest.TestCase):
         base = self.pull_request("docs/guide.md", main_file="internal/x/x.go")
         self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "false"})
 
+    def test_tygo_config_runs_go(self):
+        for path in ("tygo.yaml", "tygo/session.gen.yaml"):
+            with self.subTest(path=path), tempfile.TemporaryDirectory(dir=os.environ.get("DYNA_SCRATCH")) as tmp:
+                self.repo = Path(tmp)
+                base = self.pull_request(path)
+                self.assertEqual(self.run_filter("pull_request", base)["go"], "true")
+
     def test_go_change_runs_go(self):
         base = self.pull_request("internal/x/y.go", main_file="docs/z.md")
         self.assertEqual(self.run_filter("pull_request", base)["go"], "true")

@@ -1,0 +1,26 @@
+packages:
+  - path: dyna-agent/internal/configsvc
+    output_path: web/src/lib/api/profile.gen.ts
+    include_files: [profile_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      type StringMapOrNull = Record<string, string> | null
+      import type { Compact } from './account.ts'
+      import type { HarnessSupport } from '../settings/support.ts'
+      import type { ProfileProblem } from './profile.ts'
+      import type { Cost, CachePaired } from '../settings/accounts/activity.ts'
+    type_mappings:
+      profile.Compact: Compact
+      profile.Status: ProfileProblem
+
+  - path: dyna-agent/internal/subagent
+    output_path: web/src/lib/api/profile.gen.ts
+    include_files: [profile_usage_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      UsageCost: Cost
+      UsageCachePaired: CachePaired

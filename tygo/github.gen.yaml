@@ -1,0 +1,7 @@
+packages:
+  - path: dyna-agent/internal/pr/view
+    output_path: web/src/lib/api/github.gen.ts
+    include_files: [github_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

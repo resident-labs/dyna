@@ -1,0 +1,7 @@
+packages:
+  - path: dyna-agent/internal/state
+    output_path: web/src/lib/api/system-state.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
