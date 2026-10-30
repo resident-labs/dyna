@@ -96,6 +96,25 @@ esac
 	}
 }
 
+func TestSessionRemovesStaleShims(t *testing.T) {
+	records := setupRooms(t, "work/service")
+	installFakeGH(t, "#!/bin/sh\nexit 1\n")
+	scratch := t.TempDir()
+	stale := filepath.Join(scratch, "github-bin", "git")
+	if err := os.MkdirAll(filepath.Dir(stale), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/old/dyna", stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SessionEnvironment(context.Background(), records[0].ID, scratch, "/real/dyna", os.Environ()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("session kept the stale git shim on PATH: %v", err)
+	}
+}
+
 func TestWriteRoomSessionGuard(t *testing.T) {
 	records := setupRooms(t, "work/service")
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
