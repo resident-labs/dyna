@@ -499,6 +499,7 @@ export interface ApprovalRequestedEvent {
   tool?: string
   title?: string
   body?: string
+  detail?: string
 }
 
 // ApprovalDecidedEvent is the payload of the approval/decided events.
@@ -1978,7 +1979,8 @@ export function isApprovalRequestedEvent(v: unknown): v is ApprovalRequestedEven
     (v.command === undefined || typeof v.command === "string") &&
     (v.tool === undefined || typeof v.tool === "string") &&
     (v.title === undefined || typeof v.title === "string") &&
-    (v.body === undefined || typeof v.body === "string")
+    (v.body === undefined || typeof v.body === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
 }
 
 export function isApprovalDecidedEvent(v: unknown): v is ApprovalDecidedEvent {
