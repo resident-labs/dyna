@@ -73,14 +73,14 @@ Returns a promise for worker text or validated JSON. Options:
 
 - `profile`: eligible profile name.
 - `label`: progress label and stable resume identity; use unique author-controlled labels for matching jobs.
-- `id`: graph node identity; duplicates are diagnosed, never merged.
+- `id`: graph node identity; duplicates are diagnosed and kept separate.
 - `phase`: explicit group; use inside concurrent callbacks to prevent interleaving global groups.
 - `schema`: JSON Schema; three attempts total. Corrections resume the harness session, or retry the full prompt if resume is unavailable. Scalars must occupy the whole response or a fenced JSON block; objects and arrays may appear in prose.
 - `cwd`: worker directory; defaults to run `--dir`, then shell directory.
 - `timeout`: positive seconds; default five hours. Explicit script/profile values have a 30-minute minimum.
 - `isolation: { type: 'worktree', retention?: 'changed' | 'all' | 'none' }`: detached worktree at committed `HEAD`. Default `changed` retains changed trees; `all` retains all; `none` journals changes before removal.
 
-Isolation excludes uncommitted changes. Dyna never merges retained work. Hand later workers an engine-verified path from `worktrees()`, selected by author-controlled label; never trust worker-reported paths. Parallel writers need disjoint scopes or worktrees.
+Isolation excludes uncommitted changes. Dyna leaves retained work for you to integrate. Hand later workers an engine-verified path from `worktrees()`, selected by author-controlled label rather than a worker-reported path. Parallel writers need disjoint scopes or worktrees.
 
 ### `run(command, opts?)`
 
@@ -120,7 +120,7 @@ Awaited async factories and simple block-bodied factories also retain attributio
 Stores and delivers a room post synchronously under the workflow's name. `to` is a mention or array; non-empty `text` is limited to 16 KiB. Resolution errors throw; check returned `error` and deliveries. Keep bulk output in artifacts.
 Read `dyna guide posting` for mentions and delivery fields.
 
-Pass facts as `data` (object or array), or `post(to, { text, data })`; never inline JSON in `text`. The feed shows `data` as a collapsed key and value view. Recipients read it as a fenced JSON block after `text`; the limit counts it.
+Pass facts as `data` (object or array), or `post(to, { text, data })`. The feed shows `data` as a collapsed key and value view. Recipients read it as a fenced JSON block after `text`; the limit counts it.
 
 ```js
 const sent = post('@root', 'Review ready. See the run result.')
@@ -132,7 +132,7 @@ post('@integrator', 'Landing request after review.', { unit: 'CH', head: '31cdb1
 
 Returns a child script's result in an isolated runtime. Absolute paths resolve directly; relative paths resolve beside the caller, then under `--dir`. `.js` is optional.
 Bare names search `--workflows-dir` (default `$XDG_CONFIG_HOME/dyna/workflows`), then `<work-dir>/examples`.
-A child must not call `workflow()`. Siblings may run concurrently. Child agents share parent concurrency and lifetime limits; composition itself consumes no call. Child artifacts live under `workflows/<child-id>/`; `dyna runs show` displays child groups.
+Call `workflow()` from the parent. Siblings may run concurrently. Child agents share parent concurrency and lifetime limits; composition itself consumes no call. Child artifacts live under `workflows/<child-id>/`; `dyna runs show` displays child groups.
 
 ### Globals and progress
 
@@ -146,7 +146,7 @@ A child must not call `workflow()`. Siblings may run concurrently. Child agents 
 
 ## Workflow shape: parallel by default
 
-Name the work list before writing the script. Run independent calls in parallel; sequence dependent calls. `parallel()` queues excess calls without truncating inputs. Stream per-item stages; use barriers for cross-item decisions. Reduce cost with fewer calls or cheaper profiles. Partition writers into disjoint file sets, then stream each into review and verification.
+Name the work list before writing the script. Run independent calls in parallel; sequence dependent calls. `parallel()` queues excess calls and preserves all inputs. Stream per-item stages; use barriers for cross-item decisions. Reduce cost with fewer calls or cheaper profiles. Partition writers into disjoint file sets, then stream each into review and verification.
 
 ### Keep builds and tests out of the fan-out
 
