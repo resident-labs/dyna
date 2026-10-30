@@ -17,6 +17,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/hookinstall"
+	"dyna-agent/internal/isolation"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
@@ -555,6 +556,16 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 	for _, h := range hooks {
 		if h.Name != name {
 			continue
+		}
+		copied, err := isolation.CopyTime(s.dataDir())
+		if err != nil {
+			return Run{}, err
+		}
+		if !copied.IsZero() && !h.AddedAt.After(copied) {
+			if requested {
+				return Run{}, errors.New("copied hooks cannot run in an isolated engine")
+			}
+			return Run{}, nil
 		}
 		// Reloaded settings can change while an earlier hook is running.
 		if h.Disabled && !requested {
