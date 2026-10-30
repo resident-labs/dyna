@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/resident-labs/dyna/contract"
@@ -145,11 +146,15 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case contract.SessionStarted:
 					text = fmt.Sprintf("Goal: %s\n\n%s", body.Goal, body.Brief)
 				case contract.OpRequested:
-					text = fmt.Sprintf("Approval requested: %s (%s)\n%s\n%s", body.Card.Title, body.ID, body.Card.Body, body.Card.Target.Name)
+					card, err := json.Marshal(body.Card)
+					if err != nil {
+						return
+					}
+					text = fmt.Sprintf("Approval requested: %s\n%s", body.ID, card)
 				case contract.OpDecided:
 					text = fmt.Sprintf("Operation %s: %s. %s", body.ID, body.State, body.Decision.Reason)
 				case contract.OpRan:
-					text = fmt.Sprintf("Operation %s: %s. %s", body.ID, body.State, body.Result.Error)
+					text = fmt.Sprintf("Operation %s: %s. %s\n%s", body.ID, body.State, body.Result.Error, body.Result.Output)
 				case contract.TurnEnded:
 					text = body.Final
 					if body.Outcome == contract.TurnFailed {

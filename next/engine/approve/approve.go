@@ -71,9 +71,7 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if !ok || (input.Args != nil && input.Args.OpKind() != input.Kind) {
 		return contract.Operation{}, ErrInvalid
 	}
-	if err := entry.Check(ctx, input.Args, who); err != nil {
-		return contract.Operation{}, err
-	}
+	checkErr := entry.Check(ctx, input.Args, who)
 	args, err := json.Marshal(input.Args)
 	if err != nil {
 		return contract.Operation{}, err
@@ -130,6 +128,9 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 				previous = found
 				return nil
 			}
+		}
+		if checkErr != nil {
+			return checkErr
 		}
 		return s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, deliveries)
 	})
