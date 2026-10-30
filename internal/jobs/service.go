@@ -832,6 +832,9 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		}
 	}
 	spec := RunSpec{ID: job.ID, Dir: path.Join(job.Dir, "detached"), Unit: job.Unit, Attach: !launch, Offset: job.LogBytes, Idle: job.Idle}
+	if job.Image != "" {
+		spec.Container = containerName(job.ID)
+	}
 	if !job.Host {
 		limits := resources.Scope(false)
 		spec.Limits = &limits
@@ -1068,6 +1071,11 @@ func workspaceCheckoutScript(cache, work, sha string) string {
 		"; else git -C " + q(work) + " checkout --detach --force " + q(sha) + "; fi; git -C " + q(work) + " clean -fd"
 }
 
+// containerName is the Docker container name an image job runs under.
+func containerName(id string) string {
+	return "dyna-job-" + id
+}
+
 // jobScript is the script a job runs on its node: it checks out the commit
 // when the job has one and runs the command under the job's deadline. The
 // node queue admitted the job before it started, so the script waits for
@@ -1126,7 +1134,12 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		if job.Container.Network == NetworkNone {
 			network = " --network=none"
 		}
-		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --cpus=" + strconv.Itoa(resources.CPUs) +
+		// The container has a known name, so the wrapper and the node stop can
+		// stop it. timeout kills only the docker client, which leaves the
+		// container running. The trap stops it when this script exits.
+		name := containerName(job.ID)
+		inner += ContainerStopFunction + "trap " + q("dyna_stop_container "+name) + " EXIT; trap 'exit 143' TERM; "
+		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --name " + q(name) + " --cpus=" + strconv.Itoa(resources.CPUs) +
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
 			" --pids-limit=512" + network + mount + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
 	} else {
