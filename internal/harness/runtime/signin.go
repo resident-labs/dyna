@@ -34,24 +34,6 @@ const signInTimeout = 15 * time.Minute
 // signInMessageLimit keeps a login error short enough for a phone card.
 const signInMessageLimit = 200
 
-// SignInChoice is one native OAuth provider or login-method choice.
-type SignInChoice struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-}
-
-// SignInState is the in-app view of one native sign-in. It holds the link and
-// the one-time user code, which the owner needs, and never token contents.
-type SignInState struct {
-	Choices      []SignInChoice `json:"choices,omitempty"`
-	Phase        string         `json:"phase"`
-	URL          string         `json:"url,omitempty"`
-	Code         string         `json:"code,omitempty"`
-	Message      string         `json:"message,omitempty"`
-	AcceptsPaste bool           `json:"acceptsPaste,omitempty"`
-	SecretInput  bool           `json:"secretInput,omitempty"`
-}
-
 // final reports a phase the runner and the owner can no longer change.
 func (s SignInState) final() bool {
 	return s.Phase == signInSucceeded || s.Phase == signInFailed || s.Phase == signInCancelled

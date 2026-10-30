@@ -15,17 +15,6 @@ import (
 	"dyna-agent/internal/profile"
 )
 
-type PrivateRuntimeSnapshot struct {
-	Bundles             []Bundle             `json:"bundles"`
-	Accounts            []NativeAccount      `json:"accounts"`
-	Profiles            []Doctor             `json:"profiles"`
-	Capabilities        []Capability         `json:"capabilities"`
-	SelectedVersions    map[string]string    `json:"selectedVersions"`
-	RecommendedVersions []RecommendedVersion `json:"recommendedVersions"`
-	// Installing lists harnesses whose CLI is being installed on first use.
-	Installing []string `json:"installing"`
-}
-
 // RefreshPrivateRuntimes checks vendor metadata now, then returns the snapshot.
 func (a *Runtime) RefreshPrivateRuntimes(ctx context.Context) (PrivateRuntimeSnapshot, error) {
 	return a.privateRuntimes(ctx, true)
@@ -96,17 +85,6 @@ type privateRuntimeLogin struct {
 	// provider is the Pi provider this flow signs in, so a second request for
 	// another provider does not join the running flow.
 	provider accountstore.Provider
-}
-
-type PrivateLogin struct {
-	AccountID string `json:"accountId"`
-	// Harness names the harness of a sign-in that has no account of its own.
-	Harness string `json:"harness,omitempty"`
-	// Target names the saved account a sign-in again writes, for a flow that has
-	// no account of its own, such as Pi's provider sign-in.
-	Target  string       `json:"target,omitempty"`
-	Warning string       `json:"warning,omitempty"`
-	SignIn  *SignInState `json:"signIn,omitempty"`
 }
 
 func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version, label, provider string, _ bool) (PrivateLogin, error) {
