@@ -741,7 +741,7 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 		allowed := false
 		if len(command) >= 2 {
 			switch command[0] + " " + command[1] {
-			case "issue create", "issue comment", "pr create", "pr comment", "pr edit", "pr ready", "pr review":
+			case "issue create", "issue comment", "pr create", "pr comment", "pr edit", "pr ready", "pr review", "pr close":
 				allowed = true
 			}
 		}
@@ -767,6 +767,14 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 		case "issue create":
 			if len(command) == len(args) && !createNamesRepo(command[2:]) {
 				return err
+			}
+		case "pr close":
+			flags := parseArgs(command[:2], command[2:]).flags
+			if _, ok := flags["--delete-branch"]; ok {
+				return errors.New("deleting a branch during an upstream PR close is not allowed")
+			}
+			if _, ok := flags["-d"]; ok {
+				return errors.New("deleting a branch during an upstream PR close is not allowed")
 			}
 		case "pr edit":
 			if !editsForkPull(ctx, rec, cmdDir, r, command) {
