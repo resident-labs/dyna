@@ -1,0 +1,176 @@
+package agent
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+const outgoingLimit = 64 << 20
+
+type outgoing struct {
+	method contract.Method
+	body   []byte
+	result chan response
+}
+type response struct {
+	body []byte
+	err  error
+}
+
+type apiError struct{ status string }
+
+func (e apiError) Error() string { return e.status }
+
+// Client owns the box socket and a bounded outgoing buffer.
+type Client struct {
+	http  *http.Client
+	mu    sync.Mutex
+	size  int
+	space chan struct{}
+	queue chan outgoing
+}
+
+func NewClient(socket string) *Client {
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	return &Client{http: &http.Client{Transport: transport}, space: make(chan struct{}), queue: make(chan outgoing, 128)}
+}
+
+// Run sends queued requests in order. A disconnect does not end a running turn.
+func (c *Client) Run(ctx context.Context) {
+	for {
+		select {
+		case item := <-c.queue:
+			delay := 500 * time.Millisecond
+			for {
+				body, err := c.post(ctx, item.method, item.body)
+				var rejected apiError
+				if err == nil || errors.As(err, &rejected) || ctx.Err() != nil {
+					item.result <- response{body, err}
+					c.mu.Lock()
+					c.size -= len(item.body)
+					close(c.space)
+					c.space = make(chan struct{})
+					c.mu.Unlock()
+					break
+				}
+				timer := time.NewTimer(delay)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+				}
+				if delay < 10*time.Second {
+					delay *= 2
+					if delay > 10*time.Second {
+						delay = 10 * time.Second
+					}
+				}
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *Client) post(ctx context.Context, method contract.Method, body []byte) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/"+string(method), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, outgoingLimit))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, apiError{status: fmt.Sprintf("box API %s: %s", method, resp.Status)}
+	}
+	return data, nil
+}
+
+func (c *Client) call(ctx context.Context, method contract.Method, body []byte) ([]byte, error) {
+	if len(body) > outgoingLimit {
+		return nil, fmt.Errorf("box API request exceeds outgoing buffer")
+	}
+	for {
+		c.mu.Lock()
+		if c.size+len(body) <= outgoingLimit {
+			c.size += len(body)
+			c.mu.Unlock()
+			break
+		}
+		space := c.space
+		c.mu.Unlock()
+		select {
+		case <-space:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	item := outgoing{method: method, body: body, result: make(chan response, 1)}
+	select {
+	case c.queue <- item:
+	case <-ctx.Done():
+		c.mu.Lock()
+		c.size -= len(body)
+		close(c.space)
+		c.space = make(chan struct{})
+		c.mu.Unlock()
+		return nil, ctx.Err()
+	}
+	select {
+	case r := <-item.result:
+		return r.body, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (c *Client) Hello(ctx context.Context, version string) (contract.BoxHelloResponse, error) {
+	body, err := json.Marshal(contract.BoxHelloRequest{Version: version})
+	if err != nil {
+		return contract.BoxHelloResponse{}, err
+	}
+	data, err := c.call(ctx, contract.MethodBoxHello, body)
+	if err != nil {
+		return contract.BoxHelloResponse{}, err
+	}
+	var result contract.BoxHelloResponse
+	err = json.Unmarshal(data, &result)
+	return result, err
+}
+
+func (c *Client) DeliveryDone(ctx context.Context, id contract.DeliverySeq) error {
+	body, err := json.Marshal(contract.DeliveryDoneRequest{Delivery: id})
+	if err != nil {
+		return err
+	}
+	_, err = c.call(ctx, contract.MethodDeliveryDone, body)
+	return err
+}
+
+func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
+	body, err := json.Marshal(contract.TurnOutputRequest{Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Final: result.Final, Model: result.Usage.Model, Usage: result.Usage})
+	if err != nil {
+		return err
+	}
+	_, err = c.call(ctx, contract.MethodTurnOutput, body)
+	return err
+}
