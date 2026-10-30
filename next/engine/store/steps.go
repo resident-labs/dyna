@@ -4,13 +4,15 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
-	"strings"
 )
 
 const schemaVersion = 5
 
+// Every schema change adds an entry here and updates schema.sql.
+var steps = map[int][]string{}
+
 // upgrade applies each future numbered step in the same transaction as its version.
-func upgrade(db *sql.DB, floor int, commit string) error {
+func upgrade(db *sql.DB, floor int, commit string, steps map[int][]string) error {
 	var value string
 	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'schema_version'").Scan(&value); err != nil {
 		return err
@@ -22,95 +24,24 @@ func upgrade(db *sql.DB, floor int, commit string) error {
 	if version < floor {
 		return &Error{Code: StoreTooOld, Message: fmt.Sprintf("This store is too old. Update through commit %s first.", commit)}
 	}
-	if version == 1 {
+	for ; version < schemaVersion; version++ {
+		statements, ok := steps[version]
+		if !ok {
+			return fmt.Errorf("missing schema step %d to %d", version, version+1)
+		}
 		tx, err := db.Begin()
 		if err != nil {
 			return err
 		}
-		var definition string
-		for _, statement := range strings.Split(schema, ";") {
-			if strings.HasPrefix(strings.TrimSpace(statement), "CREATE TABLE deliveries ") {
-				definition = strings.Replace(strings.TrimSpace(statement), "CREATE TABLE deliveries ", "CREATE TABLE deliveries_new ", 1)
-				break
-			}
-		}
-		for _, statement := range []string{
-			definition,
-			"INSERT INTO deliveries_new SELECT *, NULL FROM deliveries",
-			"DROP TABLE deliveries",
-			"ALTER TABLE deliveries_new RENAME TO deliveries",
-		} {
-			if _, err = tx.Exec(statement); err != nil {
+		for _, statement := range append(statements, fmt.Sprintf("UPDATE meta SET value='%d' WHERE key='schema_version'", version+1)) {
+			if _, err := tx.Exec(statement); err != nil {
 				_ = tx.Rollback()
 				return err
 			}
-		}
-		if _, err = tx.Exec("UPDATE meta SET value='2' WHERE key='schema_version'"); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-		version = 2
-	}
-	if version == 2 {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		for _, statement := range []string{
-			"CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id))",
-			"CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT NULL REFERENCES repos(repo), is_default INTEGER NOT NULL, PRIMARY KEY(room, repo))",
-			"CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1",
-			"UPDATE meta SET value='3' WHERE key='schema_version'",
-		} {
-			if _, err = tx.Exec(statement); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-		version = 3
-	}
-	if version == 3 {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN repo TEXT NOT NULL DEFAULT ''"); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if _, err := tx.Exec("UPDATE meta SET value='4' WHERE key='schema_version'"); err != nil {
-			_ = tx.Rollback()
-			return err
 		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		version = 4
-	}
-	if version == 4 {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		for _, statement := range []string{
-			"CREATE TABLE archives (session TEXT NOT NULL REFERENCES sessions(id), repo TEXT NOT NULL REFERENCES repos(repo), ref TEXT NOT NULL, commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(session, repo))",
-			"UPDATE meta SET value='5' WHERE key='schema_version'",
-		} {
-			if _, err = tx.Exec(statement); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-		version = 5
 	}
 	if version != schemaVersion {
 		return fmt.Errorf("unsupported schema version %d", version)
