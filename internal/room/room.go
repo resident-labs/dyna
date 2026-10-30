@@ -54,6 +54,7 @@ var (
 
 // Record is one room's metadata.
 type Record struct {
+	Color            RoomColor    `json:"color"`
 	MergeMaxParallel int          `json:"mergeMaxParallel,omitempty"`
 	GitHubAccess     GitHubAccess `json:"githubAccess,omitempty"`
 	// ApprovalWait and ApprovalExpiry are this room's held-write wait and expiry.
@@ -807,7 +808,7 @@ func (s *Store) Create(in CreateInput) (Record, error) {
 		}
 		now := s.now()
 		out = Record{
-			ID: newID(now), Name: name, Repo: in.Repo, CreatedBy: strings.TrimSpace(in.CreatedBy),
+			ID: newID(now), Name: name, Repo: in.Repo, Color: nextRoomColor(existing), CreatedBy: strings.TrimSpace(in.CreatedBy),
 			GitHubAccess: in.GitHubAccess,
 			CreatedAt:    now, LastActivity: now,
 			RootProfile: strings.TrimSpace(in.RootProfile),

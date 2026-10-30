@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -68,9 +69,12 @@ func (s *Store) migrateRecords() error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "room.github_access", 1, func(conn *sql.Conn, _ int) error {
+	if err := database.Migrate(db, "room.github_access", 1, func(conn *sql.Conn, _ int) error {
 		return backfillGitHubAccess(context.Background(), conn)
-	})
+	}); err != nil {
+		return err
+	}
+	return database.Migrate(db, "room.colors", 1, func(conn *sql.Conn, _ int) error { return importRoomColors(context.Background(), conn) })
 }
 
 // TODO: legacy/shim remove later — imports retained room.json and seat.json
@@ -434,4 +438,54 @@ var storedOwnerReads = func(db *sql.DB, roomID string) (map[string]bool, error) 
 		out[id] = true
 	}
 	return out, rows.Err()
+}
+
+// TODO: legacy/shim remove only after the upgrade floor excludes rooms without colors.
+func importRoomColors(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "SELECT body FROM room_records")
+	if err != nil {
+		return err
+	}
+	var records []Record
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			rows.Close()
+			return err
+		}
+		var rec Record
+		if err := json.Unmarshal([]byte(body), &rec); err != nil {
+			rows.Close()
+			return err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+			return records[i].ID < records[j].ID
+		}
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+	// Existing explicit colors reserve their tones before assigning missing ones.
+	var used []Record
+	for _, rec := range records {
+		if rec.Color != "" {
+			used = append(used, rec)
+		}
+	}
+	for _, rec := range records {
+		if rec.Color == "" {
+			rec.Color = nextRoomColor(used)
+			if err := putRecord(ctx, conn, rec); err != nil {
+				return err
+			}
+			used = append(used, rec)
+		}
+	}
+	return nil
 }
