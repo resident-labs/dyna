@@ -34,7 +34,8 @@ func (g goalScan) run(now time.Time, signatures, work map[string]string, version
 	if err != nil {
 		return
 	}
-	all := first || *version == "" || work[revisionPrefix+goals.Global] != revisions[goals.Global]
+	globalChanged := work[revisionPrefix+goals.Global] != revisions[goals.Global]
+	all := first || *version == "" || globalChanged
 	selected := map[string]bool{}
 	for roomID, revision := range revisions {
 		if roomID != goals.Global && (all || work[revisionPrefix+roomID] != revision) {
@@ -169,6 +170,11 @@ func (g goalScan) run(now time.Time, signatures, work map[string]string, version
 			if changed && !emitted[roomID] {
 				emit(Event{Kind: "goals", RoomID: roomID, WorkerWake: wake[roomID]})
 			}
+		}
+		// Global rules belong to no room. One roomless event tells clients
+		// such as the Settings Rules pane, even when no room has goal state.
+		if globalChanged {
+			emit(Event{Kind: "goals"})
 		}
 	}
 }

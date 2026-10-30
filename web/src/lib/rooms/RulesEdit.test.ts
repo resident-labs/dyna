@@ -19,17 +19,16 @@ function byId(id: string): PageElement {
 
 const code = await bundle({ component: '../rooms/Rules', format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8'), api: 'export const api = { editRule: (...args) => globalThis.saveRule(...args) }' })
 test('inline rules preserve composition, restore focus, and keep failed edits open for both scopes', { timeout: 900 }, async () => {
+ for (const [scope, id] of [['room', 'r1'], ['global', 'u1']]) {
  const dom = installDom(); globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
  const ui = await importBundle(code, '../rooms/Rules')
  const calls: unknown[][] = []; let fail = false
  Reflect.set(globalThis, 'saveRule', async (...args: unknown[]) => { if (fail) throw Error('Save failed'); calls.push(args) })
- const app = ui.mount(ui.default, { target: document.getElementById('app'), props: { roomId: 'global', view: {
-  room: { rules: [{ id: 'r1', text: 'Room rule', setter: 'owner' }] }, global: { rules: [{ id: 'u1', text: 'Global rule', setter: 'owner' }] },
- }, onchanged: async () => {} } })
+ const app = ui.mount(ui.default, { target: document.getElementById('app'), props: { roomId: 'room-1', scope, view: { rules: [{ id, text: 'A rule', setter: 'owner' }] }, onchanged: async () => {} } })
  const settle = async () => { await Promise.resolve(); ui.flushSync(); await Promise.resolve(); ui.flushSync(); await Promise.resolve(); ui.flushSync() }
  try {
   ui.flushSync()
-  for (const id of ['r1', 'u1']) {
+  {
    const control = () => byId(`rule-control-${id}`)
    control().click(); await settle()
    const field = () => byId(`rule-edit-${id}`)
@@ -49,6 +48,7 @@ test('inline rules preserve composition, restore focus, and keep failed edits op
   for (const name of [...domNames, 'HTMLMediaElement', 'saveRule']) Reflect.deleteProperty(globalThis, name)
   await rm(ui.dir, { recursive: true, force: true })
  }
+ }
 })
 
 test('a delayed saved-rule refresh does not take focus from a newer edit or another control', async () => {
@@ -60,8 +60,8 @@ test('a delayed saved-rule refresh does not take focus from a newer edit or anot
  let enteredRefresh: () => void = () => { throw new Error('no pending refresh') }
  const started = new Promise<void>(resolve => { enteredRefresh = resolve })
  const refresh = new Promise<void>(resolve => { resolveRefresh = resolve })
- const app = ui.mount(ui.default, { target: document.getElementById('app'), props: { roomId: 'global', view: {
-  room: { rules: [{ id: 'r1', text: 'First rule', setter: 'owner' }, { id: 'r2', text: 'Second rule', setter: 'owner' }] }, global: { rules: [] },
+ const app = ui.mount(ui.default, { target: document.getElementById('app'), props: { roomId: 'room-1', scope: 'room', view: {
+  rules: [{ id: 'r1', text: 'First rule', setter: 'owner' }, { id: 'r2', text: 'Second rule', setter: 'owner' }],
  }, onchanged: () => { enteredRefresh(); return refresh } } })
  const settle = async () => { await Promise.resolve(); ui.flushSync(); await Promise.resolve(); ui.flushSync() }
  try {

@@ -1,6 +1,6 @@
 // The room's goals: the list the Goals view and the badges read, the one goal a
 // link fetched that no loaded page holds, the room's expedited goal, and the
-// Room settings rules list. lib/rooms/expedite.ts decides what an expedite
+// room's Rules view. lib/rooms/expedite.ts decides what an expedite
 // change does; this module keeps the state and the requests, so App.svelte only
 // hosts them.
 import { get } from 'svelte/store'
@@ -11,19 +11,10 @@ import { expedite, expediteAction, heldGoals, isExpedited } from '../rooms/exped
 import { expediteMenuItem } from '../rooms/expediteMenu.ts'
 import { nextRules } from '../rooms/rules.ts'
 import { router } from './router.svelte.ts'
-import type { Goal } from '../api/goal.ts'
+import type { Goal, RulesView } from '../api/goal.ts'
 import type { Member } from '../api/room.ts'
 import type { ListChange } from '../api/event.ts'
 import type { ToastInput } from '../ui/toast.ts'
-
-interface RuleList {
-  hash: string
-}
-export interface RuleSet {
-  room: RuleList
-  global: RuleList
-  hash: string
-}
 
 /** A page of one list, with its continuation cursor. */
 interface ListPage<T> {
@@ -89,8 +80,8 @@ let fetchedGoalVersion = 0
 // expedited goal, room:goal -> {at, items}, and load again when the goal
 // changes, so a new assignee gets the badge without a reload.
 let expediteGoalItems = $state<Record<string, { at: string; items: { state?: string; assignee?: string }[] }>>({})
-let rules = $state<RuleSet | null>(null)
-let rulesPending = $state<RuleSet | null>(null)
+let rules = $state<RulesView | null>(null)
+let rulesPending = $state<RulesView | null>(null)
 let rulesEditing = $state(false)
 
 let knownGoals = $derived.by(() => {
@@ -138,9 +129,8 @@ function loadRules() {
     const id = roomId
     if (!id) return
     try {
-      const [room, global] = await Promise.all([api.rules(id, false), api.rules(id, true)])
+      const v = await api.rules(id, false)
       if (!current() || roomId !== id) return
-      const v = { room, global, hash: `${global.hash}:${room.hash}` }
       const next = nextRules(rules, v, rulesEditing)
       rules = next.shown
       rulesPending = next.pending
