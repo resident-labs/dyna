@@ -564,6 +564,18 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		sessionIDs[res.from] = in.Sender.Session.ID
 		senderRoomID = in.Sender.Session.RoomID
 	}
+	senderKind := room.SenderOwner
+	switch in.Sender.Kind {
+	case SenderSession:
+		senderKind = room.SenderSession
+		if in.Sender.Session.Role == subagent.RoleRoot {
+			senderKind = room.SenderRoot
+		}
+	case SenderScript:
+		senderKind = room.SenderWorkflow
+	case SenderVoice:
+		senderKind = room.SenderVoice
+	}
 	var msg room.Message
 	if recovered.ID != "" {
 		if !slices.Equal(recovered.To, res.addrs()) || !maps.Equal(recovered.SessionIDs, sessionIDs) {
@@ -575,7 +587,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		msg, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: res.rec.ID, Event: in.Event, ID: in.ID, FreshID: in.ID == "", To: res.addrs(), Via: res.via,
 			NeedsRoot: in.NeedsRoot, RoomService: in.Sender.Kind == SenderOwner && !in.Sender.Human, SessionIDs: sessionIDs, SenderRoomID: senderRoomID, NoWake: !wake})
 	} else {
-		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs, SenderRoomID: senderRoomID,
+		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{SenderKind: senderKind, Wake: wake, SessionIDs: sessionIDs, SenderRoomID: senderRoomID,
 			ID: in.ID, NeedsRoot: in.NeedsRoot, Conversation: in.Conversation,
 			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), Script: in.Script, To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
 			Attachments: atts, References: in.References, Skill: in.Skill, Prompt: in.Prompt,
@@ -602,7 +614,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		// The sender's chat shows the post at once. The copy shares the post's
 		// ID, so a reply to the post answers it in the sender's room too. It
 		// wakes nobody: the recipients read the post in their own room.
-		if _, err := s.Rooms.Post(origin.ID, room.PostInput{ID: msg.ID, From: res.from, Human: in.Sender.Human, SessionIDs: copyIDs, To: res.addrs(), Via: res.via, ReplyTo: originReply,
+		if _, err := s.Rooms.Post(origin.ID, room.PostInput{SenderKind: senderKind, ID: msg.ID, From: res.from, Human: in.Sender.Human, SessionIDs: copyIDs, To: res.addrs(), Via: res.via, ReplyTo: originReply,
 			Text: text, Attachments: copyAtts, References: in.References, Forward: fwd, Skill: in.Skill, Prompt: in.Prompt}); err != nil {
 			out.Deliveries = append(out.Deliveries, Delivery{To: origin.Name, Delivery: "failed", Error: "the post was sent, but its copy in " + origin.Name + " was not saved: " + err.Error()})
 		}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -37,8 +38,8 @@ func TestAvatarsAreUniqueAndStable(t *testing.T) {
 	// Other rooms do not take part.
 	other := info("ses_x", "x", base)
 	other.RoomID = "r2"
-	if newAvatarBook(append(all, other), "r1").byID["ses_x"] != "" {
-		t.Fatal("a session in another room got an avatar here")
+	if newAvatarBook(append(all, other), "r1").byID["ses_x"] == "" {
+		t.Fatal("a session in another room has no avatar")
 	}
 }
 
@@ -66,5 +67,20 @@ func TestPoolHasNoDuplicates(t *testing.T) {
 			t.Fatalf("%s is in the pool twice", e)
 		}
 		seen[e] = true
+	}
+}
+
+func TestCrossRoomRootAndEngineAvatars(t *testing.T) {
+	root := info("root-id", "root", time.Unix(1, 0))
+	root.Room, root.RoomID, root.Role = "dyna", "dyna-id", subagent.RoleRoot
+	book := newAvatarBook([]subagent.Info{root}, "other-id")
+	book.rooms = map[string]room.Record{"dyna": {ID: "dyna-id", Name: "dyna", Color: room.ColorCrimson}, "other": {ID: "other-id", Name: "other", Color: room.ColorBlue}}
+	post := room.Message{From: "dyna:root", TS: time.Unix(2, 0).UnixMilli(), SenderKind: room.SenderRoot}
+	if got := book.resolve(post, "other"); got != (Avatar{Kind: room.SenderRoot, Emoji: "🖥️", Room: "dyna", Color: room.ColorCrimson}) {
+		t.Fatalf("root avatar = %+v", got)
+	}
+	handoff := room.Message{From: "dyna", SenderKind: room.SenderEngine}
+	if got := book.resolve(handoff, "dyna"); got != (Avatar{Kind: room.SenderEngine, Emoji: "⚙️", Room: "dyna", Color: room.ColorCrimson}) {
+		t.Fatalf("engine avatar = %+v", got)
 	}
 }
