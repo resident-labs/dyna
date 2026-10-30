@@ -51,6 +51,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			return input, err
 		},
 		Execute: func(ctx context.Context, args contract.OpArgs, who contract.Principal) contract.OpResult {
+			// The lock may be held for the GitHub client timeout of one minute.
 			unlock := s.lockBox(who.Session)
 			defer unlock()
 			session, head, err := lookup(ctx, who)
