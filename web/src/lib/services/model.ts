@@ -94,7 +94,7 @@ export const switchHint: Partial<Record<RegistryServiceId, string>> = {
 // setupHint says how to set up a service that has no setting to change here.
 export const setupHint: Partial<Record<RegistryServiceId, string>> = {
   'issue-watch': 'Run dyna git issue watch <issue> in this room.',
-  updates: 'Run dyna git hooks add --recipe self-update in this repository.',
+  updates: 'Set updater.source to a source checkout, then turn Updates on.',
 }
 
 // settingText names the settings keys the registry lists, in owner words; a

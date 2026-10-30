@@ -33,15 +33,12 @@ type UpdateRun struct {
 }
 
 func updateRuns() ([]UpdateRun, error) {
-	jobs, err := hookinstall.DefaultStore().Recent()
+	jobs, err := hookinstall.DefaultStore().Recent(updaterservice.RunName)
 	if err != nil {
 		return nil, err
 	}
 	out := []UpdateRun{}
 	for _, j := range jobs {
-		if j.Hook != updaterservice.RunName {
-			continue
-		}
 		result := UpdatePending
 		if j.Status == "finished" {
 			result = UpdateFailed
@@ -130,11 +127,11 @@ func scheduledUpdate(ctx context.Context, h hooks.Service, now time.Time) error 
 	if err != nil || !due {
 		return err
 	}
-	_, err = runUpdate(ctx, h, cfg.Source)
+	_, err = runUpdate(ctx, h, cfg.Source, cfg.ToolPath)
 	return err
 }
 
-func runUpdate(ctx context.Context, h hooks.Service, source string) (hooks.Run, error) {
+func runUpdate(ctx context.Context, h hooks.Service, source, toolPath string) (hooks.Run, error) {
 	if source == "" {
 		return hooks.Run{}, fmt.Errorf("set updater.source before running Updates")
 	}
@@ -150,5 +147,5 @@ func runUpdate(ctx context.Context, h hooks.Service, source string) (hooks.Run, 
 	if err != nil {
 		return hooks.Run{}, err
 	}
-	return h.StartUpdate(ctx, hooks.Event{Event: hooks.Schedule, Repo: r.Root, Worktree: r.Main, Branch: branch.Name, SHA: sha}, source)
+	return h.StartUpdate(ctx, hooks.Event{Event: hooks.Schedule, Repo: r.Root, Worktree: r.Main, Branch: branch.Name, SHA: sha}, source, toolPath)
 }

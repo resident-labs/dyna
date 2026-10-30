@@ -15,7 +15,7 @@ import (
 )
 
 // StartUpdate starts the existing detached installer without a shell hook.
-func (s Service) StartUpdate(ctx context.Context, event Event, source string) (Run, error) {
+func (s Service) StartUpdate(ctx context.Context, event Event, source, toolPath string) (Run, error) {
 	r, err := repoid.Resolve(ctx, source)
 	if err != nil {
 		return Run{}, err
@@ -47,6 +47,7 @@ func (s Service) StartUpdate(ctx context.Context, event Event, source string) (R
 			dirs = append(dirs, filepath.Dir(path))
 		}
 	}
+	dirs = append(dirs, filepath.SplitList(toolPath)...)
 	config.Path = capturedToolPath(append(dirs, filepath.SplitList(os.Getenv("PATH"))...), s.dataDir())
 	job := hookinstall.Job{ID: run.ID, SHA: event.SHA, Repo: r.ID, Hook: h.Name, Room: event.Room, Session: event.Session, HookLog: run.LogPath, Config: config}
 	err = s.installer().Start(ctx, job, log)
