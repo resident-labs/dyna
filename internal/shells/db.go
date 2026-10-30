@@ -527,23 +527,41 @@ func (s *Store) setOutputLines(id string, n int) error {
 // writer lock for long.
 const PruneBatch = 500
 
-// PruneEnded deletes up to limit jobs that ended before cutoff and are not
-// kept. Output logs live in files and are not touched. It reports how many
-// rows it removed.
+// PruneEnded deletes up to limit old, ended, unkept jobs and their directories.
 func (s *Store) PruneEnded(ctx context.Context, cutoff time.Time, limit int) (int, error) {
 	db, err := s.db()
 	if err != nil {
 		return 0, err
 	}
-	var n int64
+	var ids []string
 	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		res, err := conn.ExecContext(ctx, `DELETE FROM shell_jobs WHERE id IN (
-			SELECT id FROM shell_jobs WHERE ended IS NOT NULL AND ended<? AND keep=0 LIMIT ?)`,
+		rows, err := conn.QueryContext(ctx, `DELETE FROM shell_jobs WHERE id IN (
+			SELECT id FROM shell_jobs WHERE ended IS NOT NULL AND ended<? AND keep=0 LIMIT ?) RETURNING id`,
 			cutoff.UTC().Format(time.RFC3339Nano), limit)
-		if err == nil {
-			n, err = res.RowsAffected()
+		if err != nil {
+			return err
 		}
-		return err
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
 	})
-	return int(n), err
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if !ValidID(id) {
+			continue
+		}
+		dir := filepath.Join(s.Root, id)
+		if err := os.RemoveAll(dir); err != nil {
+			return len(ids), err
+		}
+	}
+	return len(ids), nil
 }
