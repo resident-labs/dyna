@@ -63,15 +63,19 @@ func (s *Service) SetRoomUpstream(ctx context.Context, ref, value string) error 
 
 // SetRoomAttribution sets the line that agent-created pull request and issue
 // text ends with. "off" clears it. Only the owner and the room's root may change it.
-func (s *Service) SetRoomAttribution(ctx context.Context, ref, value string) error {
+func (s *Service) SetRoomAttribution(ctx context.Context, ref, value, placement string) error {
 	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return err
+	}
+	parsed, err := room.ParseAttributionPlacement(placement)
+	if err != nil {
 		return err
 	}
 	line, err := room.ParseAttribution(value)
 	if err != nil {
 		return err
 	}
-	return s.rooms().SetAttribution(ref, line)
+	return s.rooms().SetAttribution(ref, line, parsed)
 }
 
 // SetRoomLimitResult is the answer to a saved limit: ApplyWarning names why

@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"dyna-agent/internal/account/store"
+	"dyna-agent/internal/room"
 )
 
 type agentTextKey struct{}
@@ -104,93 +105,6 @@ func shortFlag(arg string) (flag, rest string, ok bool) {
 
 var errUninspectableText = errors.New("this command builds its title or body from commits, a template, an editor or the browser, so Dyna cannot check it; pass --title and --body-file instead")
 
-// publicText returns the title and body that a create or edit command would
-// publish. A body read from standard input is read here and put back.
-func publicText(cmd *exec.Cmd) (string, error) {
-	args := commandArgs(cmd.Args[1:])
-	if _, ok := ownCommentCall(args); ok {
-		_, body, _, err := apiBody(cmd, args)
-		return body, err
-	}
-	if len(args) < 2 {
-		return "", nil
-	}
-	if _, ok := bodyCommands[args[0]+" "+args[1]]; !ok {
-		return "", nil
-	}
-	valueFlags := createValueFlags
-	if args[1] != "create" && args[1] != "edit" {
-		// Comment and review flags such as -r and -a take no value.
-		valueFlags = nil
-	}
-	flags := bodyFlagsFor(args)
-	var text strings.Builder
-	for i := 2; i < len(args); i++ {
-		if args[i] == "--" {
-			break
-		}
-		name, value, attached := strings.Cut(args[i], "=")
-		if flag, rest, ok := shortFlag(args[i]); ok {
-			name, value, attached = flag, strings.TrimPrefix(rest, "="), true
-		}
-		if name == "--attach" && args[0] == "pr" && (args[1] == "create" || args[1] == "comment") {
-			if !attached {
-				i++
-			}
-			continue
-		}
-		if generatedTextFlags[name] {
-			return "", errUninspectableText
-		}
-		isFile, known := flags[name]
-		if !known {
-			if valueFlags[name] && !attached {
-				i++
-			}
-			continue
-		}
-		if !attached {
-			if i++; i >= len(args) {
-				break
-			}
-			value = args[i]
-		}
-		if isFile {
-			data, err := readBodyFile(cmd, value)
-			if err != nil {
-				return "", err
-			}
-			value = string(data)
-		}
-		text.WriteString(value)
-		text.WriteByte('\n')
-	}
-	return text.String(), nil
-}
-
-// refuseOwnerIdentity refuses a title or body that contains a saved sign-in
-// identity of the owner (D-501). Issues and pull requests are often public.
-func refuseOwnerIdentity(ctx context.Context, cmd *exec.Cmd) error {
-	if !IsAgentText(ctx) {
-		return nil
-	}
-	text, err := publicText(cmd)
-	if err != nil || text == "" {
-		return err
-	}
-	identities, err := ownerIdentities()
-	if err != nil {
-		return err
-	}
-	lower := strings.ToLower(text)
-	for _, identity := range identities {
-		if strings.Contains(lower, strings.ToLower(identity)) {
-			return errOwnerIdentityInBody
-		}
-	}
-	return nil
-}
-
 // attributionMarker is the start of an attribution line, up to and including
 // its first token that is not punctuation: "> 🤖" for "> 🤖 Opened by an agent."
 // A body that already starts with the marker counts as attributed, so a room's
@@ -211,47 +125,89 @@ func attributionMarker(line string) string {
 
 var nonSpace = regexp.MustCompile(`\S+`)
 
-// withAttributionFirst adds the room line unless the body already has its marker.
-// Slash commands keep their start so that comment bots can recognize them.
-func withAttributionFirst(body, line string) string {
-	first := ""
-	for _, candidate := range strings.Split(body, "\n") {
-		if first = strings.TrimSpace(candidate); first != "" {
-			break
-		}
-	}
-	marker := strings.TrimLeft(attributionMarker(line), "> ")
-	if strings.HasPrefix(strings.TrimLeft(first, "> "), marker) {
-		return strings.Trim(body, "\n")
-	}
-	if command, ok := strings.CutPrefix(first, "/"); ok {
-		for _, r := range command {
-			if unicode.IsLetter(r) {
-				body = strings.TrimRight(body, "\n")
-				if strings.HasSuffix(body, "\n\n"+line) {
-					return body
-				}
-				return body + "\n\n" + line
-			}
-			break
-		}
-	}
-	body = strings.Trim(body, "\n")
-	if body == "" {
-		return line
-	}
-	return line + "\n\n" + body
-}
-
-// withAttribution starts the body that an agent's issue or pull request create,
-// edit or comment publishes with the room's attribution line, once. A create
-// without a body gets the line as its body; any other command without a body
-// keeps the published text. The returned function removes the temporary body
-// file, if any.
-func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), error) {
+// ComposeBody inspects agent text and applies the room attribution before publication.
+func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), error) {
 	none := func() {}
 	if !IsAgentText(ctx) {
 		return none, nil
+	}
+	inspect := func() (string, error) {
+		args := commandArgs(cmd.Args[1:])
+		if _, ok := ownCommentCall(args); ok {
+			_, body, _, err := apiBody(cmd, args)
+			return body, err
+		}
+		if len(args) < 2 {
+			return "", nil
+		}
+		if _, ok := bodyCommands[args[0]+" "+args[1]]; !ok {
+			return "", nil
+		}
+		valueFlags := createValueFlags
+		if args[1] != "create" && args[1] != "edit" {
+			// Comment and review flags such as -r and -a take no value.
+			valueFlags = nil
+		}
+		flags := bodyFlagsFor(args)
+		var text strings.Builder
+		for i := 2; i < len(args); i++ {
+			if args[i] == "--" {
+				break
+			}
+			name, value, attached := strings.Cut(args[i], "=")
+			if flag, rest, ok := shortFlag(args[i]); ok {
+				name, value, attached = flag, strings.TrimPrefix(rest, "="), true
+			}
+			if name == "--attach" && args[0] == "pr" && (args[1] == "create" || args[1] == "comment") {
+				if !attached {
+					i++
+				}
+				continue
+			}
+			if generatedTextFlags[name] {
+				return "", errUninspectableText
+			}
+			isFile, known := flags[name]
+			if !known {
+				if valueFlags[name] && !attached {
+					i++
+				}
+				continue
+			}
+			if !attached {
+				if i++; i >= len(args) {
+					break
+				}
+				value = args[i]
+			}
+			if isFile {
+				data, err := readBodyFile(cmd, value)
+				if err != nil {
+					return "", err
+				}
+				value = string(data)
+			}
+			text.WriteString(value)
+			text.WriteByte('\n')
+		}
+		return text.String(), nil
+	}
+
+	text, err := inspect()
+	if err != nil {
+		return none, err
+	}
+	if text != "" {
+		identities, err := ownerIdentities()
+		if err != nil {
+			return none, err
+		}
+		lower := strings.ToLower(text)
+		for _, identity := range identities {
+			if strings.Contains(lower, strings.ToLower(identity)) {
+				return none, errOwnerIdentityInBody
+			}
+		}
 	}
 	args := cmd.Args[1:]
 	command := commandArgs(args)
@@ -265,18 +221,56 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 	}
 	rec, err := roomFor(ctx, cmd.Dir, r)
 	if err != nil && !errors.Is(err, errNotInRoom) {
-		return none, nil
+		return none, err
 	}
 	if rec.Attribution == "" {
 		return none, nil
 	}
+	placement := rec.AttributionPlacement
+	format := func(body, line string) string {
+		first := ""
+		for _, candidate := range strings.Split(body, "\n") {
+			if first = strings.TrimSpace(candidate); first != "" {
+				break
+			}
+		}
+		marker := strings.TrimLeft(attributionMarker(line), "> ")
+		if strings.HasPrefix(strings.TrimLeft(first, "> "), marker) {
+			return strings.Trim(body, "\n")
+		}
+		if placement == room.AttributionPrefix {
+			body = strings.Trim(body, "\n")
+			if body == "" {
+				return line
+			}
+			return line + " " + body
+		}
+		if command, ok := strings.CutPrefix(first, "/"); ok {
+			for _, r := range command {
+				if unicode.IsLetter(r) {
+					body = strings.TrimRight(body, "\n")
+					if strings.HasSuffix(body, "\n\n"+line) {
+						return body
+					}
+					return body + "\n\n" + line
+				}
+				break
+			}
+		}
+		body = strings.Trim(body, "\n")
+		if body == "" {
+			return line
+		}
+		return line + "\n\n" + body
+	}
+
 	if comment {
 		// A comment edit changes only its body field; a DELETE has none.
 		rest, body, found, err := apiBody(cmd, command)
 		if err != nil || !found {
 			return none, err
 		}
-		cmd.Args = append(append([]string{cmd.Args[0]}, args[:len(args)-len(command)]...), append(rest, "--raw-field", "body="+withAttributionFirst(body, rec.Attribution))...)
+		cmd.Args = append(append([]string{cmd.Args[0]}, args[:len(args)-len(command)]...), append(rest, "--raw-field", "body="+format(body, rec.Attribution))...)
 		return none, nil
 	}
 	valueFlags := createValueFlags
@@ -324,7 +318,7 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 	if !found && !publishesAlone {
 		return none, nil
 	}
-	body = withAttributionFirst(body, rec.Attribution)
+	body = format(body, rec.Attribution)
 	if closesIssue(command) {
 		cmd.Args = append([]string{cmd.Args[0]}, append(append(rest, "--comment="+body), tail...)...)
 		return none, nil
