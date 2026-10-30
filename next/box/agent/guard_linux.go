@@ -28,6 +28,27 @@ type Job struct {
 	kept  bool
 }
 
+// PrepareCgroups moves box processes out of the controller root before enabling it.
+func PrepareCgroups(root string) (*Guard, error) {
+	agent := filepath.Join(root, "agent")
+	jobs := filepath.Join(root, "jobs")
+	if err := os.MkdirAll(agent, 0755); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(jobs, 0755); err != nil {
+		return nil, err
+	}
+	for _, pid := range []int{1, os.Getpid()} {
+		if err := os.WriteFile(filepath.Join(agent, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0200); err != nil {
+			return nil, err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte("+cpu +memory +pids"), 0200); err != nil {
+		return nil, err
+	}
+	return NewGuard(jobs), nil
+}
+
 func NewGuard(root string) *Guard { return &Guard{root: root, jobs: make(map[*Job]struct{})} }
 
 func (g *Guard) Start(command, cwd string, stdout, stderr io.Writer) (*Job, error) {
