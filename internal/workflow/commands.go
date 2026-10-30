@@ -321,6 +321,16 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		reject(werr)
 		return vm.ToValue(promise)
 	}
+	if e.opts.RecordManifest {
+		if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallCommand, key, id); err != nil {
+			e.manifestWriteFailed()
+			e.workers.Done()
+			recordErr := fmt.Errorf("record command manifest intent: %w", err)
+			emit(runstore.Event{T: "exec_end", Status: "error", Error: recordErr.Error()})
+			reject(recordErr)
+			return vm.ToValue(promise)
+		}
+	}
 	var prior execRecord
 	var hasPrior bool
 	if e.opts.Cache != nil {
@@ -372,15 +382,6 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 				e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("%s: cannot reattach to shell %s (%v); starting the command again", label, prior.Shell, aerr))
 			} else {
 				attach, attachStderr = prior.Shell, prior.Stderr
-			}
-		}
-		if e.opts.RecordManifest {
-			if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallCommand, key, id); err != nil {
-				e.manifestWriteFailed()
-				recordErr := fmt.Errorf("record command manifest intent: %w", err)
-				emit(runstore.Event{T: "exec_end", Status: "error", Error: recordErr.Error()})
-				reject(recordErr)
-				return
 			}
 		}
 		start := time.Now()

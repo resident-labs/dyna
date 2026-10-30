@@ -697,6 +697,16 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		reject(err)
 		return vm.ToValue(promise)
 	}
+	if e.opts.RecordManifest {
+		if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallAgent, key, id); err != nil {
+			e.manifestWriteFailed()
+			e.workers.Done()
+			recordErr := fmt.Errorf("record agent manifest intent: %w", err)
+			emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: recordErr.Error()})
+			reject(recordErr)
+			return vm.ToValue(promise)
+		}
+	}
 	journalPath := ""
 	failBeforeRun := func(err error) {
 		if e.opts.Run != nil && journalPath != "" {
@@ -819,16 +829,6 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		stepKey := ""
 		if e.opts.Run != nil {
 			stepKey = key
-		}
-		if e.opts.RecordManifest {
-			if err := runstore.RegisterWorkflowCall(actx, e.runID(), runstore.WorkflowCallAgent, key, id); err != nil {
-				e.manifestWriteFailed()
-				failBeforeRun(fmt.Errorf("record agent manifest intent: %w", err))
-				if cleanupWT != nil {
-					cleanupWT()
-				}
-				return
-			}
 		}
 		state, err := runAgentSession(actx, e.opts.Engine, agentStart, stepKey)
 		if err != nil {
