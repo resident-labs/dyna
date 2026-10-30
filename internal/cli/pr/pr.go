@@ -74,10 +74,9 @@ Pin a reviewer profile with dyna services profile reviewer <profile>.
 Use dyna git pr reviewer --restart to recreate the reviewer pool.
 Use dyna git pr review on|off --room R to control automatic review. CodeRabbit review signals remain visible,
 but cannot establish passing CI without another check, workflow or commit status.
-Unknown external CI stays eligible. Agent reviews stay in Dyna.
-Record full Markdown with dyna git pr verdict --head. Agents, including root
-and workflow workers, cannot publish GitHub comments or reviews.
-Only the owner can use dyna git pr comment or publish a GitHub review.
+Unknown external CI stays eligible. Record local reviews with dyna git pr verdict --head.
+Root and session GitHub comments and comment-only reviews use the approval path.
+The room's publishing default controls whether --publish is required.
 Comments from the owner, repository owners, members, collaborators and configured
 trusted bots pass the trust gate. Other comments stay held for the owner in
 home alerts and the PR room. Use held to list them, and admit or dismiss to decide.
@@ -406,7 +405,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return output(c, status)
 	}
-	review := &cobra.Command{Use: "review on|off|<number|url>", Short: "Turn automatic room review on or off, or publish an owner GitHub review", Long: "review on|off controls automatic room review. review <number|url> --body-file <file> [--comments-file <json-file>] [--head <sha>] publishes one GitHub comment review and its inline comments through gh, then records the review ID for routing; pass that ID to dyna git pr verdict --review-id. The comments file is a JSON array of {\"path\", \"line\", \"body\"} objects.", Args: cobra.ExactArgs(1)}
+	review := &cobra.Command{Use: "review on|off|<number|url>", Short: "Turn automatic room review on or off, or publish a GitHub review", Long: "review on|off controls automatic room review. review <number|url> --body-file <file> [--comments-file <json-file>] [--head <sha>] publishes one GitHub comment review and its inline comments through gh, then records the review ID for routing; pass that ID to dyna git pr verdict --review-id. The comments file is a JSON array of {\"path\", \"line\", \"body\"} objects.", Args: cobra.ExactArgs(1)}
 	reviewRoom := review.Flags().String("room", "", "room name or ID (default: current stamped room)")
 	reviewBodyFile := review.Flags().String("body-file", "", "publish a GitHub comment review: read the Markdown review from a file (- for stdin)")
 	reviewCommentsFile := review.Flags().String("comments-file", "", "JSON array of inline comments: [{\"path\": \"f.go\", \"line\": 42, \"body\": \"...\"}]")
@@ -415,11 +414,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	review.RunE = func(c *cobra.Command, a []string) error {
 		if *reviewBodyFile != "" {
 			role := authority.Of(c.Context()).Role
-			// A session or root publishes a comment-only review with --publish, through approval.
-			agentPublish := *reviewPublish && *reviewCommentsFile == "" && (role == authority.Session || role == authority.Root)
-			if role != authority.Owner && !agentPublish {
-				return fmt.Errorf("agents cannot publish GitHub PR comments or reviews; record feedback in Dyna")
-			}
+			agentPublish := role == authority.Session || role == authority.Root
 			s, r, err := resolve(c, a[0])
 			if err != nil {
 				return err
@@ -453,6 +448,12 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 				return err
 			}
 			if agentPublish {
+				if *reviewCommentsFile != "" {
+					return fmt.Errorf("inline review comments are not supported through approval")
+				}
+				if err := agentPublishing(s, r, roomID, *reviewPublish); err != nil {
+					return err
+				}
 				// gh pr review cannot pin a commit, so an agent review posts through the REST
 				// reviews API with commit_id. The approved request then carries the reviewed head.
 				rec, err := s.Store.Get(r.Key())
@@ -462,7 +463,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 				if *reviewHead != "" && *reviewHead != rec.Head {
 					return fmt.Errorf("the review head %s is not the tracked head %s; review the tracked head before publishing", *reviewHead, rec.Head)
 				}
-				return ghclient.PublishThroughApproval(c.Context(), roomID, "", ghclient.PinnedReviewArgs(r.Host, r.Repo, r.Number, rec.Head, body))
+				return ghclient.Submit(c.Context(), roomID, "", ghclient.PinnedReviewArgs(r.Host, r.Repo, r.Number, rec.Head, body))
 			}
 			var id int64
 			err = engineclient.New("").Call(c.Context(), "PostPRReview", []any{roomID, r, body, *reviewHead, comments, *reviewPublish}, &id)
@@ -488,7 +489,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return output(c, status)
 	}
-	publishing := &cobra.Command{Use: "publishing [local|github]", Short: "Read or set the owner's publishing policy", Long: "Agent reviews always stay in Dyna. Only the owner can select github for owner publishing. This setting preserves the reviewer role.", Args: cobra.MaximumNArgs(1)}
+	publishing := &cobra.Command{Use: "publishing [local|github]", Short: "Read or set the owner's publishing policy", Long: "Only the owner can set the room's default publishing destination.", Args: cobra.MaximumNArgs(1)}
 	publishingRoom := publishing.Flags().String("room", "", "room name or ID (default: current stamped room)")
 	publishing.RunE = func(c *cobra.Command, a []string) error {
 		if len(a) > 0 && a[0] == watch.PublishingGitHub && authority.Of(c.Context()).Role != authority.Owner {
@@ -614,6 +615,21 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
+		role := authority.Of(c.Context()).Role
+		if role == authority.Session || role == authority.Root {
+			roomID, err := s.Store.RoomOf(r.Key())
+			if err != nil {
+				return err
+			}
+			args := []string{"pr", "edit", r.URL()}
+			if change.Title != nil {
+				args = append(args, "--title", *change.Title)
+			}
+			if change.Body != nil {
+				args = append(args, "--body", *change.Body)
+			}
+			return ghclient.Submit(c.Context(), roomID, "", args)
+		}
 		return prWrite(c, s, r.Key(), "EditPR", change)
 	}
 
@@ -623,11 +639,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	publishComment := comment.Flags().Bool("publish", false, "explicitly publish this comment to GitHub even when the room defaults to local")
 	comment.RunE = func(c *cobra.Command, a []string) error {
 		role := authority.Of(c.Context()).Role
-		// A session or root publishes only with --publish, through approval.
-		agentPublish := *publishComment && (role == authority.Session || role == authority.Root)
-		if role != authority.Owner && !agentPublish {
-			return fmt.Errorf("agents cannot publish GitHub PR comments or reviews; record feedback in Dyna")
-		}
+		agentPublish := role == authority.Session || role == authority.Root
 		s, r, err := resolve(c, a[0])
 		if err != nil {
 			return err
@@ -647,11 +659,14 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 			return err
 		}
 		if agentPublish {
-			args := []string{"pr", "comment", r.URL(), "--body", watch.Sanitize(strings.TrimSpace(body))}
+			if err := agentPublishing(s, r, roomID, *publishComment); err != nil {
+				return err
+			}
+			args := []string{"pr", "comment", r.URL(), "--body", body}
 			for _, path := range *commentAttachments {
 				args = append(args, "--attach", path)
 			}
-			return ghclient.PublishThroughApproval(c.Context(), roomID, "", args)
+			return ghclient.Submit(c.Context(), roomID, "", args)
 		}
 		if len(*commentAttachments) > 0 {
 			return fmt.Errorf("owner comment attachments are not yet supported")
@@ -767,6 +782,24 @@ func publicationRoom(s *watch.Service, ref watch.Ref) (string, error) {
 		return "", err
 	}
 	return mergeRoomFor(s, "")
+}
+
+// agentPublishing applies the room's local feedback default before submission.
+func agentPublishing(s *watch.Service, ref watch.Ref, roomID string, publish bool) error {
+	if publish {
+		return nil
+	}
+	if _, err := s.Store.Get(ref.Key()); err != nil {
+		return fmt.Errorf("GitHub publishing needs --publish for an untracked PR: %w", err)
+	}
+	policy, err := s.Publishing(roomID)
+	if err != nil {
+		return err
+	}
+	if policy != watch.PublishingGitHub {
+		return fmt.Errorf("this room keeps feedback in Dyna; use --publish to post to GitHub")
+	}
+	return nil
 }
 
 // trackFixList reads --fixes. An empty value gives an empty, non-nil list, which
