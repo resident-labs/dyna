@@ -1630,13 +1630,15 @@ func (s *Service) CompleteShell(ctx context.Context, e ShellExit) (Result, error
 	return s.appendCompletion(ctx, *plan)
 }
 
-// ShellSilence sends one owner-facing notice about a quiet output log.
-func (s *Service) ShellSilence(ctx context.Context, roomID, id, label string, minutes int) (Result, error) {
+// ShellSilence sends one notice about a quiet output log to the session that
+// started the job, or to its nearest open ancestor. A job that no session
+// started goes to the room owner.
+func (s *Service) ShellSilence(ctx context.Context, roomID, id, label, owner string, minutes int) (Result, error) {
 	rec, err := s.Rooms.Resolve(roomID)
 	if err != nil {
 		return Result{}, err
 	}
-	ev := room.ShellSilenceEvent{ShellID: id, Label: label, Minutes: minutes}
+	ev := room.ShellSilenceEvent{ShellID: id, Label: label, Session: s.shellSilenceSession(owner), Minutes: minutes}
 	_, err = s.Rooms.Message(roomID, room.EventID(ev))
 	if err == nil {
 		return Result{}, nil
@@ -1644,12 +1646,29 @@ func (s *Service) ShellSilence(ctx context.Context, roomID, id, label string, mi
 	if !errors.Is(err, room.ErrPostNotFound) {
 		return Result{}, err
 	}
-	plan, err := s.prepareEventCompletion(roomID, ev, []string{rec.Name}, 0, true)
+	target := rec.Name
+	if owner != "" {
+		target = owner
+	}
+	plan, err := s.prepareEventCompletionWithFallback(roomID, ev, []string{target}, 0, false, true)
 	if err != nil || plan == nil {
 		return Result{}, err
 	}
 	plan.Producer = room.ProducerShell
 	return s.appendCompletion(ctx, *plan)
+}
+
+// shellSilenceSession names the session that started a quiet job. A job that
+// no known session started reads as the owner.
+func (s *Service) shellSilenceSession(owner string) string {
+	if owner == "" {
+		return "the owner"
+	}
+	info, err := s.sessionStore().ResolveSnapshot(owner)
+	if err != nil {
+		return "the owner"
+	}
+	return info.EffectiveName()
 }
 
 // shellLabel labels a job's row: its command's first word and the short
