@@ -40,15 +40,17 @@ func fakeProc(t *testing.T, stallMicros int, writes map[int]int) {
 }
 
 // A slow checkpoint names the processes that wrote most since the last slow
-// one and the IO stall time in between. The first one has no earlier reading.
+// one and the IO stall time in between. A writer that exited before the reading
+// (pid 50 here) cannot be ranked, so the line counts it. The first slow
+// checkpoint has no earlier reading.
 func TestIOBlameNamesTopWritersSinceLastSlowCheckpoint(t *testing.T) {
-	fakeProc(t, 1_000_000, map[int]int{10: 1 << 20, 20: 5 << 20, 30: 2 << 20})
+	fakeProc(t, 1_000_000, map[int]int{10: 1 << 20, 20: 5 << 20, 30: 2 << 20, 50: 3 << 20})
 	if got := ioBlame(); !strings.Contains(got, "no earlier reading") {
 		t.Fatalf("first reading = %q", got)
 	}
 	fakeProcKeepingLast(t, 4_500_000, map[int]int{10: 1<<20 + 400<<10, 20: 5<<20 + 9<<20, 30: 2<<20 + 100<<10, 40: 1 << 30})
 	got := ioBlame()
-	want := "io: stalled 3500 ms since the last slow checkpoint; top writers: proc40[40] 1048576 KB proc20[20] 9216 KB proc10[10] 400 KB"
+	want := "io: stalled 3500 ms since the last slow checkpoint; top visible writers: proc40[40] 1048576 KB proc20[20] 9216 KB proc10[10] 400 KB; 1 earlier processes exited and are not ranked"
 	if got != want {
 		t.Fatalf("ioBlame = %q, want %q", got, want)
 	}
