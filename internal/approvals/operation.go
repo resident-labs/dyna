@@ -3,10 +3,12 @@ package approvals
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"dyna-agent/internal/authority"
 )
@@ -74,17 +76,37 @@ func Register[P any](s *Service, op Operation[P]) {
 		}
 		inline := actor.Role == authority.Owner || decision.Class == ClassAuto || decision.Class == ClassAgent && actor.Role == authority.Root
 		if inline {
+			actorName := Owner
+			if actor.Role != authority.Owner {
+				meta, e := s.session(actor.Session)
+				if e != nil {
+					return Outcome{}, e
+				}
+				actorName = meta.Address()
+			}
 			err := op.Check(ctx, actor, payload)
 			var result Result
 			if err == nil {
 				result, err = op.Execute(ctx, actor, payload)
 			}
+			state := StateDone
 			if err != nil {
+				state = StateFailed
 				result.Reason = err.Error()
 				if result.ExitCode == nil || *result.ExitCode == 0 {
 					code := 1
 					result.ExitCode = &code
 				}
+			} else if result.ExitCode != nil && *result.ExitCode != 0 {
+				state = StateFailed
+			}
+			auditCtx := context.WithoutCancel(ctx)
+			auditErr := s.write(auditCtx, func(conn *sql.Conn) error {
+				_, e := conn.ExecContext(auditCtx, `INSERT INTO approval_inline_log(room,actor,kind,target,state,result,exit_code,at) VALUES(?,?,?,?,?,?,?,?)`, rec.ID, actorName, op.Kind, card.Repository, state, result.Reason, result.ExitCode, s.now().UnixNano())
+				return e
+			})
+			if auditErr != nil {
+				return Outcome{}, errors.Join(err, auditErr)
 			}
 			return Outcome{Result: &result}, nil
 		}
@@ -147,4 +169,57 @@ func Submit[P any](ctx context.Context, s *Service, actor authority.Actor, kind 
 		return Outcome{}, err
 	}
 	return op.submit(ctx, actor, raw)
+}
+
+// LogEntry describes one inline or decided write.
+type LogEntry struct {
+	Time     time.Time     `json:"time"`
+	Room     string        `json:"room"`
+	Actor    string        `json:"actor"`
+	Kind     OperationKind `json:"kind"`
+	Target   string        `json:"target"`
+	State    State         `json:"state,omitempty"`
+	Action   Action        `json:"action,omitempty"`
+	Detail   string        `json:"detail,omitempty"`
+	ExitCode *int          `json:"exitCode,omitempty"`
+}
+
+func (s *Service) Log(actor authority.Actor, roomRef string, since time.Duration) ([]LogEntry, error) {
+	rec, err := s.roomFor(actor, roomRef)
+	if err != nil {
+		return nil, err
+	}
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	cutoff := int64(0)
+	if since > 0 {
+		cutoff = s.now().Add(-since).UnixNano()
+	}
+	rows, err := db.Query(`SELECT at,room,actor,kind,target,state,'' AS action,result,exit_code FROM approval_inline_log WHERE room=? AND at>=?
+UNION ALL SELECT d.at,r.room,d.actor,r.kind,r.repository,'',d.action,d.reason,NULL FROM approval_decisions d JOIN approval_requests r ON r.id=d.request AND r.room=d.room WHERE r.room=? AND d.at>=? ORDER BY 1 DESC`, rec.ID, cutoff, rec.ID, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LogEntry
+	for rows.Next() {
+		var e LogEntry
+		var at int64
+		if err := rows.Scan(&at, &e.Room, &e.Actor, &e.Kind, &e.Target, &e.State, &e.Action, &e.Detail, &e.ExitCode); err != nil {
+			return nil, err
+		}
+		e.Time = time.Unix(0, at).UTC()
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if meta, err := s.session(out[i].Actor); err == nil {
+			out[i].Actor = meta.Address()
+		}
+	}
+	return out, nil
 }
