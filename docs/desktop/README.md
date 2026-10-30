@@ -321,7 +321,7 @@ See [WEB.md](WEB.md#api).
   `SendToSession`, `StopSession`, `CloseSession`, `ForceCloseSession`,
   `PromoteSession`, `TransferSession`,
   `SessionTransfer`, `CancelSessionTransfer`.
-- Workflows: `Runs`, `RunDetail`, `ListTemplates`, `StartRun`, `CancelRun`.
+- Workflows: `Runs`, `RunDetail`, `StartRun`, `CancelRun`.
 - Files and changes: `ListEntries(roomRef, sessionRef, path, showHidden)`,
   `ReadFile(roomRef, sessionRef, path)`, `GitStatus(roomRef, sessionRef)`,
   `GitDiff(roomRef, sessionRef, path, staged)`. An empty session reference
@@ -484,7 +484,6 @@ clients refresh them as needed.
 These APIs work on desktop, paired web devices, and signed-in Connect
 sessions. Writers honor read-only mode.
 
-`ListTemplates()` reads the same template registry as `dyna templates list`.
 `StartRun(roomRef, {template?, script?}, input)` returns `{id}`. Choose one
 source: a template name or a host script path. Relative scripts resolve in
 the room's working directory. `input` is any JSON value, passed as `--args`,
