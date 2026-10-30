@@ -46,6 +46,7 @@ type Job struct {
 	Unit       string    `json:"unit"`
 	Repo       string    `json:"repo"`
 	Hook       string    `json:"hook"`
+	Force      bool      `json:"force,omitempty"`
 	Room       string    `json:"room,omitempty"`
 	Session    string    `json:"session,omitempty"`
 	SHA        string    `json:"sha"`
@@ -261,9 +262,10 @@ func (s Store) List() ([]Job, error) {
 }
 
 type Service struct {
-	Jobs Store
-	Exec processguard.Executor
-	Now  func() time.Time
+	Jobs         Store
+	Exec         processguard.Executor
+	Now          func() time.Time
+	UpdateNotice func(string) error
 }
 
 func New() Service {
