@@ -265,6 +265,9 @@ func holdFor(records map[string]*state.Record, roomID, repo, ref string) *state.
 
 // EditPR changes a PR title or body through the engine.
 func (s *Service) EditPR(ctx context.Context, roomRef, key string, edit watch.PREdit) error {
+	if authority.Of(ctx).Role != authority.Owner {
+		return fmt.Errorf("agent PR edits must use the GitHub approval path")
+	}
 	p, _, err := s.authorPRInRoom(ctx, "git pr edit", roomRef, key)
 	if err != nil {
 		return err
