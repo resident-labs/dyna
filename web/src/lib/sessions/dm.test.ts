@@ -296,7 +296,7 @@ test('the turn divider text keeps spaces around its separators', () => {
   assert.equal(turnHead({ n: 4, profile: 'opus', model: 'opus' }), 'Turn 4 · opus')
   assert.equal(turnHead({ n: 5, profile: 'deepseek', model: 'deepseek/deepseek-flash' }), 'Turn 5 · deepseek')
   assert.equal(turnHead({ n: 6, model: 'deepseek/deepseek-flash' }), 'Turn 6 · deepseek-flash')
-  assert.equal(turnTail(turn), '1m00s · 30 tokens')
+  assert.equal(turnTail(turn), '30 tokens')
   assert.doesNotMatch(turnTail({ ...turn, usage: null }), /tokens/)
 })
 
