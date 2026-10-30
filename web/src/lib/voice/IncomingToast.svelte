@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { voiceIdentity } from '../ui/avatar.ts'
   // Root asked to talk now (dyna call). The request's reason says why.
   // Accept starts the call in that room; Decline closes the request.
   import type { CallRequest } from './callRequests.ts'
@@ -18,7 +19,7 @@
 
 <div class="incoming" class:narrow class:full role="alertdialog" aria-label="root would like to speak with you">
   <div class="top">
-    <span class="ring"><Avatar name="Voice" hue={3} size={full ? 72 : 40} ring="var(--field)" /></span>
+    <span class="ring"><Avatar avatar={voiceIdentity} name="Voice" hue={3} size={full ? 72 : 40} dotGap="var(--field)" /></span>
     <div class="who">
       <strong>root would like to speak with you</strong>
       <p>{request.reason}</p>

@@ -83,7 +83,7 @@
       <VoiceRelay icon="mic" label="Sent by Voice for you" text={row.text} state={row.delivery === 'read' ? '' : row.delivery || ''} />
     {:else if row.kind === 'timeline' || row.kind === 'thought'}
       <div class="activity-row" class:cont={row.cont} class:enter={isNew(row.key)}>
-        <div class="activity-gutter">{#if !row.cont}<Avatar name={member.name} hue={member.hue} emoji={member.avatar.emoji} size={compact ? 28 : 40} />{/if}</div>
+        <div class="activity-gutter">{#if !row.cont}<Avatar name={member.name} hue={member.hue} avatar={member.avatar} here={room.name} size={compact ? 28 : 40} />{/if}</div>
         <div class="activity-body">
           {#if !row.cont}<div class="activity-head"><strong class="hue-{member.hue}">{member.name}</strong><time>{stamp(row.ts)}</time></div>{/if}
           {#if row.kind === 'timeline'}
@@ -95,7 +95,7 @@
       {@const thread = row.thread}
       {@const person = members.find((p) => p.address === thread.key)}
       <div class="thread-row">
-        <ThreadChip glyph="▱" name={short(thread.key, room.name)} emoji={person?.avatar.emoji} hue={person?.hue} badge={`${row.posts.length} message${row.posts.length === 1 ? '' : 's'}`} queued={row.queued} snippet={plain(row.posts.at(-1)?.text)} time={ago(row.posts.at(-1)?.ts)} selected={selectedKey === thread.key} enter={isNew(row.key)} onopen={() => onthread(thread.key)} />
+        <ThreadChip glyph="▱" name={short(thread.key, room.name)} avatar={person?.avatar ?? thread.posts.at(-1)?.avatar} hue={person?.hue} badge={`${row.posts.length} message${row.posts.length === 1 ? '' : 's'}`} queued={row.queued} snippet={plain(row.posts.at(-1)?.text)} time={ago(row.posts.at(-1)?.ts)} selected={selectedKey === thread.key} enter={isNew(row.key)} onopen={() => onthread(thread.key)} />
       </div>
     {:else if row.kind === 'instructions'}
       <SystemNote notes={row.notes ?? [{ ...row.note, id: row.note?.id ?? row.key, target: member.name, text: row.text, ts: row.ts }]} roomId={room.id} {onopenfile} />

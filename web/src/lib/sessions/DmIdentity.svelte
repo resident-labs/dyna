@@ -10,7 +10,7 @@
 </script>
 
 <button class="dm-identity" onclick={() => onopen(member)} title="Open profile">
-  <Avatar emoji={member.avatar.emoji} name={member.name} hue={member.hue} size={32} state={member.state} status={member.status} ring="var(--main)" />
+  <Avatar avatar={member.avatar} here={member.avatar.room} name={member.name} hue={member.hue} size={32} state={member.state} status={member.status} dotGap="var(--main)" />
   <span><strong class="hue-{member.hue}">{member.name}</strong><small title="{tokens((usage?.inputTokens || 0) + (usage?.outputTokens || 0))} tokens"><span class:working={status === 'working'}>{status}</span> · {member.profile}</small></span>
 </button>
 
