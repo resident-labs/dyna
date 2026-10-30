@@ -2,10 +2,10 @@
   // One surface for grouped content: usage, alerts, a PR lane. The optional
   // header is a quiet title, a count and one trailing action.
   import type { Snippet } from 'svelte'
-  let { title = '', count = null, action, children }: { title?: string; count?: number | null; action?: Snippet; children?: Snippet } = $props()
+  let { title = '', count = null, leading, action, children }: { title?: string; count?: number | null; leading?: Snippet; action?: Snippet; children?: Snippet } = $props()
 </script>
 <section class="card">
-  {#if title}<h4>{title}{#if count !== null}<span class="n">{count}</span>{/if}{#if action}<span class="act">{@render action?.()}</span>{/if}</h4>{/if}
+  {#if title}<h4>{#if leading}{@render leading()}{/if}{title}{#if count !== null}<span class="n">{count}</span>{/if}{#if action}<span class="act">{@render action?.()}</span>{/if}</h4>{/if}
   {@render children?.()}
 </section>
 <style>

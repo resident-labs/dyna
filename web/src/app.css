@@ -32,6 +32,16 @@
   --sage: #97c995;
   --coral: #ef8a80;
 
+  --provider-anthropic: #d97757;
+  --provider-chatgpt: #ece9e4;
+  --provider-kimi-code: #a9b7ff;
+  --provider-xai: #e49ac5;
+  --provider-meta-muse: #83cce0;
+  --provider-opencode-go: #c9a6ed;
+  --provider-deepseek: #75cfc0;
+  --provider-zai: #d4bc83;
+  --provider-unknown: #aaa59e;
+
   /* Stable name hues, index = roomsvc.NameHue. */
   --hue-0: #b7a8ff;
   --hue-1: #8dc5e3;
