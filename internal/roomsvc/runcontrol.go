@@ -108,7 +108,7 @@ func (s *Service) startRun(ctx context.Context, ref string, source RunSource, in
 		if target.RoomID != rec.ID {
 			return StartedRun{}, fmt.Errorf("result target must belong to the workflow room")
 		}
-		env = append(env, "DYNA_RUN_RESULT_TO="+target.ID)
+		env = append(env, mode.EnvRunResultTo+"="+target.ID)
 	}
 	if s.Notify.Sessions.Executable == "" {
 		return StartedRun{}, fmt.Errorf("dyna executable is unavailable")
