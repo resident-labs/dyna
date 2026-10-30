@@ -766,7 +766,7 @@ func OpenTrackedCheckout(ctx context.Context, root, tree string) (bool, error) {
 			if item.Record == nil || !item.Record.Watching || item.Record.State != PROpen {
 				continue
 			}
-			for _, path := range []string{item.Record.RepoPath, item.Record.LookupDir} {
+			for _, path := range []string{item.Record.RepoPath, item.Record.LookupDir, item.Record.Dir} {
 				if path == "" {
 					continue
 				}
