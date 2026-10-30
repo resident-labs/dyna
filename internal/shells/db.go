@@ -16,7 +16,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 const schema = `CREATE TABLE shell_jobs (
 	id TEXT PRIMARY KEY,
@@ -113,6 +113,11 @@ func (s *Store) db() (*sql.DB, error) {
 		}
 		if old < 9 {
 			if _, err := conn.ExecContext(ctx, `ALTER TABLE shell_jobs ADD COLUMN activity_since INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
+		if old < 10 {
+			if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS shell_prune_pending (id TEXT PRIMARY KEY)`); err != nil {
 				return err
 			}
 		}
@@ -527,7 +532,8 @@ func (s *Store) setOutputLines(id string, n int) error {
 // writer lock for long.
 const PruneBatch = 500
 
-// PruneEnded deletes up to limit old, ended, unkept jobs and their directories.
+// PruneEnded deletes up to limit old, ended, unkept jobs. Pending directory
+// removals survive interruption and are retried on the next pass.
 func (s *Store) PruneEnded(ctx context.Context, cutoff time.Time, limit int) (int, error) {
 	db, err := s.db()
 	if err != nil {
@@ -536,32 +542,82 @@ func (s *Store) PruneEnded(ctx context.Context, cutoff time.Time, limit int) (in
 	var ids []string
 	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		rows, err := conn.QueryContext(ctx, `DELETE FROM shell_jobs WHERE id IN (
-			SELECT id FROM shell_jobs WHERE ended IS NOT NULL AND ended<? AND keep=0 LIMIT ?) RETURNING id`,
-			cutoff.UTC().Format(time.RFC3339Nano), limit)
+   SELECT id FROM shell_jobs WHERE ended IS NOT NULL AND ended<? AND keep=0 LIMIT ?) RETURNING id`, cutoff.UTC().Format(time.RFC3339Nano), limit)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
+				rows.Close()
 				return err
 			}
 			ids = append(ids, id)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO shell_prune_pending(id) VALUES(?)`, id); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
-	for _, id := range ids {
-		if !ValidID(id) {
-			continue
-		}
-		dir := filepath.Join(s.Root, id)
-		if err := os.RemoveAll(dir); err != nil {
+	rows, err := db.QueryContext(ctx, `SELECT id FROM shell_prune_pending LIMIT ?`, limit)
+	if err != nil {
+		return len(ids), err
+	}
+	var pending []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return len(ids), err
 		}
+		pending = append(pending, id)
 	}
-	return len(ids), nil
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return len(ids), err
+	}
+	if err := rows.Close(); err != nil {
+		return len(ids), err
+	}
+	var removed []string
+	var errs []error
+	for _, id := range pending {
+		if ValidID(id) {
+			remove := os.RemoveAll
+			if s.removeDir != nil {
+				remove = s.removeDir
+			}
+			if err := remove(filepath.Join(s.Root, id)); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		removed = append(removed, id)
+	}
+	if len(removed) > 0 {
+		err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			for _, id := range removed {
+				if _, err := conn.ExecContext(ctx, `DELETE FROM shell_prune_pending WHERE id=?`, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return len(ids), errors.Join(errs...)
 }
