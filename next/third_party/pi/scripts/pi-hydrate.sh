@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Hydrate Pi's generated model data from the immutable upstream catalog pin.
 set -euo pipefail
+# The hydrate script is TypeScript. Some distribution Node builds (Debian's
+# nodejs, for one) omit type stripping even on 22.18 or later.
+node -e 'process.exit(process.features.typescript ? 0 : 1)' || {
+  echo "pi-hydrate: $(node --version) at $(command -v node) cannot run TypeScript; use an official Node build, 22.18 or later" >&2
+  exit 1
+}
 repo_root=$(git rev-parse --show-toplevel)
 vendor="$repo_root/next/third_party/pi"
 revision=$(node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).revision;if(typeof value!=="string"||!/^sha256-[0-9a-f]{64}$/.test(value))process.exit(1);process.stdout.write(value)' "$vendor/nix/model-catalog.json") || {
