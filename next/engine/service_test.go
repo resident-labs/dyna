@@ -265,3 +265,34 @@ func TestSessionStartRejectsParentInM1(t *testing.T) {
 		t.Fatalf("expected invalid, got %v", e)
 	}
 }
+
+type blockingBoxes struct{ started chan BoxSpec }
+
+func (b blockingBoxes) Create(ctx context.Context, spec BoxSpec) (string, error) {
+	b.started <- spec
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+func (blockingBoxes) Remove(context.Context, contract.BoxID) error { return nil }
+
+func TestCloseCancelsCreatingBox(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	adapter := blockingBoxes{started: make(chan BoxSpec)}
+	s.boxes = adapter
+	done := make(chan *contract.Error, 1)
+	go func() {
+		_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "blocked", Profile: "test"})
+		done <- e
+	}()
+	spec := <-adapter.started
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: spec.Session}); e != nil {
+		t.Fatal(e)
+	}
+	if e := <-done; e != nil {
+		t.Fatal(e)
+	}
+	b, err := s.store.Box(ctx, spec.Box)
+	if err != nil || b.State != contract.BoxDeleted {
+		t.Fatalf("box: %+v, %v", b, err)
+	}
+}
