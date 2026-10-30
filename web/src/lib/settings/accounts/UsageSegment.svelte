@@ -18,8 +18,9 @@
     active?: boolean
     muted?: boolean
     showAccount?: boolean
+    showValue?: boolean
   }
-  let { name, window, observedAt, provider = '', active = false, muted = false, showAccount = true }: Props = $props()
+  let { name, window, observedAt, provider = '', active = false, muted = false, showAccount = true, showValue = true }: Props = $props()
   // The segment wakes each minute and at its reset, so the countdown, pace and a passed reset stay current.
   const now = deadlineClock(() => meterWake(window.resetsAt, Date.now()))
   const notice = $derived(resetNotice(window, observedAt, now()))
@@ -37,8 +38,8 @@
     {#if pace}<span class="tick" style:left={pace.expectedRemaining + '%'} title="Even pace: {percent(pace.expectedRemaining)} left"></span>{/if}
   {/if}
   <div class="label" role={remaining === null ? undefined : 'meter'} aria-label={words} aria-valuenow={remaining ?? undefined} aria-valuemin={remaining === null ? undefined : 0} aria-valuemax={remaining === null ? undefined : 100}>
-    {#if showAccount}
-      <span class="name">{name}</span>
+    {#if showAccount}<span class="name">{name}</span>{/if}
+    {#if showValue}
       {#if remaining === null}<span class="quiet">{notice ? 'Probably reset' : 'Not reported'}</span>
       {:else}<span class="ui-num value" class:low>{percent(remaining)}</span>{/if}
     {/if}
