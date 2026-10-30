@@ -54,7 +54,7 @@ func TestHookStatusUsesNewestRun(t *testing.T) {
 		{Result: "error", StartedAt: at},
 	}}
 	got := Build(Facts{Hooks: map[ID]HookFacts{IDUpdates: hook}})[9]
-	if got.ID != IDUpdates || got.State != StateOn || got.Detail != DetailNone {
+	if got.ID != IDUpdates || got.State != StateOn || got.Detail != DetailNone || got.Hook != UpdatesHook {
 		t.Fatalf("updates = %s %s %q, want on with no detail", got.ID, got.State, got.Detail)
 	}
 	if got.LastRun == nil || !got.LastRun.Equal(at.Add(time.Hour)) {

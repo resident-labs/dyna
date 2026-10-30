@@ -97,7 +97,7 @@ func (s services) serviceRegistry(ctx context.Context, roomRef, repo string) ([]
 	}
 	if repo != "" {
 		repoHooks := s.hookFacts(ctx, repo)
-		f.Hooks[serviceregistry.IDUpdates] = repoHooks["self-update"]
+		f.Hooks[serviceregistry.IDUpdates] = repoHooks[serviceregistry.UpdatesHook]
 		f.Library = s.libraryFacts(ctx, repo, rec.Name, view)
 	}
 	return serviceregistry.Build(f), nil
