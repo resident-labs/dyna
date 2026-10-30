@@ -144,6 +144,7 @@ func (w *Web) Listen(address string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	go http.Serve(l, w)
+	server := &http.Server{Handler: w, ReadHeaderTimeout: 10 * time.Second}
+	go server.Serve(l)
 	return l, nil
 }
