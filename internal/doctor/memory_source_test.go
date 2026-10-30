@@ -1,17 +1,11 @@
-package admission
+package doctor
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-	"time"
-
-	"dyna-agent/internal/database"
 )
 
 // put writes fixture files under root, creating directories as needed.
@@ -42,7 +36,7 @@ func TestLinuxReadsProcAndPressure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Load1 != 1.5 || r.MemTotal != 32000000<<10 || r.MemAvail != 20000000<<10 || r.PressureCPU != 3.5 || r.PressureMem != 12.25 {
+	if r.MemTotal != 32000000<<10 || r.MemAvail != 20000000<<10 || r.PressureMem != 12.25 {
 		t.Fatalf("readings = %+v", r)
 	}
 	if r.Source != "linux /proc + PSI" {
@@ -58,7 +52,7 @@ func TestLinuxFallsBackWithoutPSIAndMemAvailable(t *testing.T) {
 		"meminfo": "MemTotal: 1000 kB\nMemFree: 100 kB\nBuffers: 50 kB\nCached: 150 kB\n",
 	})
 	r, err := Linux{ProcDir: proc}.Read(context.Background())
-	if err != nil || r.PressureCPU != -1 || r.PressureMem != -1 || r.MemAvail != 300<<10 {
+	if err != nil || r.PressureMem != -1 || r.MemAvail != 300<<10 {
 		t.Fatalf("readings = %+v, %v", r, err)
 	}
 }
@@ -175,7 +169,7 @@ func TestDarwinReadsSysctlAndVMStat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.MemTotal != 16<<30 || r.MemAvail != 36000*16384 || r.Load1 != 2.25 || r.PressureMem != -1 {
+	if r.MemTotal != 16<<30 || r.MemAvail != 36000*16384 || r.PressureMem != -1 {
 		t.Fatalf("readings = %+v", r)
 	}
 }
@@ -187,98 +181,6 @@ func TestDarwinFailsWhenACommandFails(t *testing.T) {
 	}
 }
 
-func TestObservationsSummarizeTheLastDay(t *testing.T) {
-	o := Observed{DataDir: t.TempDir()}
-	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
-	for _, ob := range []Observation{
-		{At: now.Add(-2 * time.Hour), Running: 7, Limit: 5},
-		{At: now.Add(-time.Hour), Running: 9, Limit: 5},
-		{At: now.Add(-30 * time.Hour), Running: 20, Limit: 5}, // too old
-		{At: now.Add(-time.Minute), Running: 5, Limit: 5},     // at the limit: over by none
-	} {
-		if err := o.Record(context.Background(), ob); err != nil {
-			t.Fatal(err)
-		}
-	}
-	sum, err := o.Summarize(now.Add(-24 * time.Hour))
-	if err != nil || sum.Samples != 3 || sum.MostOver != 4 || sum.Held() != 3*SampleEvery {
-		t.Fatalf("summary = %+v, %v", sum, err)
-	}
-}
-
-// A recorded observation keeps the rooms' process counts, the sum in its own
-// column and the per-room breakdown as JSON beside it, and a database from
-// the release before the columns keeps its old rows with zero.
-func TestObservationsKeepRoomPidsAcrossTheMigration(t *testing.T) {
-	dir := t.TempDir()
-	ctx := context.Background()
-	db, err := database.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The previous release's store: version 1, three columns, one row.
-	if err := database.Migrate(db, "admission_observed.version", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(ctx, observedSchema)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Date(2026, 10, 26, 11, 0, 0, 0, time.UTC)
-	if _, err := db.Exec(`INSERT INTO admission_observed VALUES (?,?,?)`, old.Unix(), 7, 5); err != nil {
-		t.Fatal(err)
-	}
-
-	o := Observed{DataDir: dir}
-	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
-	held := Observation{At: at, Running: 9, Limit: 5,
-		RoomPids: RoomPids{Total: 8, ByRoom: map[string]int{"dyna-room-dyna.slice": 3, "dyna-room-fl.slice": 5}}}
-	if err := o.Record(ctx, held); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := db.Query(`SELECT at, running, lim, room_pids, room_pids_by_room FROM admission_observed ORDER BY at`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var got []string
-	for rows.Next() {
-		var at int64
-		var running, lim, roomPids int
-		var byRoom string
-		if err := rows.Scan(&at, &running, &lim, &roomPids, &byRoom); err != nil {
-			t.Fatal(err)
-		}
-		got = append(got, fmt.Sprintf("%d %d %d %d %s", at, running, lim, roomPids, byRoom))
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		fmt.Sprintf("%d 7 5 0 ", old.Unix()), // the old row keeps the zero defaults
-		fmt.Sprintf("%d 9 5 8 {\"dyna-room-dyna.slice\":3,\"dyna-room-fl.slice\":5}", at.Unix()),
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("rows = %q, want %q", got, want)
-	}
-}
-
-func TestStateSurvivesInTheDatabase(t *testing.T) {
-	s := StateStore{DataDir: t.TempDir()}
-	if st, err := s.Load(context.Background(), Watch); err != nil || st != (State{}) {
-		t.Fatalf("empty load = %+v, %v", st, err)
-	}
-	want := State{Overloaded: true, Calm: 1, TurnBytes: 3 << 30, MeasuredAt: time.Unix(1_800_000_000, 0)}
-	if err := s.Save(context.Background(), Watch, want); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Load(context.Background(), Watch); err != nil || !got.MeasuredAt.Equal(want.MeasuredAt) || got.Overloaded != want.Overloaded || got.Calm != 1 || got.TurnBytes != want.TurnBytes {
-		t.Fatalf("loaded %+v, %v", got, err)
-	}
-}
-
-// Two cgroup mounts show the hierarchy: the first shows a subtree that does not
-// hold the process, the second does. A mount whose root is outside the process's
-// cgroup namespace ("/..") maps by the same text rule.
 func TestLinuxUsesTheMountThatShowsTheProcess(t *testing.T) {
 	proc, cg1, cg2 := t.TempDir(), t.TempDir(), t.TempDir()
 	put(t, proc, map[string]string{

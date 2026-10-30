@@ -9,6 +9,8 @@ Dyna runs each subagent turn and each detached workflow run in its own systemd s
 
 Agents need no flag. Shells, tests and builds that an agent starts stay in its turn scope.
 
+Once per minute, Dyna checks memory pressure with its load sample. When memory is short, it can stop up to three idle agent processes, longest idle first. It leaves processes alone until they have been idle for five minutes, and never stops a session with turn work or waiting input. The session starts a new process when it next runs.
+
 ## Files and commands
 
 - Dyna writes `~/.config/systemd/user/dyna.slice` and one `dyna-room-<room>.slice` per room on first use and runs `systemctl --user daemon-reload`. To keep local edits, remove the `# Managed by Dyna` line. Dyna then leaves the file alone.
