@@ -115,16 +115,16 @@ func NewCommand() *cobra.Command {
 		return nil
 	}}
 	deny.Flags().StringVar(&why, "reason", "", "why you refuse (required for an approval)")
-	var withdrawWhy string
+	var withdrawReason string
 	withdraw := &cobra.Command{Use: "withdraw <id>", Short: "Withdraw a request", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
-		return call(c, roomRef, "WithdrawRequest", func(ref string) []any { return []any{ref, args[0], withdrawWhy} })
+		return call(c, roomRef, "WithdrawRequest", func(ref string) []any { return []any{ref, args[0], withdrawReason} })
 	}}
-	withdraw.Flags().StringVar(&withdrawWhy, "why", "", "why the request no longer matters")
-	var passWhy string
+	withdraw.Flags().StringVar(&withdrawReason, "reason", "", "why the request no longer matters")
+	var passReason string
 	pass := &cobra.Command{Use: "pass A-<n>", Short: "Pass an approval to your parent, or from root to the owner", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
-		return decideApproval(c, roomRef, args[0], approvals.ActionPass, passWhy)
+		return decideApproval(c, roomRef, args[0], approvals.ActionPass, passReason)
 	}}
-	pass.Flags().StringVar(&passWhy, "why", "", "why the next holder should decide")
+	pass.Flags().StringVar(&passReason, "reason", "", "why the next holder should decide")
 	cancel := &cobra.Command{Use: "cancel A-<n>", Short: "Cancel your pending approval request", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		return call(c, roomRef, "ApprovalCancel", func(ref string) []any { return []any{ref, args[0]} })
 	}}
