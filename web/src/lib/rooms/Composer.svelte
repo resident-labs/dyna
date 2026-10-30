@@ -186,7 +186,7 @@
     return commandLoad
   }
   let appCommands = $derived(commands.filter((c) => !profiles.some((p) => p.name === c.name)))
-  let availableRoomCommands = $derived(roomCommands.filter((c) => (c.source === 'skill' || c.source === 'mcp-prompt') && !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
+  let availableRoomCommands = $derived(roomCommands.filter((c) => !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
   let roomCommand = $derived(matchCommand(availableRoomCommands, draft))
   let command = $derived.by(() => {
     const m = draft.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/)
@@ -397,12 +397,16 @@
       error = ''
       busy = true
       try {
-        const text = roomCommand.text ? await prepareText(roomCommand.text) : ''
+        const text = roomCommand.item.source === 'workflow' ? roomCommand.text : roomCommand.text ? await prepareText(roomCommand.text) : ''
         if (!active) return
         const result = await api.runCommand(room.id, roomCommand.item.name, text)
-        if (result.failed?.length) error = result.failed.map((f) => `${short(f.to, room.name)}: ${f.error || 'delivery failed'}`).join(' · ')
-        else { note = result.deliveries?.length ? `Delivered to ${result.deliveries.length} recipient${result.deliveries.length === 1 ? '' : 's'}` : 'Posted'; setTimeout(() => (note = ''), 2400) }
-        if (result.message.id) draft = ''
+        if (result.kind === 'run') { note = 'Workflow started'; draft = '' }
+        else {
+          const post = result.post
+          if (post.failed?.length) error = post.failed.map((f) => `${short(f.to, room.name)}: ${f.error || 'delivery failed'}`).join(' · ')
+          else { note = post.deliveries?.length ? `Delivered to ${post.deliveries.length} recipient${post.deliveries.length === 1 ? '' : 's'}` : 'Posted'; setTimeout(() => (note = ''), 2400) }
+          if (post.message.id) draft = ''
+        }
       }
       catch (e) { error = errorText(e) }
       finally { busy = false; await tick(); field?.focus() }

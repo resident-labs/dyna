@@ -9,7 +9,7 @@ const code = await bundle({ component: '../rooms/Composer',
   api: `export const api = {
     preview: async () => ({mentions: [], wakes: []}),
     commands: async () => globalThis.loadCommands ? globalThis.loadCommands() : [{ name: 'review', source: 'skill', description: 'Review code', args: [] }],
-    runCommand: async (...args) => { globalThis.commandArgs = args; globalThis.commandCalls = (globalThis.commandCalls || 0) + 1; return { message: { id: 'sent' }, deliveries: [], failed: [{ to: 'lead', error: 'unavailable' }] } },
+    runCommand: async (...args) => { globalThis.commandArgs = args; globalThis.commandCalls = (globalThis.commandCalls || 0) + 1; return { kind: 'post', post: { message: { id: 'sent' }, deliveries: [], failed: [{ to: 'lead', error: 'unavailable' }] } } },
     listEntries: async () => ({entries: []}),
   }`,
 })
@@ -58,6 +58,7 @@ test('MCP prompts appear in the menu and run with or without arguments', async (
   const dom = installDom()
   Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
   Reflect.set(globalThis, 'loadCommands', () => Promise.resolve([
+    { name: 'deep-research', source: 'workflow', description: 'Research a question', args: [] },
     { name: 'docs:search', source: 'mcp-prompt', description: 'Search docs', args: [{ name: 'query', required: true, description: '' }] },
     { name: 'docs:hello', source: 'mcp-prompt', description: 'Say hello', args: [] },
     { name: 'docs.example:find', source: 'mcp-prompt', description: 'Find', args: [] },
@@ -75,6 +76,9 @@ test('MCP prompts appear in the menu and run with or without arguments', async (
       input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       await settle()
     }
+    await type('/deep')
+    assert.match(target.textContent ?? '', /Workflows/)
+    assert.equal(target.querySelector('[role="option"]')?.getAttribute('title'), 'Research a question')
     await type('/docs:')
     assert.match(target.textContent ?? '', /MCP prompts/)
     assert.match(target.textContent ?? '', /query/)
