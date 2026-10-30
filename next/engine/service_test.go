@@ -117,6 +117,8 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	connectAgent(ctx, t, s, child.Session)
+	connectAgent(ctx, t, s, parent)
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: child.Session}); e != nil {
 		t.Fatal(e)
 	}
@@ -846,9 +848,11 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 		t.Fatalf("close while child starts: %v", e)
 	}
 	close(adapter.unblock)
+	connectAgent(ctx, t, s, parent.Session)
 	for _, id := range []contract.SessionID{a.Session, b.Session} {
 		unlock := s.lockBox(id)
 		unlock()
+		connectAgent(ctx, t, s, id)
 	}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e != nil {
 		t.Fatal(e)
@@ -956,6 +960,7 @@ func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	connectAgent(ctx, t, s, lead.Session)
 	adapter := heldRemoveBox{started: make(chan struct{}, 2), release: make(chan struct{}), removed: make(chan struct{}, 2)}
 	s.boxes = adapter
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -1020,5 +1025,21 @@ func TestPostRejectsMissingAttachment(t *testing.T) {
 	})
 	if e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("got %v", e)
+	}
+}
+
+// connectAgent marks the session's box as connected, as a box hello does, so its close waits for an archive ack.
+func connectAgent(ctx context.Context, t *testing.T, s *Service, session contract.SessionID) {
+	t.Helper()
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxReady, ""); err != nil {
+		t.Fatal(err)
 	}
 }
