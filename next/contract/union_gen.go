@@ -86,6 +86,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "pr.opened":
+		var v PrOpened
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "session.closed":
 		var v SessionClosed
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -142,12 +148,18 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 }
 func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	switch k {
+	case "pr.open":
+		var v PrOpenArgs
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	default:
 		return nil, fmt.Errorf("unknown operation kind %q", k)
 	}
 }
 
-var eventBodyTypes = []EventType{"box.changed", "image.built", "image.failed", "op.decided", "op.ran", "op.requested", "post.created", "session.closed", "session.started", "turn.ended", "turn.started"}
+var eventBodyTypes = []EventType{"box.changed", "image.built", "image.failed", "op.decided", "op.ran", "op.requested", "post.created", "pr.opened", "session.closed", "session.started", "turn.ended", "turn.started"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
