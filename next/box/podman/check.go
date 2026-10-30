@@ -86,10 +86,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	add(CheckCgroup, err)
 	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
 	add(CheckPodman, err)
-	output, err := h.run(ctx, "bash", "-c", `getconf _NPROCESSORS_ONLN; awk '/MemTotal:|MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
-	if err == nil {
-		result.CPUs, result.MemBytes, result.DiskBytes, err = parseCapacity(output, o.MemoryFloor, o.DiskFloor)
-	}
+	result.CPUs, result.MemBytes, result.DiskBytes, err = h.capacity(ctx, o)
 	add(CheckCapacity, err)
 	if err == nil {
 		_, err = h.run(ctx, "systemctl", "--user", "set-property", "--runtime", "dyna.slice", fmt.Sprintf("MemoryMax=%d", result.MemBytes))
@@ -97,6 +94,15 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	}
 	add(CheckForward, h.checkForward(ctx, o))
 	return result
+}
+
+// capacity creates the host data directory before reading its free space.
+func (h *Host) capacity(ctx context.Context, o CheckOptions) (int, int64, int64, error) {
+	output, err := h.run(ctx, "bash", "-c", `set -e -o pipefail; mkdir -p -m 0700 -- "$1"; getconf _NPROCESSORS_ONLN; awk '/MemTotal:|MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return parseCapacity(output, o.MemoryFloor, o.DiskFloor)
 }
 
 // parseCapacity validates the host probe and reserves the host floor once.
