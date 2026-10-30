@@ -16,6 +16,7 @@ export function installRouterShim(state: object): void {
       set: (value: unknown) => { Reflect.set(state, name, value) },
     })
   }
+  Reflect.set(state, 'voiceHost', undefined)
   Reflect.set(state, 'router', shim)
   Reflect.set(state, 'settingsPanel', { closeRoomSettings: () => { Reflect.set(state, 'showRoomSettings', false) } })
 }
