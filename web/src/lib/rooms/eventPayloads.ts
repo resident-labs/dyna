@@ -237,7 +237,7 @@ export function serviceFailedEvent(post: EventPost): ServiceFailedEvent | undefi
   return isServiceFailedEvent(post.payload) ? post.payload : undefined
 }
 
-// serviceWaitEvent returns the typed payload of a pinned service that is waiting.
+// serviceWaitEvent returns the typed payload of a service that is waiting.
 export function serviceWaitEvent(post: EventPost): ServiceWaitEvent | undefined {
   if (post.kind !== 'service' || post.notice?.kind !== 'waiting') return undefined
   return isServiceWaitEvent(post.payload) ? post.payload : undefined
