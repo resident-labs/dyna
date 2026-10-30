@@ -31,6 +31,9 @@ type Process struct {
 }
 type Executor func(context.Context, Process) error
 
+// newCommand builds each child command. Tests replace it to inspect the bounds Execute sets.
+var newCommand = Command
+
 // Execute kills the process group on cancellation, including command descendants.
 // No lock files are passed through ExtraFiles. Clean marks inherited lock
 // descriptors close-on-exec before launching the child.
@@ -53,7 +56,7 @@ func Execute(ctx context.Context, p Process) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.Timeout)
 	defer cancel()
-	cmd := Command(ctx, p.Args[0], p.Args[1:]...)
+	cmd := newCommand(ctx, p.Args[0], p.Args[1:]...)
 	cmd.Dir, cmd.Env = p.Dir, p.Env
 	cmd.Stdout, cmd.Stderr = p.Output, p.Stderr
 	if cmd.Stderr == nil {
