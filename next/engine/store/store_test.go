@@ -23,6 +23,27 @@ func TestFreshSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestInterruptedInitializationCanRestart(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".store-init-interrupted"), []byte("incomplete"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestV1Guard(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "dyna.db"), []byte("v1"), 0600); err != nil {
