@@ -10,7 +10,7 @@
   let { item, label, onsave, sourceInvalid = false }: { item: SettingItem; label: string; onsave: (value: string) => Promise<void>; sourceInvalid?: boolean } = $props()
 
   let draft = $state<string | null>(null)
-  let sourceChoice = $state<'release' | 'checkout' | null>(null)
+  let sourceChoice = $state<'checkout' | null>(null)
   const sourceMode = $derived(sourceChoice ?? (item.value ? 'checkout' : 'release'))
   const fixed = $derived(item.source === 'env')
 
@@ -18,7 +18,7 @@
     if (draft === null || draft === settingDisplay(item)) { draft = null; return }
     // Only the text that was saved clears, so an edit typed meanwhile stays.
     const sent = draft
-    await onsave(sent).then(() => { if (draft === sent) draft = null }, () => {})
+    await onsave(sent).then(() => { if (draft === sent) { draft = null; if (item.key === 'updater.source') sourceChoice = null } }, () => {})
   }
 
   // A choice saves at once; the row shows a refusal, and the control keeps
@@ -33,7 +33,7 @@
 
 {#if item.key === 'updater.source'}
   <div class="source">
-    <Segmented options={[["release", "Release"], ["checkout", "Source checkout"]]} value={sourceMode} {label} onchange={(value: string) => { if (value === 'checkout') sourceChoice = 'checkout'; else onsave('').then(() => { sourceChoice = 'release' }, () => { sourceChoice = null }) }} />
+    <Segmented options={[["release", "Release"], ["checkout", "Source checkout"]]} value={sourceMode} {label} onchange={(value: string) => { if (value === 'checkout') sourceChoice = 'checkout'; else onsave('').then(() => { sourceChoice = null }, () => { sourceChoice = null }) }} />
     {#if sourceMode === 'checkout'}
       <input class="field mono" aria-label="Source checkout path" placeholder="/path/to/checkout" disabled={fixed} value={draft ?? String(item.value)}
         oninput={(e) => (draft = e.currentTarget.value)} onkeydown={key} onblur={commit} />
