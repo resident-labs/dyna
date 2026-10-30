@@ -93,6 +93,7 @@
             {#if accounts.length > 1 && onopen}<button class="identity-link" aria-label="Open details for {accountLabel(account)}" onclick={(event) => onopen?.(account, event)}></button>{/if}
             <b>{accountLabel(account)}</b>
             <span class="facts">{[signIn || block ? '' : accountStatus(account, '', now(), ''), accountKindLabel(account.kind), account.servesHere ? '' : 'Other repos only', roomScope && account.active && !account.activeHere ? 'Global choice' : ''].filter(Boolean).join(' · ')}</span>
+            {#if accounts.length > 1 && account.activeHere}<span class="facts">In use</span>{/if}
             {#if signIn}<StatusPill label="Needs sign-in" tone="danger" />
             {:else if block}<StatusPill label={block.ids.includes('seven_day') ? 'Weekly limit reached' : 'Session limit reached'} tone="warning" detail={block.reset ? `Resets ${dateTime(block.reset)}` : ''} />{/if}
           </div>
