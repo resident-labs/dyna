@@ -324,6 +324,10 @@ export interface PromptOptions {
 	streamingBehavior?: "steer" | "followUp";
 	/** Source of input for extension input event handlers. Defaults to "interactive". */
 	source?: InputSource;
+	/** Dyna delivery identity, recorded when the user message is consumed. */
+	deliveryId?: string;
+	/** Further delivery inputs to persist before the first model call. */
+	additionalInputs?: { message: string; deliveryId: string }[];
 	/** Internal hook used by RPC mode to observe how an accepted prompt was dispatched. Not called if the prompt is rejected. */
 	preflightResult?: (disposition: PromptDisposition) => void;
 }
@@ -1882,12 +1886,12 @@ export class AgentSession {
 	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
 	 * @param onStarted Called once the run's messages are prepared, before the first request.
 	 */
-	private async _startRun(trigger: BeforeAgentStartTrigger, onStarted?: () => void): Promise<void> {
+	private async _startRun(trigger: BeforeAgentStartTrigger | undefined, onStarted?: () => void, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<void> {
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
 		try {
-			messages = await this._prepareRun(trigger);
+			messages = trigger ? await this._prepareRun(trigger, deliveryId, additionalInputs) : [];
 		} catch (error) {
 			this._isAgentRunActive = false;
 			this._flushPendingBashMessages();
@@ -1908,7 +1912,8 @@ export class AgentSession {
 		// are dropped, so a tool that never registers does not stay pending.
 		this._pendingToolNames.clear();
 		try {
-			await this.agent.prompt(messages);
+			if (trigger) await this.agent.prompt(messages);
+			else await this.agent.continue();
 			while (!this._agentRunAbortRequested) {
 				if (await this._handlePostAgentRun()) {
 					if (this._agentRunAbortRequested) break;
@@ -1935,7 +1940,7 @@ export class AgentSession {
 	 * message followed by pending nextTurn messages (consumed here) and handler messages, with a
 	 * system patch first when the prompt changed.
 	 */
-	private async _prepareRun(trigger: BeforeAgentStartTrigger): Promise<AgentMessage[]> {
+	private async _prepareRun(trigger: BeforeAgentStartTrigger, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<AgentMessage[]> {
 		// Check if we need to compact before sending (catches aborted responses).
 		// The starting message is sent below, so do not call agent.continue() here.
 		const lastAssistant = this._findLastAssistantMessage();
@@ -1964,10 +1969,12 @@ export class AgentSession {
 				normalized.hints.length > 0 ? `${trigger.prompt}\n\n${normalized.hints.join("\n")}` : trigger.prompt;
 			messages.push({
 				role: "user",
+				deliveryId,
 				content: [{ type: "text", text }, ...normalized.images],
 				timestamp: Date.now(),
 			});
 		}
+		messages.push(...additionalInputs);
 		// Inject any pending "nextTurn" messages as context alongside the starting message
 		messages.push(...this._pendingNextTurnMessages);
 		this._pendingNextTurnMessages = [];
@@ -2111,7 +2118,7 @@ export class AgentSession {
 		// Handle extension commands first (execute immediately, even during streaming)
 		// Extension commands manage their own LLM interaction via pi.sendMessage()
 		if (expandPromptTemplates && text.startsWith("/")) {
-			const handled = await this._tryExecuteExtensionCommand(text);
+			const handled = await this._tryExecuteExtensionCommand(text, options?.deliveryId !== undefined);
 			if (handled) {
 				// Extension command executed, no prompt to send
 				preflightResult?.("handled");
@@ -2133,6 +2140,7 @@ export class AgentSession {
 			this.isStreaming ? options?.streamingBehavior : undefined,
 		);
 		if (!processedInput) {
+			if (options?.deliveryId !== undefined) throw new Error("Delivery input was handled by an extension");
 			preflightResult?.("handled");
 			return;
 		}
@@ -2147,15 +2155,16 @@ export class AgentSession {
 
 		// If streaming, queue via steer() or followUp() based on option
 		if (this.isStreaming) {
+			if (options?.additionalInputs?.length) throw new Error("Batch input requires an idle session");
 			if (!options?.streamingBehavior) {
 				throw new Error(
 					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
 				);
 			}
 			if (options.streamingBehavior === "followUp") {
-				await this._queueFollowUp(expandedText, currentImages);
+				await this._queueFollowUp(expandedText, currentImages, options.deliveryId);
 			} else {
-				await this._queueSteer(expandedText, currentImages);
+				await this._queueSteer(expandedText, currentImages, options.deliveryId);
 			}
 			preflightResult?.("queued");
 			return;
@@ -2181,15 +2190,67 @@ export class AgentSession {
 			throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
 		}
 
+		const additionalInputs: AgentMessage[] = [];
+		for (const input of options?.additionalInputs ?? []) {
+			const processed = await this._runInputHandlers(input.message, undefined, options?.source ?? "interactive");
+			if (!processed) throw new Error("Delivery input was handled by an extension");
+			let text = processed.text;
+			if (expandPromptTemplates) {
+				text = expandPromptTemplate(this._expandSkillCommand(text), [...this.promptTemplates]);
+			}
+			const normalized = await this._normalizePromptImages(processed.images);
+			if (normalized.hints.length > 0) text += `\n\n${normalized.hints.join("\n")}`;
+			additionalInputs.push({
+				role: "user",
+				deliveryId: input.deliveryId,
+				content: [{ type: "text", text }, ...normalized.images],
+				timestamp: Date.now(),
+			});
+		}
 		await this._startRun({ messageType: "user", prompt: expandedText, images: currentImages }, () =>
 			preflightResult?.("started"),
+			options?.deliveryId,
+			additionalInputs,
 		);
+	}
+
+	/**
+	 * Continue a recovered run. Missing tool results are marked unknown and never rerun.
+	 */
+	async continueRun(onStarted?: () => void): Promise<void> {
+		if (this.isStreaming) throw new Error("Agent is already processing");
+		const messages = this.agent.state.messages;
+		let assistantIndex = -1;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].role === "assistant") { assistantIndex = i; break; }
+		}
+		if (assistantIndex >= 0) {
+			const assistant = messages[assistantIndex] as AssistantMessage;
+			const results = new Set(messages.slice(assistantIndex + 1).flatMap((message) =>
+				message.role === "toolResult" ? [message.toolCallId] : [],
+			));
+			for (const block of assistant.content) {
+				if (block.type !== "toolCall" || results.has(block.id)) continue;
+				const result: ToolResultMessage = {
+					role: "toolResult", toolCallId: block.id, toolName: block.name,
+					content: [{ type: "text", text: "interrupted; state unknown" }],
+					isError: true, timestamp: Date.now(),
+				};
+				this.sessionManager.appendMessage(result);
+				this.agent.state.messages = [...this.agent.state.messages, result];
+			}
+		}
+		const last = this.agent.state.messages.at(-1);
+		if (!last || last.role === "assistant" || last.role === "system") {
+			throw new Error("Recovered session has no pending input or tool result");
+		}
+		await this._startRun(undefined, onStarted);
 	}
 
 	/**
 	 * Try to execute an extension command. Returns true if command was found and executed.
 	 */
-	private async _tryExecuteExtensionCommand(text: string): Promise<boolean> {
+	private async _tryExecuteExtensionCommand(text: string, rejectDelivery: boolean): Promise<boolean> {
 		// Parse command name and args
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
@@ -2197,6 +2258,7 @@ export class AgentSession {
 
 		const command = this._extensionRunner.getCommand(commandName);
 		if (!command) return false;
+		if (rejectDelivery) throw new Error("Delivery input was handled by an extension");
 
 		// Get command context from extension runner (includes session control methods)
 		const ctx = this._extensionRunner.createCommandContext();
@@ -2251,6 +2313,7 @@ export class AgentSession {
 		images: ImageContent[] | undefined,
 		behavior: "steer" | "followUp",
 		source: InputSource,
+		deliveryId?: string,
 	): Promise<QueuedInputDisposition> {
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -2268,9 +2331,9 @@ export class AgentSession {
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 
 		if (behavior === "steer") {
-			await this._queueSteer(expandedText, processedInput.images);
+			await this._queueSteer(expandedText, processedInput.images, deliveryId);
 		} else {
-			await this._queueFollowUp(expandedText, processedInput.images);
+			await this._queueFollowUp(expandedText, processedInput.images, deliveryId);
 		}
 		return "queued";
 	}
@@ -2287,9 +2350,9 @@ export class AgentSession {
 	async steer(
 		text: string,
 		images?: ImageContent[],
-		options?: { source?: InputSource },
+		options?: { source?: InputSource; deliveryId?: string },
 	): Promise<QueuedInputDisposition> {
-		return this._queueUserInput(text, images, "steer", options?.source ?? "interactive");
+		return this._queueUserInput(text, images, "steer", options?.source ?? "interactive", options?.deliveryId);
 	}
 
 	/**
@@ -2303,15 +2366,15 @@ export class AgentSession {
 	async followUp(
 		text: string,
 		images?: ImageContent[],
-		options?: { source?: InputSource },
+		options?: { source?: InputSource; deliveryId?: string },
 	): Promise<QueuedInputDisposition> {
-		return this._queueUserInput(text, images, "followUp", options?.source ?? "interactive");
+		return this._queueUserInput(text, images, "followUp", options?.source ?? "interactive", options?.deliveryId);
 	}
 
 	/**
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueSteer(text: string, images?: ImageContent[], deliveryId?: string): Promise<void> {
 		this._steeringMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -2320,6 +2383,7 @@ export class AgentSession {
 		}
 		this.agent.steer({
 			role: "user",
+			deliveryId,
 			content,
 			timestamp: Date.now(),
 		});
@@ -2328,14 +2392,14 @@ export class AgentSession {
 	/**
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueFollowUp(text: string, images?: ImageContent[], deliveryId?: string): Promise<void> {
 		this._followUpMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.followUp({ role: "user", content, timestamp: Date.now() });
+		this.agent.followUp({ role: "user", deliveryId, content, timestamp: Date.now() });
 	}
 
 	/**
