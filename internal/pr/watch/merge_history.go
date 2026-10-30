@@ -7,25 +7,12 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/pr/state"
 	appstate "dyna-agent/internal/state"
 )
-
-// MergeHistoryEntry is one trial, publish, or decision of the merge service.
-type MergeHistoryEntry struct {
-	Kind    string    `json:"kind"`    // "trial", "publish", or "decision"
-	Outcome string    `json:"outcome"` // "passed", "failed", "published", or "recorded"
-	Repo    string    `json:"repo"`
-	Branch  string    `json:"branch"`
-	Head    string    `json:"head"` // tested commit; the new main commit for a publish
-	Changes []string  `json:"changes"`
-	Detail  string    `json:"detail,omitempty"` // failure evidence or a decision line
-	At      time.Time `json:"at"`
-}
 
 const (
 	mergeHistoryKept = 500 // rows kept for each repository

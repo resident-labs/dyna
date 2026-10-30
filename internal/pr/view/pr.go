@@ -21,14 +21,6 @@ import (
 	"strings"
 )
 
-type PRConfig struct {
-	MergeMaxParallel int    `json:"mergeMaxParallel"`
-	GitHubAccess     string `json:"githubAccess"`
-	ReviewPublishing string `json:"reviewPublishing"`
-	ReviewerProfile  string `json:"reviewerProfile"`
-	ReviewerSession  string `json:"reviewerSession"`
-}
-
 // Watcher uses PR state beside the existing session store.
 func (s *Service) Watcher() *watch.Service {
 	p := watch.New()
