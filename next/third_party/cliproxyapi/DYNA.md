@@ -8,7 +8,9 @@ P0 adds this documentation and changes no upstream CLIProxyAPI file. It changes 
 
 The v1 gofmt check, `scripts/ci-gofmt.sh`, skips this folder. One upstream test file does not pass gofmt, and Dyna keeps upstream formatting unchanged. This is a change to Dyna's script, not to the vendored source.
 
-Each later patch to this folder must be its own commit. Each patch must add an entry here that names its reason and the Dyna code it serves. No patch exists yet.
+Each later patch to this folder must be its own commit. Each patch must add an entry here that names its reason and the Dyna code it serves.
+
+- The SDK builder accepts an already-bound listener. `engine/model` uses it to avoid a loopback port reservation race that could expose the client key.
 
 ## Update
 
