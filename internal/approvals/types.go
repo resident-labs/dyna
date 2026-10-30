@@ -55,20 +55,50 @@ type FileSnapshot struct {
 	Data []byte `json:"data"`
 }
 
+// Media binds an attachment post to sanitized bytes and an argument path.
+type Media struct {
+	Path         string `json:"path"`
+	Name         string `json:"name"`
+	PostID       string `json:"postId"`
+	AttachmentID string `json:"attachmentId"`
+	SHA256       string `json:"sha256"`
+}
+
+// MediaVisibility records the repository visibility approved for media.
+type MediaVisibility string
+
+const (
+	MediaVisibilityPublic   MediaVisibility = "public"
+	MediaVisibilityPrivate  MediaVisibility = "private"
+	MediaVisibilityInternal MediaVisibility = "internal"
+)
+
+// MediaDestination pins the target checked before uploading.
+type MediaDestination struct {
+	Visibility MediaVisibility `json:"visibility"`
+	Number     int             `json:"number,omitempty"`
+	Host       string          `json:"host"`
+	Base       string          `json:"base"`
+	Head       string          `json:"head"`
+}
+
 // RequestInput is the ApprovalRequest RPC payload for a GitHub write.
 type RequestInput struct {
 	Argv  []string       `json:"argv"`
 	Cwd   string         `json:"cwd"`
 	Repo  string         `json:"repo"`
 	Files []FileSnapshot `json:"files,omitempty"`
+	Media []Media        `json:"media,omitempty"`
 }
 
 // GHPayload is the exact stored payload of a gh request.
 type GHPayload struct {
-	Argv  []string       `json:"argv"`
-	Cwd   string         `json:"cwd"`
-	Repo  string         `json:"repo"`
-	Files []FileSnapshot `json:"files,omitempty"`
+	MediaDestination MediaDestination `json:"mediaDestination,omitempty"`
+	Argv             []string         `json:"argv"`
+	Cwd              string           `json:"cwd"`
+	Repo             string           `json:"repo"`
+	Files            []FileSnapshot   `json:"files,omitempty"`
+	Media            []Media          `json:"media,omitempty"`
 }
 
 // CreateInput is the typed input to the kind-independent core.

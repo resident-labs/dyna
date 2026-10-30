@@ -114,6 +114,12 @@ func publicText(cmd *exec.Cmd) (string, error) {
 		if flag, rest, ok := shortFlag(args[i]); ok {
 			name, value, attached = flag, strings.TrimPrefix(rest, "="), true
 		}
+		if name == "--attach" && args[0] == "pr" && (args[1] == "create" || args[1] == "comment") {
+			if !attached {
+				i++
+			}
+			continue
+		}
 		if generatedTextFlags[name] {
 			return "", errUninspectableText
 		}
