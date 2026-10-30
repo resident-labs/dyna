@@ -102,6 +102,25 @@ func TestCLIRoomCallsStayInCallerRoom(t *testing.T) {
 	}
 }
 
+func TestStartNamedRunRoutesTargetThroughEngine(t *testing.T) {
+	storetest.Isolate(t)
+	s := testServices(t, false)
+	rec, err := s.rooms.Notify.Rooms.Create(room.CreateInput{Name: "named-run", Repo: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, _, err := callsFor(s, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Owner}, authority.Actor{Role: authority.Owner})
+	req := roomsvc.StartNamedRunRequest{Room: rec.ID, Name: "deep-research", Input: json.RawMessage(`{"question":"x"}`), ResultTo: "missing-target"}
+	_, err = calls["StartNamedRun"](ctx, cliArgs(t, req))
+	if err == nil || !strings.Contains(err.Error(), "missing-target") {
+		t.Fatalf("target was not resolved: %v", err)
+	}
+}
+
 func TestStartRunUsesCLIRule(t *testing.T) {
 	storetest.Isolate(t)
 	s := testServices(t, false)
