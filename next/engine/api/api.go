@@ -28,7 +28,16 @@ func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
-	call(mux, contract.MethodOpSubmit, c, user, a.service.OpSubmit)
+	call(mux, contract.MethodOpSubmit, c, user, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+		if box(c) {
+			if req.Operation.Room == "" {
+				req.Operation.Room = c.Room
+			} else if req.Operation.Room != c.Room {
+				return contract.OpSubmitResponse{}, forbidden()
+			}
+		}
+		return a.service.OpSubmit(ctx, p, req)
+	})
 	call(mux, contract.MethodOpDecide, c, user, a.service.OpDecide)
 	call(mux, contract.MethodOpWithdraw, c, user, a.service.OpWithdraw)
 	call(mux, contract.MethodOpList, c, user, a.service.OpList)
