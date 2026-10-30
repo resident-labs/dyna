@@ -517,7 +517,9 @@ func runJournaled(ctx context.Context, p profile.Profile, prompt, cwd string, al
 		if resume != "" {
 			sess.ResumeID, sess.ForkFrom, task = resume, "", accountFailoverPrompt
 		}
-		return runJournaledOnce(ctx, p, task, cwd, allowRecovery, nudgeDelay, journal, steeringOpts, sess, e)
+		return retryStartupNotReady(ctx, func() (Result, error) {
+			return runJournaledOnce(ctx, p, task, cwd, allowRecovery, nudgeDelay, journal, steeringOpts, sess, e)
+		}, engineStarted, time.Now, waitStartup)
 	})
 }
 
