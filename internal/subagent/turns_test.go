@@ -100,8 +100,8 @@ func TestTurnFileFromAnOlderBinaryCannotReplaceTheRow(t *testing.T) {
 		t.Fatalf("after the next write, the turn reads %q; want the canonical row", got)
 	}
 	after, _ := s.turnVersion(id, 1)
-	if after == before {
-		t.Fatal("the canonical update did not move the turn's version")
+	if after != before {
+		t.Fatal("an unchanged canonical update moved the turn's version")
 	}
 	if again, _ := s.turnVersion(id, 1); again != after {
 		t.Fatalf("a read changed the canonical revision: %s then %s", after, again)

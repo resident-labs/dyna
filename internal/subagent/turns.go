@@ -1,8 +1,10 @@
 package subagent
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -128,11 +130,26 @@ func turnRevision(revision int64) string { return "r" + strconv.FormatInt(revisi
 
 // saveTurnRow writes turn n of session id with the next revision.
 func saveTurnRow(ctx context.Context, db *sql.DB, id string, n int, raw []byte) (int64, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return 0, err
+	}
+	canonical, err := json.Marshal(fields)
+	if err != nil {
+		return 0, err
+	}
 	var revision int64
-	err := state.For(db).Write(ctx, sessionlife.Changed(id), func(conn *sql.Conn) error {
-		var err error
+	err = state.For(db).WriteChanged(ctx, sessionlife.Changed(id), func(conn *sql.Conn) (bool, error) {
+		previous, current, err := resolvedTurn(ctx, conn, id, n)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+		if err == nil && bytes.Equal(previous, canonical) {
+			revision = current
+			return false, nil
+		}
 		revision, err = saveTurnConn(ctx, conn, id, n, raw)
-		return err
+		return err == nil, err
 	})
 	return revision, err
 }
