@@ -558,6 +558,12 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		s.admit.Unlock()
 		return failure(err)
 	}
+	// A session without turns has no work in its box, so no archive ack is due. The check reads durable turns, so a restart makes the same choice.
+	hasTurns, err := s.store.SessionHasTurns(ctx, session.ID)
+	if err != nil {
+		s.admit.Unlock()
+		return failure(err)
+	}
 	if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
 		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
 		if err != nil {
@@ -583,15 +589,13 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 	if err != nil {
 		return failure(err)
 	}
-	if !discard && current.State != contract.BoxDeleted {
-		if session.Repo != "" {
-			if current.Reason != "" {
-				if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
-					return failure(err)
-				}
+	if !discard && hasTurns && current.State != contract.BoxDeleted {
+		if current.Reason != "" {
+			if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
+				return failure(err)
 			}
-			return nil
 		}
+		return nil
 	}
 	return s.finishClose(ctx, session, current, caller, discard)
 }

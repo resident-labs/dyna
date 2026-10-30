@@ -199,6 +199,7 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
+	connectAgent(ctx, t, s, session)
 	_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
 	if e != nil {
 		t.Fatal(e)
@@ -258,6 +259,8 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	connectAgent(ctx, t, s, child.Session)
+	connectAgent(ctx, t, s, parent)
 	record, err := s.store.Session(ctx, parent)
 	if err != nil {
 		t.Fatal(err)
@@ -281,19 +284,32 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if e := s.ResumeClosures(ctx); e != nil {
 		t.Fatal(e)
 	}
+	childAck := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	if _, e := s.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
+	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
 	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
 		t.Fatalf("close order: %+v, %v", events, err)
 	}
 }
 
-func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
+func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	s, _, session, ctx := setup(t)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
 	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectAgent(ctx, t, s, session)
+	current, err = s.store.Box(ctx, record.Box)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,8 +320,44 @@ func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err = s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxClosing {
+		t.Fatalf("box %+v, error %v, want closing until the box acknowledges the archive", current, err)
+	}
+}
+
+func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
+	s, room, root, ctx := setup(t)
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session})
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel // the initial turn
+	connectAgent(ctx, t, s, child.Session)
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: child.Session}); e != nil {
+		t.Fatal(e)
+	}
+	msg := <-channel
+	if _, ok := msg.Body.(contract.Archive); !ok {
+		t.Fatalf("expected archive, got %+v", msg.Body)
+	}
+	record, err := s.store.Session(ctx, child.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxClosing {
+		t.Fatalf("box %+v, error %v, want closing before the archive ack", current, err)
+	}
+	if _, e := s.ArchiveDone(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	current, err = s.store.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxDeleted {
-		t.Fatalf("box %+v, error %v", current, err)
+		t.Fatalf("box %+v, error %v, want deleted after the archive ack", current, err)
 	}
 }
 

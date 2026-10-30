@@ -70,6 +70,12 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 	if current.Reason != "" {
 		return contract.ArchiveDoneResponse{}, nil
 	}
+	if session.Repo == "" && req.Repo == "" {
+		if err := s.finishClose(context.WithoutCancel(ctx), session, current, contract.Principal{Kind: contract.PrincipalEngine}, false); err != nil {
+			return contract.ArchiveDoneResponse{}, err
+		}
+		return contract.ArchiveDoneResponse{}, nil
+	}
 	if session.Repo == "" || session.Repo != req.Repo {
 		return contract.ArchiveDoneResponse{}, forbidden()
 	}
