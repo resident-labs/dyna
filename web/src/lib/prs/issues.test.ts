@@ -23,11 +23,11 @@ test('issueGroups orders the groups and puts older closed issues in Closed', () 
 
 const API = `export const api = {
   feedAround: () => Promise.resolve({ posts: [{ id: 'msg_local', text: 'Local body text' }] }),
-  issueWatches: () => Promise.resolve(globalThis.issueWatched ?? []),
+  issueWatches: () => globalThis.issueWatchFails ? Promise.reject(new Error('the web client has no method IssueWatches')) : Promise.resolve(globalThis.issueWatched ?? []),
   githubList: () => globalThis.issueListFails ? Promise.reject(new Error('No repository')) : Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
   githubView: (_r, _k, n) => globalThis.issueViewFails ? Promise.reject(new Error('Issue not found')) : Promise.resolve({ number: n, title: 'Issue ' + n, ...globalThis.issueItems.find((i) => i.number === n), body: 'Body text', comments: [] }),
   mergeControlStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve({ roomId: 'r', paused: false, queue: [], trials: [], localCIChecks: {} }) },
-}; export const openExternal = () => {}`
+}; export const openExternal = (url) => (globalThis.issueOpened ??= []).push(url)`
 
 // Bundle outside the test clock: only the mounted view is measured.
 const listCode = await bundle({ component: 'GitHub', api: API })
@@ -45,7 +45,7 @@ async function render(items: GitHubItem[], props: object = {}, wait = settle, sc
   mount(GitHub, { target, props: { roomId: 'r', kind: 'issue', ...props } })
   await wait()
   await wait()
-  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'localStorage', 'issueMergeCalls', 'issueItems', 'issueWatched', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
+  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'localStorage', 'issueMergeCalls', 'issueItems', 'issueWatched', 'issueWatchFails', 'issueOpened', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
 }
 
 test('the issue page hands its reference to the room composer', async () => {
@@ -246,7 +246,8 @@ test('local issues remain readable and actionable when GitHub fails', async () =
     assert.match(element(r.target, '.identity').textContent || '', /D-12/)
     assert.doesNotMatch(r.target.textContent || '', /msg_local/)
     need(elements(r.target, 'button').find((b) => b.getAttribute('aria-label') === 'Mention D-12 in chat')).click()
-    assert.match(r.target.textContent || '', /No repository/)
+    assert.match(r.target.textContent || '', /GitHub did not answer/)
+    assert.doesNotMatch(r.target.textContent || '', /No repository/, 'the raw error stays off the screen')
     // Dismiss sits in the row menu, so the row stays one line.
     need(elements(r.target, 'button').find((b) => b.getAttribute('aria-label') === 'More actions for D-12')).click()
     await settle()
@@ -299,18 +300,18 @@ test('an unresolved export is history, not a closed GitHub issue', () => {
 })
 
 // The Tracked view keeps the room's own issues and the GitHub issues it
-// watches, promoted or works on. A watched upstream issue outside the GitHub
+// watches or promoted. A watched upstream issue outside the GitHub
 // page keeps its saved facts, and the search matches GitHub rows here.
-test('tracked issues are the room issues plus watched, promoted and worked GitHub issues', () => {
+test('tracked issues are the room issues plus watched and promoted GitHub issues', () => {
   const local: RoomIssue = { id: 'msg_1', number: 7, title: 'Local seven', filedAt: 1, state: 'open', githubUrl: 'https://github.com/o/r/issues/3' }
   const upstream = issue(4028, 'needs-owner', { title: 'Upstream crash', url: 'https://github.com/up/r/issues/4028' })
   const page = [issue(1, 'needs-owner'), issue(2, 'working', { workingSession: 's1' }), issue(3, 'needs-owner'), issue(5, 'needs-owner')]
   const items = trackedIssueItems(page, [upstream, issue(5, 'needs-owner')], [local])
-  assert.deepEqual(items.map((i) => i.number), [2, 3, 5, 4028])
+  assert.deepEqual(items.map((i) => i.number), [3, 5, 4028], 'an issue with work but no watch stays in All')
   const rows = unifiedIssues(items, [local], 'all', 'all', '4028', false)
   assert.deepEqual(rows.map((i) => i.title), ['Upstream crash'])
   assert.deepEqual(unifiedIssues(items, [local], 'all', 'all', 'crash', false).map((i) => i.number), [4028])
-  assert.equal(unifiedIssues(items, [local], 'all', 'all', 'crash', true).length, 4, 'All trusts GitHub to have searched its rows')
+  assert.equal(unifiedIssues(items, [local], 'all', 'all', 'crash', true).length, 3, 'All trusts GitHub to have searched its rows')
 })
 
 test('the list scope is saved per room and per tab', () => {
@@ -325,10 +326,17 @@ test('the list scope is saved per room and per tab', () => {
 })
 
 test('the tracked Issues tab lists watched issues and says how to track one when empty', async () => {
-  Object.assign(globalThis, { issueWatched: [issue(4028, 'needs-owner', { title: 'Upstream crash' })] })
+  // GitHub fails here, so the panel cannot know the room repository: the
+  // watched upstream issue opens on GitHub, not as the room's own #4028.
+  const upstream = 'https://github.com/up/r/issues/4028'
+  Object.assign(globalThis, { issueListFails: true, issueWatched: [issue(4028, 'needs-owner', { title: 'Upstream crash', url: upstream })] })
   const r = await render([issue(1, 'needs-owner')], {}, microtasks, 'tracked')
   try {
     assert.deepEqual(elements(r.target, '.row .title').map((t) => t.textContent), ['Upstream crash'])
+    element(r.target, '.row').click()
+    await microtasks()
+    assert.deepEqual(Reflect.get(globalThis, 'issueOpened'), [upstream])
+    assert.equal(r.target.querySelector('.dscroll'), null)
   } finally { await r.done() }
   const empty = await render([issue(1, 'needs-owner')], {}, microtasks, 'tracked')
   try {
@@ -337,4 +345,21 @@ test('the tracked Issues tab lists watched issues and says how to track one when
     await microtasks()
     assert.deepEqual(elements(empty.target, '.row .title').map((t) => t.textContent), ['Issue 1'])
   } finally { await empty.done() }
+})
+
+// A failed list call, such as an older engine without IssueWatches, shows a
+// designed error with Retry and never the engine's raw text (rule r8).
+test('a failed watched issues call shows Retry instead of the raw error', async () => {
+  Object.assign(globalThis, { issueWatchFails: true, issueWatched: [issue(4028, 'needs-owner', { title: 'Upstream crash' })] })
+  const r = await render([], {}, microtasks, 'tracked')
+  try {
+    const failed = element(r.target, '[role=alert]')
+    assert.match(failed.textContent, /Watched issues did not load/)
+    assert.doesNotMatch(r.target.textContent || '', /no method|IssueWatches/)
+    Object.assign(globalThis, { issueWatchFails: false })
+    need(elements(failed, 'button').find((b) => b.textContent === 'Retry')).click()
+    await microtasks()
+    assert.equal(r.target.querySelector('[role=alert]'), null)
+    assert.deepEqual(elements(r.target, '.row .title').map((t) => t.textContent), ['Upstream crash'])
+  } finally { await r.done() }
 })

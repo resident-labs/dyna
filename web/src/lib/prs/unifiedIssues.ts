@@ -43,15 +43,16 @@ export function issueWork(it: IssueRow): IssueWork {
   return it.group === 'working' || it.group === 'has-pr' || it.workingSessionLive ? 'in-progress' : 'unhandled'
 }
 
-const urlKey = (url: string) => url.replace(/\/+$/, '').toLowerCase()
+export const urlKey = (url: string) => url.replace(/\/+$/, '').toLowerCase()
 
 // trackedIssueItems is the GitHub half of the Tracked issue view: the issues
-// the room watches, the issues its own issues were promoted to, and the issues
-// a session works on. A watched issue outside the loaded GitHub page keeps the
-// facts its watch saved.
+// the room watches and the issues its own issues were promoted to. The watch
+// list comes from dyna.db, so a watched issue outside the loaded GitHub page
+// keeps the facts its watch saved. A promoted issue outside the page stays as
+// its room issue row.
 export function trackedIssueItems(github: readonly GitHubItem[], watched: readonly GitHubItem[], local: readonly RoomIssue[]): GitHubItem[] {
   const own = new Set([...watched.map(i => urlKey(i.url)), ...local.flatMap(i => i.githubUrl ? [urlKey(i.githubUrl)] : [])])
-  const kept = github.filter(i => own.has(urlKey(i.url)) || !!i.workingSession)
+  const kept = github.filter(i => own.has(urlKey(i.url)))
   const seen = new Set(kept.map(i => urlKey(i.url)))
   return [...kept, ...watched.filter(i => !seen.has(urlKey(i.url)))]
 }
