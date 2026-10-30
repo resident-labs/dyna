@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -126,4 +127,21 @@ func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, file str
 		delay = min(2*delay, transcriptRetryMax)
 	}
 	return archived(ctx)
+}
+
+// waitRun ends Run when the box channel or server fails, or when ctx ends. A runner error ends Run only before a close starts. After that, closeBox decides when Run ends, so a failed turn report cannot cancel the transcript retry.
+func waitRun(ctx context.Context, errs <-chan error, runnerErrs <-chan error, closing *atomic.Bool) error {
+	for {
+		select {
+		case err := <-errs:
+			return err
+		case err := <-runnerErrs:
+			if !closing.Load() {
+				return err
+			}
+			log.Printf("runner error after close started: %v", err)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
