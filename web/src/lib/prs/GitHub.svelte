@@ -225,6 +225,16 @@
     load()
   }
 
+  // A session that starts or ends changes which issues have live room work,
+  // so the tracked issue list follows the room's live sessions.
+  let liveSessions = $derived(members.filter((m) => m.id && !m.closed && m.status !== 'dormant' && m.status !== 'closed').map((m) => m.id).sort().join(' '))
+  let liveVersion: string | null = null
+  $effect(() => {
+    const live = liveSessions
+    if (liveVersion !== null && liveVersion !== live && !inPRs && tracked && active) untrack(loadWatched)
+    liveVersion = live
+  })
+
   // Export changes the local row before GitHub's list contains the new issue.
   let localVersion: string | null = null
   $effect(() => {
