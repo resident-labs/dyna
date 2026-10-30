@@ -116,7 +116,7 @@ func TestLocalChangeOpenQueueHeadReplacementAndClose(t *testing.T) {
 	head := changeCommit(t, dir, "updated\n")
 	e.tick()
 	next, _ := e.s.Store.Get(r.ChangeID)
-	if next.Head != head || next.Round != 2 || next.Reviewer == assigned.Reviewer || next.Reviewer == "" || len(e.launches) != 2 {
+	if next.Head != head || next.Round != 2 || next.Reviewer != assigned.Reviewer || len(e.launches) != 1 || len(e.sent) != 1 || e.sent[0].Target != assigned.Reviewer {
 		t.Fatalf("local push: %+v", next)
 	}
 	again, created, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: dir})
