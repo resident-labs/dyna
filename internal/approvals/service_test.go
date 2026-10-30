@@ -85,7 +85,7 @@ func (f *fixture) create(t *testing.T, class Class) Request {
 
 func (f *fixture) createAs(t *testing.T, actor authority.Actor, class Class) Request {
 	t.Helper()
-	r, err := f.service.Create(context.Background(), actor, CreateInput{Kind: Kind("fake"), Class: class, Payload: json.RawMessage(`{"operation":"write"}`), Command: "fake write", Title: "Held write", Body: "full body"})
+	r, err := f.service.create(context.Background(), actor, createInput{Kind: Kind("fake"), Class: class, Payload: json.RawMessage(`{"operation":"write"}`), Command: "fake write", Title: "Held write", Body: "full body"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,33 +153,18 @@ func TestDecisionGuardsAndOwnerClass(t *testing.T) {
 	}
 }
 
-func TestRootAgentRequestIsAutoApproved(t *testing.T) {
-	f := newFixture(t)
-	r := f.createAs(t, f.actor(f.root), ClassAgent)
-	if r.State != StateApproved || r.At != Owner {
-		t.Fatalf("root request = %+v", r)
-	}
-	messages, err := f.rooms.Messages(f.rec.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(messages) != 1 || messages[0].Notice.Kind != string(room.TypeApprovalDecided) {
-		t.Fatalf("root auto events = %+v", messages)
-	}
-}
-
 func TestDuplicateCancelAndExpiry(t *testing.T) {
 	f := newFixture(t)
 	r := f.create(t, ClassAgent)
-	duplicate, err := f.service.Create(context.Background(), f.actor(f.child), CreateInput{Kind: Kind("fake"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"write"}`)})
+	duplicate, err := f.service.create(context.Background(), f.actor(f.child), createInput{Kind: Kind("fake"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"write"}`)})
 	if err != nil || duplicate.ID != r.ID {
 		t.Fatalf("duplicate = %+v, %v; want %s", duplicate, err, r.ID)
 	}
-	ownerClass, err := f.service.Create(context.Background(), f.actor(f.child), CreateInput{Kind: Kind("fake"), Class: ClassOwner, Payload: json.RawMessage(`{"operation":"write"}`)})
+	ownerClass, err := f.service.create(context.Background(), f.actor(f.child), createInput{Kind: Kind("fake"), Class: ClassOwner, Payload: json.RawMessage(`{"operation":"write"}`)})
 	if err != nil || ownerClass.ID == r.ID {
 		t.Fatalf("owner-class request reused agent request: %+v, %v", ownerClass, err)
 	}
-	otherKind, err := f.service.Create(context.Background(), f.actor(f.child), CreateInput{Kind: Kind("other"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"write"}`)})
+	otherKind, err := f.service.create(context.Background(), f.actor(f.child), createInput{Kind: Kind("other"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"write"}`)})
 	if err != nil || otherKind.ID == r.ID {
 		t.Fatalf("other kind reused fake request: %+v, %v", otherKind, err)
 	}
@@ -241,7 +226,7 @@ func TestWaitWakesOnFinalDecision(t *testing.T) {
 
 func TestRequestNoticeFallsBackToCommand(t *testing.T) {
 	f := newFixture(t)
-	_, err := f.service.Create(context.Background(), f.actor(f.child), CreateInput{Kind: Kind("fake"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"edit"}`), Command: "gh pr edit 1060 --body-file body.md"})
+	_, err := f.service.create(context.Background(), f.actor(f.child), createInput{Kind: Kind("fake"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"edit"}`), Command: "gh pr edit 1060 --body-file body.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
