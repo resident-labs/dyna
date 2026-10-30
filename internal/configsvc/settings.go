@@ -43,7 +43,7 @@ var help = map[string]string{
 	settings.KeyVoiceModel:             "The voice provider's model, such as qwen3.5-omni-plus-realtime for dashscope. Empty uses the provider's default.",
 	settings.KeyVoiceURL:               "The voice provider's WebSocket address. Required for speech-to-speech, such as ws://host:8000/v1/realtime; for dashscope it overrides the public endpoint, as a Model Studio workspace model needs.",
 	settings.KeyComputersEnabled:       "Give agent sessions a lazy Linux computer when labwc is installed. Applies to the next harness turn.",
-	settings.KeyShellSilenceMinutes:    "Minutes without shell output log growth before one notice. 0 turns the notice off. Partial lines may not reach the log until a newline; capped logs are not watched.",
+	settings.KeyShellSilenceMinutes:    "Minutes of continuously observed local shell output inactivity before a notice. 0 turns notices off. CPU activity is not measured. Turn and workflow step output is not yet watched.",
 	settings.KeyComputersReminder:      "Minutes between reminders to a session whose computer is open: look at the screen with dyna computer shot, and stop the computer when done. A computer with keep on, one with a viewer, and a root computer get none. 0 turns reminders off. Applies to the next reminder.",
 	settings.KeyComputersRenderNode:    "GPU that Dyna computers render on: auto, or a /dev/dri/renderD* path. auto keeps computers off the GPU that drives the owner's display when another GPU exists. Applies to the next computer start; a running computer keeps its GPU until it stops.",
 	settings.KeySessionCheckInInterval: "Parent check-in interval (default 15m). Zero disables check-ins.",

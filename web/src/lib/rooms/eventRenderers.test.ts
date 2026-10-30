@@ -345,6 +345,7 @@ const fixtures: Record<string, EventPayload> = {
   'approval/result': { requestId: 'A-12', state: 'failed', exitCode: 1, url: 'https://github.com/acme/app/pull/9', output: ['gh: not found', 'exit 1'] },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
   'shell/output-silence': { shellId: 'sh_20261023-120000-0000000a', label: 'build', session: 'builder', minutes: 30 },
+  'shell/observed-output-inactivity': { shellId: 'sh_20261023-120000-0000000a', label: 'build', session: 'builder', minutes: 30 },
   'job/queued': {
     jobId: 'job_0123456789ab',
     node: 'pve',
@@ -613,6 +614,19 @@ test('a shell silence card names the session that started the job, and an old al
     web.unmount(mounted)
     target.remove()
   }
+})
+
+test('a shell inactivity card limits the claim to observed output', () => {
+  const payload = need(fixtures['shell/observed-output-inactivity'], 'the inactivity fixture is missing')
+  const post = postFor('shell', 'observed-output-inactivity', payload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.ShellInactivityCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  assert.match(target.textContent ?? '', /observed local output inactivity for 30 minutes/)
+  assert.match(target.textContent ?? '', /CPU activity is not measured/)
+  web.unmount(mounted)
+  target.remove()
 })
 
 test('a voice session row names the agent, the provider and the time used', () => {
