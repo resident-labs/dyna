@@ -32,6 +32,7 @@ func TestWritePolicy(t *testing.T) {
 		{name: "foreign upstream close", args: []string{"issue", "close", "3"}, target: TargetUpstream, author: "other", rule: "item-foreign-upstream", reason: ReasonForeignItem},
 		{name: "own comment", args: []string{"api", "repos/o/r/issues/comments/7", "-X", "PATCH", "-f", "body=x"}, target: TargetRoom, author: "bot", rule: "comment-own", class: approvals.ClassAgent},
 		{name: "foreign comment", args: []string{"api", "repos/o/r/issues/comments/7", "-X", "DELETE"}, target: TargetRoom, author: "other", rule: "comment-foreign", reason: ReasonForeignComment},
+		{name: "input foreign comment", args: []string{"api", "repos/o/r/issues/comments/7", "-X", "PATCH", "--input", "body.json"}, target: TargetRoom, author: "other", rule: "comment-foreign", reason: ReasonForeignComment},
 		{name: "unknown comment author", args: []string{"api", "repos/o/r/issues/comments/7", "-X", "DELETE"}, target: TargetUpstream, rule: "comment-foreign", reason: ReasonForeignComment},
 		{name: "failed rerun", args: []string{"run", "rerun", "3", "--failed"}, target: TargetRoom, rule: "rerun-failed", class: approvals.ClassAgent},
 		{name: "own run", args: []string{"run", "cancel", "3"}, target: TargetRoom, author: "bot", rule: "run-own", class: approvals.ClassAgent},
