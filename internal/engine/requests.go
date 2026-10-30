@@ -112,6 +112,11 @@ func checkRunnerCachedReply(ctx context.Context, _ []json.RawMessage) error {
 	return callspec.CheckRunnerRequestID(caller.Session, callspec.RequestOf(ctx))
 }
 
+// requestResultBound limits how long storing a call's result may take after
+// the call applied. No existing constant fits: callTimeout is unexported in
+// callspec and sets a read's deadline, not a store's.
+const requestResultBound = 5 * time.Second
+
 // requestRunner runs calls once per caller-scoped request key.
 type requestRunner struct {
 	w       *state.Writer
@@ -151,12 +156,17 @@ func (r *requestRunner) run(ctx context.Context, key, name string, call websvc.C
 	}
 	result, err := json.Marshal(res)
 	if err == nil {
-		saved, done, lookupErr := r.w.RequestDone(ctx, key)
+		// The call has applied. Its result is stored even if the caller has
+		// given up, or a retry would apply the call again. The bounded context
+		// keeps the request-call values from ctx and drops its cancellation.
+		storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestResultBound)
+		defer cancel()
+		saved, done, lookupErr := r.w.RequestDone(storeCtx, key)
 		if errors.Is(lookupErr, state.ErrRequestConflict) {
 			err = lookupErr
 		} else if lookupErr != nil || !done || !bytes.Equal(nullIfEmpty(saved), result) {
 			// A failed lookup keeps the existing finalization attempt.
-			err = r.w.FinishRequest(ctx, key, name, result)
+			err = r.w.FinishRequest(storeCtx, key, name, result)
 		}
 	}
 	if err != nil {
