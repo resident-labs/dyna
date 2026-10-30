@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/resident-labs/dyna/box/agent"
+	"github.com/resident-labs/dyna/contract"
 
 	"github.com/spf13/cobra"
 )
@@ -46,6 +47,14 @@ func newRootCmd() *cobra.Command {
 	var socket string
 	root.PersistentFlags().StringVar(&socket, "socket", defaultSocket(), "Engine socket")
 	addCLI(root, func() client { return newClient(socket) })
+	root.AddCommand(&cobra.Command{Use: "web", Long: "If the engine runs on another machine, forward its port first, for example ssh -L 7790:127.0.0.1:7790 <user>@<host>. Run dyna web on that machine and open the printed URL here.", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		r, err := call[contract.WebLoginRequest, contract.WebLoginResponse](cmd.Context(), newClient(socket), contract.MethodWebLogin, contract.WebLoginRequest{})
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), r.URL)
+		return err
+	}})
 	root.AddCommand(computerCommand("/run/dyna/agent.sock"))
 	addEngine(root)
 	return root

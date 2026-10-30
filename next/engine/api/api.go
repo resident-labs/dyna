@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -17,17 +18,29 @@ type API struct {
 	service Service
 	model   func(Caller) http.Handler
 	git     func(Caller) http.Handler
+	web     *Web
+	files   func(Caller) http.Handler
 }
 
 func New(service Service, model func(Caller) http.Handler) *API {
 	return &API{service: service, model: model}
 }
 
+func (a *API) SetFilesRoute(route func(Caller) http.Handler) { a.files = route }
+
 // SetGitRoute configures the per-box git route before opening sockets.
 func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
+	call(mux, contract.MethodWebLogin, c, func(c Caller) bool { return owner(c) && !c.Web }, func(ctx context.Context, p contract.Principal, req contract.WebLoginRequest) (contract.WebLoginResponse, *contract.Error) {
+		if a.web == nil {
+			return contract.WebLoginResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the engine was started without --web.listen"}
+		}
+		return a.web.login(ctx, p, req)
+	})
+	call(mux, contract.MethodRoomList, c, owner, a.service.RoomList)
+	call(mux, contract.MethodSessionList, c, user, a.service.SessionList)
 	call(mux, contract.MethodOpSubmit, c, user, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
 		if box(c) {
 			if req.Operation.Room == "" {
@@ -84,7 +97,11 @@ func (a *API) handler(c Caller) http.Handler {
 			return
 		}
 		var after int64
-		if s := r.URL.Query().Get("after"); s != "" {
+		s := r.URL.Query().Get("after")
+		if r.Header.Get("Last-Event-ID") != "" {
+			s = r.Header.Get("Last-Event-ID")
+		}
+		if s != "" {
 			n, err := strconv.ParseInt(s, 10, 64)
 			if err != nil || n < 0 {
 				writeError(w, invalid())
@@ -104,8 +121,15 @@ func (a *API) handler(c Caller) http.Handler {
 			return
 		}
 		f.Flush()
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
+			case <-ticker.C:
+				if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+					return
+				}
+				f.Flush()
 			case <-r.Context().Done():
 				return
 			case event, ok := <-ch:
@@ -116,7 +140,7 @@ func (a *API) handler(c Caller) http.Handler {
 				if err != nil {
 					return
 				}
-				if _, err = fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				if _, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", event.Seq, data); err != nil {
 					return
 				}
 				f.Flush()
@@ -156,6 +180,10 @@ func (a *API) handler(c Caller) http.Handler {
 			}
 		}
 	})
+	if user(c) && a.files != nil {
+		mux.Handle("/v1/files", a.files(c))
+		mux.Handle("/v1/files/", a.files(c))
+	}
 	if box(c) && a.git != nil {
 		mux.Handle("/git/", a.git(c))
 	}

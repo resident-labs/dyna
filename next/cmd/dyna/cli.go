@@ -42,10 +42,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
+	contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
 }
 type responseType interface {
-	contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
+	contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {

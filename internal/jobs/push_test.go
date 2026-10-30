@@ -98,6 +98,37 @@ func TestPushCommitSendsTheBaseCommit(t *testing.T) {
 	}
 }
 
+// An existing base ref stays available while another push updates a head.
+func TestPushCommitKeepsSharedBase(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base")
+	base := git("rev-parse", "HEAD")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "head")
+	head := git("rev-parse", "HEAD")
+	cache := filepath.Join(t.TempDir(), "repo.git")
+	x := Executor{Node: Conn{Name: "here"}}
+	if err := x.PushCommit(t.Context(), repo, cache, base, ""); err != nil {
+		t.Fatal(err)
+	}
+	// During the next push, another run can fetch this shared base.
+	hook := "#!/bin/sh\ngit cat-file -e " + base + " && git show-ref --verify --quiet refs/dyna/ci/" + base + "\n"
+	if err := os.WriteFile(filepath.Join(cache, "hooks", "update"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.PushCommit(t.Context(), repo, cache, head, base); err != nil {
+		t.Fatalf("shared base disappeared during push: %v", err)
+	}
+}
+
 // A second job can create the head ref while this push fails, as in the race
 // above. The base ref is still missing then, so the push must fail: a check
 // would diff against a base the node does not hold.
