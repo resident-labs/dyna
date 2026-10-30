@@ -586,6 +586,100 @@ var resultClock = time.Now
 // PruneBatch bounds one PruneResults delete, so no write holds the writer lock long.
 const PruneBatch = 100
 
+// PruneResultLogs removes old diagnostic text while retaining result status.
+// Live commits retain their evidence until the owning PR or trial is finished.
+func (s Store) PruneResultLogs(ctx context.Context, cutoff time.Time, keep map[string]bool) (int, error) {
+	db, err := s.open()
+	if err != nil {
+		return 0, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT repo, sha FROM local_ci_results WHERE recorded_at<? AND (instr(payload, '"logTail"') > 0 OR instr(payload, '"failureExcerpt"') > 0)`, cutoff.Unix())
+	if err != nil {
+		return 0, err
+	}
+	type key struct{ repo, sha string }
+	var old []key
+	for rows.Next() {
+		var k key
+		if err := rows.Scan(&k.repo, &k.sha); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if !keep[k.sha] {
+			old = append(old, k)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	changed := 0
+	for len(old) > 0 && ctx.Err() == nil {
+		// Log payloads can be large; bound the work in each writer transaction.
+		batch := old[:min(10, len(old))]
+		old = old[len(batch):]
+		batchChanged := 0
+		err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			for _, k := range batch {
+				var raw []byte
+				err := conn.QueryRowContext(ctx, "SELECT payload FROM local_ci_results WHERE repo=? AND sha=? AND recorded_at<?", k.repo, k.sha, cutoff.Unix()).Scan(&raw)
+				if errors.Is(err, sql.ErrNoRows) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				var result map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &result); err != nil {
+					return err
+				}
+				dirty := false
+				for _, field := range []string{"suites", "checks"} {
+					if len(result[field]) == 0 {
+						continue
+					}
+					var suites []map[string]json.RawMessage
+					if err := json.Unmarshal(result[field], &suites); err != nil {
+						return err
+					}
+					fieldDirty := false
+					for _, suite := range suites {
+						for _, logField := range []string{"logTail", "failureExcerpt"} {
+							if _, ok := suite[logField]; ok {
+								delete(suite, logField)
+								fieldDirty = true
+							}
+						}
+					}
+					if fieldDirty {
+						result[field], err = json.Marshal(suites)
+						if err != nil {
+							return err
+						}
+						dirty = true
+					}
+				}
+				if !dirty {
+					continue
+				}
+				raw, err = json.Marshal(result)
+				if err != nil {
+					return err
+				}
+				if _, err := conn.ExecContext(ctx, "UPDATE local_ci_results SET payload=? WHERE repo=? AND sha=?", raw, k.repo, k.sha); err != nil {
+					return err
+				}
+				batchChanged++
+			}
+			return nil
+		})
+		if err != nil {
+			return changed, err
+		}
+		changed += batchChanged
+	}
+	return changed, ctx.Err()
+}
+
 // PruneResults deletes results last saved before cutoff, except those for a
 // commit in keep. It deletes in batches, one short write each, and reports how
 // many rows it removed.
