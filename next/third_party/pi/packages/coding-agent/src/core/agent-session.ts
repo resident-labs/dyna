@@ -2118,9 +2118,8 @@ export class AgentSession {
 		// Handle extension commands first (execute immediately, even during streaming)
 		// Extension commands manage their own LLM interaction via pi.sendMessage()
 		if (expandPromptTemplates && text.startsWith("/")) {
-			const handled = await this._tryExecuteExtensionCommand(text);
+			const handled = await this._tryExecuteExtensionCommand(text, options?.deliveryId !== undefined);
 			if (handled) {
-				if (options?.deliveryId) throw new Error("Delivery input was handled by an extension");
 				// Extension command executed, no prompt to send
 				preflightResult?.("handled");
 				return;
@@ -2251,7 +2250,7 @@ export class AgentSession {
 	/**
 	 * Try to execute an extension command. Returns true if command was found and executed.
 	 */
-	private async _tryExecuteExtensionCommand(text: string): Promise<boolean> {
+	private async _tryExecuteExtensionCommand(text: string, rejectDelivery: boolean): Promise<boolean> {
 		// Parse command name and args
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
@@ -2259,6 +2258,7 @@ export class AgentSession {
 
 		const command = this._extensionRunner.getCommand(commandName);
 		if (!command) return false;
+		if (rejectDelivery) throw new Error("Delivery input was handled by an extension");
 
 		// Get command context from extension runner (includes session control methods)
 		const ctx = this._extensionRunner.createCommandContext();
