@@ -35,7 +35,7 @@ Read a full post with `dyna room read <room> <post-id>`, or the posts after one 
 Use the last since line's post ID with `--since <post-id>` when you restart the watcher.
 Held posts remain in the room log. A restart after the last handled waking post replays that context with the next wake.
 The internal root reads the same quiet context with its next real input, from the same classifier, without changing the posts' wake intent.
-Keep one --all watcher for context and action requests.
+Use one default watcher for context and action requests.
 
 Run this topic again with the flag for your harness:
 
