@@ -124,3 +124,52 @@ func TestPrOpenGitHubErrorIsRedacted(t *testing.T) {
 		t.Fatalf("state %s error %q", result.Operation.State, message)
 	}
 }
+
+func TestPrOpenCompletesBeforeSessionClose(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	s, session, ctx := prFixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"number":42}`)
+	})
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parent string
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", session).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan contract.OpSubmitResponse, 1)
+	go func() {
+		result, _ := s.OpSubmit(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Base: "main"}}})
+		done <- result
+	}()
+	<-started
+	s.boxLockMu.Lock()
+	lock := s.boxLocks[session]
+	s.boxLockMu.Unlock()
+	if lock.TryLock() {
+		lock.Unlock()
+		close(release)
+		t.Fatal("PR request did not serialize with session close")
+	}
+	closed := make(chan *contract.Error, 1)
+	go func() {
+		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session, Discard: true})
+		closed <- e
+	}()
+	close(release)
+	result := <-done
+	if result.Operation.State != contract.OpDone {
+		t.Fatalf("operation %+v", result.Operation)
+	}
+	if e := <-closed; e != nil {
+		t.Fatal(e)
+	}
+	var owner string
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT session FROM pr_owners WHERE repo=? AND number=?", "owner/repo", 42).Scan(&owner); err != nil || owner != parent {
+		t.Fatalf("owner %q error %v", owner, err)
+	}
+}
