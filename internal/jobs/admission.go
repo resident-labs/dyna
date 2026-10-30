@@ -861,9 +861,14 @@ func (a Admission) sweep(ctx context.Context) error {
 // limits and disk use come from the machine's last probe and stored limits.
 func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, machine machines.Machine, machineErr error, q nodeQueue, roomName func(string) string, admitted map[string]bool, reasons map[string]string, needsWrite *bool) error {
 	capacityCPUs, capacityMemMiB := 0, int64(0)
+	memoryKnown := false
 	limits := machines.Machine{}
 	if machineErr == nil {
 		capacityCPUs, capacityMemMiB = machine.Capabilities.CPUs, int64(machine.Capabilities.MemTotal/(1<<20))
+		memoryKnown = machine.Capabilities.MemTotal > 0
+		if memoryKnown {
+			capacityMemMiB = max(0, capacityMemMiB-int64(machine.QuickSlotLimit())*1024)
+		}
 		limits = machine
 	}
 	// Every waiting unit of this node in one order, and the work the node
@@ -881,7 +886,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		if capacityCPUs > 0 {
 			freeCPUs = capacityCPUs - held.cpus
 		}
-		if capacityMemMiB > 0 {
+		if memoryKnown {
 			freeMemMiB = capacityMemMiB - held.memMiB
 		}
 		port := -1
@@ -936,7 +941,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			why = fmt.Sprintf("%d of %d IO-heavy jobs running", held.heavy, limits.IOHeavyLimit())
 		case unit.lane != LaneQuick && capacityCPUs > 0 && d.CPUs > freeCPUs:
 			why = fmt.Sprintf("asks %d CPUs, %d free", d.CPUs, max(freeCPUs, 0))
-		case unit.lane != LaneQuick && capacityMemMiB > 0 && d.MemoryMiB > freeMemMiB:
+		case unit.lane != LaneQuick && memoryKnown && d.MemoryMiB > freeMemMiB:
 			why = fmt.Sprintf("asks %s, %s free", MemoryLabel(d.MemoryMiB), MemoryLabel(max(freeMemMiB, 0)))
 		case !unit.isJob && port < 0:
 			why = "all check ports in use"
