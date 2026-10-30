@@ -10,6 +10,7 @@
   import { trackViewportHeight } from './lib/ui/viewport.ts'
   import { viewIdentity } from './lib/ui/viewIdentity.ts'
   import { createReadMarker } from './lib/rooms/readMarker.ts'
+  import { createRoomActions } from './lib/app/roomActions.svelte.ts'
   import { bindRoomLoader, roomData } from './lib/app/roomLoader.svelte.ts'
   import { bindMachines, machineView, watchMachines } from './lib/app/machines.svelte.ts'
   import { bindGoals, goalView } from './lib/app/goals.svelte.ts'
@@ -144,7 +145,6 @@
   import type { Page } from './lib/api/wire.ts'
   import type { FeedMember } from './lib/rooms/feedViews.ts'
   import type { Receipt } from './lib/sessions/dm.ts'
-  import type { ActionRoom } from './lib/ui/actions.ts'
   import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
   import type { CallRequest } from './lib/voice/callRequests.ts'
@@ -155,18 +155,6 @@
   import type { AgentRef } from './lib/app/agentRef.ts'
 
   // A member the open view drills into. The root conversation is one made from the seat.
-  interface PromptSpec {
-    title: string
-    lines?: string[]
-    label?: string
-    value?: string
-    multiline?: boolean
-    placeholder?: string
-    match?: string
-    action?: string
-    danger?: boolean
-    submit: (value: string) => void | Promise<unknown>
-  }
   interface RoomContext {
     roomId: string
     visit: number
@@ -487,7 +475,10 @@
   let reveal = $state('') // a file the Files view opens, from Changes
   let revealFolder = $state<{ path: string } | null>(null) // a folder the Files view shows, from Library; an object so the root and repeats still open
   let starting = $state(false) // the Run workflow dialog is open
-  let ask = $state<PromptSpec | null>(null) // {title, lines, label, value, multiline, match, action, danger, submit}: the open Prompt
+  const roomActions = createRoomActions({
+    roomId: () => roomId, selectRoom, loadRooms, say,
+    renameRoom: api.renameRoom, deleteRoom: api.deleteRoom,
+  })
   // The sidebar row of the open work view, and its tabs when it has several.
   let workRow = $derived(rowOf(view))
   let workTabs = $derived(visibleTabs(workRow))
@@ -655,8 +646,8 @@
     reload,
     error: (message) => (loadError = message),
     openIssuesView: () => { showPins = false; showMembers = false; openView('issues') },
-    ask: (prompt) => (ask = prompt),
-    clearAsk: () => (ask = null),
+    ask: roomActions.open,
+    clearAsk: roomActions.dismiss,
     say,
   })
   bindSync({ reload })
@@ -1215,51 +1206,6 @@
     return roomActionItems(actionRegistry(r))
   }
 
-  async function roomAction(fn: () => Promise<unknown>, done: string) {
-    try {
-      await fn()
-      say({ tone: 'success', subject: done })
-      await loadRooms()
-    } catch (e) {
-      say({ tone: 'error', subject: 'Could not finish that room action', text: errorText(e) })
-    }
-  }
-
-  function renameRoom(r: ActionRoom) {
-    ask = {
-      title: 'Rename room',
-      label: 'Name',
-      value: roomLabel(r),
-      lines: [`The new name shows in the app. Agents still address the room as #${r.name}.`],
-      action: 'Rename',
-      submit: async (name) => {
-        await api.renameRoom(r.id, name)
-        ask = null
-        say({ tone: 'success', subject: 'Room renamed', text: `It now shows as ${name}.` })
-        loadRooms()
-      },
-    }
-  }
-
-  function deleteRoom(r: ActionRoom) {
-    ask = {
-      title: `Delete ${roomLabel(r)}?`,
-      lines: ['This removes the room, its feed and its pins. Records of closed sessions stay.', 'A room with live work cannot be deleted. Stop its sessions and runs first.', `Type ${r.name} to confirm.`],
-      label: 'Room name',
-      placeholder: r.name,
-      match: r.name,
-      action: 'Delete room',
-      danger: true,
-      submit: async () => {
-        await api.deleteRoom(r.id)
-        ask = null
-        say({ tone: 'success', subject: 'Room deleted', text: `${roomLabel(r)} and its feed are gone.` })
-        if (roomId === r.id) selectRoom('')
-        loadRooms()
-      },
-    }
-  }
-
   // openRunAgent opens the session that ran an agent: its transcript and its composer.
   function openRunAgent(run: RunSummary, a: RunAgent) {
     if (!a.session) return
@@ -1646,7 +1592,7 @@
   function actionRegistry(r = current ?? room) {
     return actions({
       room: r, rooms, icons: ICON, hasTerminal, narrow, runs, session: drill, sessionPRs: prMap[drill?.id ?? ''],
-      openView: (v) => (v === 'terminal' ? dockRequest++ : openView(v)), openSettings, renameRoom, deleteRoom, roomAction, say: sayLine, loadRooms,
+      openView: (v) => (v === 'terminal' ? dockRequest++ : openView(v)), openSettings, renameRoom: roomActions.rename, deleteRoom: roomActions.delete, roomAction: roomActions.action, say: sayLine, loadRooms,
       openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
       openPins: () => { showPins = true; if (narrow) showMembers = false },
       openSearch: (arg) => openSearch(arg || ''),
@@ -2068,8 +2014,8 @@
 {#if starting && room}
   <RunWorkflow {room} onstarted={runStarted} oncancel={() => (starting = false)} />
 {/if}
-{#if ask}
-  <Prompt {...ask} onsubmit={ask.submit} oncancel={() => (ask = null)} />
+{#if roomActions.prompt}
+  <Prompt {...roomActions.prompt} onsubmit={roomActions.prompt.submit} oncancel={roomActions.dismiss} />
 {/if}
 {#if closeResult}
   <CloseResult name={closeResult.name} outcomes={closeResult.outcomes} onclose={() => (closeResult = null)} onchoose={chooseCloseRow} />
