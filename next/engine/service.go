@@ -14,6 +14,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
@@ -33,6 +34,7 @@ type Service struct {
 	boxes     BoxAdapter
 	profiles  Profiles
 	repos     Repositories
+	approvals *approve.Service
 	now       func() time.Time
 	mu        sync.Mutex
 	channels  map[contract.SessionID]*boxChannel
@@ -97,7 +99,13 @@ func id(prefix string, now time.Time) (string, error) {
 
 func failure(err error) *contract.Error {
 	code := contract.ErrUnavailable
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, approve.ErrForbidden) {
+		code = contract.ErrForbidden
+	} else if errors.Is(err, approve.ErrInvalid) {
+		code = contract.ErrInvalid
+	} else if errors.Is(err, approve.ErrConflict) {
+		code = contract.ErrConflict
+	} else if errors.Is(err, sql.ErrNoRows) {
 		code = contract.ErrNotFound
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing

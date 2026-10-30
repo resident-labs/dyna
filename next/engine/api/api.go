@@ -28,6 +28,10 @@ func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
+	call(mux, contract.MethodOpSubmit, c, user, a.service.OpSubmit)
+	call(mux, contract.MethodOpDecide, c, user, a.service.OpDecide)
+	call(mux, contract.MethodOpWithdraw, c, user, a.service.OpWithdraw)
+	call(mux, contract.MethodOpList, c, user, a.service.OpList)
 	call(mux, contract.MethodHostAdd, c, owner, a.service.HostAdd)
 	call(mux, contract.MethodRoomCreate, c, owner, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, owner, a.service.RoomRepoAdd)
