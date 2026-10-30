@@ -80,8 +80,8 @@ func TestHostAddMapsFlags(t *testing.T) {
 }
 func TestRoomCreateMapsName(t *testing.T) {
 	f := &fakeClient{}
-	runCLI(t, f, "room", "create", "work")
-	if f.room.Name != "work" {
+	runCLI(t, f, "room", "create", "work", "--root-profile", "p")
+	if f.room.Name != "work" || f.room.RootProfile != "p" {
 		t.Fatalf("%+v", f.room)
 	}
 }
