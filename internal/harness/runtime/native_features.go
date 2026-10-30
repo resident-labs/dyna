@@ -37,6 +37,10 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 			"CLAUDE_CODE_DISABLE_WORKFLOWS":        "1",
 			"CLAUDE_CODE_DISABLE_AGENT_VIEW":       "1",
 			"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
+			// Dyna gives each session its branch and its git rules. Without
+			// this, every session runs git status for its system context
+			// and gets Claude Code's own git instructions (checked in 2.1.309).
+			"CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1",
 		},
 		Config:    map[string]any{"autoMemoryEnabled": false},
 		DenyFlags: []string{"--disallowedTools", "--disallowed-tools"},
