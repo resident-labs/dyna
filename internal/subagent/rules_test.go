@@ -56,8 +56,11 @@ func TestInstructionNoteSteersTheRunningTurn(t *testing.T) {
 // does not change the next read.
 func TestRuleFanoutReplaysAfterInterruptedSave(t *testing.T) {
 	e := newTestEnv(t)
-	info, _ := e.start("SLEEP:1 RESPOND: ready")
-	e.wait(info.ID, 1)
+	info := completedFixtureSession(t, e)
+	snapshot := instructions.Build(instructions.Section{Name: "Room rules", Text: "rules"})
+	if _, err := e.m.Store.UpdateMeta(info.ID, func(meta *Meta) { meta.Instructions = &snapshot }); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.m.goalStore().AddRule(e.room.ID, "owner", "", "A durable rule."); err != nil {
 		t.Fatal(err)
 	}
