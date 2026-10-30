@@ -541,6 +541,7 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 // the repository, and every probe of that head gets the same result.
 func (s *Service) recheckCancelledMainCI(ctx context.Context, gh GitHub, records []*Record, localRepos map[string]bool, heads map[string]headProbe) error {
 	results := map[string]mainCIResult{}
+	failed := map[string]bool{}
 	var failures []error
 	for _, r := range records {
 		probe, ok := heads[r.Key]
@@ -548,11 +549,15 @@ func (s *Service) recheckCancelledMainCI(ctx context.Context, gh GitHub, records
 			continue
 		}
 		identity := defaultRepo(*r) + "@" + probe.Default.Head
+		if failed[identity] {
+			continue
+		}
 		result, read := results[identity]
 		if !read {
 			var snap Snapshot
 			if err := gh.readCommitCI(ctx, refRecord(*r), probe.Default.Head, &snap); err != nil {
 				failures = append(failures, err)
+				failed[identity] = true
 				continue
 			}
 			snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = probe.Default.Head, r.Repo
