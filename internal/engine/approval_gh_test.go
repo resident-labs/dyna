@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	roomfixture "dyna-agent/internal/room/testfixture"
 	"dyna-agent/internal/sessionlife"
@@ -103,16 +104,8 @@ func TestRootMediaApprovalChecksItsAttachment(t *testing.T) {
 	if err := sessionlife.Save(s.rooms.Notify.Sessions.Store.Root, root.ID, root); err != nil {
 		t.Fatal(err)
 	}
-	attachment, err := s.rooms.Notify.Rooms.PutAttachment(rec.ID, "image.png", []byte("not an image"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg, err := s.rooms.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{rec.Name}, Text: "media", SessionIDs: map[string]string{rec.Name: root.ID}, Attachments: []room.Attachment{attachment}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	actor := authority.Actor{Role: authority.Root, Session: root.ID, Room: rec.ID}
-	in := approvals.RequestInput{Argv: []string{"pr", "comment", "7", "--attach", "image.png"}, Media: []approvals.Media{{Path: "image.png", Name: "image.png", PostID: msg.ID, AttachmentID: attachment.ID, SHA256: strings.Repeat("0", 64)}}}
+	in := approvals.RequestInput{Argv: []string{"pr", "comment", "7", "--attach", "image.png"}, Media: []approvals.Media{{Path: "image.png", Name: "image.png", Data: []byte("bad"), SHA256: strings.Repeat("0", 64)}}}
 	_, err = s.approvalRequest(authority.WithActor(t.Context(), actor), in)
 	if err == nil || !strings.Contains(err.Error(), "media hash mismatch") {
 		t.Fatalf("root media must reach hash validation; got %v", err)
@@ -152,16 +145,8 @@ esac
 		t.Fatal(err)
 	}
 	data := buf.Bytes()
-	attachment, err := s.rooms.Notify.Rooms.PutAttachment(rec.ID, "image.png", data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg, err := s.rooms.Notify.Rooms.Post(rec.ID, room.PostInput{From: child.Name, To: []string{rec.Name}, Text: "media", SessionIDs: map[string]string{child.Name: child.ID}, Attachments: []room.Attachment{attachment}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	sum := sha256.Sum256(data)
-	media := approvals.Media{Path: "image.png", Name: "image.png", PostID: msg.ID, AttachmentID: attachment.ID, SHA256: fmt.Sprintf("%x", sum)}
+	media := approvals.Media{Path: "image.png", Name: "image.png", Data: data, SHA256: fmt.Sprintf("%x", sum)}
 	dir := t.TempDir()
 	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "https://github.com/owner/repo.git"}} {
 		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
@@ -169,7 +154,7 @@ esac
 		}
 	}
 	actor := authority.Actor{Role: authority.Session, Session: child.ID, Room: rec.ID}
-	for _, args := range [][]string{{"pr", "comment", "https://github.com/owner/repo/pull/7", "--attach", "image.png"}, {"pr", "create", "--repo", "owner/repo", "--head", "branch", "--attach", "image.png"}} {
+	for _, args := range [][]string{{"pr", "comment", "https://github.com/owner/repo/pull/7", "--attach", "image.png"}} {
 		in := approvals.RequestInput{Argv: args, Cwd: dir, Media: []approvals.Media{media}}
 		req, err := s.approvalRequest(authority.WithActor(t.Context(), actor), in)
 		if err != nil {
@@ -182,21 +167,35 @@ esac
 			t.Fatal("missing media destination")
 		}
 	}
-	rootMsg, err := s.rooms.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{rec.Name}, Text: "media", SessionIDs: map[string]string{rec.Name: root.ID}, Attachments: []room.Attachment{attachment}})
+	const key = "github.com/owner/repo#7"
+	if err := prstate.UpdateRecords(t.Context(), s.rooms.PRs.Watcher().Store.Root, []string{key}, func(st *prstate.State) error {
+		st.Records[key] = &prstate.Record{Key: key, Host: "github.com", Repo: "owner/repo", Number: 7, RoomID: rec.ID, Author: child.ID, State: prstate.PROpen, Watching: true}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mediaRequest, err := s.approvalRequest(authority.WithActor(t.Context(), actor), approvals.RequestInput{Argv: []string{"pr", "comment", "7", "--repo", "owner/repo", "--body", "hello", "--attach", "image.png"}, Cwd: dir, Repo: "owner/repo", Media: []approvals.Media{media}})
+	if err != nil || mediaRequest.State != approvals.StatePending || mediaRequest.At != root.Name || mediaRequest.Class != approvals.ClassAgent {
+		t.Fatalf("own PR media = %+v, %v", mediaRequest, err)
+	}
+	before, err := s.rooms.Notify.Rooms.Messages(rec.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	media.PostID = rootMsg.ID
-	rootActor := authority.Actor{Role: authority.Root, Session: root.ID, Room: rec.ID}
-	req, err := s.approvalRequest(authority.WithActor(t.Context(), rootActor), approvals.RequestInput{Argv: []string{"pr", "comment", "https://github.com/owner/repo/pull/7", "--attach", "image.png"}, Cwd: dir, Media: []approvals.Media{media}})
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		actor authority.Actor
+		args  []string
+	}{
+		{authority.Actor{Role: authority.Root, Session: root.ID, Room: rec.ID}, []string{"issue", "create", "--repo", "owner/repo", "--title", "title", "--body", "body"}},
+		{actor, []string{"pr", "edit", "7", "--repo", "owner/repo", "--title", "title"}},
+	} {
+		result, err := s.approvalRequest(authority.WithActor(t.Context(), tc.actor), approvals.RequestInput{Argv: tc.args, Cwd: dir, Repo: "owner/repo"})
+		if err != nil || result.ID != "" || result.State != approvals.StateDone {
+			t.Fatalf("inline result = %+v, %v", result, err)
+		}
 	}
-	if req.State != approvals.StateApproved {
-		t.Fatalf("root media: state %s; want approved", req.State)
+	after, err := s.rooms.Notify.Rooms.Messages(rec.ID)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("inline messages = %d before, %d after, %v", len(before), len(after), err)
 	}
-	if !strings.Contains(req.Body, "Media destination:") {
-		t.Fatal("missing root media destination")
-	}
-
 }
