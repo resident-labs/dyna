@@ -381,6 +381,64 @@ func fakePiPID(t *testing.T, log string) int {
 	return 0
 }
 
+// TestPiStartGateReturnsBeforePromptResponse proves that StartGate covers
+// only the prompt write. The fake holds the prompt response until abort, so a
+// gate that waits for the response returns the cancellation error instead.
+func TestPiStartGateReturnsBeforePromptResponse(t *testing.T) {
+	logPath := installFakePi(t, false)
+	signalPath := filepath.Join(t.TempDir(), "prompted.sock")
+	listener, err := net.Listen("unix", signalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	p := fakePiProfile(logPath, false)
+	p.Env[envFakePiGate] = "1"
+	p.Env[envFakePiSignal] = signalPath
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	signals := make(chan string, 2)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 32)
+			n, _ := conn.Read(buf)
+			_ = conn.Close()
+			signals <- strings.TrimSpace(string(buf[:n]))
+		}
+	}()
+	gateResult := make(chan error, 1)
+	done := make(chan error, 1)
+	workDir := t.TempDir()
+	go func() {
+		_, err := RunWithOptions(ctx, p, "blocked task", workDir, false, JournalOptions{}, SteeringOptions{
+			Source: &armedSource{},
+			StartGate: func(_ context.Context, _ string, launch func() error) error {
+				err := launch()
+				gateResult <- err
+				return err
+			},
+		}, SessionOptions{}, ExecutionOptions{})
+		done <- err
+	}()
+	select {
+	case got := <-signals:
+		if got != "prompted" {
+			t.Fatalf("first signal = %q", got)
+		}
+	case err := <-done:
+		t.Fatalf("turn ended before the fake prompt: %v", err)
+	}
+	cancel()
+	<-done
+	if err := <-gateResult; err != nil {
+		t.Fatalf("start gate waited for the prompt response: %v", err)
+	}
+}
+
 // TestPiCancelAbortsTheRPCRun cancels a turn while pi holds the prompt
 // response and proves the RPC abort still reaches pi. The cancel can land
 // after the prompt was written but before its response arrived; that window
