@@ -75,12 +75,12 @@ async function screen(run: (screen: Screen) => Promise<void>, { merge, props = {
     await rm(dir, { recursive: true, force: true })
   }
 }
-test('the room list shows only open PRs with CI, review and merge order', async () => {
+test('the room list shows only open PRs with their next action', async () => {
   await screen(async ({ open, text }) => {
     const t = await open()
     const rows = elements(t, '.rows .row')
     assert.equal(rows.length, 2)
-    assert.match(text(need(rows[0])), /PR 1.*#1.*CI · passed.*Approved.*Next · 1/)
+    assert.match(text(need(rows[0])), /PR 1.*#1.*Ready to merge/)
     assert.match(text(need(rows[1])), /PR 2/)
     assert.doesNotMatch(text(t), /PR 3|PR 5|Local change/)
     assert.equal(t.querySelector('.dscroll'), null, 'opening the list does not select a PR')
