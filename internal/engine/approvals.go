@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/notify"
+	"dyna-agent/internal/room"
 )
 
 func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput) (approvals.Request, error) {
@@ -121,6 +122,21 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 	}
 	class, pinnedArgs, err := ghclient.ClassifyForSession(ctx, "", in.Cwd, in.Argv, owns)
 	if err != nil {
+		var refusal *ghclient.RefusalError
+		if errors.As(err, &refusal) && actor.Session != "" {
+			rec, resolveErr := s.rooms.Notify.Rooms.Resolve(actor.Room)
+			if resolveErr != nil {
+				return approvals.Request{}, resolveErr
+			}
+			sender, senderErr := s.rooms.Notify.SenderOf(notify.Claim{Session: actor.Session, Room: actor.Room})
+			if senderErr != nil {
+				return approvals.Request{}, senderErr
+			}
+			event := room.GitHubWriteRefusedEvent{Requester: sender.Session.Address(), Verb: room.GitHubWriteVerb(refusal.Write.Verb), Repository: refusal.Write.Host + "/" + refusal.Write.Repo, Reason: room.GitHubWriteReason(refusal.Decision.Refusal), Rule: room.GitHubWriteRule(refusal.Decision.Rule)}
+			if _, postErr := s.rooms.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: actor.Room, Event: event, FreshID: true, Producer: room.ProducerEngine, To: []string{rec.Name}}); postErr != nil {
+				return approvals.Request{}, postErr
+			}
+		}
 		return approvals.Request{}, err
 	}
 	if class == approvals.ClassRead {
