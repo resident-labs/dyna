@@ -741,7 +741,7 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 		allowed := false
 		if len(command) >= 2 {
 			switch command[0] + " " + command[1] {
-			case "issue create", "issue comment", "pr create", "pr comment", "pr edit", "pr ready", "pr review":
+			case "issue create", "issue comment", "pr create", "pr comment", "pr edit", "pr ready", "pr review", "pr close":
 				allowed = true
 			}
 		}

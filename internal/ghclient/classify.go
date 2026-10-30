@@ -105,13 +105,14 @@ type parsedArgs struct {
 
 // parseArgs splits the arguments that follow the command words. command is the
 // command words, so repositoryFlagTakesValue knows which flags consume a value.
-// It reads flags as repositoryFor does. Arguments after "--" are not read.
+// Arguments after "--" are positional.
 func parseArgs(command, args []string) parsedArgs {
 	p := parsedArgs{flags: map[string]string{}}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--":
+			p.positional = append(p.positional, args[i+1:]...)
 			return p
 		case !strings.HasPrefix(arg, "-") || arg == "-":
 			p.positional = append(p.positional, arg)
