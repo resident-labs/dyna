@@ -1886,12 +1886,12 @@ export class AgentSession {
 	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
 	 * @param onStarted Called once the run's messages are prepared, before the first request.
 	 */
-	private async _startRun(trigger: BeforeAgentStartTrigger, onStarted?: () => void, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<void> {
+	private async _startRun(trigger: BeforeAgentStartTrigger | undefined, onStarted?: () => void, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<void> {
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
 		try {
-			messages = await this._prepareRun(trigger, deliveryId, additionalInputs);
+			messages = trigger ? await this._prepareRun(trigger, deliveryId, additionalInputs) : [];
 		} catch (error) {
 			this._isAgentRunActive = false;
 			this._flushPendingBashMessages();
@@ -1912,7 +1912,8 @@ export class AgentSession {
 		// are dropped, so a tool that never registers does not stay pending.
 		this._pendingToolNames.clear();
 		try {
-			await this.agent.prompt(messages);
+			if (trigger) await this.agent.prompt(messages);
+			else await this.agent.continue();
 			while (!this._agentRunAbortRequested) {
 				if (await this._handlePostAgentRun()) {
 					if (this._agentRunAbortRequested) break;
@@ -2210,6 +2211,35 @@ export class AgentSession {
 			options?.deliveryId,
 			additionalInputs,
 		);
+	}
+
+	/**
+	 * Continue a recovered run. Missing tool results are marked unknown and never rerun.
+	 */
+	async continueRun(onStarted?: () => void): Promise<void> {
+		if (this.isStreaming) throw new Error("Agent is already processing");
+		const messages = this.agent.state.messages;
+		let assistantIndex = -1;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].role === "assistant") { assistantIndex = i; break; }
+		}
+		if (assistantIndex >= 0) {
+			const assistant = messages[assistantIndex] as AssistantMessage;
+			const results = new Set(messages.slice(assistantIndex + 1).flatMap((message) =>
+				message.role === "toolResult" ? [message.toolCallId] : [],
+			));
+			for (const block of assistant.content) {
+				if (block.type !== "toolCall" || results.has(block.id)) continue;
+				const result: ToolResultMessage = {
+					role: "toolResult", toolCallId: block.id, toolName: block.name,
+					content: [{ type: "text", text: "interrupted; state unknown" }],
+					isError: true, timestamp: Date.now(),
+				};
+				this.sessionManager.appendMessage(result);
+				this.agent.state.messages = [...this.agent.state.messages, result];
+			}
+		}
+		await this._startRun(undefined, onStarted);
 	}
 
 	/**
