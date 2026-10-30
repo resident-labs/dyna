@@ -364,6 +364,8 @@ func (e *e2e) serveEngine() {
 	e.t.Helper()
 	e.t.Setenv("XDG_DATA_HOME", e.data)
 	e.t.Setenv("XDG_CONFIG_HOME", e.config)
+	// The in-process engine publishes this fixture's CLI to worker homes.
+	e.t.Setenv("DYNA_BIN", e.bin)
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "Post", Access: websvc.Write, Scope: websvc.ScopeOperate,
 		Method: func(ctx context.Context, req notify.PostRequest) (notify.Result, error) {
 			svc := notify.Default()
