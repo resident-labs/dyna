@@ -90,6 +90,11 @@ export const ResultError: RunResult = "error";
  */
 export const ResultFail: RunResult = "fail";
 /**
+ * ResultInstalling is a run that found the install unit for its commit
+ * already active. That unit records the result, so this run is not an error.
+ */
+export const ResultInstalling: RunResult = "installing";
+/**
  * Run records one repository hook attempt independently of test evidence.
  */
 export interface Run {

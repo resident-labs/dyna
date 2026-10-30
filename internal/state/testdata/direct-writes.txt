@@ -151,6 +151,7 @@ not-state internal/hookinstall/install.go pruneBackups 1 # self-update install j
 not-state internal/hookinstall/unit.go Log 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.CleanupUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.InspectUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/unit.go Service.Installing 1 # runs systemctl --user is-active, a read-only query of the self-update install unit
 not-state internal/hookinstall/unit.go Service.Start 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.Worker 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hooks/events.go cleanupSnapshot 1 # removes a private Git execution worktree directory
