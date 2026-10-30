@@ -3,6 +3,9 @@ package contract
 type Method string
 
 const (
+	MethodWebLogin         Method = "web.login"
+	MethodRoomList         Method = "room.list"
+	MethodSessionList      Method = "session.list"
 	MethodArchiveDone      Method = "archive.done"
 	MethodDeliveryDone     Method = "delivery.done"
 	MethodHostAdd          Method = "host.add"
@@ -37,6 +40,35 @@ const (
 type Error struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
+}
+
+type RoomListRequest struct{}
+type RoomSummary struct {
+	ID   RoomID `json:"id"`
+	Name string `json:"name"`
+}
+type RoomListResponse struct {
+	Rooms []RoomSummary `json:"rooms"`
+}
+type SessionListRequest struct {
+	Room RoomID `json:"room"`
+}
+type SessionSummary struct {
+	ID       SessionID   `json:"id"`
+	Name     string      `json:"name"`
+	Parent   SessionID   `json:"parent"`
+	Profile  ProfileName `json:"profile"`
+	Box      BoxID       `json:"box"`
+	BoxState BoxState    `json:"boxState"`
+	Goal     string      `json:"goal"`
+}
+type SessionListResponse struct {
+	Sessions []SessionSummary `json:"sessions"`
+}
+
+type WebLoginRequest struct{}
+type WebLoginResponse struct {
+	URL string `json:"url"`
 }
 
 type HostAddRequest struct {
@@ -84,21 +116,23 @@ type SessionCloseRequest struct {
 }
 type SessionCloseResponse struct{}
 type PostRequest struct {
-	Room     RoomID       `json:"room"`
-	Text     string       `json:"text"`
-	Mentions []string     `json:"mentions,omitempty"`
-	Home     Conversation `json:"home,omitempty"`
-	ReplyTo  EventID      `json:"replyTo,omitempty"`
+	Room        RoomID       `json:"room"`
+	Text        string       `json:"text"`
+	Mentions    []string     `json:"mentions,omitempty"`
+	Home        Conversation `json:"home,omitempty"`
+	ReplyTo     EventID      `json:"replyTo,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 type PostResponse struct {
 	Event EventID `json:"event"`
 	Seq   int64   `json:"seq"`
 }
 type EventsListRequest struct {
-	Room     RoomID      `json:"room"`
-	AfterSeq int64       `json:"afterSeq"`
-	Limit    int         `json:"limit"`
-	Types    []EventType `json:"types,omitempty"`
+	Room      RoomID      `json:"room"`
+	AfterSeq  int64       `json:"afterSeq"`
+	BeforeSeq int64       `json:"beforeSeq,omitempty"`
+	Limit     int         `json:"limit"`
+	Types     []EventType `json:"types,omitempty"`
 }
 type EventsListResponse struct {
 	Events []Event `json:"events"`
