@@ -254,6 +254,8 @@ export interface Member {
   closed?: boolean
   closeSummary?: CloseOutcome[]
   emoji?: string
+  // computer is the ID of the computer this row uses; the engine names it.
+  computer?: string
   seat?: Seat
   responsibilities?: Responsibilities
   // ownerDisplay marks a session whose own shells use the owner's display.

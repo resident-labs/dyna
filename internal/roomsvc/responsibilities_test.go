@@ -51,6 +51,25 @@ func TestRosterRebuildBatchesResponsibilityCounts(t *testing.T) {
 	}
 }
 
+// Each row names the computer it uses: the owner row names the room's root
+// computer, and a session row names its own computer.
+func TestMembersNameTheComputerEachRowUses(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("computer-ids")
+	lead := e.start(rec, "lead", nil)
+
+	members, err := e.svc.Members(rec.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := members[0].Computer, "root-"+rec.ID; got != want {
+		t.Fatalf("owner computer = %q, want %q", got, want)
+	}
+	if got := row(members, lead.ID).Computer; got != lead.ID {
+		t.Fatalf("lead computer = %q, want its session ID %q", got, lead.ID)
+	}
+}
+
 // A member row shows what stops its session from finishing: the owner row keeps
 // no count, and a new child counts for its parent.
 func TestMembersCountWhatStopsAnOpenSession(t *testing.T) {

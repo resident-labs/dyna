@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/approvals"
+	"dyna-agent/internal/computers"
 	"dyna-agent/internal/listpage"
 	"dyna-agent/internal/notify"
 	prview "dyna-agent/internal/pr/view"
@@ -925,6 +926,9 @@ type Member struct {
 	Closed           bool                   `json:"closed,omitempty"`
 	Hue              int                    `json:"hue"`
 	Emoji            string                 `json:"emoji,omitempty"` // avatar; empty for the owner
+	// Computer is the ID of the computer this row uses (computers.ActorID), so
+	// the Computer tab reads the right computer without guessing from the row.
+	Computer string `json:"computer,omitempty"`
 	// Seat is set on the owner entry: who holds the room's root seat.
 	Seat *room.Seat `json:"seat,omitempty"`
 	// OwnerDisplay says this session's own shells use the owner's display.
@@ -1036,6 +1040,7 @@ func (s *Service) buildMembers(rec room.Record, all []subagent.Info, rev string,
 	book := s.avatarBook(rec.ID, all, rev)
 	for i := range out {
 		out[i].Emoji = book.byID[out[i].ID]
+		out[i].Computer = computers.ActorID(out[i].ID, rec.ID)
 	}
 	return out
 }
