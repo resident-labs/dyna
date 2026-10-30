@@ -2,11 +2,14 @@ package hookinstall
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/localci"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
+	statewrite "dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
 
@@ -39,12 +42,14 @@ func (s Service) updateGuard(ctx context.Context, now time.Time, source string) 
 	if err != nil {
 		return false, err
 	}
-	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS update_restart_guard (
-id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since INTEGER NOT NULL, noticed INTEGER NOT NULL)`)
-	if err != nil {
-		return false, err
-	}
-	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO update_restart_guard VALUES(1,0,0,0)")
+	err = statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS update_restart_guard (
+id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since INTEGER NOT NULL, noticed INTEGER NOT NULL)`); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO update_restart_guard VALUES(1,0,0,0)")
+		return err
+	})
 	if err != nil {
 		return false, err
 	}
@@ -56,7 +61,10 @@ id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since IN
 	if busy {
 		if since == 0 {
 			since = now.Unix()
-			if _, err = db.ExecContext(ctx, "UPDATE update_restart_guard SET busy_since=? WHERE id=1", since); err != nil {
+			if err = statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+				_, err := conn.ExecContext(ctx, "UPDATE update_restart_guard SET busy_since=? WHERE id=1", since)
+				return err
+			}); err != nil {
 				return false, err
 			}
 		}
@@ -68,7 +76,10 @@ id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since IN
 			if err = notify(source); err != nil {
 				return false, err
 			}
-			if _, err = db.ExecContext(ctx, "UPDATE update_restart_guard SET noticed=1 WHERE id=1"); err != nil {
+			if err = statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+				_, err := conn.ExecContext(ctx, "UPDATE update_restart_guard SET noticed=1 WHERE id=1")
+				return err
+			}); err != nil {
 				return false, err
 			}
 		}
@@ -98,6 +109,8 @@ func (s Service) recordUpdateRestart(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "UPDATE update_restart_guard SET last_restart=?,busy_since=0,noticed=0 WHERE id=1", now.Unix())
-	return err
+	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "UPDATE update_restart_guard SET last_restart=?,busy_since=0,noticed=0 WHERE id=1", now.Unix())
+		return err
+	})
 }
