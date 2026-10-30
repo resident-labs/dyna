@@ -543,3 +543,35 @@ func TestAdmissionAdmitsARoomsAheadCheckBeforeItsOlderWaitingChecks(t *testing.T
 		t.Fatalf("pull-request check = %+v, %v; want still waiting", row, err)
 	}
 }
+
+func TestCanAdmitUsesDemandAndEarlierWaiters(t *testing.T) {
+	ctx := t.Context()
+	node := machines.Machine{Name: "node", Enabled: true}
+	node.Capabilities.CPUs = 8
+	node.Capabilities.MemTotal = 8 << 30
+	queue := Admission{DataDir: t.TempDir(), Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, Engine: true}
+	if _, err := queue.Hold(ctx, Demand{ID: "held", Node: "node", CPUs: 2, MemoryMiB: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		cpu  int
+		mem  int64
+		want bool
+	}{{6, 4096, true}, {7, 1024, false}, {1, 4097, false}} {
+		got, err := queue.CanAdmit(ctx, Demand{Node: "node", CPUs: tc.cpu, MemoryMiB: tc.mem})
+		if err != nil || got != tc.want {
+			t.Fatalf("demand %d CPUs %d MiB: got %v, %v; want %v", tc.cpu, tc.mem, got, err, tc.want)
+		}
+	}
+	if err := queue.upsert(ctx, Demand{ID: "earlier", Node: "node", CPUs: 4, MemoryMiB: 1024}, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := queue.CanAdmit(ctx, Demand{Node: "node", CPUs: 4, MemoryMiB: 1024})
+	if err != nil || got {
+		t.Fatalf("prediction ignored earlier waiter: %v, %v", got, err)
+	}
+	row, err := queue.get(ctx, "earlier")
+	if err != nil || row.State != "waiting" {
+		t.Fatalf("prediction changed waiter: %+v, %v", row, err)
+	}
+}
