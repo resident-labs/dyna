@@ -216,6 +216,20 @@ func TestWaitWakesOnFinalDecision(t *testing.T) {
 	}
 }
 
+func TestRequestNoticeNamesTheDecidingCommands(t *testing.T) {
+	f := newFixture(t)
+	r := f.create(t, ClassAgent)
+	messages, err := f.rooms.Messages(f.rec.ID)
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("messages = %+v, %v", messages, err)
+	}
+	for _, want := range []string{"dyna request approve " + r.ID, "dyna request deny " + r.ID + " --reason \"<why>\""} {
+		if !strings.Contains(messages[0].Text, want) {
+			t.Fatalf("notice %q does not name %q", messages[0].Text, want)
+		}
+	}
+}
+
 func TestApprovalEventsWakeOnlyTheirTarget(t *testing.T) {
 	f := newFixture(t)
 	r := f.create(t, ClassAgent)

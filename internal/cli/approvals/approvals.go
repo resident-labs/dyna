@@ -26,7 +26,12 @@ func Command(o Options) *cobra.Command {
 		o.Client = engineclient.New("")
 	}
 	var roomRef string
-	root := &cobra.Command{Use: "approvals", Short: "Show and change agent write approval settings", Args: cobra.NoArgs}
+	root := &cobra.Command{
+		Use:   "approvals",
+		Short: "Show and change agent write approval settings",
+		Long:  "Pending approvals are decided with dyna request approve or deny.\nThis command shows and changes the approval wait and expiry settings.",
+		Args:  cobra.NoArgs,
+	}
 	root.PersistentFlags().StringVar(&roomRef, "room", "", "room name or ID (defaults to your room)")
 	var wait, expiry time.Duration
 	settings := &cobra.Command{Use: "settings", Short: "Show or set the approval wait and expiry", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
