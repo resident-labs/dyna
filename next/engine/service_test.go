@@ -684,7 +684,7 @@ func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A restart after the close marked the pending box and before it finished leaves this state behind.
-	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, noAgentReason); err != nil {
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, ""); err != nil {
 		t.Fatal(err)
 	}
 	if e := s.ResumeClosures(ctx); e != nil {
@@ -707,9 +707,7 @@ func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	}
 	session := lead.Session
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
-		t.Fatal(e)
-	}
+	connectAgent(ctx, t, s, session)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
@@ -1028,7 +1026,7 @@ func TestPostRejectsMissingAttachment(t *testing.T) {
 	}
 }
 
-// connectAgent marks the session's box as connected, as a box hello does, so its close waits for an archive ack.
+// connectAgent marks the session's box as connected, as a box hello does, and records a turn, so its close waits for an archive ack.
 func connectAgent(ctx context.Context, t *testing.T, s *Service, session contract.SessionID) {
 	t.Helper()
 	record, err := s.store.Session(ctx, session)
@@ -1040,6 +1038,12 @@ func connectAgent(ctx context.Context, t *testing.T, s *Service, session contrac
 		t.Fatal(err)
 	}
 	if _, err := s.transition(ctx, record.Room, current, contract.BoxReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) SELECT 'turn_'||?,?,0,'','',0,0,0,0 WHERE NOT EXISTS (SELECT 1 FROM turns WHERE session=?)", session, session, session)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
