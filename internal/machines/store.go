@@ -236,9 +236,16 @@ func (m Machine) HostChecksAllowed(room string) bool {
 // QuickSlotLimit bounds jobs in the quick lane.
 func (m Machine) QuickSlotLimit() int {
 	if m.QuickSlots > 0 {
+		if m.Capabilities.MemTotal > 0 {
+			return min(m.QuickSlots, max(1, int(m.Capabilities.MemTotal/(2<<30))))
+		}
 		return m.QuickSlots
 	}
-	return max(4, m.Capabilities.CPUs/4)
+	limit := max(4, m.Capabilities.CPUs/4)
+	if m.Capabilities.MemTotal > 0 {
+		limit = max(1, min(limit, int(m.Capabilities.MemTotal/(8<<30))))
+	}
+	return limit
 }
 
 // IOHeavyLimit is how many IO-heavy jobs and checks this node runs at once.
