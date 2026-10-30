@@ -119,6 +119,17 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		}
 	}
 }
+func TestStopContainerIgnoresMissing(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	if err := h.StopContainer(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	args := r.calls[1]
+	if !strings.HasSuffix(args[len(args)-1], "'podman' '--cgroup-manager=systemd' 'stop' '--ignore' 'a'") {
+		t.Fatalf("command %v", args)
+	}
+}
 func TestRemoveContainerLeavesVolumeForMove(t *testing.T) {
 	r := &runner{}
 	h := newTestHost(t, r)

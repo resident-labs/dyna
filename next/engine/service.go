@@ -11,37 +11,55 @@ import (
 	"sync"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
-
-// Boxes controls the lifetime of a session's box.
-type Boxes interface {
-	Start(context.Context, contract.SessionID, contract.BoxID, contract.BoxSizeName) (Placement, error)
-	Close(context.Context, contract.BoxID) error
-}
-
-// Placement reports a refusal as a pending box and a reason.
-type Placement struct {
-	State  contract.BoxState
-	Reason string
-}
 
 type Profiles interface {
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
 }
 
 type Service struct {
-	store    *store.Store
-	boxes    Boxes
-	profiles Profiles
-	now      func() time.Time
-	mu       sync.Mutex
-	channels map[contract.SessionID]*boxChannel
+	store     *store.Store
+	boxes     BoxAdapter
+	profiles  Profiles
+	now       func() time.Time
+	mu        sync.Mutex
+	channels  map[contract.SessionID]*boxChannel
+	admit     sync.Mutex
+	boxLockMu sync.Mutex
+	boxLocks  map[contract.SessionID]*sync.Mutex
+	boxRuns   map[contract.SessionID]*boxRun
 }
 
-func New(st *store.Store, boxes Boxes, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel)}
+type boxRun struct {
+	cancel  context.CancelFunc
+	closing bool
+}
+
+func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
+	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
+}
+
+func (s *Service) lockBox(id contract.SessionID) func() {
+	s.boxLockMu.Lock()
+	lock := s.boxLocks[id]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.boxLocks[id] = lock
+	}
+	s.boxLockMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string) (box.Box, error) {
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})
+	if err != nil {
+		return box.Box{}, err
+	}
+	return s.store.TransitionBox(ctx, b, state, reason, event)
 }
 
 func id(prefix string, now time.Time) (string, error) {
@@ -153,21 +171,78 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err := s.store.StartSession(ctx, session, req.Parent, req.Goal, event); err != nil {
-		return contract.SessionStartResponse{}, failure(err)
-	}
-	placement, err := s.boxes.Start(ctx, session.ID, session.Box, contract.BoxSizeSmall)
+	unlock := s.lockBox(session.ID)
+	defer unlock()
+	createCtx, cancel := context.WithCancel(ctx)
+	run := &boxRun{cancel: cancel}
+	s.boxLockMu.Lock()
+	s.boxRuns[session.ID] = run
+	s.boxLockMu.Unlock()
+	defer func() {
+		cancel()
+		s.boxLockMu.Lock()
+		delete(s.boxRuns, session.ID)
+		s.boxLockMu.Unlock()
+	}()
+	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
+	s.admit.Lock()
+	hosts, err := s.store.Hosts(ctx)
 	if err != nil {
-		placement = Placement{State: contract.BoxPending, Reason: err.Error()}
+		s.admit.Unlock()
+		return contract.SessionStartResponse{}, failure(err)
 	}
-	change, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, From: contract.BoxPending, To: placement.State, Reason: placement.Reason})
+	boxes, err := s.store.Boxes(ctx)
 	if err != nil {
+		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err = s.store.SetBoxState(context.WithoutCancel(ctx), session.Box, placement.State, placement.Reason, change); err != nil {
+	size, _ := box.Size(contract.BoxSizeSmall)
+	current := box.Box{ID: session.Box, Session: session.ID, Size: size, State: contract.BoxPending, PlacedAt: event.Time}
+	placement := box.Admit(hosts, boxes, current, 20*box.GiB)
+	initial, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending, Reason: string(placement.Reason)})
+	if err != nil {
+		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	return contract.SessionStartResponse{Session: session.ID, Box: session.Box}, nil
+	if err = s.store.StartSession(ctx, session, req.Parent, req.Goal, event, initial, string(placement.Reason)); err != nil {
+		s.admit.Unlock()
+		return contract.SessionStartResponse{}, failure(err)
+	}
+	writeCtx := context.WithoutCancel(ctx)
+	if placement.Reason != "" {
+		s.admit.Unlock()
+		return response, nil
+	}
+	slice, err := box.SliceName([]contract.BoxID{session.Box})
+	if err != nil {
+		s.admit.Unlock()
+		return response, failure(err)
+	}
+	current.Host, current.Slice = placement.Host, slice
+	current, err = s.transition(writeCtx, session.Room, current, contract.BoxCreating, "")
+	s.admit.Unlock()
+	if err != nil {
+		return response, failure(err)
+	}
+	image, createErr := s.boxes.Create(createCtx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size})
+	if createErr != nil {
+		s.boxLockMu.Lock()
+		closing := run.closing
+		s.boxLockMu.Unlock()
+		if closing {
+			return response, nil
+		}
+		_, err = s.transition(writeCtx, session.Room, current, contract.BoxFailed, createErr.Error())
+		if err != nil {
+			return response, failure(err)
+		}
+		return response, nil
+	}
+	current.Image = image
+	if _, err = s.transition(writeCtx, session.Room, current, contract.BoxStarting, ""); err != nil {
+		return response, failure(err)
+	}
+	return response, nil
 }
 
 func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, req contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
@@ -181,8 +256,35 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
 		return contract.SessionCloseResponse{}, e
 	}
-	if err := s.boxes.Close(ctx, session.Box); err != nil {
+	s.boxLockMu.Lock()
+	if run := s.boxRuns[session.ID]; run != nil {
+		run.closing = true
+		run.cancel()
+	}
+	s.boxLockMu.Unlock()
+	unlock := s.lockBox(session.ID)
+	defer unlock()
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
+	}
+	if current.State != contract.BoxDeleted {
+		if current.State != contract.BoxClosing {
+			current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+			if err != nil {
+				return contract.SessionCloseResponse{}, failure(err)
+			}
+		}
+		if err = s.boxes.Remove(ctx, session.Box); err != nil {
+			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
+			if transitionErr != nil {
+				return contract.SessionCloseResponse{}, failure(transitionErr)
+			}
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+		if _, err = s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
+			return contract.SessionCloseResponse{}, failure(err)
+		}
 	}
 	event, err := s.event(session.Room, caller, contract.SessionClosed{Session: session.ID})
 	if err != nil {
@@ -202,7 +304,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, invalid("post text is required")
 	}
 	var mentions []contract.Principal
-	var recipients []contract.SessionID
+	var recipients []contract.Delivery
 	seen := make(map[contract.SessionID]bool)
 	for _, name := range req.Mentions {
 		session, err := s.store.SessionByName(ctx, req.Room, strings.TrimPrefix(name, "@"))
@@ -215,7 +317,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		seen[session.ID] = true
 		mentions = append(mentions, contract.Principal{Kind: contract.PrincipalSession, Session: session.ID})
 		if caller.Kind != contract.PrincipalSession || caller.Session != session.ID {
-			recipients = append(recipients, session.ID)
+			recipients = append(recipients, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 		}
 	}
 	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: contract.Conversation{Kind: contract.ConversationFeed}})
@@ -257,6 +359,19 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	session, err := s.store.Session(ctx, caller.Session)
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
+	}
+	unlock := s.lockBox(session.ID)
+	defer unlock()
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		return contract.BoxHelloResponse{}, failure(err)
+	}
+	if current.State == contract.BoxStarting {
+		if _, err = s.transition(ctx, session.Room, current, contract.BoxReady, ""); err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+	} else if current.State != contract.BoxReady {
+		return contract.BoxHelloResponse{}, invalid("box is not starting or ready")
 	}
 	model, _, err := s.profiles.Model(session.Profile)
 	if err != nil {
