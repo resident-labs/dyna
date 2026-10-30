@@ -323,7 +323,7 @@ func TestFinishedSessionStaysMessageableAndReopenIsRoomScoped(t *testing.T) {
 			finished = m
 		}
 	}
-	if !finished.Finished || finished.Closed || finished.Status != subagent.StatusDormant {
+	if finished.Closed || finished.Status != subagent.StatusDormant {
 		t.Fatalf("finished member is not dormant: %+v", members)
 	}
 	if finished.Ended.IsZero() {

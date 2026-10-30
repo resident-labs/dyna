@@ -969,9 +969,7 @@ func (s *Service) MarkRoomRead(roomID string) error {
 
 // Member is one row of a room's member tree. The first row is the owner.
 type Member struct {
-	Service bool `json:"service,omitempty"`
-	// TODO: legacy/shim remove later — keep the finished API flag for older desktop clients until they use status=dormant.
-	Finished  bool      `json:"finished,omitempty"`
+	Service   bool      `json:"service,omitempty"`
 	Resumable bool      `json:"resumable"`
 	Role      string    `json:"role,omitempty"`
 	Model     string    `json:"model,omitempty"`
@@ -1128,8 +1126,8 @@ func (s *Service) member(info subagent.Info, depth, kids int) Member {
 	m := Member{
 		ID: info.ID, Role: info.Role, Service: info.Service, Name: info.EffectiveName(), Address: info.Address(), Profile: info.Profile, Model: info.Model, Parent: info.ParentSession,
 		Depth: depth, Children: kids, Status: info.Status, Turns: info.Turns, Created: info.Created, Activity: info.LastActivity,
-		Finished: info.Status == subagent.StatusDormant, Resumable: info.Resumable && info.HarnessSession != "" && info.ConsumedBy == "",
-		Closed: info.Status == subagent.StatusClosed, Hue: NameHue(info.Address()), OwnerDisplay: info.OwnerDisplay,
+		Resumable: info.Resumable && info.HarnessSession != "" && info.ConsumedBy == "",
+		Closed:    info.Status == subagent.StatusClosed, Hue: NameHue(info.Address()), OwnerDisplay: info.OwnerDisplay,
 		Computer: computers.ActorID(info.ID, info.RoomID),
 	}
 	switch info.Status {
