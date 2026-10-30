@@ -1,6 +1,5 @@
 <script lang="ts">
-  // A pinned service is waiting. The card names the pin and why it cannot
-  // run. The service does not start on another profile.
+  // A service is waiting. The card names its pass, profile, and reason.
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { serviceWaitEvent } from './eventPayloads.ts'
@@ -13,7 +12,7 @@
   const roleNames: Record<ServiceRole, string> = { librarian: 'Librarian', reviewer: 'Reviewer', helper: 'Helper' }
 
   let payload = $derived(serviceWaitEvent(post))
-  let title = $derived(payload ? `${roleNames[payload.service] ?? 'Service'} is waiting` : 'Service is waiting')
+  let title = $derived(payload ? `${roleNames[payload.service] ?? 'Service'}${payload.pass === 'map' ? ' map' : payload.pass === 'smell' ? ' smell pass' : ''} is waiting` : 'Service is waiting')
 </script>
 
 <EventRow
@@ -26,7 +25,7 @@
 >
   {#snippet icon()}!{/snippet}
   {#snippet detail()}
-    {#if payload?.reason}<p class="why">{payload.profile}: {payload.reason}</p>{/if}
+    {#if payload?.reason}<p class="why">{#if payload.profile}{payload.profile}: {/if}{payload.reason}</p>{/if}
     {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
   {/snippet}
 </EventRow>
