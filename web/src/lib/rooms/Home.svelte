@@ -231,7 +231,7 @@
 
 <style>
   .home { flex: 1; overflow-y: auto; }
-  .dash { padding: var(--s4); display: grid; gap: var(--s3); align-content: start; max-width: 1240px; }
+  .dash { padding: var(--s4); display: grid; gap: var(--s3); align-content: start; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s3); }
   .new-room { padding: var(--s2) 0; color: var(--ink); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
   .link { color: var(--faint); font-size: var(--t-sm); transition: color var(--motion-fast) var(--ease); }
