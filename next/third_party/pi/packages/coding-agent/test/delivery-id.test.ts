@@ -19,7 +19,7 @@ it.each(["handled", "/handled"])("rejects a delivery batch when an extension han
 			pi.on("input", () => ({ action: "handled" }));
 		},
 	]);
-	const agent = new Agent({});
+	const agent = new Agent({ streamFn: () => createAssistantMessageEventStream() });
 	const registry = await createModelRegistry(AuthStorage.inMemory(), dir);
 	const session = new AgentSession({
 		agent, sessionManager: SessionManager.create(dir), settingsManager: SettingsManager.create(dir, dir),
