@@ -9,7 +9,7 @@ export function runtimeFixture(overrides: Partial<RuntimeHost> = {}) {
   let unauthorized = () => {}
   const host: RuntimeHost = {
     narrowQuery: '(max-width: 760px)',
-    needPair: () => false, unauthorized() {}, setHalt() {}, setNarrow() {}, setDataDir() {}, setHealth() {},
+    needPair: () => false, unauthorized() {}, setHalt() {}, setNarrow() {}, setHealth() {},
     setUpdate() {}, setRoute() {}, setEngine() {}, loadProfiles() {}, openFirst() {}, handle() {},
     workerMessage() {}, hashChanged() {}, openDetail() {}, tickRooms() {}, startData() {}, popped() {},
     openHookLog() {}, setVisible() {}, visible: () => true, started: () => true, refreshVisible() {},

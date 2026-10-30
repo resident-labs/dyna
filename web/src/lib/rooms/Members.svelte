@@ -17,6 +17,7 @@
   import MonitorGlyph from '../computers/MonitorGlyph.svelte'
   import { isLive, appName, ageText } from '../computers/computers.ts'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.ts'
+  import { ownerName } from '../settings/owner.ts'
   import StatusPill from '../ui/StatusPill.svelte'
   import { changeName, prAttention, type Facts } from '../prs/pr.ts'
 
@@ -191,9 +192,9 @@
     <h2>Owner</h2>
     {#if owner}
       <div class="row owner">
-        <Avatar avatar={owner.avatar} here={owner.avatar.room} name="you" hue={owner.hue} size={32} dotGap="var(--side)" />
+        <Avatar avatar={owner.avatar} here={owner.avatar.room} name={ownerName()} hue={owner.hue} size={32} dotGap="var(--side)" />
         <span class="text">
-          <span class="name hue-{owner.hue}">you</span>
+          <span class="name hue-{owner.hue}">{ownerName()}</span>
           <span class="sub">{owner.children} top-level session{owner.children === 1 ? '' : 's'}</span>
         </span>
       </div>
