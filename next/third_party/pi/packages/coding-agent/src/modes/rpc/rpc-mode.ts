@@ -392,13 +392,20 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "prompt": {
+				if (command.inputs && (command.inputs.length === 0 || command.message !== undefined)) {
+					return error(id, "prompt", "Provide either message or a nonempty inputs array");
+				}
+				const first = command.inputs?.[0];
+				const message = first?.message ?? command.message;
+				if (message === undefined) return error(id, "prompt", "Missing prompt message");
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
 				let preflightSucceeded = false;
 				void session
-					.prompt(command.message, {
+					.prompt(message, {
 						images: command.images,
-						deliveryId: command.deliveryId,
+						deliveryId: first?.deliveryId ?? command.deliveryId,
+						additionalInputs: command.inputs?.slice(1),
 						streamingBehavior: command.streamingBehavior,
 						source: "rpc",
 						preflightResult: (disposition) => {
