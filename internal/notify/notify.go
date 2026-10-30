@@ -1047,7 +1047,7 @@ func (s *Service) appendCompletion(ctx context.Context, plan subagent.ReportPlan
 		// the address, which a reused name would collide on.
 		msg, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: plan.RoomID, Event: ev, ID: plan.Post.ID, Producer: plan.Producer,
 			To: plan.Post.To, Via: plan.Post.Via, NeedsRoot: plan.Post.NeedsRoot, SessionIDs: plan.Post.SessionIDs, Turn: plan.Post.Turn, OwnerReport: plan.Post.OwnerReport,
-			Conversation: string(plan.Post.Conversation)})
+			Conversation: string(plan.Post.Conversation), NoWake: !plan.Post.Wake})
 	} else {
 		msg, err = s.Rooms.Post(plan.RoomID, plan.Post)
 	}
@@ -1406,10 +1406,10 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 				posted = append(posted, meta.Room)
 			}
 		}
-		// An explicit post stands in for the report only when the turn ends with
-		// no final text. A turn that wrote a final result still reports it, so a
-		// question posted to the parent mid-turn cannot hide the completion.
-		if !turnHasResult(turn) && slices.ContainsFunc(posted, func(addr string) bool { return slices.Contains(turn.PostedTo, addr) }) {
+		// Keep a final result as quiet context when this turn already posted to
+		// the recipient. Without a final result, the post is the whole report.
+		alreadyPosted := slices.ContainsFunc(posted, func(addr string) bool { return slices.Contains(turn.PostedTo, addr) })
+		if alreadyPosted && !turnHasResult(turn) {
 			return nil, nil
 		}
 		ev, err := s.turnEvent(meta, turn)
@@ -1420,7 +1420,10 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 		// written once.
 		result, err := s.prepareEventCompletion(meta.RoomID, ev, targets, turn.N, false)
 		if result == nil && err == nil {
-			return s.prepareEventCompletion(meta.RoomID, ev, []string{meta.Room}, turn.N, false)
+			result, err = s.prepareEventCompletion(meta.RoomID, ev, []string{meta.Room}, turn.N, false)
+		}
+		if result != nil && alreadyPosted {
+			result.Post.Wake = false
 		}
 		return result, err
 	}
