@@ -2,8 +2,8 @@
    one design. Color and surface vars stay in app.css. */
 :root {
   /* Hairline borders: a quiet edge, and a firmer one for controls. */
-  --hair: rgba(236, 233, 228, 0.09);
-  --hair-strong: rgba(236, 233, 228, 0.18);
+  --hair: var(--border);
+  --hair-strong: var(--border-strong);
 
   /* Radius: rows, chips and controls; cards; floating glass. Pills and dots
      are fully round. */
@@ -42,8 +42,7 @@
   --glass-composer: 0.93;
   --glass-panel: 0.95;
 
-  /* Foundation layer. New code uses these names; the older names above and
-     in app.css keep their values until each page moves over.
+  /* Foundation layer. Older names above and in app.css alias these tokens.
      Surfaces: canvas, sunken nav, card, and a raised field or popover.
      Hover and select are washes, so they work on any surface. */
   --bg: #1c1b1e;
@@ -99,6 +98,7 @@
   --w-medium: 500;
   --w-strong: 600;
 
+  --r-card: 12px;
   --r-badge: 4px;
   --meter-h: 6px;
   --meter-track: rgba(236, 233, 228, 0.07);
