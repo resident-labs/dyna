@@ -68,7 +68,7 @@
     {#if cont}<time class="side-time">{clock(post.ts)}</time>
     {:else if script}<a class="av" href={scriptHref(post.roomId ?? '', script)} aria-label="Open workflow run {name}"><RunAvatar size={40} /></a>
     {:else}<button class="av" onclick={() => onaddress?.(post.from ?? '')} aria-label={name}>
-      <Avatar {name} hue={post.fromHue} owner={post.owner} emoji={post.fromEmoji} size={40} />
+      <Avatar {name} hue={post.fromHue} owner={post.owner} emoji={post.avatar?.emoji} size={40} />
     </button>{/if}
   </span>
   <div class="body" class:turn-result={turnResult}>

@@ -37,7 +37,7 @@ function props(threadCount: number) {
   const noop = () => {}
   return {
     narrow: true, navOpen: false, showSide: false, roomId: 'room_1', room: { id: 'room_1', name: 'room_1' }, current: undefined,
-    drill: { id: 'ses_root', name: 'root', address: 'room_1:root', hue: 2 }, session: null,
+    drill: { avatar: { kind: 'session', room: 'repo', color: 'crimson' }, id: 'ses_root', name: 'root', address: 'room_1:root', hue: 2 }, session: null,
     machines: [], machineId: '', machineDetail: null, readOnlyDm: false, reviewOpen: false, people: [], live: [], pins: [],
     sessionTab: 'chat', sessionComputer: null, drillComputer: null, shells: 0, isRootDm: false, threadsOpen: false, threadCount,
     sessionTrail: [], view: 'general', openRun: '', runTrail: [], runDetail: null, workRow: undefined, workTabs: null,
