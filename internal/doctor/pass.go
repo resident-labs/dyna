@@ -19,7 +19,7 @@ type Pass struct {
 	// GPUs reads live GPU memory during each examination; nil skips the GPU
 	// check (D-352).
 	GPUs func() ([]GPUReading, string)
-	// If is the condition text, such as the hook recipe's DoctorCondition. It
+	// If is the condition text, such as the default DoctorCondition. It
 	// holds every threshold, so the doctor has no limit of its own to start.
 	If       string
 	Cooldown time.Duration

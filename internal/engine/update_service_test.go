@@ -4,12 +4,14 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/serviceregistry"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/updaterservice"
@@ -30,6 +32,21 @@ func TestUpdateSettingAndControls(t *testing.T) {
 	cfg, err := (updaterservice.Store{DataDir: store.DataDir()}).Get(ctx)
 	if err != nil || cfg.Source != "/missing" || !cfg.Enabled || cfg.EveryMinutes != 17 {
 		t.Fatalf("config = %+v, %v", cfg, err)
+	}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	updater := updaterservice.Store{DataDir: store.DataDir()}
+	if _, due, err := updater.ClaimInterval(ctx, now); err != nil || !due {
+		t.Fatalf("first claim: %v %v", due, err)
+	}
+	if _, due, err := updater.ClaimInterval(ctx, now.Add(time.Minute)); err != nil || due {
+		t.Fatalf("early claim: %v %v", due, err)
+	}
+	if _, due, err := updater.ClaimInterval(ctx, now.Add(17*time.Minute)); err != nil || !due {
+		t.Fatalf("due claim: %v %v", due, err)
+	}
+	rows := serviceregistry.Build(serviceregistry.Facts{Updates: updateFacts(ctx)})
+	if rows[9].State != serviceregistry.StateError || rows[9].Detail != serviceregistry.DetailUpdateSourceInvalid {
+		t.Fatalf("missing checkout: %+v", rows[9])
 	}
 	if _, err := s.setSetting(ctx, "updater.source", "relative"); err == nil {
 		t.Fatal("relative path accepted")
