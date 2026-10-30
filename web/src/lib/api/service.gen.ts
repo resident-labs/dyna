@@ -165,11 +165,5 @@ export interface Service {
    * Session is the address of the agent session the service runs in, or empty.
    */
   session: string;
-  /**
-   * Hook names the repository hook that does this service's work, such as
-   * self-update for Updates, or is empty. The Services page shows that hook
-   * under the service and leaves it out of the hook list.
-   */
-  hook: string;
   settingsKeys: string[];
 }
