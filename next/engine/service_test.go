@@ -54,6 +54,15 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 	}
 	return s, room.Room, session.Session, ctx
 }
+func setupRoot(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context.Context) {
+	t.Helper()
+	s, room, worker, ctx := setup(t)
+	var root contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	return s, room, root, ctx
+}
 func TestRoomCreatesRootAndAttachesWorker(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	var parent contract.SessionID
@@ -70,7 +79,7 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: root}); e == nil || e.Code != contract.ErrInvalid {
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: root}); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("root close: %v", e)
 	}
 	current, err := s.store.Session(ctx, worker)
@@ -97,7 +106,7 @@ func TestCloseParentWithChildIsRejected(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrInvalid {
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrHasChildren {
 		t.Fatalf("close: %v", e)
 	}
 }
@@ -380,7 +389,7 @@ func TestSessionCannotClose(t *testing.T) {
 }
 
 func TestBoxLifecycleEmitsTransitions(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
 	if e != nil {
 		t.Fatal(e)
@@ -488,7 +497,7 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 	}
 }
 func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
 	if e != nil {
 		t.Fatal(e)
@@ -531,7 +540,7 @@ func (b *recordingBoxes) Create(_ context.Context, spec BoxSpec) (string, error)
 func (b *recordingBoxes) Remove(context.Context, contract.BoxID) error { return nil }
 
 func TestChildPlacement(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	recorder := &recordingBoxes{}
 	s.boxes = recorder
 	start := func(parent contract.SessionID, name string) contract.SessionStartResponse {
@@ -560,7 +569,7 @@ func TestChildPlacement(t *testing.T) {
 }
 
 func TestChildWaitsForParentBox(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	s.boxes = unavailableBoxes{}
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
 	if e != nil {
@@ -602,7 +611,7 @@ func (b *heldParentBox) Create(_ context.Context, spec BoxSpec) (string, error) 
 func (*heldParentBox) Remove(context.Context, contract.BoxID) error { return nil }
 
 func TestPendingChildrenRetryIndependently(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	s.SetRepositories(placementRepos{})
 	adapter := &heldParentBox{started: make(chan BoxSpec), release: make(chan struct{}), children: make(chan BoxSpec, 2), unblock: make(chan struct{})}
 	s.boxes = adapter
@@ -644,14 +653,14 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 }
 
 func TestCloseRootIsForbidden(t *testing.T) {
-	s, _, root, ctx := setup(t)
+	s, _, root, ctx := setupRoot(t)
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: root}); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("close root: %v", e)
 	}
 }
 
 func TestStartRejectsClosingParent(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closing' WHERE id=?", root)
 		return err
@@ -681,7 +690,7 @@ func (b closingInterleaveBox) Create(ctx context.Context, spec BoxSpec) (string,
 func (closingInterleaveBox) Remove(context.Context, contract.BoxID) error { return nil }
 
 func TestClosingCreatingParentRejectsConcurrentChild(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	adapter := closingInterleaveBox{started: make(chan BoxSpec), cancelled: make(chan struct{}), release: make(chan struct{})}
 	s.boxes = adapter
 	started := make(chan *contract.Error, 1)
@@ -724,7 +733,7 @@ func (b heldRemoveBox) Remove(context.Context, contract.BoxID) error {
 }
 
 func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
-	s, room, root, ctx := setup(t)
+	s, room, root, ctx := setupRoot(t)
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
 	if e != nil {
 		t.Fatal(e)
