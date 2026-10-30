@@ -94,9 +94,24 @@ type BoxChanged struct {
 	Box     BoxID     `json:"box"`
 	Session SessionID `json:"session"`
 	Host    HostName  `json:"host,omitempty"`
-	From    BoxState  `json:"from"`
+	From    BoxState  `json:"from,omitempty"` // empty for a new box
 	To      BoxState  `json:"to"`
 	Reason  string    `json:"reason,omitempty"`
+}
+
+// PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a
+// reached memory.max or an OOM kill.
+type PressureKind string
+
+const (
+	PressureHigh PressureKind = "high"
+	PressureMax  PressureKind = "max"
+)
+
+// BoxPressure reports memory pressure in a box. It wakes nobody.
+type BoxPressure struct {
+	Box  BoxID        `json:"box"`
+	Kind PressureKind `json:"kind"`
 }
 
 type ImageBuilt struct {
@@ -171,6 +186,9 @@ func (ImageFailed) isEventBody()         {}
 
 func (BoxChanged) EventType() EventType { return "box.changed" }
 func (BoxChanged) isEventBody()         {}
+
+func (BoxPressure) EventType() EventType { return "box.pressure" }
+func (BoxPressure) isEventBody()         {}
 
 const (
 	TurnCompleted TurnOutcome = "completed"
