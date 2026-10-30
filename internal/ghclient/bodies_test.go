@@ -110,6 +110,9 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 			if text, ok := strings.CutPrefix(arg, "body="); ok {
 				return text
 			}
+			if text, ok := strings.CutPrefix(arg, "--comment="); ok {
+				return text
+			}
 			if path, ok := strings.CutPrefix(arg, "--body-file="); ok {
 				data, err := os.ReadFile(path)
 				if err != nil {
@@ -150,7 +153,8 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		"edit no body":   {[]string{"pr", "edit", "1", "--title", "t"}, ""},
 		"not a body":     {[]string{"pr", "view", "1"}, ""},
 		"issue comment":  {[]string{"issue", "comment", "3", "--body", "Hi"}, "Opened by an agent.\n\nHi\n"},
-		"issue close":    {[]string{"issue", "close", "3", "--reason", "completed", "--comment", "Done"}, "Opened by an agent.\n\nDone\n"},
+		"issue close":    {[]string{"issue", "close", "3", "--reason", "completed", "--comment", "Done"}, "Opened by an agent.\n\nDone"},
+		"issue reopen":   {[]string{"issue", "reopen", "3", "--comment=Done"}, "Opened by an agent.\n\nDone"},
 		"pr comment":     {[]string{"pr", "comment", "3", "-F", "body.md"}, "Opened by an agent.\n\nBody text\n"},
 		"review comment": {[]string{"pr", "review", "3", "--comment", "-b", "Fine"}, "Opened by an agent.\n\nFine\n"},
 		"approve":        {[]string{"pr", "review", "3", "--approve"}, ""},
