@@ -2,7 +2,7 @@ import type { Attachment, Conversation, Event, Principal } from "./contract.gen.
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean }
-  | { kind: "failed"; key: string; session: string; error: string }
+  | { kind: "failed"; key: string; session: string; at: string; error: string }
   | { kind: "work"; key: string; events: Event[] };
 
 type Name = (session: string) => string;
@@ -50,7 +50,7 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
       }
       if (event.body.outcome === "failed") {
         flush();
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, error: event.body.error ?? "" });
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, error: event.body.error ?? "" });
         continue;
       }
     }
@@ -58,6 +58,13 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
   }
   flush();
   return rows;
+}
+
+// The muted time on a row's name line: the clock today, else the date and the clock.
+export function formatTime(value: string): string {
+  const at = new Date(value);
+  const clock = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return at.toDateString() === new Date().toDateString() ? clock : `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
 }
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
