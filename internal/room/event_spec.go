@@ -777,8 +777,7 @@ var eventSpecs = []EventSpec{
 		Text:      "The {service} service failed on turn {turn} ({session}): {error}",
 		Producers: []EventProducer{ProducerLibrarian, ProducerReviewer, ProducerHelper},
 	},
-	// A pinned service that cannot run its pin waits. Root hears it once per
-	// pin and reason, and the service does not start on another profile.
+	// A service that cannot run waits. Root hears each availability transition.
 	{
 		Family:    FamilyService,
 		Type:      TypeWaiting,
@@ -786,7 +785,7 @@ var eventSpecs = []EventSpec{
 		Payload:   reflect.TypeOf(ServiceWaitEvent{}),
 		Wake:      WakeRoot,
 		Once:      true,
-		Text:      "The {service} service is waiting. Its pinned profile {profile} cannot run: {reason}",
+		Text:      "The {service} service is waiting: {reason}",
 		Producers: []EventProducer{ProducerLibrarian, ProducerReviewer},
 	},
 	// A helper outcome wakes its available parent. An unavailable parent sends
@@ -1042,6 +1041,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(AlertSource("")), Values: enumValues(alertSources)},
 	{Type: reflect.TypeOf(AlertSeverity("")), Values: enumValues(alertSeverities)},
 	{Type: reflect.TypeOf(ServiceRole("")), Values: enumValues(serviceRoles)},
+	{Type: reflect.TypeOf(ServicePass("")), Values: enumValues(servicePasses)},
 	{Type: reflect.TypeOf(HelperOutcomeReason("")), Values: enumValues(helperOutcomeReasons)},
 	{Type: reflect.TypeOf(TerminalVerdict("")), Values: enumValues(terminalVerdicts)},
 	{Type: reflect.TypeOf(ApprovalClass("")), Values: enumValues([]ApprovalClass{ApprovalClassAgent, ApprovalClassOwner})},
