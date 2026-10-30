@@ -75,6 +75,8 @@ test('the PR page has no reviewer bar and no review strip at the top', async () 
    assert.doesNotMatch(show('run'), /class="status pill/)
    assert.match(show('coral'), /class="status pill danger /)
    assert.match(show('gold'), /class="status pill warning /)
+   const shortFailure = render(component, { props: { pr: { number: 9 }, meta: { tone: 'coral', label: 'CI failed' }, short: true } }).body
+   assert.match(shortFailure, /class="status pill danger [^>]*>[^]*CI failed/)
   } finally { await rm(dir, { recursive: true, force: true }) }
  })
 
