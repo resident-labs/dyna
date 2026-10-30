@@ -121,6 +121,15 @@ func open(root string) (*sql.DB, error) {
 		return db, err
 	}
 	err = database.Migrate(db, "pr.record_parts", 1, migrateRecordParts)
+	if err != nil {
+		return db, err
+	}
+	err = database.Migrate(db, "pr.session-indexes", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `CREATE INDEX IF NOT EXISTS pr_rows_author_session ON pr_rows(room, json_extract(body,'$.record.authorSession'));
+CREATE INDEX IF NOT EXISTS pr_rows_reviewer_session ON pr_rows(room, json_extract(body,'$.record.reviewerSession'));
+CREATE INDEX IF NOT EXISTS pr_rows_reviewer_override ON pr_rows(room, json_extract(body,'$.record.reviewerOverride'));`)
+		return err
+	})
 	return db, err
 }
 
@@ -372,6 +381,13 @@ func ReadForSessions(root, roomID string, sessions ...string) (State, error) {
 	return st, nil
 }
 
+const sessionsQuery = `SELECT pr_rows.key, pr_rows.body, pr_record_parts.part, pr_record_parts.body
+FROM pr_rows LEFT JOIN pr_record_parts ON pr_record_parts.key=pr_rows.key AND pr_record_parts.part<>'responses'
+WHERE pr_rows.key IN (
+SELECT key FROM pr_rows WHERE room=? AND json_extract(body,'$.record.authorSession') IN (%s)
+UNION SELECT key FROM pr_rows WHERE room=? AND json_extract(body,'$.record.reviewerSession') IN (%s)
+UNION SELECT key FROM pr_rows WHERE room=? AND json_extract(body,'$.record.reviewerOverride') IN (%s))`
+
 // ReadForSessionsFresh is the close-path read. SQLite filters the rows of the
 // store as it is now, so a close decision never uses the shared snapshot.
 func ReadForSessionsFresh(root, roomID string, sessions ...string) (State, error) {
@@ -385,8 +401,9 @@ func ReadForSessionsFresh(root, roomID string, sessions ...string) (State, error
 		return State{}, err
 	}
 	marks := strings.TrimSuffix(strings.Repeat("?,", len(sessions)), ",")
-	args := []any{roomID}
+	var args []any
 	for range 3 {
+		args = append(args, roomID)
 		for _, session := range sessions {
 			args = append(args, session)
 		}
@@ -396,10 +413,7 @@ func ReadForSessionsFresh(root, roomID string, sessions ...string) (State, error
 	found := map[string]*storedRow{}
 	var keys []string
 	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
-		rows, err := r.QueryContext(context.Background(), `SELECT pr_rows.key, pr_rows.body, pr_record_parts.part, pr_record_parts.body
-FROM pr_rows LEFT JOIN pr_record_parts ON pr_record_parts.key=pr_rows.key AND pr_record_parts.part<>'responses'
-WHERE pr_rows.room=? AND (
-json_extract(pr_rows.body,'$.record.authorSession') IN (`+marks+`) OR json_extract(pr_rows.body,'$.record.reviewerSession') IN (`+marks+`) OR json_extract(pr_rows.body,'$.record.reviewerOverride') IN (`+marks+`))`, args...)
+		rows, err := r.QueryContext(context.Background(), fmt.Sprintf(sessionsQuery, marks, marks, marks), args...)
 		if err != nil {
 			return err
 		}
