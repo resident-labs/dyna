@@ -9,7 +9,7 @@ import (
 
 // RoomTree loads open sessions in a room for the pure tree rules.
 func (s *Store) RoomTree(ctx context.Context, id contract.RoomID) (room.Tree, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,coalesce(parent,'') FROM sessions WHERE room=? AND closed_at IS NULL ORDER BY id", id)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,coalesce(parent,'') FROM sessions WHERE room=? AND closed_at IS NULL ORDER BY created_at,id", id)
 	if err != nil {
 		return room.Tree{}, err
 	}

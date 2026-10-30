@@ -8,6 +8,11 @@ import (
 
 func TestTree(t *testing.T) {
 	tree := NewTree([]Node{{ID: "root"}, {ID: "a", Parent: "root"}, {ID: "b", Parent: "a"}, {ID: "c", Parent: "root"}})
+	legacy := NewTree([]Node{{ID: "first"}, {ID: "second"}})
+	parent, err := legacy.ParentFor(contract.Principal{Kind: contract.PrincipalOwner}, "")
+	if err != nil || parent != "first" {
+		t.Fatalf("legacy root %q: %v", parent, err)
+	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	a := contract.Principal{Kind: contract.PrincipalSession, Session: "a"}
 	for _, tt := range []struct {
