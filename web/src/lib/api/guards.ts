@@ -145,6 +145,12 @@ export function isMessage(v: unknown): v is Message {
   return isRecord(v) && messageFields(v)
 }
 
+function isAvatar(v: unknown): boolean {
+  return isRecord(v) && isString(v.kind) && ['session', 'root', 'owner', 'engine', 'voice', 'workflow', 'unknown'].includes(v.kind) &&
+    optional(v.emoji, isString) && isString(v.room) && isString(v.color) &&
+    ['crimson', 'blue', 'violet', 'teal', 'orange', 'magenta', 'sky', 'olive'].includes(v.color)
+}
+
 export function isPost(v: unknown): v is Post {
   return (
     isRecord(v) &&
@@ -158,7 +164,7 @@ export function isPost(v: unknown): v is Post {
     optional(v.preview, isString) &&
     optional(v.hidden, isNumber) &&
     optional(v.unread, isBoolean) &&
-    optional(v.fromEmoji, isString) &&
+    isAvatar(v.avatar) &&
     optional(v.fullResult, isBoolean) &&
     optional(v.resultCut, isBoolean) &&
     // TODO: legacy/shim — remove after cached feeds expire. A feed cached
@@ -178,6 +184,7 @@ export function isFeedSearch(v: unknown): v is FeedSearch {
 export function isSessionReference(v: unknown): v is SessionReference {
   return (
     isRecord(v) &&
+    isAvatar(v.avatar) &&
     isString(v.postId) &&
     isString(v.from) &&
     isString(v.speaker) &&
@@ -347,7 +354,7 @@ export function isMember(v: unknown): v is Member {
     optional(v.ended, isString) &&
     optional(v.doing, isDoing) &&
     optional(v.closed, isBoolean) &&
-    optional(v.emoji, isString) &&
+    isAvatar(v.avatar) &&
     optional(v.seat, isSeat) &&
     optional(v.ownerDisplay, isBoolean)
   )

@@ -74,7 +74,7 @@
   {@const attention = prAttention(pr)}
   <!-- A row is the name, one muted fact and at most one dot. The profile says why. -->
   <button class="chan person" class:sel style="--depth: 0" {onclick}>
-    <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
+    <Avatar emoji={m.avatar.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
     <span class="fit"><span class="label hue-{m.hue}">{m.name}</span><span class="turn">{pr ? changeName(pr) : m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span></span>
     {#if agentExpedited($expedite, m)}<ExpediteBadge short />{/if}
     {#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}

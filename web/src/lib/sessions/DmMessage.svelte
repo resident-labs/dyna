@@ -71,7 +71,7 @@
 <article class="message" class:post={actionable} class:cont={row.cont} class:selected={!!post && selection.get() === post.id} class:enter tabindex={actionable ? 0 : undefined} data-select-id={post?.id} {...(post && actionable ? postHandlers(selection, post.id) : {})}>
   <div class="gutter">
     {#if row.cont}<span class="side-time">{@render when(clock(row.ts))}</span>
-    {:else}<Avatar {name} {hue} {owner} emoji={row.post?.fromEmoji || person?.emoji} size={compact ? 28 : 40} />{/if}
+    {:else}<Avatar {name} {hue} {owner} emoji={row.post?.avatar?.emoji || person?.avatar.emoji} size={compact ? 28 : 40} />{/if}
   </div>
   <div class="body">
     {#if !row.cont}<div class="head"><span class="from hue-{hue}" class:owner>{name}</span>{@render when(stamp(row.ts))}{#if row.post && !delivery && !inThread && !row.ownerAttachments && sentTo}<span class="tag posted">posted to {sentTo}</span>{/if}</div>{/if}

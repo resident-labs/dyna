@@ -29,7 +29,7 @@
 <ol class="journal">
   {#each items as item (item.id)}
     <li class="entry">
-      <Avatar name={name(item.by)} hue={member(item.by)?.hue ?? 0} emoji={member(item.by)?.emoji} size={22} />
+      <Avatar name={name(item.by)} hue={member(item.by)?.hue ?? 0} emoji={member(item.by)?.avatar.emoji} size={22} />
       <div class="body">
         <header><span class="name hue-{member(item.by)?.hue ?? 0}">{name(item.by)}</span> {VERBS[item.event] ?? item.event}{#if item.goal}<button type="button" onclick={() => ongoal(item.goal)}>{item.goal}{item.item ? `·${item.item}` : ''}</button>{/if}<time datetime={item.at}>{when(item.at)}</time></header>
         {#if item.text}<p class="text">{item.text}</p>{/if}

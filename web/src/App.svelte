@@ -521,7 +521,7 @@
   function rootMember(): Drill {
     const owner = hierarchy.find((m) => m.owner)
     const holder = rootSeat.external ? (rootSeat.harness ? rootSeat.harness + ' (external)' : 'External orchestrator') : 'Internal root'
-    return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, computer: owner?.computer, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
+    return { avatar: { kind: 'root', emoji: '🖥️', room: room?.name ?? '', color: room?.color ?? 'crimson' }, id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, computer: owner?.computer, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
   }
   // The breadcrumbs above a session and a run: root, then the parent sessions.
   let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(feedViews, drill.parent, rootMember()).filter((m) => m.id !== drill?.id) : [])
