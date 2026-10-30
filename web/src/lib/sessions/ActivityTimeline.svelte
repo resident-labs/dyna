@@ -96,7 +96,7 @@
 </section>
 
 <style>
-  .timeline { max-width: 920px; margin: var(--s1) 0; color: var(--ink-2); font-size: var(--t-sm); }
+  .timeline { max-width: var(--feed-reading-width); margin: var(--s1) 0; color: var(--ink-2); font-size: var(--t-sm); }
   header { display: flex; flex-wrap: wrap; gap: 0 5px; padding: 0 0 var(--s2); color: var(--muted); font-size: var(--t-cap); font-variant-numeric: tabular-nums; }
   ol { list-style: none; padding: 0; margin: 0 0 0 5px; border-left: 1px solid var(--line); }
   li { position: relative; padding-left: 16px; }

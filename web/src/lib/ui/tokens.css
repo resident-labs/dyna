@@ -11,6 +11,10 @@
   --r-sm: 10px;
   --r-lg: 16px;
 
+  /* Reading surfaces have a shared cap. Dashboards and grids fill their space. */
+  --page-reading-width: 1160px;
+  --feed-reading-width: 920px;
+
   /* Spacing: one scale for padding and gaps. */
   --s1: 4px;
   --s2: 8px;
