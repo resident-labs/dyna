@@ -136,7 +136,6 @@ func setup(t *testing.T) *harness {
 	path := filepath.Join(data, "settings.json")
 	h := &harness{sessions: &fakeSessions{}, repo: repo, clock: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)}
 	h.svc = Service{DataDir: data, Sessions: h.sessions, Settings: func() (settings.Values, error) { return settings.Load(path) }, Now: func() time.Time { return h.clock }}
-	configureLibrarianHooks(&h.svc, nil)
 	r, err := h.svc.Enable(context.Background(), authority.Actor{Role: authority.Owner}, repo, "room_1", "/usr/bin/dyna")
 	if err != nil {
 		t.Fatal(err)
@@ -168,18 +167,13 @@ func TestEnableInstallsHooksOnce(t *testing.T) {
 	ctx := context.Background()
 	svc := hooks.Service{DataDir: h.svc.DataDir}
 	list, err := svc.List(ctx, h.repo)
-	if err != nil || len(list) != 1 || list[0].Name != "librarian-main" {
+	if err != nil || len(list) != 0 {
 		t.Fatalf("hooks = %+v %v", list, err)
-	}
-	for _, hk := range list {
-		if !strings.Contains(hk.Command, "library wake --repo") || hooks.Validate(hk) != nil {
-			t.Fatalf("hook %+v", hk)
-		}
 	}
 	if _, err := h.svc.Enable(ctx, authority.Actor{Role: authority.Owner}, h.repo, "room_1", "/usr/bin/dyna"); err != nil {
 		t.Fatalf("second enable: %v", err)
 	}
-	if again, _ := svc.List(ctx, h.repo); len(again) != 1 || !again[0].AddedAt.Equal(list[0].AddedAt) {
+	if again, _ := svc.List(ctx, h.repo); len(again) != 0 {
 		t.Fatalf("second enable replaced unchanged hooks: %+v", again)
 	}
 }

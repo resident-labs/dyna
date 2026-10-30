@@ -2,7 +2,7 @@
 // data and returns a typed value, or null where the call failed or the shape
 // is wrong. Nothing here changes data.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
-import { StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp, DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, type Detail, type State } from '../api/service.gen.ts'
+import { IDReviews, IDMergeQueue, IDLocalCI, IDPRWatcher, IDLaneSync, IDIssueWatch, IDLibrary, IDParentCheckIns, IDVoice, IDUpdates, IDLoadDoctor, IDMaintenance, IDAccountUsage, IDHarnessVersions, GroupPullRequests, GroupAgents, GroupThisComputer, type ID, type Group, StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp, DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, type Detail, type State } from '../api/service.gen.ts'
 import type { RegistryService } from '../api/service.ts'
 import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, RunReason, ServiceInfo as ServiceRow, SyncInfoByRepo, SyncRemote, TestHealth, UsageRow } from './model.ts'
 
@@ -162,14 +162,24 @@ export function readHookLog(v: unknown): RunReason | null {
 
 const states: readonly State[] = [StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp]
 const details: readonly Detail[] = [DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable]
+const ids: readonly ID[] = [IDReviews, IDMergeQueue, IDLocalCI, IDPRWatcher, IDLaneSync, IDIssueWatch, IDLibrary, IDParentCheckIns, IDVoice, IDUpdates, IDLoadDoctor, IDMaintenance, IDAccountUsage, IDHarnessVersions]
+const groups: readonly Group[] = [GroupPullRequests, GroupAgents, GroupThisComputer]
 
-// ServiceRegistry: serviceregistry.Service. A row with a state or detail this
-// page does not know is dropped, so its service shows as unreadable.
+// ServiceRegistry: serviceregistry.Service. A row with an id, group, state or
+// detail this page does not know is dropped, so its service shows as unreadable.
 export const readRegistry = (v: unknown): RegistryService[] | null =>
   Array.isArray(v)
     ? v.filter(isRecord).flatMap((r) => {
-      const state = states.find((s) => s === r.state)
-      const detail = details.find((d) => d === r.detail)
-      return state && detail && isString(r.id) ? [{ ...(r as unknown as RegistryService), state, detail }] : []
+      const id = ids.find((x) => x === r.id)
+      const group = groups.find((x) => x === r.group)
+      const state = states.find((x) => x === r.state)
+      const detail = details.find((x) => x === r.detail)
+      if (!id || !group || !state || !detail) return []
+      const sw = isRecord(r.switch) && isBoolean(r.switch.on) ? { on: r.switch.on } : undefined
+      return [{
+        id, group, state, detail, label: str(r.label), description: str(r.description), count: num(r.count),
+        lastRun: str(r.lastRun) || undefined, nextRun: str(r.nextRun) || undefined, switch: sw,
+        profile: str(r.profile), session: str(r.session), settingsKeys: strings(r.settingsKeys),
+      }]
     })
     : null
