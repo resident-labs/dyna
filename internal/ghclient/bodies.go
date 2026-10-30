@@ -281,7 +281,13 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 	start := len(args) - len(command) + 2
 	body, rest := "", append([]string(nil), args[:start]...)
 	found := false
+	// Arguments after "--" are positional, so the attributed flag goes before them.
+	var tail []string
 	for i := start; i < len(args); i++ {
+		if args[i] == "--" {
+			tail = args[i:]
+			break
+		}
 		name, value, attached := strings.Cut(args[i], "=")
 		if flag, rest, ok := shortFlag(args[i]); ok {
 			name, value, attached = flag, strings.TrimPrefix(rest, "="), true
@@ -314,7 +320,7 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 	}
 	body = withAttributionFirst(body, rec.Attribution)
 	if closesIssue(command) {
-		cmd.Args = append([]string{cmd.Args[0]}, append(rest, "--comment="+body)...)
+		cmd.Args = append([]string{cmd.Args[0]}, append(append(rest, "--comment="+body), tail...)...)
 		return none, nil
 	}
 	file, err := os.CreateTemp("", "dyna-gh-body-")
@@ -327,6 +333,6 @@ func withAttribution(ctx context.Context, cmd *exec.Cmd, r repository) (func(), 
 		cleanup()
 		return none, errors.Join(werr, cerr)
 	}
-	cmd.Args = append([]string{cmd.Args[0]}, append(rest, "--body-file="+file.Name())...)
+	cmd.Args = append([]string{cmd.Args[0]}, append(append(rest, "--body-file="+file.Name()), tail...)...)
 	return cleanup, nil
 }
