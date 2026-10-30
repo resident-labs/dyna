@@ -16,11 +16,12 @@ var ErrParentClosing = errors.New("parent session is closing")
 
 // Session describes the stored session and its box.
 type Session struct {
-	ID      contract.SessionID
-	Room    contract.RoomID
-	Name    string
-	Profile contract.ProfileName
-	Box     contract.BoxID
+	ID          contract.SessionID
+	Room        contract.RoomID
+	Name        string
+	Profile     contract.ProfileName
+	Box         contract.BoxID
+	NewRoomName string // nonempty only for a new room root
 }
 
 func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string, at time.Time) error {
@@ -39,6 +40,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			}
 			if state == "closing" || state == "closed" {
 				return ErrParentClosing
+			}
+		}
+		if session.NewRoomName != "" {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES(?,?,?,?,?)", session.Room, session.NewRoomName, event.Time.UnixMilli(), 0, 0); err != nil {
+				return err
 			}
 		}
 		var parentID *contract.SessionID

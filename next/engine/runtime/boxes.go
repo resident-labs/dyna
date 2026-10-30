@@ -15,6 +15,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
+	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -61,6 +62,11 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 		}
 	}
 	return nil, fmt.Errorf("host %q not found", name)
+}
+
+func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegit.CacheHost, string, error) {
+	h, err := b.host(ctx, name)
+	return h, b.HostData, err
 }
 
 func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error {
@@ -160,6 +166,9 @@ func (b *Boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 		{HostPath: filepath.Dir(forward.HostPath), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
 	}}
+	for _, repo := range spec.Repos {
+		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
+	}
 	if err = h.CreateContainer(ctx, c); err != nil {
 		return "", err
 	}

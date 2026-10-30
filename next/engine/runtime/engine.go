@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
+	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -54,6 +56,10 @@ type Config struct {
 }
 
 func Run(ctx context.Context, cfg Config) error {
+	token := os.Getenv("GH_TOKEN")
+	if err := os.Unsetenv("GH_TOKEN"); err != nil {
+		return err
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -82,6 +88,8 @@ func Run(ctx context.Context, cfg Config) error {
 	defer proxy.Shutdown(context.Background())
 	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi}
 	service := engine.New(st, boxes, profiles, time.Now)
+	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
+	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes}, func(c api.Caller) http.Handler {
 		session, err := st.Session(ctx, c.Principal.Session)
 		if err != nil {
@@ -96,6 +104,9 @@ func Run(ctx context.Context, cfg Config) error {
 			})
 		}
 		return proxy.Handler(string(session.ID), allowed)
+	})
+	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
+		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
 	})
 	sockets := api.NewSockets(apiServer, cfg.Runtime, uint32(os.Getuid()), nil)
 	boxes.Sockets = sockets

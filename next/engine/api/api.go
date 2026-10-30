@@ -16,11 +16,15 @@ import (
 type API struct {
 	service Service
 	model   func(Caller) http.Handler
+	git     func(Caller) http.Handler
 }
 
 func New(service Service, model func(Caller) http.Handler) *API {
 	return &API{service: service, model: model}
 }
+
+// SetGitRoute configures the per-box git route before opening sockets.
+func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
@@ -136,6 +140,9 @@ func (a *API) handler(c Caller) http.Handler {
 			}
 		}
 	})
+	if box(c) && a.git != nil {
+		mux.Handle("/git/", a.git(c))
+	}
 	if box(c) && a.model != nil {
 		mux.Handle("/model/", a.model(c))
 	}
