@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
 )
 
 type runner struct {
@@ -297,21 +298,20 @@ func TestCancelledHeartbeatDoesNotWaitForHostState(t *testing.T) {
 	}
 }
 
-type ticker struct{ ch chan time.Time }
-
-func (t ticker) C() <-chan time.Time { return t.ch }
-func (ticker) Stop()                 {}
 func TestHeartbeatThreeMisses(t *testing.T) {
 	r := &runner{fail: true}
 	h := newTestHost(t, r)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ticks := ticker{make(chan time.Time)}
+	ticks := make(chan time.Time)
 	reports := make(chan bool)
 	done := make(chan struct{})
-	go func() { defer close(done); h.Heartbeat(ctx, ticks, func(ok bool) { reports <- ok }) }()
+	go func() {
+		defer close(done)
+		h.Heartbeat(ctx, ticks, func(ok bool) { reports <- ok }, func(string, contract.PressureKind) {})
+	}()
 	for i := 0; i < 3; i++ {
-		ticks.ch <- time.Time{}
+		ticks <- time.Time{}
 	}
 	if <-reports {
 		t.Fatal("expected unreachable")
