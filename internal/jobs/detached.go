@@ -310,6 +310,10 @@ func CommandExitStatus(err error) (int, bool) {
 	if errors.As(err, &detached) {
 		return detached.Code, true
 	}
+	var remote *remoteExit
+	if errors.As(err, &remote) {
+		return remote.code, true
+	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		return exit.ExitCode(), true
@@ -336,6 +340,10 @@ func (x Executor) pause(ctx context.Context, d time.Duration) error {
 // script that exited with its own status is an answer.
 func (x Executor) transient(err error) bool {
 	if x.Node.SSH == "" {
+		return false
+	}
+	var remote *remoteExit
+	if errors.As(err, &remote) {
 		return false
 	}
 	var exit *exec.ExitError
