@@ -123,6 +123,11 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs,error) {
  }
 }
 `)
+	g.WriteString("\nvar eventBodyTypes = []EventType{")
+	for _, b := range bodies {
+		fmt.Fprintf(&g, "%q,", b.kind)
+	}
+	g.WriteString("}\n")
 	source := strings.ReplaceAll(g.String(), "@", "`")
 	source = strings.Replace(source, `"fmt")`, `"fmt"; "time")`, 1)
 	formatted, err := format.Source([]byte(source))
