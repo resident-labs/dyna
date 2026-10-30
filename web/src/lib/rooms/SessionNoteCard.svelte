@@ -93,6 +93,7 @@
         <ul class="sections">
           {#each sessionEvent(step)?.sections ?? [] as section, i (i)}
             <li>
+              <span class="name">{section.name}</span>
               <span class="action">{actionWords[section.action]}</span>
               {#if section.body}<span class="item" title={section.body}>{section.body}</span>{/if}
               {#each section.added ?? [] as item (item)}<span class="item add" title={item}>+ {item}</span>{/each}
