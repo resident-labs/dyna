@@ -171,6 +171,13 @@ type Choice struct {
 	Cause  Cause
 }
 
+// NoProfileError means no service profile can currently run.
+type NoProfileError struct{ Role string }
+
+func (e *NoProfileError) Error() string {
+	return fmt.Sprintf("no %s profile is available for services; enable a service profile or check its availability", e.Role)
+}
+
 // ChooseProfile honors an available pin, then uses the shared ranking for role.
 // role orders the result and names the profile kind in the error message. A
 // profile whose every account that may run in repo is out of quota is
@@ -191,7 +198,7 @@ func ChooseProfile(profiles []profile.Profile, pinned, repo string, failures map
 		}
 	}
 	if len(ranked) == 0 {
-		return Choice{}, fmt.Errorf("no enabled %s profile is available; all profiles are disabled or recently failed", role)
+		return Choice{}, &NoProfileError{Role: role}
 	}
 	if pinned != "" {
 		cause, detail := pinnedBlock(profiles, pinned, failures, now)

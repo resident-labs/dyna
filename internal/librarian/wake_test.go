@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	statewrite "dyna-agent/internal/state"
@@ -603,5 +604,30 @@ func TestRunningFollowsTheAssignedTurn(t *testing.T) {
 		if got := svc.Running(c.st); got != c.want {
 			t.Errorf("%s: Running = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestUnavailablePassesRepeatOnlyAfterRecovery(t *testing.T) {
+	dir := t.TempDir()
+	var events []room.ServiceWaitEvent
+	s := Service{DataDir: dir, Notice: func(_ context.Context, _ string, ev room.Event) error {
+		events = append(events, ev.(room.ServiceWaitEvent))
+		return nil
+	}}
+	unavailable := &rolesession.NoProfileError{Role: subagent.RoleLibrarian}
+	observe := func(pass room.ServicePass, err error) {
+		t.Helper()
+		_, _, e := s.profileWait(context.Background(), "room", "repo", pass, "", rolesession.Choice{}, err)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	observe(room.ServicePassMap, unavailable)
+	observe(room.ServicePassSmell, unavailable)
+	observe(room.ServicePassMap, unavailable)
+	observe(room.ServicePassMap, nil)
+	observe(room.ServicePassMap, unavailable)
+	if len(events) != 4 || events[0].Pass != room.ServicePassMap || events[1].Pass != room.ServicePassSmell || room.EventID(events[0]) != room.EventID(events[2]) || room.EventID(events[0]) == room.EventID(events[3]) || room.EventID(events[1]) == room.EventID(events[0]) {
+		t.Fatalf("availability transitions: %+v", events)
 	}
 }
