@@ -52,6 +52,25 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 	}
 	return s, room.Room, session.Session, ctx
 }
+func TestRoomRepoAPI(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	agent := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.RoomRepoAdd(ctx, agent, contract.RoomRepoAddRequest{Room: room, Repo: "a/b"}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("agent add: %v", e)
+	}
+	if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: "bad"}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("invalid add: %v", e)
+	}
+	if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: "a/b"}); e != nil {
+		t.Fatal(e)
+	}
+	result, e := s.RoomRepos(ctx, owner, contract.RoomReposRequest{Room: room})
+	if e != nil || len(result.Repos) != 1 || result.Repos[0].Repo != "a/b" || !result.Repos[0].Default {
+		t.Fatalf("repos %+v: %v", result, e)
+	}
+}
+
 func TestSessionStartCreatesWake(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	events, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Limit: 100})

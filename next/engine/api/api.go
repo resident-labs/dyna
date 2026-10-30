@@ -25,6 +25,8 @@ func New(service Service, model func(Caller) http.Handler) *API {
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
 	call(mux, contract.MethodRoomCreate, c, owner, a.service.RoomCreate)
+	call(mux, contract.MethodRoomRepoAdd, c, owner, a.service.RoomRepoAdd)
+	call(mux, contract.MethodRoomRepos, c, owner, a.service.RoomRepos)
 	call(mux, contract.MethodSessionStart, c, owner, a.service.SessionStart)
 	call(mux, contract.MethodSessionClose, c, owner, a.service.SessionClose)
 	call(mux, contract.MethodPost, c, user, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
