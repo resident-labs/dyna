@@ -14,14 +14,16 @@ import (
 type ItemKind string
 
 const (
-	ItemIssue ItemKind = "issue"
-	ItemPR    ItemKind = "pr"
-	ItemRun   ItemKind = "run"
+	ItemIssue   ItemKind = "issue"
+	ItemPR      ItemKind = "pr"
+	ItemRun     ItemKind = "run"
+	ItemComment ItemKind = "comment"
 )
 
-// ItemRef names the issue, pull request or run whose author a lookup returns.
-// Target is what the command gave: a number, a URL or a branch. For a pull
-// request it is empty when the command uses the checked-out branch.
+// ItemRef names the issue, pull request, run or comment whose author a lookup
+// returns. Target is what the command gave. For a pull request it is empty when
+// the command uses the checked-out branch. For a comment it is the endpoint
+// path below the repository, such as issues/comments/7.
 type ItemRef struct {
 	Kind   ItemKind
 	Host   string
@@ -168,7 +170,7 @@ func Classify(ctx context.Context, args []string, in ClassifyInput) approvals.Cl
 	// state change names. A missing target, several targets or a failed lookup
 	// give false.
 	authored := func(ref ItemRef, targets []string) bool {
-		if in.Login == "" || in.AuthorOf == nil || len(targets) > 1 || ref.Host == "" || (len(targets) == 0 && ref.Kind != ItemPR) {
+		if in.Login == "" || in.AuthorOf == nil || len(targets) > 1 || ref.Host == "" || (len(targets) == 0 && ref.Kind != ItemPR && ref.Kind != ItemComment) {
 			return false
 		}
 		if len(targets) == 1 {
@@ -249,7 +251,7 @@ func classifyAPI(args []string, host string, authored func(ItemRef, []string) bo
 	}
 	endpoint, _, _ := strings.Cut(p.positional[0], "?")
 	parts := strings.Split(strings.Trim(endpoint, "/"), "/")
-	if len(parts) < 4 || parts[0] != "repos" || (method != "POST" && method != "PATCH") {
+	if len(parts) < 4 || parts[0] != "repos" {
 		return approvals.ClassOwner
 	}
 	// The lookup binds to the repository the endpoint names, not the checkout's.
@@ -257,13 +259,24 @@ func classifyAPI(args []string, host string, authored func(ItemRef, []string) bo
 		host = h
 	}
 	ref := ItemRef{Host: host, Repo: parts[1] + "/" + parts[2]}
+	if comment, ok := ownCommentCall(args); ok && comment.repo == ref.Repo {
+		if comment.method == "PATCH" && (call.input || !slices.Contains(call.keys, "body")) {
+			return approvals.ClassOwner
+		}
+		ref.Kind, ref.Target = ItemComment, comment.kind+"/comments/"+comment.id
+		if authored(ref, nil) {
+			return approvals.ClassAgent
+		}
+		return approvals.ClassOwner
+	}
+	if method != "POST" && method != "PATCH" {
+		return approvals.ClassOwner
+	}
 	rest := parts[3:]
 	last := rest[len(rest)-1]
 	_, number := strconv.Atoi(rest[len(rest)-1])
 	switch {
 	case method == "POST" && last == "comments" && slices.Contains([]string{"issues", "pulls", "commits"}, rest[0]):
-		return approvals.ClassAgent
-	case method == "PATCH" && len(rest) >= 2 && len(rest) <= 3 && rest[len(rest)-2] == "comments" && slices.Contains([]string{"issues", "pulls", "comments"}, rest[0]):
 		return approvals.ClassAgent
 	case method == "POST" && len(rest) == 1 && (rest[0] == "issues" || rest[0] == "pulls"):
 		return approvals.ClassAgent
