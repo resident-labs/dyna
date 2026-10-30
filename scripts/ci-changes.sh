@@ -22,7 +22,7 @@ fi
 # gives printf SIGPIPE after an early match, and pipefail reports false.
 has() { printf '%s\n' "$files" | grep -E "$1" >/dev/null && echo true || echo false; }
 echo "relay=$(has '^(relay|\.github)/|^scripts/ci\.sh$')"
-echo "go=$(has '(\.go$|^internal/|^go\.(mod|sum)$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)')"
+echo "go=$(has '(\.go$|^internal/|^go\.(mod|sum)$|^tygo\.yaml$|^tygo/.*\.yaml$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)')"
 echo "computers=$(has '^internal/(computers|computerweb)/|^\.github/')"
 # Two web tests read these backend files, so a change to either runs the web suites.
 echo "web=$(has '^web/|^internal/filesvc/files\.go$|^internal/voice/realtime/testdata/page-protocol\.json$|^\.github/|^scripts/ci\.sh$')"
