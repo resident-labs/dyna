@@ -209,8 +209,13 @@ func TestIssuesRevisionChangesOnEveryWrite(t *testing.T) {
 	if _, err := s.ChangeIssue(ownerCtx(), rec.ID, i.ID, rec.Name, func(i *Issue) error { i.State = "closed"; i.Reason = "seen"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if changed := rev(); !(start < filed && filed < changed) {
-		t.Fatalf("revisions %d, %d, %d; want each write to raise it", start, filed, changed)
+	changed := rev()
+	// New GitHub issue work changes no room issue, but clients must reload.
+	if err := s.TouchIssues(rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if touched := rev(); !(start < filed && filed < changed && changed < touched) {
+		t.Fatalf("revisions %d, %d, %d, %d; want each write to raise it", start, filed, changed, touched)
 	}
 }
 

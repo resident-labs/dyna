@@ -349,6 +349,19 @@ func deleteIssueRows(ctx context.Context, conn *sql.Conn, roomID string) error {
 }
 
 // IssuesRevision changes whenever the room's issues change.
+// TouchIssues records that the room's issue list changed outside its room
+// issues, such as new GitHub issue work. Watchers see the new revision and
+// tell the clients to reload the list.
+func (s *Store) TouchIssues(roomID string) error {
+	db, err := s.issuesDB()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		return bumpIssues(context.Background(), conn, roomID)
+	})
+}
+
 func (s *Store) IssuesRevision(roomID string) (int64, error) {
 	db, err := s.issuesDB()
 	if err != nil {
