@@ -10,6 +10,7 @@
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
+  import { toneOf } from '../ui/tone.ts'
   import GoalGlyph from '../goals/GoalGlyph.svelte'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, agentExpedited, goalExpedited } from '../rooms/expedite.ts'
@@ -96,7 +97,7 @@
               {@const active = g.state === 'active'}
               <Row text={parts.aim} clamp={!active} context={!active} onclick={ongoal && (() => ongoal(g.id))}>
                 {#snippet lead()}<GoalGlyph goal={g} />{/snippet}
-                {#snippet meta()}{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<Chip tone={goalTone(g)} outline={!active}>{g.state}</Chip><span>{active ? `opened ${goalAgo(g.createdAt)}` : goalAgo(g.done?.at ?? g.updatedAt)}</span>{/snippet}
+                {#snippet meta()}{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<Chip tone={toneOf(goalTone(g))} outline={!active}>{g.state}</Chip><span>{active ? `opened ${goalAgo(g.createdAt)}` : goalAgo(g.done?.at ?? g.updatedAt)}</span>{/snippet}
                 {#snippet detail()}
                   {#if !active}{#if g.done?.summary}<span class="when clamp">{g.done.summary}</span>{/if}
                   {:else}{#if parts.done}<span class="when"><b>Done when</b> {parts.done}</span>{/if}{/if}
