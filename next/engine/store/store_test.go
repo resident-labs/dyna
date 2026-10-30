@@ -8,11 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestFreshSchema(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,14 +27,14 @@ func TestInterruptedInitializationCanRestart(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".store-init-interrupted"), []byte("incomplete"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(dir, time.Now)
+	s, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(dir, time.Now)
+	s, err = Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +48,7 @@ func TestV1Guard(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "dyna.db"), []byte("v1"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Open(dir, time.Now)
+	_, err := Open(dir)
 	var e *Error
 	if !errors.As(err, &e) || e.Code != StoreFromV1 {
 		t.Fatalf("got %v", err)
@@ -60,14 +59,14 @@ func TestV1Guard(t *testing.T) {
 }
 func TestFloor(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Open(dir, time.Now)
+	s, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = open(dir, time.Now, schemaVersion+1, "fake-commit", nil)
+	_, err = open(dir, schemaVersion+1, "fake-commit", nil)
 	var e *Error
 	if !errors.As(err, &e) || e.Code != StoreTooOld || !strings.Contains(e.Message, "fake-commit") {
 		t.Fatalf("got %v", err)
@@ -75,7 +74,7 @@ func TestFloor(t *testing.T) {
 }
 func TestWriteSurvivesClose(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Open(dir, time.Now)
+	s, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +85,7 @@ func TestWriteSurvivesClose(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(dir, time.Now)
+	s, err = Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +98,7 @@ func TestWriteSurvivesClose(t *testing.T) {
 	}
 }
 func TestCancelledWriteDoesNotFailClose(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +116,7 @@ func TestCancelledWriteDoesNotFailClose(t *testing.T) {
 // The write function rolls back before it returns, so Commit sees a finished
 // transaction without waiting on database/sql's asynchronous rollback.
 func TestCommitLostToCancelIsNotWriterError(t *testing.T) {
-	s, err := Open(t.TempDir(), time.Now)
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +148,7 @@ func TestCommitLostToCancelIsNotWriterError(t *testing.T) {
 
 func TestCheckpointDoesNotBlockWrite(t *testing.T) {
 	started, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	s, err := open(t.TempDir(), time.Now, floorVersion, floorCommit, func() error { close(started); <-release; return nil })
+	s, err := open(t.TempDir(), floorVersion, floorCommit, func() error { close(started); <-release; return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
