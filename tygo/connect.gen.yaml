@@ -1,0 +1,16 @@
+packages:
+  - path: dyna-agent/internal/websvc
+    output_path: web/src/lib/api/connect.gen.ts
+    include_files: [connect_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/connect
+    output_path: web/src/lib/api/connect.gen.ts
+    include_files: [wire_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      websvc.Route: Route

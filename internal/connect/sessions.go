@@ -194,7 +194,7 @@ func (s *Service) exchange(w http.ResponseWriter, r *http.Request, rt websvc.Rou
 	}
 	s.o.Store.Audit("session.start", fmt.Sprintf("%s device %s at %s", sess.ID, sess.Device, sess.Origin))
 	s.setCookie(w, rt, tok, int(sess.End.Sub(now)/time.Second))
-	websvc.JSONReply(w, http.StatusOK, map[string]any{"session": sess.ID, "expires": sess.Access, "grantEnd": sess.End})
+	websvc.JSONReply(w, http.StatusOK, ConnectSession{Session: sess.ID, Expires: sess.Access, GrantEnd: sess.End})
 }
 
 func (s *Service) saveSessionGrant(id string, scopes []string, legacy bool) error {
