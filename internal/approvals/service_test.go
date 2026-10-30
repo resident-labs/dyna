@@ -90,6 +90,27 @@ func (f *fixture) createAs(t *testing.T, actor authority.Actor, class Class) Req
 	return r
 }
 
+func TestServiceRequestRoutesToRoot(t *testing.T) {
+	f := newFixture(t)
+	service := f.session(t, f.service.SessionRoot, "library", "", "librarian")
+	service.Service = true
+	if err := sessionlife.SaveContext(context.Background(), f.service.SessionRoot, service.ID, service); err != nil {
+		t.Fatal(err)
+	}
+	r := f.createAs(t, f.actor(service), ClassAgent)
+	if r.At != "root" || r.State != StatePending {
+		t.Fatalf("service request = %+v", r)
+	}
+	messages, err := f.rooms.Messages(f.rec.ID)
+	if err != nil || len(messages) != 1 || !reflect.DeepEqual(messages[0].To, []string{f.root.Address()}) || !messages[0].Wake {
+		t.Fatalf("root wake = %+v, %v", messages, err)
+	}
+	r, err = f.service.Decide(context.Background(), f.actor(f.root), DecisionInput{Room: f.rec.ID, RequestID: r.ID, Action: ActionPass})
+	if err != nil || r.At != Owner {
+		t.Fatalf("root pass = %+v, %v", r, err)
+	}
+}
+
 func TestRoutingPassFromParentToRootAndOwner(t *testing.T) {
 	f := newFixture(t)
 	r := f.create(t, ClassAgent)
