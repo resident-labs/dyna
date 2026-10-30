@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -70,6 +71,9 @@ func TestMainUpdatedStartsSourceInstaller(t *testing.T) {
 			calls++
 		} else if p.Args[0] != "systemctl" {
 			t.Fatalf("installer command = %v", p.Args)
+		} else if p.Args[2] == "is-active" {
+			// is-active exits nonzero for an inactive unit: no install runs yet.
+			return errors.New("inactive")
 		}
 		return nil
 	}

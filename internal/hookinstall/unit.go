@@ -133,6 +133,14 @@ func (s Service) InspectUnit(ctx context.Context, j Job) (Job, error) {
 	})
 	return j, err
 }
+
+// Installing reports whether the install unit for a commit is already active.
+// A query that fails reports false, so the launch runs and surfaces the real error.
+func (s Service) Installing(ctx context.Context, sha string) bool {
+	err := s.Exec(ctx, processguard.Process{Dir: "/", Args: []string{"systemctl", "--user", "is-active", "dyna-install-" + sha}, Env: processguard.MetadataEnv(), Timeout: 10 * time.Second, Output: io.Discard})
+	return err == nil
+}
+
 func (s Service) CleanupUnit(ctx context.Context, j Job) {
 	for _, verb := range []string{"stop", "reset-failed"} {
 		_ = s.Exec(ctx, processguard.Process{Dir: "/", Args: []string{"systemctl", "--user", verb, j.Unit}, Env: processguard.MetadataEnv(), Timeout: 10 * time.Second, Output: io.Discard})
