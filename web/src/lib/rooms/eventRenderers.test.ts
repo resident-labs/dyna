@@ -1046,9 +1046,9 @@ test('a pending approval for the owner is a card with the full text and decides 
 
 test('a request that is settled, held by another session or superseded is a quiet row', () => {
   const cases: [Parameters<typeof mountApproval>, RegExp][] = [
-    [[undefined], /asked to run/],
+    [[undefined], /requested a write/],
     [[{ id: 'A-12', at: 'dyna:parent' }, undefined, 'dyna:parent'], /waits on dyna:parent/],
-    [[{ id: 'A-12', at: 'owner' }, undefined, 'dyna:parent', false], /asked to run/],
+    [[{ id: 'A-12', at: 'owner' }, undefined, 'dyna:parent', false], /requested a write/],
   ]
   for (const [args, want] of cases) {
     const { target, close } = mountApproval(...args)
@@ -1075,6 +1075,59 @@ test('an approval result shows its output behind a toggle and a failed one start
   assert.match(target.querySelector('pre')?.textContent ?? '', /gh: not found/)
   web.unmount(mounted)
   target.remove()
+})
+
+test('result outcomes appear once and failed writes use a danger pill', () => {
+  const target = document.createElement('div')
+  document.body.append(target)
+  for (const state of ['done', 'failed'] as const) {
+    const post = postFor('approval', 'result', { requestId: 'A-12', state, url: 'https://example.com/pr/1', output: ['https://example.com/pr/1'] })
+    const mounted = web.mount(web.eventComponents.ApprovalResultCard, { target, props: { post } })
+    web.flushSync()
+    const text = target.textContent ?? ''
+    assert.equal((text.match(new RegExp(state === 'done' ? 'ran' : 'failed', 'g')) ?? []).length, 1)
+    assert.equal(target.querySelectorAll('.status.danger').length, state === 'failed' ? 1 : 0)
+    assert.equal(target.querySelectorAll('a[href="https://example.com/pr/1"]').length, 1)
+    web.unmount(mounted)
+  }
+  target.remove()
+})
+
+test('denial reason appears only in the decision row', () => {
+  const target = document.createElement('div')
+  document.body.append(target)
+  const decision = postFor('approval', 'decided', { requestId: 'A-12', actor: 'lead', action: 'deny', reason: 'wrong branch' })
+  const result = postFor('approval', 'result', { requestId: 'A-12', state: 'denied', reason: 'wrong branch' })
+  const a = web.mount(web.eventComponents.ApprovalDecisionRow, { target, props: { post: decision } })
+  const b = web.mount(web.eventComponents.ApprovalResultCard, { target, props: { post: result } })
+  web.flushSync()
+  assert.equal((target.textContent?.match(/wrong branch/g) ?? []).length, 1)
+  assert.equal((target.textContent?.match(/denied/g) ?? []).length, 1)
+  web.unmount(a); web.unmount(b); target.remove()
+})
+
+test('a denied result explains the decision in the requester DM', () => {
+  const target = document.createElement('div')
+  document.body.append(target)
+  const post = postFor('approval', 'result', { requestId: 'A-12', state: 'denied', reason: 'wrong branch' })
+  const mounted = web.mount(web.eventComponents.ApprovalResultCard, { target, props: { post, surface: 'dm' } })
+  web.flushSync()
+  assert.match(target.textContent ?? '', /Write denied/)
+  assert.match(target.textContent ?? '', /wrong branch/)
+  web.unmount(mounted); target.remove()
+})
+
+test('result output preserves standalone and embedded URLs exactly', () => {
+  const target = document.createElement('div')
+  document.body.append(target)
+  const url = 'https://example.com/pr/1'
+  const output = [url, `${url}23`, `See ${url} for details`]
+  const post = postFor('approval', 'result', { requestId: 'A-12', state: 'done', url, output })
+  const mounted = web.mount(web.eventComponents.ApprovalResultCard, { target, props: { post } })
+  web.flushSync()
+  assert.equal(target.querySelector('pre')?.textContent, output.join('\n'))
+  assert.equal(target.querySelectorAll(`a[href="${url}"]`).length, 1)
+  web.unmount(mounted); target.remove()
 })
 
 test('an interrupted workflow explains its typed replay decision', () => {
