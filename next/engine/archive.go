@@ -27,6 +27,34 @@ func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, curre
 	return s.store.SetClosingReason(ctx, current.ID, reason, event)
 }
 
+// ResumeClosures finishes interrupted closes that have nothing to archive.
+func (s *Service) ResumeClosures(ctx context.Context) *contract.Error {
+	boxes, err := s.store.Boxes(ctx)
+	if err != nil {
+		return failure(err)
+	}
+	for _, current := range boxes {
+		if current.State != contract.BoxClosing {
+			continue
+		}
+		session, err := s.store.Session(ctx, current.Session)
+		if err != nil {
+			return failure(err)
+		}
+		repos, err := s.store.RoomRepos(ctx, session.Room)
+		if err != nil {
+			return failure(err)
+		}
+		if len(repos) == 0 {
+			_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session.ID})
+			if e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, req contract.ArchiveDoneRequest) (contract.ArchiveDoneResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ArchiveDoneResponse{}, forbidden()
@@ -43,6 +71,9 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 	}
 	if current.State != contract.BoxClosing {
 		return contract.ArchiveDoneResponse{}, invalid("box is not closing")
+	}
+	if current.Reason != "" {
+		return contract.ArchiveDoneResponse{}, nil
 	}
 	repos, err := s.store.RoomRepos(ctx, session.Room)
 	if err != nil {
