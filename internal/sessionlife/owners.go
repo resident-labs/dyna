@@ -9,6 +9,9 @@ import (
 	"hash/crc32"
 	"strconv"
 	"strings"
+	"sync"
+
+	"dyna-agent/internal/database"
 )
 
 // The ownership projection: worktree ownership inference needs each record's
@@ -34,54 +37,144 @@ type OwnerRow struct {
 	Service, Closed     bool
 }
 
-// Owners visits every session's ownership row, closed sessions included, in
-// name order. It replaces the legacy read that decoded every record's meta
-// blob. A row whose meta no longer matches the columns written with it, or
-// whose meta names another ID, is an ErrRecord; a caller that removes trees
-// must then keep them.
+// ownerCaches keeps only verified projections, not metadata blobs. The database
+// handle separates stores and the delete counter prevents revision reuse.
+var ownerCaches sync.Map // map[*sql.DB]*ownerCache
+
+func init() { database.OnClose(func(db *sql.DB) { ownerCaches.Delete(db) }) }
+
+type cachedOwner struct {
+	revision int64
+	owner    OwnerRow
+}
+
+type ownerCache struct {
+	mu      sync.Mutex
+	deletes string
+	rows    map[string]cachedOwner
+}
+
+// Owners visits every session's verified ownership row in ID order. A changed
+// row is verified before it enters the cache; any failure keeps trees safe.
+// Database triggers invalidate cached revisions after unversioned edits.
 func Owners(sessions string, visit func(OwnerRow) error) error {
 	db, ok, err := readable(sessions)
 	if err != nil || !ok {
 		return err
 	}
-	res, err := db.Query(`SELECT id, meta_id, room, name, closed, dir, service, meta, meta_digest FROM session_records ORDER BY id`)
+	value, _ := ownerCaches.LoadOrStore(db, &ownerCache{})
+	cache := value.(*ownerCache)
+	cache.mu.Lock()
+	rows, err := cache.read(db)
+	cache.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	type verified struct {
-		owner  OwnerRow
-		metaID string
-		digest string
-	}
-	var rows []verified
-	for res.Next() {
-		var r verified
-		var closed int
-		// RawBytes stays valid only until the next Next, so the digest is
-		// checked before the meta bytes are released.
-		var meta sql.RawBytes
-		if err := res.Scan(&r.owner.ID, &r.metaID, &r.owner.Room, &r.owner.Name, &closed, &r.owner.Dir, &r.owner.Service, &meta, &r.digest); err != nil {
-			res.Close()
+	for _, row := range rows {
+		if err := visit(row); err != nil {
 			return err
 		}
-		r.owner.Closed = closed != 0
-		if r.metaID != "" && r.metaID != r.owner.ID {
-			res.Close()
-			return fmt.Errorf("%w: session %s record names id %s", ErrRecord, r.owner.ID, r.metaID)
-		}
-		if r.digest == "" || r.digest != ownerDigest(meta) {
-			res.Close()
-			return fmt.Errorf("%w: session %s meta does not match its stored columns", ErrRecord, r.owner.ID)
-		}
-		rows = append(rows, r)
 	}
-	if err := errors.Join(res.Err(), res.Close()); err != nil {
-		return err
+	return nil
+}
+
+func (c *ownerCache) read(db *sql.DB) ([]OwnerRow, error) {
+	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
 	}
-	for _, r := range rows {
-		if err := visit(r.owner); err != nil {
-			return err
+	defer tx.Rollback()
+	var deletes string
+	if err := tx.QueryRow("SELECT COALESCE((SELECT value FROM meta WHERE key = ?), '0')", DeletesKey).Scan(&deletes); err != nil {
+		return nil, err
+	}
+	if c.deletes != deletes {
+		c.rows = nil
+	}
+	var rows []OwnerRow
+	next := make(map[string]cachedOwner)
+	if len(c.rows) == 0 {
+		res, err := tx.Query("SELECT id, revision, meta_id, room, name, closed, dir, service, meta, meta_digest FROM session_records ORDER BY id")
+		if err != nil {
+			return nil, err
 		}
+		for res.Next() {
+			var id, metaID, digest string
+			var revision int64
+			var row OwnerRow
+			var closed int
+			var meta sql.RawBytes
+			if err := res.Scan(&id, &revision, &metaID, &row.Room, &row.Name, &closed, &row.Dir, &row.Service, &meta, &digest); err != nil {
+				res.Close()
+				return nil, err
+			}
+			row.ID, row.Closed = id, closed != 0
+			if err := verifyOwner(id, metaID, digest, meta); err != nil {
+				res.Close()
+				return nil, err
+			}
+			next[id] = cachedOwner{revision: revision, owner: row}
+			rows = append(rows, row)
+		}
+		if err := errors.Join(res.Err(), res.Close()); err != nil {
+			return nil, err
+		}
+	} else {
+		res, err := tx.Query("SELECT id, revision FROM session_records ORDER BY id")
+		if err != nil {
+			return nil, err
+		}
+		type version struct {
+			id       string
+			revision int64
+			length   int
+		}
+		var versions []version
+		for res.Next() {
+			var v version
+			if err := res.Scan(&v.id, &v.revision); err != nil {
+				res.Close()
+				return nil, err
+			}
+			versions = append(versions, v)
+		}
+		if err := errors.Join(res.Err(), res.Close()); err != nil {
+			return nil, err
+		}
+		for _, v := range versions {
+			r, ok := c.rows[v.id]
+			if !ok || r.revision != v.revision {
+				var metaID, digest string
+				var meta []byte
+				var closed int
+				r = cachedOwner{revision: v.revision}
+				r.owner.ID = v.id
+				err := tx.QueryRow("SELECT meta_id, room, name, closed, dir, service, meta, meta_digest FROM session_records WHERE id = ?", v.id).Scan(&metaID, &r.owner.Room, &r.owner.Name, &closed, &r.owner.Dir, &r.owner.Service, &meta, &digest)
+				if err != nil {
+					return nil, err
+				}
+				r.owner.Closed = closed != 0
+				if err := verifyOwner(v.id, metaID, digest, meta); err != nil {
+					return nil, err
+				}
+			}
+			next[v.id] = r
+			rows = append(rows, r.owner)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	c.rows, c.deletes = next, deletes
+	return rows, nil
+}
+
+func verifyOwner(id, metaID, digest string, meta []byte) error {
+	if metaID != "" && metaID != id {
+		return fmt.Errorf("%w: session %s record names id %s", ErrRecord, id, metaID)
+	}
+	if digest == "" || digest != ownerDigest(meta) {
+		return fmt.Errorf("%w: session %s meta does not match its stored columns", ErrRecord, id)
 	}
 	return nil
 }
