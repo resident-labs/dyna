@@ -21,7 +21,7 @@ func TestRunRoomSelectionKeepsOwnerAuthority(t *testing.T) {
 	if actor.Role != authority.Owner || actor.Room != rec.ID {
 		t.Fatalf("run actor = %+v", actor)
 	}
-	if err := authority.Check("run", actor, nil); err != nil {
+	if err := authority.Check("workflow run", actor, nil); err != nil {
 		t.Fatal(err)
 	}
 }

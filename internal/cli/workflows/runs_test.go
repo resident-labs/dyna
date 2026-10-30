@@ -311,8 +311,8 @@ func TestRunAndDemoAreRefusedInWorkflowMode(t *testing.T) {
 		cmd.SetArgs(args)
 		cmd.SilenceUsage = true
 		err := cmd.Execute()
-		if err == nil || err.Error() != "run is owner or root only; dyna run is for room roots. Start a child with dyna subagent start, or post the job to @root." {
-			t.Fatalf("dyna run %v err = %v", args, err)
+		if err == nil || err.Error() != "workflow run is owner or root only; dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root." {
+			t.Fatalf("dyna workflow run %v err = %v", args, err)
 		}
 	}
 	demo := NewDemoCommand()
@@ -324,7 +324,7 @@ func TestRunAndDemoAreRefusedInWorkflowMode(t *testing.T) {
 	plan.SetArgs([]string{script, "--plan"})
 	plan.SetOut(io.Discard)
 	if err := plan.Execute(); err != nil {
-		t.Fatalf("dyna run --plan refused in workflow mode: %v", err)
+		t.Fatalf("dyna workflow run --plan refused in workflow mode: %v", err)
 	}
 }
 
