@@ -1,3 +1,5 @@
+import { createRuntime } from '../app/runtime.svelte.ts'
+import { runtimeFixture } from '../../../test/runtime.ts'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -43,34 +45,6 @@ type CallNode = Extract<ScriptExpression, { type: 'CallExpression' }>
 // isCallTo reports a call expression whose callee is the named identifier.
 function isCallTo(node: ScriptExpression, name: string): node is CallNode {
   return node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === name
-}
-
-// blockOf is the statement list of a function expression, or an empty list.
-function blockOf(node: ScriptExpression | undefined): ScriptStatement[] {
-  if (!node || (node.type !== 'ArrowFunctionExpression' && node.type !== 'FunctionExpression')) return []
-  return node.body.type === 'BlockStatement' ? node.body.body : []
-}
-
-// onMountBody is the statement list of App.svelte's onMount callback.
-function onMountBody(): ScriptStatement[] {
-  for (const node of body) {
-    if (node.type !== 'ExpressionStatement' || !isCallTo(node.expression, 'onMount')) continue
-    const callback = node.expression.arguments[0]
-    return blockOf(callback?.type === 'SpreadElement' ? undefined : callback)
-  }
-  throw new Error('App.svelte has no onMount callback')
-}
-
-// initOf is the initializer of a declared variable in these statements.
-function initOf(statements: ScriptStatement[], name: string): ScriptExpression | undefined {
-  for (const node of statements) {
-    if (node.type !== 'VariableDeclaration') continue
-    for (const declarator of node.declarations) {
-      if (declarator.id.type !== 'Identifier' || declarator.id.name !== name || !declarator.init) continue
-      return declarator.init
-    }
-  }
-  return undefined
 }
 
 // findStatement is the first call statement to name whose text includes marker.
@@ -327,13 +301,16 @@ test('visibility restoration refreshes skipped members, choices, questions and p
   })
   appFunctions(c, ['loadRooms', 'loadMembers', 'loadQuestions', 'loadPins', 'loadSync', 'loadIssues'])
   if (body.some((n) => n.type === 'FunctionDeclaration' && n.id.name === 'refreshVisibleRoom')) appFunctions(c, ['refreshVisibleRoom'])
-  const visibility = initOf(onMountBody(), 'visibility')
-  if (!visibility) throw new Error('App.svelte has no visibility callback')
-  c.restoreVisibility = runExpression(c, visibility)
+  const runtime = runtimeFixture({
+    setVisible: (value) => { c.pageVisible = value }, visible: () => c.pageVisible,
+    started: () => c.started, refreshVisible: () => { call(c, 'refreshVisibleRoom') },
+  })
+  runtime.env.boot = () => new Promise(() => {})
+  const stop = createRuntime(runtime.host, runtime.env).start()
   await Promise.all([call(c, 'loadMembers'), call(c, 'loadQuestions'), call(c, 'loadPins'), call(c, 'loadSync'), call(c, 'loadIssues')])
   assert.deepEqual(calls, [])
-  c.document.visibilityState = 'visible'
-  call(c, 'restoreVisibility')
+  Object.defineProperty(runtime.env.document, 'visibilityState', { value: 'visible', configurable: true })
+  runtime.env.document.dispatchEvent(new runtime.dom.window.Event('visibilitychange'))
   await new Promise(setImmediate)
   assert.deepEqual(c.members.map((m) => m.id), ['new'])
   assert.deepEqual(c.choices, ['@new'])
@@ -342,6 +319,7 @@ test('visibility restoration refreshes skipped members, choices, questions and p
   assert.equal(c.syncStatus['/r']?.origin.behind, 2)
   assert.equal(c.issues[0]?.id, 'i-new')
   assert.deepEqual(calls.sort(), ['issues', 'issues', 'members', 'mentions', 'pins', 'questions', 'rooms', 'sync'])
+  stop()
   c.roomData?.destroy()
 })
 
@@ -516,12 +494,13 @@ test('App polling leaves visible and hidden control panels unchanged', async () 
   c.refreshHeldComments ??= () => {}
   Object.assign(c, { controls: c.roomSessionController ?? { load() {} }, roomControls: null })
   vm.createContext(c)
-  const transferPoll = initOf(onMountBody(), 'transferPoll')
-  if (!transferPoll || !isCallTo(transferPoll, 'setInterval')) throw new Error('App.svelte has no transferPoll')
-  const callback = transferPoll.arguments[0]
-  if (!callback) throw new Error('App.svelte has no transfer poll callback')
-  const poll = runExpression(c, callback)
-  if (typeof poll !== 'function') throw new Error('transferPoll callback is not a function')
+  const runtime = runtimeFixture({
+    needPair: () => c.needPair, visible: () => c.pageVisible,
+    refreshTransfers: () => { vm.runInContext('selectionView.refreshTransfers()', c) },
+  })
+  runtime.env.boot = () => new Promise(() => {})
+  const stop = createRuntime(runtime.host, runtime.env).start()
+  const poll = need([...runtime.timers.values()].find((entry) => entry.ms === 5000)).fn
   poll()
   await new Promise(setImmediate)
   assert.deepEqual(calls, [])
@@ -529,6 +508,7 @@ test('App polling leaves visible and hidden control panels unchanged', async () 
   poll()
   await new Promise(setImmediate)
   assert.deepEqual(calls, [])
+  stop()
   need(c.roomSessionController, 'roomSessionController').destroy()
 })
 
