@@ -48,8 +48,7 @@ func (s *Store) Wake(ctx context.Context, b box.Box, to contract.BoxState, reaso
 	state, condition := "dormant", waking
 	if to == contract.BoxStarting {
 		state = "open"
-	}
-	if b.State == contract.BoxStarting {
+	} else if b.State == contract.BoxStarting {
 		condition = "1"
 	}
 	return s.dormancyTransition(ctx, b, to, reason, event, state, condition, event.Time)
