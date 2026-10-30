@@ -92,6 +92,8 @@ func TestAgentStampKeysPreserveOwnerGuard(t *testing.T) {
 // These DYNA_* keys are not caller stamps. The contract test requires
 // a reason here for each one, so fixture isolation never clears by prefix.
 var nonStampKeys = map[string]string{
+	"DYNA_CI_RUN":                         "Local CI run kind passed to checks, not a caller stamp.",
+	"DYNA_CI_BASE":                        "Local CI comparison commit passed to checks, not a caller stamp.",
 	"DYNA_TESTSAFE_ROOT":                  "The first test binary's temporary folder, which its child test binaries keep.",
 	"DYNA_FOREGROUND_SCOPE":               "A foreground cgroup, not a caller identity.",
 	"DYNA_LAUNCH_GATE":                    "An inherited launch-gate file descriptor, unset at process start.",
