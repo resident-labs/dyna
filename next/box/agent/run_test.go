@@ -8,7 +8,7 @@ import (
 )
 
 func TestModelArgsUseConfiguredProviderAndThinking(t *testing.T) {
-	args, err := modelArgs(contract.ModelChoice{Provider: contract.ProviderOpenAI, ID: "model-a", Thinking: contract.ThinkingHigh})
+	args, err := modelArgs(contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "model-a", Thinking: contract.ThinkingHigh})
 	if err != nil {
 		t.Fatal(err)
 	}
