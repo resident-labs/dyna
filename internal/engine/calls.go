@@ -29,6 +29,7 @@ import (
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/sysload"
 	"dyna-agent/internal/terminalsvc"
+	"dyna-agent/internal/updaterservice"
 	"dyna-agent/internal/voice"
 	"dyna-agent/internal/websvc"
 	"dyna-agent/internal/worktreesvc"
@@ -270,6 +271,13 @@ func bindings(s services) []websvc.Binding {
 			if err != nil {
 				return hooks.Run{}, err
 			}
+			if name == "updates" {
+				cfg, err := (updaterservice.Store{DataDir: store.DataDir()}).Get(ctx)
+				if err != nil {
+					return hooks.Run{}, err
+				}
+				return runUpdate(ctx, s.hooks, cfg.Source, cfg.ToolPath)
+			}
 			return s.hooks.RunBuiltin(ctx, hooks.Event{Session: by}, name)
 		}},
 		{Name: "RunGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) (hooks.Run, error) {
@@ -302,6 +310,9 @@ func bindings(s services) []websvc.Binding {
 			if err != nil {
 				return err
 			}
+			if name == "updates" {
+				return editUpdate(ctx, patch)
+			}
 			return s.hooks.EditBuiltin(ctx, name, by, patch)
 		}},
 		{Name: "RemoveGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
@@ -315,6 +326,8 @@ func bindings(s services) []websvc.Binding {
 			return s.hooks.ResetBuiltin(ctx, name, by)
 		}},
 		{Name: "HookRunLog", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.HookRunLog},
+		{Name: "UpdateRuns", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: updateRuns},
+		{Name: "UpdateRunLog", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: updateRunLog},
 		{Name: "GlobalHookRunLog", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name, id string) (hooks.HookRunLog, error) {
 			return s.hooks.HookRunLog("", name, id)
 		}},
@@ -469,7 +482,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "RemoveProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.config.RemoveProfile},
 		{Name: "SetDefaultProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.config.SetDefaultProfile},
 		{Name: "SetProfileDisabled", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.config.SetProfileDisabled},
-		{Name: "Settings", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: configsvc.Items},
+		{Name: "Settings", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.settingsItems},
 		{Name: "SetSetting", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.setSetting},
 		{Name: "UpdateNotice", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.config.UpdateNotice},
 		{Name: "Notices", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Notices},

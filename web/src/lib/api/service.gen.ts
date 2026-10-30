@@ -106,7 +106,15 @@ export const DetailUnavailable = "unavailable";
  * DetailUnreadable marks a service whose facts could not be read.
  */
 export const DetailUnreadable = "unreadable";
-export type Detail = typeof DetailNone | typeof DetailLastRunFailed | typeof DetailNoRunYet | typeof DetailProfileWaiting | typeof DetailWorking | typeof DetailQueued | typeof DetailPaused | typeof DetailInCall | typeof DetailUnavailable | typeof DetailUnreadable;
+/**
+ * DetailUpdateSourceInvalid means the configured checkout cannot be used.
+ */
+export const DetailUpdateSourceInvalid = "update-source-invalid";
+/**
+ * DetailMultipleUpdateHooks asks the owner to choose one source checkout.
+ */
+export const DetailMultipleUpdateHooks = "multiple-update-hooks";
+export type Detail = typeof DetailNone | typeof DetailLastRunFailed | typeof DetailNoRunYet | typeof DetailProfileWaiting | typeof DetailWorking | typeof DetailQueued | typeof DetailPaused | typeof DetailInCall | typeof DetailUnavailable | typeof DetailUnreadable | typeof DetailUpdateSourceInvalid | typeof DetailMultipleUpdateHooks;
 /**
  * Switch is a service's on/off control and its current value.
  */
