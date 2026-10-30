@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"dyna-agent/internal/ghclient"
@@ -741,13 +742,16 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			base = job.record.Base
 		}
 		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, Base: base, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: registeredCIRunParallelism, Ahead: job.trial || job.sync, Source: jobs.CheckSource{Kind: cisched.CheckKind(job.kind()), Number: job.record.Number, Trial: job.trial, Branch: job.branch}}
+		var cancelHostedOnce sync.Once
 		req.OnStart = func(startCtx context.Context) error {
-			// Hosted work is only replaced for a hosted head. A local change has
-			// no queued GitHub run to cancel.
+			// Relocation starts another runner for the same registered run.
+			// A local change has no queued GitHub run to cancel.
 			if job.hosted() {
-				if err := s.cancelQueuedHostedCI(startCtx, job, repo); err != nil {
-					log.Printf("cancel queued hosted CI: %v", err)
-				}
+				cancelHostedOnce.Do(func() {
+					if err := s.cancelQueuedHostedCI(startCtx, job, repo); err != nil {
+						log.Printf("cancel queued hosted CI for %s at %s: %v", repo, job.head, err)
+					}
+				})
 			}
 			return startCtx.Err()
 		}
