@@ -158,7 +158,7 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 		return approvals.Request{}, err
 	}
 	return s.rooms.Approvals.Create(ctx, actor, approvals.CreateInput{
-		Kind: approvals.KindGH, Class: class, Auto: auto, Payload: payload, Repository: in.Repo,
+		Kind: approvals.KindGH, Class: class, Auto: auto, RequireReview: len(in.Media) > 0, Payload: payload, Repository: in.Repo,
 		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: body,
 	})
 }

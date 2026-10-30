@@ -182,4 +182,18 @@ esac
 			t.Fatal("missing media destination")
 		}
 	}
+	rootMsg, err := s.rooms.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{rec.Name}, Text: "media", SessionIDs: map[string]string{rec.Name: root.ID}, Attachments: []room.Attachment{attachment}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	media.PostID = rootMsg.ID
+	rootActor := authority.Actor{Role: authority.Root, Session: root.ID, Room: rec.ID}
+	req, err := s.approvalRequest(authority.WithActor(t.Context(), rootActor), approvals.RequestInput{Argv: []string{"pr", "comment", "https://github.com/owner/repo/pull/7", "--attach", "image.png"}, Cwd: dir, Media: []approvals.Media{media}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.State != approvals.StatePending || req.At != approvals.Owner {
+		t.Fatalf("root media: state %s at %s; want pending at owner", req.State, req.At)
+	}
+
 }
