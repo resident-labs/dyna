@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
-	"slices"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -67,7 +67,20 @@ func (s Service) fastForwardRoomCheckout(ctx context.Context, path string) {
 		log.Printf("room checkouts: cannot list rooms: %v", err)
 		return
 	}
-	if !slices.Contains(paths, path) {
+	// A room may reach its checkout through a symlink, so compare resolved paths.
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		log.Printf("room checkout %s: cannot fast-forward: %v", path, err)
+		return
+	}
+	isRoom := false
+	for _, p := range paths {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil && resolved == target {
+			isRoom = true
+			break
+		}
+	}
+	if !isRoom {
 		return
 	}
 	reason, err := fastForwardCheckout(ctx, path)
@@ -76,8 +89,8 @@ func (s Service) fastForwardRoomCheckout(ctx context.Context, path string) {
 		return
 	}
 	lastSkipMu.Lock()
-	changed := lastSkip[path] != reason
-	lastSkip[path] = reason
+	changed := lastSkip[target] != reason
+	lastSkip[target] = reason
 	lastSkipMu.Unlock()
 	if changed && reason != "" {
 		log.Printf("room checkout %s: skipped, %s", path, reason)
