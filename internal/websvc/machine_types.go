@@ -79,6 +79,7 @@ type MachineSummary struct {
 	// MaxIOHeavy and MaxDiskPercent are the node queue's stored limits; zero
 	// keeps each default.
 	MaxIOHeavy     *int                          `json:"maxIOHeavy,omitempty"`
+	QuickSlots     *int                          `json:"quickSlots,omitempty"`
 	MaxDiskPercent *int                          `json:"maxDiskPercent,omitempty"`
 	Resources      map[machines.ResourceName]int `json:"resources,omitempty"`
 	Rooms          []string                      `json:"rooms,omitempty"`
@@ -208,6 +209,7 @@ type MachinePatch struct {
 	// MaxIOHeavy caps how many IO-heavy jobs and checks this node runs at
 	// once; zero keeps the default of one per sixteen probed CPUs.
 	MaxIOHeavy *int `json:"maxIOHeavy,omitempty"`
+	QuickSlots *int `json:"quickSlots,omitempty"`
 	// MaxDiskPercent is the used-disk percent above which this node admits no
 	// new work; zero keeps the default of 90.
 	MaxDiskPercent *int `json:"maxDiskPercent,omitempty"`

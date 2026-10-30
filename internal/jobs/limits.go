@@ -113,6 +113,7 @@ type Limits struct {
 	CPUs      int
 	MemoryMiB int64
 	TasksMax  int
+	IOWeight  int
 }
 
 // DefaultLimits bound a scope that is not a job, such as node setup or
