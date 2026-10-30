@@ -1062,3 +1062,14 @@ test('an approval result shows its output behind a toggle and a failed one start
   web.unmount(mounted)
   target.remove()
 })
+
+test('an interrupted workflow explains its typed replay decision', () => {
+  const post = postFor('run', 'result', { ...fixtures['run/result'], state: 'interrupted', replayReason: 'input_mismatch' } as EventPayload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.RunResultCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  assert.match(target.textContent ?? '', /The workflow inputs or worktree changed\./)
+  web.unmount(mounted)
+  target.remove()
+})
