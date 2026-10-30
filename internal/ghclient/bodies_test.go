@@ -130,21 +130,21 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		return ""
 	}
 	// Dyna's own calls, such as the owner's PR edit, are never changed.
-	if err := room.DefaultStore().SetAttribution(records[0].ID, "Opened by an agent."); err != nil {
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "Opened by an agent."}); err != nil {
 		t.Fatal(err)
 	}
 	owner := exec.Command("gh", "pr", "edit", "1", "--body", "Owner text")
 	if _, err := ComposeBody(WithRoom(context.Background(), records[0].ID), owner, own); err != nil || owner.Args[len(owner.Args)-1] != "Owner text" {
 		t.Fatalf("owner edit changed: %q, %v", owner.Args, err)
 	}
-	if err := room.DefaultStore().SetAttribution(records[0].ID, ""); err != nil {
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: ""}); err != nil {
 		t.Fatal(err)
 	}
 	// Without a setting, the command runs as given.
 	if got := body(t, "pr", "create", "--body-file", "body.md"); got != "" {
 		t.Fatalf("no attribution set, body file = %q", got)
 	}
-	if err := room.DefaultStore().SetAttribution(records[0].ID, "Opened by an agent."); err != nil {
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "Opened by an agent."}); err != nil {
 		t.Fatal(err)
 	}
 	for name, tt := range map[string]struct {
@@ -175,7 +175,7 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 			}
 		})
 	}
-	if err := room.DefaultStore().SetAttribution(records[0].ID, "> 🤖 Posted by an agent"); err != nil {
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "> 🤖 Posted by an agent"}); err != nil {
 		t.Fatal(err)
 	}
 	for name, tt := range map[string]struct{ body, want string }{
@@ -204,7 +204,7 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 
 func TestAttributedCloseKeepsTerminator(t *testing.T) {
 	records := setupRooms(t, "fork/project")
-	if err := room.DefaultStore().SetAttribution(records[0].ID, "Opened by an agent."); err != nil {
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "Opened by an agent."}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
@@ -229,12 +229,31 @@ func TestComposeBodyPlacements(t *testing.T) {
 	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
 	repo := repository{"github.com", "fork/project"}
 	verbs := [][]string{{"issue", "create"}, {"pr", "create"}, {"issue", "edit", "1"}, {"pr", "edit", "1"}, {"issue", "comment", "1"}, {"pr", "comment", "1"}, {"issue", "close", "1"}, {"issue", "reopen", "1"}, {"pr", "review", "1", "--comment"}, {"api", "-X", "PATCH", "repos/fork/project/issues/comments/9"}, {"api", "-X", "POST", "repos/fork/project/pulls/1/reviews"}}
-	for _, placement := range []room.AttributionPlacement{room.AttributionLine, room.AttributionPrefix} {
-		if err := room.DefaultStore().SetAttribution(records[0].ID, "🤖 Agent:", placement); err != nil {
+	for _, placement := range []room.AttributionPlacement{room.AttributionLine, room.AttributionEnd, room.AttributionPrefix} {
+		if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "🤖 Agent:", Placement: placement}); err != nil {
 			t.Fatal(err)
 		}
+		for _, kind := range []room.AttributionKind{room.AttributionPR, room.AttributionIssue, room.AttributionReview, room.AttributionComment} {
+			if err := room.DefaultStore().SetAttribution(records[0].ID, kind, room.Attribution{Text: string(kind) + ":", Placement: placement}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		for _, verb := range verbs {
-			for _, body := range []string{"hello", "/claim", "🤖 Agent: hello", ""} {
+			kind := room.AttributionComment
+			switch strings.Join(verb[:2], " ") {
+			case "pr create", "pr edit":
+				kind = room.AttributionPR
+			case "issue create", "issue edit":
+				kind = room.AttributionIssue
+			case "pr review":
+				kind = room.AttributionReview
+			case "api -X":
+				if verb[2] == "POST" {
+					kind = room.AttributionReview
+				}
+			}
+			marker := string(kind) + ":"
+			for _, body := range []string{"hello", "/claim", marker + " hello", ""} {
 				t.Run(strings.Join(verb, "_")+"/"+string(placement)+"/"+body, func(t *testing.T) {
 					args := append([]string(nil), verb...)
 					flag := "--body"
@@ -268,13 +287,13 @@ func TestComposeBodyPlacements(t *testing.T) {
 						}
 					}
 					input := strings.TrimPrefix(body, "body=")
-					want := "🤖 Agent:"
+					want := marker
 					if strings.HasPrefix(input, want) {
 						want = input
 					} else if input != "" {
 						if placement == room.AttributionPrefix {
 							want += " " + input
-						} else if input == "/claim" {
+						} else if input == "/claim" || placement == room.AttributionEnd {
 							want = input + "\n\n" + want
 						} else {
 							want += "\n\n" + input
@@ -286,6 +305,92 @@ func TestComposeBodyPlacements(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestComposeBodyLogin(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
+	repo := repository{"github.com", "fork/project"}
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "By {login}"}); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"login":"writer"}]}}';;
+"auth token") echo secret;;
+"api --hostname") echo '{"permissions":{"push":true}}';;
+esac
+`
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	previous := ownerIdentities
+	ownerIdentities = func() ([]string, error) { return []string{"writer"}, nil }
+	t.Cleanup(func() { ownerIdentities = previous })
+	cmd := exec.Command(exe, "pr", "create", "--body", "hello")
+	cleanup, err := ComposeBody(ctx, cmd, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	for _, arg := range cmd.Args {
+		if path, ok := strings.CutPrefix(arg, "--body-file="); ok {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != "By writer\n\nhello\n" {
+				t.Fatalf("body = %q", data)
+			}
+			goto failedLookup
+		}
+	}
+	t.Fatal("missing body file")
+failedLookup:
+	bad := filepath.Join(t.TempDir(), "gh")
+	if err := os.WriteFile(bad, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command(bad, "pr", "create", "--body", "hello")
+	if _, err := ComposeBody(ctx, cmd, repo); err == nil {
+		t.Fatal("unresolved login accepted")
+	}
+}
+
+func TestComposeBodyUpstreamCommentUsesWriteAccount(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "By {login}"}); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"login":"reader"},{"login":"writer"}]}}';;
+"auth token") case "$*" in *reader*) echo reader-secret;; *writer*) echo writer-secret;; esac;;
+"api --hostname") case "$GH_TOKEN" in reader-secret) echo '{"permissions":{"push":false}}';; writer-secret) echo '{"permissions":{"push":true}}';; esac;;
+esac
+`
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
+	cmd := exec.Command(exe, "api", "-X", "PATCH", "repos/upstream/project/issues/comments/9", "-f", "body=hello")
+	cmd.Dir = records[0].Repo
+	cleanup, err := ComposeBody(ctx, cmd, repository{"github.com", "upstream/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if !slices.Contains(cmd.Args, "body=By writer\n\nhello") {
+		t.Fatalf("args = %q", cmd.Args)
 	}
 }
 
