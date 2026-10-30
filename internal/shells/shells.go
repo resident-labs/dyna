@@ -953,6 +953,13 @@ func Spawn(exe, id string) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := childenv.Clean(cmd).Run(); err != nil {
+		// The launcher can fail after recording a supervisor and releasing its
+		// gate. Treat that ambiguous outcome as launched, not safe to retry.
+		if dir, dirErr := DefaultStore().dir(id); dirErr == nil {
+			if _, statErr := os.Stat(filepath.Join(dir, supervisorPID)); statErr == nil {
+				return nil
+			}
+		}
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return fmt.Errorf("start shell supervisor: %s", msg)
 		}
