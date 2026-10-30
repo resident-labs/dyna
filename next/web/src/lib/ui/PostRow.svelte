@@ -1,19 +1,14 @@
 <script lang="ts">
   import { marked } from "marked";
   import DOMPurify from "dompurify";
-  import type { Row } from "../feed.ts";
+  import { formatTime, type Row } from "../feed.ts";
   let { row, author }: { row: Extract<Row, { kind: "post" }>; author: string } = $props();
   // Markdown from any author is sanitized before it reaches the page.
   let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true })));
-  let time = $derived.by(() => {
-    const at = new Date(row.at);
-    const clock = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return at.toDateString() === new Date().toDateString() ? clock : `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
-  });
 </script>
 
 <article class="post" class:first={row.first}>
-  {#if row.first}<p class="name"><strong>{author}</strong> <time datetime={row.at}>{time}</time></p>{/if}
+  {#if row.first}<p class="name"><strong>{author}</strong> <time datetime={row.at}>{formatTime(row.at)}</time></p>{/if}
   <div class="text">{@html html}</div>
   {#if row.attachments.length}
     <p class="files">{row.attachments.length === 1 ? "1 file" : `${row.attachments.length} files`}: {row.attachments.map(file => file.name).join(", ")}</p>
