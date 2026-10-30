@@ -222,6 +222,46 @@ func TestImmediateSubmitReturnsResultWithoutWake(t *testing.T) {
 	}
 }
 
+func TestCanceledSubmitWakesWhenExecutionFinishes(t *testing.T) {
+	f := setup(t)
+	f.class = contract.ClassAuto
+	started, release := make(chan struct{}), make(chan struct{})
+	entry := f.s.Kinds["test.run"]
+	entry.Execute = func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult {
+		close(started)
+		<-release
+		return contract.OpResult{}
+	}
+	f.s.Kinds["test.run"] = entry
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan contract.Operation, 1)
+	go func() {
+		op, _ := f.s.Submit(ctx, principal("worker"), contract.Operation{Room: "room", Args: fakeArgs{}})
+		done <- op
+	}()
+	<-started
+	updates, stop := f.s.Store.Subscribe()
+	defer stop()
+	cancel()
+	close(release)
+	op := <-done
+	for {
+		record, err := f.s.Store.Operation(context.Background(), op.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.Operation.State == contract.OpDone {
+			break
+		}
+		<-updates
+	}
+	var count int
+	err := f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='op.ran' AND d.wake=1", "worker").Scan(&count)
+	if err != nil || count != 1 {
+		t.Fatalf("wakes %d, error %v", count, err)
+	}
+}
+
 func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
 	f := setup(t)
 	started, release := make(chan struct{}), make(chan struct{})
