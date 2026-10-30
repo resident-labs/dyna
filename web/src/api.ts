@@ -227,6 +227,7 @@ export const api = {
   reviewerStatus: (roomRef: string) => app.ReviewerStatus(roomRef),
   setReviewEnabled: (roomRef: string, enabled: boolean) => app.SetReviewEnabled(roomRef, enabled),
   listServices: (roomRef: string) => app.ListServices(roomRef),
+  serviceRegistry: (roomRef: string, repo: string) => app.ServiceRegistry(roomRef, repo),
   setServiceProfile: (roomRef: string, role: string, profile: string) => app.SetServiceProfile(roomRef, role, profile),
   restartReviewer: (roomRef: string) => app.RestartReviewer(roomRef),
   roomCIBudget: (roomId: string) => app.RoomCIBudget(roomId),

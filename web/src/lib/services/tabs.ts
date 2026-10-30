@@ -2,7 +2,7 @@
 // and the results that service produced. A trial groups its tests and its
 // publish, repeated passing hook runs fold into one row per day, and a failure
 // always keeps its own row. Nothing here changes data.
-import { elapsed, nextAt, queueCounts, queueLine, testLine, until, type HookRow, type HookRunRow, type Inputs, type MergeHistoryRow, type Row, type RunReason, type Tone } from './model.ts'
+import { elapsed, queueCounts, queueLine, testLine, until, type HookRow, type HookRunRow, type Inputs, type MergeHistoryRow, type Row, type RunReason, type Tone } from './model.ts'
 
 export type TabId = 'merges' | 'reviews' | 'updates' | 'librarian' | 'ci' | 'more'
 
@@ -162,6 +162,9 @@ function hookTone(rows: HookRow[], runs: Inputs['runs']): Tone {
   return rows.some((r) => newestResult(r, runs) === 'pending') ? 'live' : 'on'
 }
 
+// stateWord is a registry state as the first word of a tab line.
+const stateWord = (state: string): string => (state === 'not-set-up' ? 'Not set up' : state.charAt(0).toUpperCase() + state.slice(1))
+
 export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
   const row = (id: string): Row | undefined => rows.find((r) => r.id === id)
   const pick = (id: Exclude<TabId, 'more'>): Row[] => rows.filter((r) => r.id === rowIds[id])
@@ -181,21 +184,14 @@ export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
   const rev = row('reviewer')
   const reviewLine = !rev ? '' : rev.state === 'error' || rev.state === 'off' || rev.state === 'unreadable'
     ? `${rev.state === 'error' ? 'Failing' : rev.state === 'off' ? 'Off' : 'Unreadable'} · ${rev.detail}`
-    : rev.state === 'rate-limited' ? `Rate-limited · ${rev.detail}; reviews resume on their own`
-      : rev.state === 'idle' ? 'Idle · nothing to review now' : `${rev.state === 'running' ? 'Running' : 'Waiting'} · ${rev.detail}`
+    : `${rev.state === 'idle' ? 'Idle' : rev.state === 'running' ? 'Running' : 'Waiting'} · ${rev.detail}`
 
-  const update = hooks.find((h) => h.hook.name === 'self-update') ?? null
-  const updateNext = nextAt(update)
   const updateRow = row('update')
-  const updateLine = updateRow ? [updateRow.detail, updateNext ? `next ${until(updateNext, now)}` : ''].filter(Boolean).join(' · ') : ''
+  const updateLine = updateRow ? [updateRow.detail, updateRow.nextAt ? `next ${until(updateRow.nextAt, now)}` : ''].filter(Boolean).join(' · ') : ''
 
   const librarian = row('librarian')
-  const main = libraryHooks.find((h) => h.hook.name === 'librarian-main') ?? null
-  const mainResult = main ? newestResult(main, i.runs) : ''
   const nextText = librarian?.nextAt ? `next ${until(librarian.nextAt, now)}` : ''
-  const librarianLine = !librarian ? '' : librarian.state === 'on'
-    ? [isFailure(mainResult) ? 'Failing' : mainResult === 'pending' ? 'Running' : 'On', mainResult && !isFailure(mainResult) && mainResult !== 'pending' ? `last ${resultWord(mainResult)}` : '', nextText].filter(Boolean).join(' · ')
-    : `${librarian.state === 'off' ? 'Off' : 'Unknown'} · ${librarian.detail}`
+  const librarianLine = !librarian ? '' : [stateWord(librarian.state), librarian.detail, nextText].filter(Boolean).join(' · ')
 
   const slow = testLine(i.testHealth)
   const counts = queueCounts(i.queue)
@@ -204,7 +200,7 @@ export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
     { id: 'merges', name: 'Merges', tone: lastFailed ? 'error' : counts.running ? 'live' : merge?.tone ?? 'off', line: mergeLine, rows: pick('merges'), entries: merges },
     { id: 'reviews', name: 'Reviews', tone: rev?.tone ?? 'off', line: reviewLine, rows: pick('reviews'), entries: byNewest(reviewEntries(i, now)) },
     { id: 'updates', name: 'Updates and hooks', tone: updateRow?.tone === 'error' ? 'error' : hookTone(otherHooks, i.runs) === 'error' ? 'error' : updateRow?.tone ?? 'off', line: updateLine, rows: pick('updates'), entries: entriesOf(otherHooks) },
-    { id: 'librarian', name: 'Librarian', tone: isFailure(mainResult) ? 'error' : librarian?.tone ?? 'off', line: librarianLine, rows: pick('librarian'), entries: entriesOf(libraryHooks) },
+    { id: 'librarian', name: 'Librarian', tone: librarian?.tone ?? 'off', line: librarianLine, rows: pick('librarian'), entries: entriesOf(libraryHooks) },
     { id: 'ci', name: 'CI health', tone: slow ? 'live' : 'on', line: slow || 'No test is over the limit', rows: pick('ci'), entries: [] },
     { id: 'more', name: 'More', tone: 'off', line: '', rows: moreIds.map(row).filter((r): r is Row => !!r), entries: [] },
   ]
