@@ -91,8 +91,11 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer proxy.Shutdown(context.Background())
-	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi}
+	boxCtx, stopBoxes := context.WithCancel(ctx)
+	defer stopBoxes()
+	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
+	boxes.Pressure = service
 	if err := service.ConfigureOperations(ctx, nil, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
