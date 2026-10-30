@@ -81,6 +81,8 @@ type document struct {
 }
 type state struct {
 	Main string `json:"main,omitempty"`
+	// PendingMain remains until the engine observer acknowledges this commit.
+	PendingMain string `json:"pendingMain,omitempty"`
 	// Fetched holds the last origin fetch of each local checkout, keyed by its
 	// root. Clones of one remote share a repository ID, so each clone needs its own.
 	Fetched map[string]time.Time `json:"fetched,omitempty"`
