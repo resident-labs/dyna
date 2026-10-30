@@ -25,7 +25,7 @@ type Runner interface {
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
-	c := exec.CommandContext(ctx, "ssh", args...)
+	c := exec.CommandContext(ctx, args[0], args[1:]...)
 	c.Stdin = strings.NewReader(string(in))
 	return c.Output()
 }
@@ -37,6 +37,7 @@ type Host struct {
 	runner              Runner
 	forwards            map[box.Forward]struct{}
 	restored            bool
+	masterReset         bool
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
@@ -79,7 +80,7 @@ func (h *Host) lock(ctx context.Context) error {
 }
 func (h *Host) unlock() { <-h.gate }
 func (h *Host) base() []string {
-	return []string{"-S", h.socket, "-o", "ControlMaster=no", "-o", "StreamLocalBindUnlink=yes"}
+	return []string{"ssh", "-S", h.socket, "-o", "ControlMaster=no", "-o", "StreamLocalBindUnlink=yes"}
 }
 func (h *Host) control(ctx context.Context, op string, extra ...string) error {
 	args := append(h.base(), "-O", op)
@@ -89,9 +90,16 @@ func (h *Host) control(ctx context.Context, op string, extra ...string) error {
 	return err
 }
 func (h *Host) ensure(ctx context.Context) error {
+	if !h.masterReset {
+		_ = h.control(ctx, "exit")
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h.masterReset = true
+	}
 	if h.control(ctx, "check") != nil {
 		h.restored = false
-		args := []string{"-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "StreamLocalBindUnlink=yes", h.destination}
+		args := []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "StreamLocalBindUnlink=yes", h.destination}
 		if _, err := h.runner.Run(ctx, nil, args...); err != nil {
 			return err
 		}
@@ -280,6 +288,11 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--userns=keep-id:uid=1000,gid=1000", "--user", "1000:1000", "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-" + string(c.Box) + ":/box"}
 	for _, m := range c.Mounts {
+		if !m.ReadOnly {
+			if _, err := h.run(ctx, "bash", "-c", `if [ ! -e "$1" ]; then mkdir -p -m 0700 -- "$1"; fi`, "dyna", m.HostPath); err != nil {
+				return err
+			}
+		}
 		v := m.HostPath + ":" + m.BoxPath
 		if m.ReadOnly {
 			v += ":ro"
@@ -301,7 +314,7 @@ func (h *Host) StartContainer(ctx context.Context, id contract.BoxID) error {
 	return err
 }
 func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "stop", string(id))
+	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id))
 	return err
 }
 func (h *Host) RemoveContainer(ctx context.Context, id contract.BoxID) error {

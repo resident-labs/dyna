@@ -22,7 +22,14 @@ const (
 	ListContainers  Call = "list-containers"
 	AddForward      Call = "add-forward"
 	RemoveForward   Call = "remove-forward"
+	Build           Call = "build"
+	PushCache       Call = "push-cache"
 )
+
+type Image struct {
+	Base       string
+	ContextTar []byte
+}
 
 type Host struct {
 	Calls      []Call
@@ -32,10 +39,12 @@ type Host struct {
 	Volumes    map[contract.BoxID]bool
 	Running    map[contract.BoxID]bool
 	Forwards   map[box.Forward]bool
+	Images     map[string]Image
+	Caches     map[string][]string
 }
 
 func New() *Host {
-	return &Host{Slices: map[string]box.Slice{}, Containers: map[contract.BoxID]box.ContainerSpec{}, Volumes: map[contract.BoxID]bool{}, Running: map[contract.BoxID]bool{}, Forwards: map[box.Forward]bool{}}
+	return &Host{Slices: map[string]box.Slice{}, Containers: map[contract.BoxID]box.ContainerSpec{}, Volumes: map[contract.BoxID]bool{}, Running: map[contract.BoxID]bool{}, Forwards: map[box.Forward]bool{}, Images: map[string]Image{}, Caches: map[string][]string{}}
 }
 func (h *Host) call(c Call) error {
 	h.Calls = append(h.Calls, c)
@@ -117,6 +126,23 @@ func (h *Host) RemoveForward(_ context.Context, f box.Forward) error {
 		return err
 	}
 	delete(h.Forwards, f)
+	return nil
+}
+
+func (h *Host) Build(_ context.Context, tag, base string, tar []byte) error {
+	if err := h.call(Build); err != nil {
+		return err
+	}
+	if _, ok := h.Images[tag]; !ok {
+		h.Images[tag] = Image{Base: base, ContextTar: append([]byte(nil), tar...)}
+	}
+	return nil
+}
+func (h *Host) PushCache(_ context.Context, mirror, hostData, repo string, refs []string) error {
+	if err := h.call(PushCache); err != nil {
+		return err
+	}
+	h.Caches[hostData+"/git/"+repo+".git"] = append([]string(nil), refs...)
 	return nil
 }
 
