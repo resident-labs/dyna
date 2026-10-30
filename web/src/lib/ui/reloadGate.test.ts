@@ -3,13 +3,14 @@ import { hasItemChange, patchListRows } from './listChanges.ts'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
 import { mergeListPage } from './listPages.ts'
 import { createReloadGate, listVisible, reconcileRows } from './reloadGate.ts'
 import { PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, installGoals, installPRs, installQuestions } from '../../../test/appModules.ts'
 import { reloadsUnread } from './unreadReload.ts'
-import { topLevelFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { topLevelFunctions, moduleFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
 
 // A promise the test settles by hand.
@@ -157,6 +158,8 @@ const appSource = () => readFile(new URL('../../App.svelte', import.meta.url), '
 
 // The PR and visual lists moved to lib/app modules; a test that names one of
 // their loaders installs that module over the same sandbox.
+const listFunctions = ['applyListPage', 'applyListItem'] as const
+const listSource = readFileSync(new URL('../app/lists.svelte.ts', import.meta.url), 'utf8')
 const MODULES: readonly [readonly string[], (state: object) => void][] = [
   [PRS_FUNCTIONS, installPRs],
   [QUESTIONS_FUNCTIONS, installQuestions],
@@ -170,6 +173,9 @@ function runApp(source: string, c: Record<string, unknown>, names: readonly stri
     if (!functions.some((name) => names.includes(name))) continue
     install(c)
     for (const name of functions) moved.add(name)
+  }
+  for (const [name, code] of moduleFunctions(listSource, listFunctions)) {
+    if (names.includes(name)) { vm.runInContext(code, c); moved.add(name) }
   }
   const kept = names.filter((name) => !moved.has(name))
   const found = topLevelFunctions(source, kept)

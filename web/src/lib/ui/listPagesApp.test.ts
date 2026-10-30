@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { mergeListPage } from './listPages.ts'
 import { reconcileRows } from './reloadGate.ts'
-import { topLevelFunctions } from '../../../test/svelte-source.ts'
+import { moduleFunctions } from '../../../test/svelte-source.ts'
 
 interface AppRow {
   [field: string]: unknown
@@ -24,9 +24,9 @@ interface AppListContext {
   applyListPage?: (kind: string, page: AppPage, append?: boolean) => AppRow[]
 }
 
-const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const code = topLevelFunctions(source, ['applyListPage']).get('applyListPage')
-if (code === undefined) throw new Error('App.svelte defines no applyListPage')
+const source = readFileSync(new URL('../app/lists.svelte.ts', import.meta.url), 'utf8')
+const code = moduleFunctions(source, ['applyListPage']).get('applyListPage')
+if (code === undefined) throw new Error('lists.svelte.ts defines no applyListPage')
 
 for (const [kind, key] of [['jobs', 'id'], ['changes', 'key']] as const) {
   test(`${kind} refresh keeps loaded history, its cursor, and keyed row objects`, () => {
