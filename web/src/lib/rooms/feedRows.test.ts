@@ -159,6 +159,13 @@ test('a failed hook result remains visible after a later success', () => {
   assert.deepEqual(rows.map((row) => row.post.id), ['fail', 'pass'])
 })
 
+test('consecutive successful runs fold, but a live or failed run breaks the fold', () => {
+  const posts = [hookPost('a', 'result', 'a', 'passed'), hookPost('b', 'result', 'b', 'passed'), hookPost('c', 'started', 'c', 'running'), hookPost('d', 'result', 'd', 'failed'), hookPost('e', 'result', 'e', 'passed')]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.post.id), ['b', 'c', 'd', 'e'])
+  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['a', 'b'])
+})
+
 // A merge trial posts its progress and its end. One card shows the trial, so
 // every step of one trial ID folds into the newest post.
 const mergePost = (id: string, type: 'queued' | 'trial' | 'checks' | 'landed' | 'failed', trialId: string): FeedInput => ({
