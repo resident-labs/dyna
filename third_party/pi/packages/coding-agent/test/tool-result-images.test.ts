@@ -75,8 +75,12 @@ describe("normalizeToolResultImages", () => {
 		expect(await normalizeToolResultImages(content)).toBe(content);
 	});
 
-	it("resizes oversized images and reports the original dimensions", async () => {
-		const content: ToolResultContent[] = [imageBlock(createPng(2400, 300), "image/png")];
+	// Wide and tall inputs each exceed one limit, which keeps the encoded output small.
+	it.each([
+		[2400, 300],
+		[300, 2400],
+	])("resizes oversized %ix%i images and reports the original dimensions", async (originalWidth, originalHeight) => {
+		const content: ToolResultContent[] = [imageBlock(createPng(originalWidth, originalHeight), "image/png")];
 
 		const normalized = await normalizeToolResultImages(content);
 
@@ -91,7 +95,7 @@ describe("normalizeToolResultImages", () => {
 		const note = normalized[1];
 		expect(note.type).toBe("text");
 		if (note.type !== "text") return;
-		expect(note.text).toContain("original 2400x300");
+		expect(note.text).toContain(`original ${originalWidth}x${originalHeight}`);
 	});
 
 	it("leaves oversized images alone when auto-resize is disabled", async () => {
