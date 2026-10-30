@@ -98,13 +98,15 @@ func TestRunnerDoesNotRestartWhileOutputIsBlocked(t *testing.T) {
 	close(h.release)
 	<-sink.entered
 	err := runner.Handle(context.Background(), start)
+	newTurn := contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_b", Inputs: []contract.TurnInput{{Delivery: 2}}}}
+	nextErr := runner.Handle(context.Background(), newTurn)
 	h.mu.Lock()
 	recovered := h.recoveries
 	h.mu.Unlock()
 	close(sink.release)
 	<-sink.done
-	if err != nil || recovered != 0 {
-		t.Fatalf("replay error=%v recoveries=%d", err, recovered)
+	if err != nil || recovered != 0 || nextErr != errTurnSettling {
+		t.Fatalf("replay error=%v recoveries=%d next error=%v", err, recovered, nextErr)
 	}
 }
 
