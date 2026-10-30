@@ -738,3 +738,46 @@ func normalizeState(st *State) {
 		st.NoiseRules = map[string]NoiseRule{}
 	}
 }
+
+// OpenTrackedCheckout reports whether an open tracked change uses a path
+// inside the worktree. An unreadable record keeps the tree rather than losing
+// the checkout that the change needs.
+func OpenTrackedCheckout(ctx context.Context, root, tree string) (bool, error) {
+	db, err := open(root)
+	if err != nil {
+		return false, err
+	}
+	found := false
+	err = appstate.For(db).Read(ctx, func(r appstate.Reader) error {
+		rows, err := r.QueryContext(ctx, "SELECT body FROM pr_rows WHERE closed=0")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var body []byte
+			if err := rows.Scan(&body); err != nil {
+				return err
+			}
+			var item diskRecord
+			if err := json.Unmarshal(body, &item); err != nil {
+				return err
+			}
+			if item.Record == nil || !item.Record.Watching || item.Record.State != PROpen {
+				continue
+			}
+			for _, path := range []string{item.Record.RepoPath, item.Record.LookupDir} {
+				if path == "" {
+					continue
+				}
+				rel, err := filepath.Rel(tree, path)
+				if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					found = true
+					return nil
+				}
+			}
+		}
+		return rows.Err()
+	})
+	return found, err
+}
