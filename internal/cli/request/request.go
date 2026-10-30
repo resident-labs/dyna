@@ -84,9 +84,17 @@ func NewCommand() *cobra.Command {
 
 	approve := &cobra.Command{Use: "approve <id>", Short: "Approve an approval or pass a terminal request to your parent", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		if approvalID(args[0]) {
-			return decideApproval(c, roomRef, args[0], approvals.ActionApprove, "")
+			if err := decideApproval(c, roomRef, args[0], approvals.ActionApprove, ""); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Approved %s.\n", args[0])
+			return nil
 		}
-		return call(c, roomRef, "ApproveRequest", func(ref string) []any { return []any{ref, args[0]} })
+		if err := call(c, roomRef, "ApproveRequest", func(ref string) []any { return []any{ref, args[0]} }); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.OutOrStdout(), "Passed request %s up to the next holder.\n", args[0])
+		return nil
 	}}
 	var why, approvalWhy string
 	deny := &cobra.Command{Use: "deny <id> --reason <why>", Short: "Refuse a request you hold; the filer reads your reason", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
@@ -94,9 +102,17 @@ func NewCommand() *cobra.Command {
 			if strings.TrimSpace(approvalWhy) == "" {
 				return fmt.Errorf("--why is required when denying an approval")
 			}
-			return decideApproval(c, roomRef, args[0], approvals.ActionDeny, approvalWhy)
+			if err := decideApproval(c, roomRef, args[0], approvals.ActionDeny, approvalWhy); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Denied %s.\n", args[0])
+			return nil
 		}
-		return call(c, roomRef, "DenyRequest", func(ref string) []any { return []any{ref, args[0], why} })
+		if err := call(c, roomRef, "DenyRequest", func(ref string) []any { return []any{ref, args[0], why} }); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.OutOrStdout(), "Denied request %s.\n", args[0])
+		return nil
 	}}
 	deny.Flags().StringVar(&why, "reason", "", "why you refuse a terminal request (required)")
 	deny.Flags().StringVar(&approvalWhy, "why", "", "why you refuse an approval (required)")

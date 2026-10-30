@@ -46,6 +46,8 @@ type ApprovalRequestedEvent struct {
 	Tool       string        `json:"tool,omitempty"`
 	Title      string        `json:"title,omitempty"`
 	Body       string        `json:"body,omitempty"`
+	// Detail names the commands that decide the request, for the agent text.
+	Detail string `json:"detail,omitempty"`
 }
 
 func (ApprovalRequestedEvent) eventFamily() EventFamily { return FamilyApproval }
