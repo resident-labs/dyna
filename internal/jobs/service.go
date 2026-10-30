@@ -1046,7 +1046,9 @@ func (s *Service) finish(job *Job, err error) {
 // machineFacts reads a machine's clamp facts: its last probe. A machine with
 // no probe keeps the job's own request.
 func machineFacts(m machines.Machine) Facts {
-	return Facts{CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal}
+	probedMiB := int64(m.Capabilities.MemTotal / (1 << 20))
+	reserve := min(int64(m.QuickSlotLimit())*1024, max(0, probedMiB-DefaultHostMemoryMiB))
+	return Facts{CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, QuickReserveMiB: reserve}
 }
 
 // logStore streams a job log to its file and tracks the stored size on the
