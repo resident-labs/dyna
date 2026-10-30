@@ -74,17 +74,19 @@ type event struct {
 }
 
 type Harness struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	session  string
-	writeMu  sync.Mutex
-	mu       sync.Mutex
-	pending  map[string]chan event
-	events   chan event
-	done     chan struct{}
-	stop     chan struct{}
-	readErr  error
-	sequence atomic.Uint64
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	session   string
+	writeMu   sync.Mutex
+	mu        sync.Mutex
+	pending   map[string]chan event
+	events    chan event
+	done      chan struct{}
+	stop      chan struct{}
+	readErr   error
+	sequence  atomic.Uint64
+	closeOnce sync.Once
+	closeErr  error
 }
 
 var _ harness.Harness = (*Harness)(nil)
@@ -292,10 +294,17 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 }
 
 func (h *Harness) Close() error {
-	close(h.stop)
-	_ = h.stdin.Close()
-	if h.cmd.Process != nil {
-		_ = h.cmd.Process.Kill()
-	}
-	return h.cmd.Wait()
+	h.closeOnce.Do(func() {
+		close(h.stop)
+		_ = h.stdin.Close()
+		if h.cmd.Process != nil {
+			_ = h.cmd.Process.Kill()
+		}
+		err := h.cmd.Wait()
+		var exit *exec.ExitError
+		if err != nil && !errors.As(err, &exit) {
+			h.closeErr = err
+		}
+	})
+	return h.closeErr
 }
