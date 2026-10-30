@@ -17,17 +17,28 @@ const (
 	Lease = 3 * PublishInterval
 )
 
+// CPUState describes whether command-only CPU accounting is available.
+// Unsupported is not evidence of zero CPU use.
+type CPUState string
+
+const (
+	CPUUnknown     CPUState = ""
+	CPUUnsupported CPUState = "unsupported"
+)
+
 // Signal separates output activity from the state of its observer.
 type Signal struct {
 	LastOutput time.Time
 	LeaseUntil time.Time
 	Copier     CopierState
+	CPU        CPUState
 }
 
 // At returns unknown when the observation's lease is absent or expired.
 func (s Signal) At(now time.Time) Signal {
 	if s.LeaseUntil.IsZero() || !now.Before(s.LeaseUntil) {
 		s.Copier = CopierUnknown
+		s.CPU = CPUUnknown
 	}
 	return s
 }
