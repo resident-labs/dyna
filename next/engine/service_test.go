@@ -43,7 +43,7 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room"})
+	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -195,7 +195,7 @@ func TestFailedTurnRecordsError(t *testing.T) {
 func TestPostAcrossRooms(t *testing.T) {
 	s, source, sender, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	other, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other"})
+	other, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
 	if e != nil {
 		t.Fatal(e)
 	}
