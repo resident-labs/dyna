@@ -17,6 +17,24 @@ const (
 // turnStates lists every turn state the web needs as a union type.
 var turnStates = []TurnState{TurnCompleted, TurnFailed, TurnStopped}
 
+// CandidateState describes the evidence for a transfer profile.
+type CandidateState string
+
+const (
+	CandidateAvailable   CandidateState = "available"
+	CandidateUnavailable CandidateState = "unavailable"
+	CandidateUnknown     CandidateState = "unknown"
+)
+
+var candidateStates = []CandidateState{CandidateAvailable, CandidateUnavailable, CandidateUnknown}
+
+// TransferCandidate records the evidence frozen with a failed-turn report.
+type TransferCandidate struct {
+	Profile    string         `json:"profile"`
+	State      CandidateState `json:"state"`
+	EvidenceAt string         `json:"evidenceAt,omitempty"`
+}
+
 // TurnEvent is the end of one session turn. Its summary is the report the
 // session gave, which the completion row shows as its body.
 type TurnEvent struct {
@@ -36,7 +54,9 @@ type TurnEvent struct {
 	WorkerStderr string `json:"workerStderr,omitempty"`
 	// Detail is the rest of the line an agent reads: how to inspect the turn
 	// or recover from it.
-	Detail string `json:"detail,omitempty"`
+	Detail          string              `json:"detail,omitempty"`
+	Candidates      []TransferCandidate `json:"candidates,omitempty"`
+	CandidatesError bool                `json:"candidatesError,omitempty"`
 }
 
 func (TurnEvent) eventFamily() EventFamily { return FamilyTurn }
