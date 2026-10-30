@@ -33,7 +33,7 @@ func (s Service) newRun(ctx context.Context, r repoid.Repo, e Event, h Hook) (Ru
 	if err != nil {
 		return Run{}, nil, err
 	}
-	run := Run{RunnerSession: e.Session, ID: id, Repo: r.ID, Main: r.Main, Room: e.Room, Event: e.Event, Label: h.Label, Name: "hook-" + h.Name, Command: h.Command, Result: "pending", LogPath: log.Name(), StartedAt: time.Now().UTC()}
+	run := Run{RunnerSession: e.Session, ID: id, Repo: r.ID, Main: r.Main, Room: e.Room, Event: e.Event, Label: h.Label, Name: "hook-" + h.Name, Command: h.Command, Result: ResultPending, LogPath: log.Name(), StartedAt: time.Now().UTC()}
 	if _, err = s.saveRun(ctx, run); err != nil {
 		log.Close()
 		return Run{}, nil, err

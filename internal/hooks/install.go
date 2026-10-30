@@ -60,9 +60,9 @@ func (s Service) pendingInstall(ctx context.Context, ev Run) (Run, error) {
 		return ev, err
 	}
 	err := i.Jobs.Update(ev.ID, func(j *hookinstall.Job) error {
-		ev.Result = "pending"
+		ev.Result = ResultPending
 		if j.Recorded {
-			ev.Result = j.Result
+			ev.Result = RunResult(j.Result)
 			ev.FinishedAt = j.FinishedAt
 		}
 		var err error
@@ -101,8 +101,8 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 				break
 			}
 		}
-		if ev.Result != "pending" {
-			if ev.Result != "pass" && job.Status == "finished" {
+		if ev.Result != ResultPending {
+			if ev.Result != ResultPass && job.Status == "finished" {
 				_ = i.Jobs.Update(job.ID, func(j *hookinstall.Job) error { j.Recorded = true; return nil })
 				i.CleanupUnit(ctx, job)
 				if err := i.Jobs.Archive(job.ID); err != nil {
@@ -131,7 +131,7 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 			if err := hookinstall.Log(*j); err != nil {
 				return err
 			}
-			ev.Result = j.Result
+			ev.Result = RunResult(j.Result)
 			ev.FinishedAt = j.FinishedAt
 			if _, err := s.saveRun(ctx, ev); err != nil {
 				return err
@@ -175,7 +175,7 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 				// not. Warnings from the checkout stay on the same card, and the
 				// run's log holds them too.
 				state := room.HookPassed
-				if j.Result != "pass" {
+				if j.Result != string(ResultPass) {
 					state = room.HookError
 				}
 				detail := warningText(j.Warnings)
@@ -291,7 +291,7 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 		// A global built-in hook belongs to no repository and no room, so its
 		// run ends in the hook store that the Hooks screen reads.
 		writeDetail()
-		run.Result, run.FinishedAt = "error", now
+		run.Result, run.FinishedAt = ResultError, now
 		_, err := s.saveRun(ctx, run)
 		return err
 	}
@@ -299,7 +299,7 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 		// A repository run whose checkout is gone has no room to post in, so it
 		// ends in the hook store too.
 		writeDetail()
-		run.Result, run.FinishedAt = "error", now
+		run.Result, run.FinishedAt = ResultError, now
 		_, err := s.saveRun(ctx, run)
 		return err
 	}
@@ -332,7 +332,7 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 	}
 	// The result posts before the run is saved, so a post that fails leaves the
 	// run pending for the next start instead of a card that never ends.
-	run.Result, run.FinishedAt = "error", now
+	run.Result, run.FinishedAt = ResultError, now
 	if err := s.postEvent(ev, hookEvent(ev, h, run, room.HookError, detail), false); err != nil {
 		return err
 	}

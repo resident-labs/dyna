@@ -470,7 +470,7 @@ func (s Service) spoolAlert(ctx context.Context, r repoid.Repo, e Event, h Hook,
 		log.Printf("hook spool alert for %s: cannot record the run: %v (spool error: %v)", h.Name, err, cause)
 		return
 	}
-	run.Result = "error"
+	run.Result = ResultError
 	run.FinishedAt = time.Now().UTC()
 	_, _ = fmt.Fprintln(file, "spool write error:", cause)
 	_ = file.Close()
@@ -498,7 +498,7 @@ func hookEvent(e Event, h Hook, run Run, state room.HookState, detail string) ro
 // resultState names how a failed run ended: an exit code is a failed hook, and
 // a timeout, a cancellation or a runner fault is an error.
 func resultState(run Run) room.HookState {
-	if run.Result == "fail" {
+	if run.Result == ResultFail {
 		return room.HookFailed
 	}
 	return room.HookError
@@ -662,12 +662,12 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 			runErr = errors.Join(runErr, logErr)
 		}
 		closeErr := log.Close()
-		ev.Result = "pass"
+		ev.Result = ResultPass
 		if runErr != nil {
-			ev.Result = "error"
+			ev.Result = ResultError
 			var exit *exec.ExitError
 			if preparationErr == nil && errors.As(runErr, &exit) {
-				ev.Result = "fail"
+				ev.Result = ResultFail
 			}
 		}
 		ev.FinishedAt = time.Now().UTC()
@@ -691,10 +691,10 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 			} else {
 				s.emit(e, hookEvent(e, h, ev, resultState(ev), cause))
 			}
-		} else if ev.Result != "pending" && e.Event != Schedule {
+		} else if ev.Result != ResultPending && e.Event != Schedule {
 			s.emit(e, hookEvent(e, h, ev, room.HookPassed, ""))
 		}
-		if runErr == nil && ev.Result != "pending" {
+		if runErr == nil && ev.Result != ResultPending {
 			s.clearNotices(r.ID, h)
 		}
 		return ev, runErr
@@ -747,9 +747,9 @@ func (s Service) runBuiltin(ctx context.Context, r repoid.Repo, h Hook, e Event)
 		runErr = errors.Join(runErr, logErr)
 	}
 	closeErr := log.Close()
-	ev.Result = "pass"
+	ev.Result = ResultPass
 	if runErr != nil {
-		ev.Result = "error"
+		ev.Result = ResultError
 	}
 	ev.FinishedAt = time.Now().UTC()
 	_, saveErr := s.saveRun(ctx, ev)
