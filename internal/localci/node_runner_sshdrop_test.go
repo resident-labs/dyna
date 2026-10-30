@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/jobstest"
+	"dyna-agent/internal/testsafe"
 )
 
 // sshDropError is the error an SSH client leaves when it loses the connection.
@@ -26,6 +27,7 @@ func sshDropError(t *testing.T) error {
 // Dyna uses its own master and verifies replies independently of SSH's exit
 // status, so a dropped master cannot make a truncated reply succeed (D-166).
 func TestNodeProgramUsesDynaConnectionMultiplexing(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve"}}
 	name, args := r.exec().NodeProgram("bash", []string{"-c", "true"})
 	if name != "ssh" {
@@ -56,6 +58,7 @@ func TestNodeProgramUsesNodeConnectTimeout(t *testing.T) {
 // The commit push to a node goes over the same slow relay, so it dials with the
 // node's connect timeout too, set for that one git command.
 func TestPushCommitToNodeUsesNodeConnectTimeout(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	var pushed []string
 	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve", SSHConnectTimeout: 60 * time.Second}}
 	r.Command = jobs.Command(jobstest.FrameCommand(func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
