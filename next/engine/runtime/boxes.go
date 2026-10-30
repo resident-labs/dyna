@@ -18,8 +18,16 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+type boxStore interface {
+	Hosts(context.Context) ([]box.Host, error)
+	AddHost(context.Context, box.Host) error
+	Session(context.Context, contract.SessionID) (store.Session, error)
+	Box(context.Context, contract.BoxID) (box.Box, error)
+	Boxes(context.Context) ([]box.Box, error)
+}
+
 type Boxes struct {
-	Store     *store.Store
+	Store     boxStore
 	Sockets   *api.Sockets
 	Runtime   string
 	HostData  string
@@ -211,6 +219,9 @@ func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	record, err := b.Store.Box(ctx, id)
 	if err != nil {
 		return err
+	}
+	if record.Host == "" {
+		return nil
 	}
 	h, err := b.host(ctx, record.Host)
 	if err != nil {
