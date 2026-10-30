@@ -65,6 +65,11 @@ func Failure(text string, tail bool) string {
 // terminal: CSI, OSC and the short escape forms.
 var ansiColors = regexp.MustCompile("\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)|\\x1b[@-Z\\\\-_]")
 
+// StripANSI removes the color and cursor sequences from text.
+func StripANSI(text string) string {
+	return ansiColors.ReplaceAllString(text, "")
+}
+
 // logTimestamp reports whether text starts with the time GitHub writes at the
 // start of each log line.
 func logTimestamp(text string) bool {
@@ -76,7 +81,7 @@ func logTimestamp(text string) bool {
 // Lines drops what a CI log shows only in a terminal: ANSI colors, the job
 // and step columns that gh run view adds, and each line's GitHub timestamp.
 func Lines(text string) []string {
-	lines := strings.Split(strings.TrimSpace(ansiColors.ReplaceAllString(text, "")), "\n")
+	lines := strings.Split(strings.TrimSpace(StripANSI(text)), "\n")
 	for i, line := range lines {
 		line = strings.TrimSuffix(line, "\r")
 		if _, rest, ok := strings.Cut(line, "\t"); ok {

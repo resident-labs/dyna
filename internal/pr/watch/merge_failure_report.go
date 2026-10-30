@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"dyna-agent/internal/ciexcerpt"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 	"golang.org/x/mod/modfile"
@@ -144,6 +145,8 @@ func mergeFailureLines(logs string) (packages, tests, frontend, jobs []string) {
 		}
 	}
 	for _, line := range strings.Split(logs, "\n") {
+		// Local CI colors a failure line; the plain copy of the same test must still match.
+		line = ciexcerpt.StripANSI(line)
 		failed := false
 		if m := mergeFailedPackage.FindStringSubmatch(line); len(m) > 1 {
 			add(&packages, m[1])
@@ -155,7 +158,8 @@ func mergeFailureLines(logs string) (packages, tests, frontend, jobs []string) {
 		}
 		if (strings.Contains(line, "FAIL ") || strings.Contains(line, "× ") || strings.Contains(line, "✕ ")) && (strings.Contains(line, ".test.") || strings.Contains(line, ".spec.") || strings.Contains(line, " > ")) {
 			parts := strings.SplitN(line, "\t", 3)
-			add(&frontend, strings.TrimSpace(parts[len(parts)-1]))
+			// Removing the colors leaves two spaces where the escape codes sat; one name must match its plain copy.
+			add(&frontend, strings.Join(strings.Fields(parts[len(parts)-1]), " "))
 			failed = true
 		}
 		if failed {
