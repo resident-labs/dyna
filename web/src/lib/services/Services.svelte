@@ -24,8 +24,9 @@
   import type { SettingItem } from '../api/settings.ts'
   import type { HooksFocus } from '../app/settingsPanel.svelte.ts'
 
-  let { roomId, repo = '', members = [], changes = [], hooks = null, onopen, onpr }: {
+  let { roomId, repo = '', scope = 'room', members = [], changes = [], hooks = null, onopen, onpr }: {
     roomId: string
+    scope?: 'room' | 'global'
     repo?: string
     members?: Member[]
     changes?: ChangeRow[]
@@ -40,6 +41,9 @@
   // Settings need the admin scope; without it the details show no keys.
   let settings = $state<SettingItem[] | null>(null)
   let now = $state(Date.now())
+  let width = $state(0)
+  const wide = $derived(width >= 1000)
+  const selected = $derived(registry?.find((s) => s.id === open))
 
   // The page reads the registry again every minute, so a change made
   // elsewhere shows without a reload. A failed read keeps the rows it had.
@@ -54,7 +58,7 @@
     return () => clearInterval(t)
   })
 
-  const groups = $derived(sections(registry ?? []))
+  const groups = $derived(sections((registry ?? []).filter((s) => s.scope === scope)))
   let open = $state('') // the service whose detail shows
   let notSetUp = $state(false) // the Not set up group is open
   let saving = $state<string[]>([])
@@ -89,9 +93,9 @@
   {@const pill = pillOf(s)}
   {@const write = s.switch ? switchWrite(api, host, s) : null}
   {#snippet detail()}
-    <ServiceDetail service={s} {host} {settings} {changes} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
+    <div class="inline-detail"><ServiceDetail service={s} {host} {settings} {changes} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} /></div>
   {/snippet}
-  <SettingRow inline id="service-{s.id}" title={s.label} description={s.description} expanded={open === s.id} ontoggle={() => toggle(s.id)} children={open === s.id ? detail : undefined}>
+  <SettingRow inline id="service-{s.id}" title={s.label} description={s.description} expanded={open === s.id} ontoggle={() => toggle(s.id)} children={!wide && open === s.id ? detail : undefined}>
     {#snippet status()}
       {#if pill}<StatusPill label={pill.label} tone={pill.tone} />{/if}
       <span>{[...(s.id === 'updates' && settings && s.detail !== 'update-source-invalid' ? [String(settings.find((item) => item.key === 'updater.source')?.value || 'Release updater')] : []), ...factsOf(s, now, !!write)].join(' · ')}</span>
@@ -107,8 +111,9 @@
   </SettingRow>
 {/snippet}
 
-<section class="services" aria-label="Services">
+<section class="services" aria-label="Services" bind:clientWidth={width}>
   <TabHeader title="Services" blurb="What Dyna runs by itself, and the commands you added." />
+  <div class="layout">
   <div class="page">
     {#if failed}<p class="err" role="alert">The service list could not be read: {failed}</p>{/if}
     {#if registry === null && !failed}
@@ -126,13 +131,28 @@
         </Card>
       </Section>
     {/each}
-    <HooksSection {repo} focus={hooks} />
+    <HooksSection {repo} focus={hooks} {scope} />
+  </div>
+  {#if wide && selected}
+    <aside class="detail-panel" aria-label="{selected.label} details">
+      <Card>
+        <h2>{selected.label}</h2>
+        {#key selected.id}
+          <ServiceDetail flushRows service={selected} {host} {settings} {changes} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
+        {/key}
+      </Card>
+    </aside>
+  {/if}
   </div>
 </section>
 
 <style>
   .services { flex: 1; min-height: 0; overflow: auto; container-type: inline-size; }
-  .page { max-width: 760px; padding: 0 var(--s5) var(--s6); }
+  .layout { display: flex; align-items: flex-start; }
+  .page { width: 100%; flex: 0 1 calc(var(--page-reading-width, 72.5rem) / 2); min-width: 0; padding: 0 var(--s5) var(--s6); }
+  .detail-panel { flex: 1; min-width: 0; position: sticky; top: 0; max-height: calc(100vh - 8rem); overflow: auto; padding: 0 var(--s5) var(--s5) 0; }
+  .detail-panel h2 { margin: 0 0 var(--s1); font-size: var(--t-lg); }
+  .inline-detail { max-height: 60vh; overflow: auto; }
   .err { margin: 0 0 var(--s3); font-size: var(--t-sm); color: var(--tone-danger-fg); }
   @container (max-width: 640px) {
     .page { padding: 0 var(--s3) var(--s5); }

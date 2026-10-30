@@ -2,7 +2,7 @@
 // data and returns a typed value, or null where the call failed or the shape
 // is wrong. Nothing here changes data.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
-import { IDReviews, IDMergeQueue, IDLocalCI, IDPRWatcher, IDLaneSync, IDIssueWatch, IDLibrary, IDParentCheckIns, IDVoice, IDUpdates, IDLoadDoctor, IDMaintenance, IDAccountUsage, IDHarnessVersions, GroupPullRequests, GroupAgents, GroupThisComputer, type ID, type Group, StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp, DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, DetailUpdateSourceInvalid, DetailMultipleUpdateHooks, type Detail, type State } from '../api/service.gen.ts'
+import { ScopeRoom, ScopeGlobal, IDReviews, IDMergeQueue, IDLocalCI, IDPRWatcher, IDLaneSync, IDIssueWatch, IDLibrary, IDParentCheckIns, IDVoice, IDUpdates, IDLoadDoctor, IDMaintenance, IDAccountUsage, IDHarnessVersions, GroupPullRequests, GroupAgents, GroupThisComputer, type ID, type Group, StateOn, StateRunning, StateWaiting, StateIdle, StateOff, StateError, StateNotSetUp, DetailNone, DetailLastRunFailed, DetailNoRunYet, DetailProfileWaiting, DetailWorking, DetailQueued, DetailPaused, DetailInCall, DetailUnavailable, DetailUnreadable, DetailUpdateSourceInvalid, DetailMultipleUpdateHooks, type Detail, type State } from '../api/service.gen.ts'
 import type { RegistryService } from '../api/service.ts'
 import type { HookRunRow, MergeHistoryRow, RunReason } from './activity.ts'
 
@@ -40,12 +40,13 @@ export const readRegistry = (v: unknown): RegistryService[] | null =>
     ? v.filter(isRecord).flatMap((r) => {
       const id = ids.find((x) => x === r.id)
       const group = groups.find((x) => x === r.group)
+      const scope = r.scope === ScopeRoom ? ScopeRoom : r.scope === ScopeGlobal ? ScopeGlobal : undefined
       const state = states.find((x) => x === r.state)
       const detail = details.find((x) => x === r.detail)
-      if (id === undefined || group === undefined || state === undefined || detail === undefined) return []
+      if (id === undefined || group === undefined || scope === undefined || state === undefined || detail === undefined) return []
       const sw = isRecord(r.switch) && isBoolean(r.switch.on) ? { on: r.switch.on } : undefined
       return [{
-        id, group, state, detail, label: str(r.label), description: str(r.description), count: num(r.count),
+        id, group, scope, state, detail, label: str(r.label), description: str(r.description), count: num(r.count),
         schedule: isRecord(r.schedule) ? { everyMinutes: num(r.schedule.everyMinutes), timeout: str(r.schedule.timeout) } : undefined,
         lastRun: str(r.lastRun) || undefined, nextRun: str(r.nextRun) || undefined, switch: sw,
         profile: str(r.profile), session: str(r.session), settingsKeys: strings(r.settingsKeys),

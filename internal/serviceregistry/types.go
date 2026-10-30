@@ -8,6 +8,14 @@ type ID string
 // Group is the section of the Services page that holds a service.
 type Group string
 
+// Scope says where a service belongs in the app.
+type Scope string
+
+const (
+	ScopeRoom   Scope = "room"
+	ScopeGlobal Scope = "global"
+)
+
 // State is what a service is doing now. It is data: the page shows a colored
 // chip only for the states that need attention.
 type State string
@@ -100,6 +108,7 @@ type Schedule struct {
 type Service struct {
 	ID          ID     `json:"id"`
 	Group       Group  `json:"group"`
+	Scope       Scope  `json:"scope"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
 	State       State  `json:"state"`
