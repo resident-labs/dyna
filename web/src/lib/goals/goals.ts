@@ -63,5 +63,11 @@ export const goalFilter = (g?: Pick<Goal, 'state'> | null): GoalFilter => (g && 
 // itemCountLabel renders a goal's item counts: "2 open · 5 items".
 export function itemCountLabel(count?: readonly [number, number] | null): string {
   if (!count || !count[1]) return ''
-  return `${count[0]} open · ${count[1]} items`
+  return `${count[0]} open · ${count[1]} ${count[1] === 1 ? 'item' : 'items'}`
+}
+
+// statusPresentation keeps ordinary computed states quiet and highlights attention.
+export function statusPresentation(label: string): { label: string; tone: 'danger' | 'warning' | null } {
+  const labels: Record<string, string> = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned', needs_root: 'Needs root' }
+  return { label: labels[label] ?? '', tone: label === 'errored' ? 'danger' : label === 'stuck' || label === 'needs_root' ? 'warning' : null }
 }

@@ -26,3 +26,11 @@ test('goal text splits its done condition into its own line', () => {
   assert.deepEqual(goalParts('Replace dyna land. Done when all changes merge.'), { aim: 'Replace dyna land.', done: 'all changes merge.' })
   assert.deepEqual(goalParts('Show goals in the profile'), { aim: 'Show goals in the profile', done: '' })
 })
+
+test('computed statuses use attention pills only when action is needed', async () => {
+  const { statusPresentation } = await import('./goals.ts')
+  assert.deepEqual(['on_track', 'waiting', 'ready_to_close', 'unowned', 'stuck', 'errored', 'needs_root'].map(statusPresentation), [
+    { label: 'On track', tone: null }, { label: 'Waiting', tone: null }, { label: 'Ready to close', tone: null }, { label: 'Unowned', tone: null },
+    { label: 'Stuck', tone: 'warning' }, { label: 'Errored', tone: 'danger' }, { label: 'Needs root', tone: 'warning' },
+  ])
+})
