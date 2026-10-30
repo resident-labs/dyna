@@ -26,10 +26,12 @@
   const pace = $derived(remaining === null ? null : paceOf(window, now()))
   const until = $derived(resetsIn(window.resetsAt, now()))
   const low = $derived(remaining !== null && remaining < 20)
+  // hover names the account in full, since a narrow segment cuts the name.
+  const hover = $derived([`${name} · ${window.label}`, notice || (remaining === null ? 'Not reported' : `${percent(remaining)} left`), dateTime(window.resetsAt) ? `Resets ${dateTime(window.resetsAt)}` : ''].filter(Boolean).join(' · '))
   const words = $derived([name, active ? 'in use' : '', notice || (remaining === null ? 'not reported' : `${percent(remaining)} left${low ? ', low' : ''}`)].filter(Boolean).join(', '))
 </script>
 
-<div class="segment" class:active class:muted title={notice ? `${window.label}: ${notice}` : window.label}>
+<div class="segment" class:active class:muted title={hover}>
   {#if remaining !== null}
     <div class="fill" style:width={remaining + '%'} style:background={providerColor(provider)}></div>
     {#if pace}<span class="tick" style:left={pace.expectedRemaining + '%'} title="Even pace: {percent(pace.expectedRemaining)} left"></span>{/if}
