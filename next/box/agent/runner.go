@@ -21,6 +21,8 @@ type turnSink interface {
 type Runner struct {
 	Harness  harness.Harness
 	Sink     turnSink
+	Setup    func(context.Context) error
+	setupErr error
 	mu       sync.Mutex
 	active   contract.TurnID
 	settling bool
@@ -40,6 +42,12 @@ func (r *Runner) Errors() <-chan error {
 func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error {
 	switch m := message.Body.(type) {
 	case contract.TurnStart:
+		if r.Setup != nil {
+			r.setupErr = r.Setup(ctx)
+			if r.setupErr != nil {
+				return r.Sink.TurnOutput(ctx, contract.TurnEnded{Turn: m.Turn, Outcome: contract.TurnOutcome("failed"), Error: "repository setup: " + r.setupErr.Error()})
+			}
+		}
 		return r.start(ctx, m)
 	case contract.TurnSteer:
 		return r.steer(ctx, m)
