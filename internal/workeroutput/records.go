@@ -60,17 +60,6 @@ type recordUsage struct {
 	Cost     *float64                   `json:"total_cost_usd"`
 }
 
-// CallUsage is the prompt accounting of one model call. A nil field was not
-// reported, so an unreported count never reads as zero. Context is the prompt
-// size, the input plus cache reads and writes, and is nil unless all three are
-// reported.
-type CallUsage struct {
-	Input      *int64 `json:"inputTokens,omitempty"`
-	CacheRead  *int64 `json:"cacheReadTokens,omitempty"`
-	CacheWrite *int64 `json:"cacheWriteTokens,omitempty"`
-	Context    *int64 `json:"contextTokens,omitempty"`
-}
-
 // callUsage reads one model call's prompt counts from its usage object.
 func callUsage(usage map[string]json.RawMessage) *CallUsage {
 	if usage == nil {

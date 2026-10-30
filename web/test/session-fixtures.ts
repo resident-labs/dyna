@@ -15,7 +15,8 @@ export const post = (id: string, extra: Partial<Post> = {}): Post => ({
 })
 
 export const turn = (n: number, extra: Partial<Turn> = {}): Turn => ({
-  n, status: 'ok', started: '', ended: '', usage: {}, items: [], ...extra,
+  n, status: 'ok', started: '', ended: '', usage: {}, items: [],
+  usageNormalization: { version: 0, source: '', input: '', cachedInput: '', output: '', cost: '' }, ...extra,
 })
 
 export const session = (id: string, extra: Partial<Session> = {}): Session => ({

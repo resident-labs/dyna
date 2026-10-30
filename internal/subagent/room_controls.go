@@ -13,46 +13,12 @@ import (
 	"dyna-agent/internal/authority"
 )
 
-type RoomSessionState struct {
-	RoomID    string    `json:"roomId"`
-	Paused    bool      `json:"paused"`
-	PausedAt  time.Time `json:"pausedAt,omitempty"`
-	ResumedAt time.Time `json:"resumedAt,omitempty"`
-	Running   int       `json:"running"`
-	Held      int       `json:"held"`
-	Dormant   int       `json:"dormant"`
-}
-
-// RoomSessionKeptReason says why a room action left a session as it was. The
-// web maps these named reasons to text, so it never matches an error message.
-// Only RoomSessionKeptFailed is a real failure.
-type RoomSessionKeptReason string
-
+// Existing names stay as aliases; the prefixed names let tygo emit a closed union.
 const (
-	// RoomSessionKeptStartedWork means the session gained work after the list
-	// was drawn. Keeping it open is the correct, neutral outcome.
-	RoomSessionKeptStartedWork RoomSessionKeptReason = "started-work"
-	// RoomSessionKeptResponsibilities means the session still answers for work.
-	RoomSessionKeptResponsibilities RoomSessionKeptReason = "responsibilities"
-	// RoomSessionKeptFailed means the action could not run.
-	RoomSessionKeptFailed RoomSessionKeptReason = "failed"
+	RoomSessionKeptStartedWork      = RoomSessionKeptReasonStartedWork
+	RoomSessionKeptResponsibilities = RoomSessionKeptReasonResponsibilities
+	RoomSessionKeptFailed           = RoomSessionKeptReasonFailed
 )
-
-type RoomSessionResult struct {
-	Session string                `json:"session"`
-	Name    string                `json:"name,omitempty"`
-	OK      bool                  `json:"ok"`
-	Status  string                `json:"status"`
-	Reason  RoomSessionKeptReason `json:"reason,omitempty"`
-	Error   string                `json:"error,omitempty"`
-}
-type RoomSessionMutation struct {
-	State     RoomSessionState    `json:"state"`
-	Results   []RoomSessionResult `json:"results"`
-	Succeeded int                 `json:"succeeded"`
-	Kept      int                 `json:"kept"`
-	Failed    int                 `json:"failed"`
-}
 
 // roomSessions excludes unassigned history. Corrupt evidence cannot silently
 // disappear from a destructive room action.

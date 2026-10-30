@@ -31,15 +31,6 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// Bundle identifies an exact installed executable. Launchers must set
-// DISABLE_UPDATES=1 for Claude Code.
-type Bundle struct {
-	Harness    string `json:"harness"`
-	Version    string `json:"version"`
-	Executable string `json:"executable"`
-	Directory  string `json:"directory"`
-}
-
 // PinnedBundle is one bundle held in use and what holds it: a profile
 // selection, an open session, or the process of a live lease. Removal
 // refusals name the holder, so the owner knows what to close first.
