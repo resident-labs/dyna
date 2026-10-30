@@ -597,6 +597,7 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		return failure(err)
 	}
 	if !discard && hasTurns && current.State != contract.BoxDeleted {
+		if err := s.boxes.Start(ctx, current.ID); err != nil { return failure(err) }
 		if current.Reason != "" {
 			if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
 				return failure(err)
@@ -832,8 +833,8 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if _, err = s.transition(ctx, session.Room, current, contract.BoxReady, ""); err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
-	} else if current.State != contract.BoxReady {
-		return contract.BoxHelloResponse{}, invalid("box is not starting or ready")
+	} else if current.State != contract.BoxReady && (current.State != contract.BoxClosing || session.Repo == "") {
+		return contract.BoxHelloResponse{}, invalid("box is not starting, ready, or archiving")
 	}
 	model, _, err := s.profiles.Model(session.Profile)
 	if err != nil {

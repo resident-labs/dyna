@@ -61,6 +61,31 @@ type Config struct {
 	WebListen                                  string
 }
 
+// dormancyKicks drains events while reconciliation waits on a host.
+func dormancyKicks(ctx context.Context, subscribe func() (<-chan contract.Event, func())) <-chan struct{} {
+	updates, unsubscribe := subscribe()
+	kicks := make(chan struct{}, 1)
+	go func() {
+		defer func() { unsubscribe() }()
+		for {
+			select {
+			case _, ok := <-updates:
+				if !ok {
+					unsubscribe()
+					updates, unsubscribe = subscribe()
+				}
+				select {
+				case kicks <- struct{}{}:
+				default:
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return kicks
+}
+
 func Run(ctx context.Context, cfg Config) error {
 	token := os.Getenv("GH_TOKEN")
 	if err := os.Unsetenv("GH_TOKEN"); err != nil {
@@ -152,22 +177,10 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
-	updates, unsubscribe := st.Subscribe()
-	defer unsubscribe()
-	service.ReconcileDormancy(ctx, true)
-	go func() {
-		for {
-			select {
-			case _, ok := <-updates:
-				if !ok {
-					return
-				}
-				service.ReconcileDormancy(ctx, false)
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	kicks := dormancyKicks(watchCtx, st.Subscribe)
+	service.ReconcileDormancy(ctx, true, true)
 	if problem := service.ResumeClosures(ctx); problem != nil {
 		return fmt.Errorf("resume close: %s", problem.Message)
 	}
@@ -179,8 +192,10 @@ func Run(ctx context.Context, cfg Config) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-kicks:
+			service.ReconcileDormancy(ctx, false, false)
 		case <-ticker.C:
-			service.ReconcileDormancy(ctx, false)
+			service.ReconcileDormancy(ctx, false, true)
 			if err := service.ExpireOperations(ctx); err != nil {
 				return fmt.Errorf("operation expiry sweep: %w", err)
 			}

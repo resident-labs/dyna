@@ -18,7 +18,7 @@ type dormancy struct {
 }
 
 // ReconcileDormancy is level-triggered by committed events and the runtime tick.
-func (s *Service) ReconcileDormancy(ctx context.Context, startup bool) {
+func (s *Service) ReconcileDormancy(ctx context.Context, startup, retry bool) {
 	s.dormancy.mu.Lock()
 	defer s.dormancy.mu.Unlock()
 	boxes, err := s.store.Boxes(ctx)
@@ -41,7 +41,7 @@ func (s *Service) ReconcileDormancy(ctx context.Context, startup bool) {
 				log.Printf("dormancy start: %v", err)
 			}
 		}
-		if !s.dormancy.unconfirmed[b.ID] {
+		if !retry || !s.dormancy.unconfirmed[b.ID] {
 			continue
 		}
 		unlock := s.lockBox(b.Session)
