@@ -103,7 +103,8 @@ var LongCalls = map[string]time.Duration{
 	// Merge recovery can delete trial branches, build a retry, or publish a
 	// passed trial through git and GitHub. Keep the existing synchronous CLI
 	// behavior until item 8 moves slow work into jobs.
-	"MergeControl": 2 * time.Minute,
+	// Allow the ten-minute publication lock wait and the bounded retry build.
+	"MergeControl": 12 * time.Minute,
 	// GitHub (gh) and git.
 	"ExportIssue": 30 * time.Second, "GitHubList": 2 * time.Minute, "GitHubView": 2 * time.Minute, "TrackedIssues": 2 * time.Minute, "GitHubDiff": 2 * time.Minute,
 	"CommentPR": 2 * time.Minute, "EditPR": 2 * time.Minute, "PostPRReview": 2 * time.Minute, "LearnPRNoise": 2 * time.Minute, "TrackPR": 2 * time.Minute, "TrackPRRef": 2 * time.Minute, "SetPRDraft": 2 * time.Minute, "OpenChange": 2 * time.Minute, "MergeFixPR": 2 * time.Minute,
