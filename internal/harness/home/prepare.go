@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -116,6 +117,16 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	files := map[string][]byte{"gitconfig": []byte(globalConfig(owner, home, config))}
 	for name, target := range resolved {
 		files["bin/"+name] = []byte(bridge(owner, target, name == "dyna"))
+	}
+	// Test wrappers preserve the harness environment. Missing tools need no bridge.
+	slotSettings, err := settings.Load("")
+	if err != nil {
+		return nil, err
+	}
+	for _, rule := range slotSettings.TestSlots.Commands {
+		if target, err := resolve(rule.Command, path); err == nil {
+			files["bin/"+rule.Command] = []byte(testSlotBridge(resolved["dyna"], target, rule.Arg))
+		}
 	}
 	// The systemd-run shim is always installed when the owner PATH names a
 	// real one, so a room's own user units join the room slice. A machine
@@ -427,6 +438,21 @@ func bridge(owner map[string]string, target string, isDyna bool) string {
 		}
 	}
 	fmt.Fprintf(&script, "exec %s \"$@\"\n", shellquote.Quote(target))
+	return script.String()
+}
+
+// testSlotBridge only intercepts the test argument before a positional argument.
+func testSlotBridge(dyna, target, arg string) string {
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\n")
+	if arg == "" {
+		fmt.Fprintf(&script, "exec %s slot run -- %s \"$@\"\n", shellquote.Quote(dyna), shellquote.Quote(target))
+	} else {
+		script.WriteString("for arg do\n")
+		fmt.Fprintf(&script, "  if [ \"$arg\" = %s ]; then exec %s slot run -- %s \"$@\"; fi\n", shellquote.Quote(arg), shellquote.Quote(dyna), shellquote.Quote(target))
+		script.WriteString("  case \"$arg\" in -*) ;; *) break ;; esac\ndone\n")
+		fmt.Fprintf(&script, "exec %s \"$@\"\n", shellquote.Quote(target))
+	}
 	return script.String()
 }
 
