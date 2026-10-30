@@ -11,16 +11,20 @@ func TestTree(t *testing.T) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	a := contract.Principal{Kind: contract.PrincipalSession, Session: "a"}
 	for _, tt := range []struct {
-		name      string
-		got, want contract.SessionID
+		name            string
+		caller          contract.Principal
+		requested, want contract.SessionID
+		fail            bool
 	}{
-		{"owner default", tree.ParentFor(owner, ""), "root"},
-		{"owner choice", tree.ParentFor(owner, "a"), "a"},
-		{"session", tree.ParentFor(a, "c"), "a"},
+		{"owner default", owner, "", "root", false},
+		{"owner choice", owner, "a", "a", false},
+		{"session", a, "c", "a", false},
+		{"missing parent", owner, "missing", "", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.got != tt.want {
-				t.Fatalf("got %s", tt.got)
+			got, err := tree.ParentFor(tt.caller, tt.requested)
+			if got != tt.want || (err != nil) != tt.fail {
+				t.Fatalf("got %s, %v", got, err)
 			}
 		})
 	}

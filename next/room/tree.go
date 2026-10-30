@@ -1,12 +1,14 @@
 package room
 
-import "github.com/resident-labs/dyna/contract"
+import (
+	"errors"
+	"github.com/resident-labs/dyna/contract"
+)
 
 // Node contains the tree facts loaded by the engine.
 type Node struct {
 	ID     contract.SessionID
 	Parent contract.SessionID
-	Host   contract.HostName
 }
 
 // Tree represents one room's session tree.
@@ -28,14 +30,17 @@ func NewTree(nodes []Node) Tree {
 
 // ParentFor picks the caller for a session start, or the requested parent
 // for an owner start, defaulting to root.
-func (t Tree) ParentFor(caller contract.Principal, requested contract.SessionID) contract.SessionID {
+func (t Tree) ParentFor(caller contract.Principal, requested contract.SessionID) (contract.SessionID, error) {
 	if caller.Kind == contract.PrincipalSession {
-		return caller.Session
+		return caller.Session, nil
 	}
-	if requested != "" {
-		return requested
+	if requested == "" {
+		requested = t.root
 	}
-	return t.root
+	if _, ok := t.nodes[requested]; !ok {
+		return "", errors.New("parent is not in the room tree")
+	}
+	return requested, nil
 }
 
 // Above reports strict ancestry; a session is not above itself.
