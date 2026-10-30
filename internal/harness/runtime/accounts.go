@@ -171,7 +171,7 @@ func (a *Accounts) Create(harness, label string) (result NativeAccount, err erro
 		return result, err
 	}
 	provider, kind := store.ProviderFor(h, "")
-	return a.createProvider(h, provider, kind, label)
+	return a.createProvider(h, provider, kind, label, labelSource(label))
 }
 
 // CreateProvider makes an account of one provider in its own home. A harness
@@ -181,10 +181,17 @@ func (a *Accounts) CreateProvider(harness string, provider store.Provider, kind 
 	if err != nil {
 		return NativeAccount{}, err
 	}
-	return a.createProvider(h, provider, kind, label)
+	return a.createProvider(h, provider, kind, label, labelSource(label))
 }
 
-func (a *Accounts) createProvider(h string, provider store.Provider, kind store.Kind, label string) (result NativeAccount, err error) {
+func labelSource(label string) store.LabelSource {
+	if label == "" {
+		return store.LabelDefault
+	}
+	return store.LabelOwner
+}
+
+func (a *Accounts) createProvider(h string, provider store.Provider, kind store.Kind, label string, source store.LabelSource) (result NativeAccount, err error) {
 	err = a.transaction(func(state *store.State) error {
 		id := make([]byte, 16)
 		if _, err := rand.Read(id); err != nil {
@@ -206,7 +213,7 @@ func (a *Accounts) createProvider(h string, provider store.Provider, kind store.
 			return err
 		}
 		now := time.Now().UTC()
-		e := store.Entry{Metadata: store.Metadata{ID: key, Provider: provider, Kind: kind, Harness: h, Label: label, NativeHome: home, NeedsLogin: true, CreatedAt: now, UpdatedAt: now}}
+		e := store.Entry{Metadata: store.Metadata{ID: key, Provider: provider, Kind: kind, Harness: h, Label: label, LabelSource: source, NativeHome: home, NeedsLogin: true, CreatedAt: now, UpdatedAt: now}}
 		state.Entries = append(state.Entries, e)
 		result, err = a.native(&e)
 		return err
