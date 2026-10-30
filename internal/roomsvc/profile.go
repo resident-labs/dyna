@@ -17,7 +17,7 @@ func (s *Service) Profile(ref string, posts int) (Profile, error) {
 	}
 	out := Profile{Member: s.member(info, 0, 0), Dir: info.Dir, Usage: info.Usage}
 	book := s.avatars(info.RoomID)
-	out.Member.Emoji = book.byID[info.ID]
+	out.Member.Avatar = book.member(info.ID, info.Room)
 	if info.ParentSession != "" {
 		if parent, err := s.sessions().Inspect(info.ParentSession); err == nil {
 			out.Parent = parent.EffectiveName()

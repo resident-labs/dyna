@@ -71,9 +71,11 @@ func (r *RoomLink) Spoken(owner bool, text string) error {
 // wakes root. Root sees only Voice's task posts to it.
 func (r *RoomLink) callPost(owner bool, in room.PostInput) room.PostInput {
 	voice := r.rec.Name + ":" + room.VoiceAgent
+	in.SenderKind = room.SenderVoice
 	in.From, in.To = voice, []string{r.rec.Name}
 	if owner {
 		// The owner's own speech, transcribed: a person made it.
+		in.SenderKind = room.SenderOwner
 		in.From, in.To, in.Human = r.rec.Name, []string{voice}, true
 	}
 	in.Kind, in.Source = "voice", room.SourceVoice

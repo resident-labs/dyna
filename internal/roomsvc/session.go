@@ -185,7 +185,7 @@ func (s *Service) sessionView(sess transcript.Session) (Session, error) {
 	}
 	out.Address = sess.Info.Address()
 	book := s.avatars(sess.Info.RoomID)
-	out.Member.Emoji = book.byID[sess.Info.ID]
+	out.Member.Avatar = book.member(sess.Info.ID, sess.Info.Room)
 	jobs := s.sessionJobs(sess)
 	byID := map[string]shells.Info{}
 	for _, in := range jobs {
@@ -366,10 +366,12 @@ func (s *Service) dmReferences(rec room.Record, conversation room.Conversation, 
 		kept = append(kept, post)
 	}
 	posts := mergeHomePosts(received, kept)
+	book := s.avatars(rec.ID)
 	rows := make([]ReferenceRow, 0, len(posts))
 	for _, post := range posts {
 		m := post.Message
 		rows = append(rows, ReferenceRow{
+			Avatar:       book.resolve(m, rec.Name),
 			PostID:       m.ID,
 			From:         m.From,
 			Kind:         m.Kind,
