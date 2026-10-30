@@ -7,7 +7,20 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-type fakeRepos struct{ prepared bool }
+type fakeRepos struct {
+	prepared bool
+	err      error
+	calls    int
+	commits  map[contract.RepoName]string
+}
+
+func (r *fakeRepos) Ref(_ context.Context, repo contract.RepoName, _ string) (string, error) {
+	r.calls++
+	if hash := r.commits[repo]; hash != "" {
+		return hash, r.err
+	}
+	return "abc", r.err
+}
 
 func (r *fakeRepos) Get(_ context.Context, _ contract.RoomID, _ contract.SessionID, _ contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
 	if fetch {

@@ -22,6 +22,10 @@ type Repositories struct {
 	Mirror *Mirror
 }
 
+func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref string) (string, error) {
+	return r.Mirror.Ref(ctx, repo, ref)
+}
+
 func (r *Repositories) Get(ctx context.Context, room contract.RoomID, session contract.SessionID, host contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
 	repos, err := r.Rooms.RoomRepos(ctx, room)
 	if err != nil {
