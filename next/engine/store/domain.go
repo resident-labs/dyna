@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -26,7 +27,7 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, goal string, event contract.Event) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, goal string, event, boxEvent contract.Event, reason string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var parentID *contract.SessionID
 		if parent != "" {
@@ -36,7 +37,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", contract.BoxSizeSmall, contract.BoxPending, "", "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -44,25 +45,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", contract.PrincipalSession, session.ID, seq, contract.SurfaceSession, contract.ReplyNone, "", "", "", "", 1, "pending")
-		return err
-	})
-}
-
-func (s *Store) SetBoxState(ctx context.Context, id contract.BoxID, state contract.BoxState, reason string, event contract.Event) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET state=?,reason=?,updated_at=? WHERE id=?", state, reason, event.Time.UnixMilli(), id)
+		err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 		if err != nil {
 			return err
 		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return sql.ErrNoRows
-		}
-		_, err = s.AppendEvent(tx, event)
+		_, err = s.AppendEvent(tx, boxEvent)
 		return err
 	})
 }
@@ -79,9 +66,6 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		}
 		if n != 1 {
 			return sql.ErrNoRows
-		}
-		if _, err = tx.ExecContext(ctx, "UPDATE boxes SET state=?,updated_at=? WHERE session=?", contract.BoxDeleted, event.Time.UnixMilli(), id); err != nil {
-			return err
 		}
 		_, err = s.AppendEvent(tx, event)
 		return err
@@ -150,7 +134,16 @@ func (s *Store) SessionByName(ctx context.Context, room contract.RoomID, name st
 	return session, err
 }
 
-func (s *Store) Post(ctx context.Context, event contract.Event, recipients []contract.SessionID) (int64, error) {
+func insertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d contract.Delivery) error {
+	home := string(d.Reply.Home.Kind)
+	if d.Reply.Home.Kind == contract.ConversationDM {
+		home += ":" + string(d.Reply.Home.Session)
+	}
+	_, err := tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", d.To.Kind, d.To.Session, seq, d.Surface, d.Reply.Kind, d.Reply.Target.Kind, d.Reply.Target.Session, home, d.Reply.ReplyTo, d.Wake, "pending")
+	return err
+}
+
+func (s *Store) Post(ctx context.Context, event contract.Event, deliveries []contract.Delivery) (int64, error) {
 	var seq int64
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -158,9 +151,8 @@ func (s *Store) Post(ctx context.Context, event contract.Event, recipients []con
 		if err != nil {
 			return err
 		}
-		for _, recipient := range recipients {
-			_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", contract.PrincipalSession, recipient, seq, contract.SurfaceFeed, contract.ReplyNone, "", "", "", "", 1, "pending")
-			if err != nil {
+		for _, delivery := range deliveries {
+			if err := insertDelivery(ctx, tx, seq, delivery); err != nil {
 				return err
 			}
 		}
@@ -173,6 +165,7 @@ func (s *Store) Post(ctx context.Context, event contract.Event, recipients []con
 type FeedInput struct {
 	Seq     contract.DeliverySeq
 	Surface contract.Surface
+	Reply   contract.ReplyChannel
 	Queue   *contract.TurnQueue
 }
 
@@ -186,7 +179,7 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
+		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,d.reply_home,d.reply_to,d.wake FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
 		if err != nil {
 			return err
 		}
@@ -196,15 +189,21 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 			queue sql.NullString
 			event contract.EventID
 			turn  sql.NullString
+			home  string
+			wake  bool
 		}
 		var items []item
 		for rows.Next() {
 			var v item
-			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn); err != nil {
+			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn, &v.input.Reply.Kind, &v.input.Reply.Target.Kind, &v.input.Reply.Target.Session, &v.home, &v.input.Reply.ReplyTo, &v.wake); err != nil {
 				rows.Close()
 				return err
 			}
-			items = append(items, v)
+			kind, session, _ := strings.Cut(v.home, ":")
+			v.input.Reply.Home = contract.Conversation{Kind: contract.ConversationKind(kind), Session: contract.SessionID(session)}
+			if active == "" || v.wake || v.turn.Valid {
+				items = append(items, v)
+			}
 		}
 		if err := rows.Close(); err != nil {
 			return err
@@ -213,8 +212,11 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 			return err
 		}
 		if active == "" {
-			if len(items) != 0 {
-				active = turn
+			for _, item := range items {
+				if item.wake {
+					active = turn
+					break
+				}
 			}
 			if active == "" {
 				return nil

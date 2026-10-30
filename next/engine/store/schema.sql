@@ -1,5 +1,8 @@
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER);
+CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id));
+CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT NULL REFERENCES repos(repo), is_default INTEGER NOT NULL, PRIMARY KEY(room, repo));
+CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1;
 CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, parent TEXT REFERENCES sessions(id), profile TEXT NOT NULL, state TEXT NOT NULL, goal TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER);
 CREATE UNIQUE INDEX sessions_open_name ON sessions(room, name) WHERE closed_at IS NULL;
 CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, at INTEGER NOT NULL, room TEXT REFERENCES rooms(id), type TEXT NOT NULL, from_kind TEXT NOT NULL, from_id TEXT NOT NULL, body BLOB NOT NULL);
@@ -7,8 +10,7 @@ CREATE INDEX events_room_seq ON events(room, seq);
 CREATE INDEX events_type_seq ON events(type, seq);
 CREATE TABLE deliveries (to_kind TEXT NOT NULL, to_id TEXT NOT NULL, seq INTEGER NOT NULL REFERENCES events(seq), surface TEXT NOT NULL, reply_kind TEXT NOT NULL, reply_target_kind TEXT NOT NULL, reply_target_id TEXT NOT NULL, reply_home TEXT NOT NULL, reply_to TEXT NOT NULL, wake INTEGER NOT NULL, state TEXT NOT NULL, turn TEXT, queue TEXT, PRIMARY KEY(to_kind, to_id, seq));
 CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL);
-CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, no_reflink INTEGER NOT NULL, checked_at INTEGER NOT NULL);
+CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, checked_at INTEGER NOT NULL);
 CREATE TABLE host_labels (host TEXT NOT NULL REFERENCES hosts(name), label TEXT NOT NULL, PRIMARY KEY(host, label));
 CREATE TABLE boxes (id TEXT PRIMARY KEY, session TEXT NOT NULL UNIQUE REFERENCES sessions(id), parent TEXT REFERENCES boxes(id), host TEXT REFERENCES hosts(name), image TEXT NOT NULL, size TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL, slice TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX boxes_host_state ON boxes(host, state);
-CREATE TABLE transcripts (session TEXT NOT NULL REFERENCES sessions(id), path TEXT NOT NULL, acked_offset INTEGER NOT NULL, file TEXT NOT NULL, PRIMARY KEY(session, path));
