@@ -53,7 +53,6 @@ import (
 	"dyna-agent/internal/update"
 	"dyna-agent/internal/webpush"
 	"dyna-agent/internal/websvc/devicestore"
-	"dyna-agent/internal/workflowtemplate"
 	"dyna-agent/internal/worktrees"
 )
 
@@ -125,7 +124,7 @@ var migrations = []func(dataDir string) error{
 	attempts.Migrate,
 	webpush.Migrate,
 	worktrees.Migrate,
-	workflowtemplate.Migrate,
+	migrateRemovedWorkflowTemplates,
 }
 
 // Migrate prepares every store in dataDir before the engine serves calls.

@@ -155,7 +155,6 @@ esac
 
 # Seed shipped workflow starters into the user template registry.
 # User-modified files are left untouched; unchanged managed copies may update.
-"$BIN" templates seed || true
 
 if [ "$os" = linux ] && command -v systemctl >/dev/null 2>&1; then
   "$BIN" engine run --help >/dev/null 2>&1 || fail "installed binary cannot run the engine; keeping the existing service"

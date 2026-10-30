@@ -1,5 +1,4 @@
-// Workflow runs and their templates. Sources: internal/roomsvc/runs.go and
-// internal/workflowtemplate/catalog.go.
+// Workflow runs. Source: internal/roomsvc/runcontrol.go.
 import type { Doing } from './room.ts'
 
 // RunSummary is roomsvc.RunSummary. endedAt is omitted while a run goes.
@@ -119,14 +118,6 @@ export interface WorkflowInfo {
   description: string
 }
 
-// TemplateInfo is workflowtemplate.Info.
-export interface TemplateInfo {
-  name: string
-  description?: string
-  source: string
-  path: string
-}
-
 // StartNamedRunRequest is roomsvc.StartNamedRunRequest.
 export interface StartNamedRunRequest {
   room: string
@@ -140,8 +131,7 @@ export interface StartedRun {
   id: string
 }
 
-// RunSource is roomsvc.RunSource: a template by name, or a script.
+// RunSource is roomsvc.RunSource.
 export interface RunSource {
-  template?: string
   script?: string
 }

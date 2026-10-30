@@ -26,7 +26,6 @@ export interface ActionContext {
   session?: { name: string } | null
   sessionPRs?: readonly unknown[] | null
   roomOptions?: () => Option[]
-  templateOptions?: () => Option[]
   switchRoom: Handler
   newRoom: Handler
   openFiles: Handler
@@ -63,7 +62,7 @@ export function actions(c: ActionContext): Action[] {
     )
     if (c.hasTerminal) out.push({ id: 'terminal', palette: { label: 'Open terminal', hint: `in ${label}`, icon: icon.terminal, terms: 'shell console bash command' }, slash: { name: 'terminal', hint: 'a shell in the repo' }, run: () => c.openView('terminal') })
     out.push(
-      { id: 'run', palette: { label: 'Run a workflow…', icon: icon.run, terms: 'start workflow template run' }, slash: { name: 'run', arg: 'template and input', listTitle: 'Workflow templates', hint: 'start a workflow', options: c.templateOptions }, run: c.startWorkflow },
+      { id: 'run', palette: { label: 'Run a workflow…', icon: icon.run, terms: 'start workflow run' }, slash: { name: 'run', arg: 'workflow and input', hint: 'start a workflow' }, run: c.startWorkflow },
     )
     for (const run of (c.runs?.runs ?? []).filter((x) => x.status === 'running')) out.push({ id: `cancel-${run.id}`, palette: { label: `Cancel ${run.name}`, hint: 'running workflow', icon: icon.stop, danger: true, terms: 'cancel stop workflow run' }, run: () => c.cancelRun(run) })
     out.push(
