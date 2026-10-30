@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -67,6 +68,47 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 		t.Fatalf("close order: %+v, %v", events, err)
 	}
 }
+func TestCloseStartsStoppedBoxForArchive(t *testing.T) {
+	s, _, sid, ctx := setupArchive(t)
+	h := &dormantHost{}
+	s.boxes = h
+	s.SetRepositories(&fakeRepos{})
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: sid}
+	channelCtx, cancel := context.WithCancel(ctx)
+	channel, problem := testChannel(t, s, channelCtx, caller)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	start := (<-channel).Body.(contract.TurnStart)
+	cancel()
+	for range channel {
+	}
+	if _, problem = s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted}); problem != nil {
+		t.Fatal(problem)
+	}
+	s.now = func() time.Time { return time.Unix(1000, 0).Add(11 * time.Minute) }
+	s.ReconcileDormancy(ctx, false, true)
+	if stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatal("box did not stop")
+	}
+	if _, problem = s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
+		t.Fatal(problem)
+	}
+	if h.starts != 1 {
+		t.Fatal("closing did not restart the box")
+	}
+	if _, problem = s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	reconnected, problem := s.BoxChannel(ctx, caller)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, ok := (<-reconnected).Body.(contract.Archive); !ok {
+		t.Fatal("archive not sent")
+	}
+}
+
 func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
