@@ -536,7 +536,7 @@ The control plane runs no boxes. It opens one SSH master to each host and does a
 
 The owner adds a host with `dyna host add <name> --ssh user@addr`. The engine then runs the **host check** over the master. A host is `ready` only when every item passes:
 
-- cgroup v2, with `Delegate=yes` for the user manager and the cpu, memory, io and pids controllers delegated;
+- cgroup v2, with `Delegate=yes` for the user manager and the cpu, memory and pids controllers delegated; io joins when v2 limits disk IO;
 - rootless Podman 5 or later, with the systemd cgroup manager and `--userns=keep-id:uid=1000,gid=1000` support (introduced in Podman 4.3);
 - sshd allows `StreamLocalForwarding`, and curl 7.40 or later is available for the socket probe;
 - git is installed, because the engine pushes the repository caches over the master (5.6);
