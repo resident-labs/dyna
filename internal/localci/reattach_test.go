@@ -28,6 +28,7 @@ type reattachFixture struct {
 	removed atomic.Int32
 	// onReports runs when the node copies the reports, after every check ended.
 	onReports func()
+	onSetup   func()
 }
 
 func newReattachFixture(t *testing.T) *reattachFixture {
@@ -49,6 +50,9 @@ func newReattachFixture(t *testing.T) *reattachFixture {
 			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
 		case strings.Contains(script, "init.lock"):
 			f.setups.Add(1)
+			if f.onSetup != nil {
+				f.onSetup()
+			}
 		case strings.Contains(script, "tar -C"):
 			if f.onReports != nil {
 				f.onReports()
@@ -567,5 +571,26 @@ func TestResumeWaitsForLiveAttachment(t *testing.T) {
 	runner := Runner{DataDir: store.DataDir, Node: &Node{Name: "pve"}}
 	if _, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", nil); err == nil || errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("live attachment was treated as absent: %v", err)
+	}
+}
+
+// A restart during remote setup must leave a record of its keeper so the next
+// engine can tear it down before starting the same head again.
+func TestRunRecordsAttachmentBeforeRemoteSetup(t *testing.T) {
+	f := newReattachFixture(t)
+	store := Store{DataDir: f.runner.DataDir}
+	repo, err := canonicalKey(f.request.Repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []attachmentRow
+	var readErr error
+	f.onSetup = func() { rows, readErr = store.attachmentRows(t.Context(), repo, strings.Repeat("a", 40)) }
+	close(f.release)
+	if _, err := f.runner.Run(t.Context(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if readErr != nil || len(rows) != 1 || rows[0].RunID == "" {
+		t.Fatalf("setup attachment = %+v, %v", rows, readErr)
 	}
 }
