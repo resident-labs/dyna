@@ -262,3 +262,14 @@ test('a failure between instruction notes remains a separate card', () => {
   assert.deepEqual(rows.map((row) => row.post.id), ['failure', 'b'])
   assert.equal(rowPost(rows[0])?.notice?.kind, 'failed')
 })
+
+test('routine check-ins fold by parent without hiding attention or other posts', () => {
+  const checkin = (id: string, parent: string, attention?: 'none' | 'blocked' | 'overdue'): FeedInput => ({
+    id, ts: start + Number(id.slice(1)) * 1000, from: 'dyna', kind: 'checkin',
+    payload: { parent, windowStart: 1, counts: { running: 1, queued: 0, idle: 0 }, children: [], ...(attention ? { attention } : {}) },
+  })
+  const posts = [checkin('p1', 'a', 'none'), checkin('p2', 'b', 'none'), checkin('p3', 'a', 'blocked'), checkin('p4', 'a', 'none'), checkin('p5', 'a', 'overdue'), checkin('p6', 'a')]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.post.id), ['p2', 'p3', 'p4', 'p5', 'p6'])
+  assert.deepEqual(rowPosts(rows[2]).map((post) => post.id), ['p1', 'p4'])
+})
