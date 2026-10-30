@@ -94,7 +94,7 @@ A reviewer starts on each needed verified head, in parallel with CI.
 Draft PRs get no automatic review, even with required reviewers. Open a PR
 ready for review, or run `gh pr ready <number>` when it should be reviewed.
 Known failed CI blocks review until a rerun starts or passes.
-Reviewers use CI as the test oracle and focus on the review. They read the diff
+Reviewers leave all test suite runs to CI, the test oracle, and focus on the review. They read the diff
 and may run cheap static checks on changed files (go vet, gofmt, tsc, linters).
 Read the assigned head and review input. Confirm or reject every bot finding
 with a reason after checking its file and line.
