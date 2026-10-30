@@ -115,7 +115,7 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		expiry = DefaultExpiry
 	}
 	r.CreatedAt, r.UpdatedAt, r.ExpiresAt = now, now, now.Add(expiry)
-	auto := in.Class == ClassAgent && actor.Role == authority.Root
+	auto := in.Auto && in.Class == ClassAgent || in.Class == ClassAgent && actor.Role == authority.Root
 	if auto {
 		r.State = StateApproved
 		r.Result = &Result{Actor: requester.Address()}
@@ -133,7 +133,11 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 			return err
 		}
 		if auto {
-			return insertDecision(ctx, conn, r.ID, requester.ID, ActionAuto, "root", now)
+			reason := "root"
+			if in.Auto {
+				reason = "routine PR write"
+			}
+			return insertDecision(ctx, conn, r.ID, requester.ID, ActionAuto, reason, now)
 		}
 		return nil
 	})
@@ -141,7 +145,11 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		return Request{}, err
 	}
 	if auto {
-		err = s.postDecided(r, requester.Address(), ActionAuto, "root", "")
+		reason := "root"
+		if in.Auto {
+			reason = "routine PR write"
+		}
+		err = s.postDecided(r, requester.Address(), ActionAuto, reason, "")
 	} else {
 		err = s.postRequested(r)
 	}
