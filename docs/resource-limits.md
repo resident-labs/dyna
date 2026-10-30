@@ -30,7 +30,8 @@ argument. Dyna skips tools absent from the owner's PATH. A waiting command
 prints one line in its tool output and gives up after 30 minutes.
 Nested test commands share their parent's slot. To limit a different command
 once, use `dyna slot run -- command args...`. The slot files live under
-`$XDG_RUNTIME_DIR/dyna/test-slots`. This limit does not change CI.
+`$XDG_RUNTIME_DIR/dyna/test-slots`. If `XDG_RUNTIME_DIR` is unset, Dyna uses
+a private per-user directory under `/tmp`. This limit does not change CI.
 
 ## Files and commands
 

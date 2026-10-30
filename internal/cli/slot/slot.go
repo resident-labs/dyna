@@ -62,11 +62,10 @@ func runCommand(args, env []string, stdin io.Reader, stdout, stderr io.Writer) (
 	defer stop()
 	var lock *os.File
 	if cfg.TestSlots.Slots > 0 && os.Getenv(heldEnv) != "1" {
-		runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-		if !filepath.IsAbs(runtimeDir) {
-			return 1, fmt.Errorf("XDG_RUNTIME_DIR must be an absolute path")
+		dir, err := slotDirectory(os.Getenv("XDG_RUNTIME_DIR"), "/tmp", os.Getuid())
+		if err != nil {
+			return 1, err
 		}
-		dir := filepath.Join(runtimeDir, "dyna", "test-slots")
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 		defer cancel()
 		lock, err = acquire(ctx, dir, cfg.TestSlots.Slots, os.Getenv("DYNA_SESSION"), stderr, waitTick)
@@ -109,6 +108,30 @@ func runCommand(args, env []string, stdin io.Reader, stdout, stderr io.Writer) (
 		return exit.ExitCode(), nil
 	}
 	return 1, err
+}
+
+// slotDirectory shares one private fallback across all rooms when there is no
+// XDG runtime directory. Reject a pre-existing directory owned by another
+// user, a symlink, or a directory that other users can access.
+func slotDirectory(runtimeDir, temporaryRoot string, uid int) (string, error) {
+	if runtimeDir != "" {
+		if !filepath.IsAbs(runtimeDir) {
+			return "", fmt.Errorf("XDG_RUNTIME_DIR must be an absolute path")
+		}
+		return filepath.Join(runtimeDir, "dyna", "test-slots"), nil
+	}
+	root := filepath.Join(temporaryRoot, "dyna-test-slots-"+strconv.Itoa(uid))
+	if err := os.Mkdir(root, 0700); err != nil && !os.IsExist(err) {
+		return "", fmt.Errorf("create test slot directory: %w", err)
+	}
+	var stat unix.Stat_t
+	if err := unix.Lstat(root, &stat); err != nil {
+		return "", fmt.Errorf("inspect test slot directory: %w", err)
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR || int(stat.Uid) != uid || stat.Mode&0077 != 0 {
+		return "", fmt.Errorf("unsafe test slot directory %s: it must be a private directory owned by the current user", root)
+	}
+	return filepath.Join(root, "test-slots"), nil
 }
 
 func appendEnv(env []string, key, value string) []string {
