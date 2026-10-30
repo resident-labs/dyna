@@ -2,12 +2,19 @@ package plan
 
 import "github.com/dop251/goja/ast"
 
+type WorkflowArg struct {
+	Name        string `json:"name"`
+	Required    bool   `json:"required"`
+	Description string `json:"description"`
+}
+
 // Metadata holds literal workflow declarations. Reading it never runs source.
 type Metadata struct {
 	Name          string
 	Description   string
 	Deterministic bool
 	Phases        []PhaseDecl
+	Args          []WorkflowArg
 }
 
 // ReadMetadata reads the top-level meta declaration with the workflow parser.
@@ -35,6 +42,20 @@ func metadataFromProgram(prog *ast.Program, wrapped bool) Metadata {
 			m.Description, _ = staticString(objectProp(obj, "description"))
 			if value, ok := objectProp(obj, "deterministic").(*ast.BooleanLiteral); ok {
 				m.Deterministic = value.Value
+			}
+			if arr, ok := objectProp(obj, "args").(*ast.ArrayLiteral); ok {
+				for _, el := range arr.Value {
+					if arg, ok := el.(*ast.ObjectLiteral); ok {
+						name, _ := staticString(objectProp(arg, "name"))
+						if name == "" {
+							continue
+						}
+						description, _ := staticString(objectProp(arg, "description"))
+						required, _ := objectProp(arg, "required").(*ast.BooleanLiteral)
+						m.Args = append(m.Args, WorkflowArg{Name: name, Description: description, Required: required != nil && required.Value})
+					}
+				}
+
 			}
 			if arr, ok := objectProp(obj, "phases").(*ast.ArrayLiteral); ok {
 				for _, el := range arr.Value {

@@ -1,4 +1,4 @@
-export const meta = { name: 'migrate', description: 'Transform matching files in isolated worktrees and verify each result' }
+export const meta = { name: 'migrate', description: 'Transform matching files in isolated worktrees and verify each result', args: [{ name: 'instruction', required: true, description: 'Migration instruction' }, { name: 'glob', required: true, description: 'Glob matching files to migrate' }] }
 if (!args || typeof args.instruction !== 'string' || !args.instruction.trim()) throw new Error('instruction is required')
 if (typeof args.glob !== 'string' || !args.glob.trim()) throw new Error('glob is required')
 const ranked = [...profiles].filter(p => p.remaining !== 0).sort((a, b) => b.intelligence - a.intelligence)
