@@ -11,6 +11,8 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
@@ -64,6 +66,36 @@ func TestMergeControlWaitsForPublisherAndKeepsAutomaticTickNonblocking(t *testin
 		t.Fatalf("completed control retained the publisher lock: %v", err)
 	}
 	unlock()
+}
+
+func TestRoomPassDoesNotLandWhileAnotherRoomHasTrial(t *testing.T) {
+	e, _, merged := mergeEnv(t, 1, 2)
+	other, err := e.s.Notify.Rooms.Create(room.CreateInput{Name: "other-merge-room"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ghclient.SetAccess(e.s.Notify.Rooms, other.ID, ghclient.ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Store.update(func(st *State) error {
+		first := st.Records["github.com/owner/repo#1"]
+		second := st.Records["github.com/owner/repo#2"]
+		second.RoomID = other.ID
+		second.Verdict = state.VerdictApproveFast
+		st.MergeTrials = map[string]*state.MergeTrial{
+			defaultRepo(*first): {Phase: state.MergeTrialPhaseAwaitingRoot, Changes: []state.MergeTrialChange{trialChange(*first)}},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(t.Context(), automaticMergeRoom{}, true)
+	if _, err := e.s.mergeTickLocked(ctx, other.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(*merged) != 0 {
+		t.Fatalf("landed changes while another room owns the trial: %v", *merged)
+	}
 }
 
 func TestMergeControlCancellationKeepsTheCurrentPublisher(t *testing.T) {
