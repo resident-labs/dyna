@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
@@ -80,9 +81,10 @@ func Run(ctx context.Context, version string) error {
 	}
 	defer h.Close()
 	transcript := NewTranscript(client, sessions)
-	if err := transcript.Sync(ctx, h.SessionFile()); err != nil {
-		return err
-	}
+	transcript.syncLogged(ctx, h.SessionFile())
+	ticks := time.NewTicker(transcriptInterval)
+	defer ticks.Stop()
+	go transcript.Run(ctx, ticks.C, h.SessionFile)
 	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
