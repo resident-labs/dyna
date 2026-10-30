@@ -125,8 +125,12 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 	}
 	for _, args := range r.calls {
 		for i, a := range args {
-			if a == "-R" && args[i+1] != "/remote/s:/local/s" {
-				t.Fatalf("forward %v", args)
+			if a != "-O" || (args[i+1] != "forward" && args[i+1] != "cancel") {
+				continue
+			}
+			want := append(h.base(), "-O", args[i+1], "-R", "/remote/s:/local/s", "user@host")
+			if !reflect.DeepEqual(args, want) {
+				t.Fatalf("forward argv %v, want %v", args, want)
 			}
 		}
 	}
