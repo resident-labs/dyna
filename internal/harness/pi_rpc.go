@@ -141,15 +141,21 @@ func (c *piRPCClient) fail(err error) {
 	}
 }
 
-// command sends one RPC record and waits for its response. timeout <= 0
-// waits as long as ctx allows.
-func (c *piRPCClient) command(ctx context.Context, record map[string]any, timeout time.Duration) (piResponse, error) {
+type piRPCPending struct {
+	id         string
+	recordType string
+	response   <-chan piResponse
+}
+
+// send registers and writes one RPC record without waiting for its response.
+func (c *piRPCClient) send(record map[string]any) (piRPCPending, error) {
 	c.mu.Lock()
 	id := fmt.Sprintf("dyna-%d", c.nextID)
 	c.nextID++
 	ch := make(chan piResponse, 1)
 	c.pending[id] = ch
 	c.mu.Unlock()
+	pending := piRPCPending{id: id, recordType: fmt.Sprint(record["type"]), response: ch}
 	drop := func() {
 		c.mu.Lock()
 		delete(c.pending, id)
@@ -159,15 +165,26 @@ func (c *piRPCClient) command(ctx context.Context, record map[string]any, timeou
 	payload, err := json.Marshal(record)
 	if err != nil {
 		drop()
-		return piResponse{}, err
+		return piRPCPending{}, err
 	}
 	if err := c.sess.Write(payload); err != nil {
 		drop()
-		return piResponse{}, err
+		return piRPCPending{}, err
 	}
-	wait := func() (piResponse, error) {
+	return pending, nil
+}
+
+// wait receives a sent command's response. timeout <= 0 waits as long as ctx
+// allows.
+func (c *piRPCClient) wait(ctx context.Context, pending piRPCPending, timeout time.Duration) (piResponse, error) {
+	drop := func() {
+		c.mu.Lock()
+		delete(c.pending, pending.id)
+		c.mu.Unlock()
+	}
+	if timeout <= 0 {
 		select {
-		case resp := <-ch:
+		case resp := <-pending.response:
 			return resp, nil
 		case <-c.done:
 			drop()
@@ -177,13 +194,10 @@ func (c *piRPCClient) command(ctx context.Context, record map[string]any, timeou
 			return piResponse{}, ctx.Err()
 		}
 	}
-	if timeout <= 0 {
-		return wait()
-	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case resp := <-ch:
+	case resp := <-pending.response:
 		return resp, nil
 	case <-c.done:
 		drop()
@@ -193,8 +207,17 @@ func (c *piRPCClient) command(ctx context.Context, record map[string]any, timeou
 		return piResponse{}, ctx.Err()
 	case <-timer.C:
 		drop()
-		return piResponse{}, fmt.Errorf("pi rpc %v command timed out after %s", record["type"], timeout)
+		return piResponse{}, fmt.Errorf("pi rpc %s command timed out after %s", pending.recordType, timeout)
 	}
+}
+
+// command sends one RPC record and waits for its response.
+func (c *piRPCClient) command(ctx context.Context, record map[string]any, timeout time.Duration) (piResponse, error) {
+	pending, err := c.send(record)
+	if err != nil {
+		return piResponse{}, err
+	}
+	return c.wait(ctx, pending, timeout)
 }
 
 // stopPump ends the frame pump. Pending commands fail through their wait.
@@ -451,23 +474,29 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 	}
 
 	var startBoundary *int64
+	var pendingPrompt piRPCPending
 	sendPrompt := func() error {
 		startBoundary = normalizedBoundary(normalizer)
-		resp, err := client.command(ctx, map[string]any{"type": "prompt", "message": spec.prompt}, piPromptTimeout)
-		if err != nil {
-			return err
-		}
-		if !resp.Success {
-			return fmt.Errorf("pi rejected the prompt: %s", resp.Error)
-		}
-		promptAccepted = true
-		return nil
+		var err error
+		pendingPrompt, err = client.send(map[string]any{"type": "prompt", "message": spec.prompt})
+		return err
 	}
 	var promptErr error
 	if steering != nil && steering.opts.StartGate != nil {
 		promptErr = steering.opts.StartGate(ctx, spec.prompt, sendPrompt)
 	} else {
 		promptErr = sendPrompt()
+	}
+	if promptErr == nil {
+		resp, err := client.wait(ctx, pendingPrompt, piPromptTimeout)
+		switch {
+		case err != nil:
+			promptErr = err
+		case !resp.Success:
+			promptErr = fmt.Errorf("pi rejected the prompt: %s", resp.Error)
+		default:
+			promptAccepted = true
+		}
 	}
 	if promptErr != nil {
 		// The prompt command may already be in pi's hands when its handshake
@@ -520,23 +549,28 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 			return nil
 		}
 		var sourceOffset *int64
+		var pendingSteering piRPCPending
 		send := func() error {
 			sourceOffset = normalizedBoundary(normalizer)
 			record := map[string]any{"type": "prompt", "message": steeringPrompt(messages), "streamingBehavior": "steer"}
-			resp, err := client.command(ctx, record, piCommandTimeout)
-			if err != nil {
-				return err
-			}
-			if !resp.Success {
-				return fmt.Errorf("pi rejected the steering prompt: %s", resp.Error)
-			}
-			return nil
+			var err error
+			pendingSteering, err = client.send(record)
+			return err
 		}
 		var deliveryErr error
 		if steering.opts.DeliveryGate != nil {
 			deliveryErr = steering.opts.DeliveryGate(send)
 		} else {
 			deliveryErr = send()
+		}
+		if deliveryErr == nil {
+			resp, err := client.wait(ctx, pendingSteering, piCommandTimeout)
+			switch {
+			case err != nil:
+				deliveryErr = err
+			case !resp.Success:
+				deliveryErr = fmt.Errorf("pi rejected the steering prompt: %s", resp.Error)
+			}
 		}
 		if deliveryErr != nil {
 			steering.pending = append(messages, steering.pending...)
