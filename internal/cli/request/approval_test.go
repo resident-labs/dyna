@@ -38,21 +38,26 @@ func TestApprovalDecisionCLIUsesEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	enginetest.Serve(t, store.DataDir(), calls)
+	var out bytes.Buffer
 	run := func(args ...string) error {
 		cmd := NewCommand()
-		var out bytes.Buffer
+		out.Reset()
 		cmd.SetOut(&out)
 		cmd.SetErr(&out)
 		cmd.SetArgs(args)
 		return cmd.ExecuteContext(t.Context())
 	}
-	if err := run("--room", rec.ID, "deny", "A-42", "--reason", "old flag"); err == nil || !strings.Contains(err.Error(), "--why is required") {
-		t.Fatalf("deny without --why = %v", err)
+	if err := run("--room", rec.ID, "deny", "A-42"); err == nil || !strings.Contains(err.Error(), "--reason is required") {
+		t.Fatalf("deny without --reason = %v", err)
+	}
+	if err := run("--room", rec.ID, "approve", "A-42"); err != nil || out.String() != "Approved A-42.\n" {
+		t.Fatalf("approve printed %q, %v", out.String(), err)
+	}
+	if err := run("--room", rec.ID, "deny", "A-42", "--reason", "not safe"); err != nil || out.String() != "Denied A-42.\n" {
+		t.Fatalf("deny printed %q, %v", out.String(), err)
 	}
 	for _, args := range [][]string{
-		{"--room", rec.ID, "approve", "A-42"},
-		{"--room", rec.ID, "pass", "A-42", "--why", "owner should decide"},
-		{"--room", rec.ID, "deny", "A-42", "--why", "not safe"},
+		{"--room", rec.ID, "pass", "A-42", "--reason", "owner should decide"},
 		{"--room", rec.ID, "cancel", "A-42"},
 	} {
 		if err := run(args...); err != nil {
@@ -61,8 +66,8 @@ func TestApprovalDecisionCLIUsesEngine(t *testing.T) {
 	}
 	want := []approvals.DecisionInput{
 		{Room: rec.ID, RequestID: "A-42", Action: approvals.ActionApprove},
-		{Room: rec.ID, RequestID: "A-42", Action: approvals.ActionPass, Reason: "owner should decide"},
 		{Room: rec.ID, RequestID: "A-42", Action: approvals.ActionDeny, Reason: "not safe"},
+		{Room: rec.ID, RequestID: "A-42", Action: approvals.ActionPass, Reason: "owner should decide"},
 	}
 	if !reflect.DeepEqual(decisions, want) || cancelled != rec.ID+" A-42" {
 		t.Fatalf("decisions = %+v, cancel = %q", decisions, cancelled)

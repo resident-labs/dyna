@@ -57,7 +57,7 @@ func TestQuestionCLIUsesEngine(t *testing.T) {
 	for _, args := range [][]string{
 		{"--room", rec.ID, "question", "Proceed?", "--meanwhile", "check data"},
 		{"--room", rec.ID, "answer", "q42", "--choice", "yes"},
-		{"--room", rec.ID, "withdraw", "q42", "--why", "finished"},
+		{"--room", rec.ID, "withdraw", "q42", "--reason", "finished"},
 	} {
 		cmd := NewCommand()
 		var out bytes.Buffer

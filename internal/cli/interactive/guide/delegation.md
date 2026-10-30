@@ -105,7 +105,7 @@ Root can use these question commands:
 ```bash
 dyna request question "Which format?" --meanwhile "Inspect the parser" --options "JSON,CSV"
 dyna request question
-dyna request withdraw <id> --why "Resolved"
+dyna request withdraw <id> --reason "Resolved"
 dyna request answer <id> --choice JSON
 ```
 
