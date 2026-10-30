@@ -7,7 +7,7 @@ node's queue, and store their log and exit code.
 
 ## Run a job
 
-`dyna job run [--node N | --label L]... [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG | --host] [--network none] [--mount NAME:PATH[:ro|rw]]... [--device PATH]... [--artifact PATH]... -- CMD`
+`dyna job run [--node N | --label L]... [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG] [--network none] [--mount NAME:PATH[:ro|rw]]... [--device PATH]... [--artifact PATH]... -- CMD`
 
 - With no `--node` or `--label`, the job runs on the local node (the engine
   host), so a one-node owner needs no setup.
@@ -28,9 +28,10 @@ node's queue, and store their log and exit code.
   in an empty work folder of its own. Either way, the work folder is the
   command's working directory, and `/workspace` in a container.
 - A local host job gets the caller's `DYNA_SCRATCH`; a remote job leaves it unset. Use `--workspace` or `--artifact` to send files.
-- `--host` runs on the node itself; `--image IMG` runs in a container. The
-  command's first word is the container's entrypoint and the rest are its
-  arguments, so any image works, with or without a shell.
+- Without `--image`, the command runs on the node itself; `--image IMG` runs it
+  in a container. The command's first word is the container's entrypoint and
+  the rest are its arguments, so any image works, with or without a shell.
+  Old scripts that pass `--host` fail with `unknown flag: --host`; drop it.
   Host execution on a remote node needs that node's host-check grant
   (`dyna node edit N --allow-host-checks`); the local node needs none.
 - `--network none` disables container networking. `--network`, `--mount` and
