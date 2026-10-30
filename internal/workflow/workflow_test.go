@@ -59,7 +59,11 @@ func executeTest(ctx context.Context, opts Options) (string, error) {
 	if opts.Engine == nil {
 		opts.Engine = &enginefake.Engine{Profiles: opts.Store}
 	}
-	return Execute(ctx, opts)
+	result, err := Execute(ctx, opts)
+	if opts.Run != nil {
+		opts.Run.FlushActivity()
+	}
+	return result, err
 }
 
 func executeWorkflowTest(t *testing.T, script string, opts Options) (string, error) {
@@ -72,7 +76,10 @@ func executeWorkflowTest(t *testing.T, script string, opts Options) (string, err
 		if err := ancestry.Migrate(dataDir); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { database.Close(dataDir) })
+		t.Cleanup(func() {
+			opts.Run.FlushActivity()
+			database.Close(dataDir)
+		})
 	}
 	// A hang guard only. It stays above the 10 s per-test budget, so a slow
 	// run is reported as slow instead of as a confusing deadline error.
