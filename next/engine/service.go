@@ -584,14 +584,12 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		return failure(err)
 	}
 	if !discard && current.State != contract.BoxDeleted {
-		if session.Repo != "" {
-			if current.Reason != "" {
-				if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
-					return failure(err)
-				}
+		if current.Reason != "" {
+			if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
+				return failure(err)
 			}
-			return nil
 		}
+		return nil
 	}
 	return s.finishClose(ctx, session, current, caller, discard)
 }

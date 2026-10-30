@@ -124,7 +124,11 @@ func TestCloseBoxSendsUnsentBytesBeforeArchive(t *testing.T) {
 	writeSession(t, file, "abc")
 	engine := &transcriptEngine{}
 	archived := false
-	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, func(context.Context) error {
+	noWait := func(time.Duration) <-chan time.Time {
+		t.Fatal("closeBox waited although the sync succeeded")
+		return nil
+	}
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, noWait, func(context.Context) error {
 		archived = true
 		if len(engine.requests) != 1 || string(engine.requests[0].Bytes) != "abc" {
 			t.Fatalf("archived before the transcript reached the engine: %+v", engine.requests)
@@ -136,17 +140,31 @@ func TestCloseBoxSendsUnsentBytesBeforeArchive(t *testing.T) {
 	}
 }
 
-func TestCloseBoxKeepsBoxWhenTranscriptFails(t *testing.T) {
+func TestCloseBoxRetriesFailedSyncBeforeArchive(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.jsonl")
 	writeSession(t, file, "abc")
+	engine := &transcriptEngine{lose: true}
+	var waits []time.Duration
+	fired := func(d time.Duration) <-chan time.Time {
+		waits = append(waits, d)
+		ticked := make(chan time.Time, 1)
+		ticked <- time.Time{}
+		return ticked
+	}
 	archived := false
-	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(&transcriptEngine{lose: true}, dir), file, func(context.Context) error {
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, fired, func(context.Context) error {
 		archived = true
+		if len(engine.requests) != 2 || string(engine.requests[1].Bytes) != "abc" {
+			t.Fatalf("archived before the retry reached the engine: %+v", engine.requests)
+		}
 		return nil
 	})
-	if err == nil || archived {
-		t.Fatalf("closeBox = %v, archived = %v, want an error and no archive", err, archived)
+	if err != nil || !archived {
+		t.Fatalf("closeBox = %v, archived = %v, want nil and true", err, archived)
+	}
+	if len(waits) != 1 || waits[0] != transcriptRetryMin {
+		t.Fatalf("waits = %v, want one wait of %v", waits, transcriptRetryMin)
 	}
 }
 
