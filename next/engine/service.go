@@ -287,25 +287,121 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return response, failure(err)
 	}
-	image, createErr := s.boxes.Create(createCtx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size})
+	if err := s.createPlaced(createCtx, writeCtx, session.Room, current, run); err != nil {
+		return response, failure(err)
+	}
+	return response, nil
+}
+
+// createPlaced completes a reserved box and wakes children waiting for its host.
+func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.RoomID, current box.Box, run *boxRun) error {
+	image, createErr := s.boxes.Create(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size})
 	if createErr != nil {
 		s.boxLockMu.Lock()
 		closing := run.closing
 		s.boxLockMu.Unlock()
 		if closing {
-			return response, nil
+			return nil
 		}
-		_, err = s.transition(writeCtx, session.Room, current, contract.BoxFailed, createErr.Error())
-		if err != nil {
-			return response, failure(err)
-		}
-		return response, nil
+		_, err := s.transition(writeCtx, room, current, contract.BoxFailed, createErr.Error())
+		return err
 	}
 	current.Image = image
-	if _, err = s.transition(writeCtx, session.Room, current, contract.BoxStarting, ""); err != nil {
-		return response, failure(err)
+	s.admit.Lock()
+	_, err := s.transition(writeCtx, room, current, contract.BoxStarting, "")
+	s.admit.Unlock()
+	if err != nil {
+		return err
 	}
-	return response, nil
+	return s.retryChildren(writeCtx, current.ID)
+}
+
+func (s *Service) retryChildren(ctx context.Context, parent contract.BoxID) error {
+	boxes, err := s.store.Boxes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, child := range boxes {
+		if child.BudgetParent != parent || child.State != contract.BoxPending || child.Reason != string(box.PendingParentHost) {
+			continue
+		}
+		if err := s.retryChild(ctx, child.Session); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) retryChild(ctx context.Context, id contract.SessionID) error {
+	unlock := s.lockBox(id)
+	defer unlock()
+	s.admit.Lock()
+	boxes, err := s.store.Boxes(ctx)
+	if err != nil {
+		s.admit.Unlock()
+		return err
+	}
+	var current box.Box
+	for _, b := range boxes {
+		if b.Session == id {
+			current = b
+			break
+		}
+	}
+	if current.State != contract.BoxPending || current.Reason != string(box.PendingParentHost) {
+		s.admit.Unlock()
+		return nil
+	}
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		s.admit.Unlock()
+		return err
+	}
+	placement := box.Admit(hosts, boxes, current, 20*box.GiB)
+	if placement.Reason != "" {
+		s.admit.Unlock()
+		return nil
+	}
+	var ancestry []contract.BoxID
+	for id := current.ID; id != ""; {
+		ancestry = append([]contract.BoxID{id}, ancestry...)
+		if id == current.ID {
+			id = current.BudgetParent
+			continue
+		}
+		next := contract.BoxID("")
+		for _, b := range boxes {
+			if b.ID == id {
+				next = b.BudgetParent
+				break
+			}
+		}
+		id = next
+	}
+	current.Slice, err = box.SliceName(ancestry)
+	if err != nil {
+		s.admit.Unlock()
+		return err
+	}
+	current.Host = placement.Host
+	session, err := s.store.Session(ctx, current.Session)
+	if err != nil {
+		s.admit.Unlock()
+		return err
+	}
+	createCtx, cancel := context.WithCancel(ctx)
+	run := &boxRun{cancel: cancel}
+	s.boxLockMu.Lock()
+	s.boxRuns[id] = run
+	s.boxLockMu.Unlock()
+	defer func() { cancel(); s.boxLockMu.Lock(); delete(s.boxRuns, id); s.boxLockMu.Unlock() }()
+	current, err = s.transition(ctx, session.Room, current, contract.BoxCreating, "")
+	s.admit.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.createPlaced(createCtx, ctx, session.Room, current, run)
+
 }
 
 func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, req contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
