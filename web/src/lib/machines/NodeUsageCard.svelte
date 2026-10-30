@@ -6,6 +6,7 @@
   import { loadView } from '../system/systemLoad.ts'
   import { memoryPct, sizeText } from './machines.ts'
   import { diskTone, freshness, usageTone } from './nodeUsage.ts'
+  import { ago } from '../ui/format.ts'
 
   let { machine, load, work }: { machine: MachineDetail; load: SystemLoad | null; work: MachineWork | null } = $props()
   let remote = $derived(machine.load)
@@ -26,7 +27,7 @@
   <div class="tiles">
     <StatTile label="CPU" value={cpu == null ? '–' : `${Math.round(cpu)}%`} detail={average === undefined || !cpus ? 'No reading' : `load ${average.toFixed(1)} on ${cpus} CPUs`} tone={usageTone(cpu)} />
     <StatTile label="Memory" value={memory == null ? '–' : `${Math.round(memory)}%`} detail={used === undefined || !total ? 'No reading' : `${sizeText(used)} of ${sizeText(total)}`} tone={usageTone(memory)} />
-    <StatTile label="Disk free" value={disk === undefined ? '–' : sizeText(disk)} detail={floor === undefined ? 'No reading' : `floor ${sizeText(floor)}`} tone={diskTone(disk, floor)} />
+    <StatTile label="Disk free" value={disk === undefined ? '–' : sizeText(disk)} detail={floor === undefined ? 'No reading' : `floor ${sizeText(floor)}${machine.local ? machine.seenAt ? ` · probed ${ago(machine.seenAt)}` : ' · probe time unavailable' : ''}`} tone={diskTone(disk, floor)} />
     <StatTile label="Held by work" value={capacity?.cpus ? `${capacity.cpusUsed}/${capacity.cpus}` : '–'} detail="CPUs reserved" />
   </div>
   <!-- The node history chart belongs here. -->
