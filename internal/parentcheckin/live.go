@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/notify"
 	prstate "dyna-agent/internal/pr/state"
@@ -89,7 +90,31 @@ func New(n *notify.Service) *Scheduler {
 			if s.Now != nil {
 				now = s.Now()
 			}
-			ev, err := checkin(parent, kids, goals.DefaultStore(), store.DataDir(), n.Sessions.Store, now)
+			interval, err := s.Interval()
+			if err != nil {
+				return "", err
+			}
+			if s.IntervalFor != nil {
+				interval = s.IntervalFor(target.Room, interval)
+			}
+			openQuestions, err := n.QuestionStore().ListOpen(target.Room)
+			if err != nil {
+				return "", err
+			}
+			waitingOwner := make(map[string]bool)
+			for _, q := range openQuestions {
+				if q.To == "owner" {
+					waitingOwner[q.Asker] = true
+				}
+			}
+			approvalWaiters, err := approvals.New(n.Rooms, n.Sessions.Store.Root).WaitingOnOwner(target.Room)
+			if err != nil {
+				return "", err
+			}
+			for _, id := range approvalWaiters {
+				waitingOwner[id] = true
+			}
+			ev, err := checkin(parent, kids, goals.DefaultStore(), store.DataDir(), n.Sessions.Store, now, interval, waitingOwner)
 			if err != nil {
 				return "", err
 			}
@@ -131,29 +156,35 @@ func children(live []subagent.Info) map[string][]subagent.Info {
 }
 
 type childReport struct {
-	name, work, prs string
-	state           room.CheckinState
-	age             string
-	since           time.Time
+	name, work, prs                      string
+	state                                room.CheckinState
+	age                                  string
+	since                                time.Time
+	failed, waitingOwner, hasWork, hasPR bool
 }
 
 // checkin builds the typed check-in of one parent: the stalest children first,
 // with the counts the card shows and the child table the agent reads.
-func checkin(parent subagent.Info, kids []subagent.Info, g *goals.Store, root string, sessions *subagent.Store, now time.Time) (room.CheckinEvent, error) {
-	reports, err := readReports(kids, g, root, sessions, now)
+func checkin(parent subagent.Info, kids []subagent.Info, g *goals.Store, root string, sessions *subagent.Store, now time.Time, interval time.Duration, waitingOwner map[string]bool) (room.CheckinEvent, error) {
+	reports, err := readReports(kids, g, root, sessions, now, waitingOwner)
 	if err != nil {
 		return room.CheckinEvent{}, err
 	}
-	return checkinEvent(parent, reports, now), nil
+	return checkinEvent(parent, reports, now, interval), nil
 }
 
 // checkinEvent builds the event from the child reports: the stalest first,
 // with the counts the card shows and the table the agent reads.
-func checkinEvent(parent subagent.Info, reports []childReport, now time.Time) room.CheckinEvent {
+func checkinEvent(parent subagent.Info, reports []childReport, now time.Time, interval time.Duration) room.CheckinEvent {
 	reports = stalestFirst(reports, now)
 	ev := room.CheckinEvent{Parent: parent.ID, WindowStart: now.UnixMilli(), Attention: room.CheckinAttentionNone}
 	var lines []string
 	for _, child := range reports {
+		if child.failed || child.waitingOwner {
+			ev.Attention = room.CheckinAttentionBlocked
+		} else if ev.Attention == room.CheckinAttentionNone && child.state == room.CheckinIdle && child.hasWork && !child.hasPR && interval > 0 && now.Sub(child.since) > interval {
+			ev.Attention = room.CheckinAttentionOverdue
+		}
 		switch child.state {
 		case room.CheckinRunning:
 			ev.Counts.Running++
@@ -170,7 +201,7 @@ func checkinEvent(parent subagent.Info, reports []childReport, now time.Time) ro
 }
 
 // readReports reads what each child is doing and how long it has been doing it.
-func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *subagent.Store, now time.Time) ([]childReport, error) {
+func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *subagent.Store, now time.Time, waitingOwner map[string]bool) ([]childReport, error) {
 	prs, err := prstate.Read(prstate.Root(root))
 	if err != nil {
 		return nil, err
@@ -198,6 +229,7 @@ func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *su
 		for _, item := range items {
 			work = append(work, item.Goal+"/"+item.Item.ID+": "+goals.Clip(item.Item.Text, 100))
 		}
+		hasWork := len(work) > 0
 		if len(work) == 0 {
 			work = append(work, "no open goal or item")
 		}
@@ -208,15 +240,18 @@ func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *su
 			}
 		}
 		sort.Strings(links)
+		hasPR := len(links) > 0
 		if len(links) == 0 {
 			links = append(links, "no open PRs")
 		}
 		since := child.LastActivity
+		failed := false
 		if child.Turns > 0 {
 			turn, err := sessions.ReadTurn(child.ID, child.Turns)
 			if err != nil {
 				return nil, err
 			}
+			failed = turn.Status == "failed"
 			switch child.Status {
 			case subagent.StatusRunning:
 				since = turn.Started
@@ -232,7 +267,7 @@ func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *su
 		if since.IsZero() {
 			since = child.Created
 		}
-		reports = append(reports, childReport{name: child.Name, state: state, work: strings.Join(work, ", "), prs: strings.Join(links, ", "), since: since})
+		reports = append(reports, childReport{name: child.Name, state: state, work: strings.Join(work, ", "), prs: strings.Join(links, ", "), since: since, failed: failed, waitingOwner: waitingOwner[child.ID], hasWork: hasWork, hasPR: hasPR})
 	}
 	return stalestFirst(reports, now), nil
 }

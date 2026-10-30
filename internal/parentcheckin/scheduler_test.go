@@ -146,7 +146,7 @@ func TestCheckinEventIsStalestFirst(t *testing.T) {
 	got := checkinEvent(parent, []childReport{
 		{name: "new", state: room.CheckinQueued, work: "g2/i1: Check parser", prs: "no open PRs", since: now.Add(-10 * time.Minute)},
 		{name: "old", state: room.CheckinIdle, work: "g1: Fix parser", prs: "open PR #42: open", since: now.Add(-12 * time.Minute)},
-	}, now)
+	}, now, 15*time.Minute)
 	if got.Parent != "parent" || got.WindowStart != now.UnixMilli() {
 		t.Fatalf("check-in identity = %+v", got)
 	}
@@ -168,5 +168,26 @@ func TestCheckinEventIsStalestFirst(t *testing.T) {
 	wantDetail := "old · idle for 12m · g1: Fix parser · open PR #42: open\nnew · queued for 10m · g2/i1: Check parser · no open PRs"
 	if got.Detail != wantDetail {
 		t.Fatalf("detail:\n%s\nwant:\n%s", got.Detail, wantDetail)
+	}
+}
+
+func TestCheckinAttention(t *testing.T) {
+	now := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		report childReport
+		want   room.CheckinAttention
+	}{
+		{"failed", childReport{failed: true}, room.CheckinAttentionBlocked},
+		{"owner", childReport{waitingOwner: true}, room.CheckinAttentionBlocked},
+		{"overdue", childReport{state: room.CheckinIdle, hasWork: true, since: now.Add(-16 * time.Minute)}, room.CheckinAttentionOverdue},
+		{"PR", childReport{state: room.CheckinIdle, hasWork: true, hasPR: true, since: now.Add(-16 * time.Minute)}, room.CheckinAttentionNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := checkinEvent(subagent.Info{}, []childReport{tc.report}, now, 15*time.Minute)
+			if got.Attention != tc.want {
+				t.Fatalf("attention = %q, want %q", got.Attention, tc.want)
+			}
+		})
 	}
 }
