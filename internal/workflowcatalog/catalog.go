@@ -15,21 +15,6 @@ import (
 	"dyna-agent/internal/workflows/bundled"
 )
 
-type Scope string
-
-const (
-	ScopeProject  Scope = "project"
-	ScopePersonal Scope = "personal"
-	ScopeBundled  Scope = "bundled"
-)
-
-type Info struct {
-	Name        string             `json:"name"`
-	Scope       Scope              `json:"scope"`
-	Description string             `json:"description"`
-	Args        []plan.WorkflowArg `json:"args"`
-}
-
 func List(workDir, personalDir string) ([]Info, error) {
 	out := []Info{}
 	add := func(name string, scope Scope, source []byte) {
