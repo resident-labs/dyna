@@ -66,7 +66,7 @@ violation internal/connect/store.go Store.locked 1
 violation internal/connect/store.go Store.write 1
 violation internal/connect/tunnel.go runOnce 1
 not-state internal/computers/supervisor_linux.go removeBusSocket 1 # deletes a computer's private D-Bus socket file in its runtime directory; not Dyna state
-not-state internal/database/backup.go copyDatabase 2 # dyna.db backup files made by VACUUM INTO, copies of state, not state
+not-state internal/database/backup.go copyDatabase 3 # creates and marks a staged dyna.db backup, a copy of state, not live state
 not-state internal/database/snapshot.go Snapshot 1 # user-requested dyna.db snapshot made by VACUUM INTO, a copy of state, not state
 not-state internal/database/backup.go prune 1 # removes old dyna.db backup files
 not-state internal/database/database.go Migrate 1 # the schema and meta bootstrap primitive under internal/state; only the engine migrates (item 41)
