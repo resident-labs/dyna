@@ -1158,7 +1158,10 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		// The work folder lives on the node, so the container mounts it and
 		// works there, exactly as a CI check container does, and what the job
 		// writes there stays for its artifacts.
-		mount := " -v " + q(work+":/workspace") + " -w " + q(path.Join("/workspace", job.Subdir))
+		mount := " -v " + q(work+":/workspace") + " -w /workspace"
+		if job.Subdir != "" && job.Subdir != "." {
+			mount = " -v " + q(work+":/workspace") + " -w " + q(path.Join("/workspace", job.Subdir))
+		}
 		for _, registered := range job.Container.Mounts {
 			mount += " -v " + q(registered.Source+":"+registered.Target+":"+string(registered.Mode))
 		}
