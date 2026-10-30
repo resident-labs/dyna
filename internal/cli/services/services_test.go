@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/serviceregistry"
 )
 
@@ -221,7 +222,7 @@ func TestEnableSwitchesBuiltinHook(t *testing.T) {
 	if err := setEnabled(context.Background(), reader, refs{Room: "dyna"}, serviceregistry.IDMaintenance, false, &out); err != nil {
 		t.Fatal(err)
 	}
-	w, ok := reader.write("EditGlobalHook")
+	w, ok := reader.write("EditService")
 	if !ok || w.args[0] != "maintenance" {
 		t.Fatalf("switch write = %+v", reader.writes)
 	}
@@ -239,5 +240,39 @@ func TestListReadsTheChosenRepository(t *testing.T) {
 	}
 	if fmt.Sprint(reader.registryArgs) != "[dyna /other]" {
 		t.Fatalf("registry args = %v", reader.registryArgs)
+	}
+}
+
+// set writes one typed edit with whole minutes and a duration, and refuses a
+// service that has no timer, a fractional interval and an empty change.
+func TestSetWritesTheScheduleEdit(t *testing.T) {
+	reader := readerWith(t, map[string]any{})
+	var out bytes.Buffer
+	if err := setSchedule(context.Background(), reader, serviceregistry.IDMaintenance, 30*time.Minute, 90*time.Second, true, true, &out); err != nil {
+		t.Fatal(err)
+	}
+	w, ok := reader.write("EditService")
+	if !ok || len(w.args) != 2 || w.args[0] != "maintenance" {
+		t.Fatalf("writes = %+v", reader.writes)
+	}
+	patch, _ := w.args[1].(hooks.ServicePatch)
+	if patch.EveryMinutes == nil || *patch.EveryMinutes != 30 || patch.Timeout == nil || *patch.Timeout != "1m30s" || patch.Disabled != nil {
+		t.Fatalf("patch = %+v", patch)
+	}
+	for _, c := range []struct {
+		id                      ServiceID
+		interval                time.Duration
+		setInterval, setTimeout bool
+	}{
+		{serviceregistry.IDReviews, time.Minute, true, false},
+		{serviceregistry.IDMaintenance, 90 * time.Second, true, false},
+		{serviceregistry.IDMaintenance, 0, false, false},
+	} {
+		if err := setSchedule(context.Background(), reader, c.id, c.interval, 0, c.setInterval, c.setTimeout, &out); err == nil {
+			t.Errorf("set %s accepted %+v", c.id, c)
+		}
+	}
+	if len(reader.writes) != 1 {
+		t.Fatalf("a refused change wrote: %+v", reader.writes)
 	}
 }

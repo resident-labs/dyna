@@ -84,6 +84,14 @@ type Switch struct {
 	On bool `json:"on"`
 }
 
+// Schedule is how often a built-in service runs and how long one run may
+// take. The owner can change both and reset them to the defaults.
+type Schedule struct {
+	EveryMinutes int `json:"everyMinutes"`
+	// Timeout is a Go duration such as "5m0s".
+	Timeout string `json:"timeout"`
+}
+
 // Service is one row of the registry.
 type Service struct {
 	ID          ID     `json:"id"`
@@ -98,6 +106,8 @@ type Service struct {
 	NextRun *time.Time `json:"nextRun"`
 	// Switch is nil for a service the owner cannot turn off.
 	Switch *Switch `json:"switch"`
+	// Schedule is set for a built-in service whose timing the owner can edit.
+	Schedule *Schedule `json:"schedule"`
 	// Profile is the agent profile the service runs on; empty for a service
 	// that runs no agent.
 	Profile string `json:"profile"`

@@ -124,6 +124,9 @@ func (s services) hookFacts(ctx context.Context, repo string) map[string]service
 	out := map[string]serviceregistry.HookFacts{}
 	for _, sum := range summaries {
 		h := serviceregistry.HookFacts{Found: true, Disabled: sum.Hook.Disabled, NextRun: sum.NextRun}
+		if sum.Hook.Builtin != "" {
+			h.Schedule = &serviceregistry.Schedule{EveryMinutes: sum.Hook.EveryMinutes, Timeout: sum.Hook.Timeout}
+		}
 		for _, run := range runs {
 			if run.Name == "hook-"+sum.Hook.Name {
 				h.Runs = append(h.Runs, serviceregistry.HookRun{Result: run.Result, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt})
