@@ -8,6 +8,8 @@ const code = await bundle({ component: '../rooms/Composer',
   format: `export const short = x => x; export const roomLabel = r => r.name; export const ago = () => ''; export const markdown = x => x; export const stamp = () => '';`,
   api: `export const api = {
     preview: async () => ({mentions: [], wakes: []}),
+    commands: async () => [{ name: 'review', source: 'skill', description: 'Review code', args: [] }],
+    runCommand: async (...args) => { globalThis.commandArgs = args },
     listEntries: async () => ({entries: []}),
   }`,
 })
@@ -36,7 +38,11 @@ test('the slash menu names each profile and explains an empty result', async () 
     }
     await type('/')
     const hints = [...target.querySelectorAll('[role="option"]')].map((row) => row.getAttribute('title'))
-    assert.deepEqual(hints, ['Pi · GPT 6.1 Sol', 'Pi · GPT 6.1 Sol · Ultrafast · default'])
+    assert.deepEqual(hints, ['Pi · GPT 6.1 Sol', 'Pi · GPT 6.1 Sol · Ultrafast · default', 'Review code'])
+    await type('/review check this')
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'review', 'check this'])
     await type('/zz')
     assert.equal(target.querySelector('.pop.status')?.textContent, 'No session or command matches “/zz”.')
   } finally {

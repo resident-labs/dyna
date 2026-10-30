@@ -171,11 +171,18 @@ type Message struct {
 	// for the desktop. See RootContext.
 	OwnerReport bool `json:"ownerReport,omitempty"`
 	// NeedsRoot marks a post that requires the root seat to act.
-	NeedsRoot bool   `json:"needsRoot,omitempty"`
-	Text      string `json:"text"`
+	NeedsRoot bool      `json:"needsRoot,omitempty"`
+	Text      string    `json:"text"`
+	Skill     *SkillRef `json:"skill,omitempty"`
 	// Attachments are files saved with the room before this post.
 	Attachments []Attachment `json:"attachments,omitempty"`
 	References  []Reference  `json:"references,omitempty"`
+}
+
+// SkillRef identifies the skill chosen for this message and its instruction file.
+type SkillRef struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // ScriptRef is the workflow run behind a script's post, stored on the post so
@@ -493,6 +500,9 @@ func (m Message) Frame(o FrameOptions) string {
 	if m.Text != "" {
 		out += "\n\n" + m.Text
 	}
+	if m.Skill != nil {
+		out += "\n\nUse the " + m.Skill.Name + " skill: read " + m.Skill.Path + " for this message."
+	}
 	if man := m.manifest(o, 0); man != "" {
 		out += "\n\n" + man
 	}
@@ -509,6 +519,9 @@ func (m Message) SteeringFrame(o FrameOptions, limit int) (string, bool) {
 		return full, false
 	}
 	header := m.Header(o)
+	if m.Skill != nil {
+		header += "\n\nUse the " + m.Skill.Name + " skill: read " + m.Skill.Path + " for this message."
+	}
 	total := len(m.Text)
 	trailer := func(shown int) string {
 		return fmt.Sprintf("[Truncated: %d of %d bytes. Full text: dyna room read %s %s]", shown, total, o.Room, m.ID)
@@ -965,6 +978,7 @@ type PostInput struct {
 	OwnerReport  bool
 	NeedsRoot    bool
 	Text         string
+	Skill        *SkillRef
 	Source       string
 	Spoken       bool
 	RelayOf      string
@@ -1152,7 +1166,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		now := s.now()
 		out = Message{
 			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs, SenderRoomID: in.SenderRoomID,
-			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Script: in.Script, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
+			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Script: in.Script, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text, Skill: in.Skill,
 			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}
 		if in.ID != "" {
