@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/authority"
 	cliexport "dyna-agent/internal/cli/export"
 	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/notify"
 	prstate "dyna-agent/internal/pr/state"
@@ -413,7 +414,10 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	reviewPublish := review.Flags().Bool("publish", false, "explicitly publish this review to GitHub even when the room defaults to local")
 	review.RunE = func(c *cobra.Command, a []string) error {
 		if *reviewBodyFile != "" {
-			if authority.Of(c.Context()).Role != authority.Owner {
+			role := authority.Of(c.Context()).Role
+			// A session or root publishes a comment-only review with --publish, through approval.
+			agentPublish := *reviewPublish && *reviewCommentsFile == "" && (role == authority.Session || role == authority.Root)
+			if role != authority.Owner && !agentPublish {
 				return fmt.Errorf("agents cannot publish GitHub PR comments or reviews; record feedback in Dyna")
 			}
 			s, r, err := resolve(c, a[0])
@@ -447,6 +451,18 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 			roomID, err := publicationRoom(s, r)
 			if err != nil {
 				return err
+			}
+			if agentPublish {
+				// gh pr review cannot pin a commit, so an agent review posts through the REST
+				// reviews API with commit_id. The approved request then carries the reviewed head.
+				rec, err := s.Store.Get(r.Key())
+				if err != nil {
+					return err
+				}
+				if *reviewHead != "" && *reviewHead != rec.Head {
+					return fmt.Errorf("the review head %s is not the tracked head %s; review the tracked head before publishing", *reviewHead, rec.Head)
+				}
+				return ghclient.PublishThroughApproval(c.Context(), roomID, "", ghclient.PinnedReviewArgs(r.Host, r.Repo, r.Number, rec.Head, body))
 			}
 			var id int64
 			err = engineclient.New("").Call(c.Context(), "PostPRReview", []any{roomID, r, body, *reviewHead, comments, *reviewPublish}, &id)
@@ -605,7 +621,10 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	commentBody := comment.Flags().String("body", "", "comment body text, as an alternative to the positional body")
 	publishComment := comment.Flags().Bool("publish", false, "explicitly publish this comment to GitHub even when the room defaults to local")
 	comment.RunE = func(c *cobra.Command, a []string) error {
-		if authority.Of(c.Context()).Role != authority.Owner {
+		role := authority.Of(c.Context()).Role
+		// A session or root publishes only with --publish, through approval.
+		agentPublish := *publishComment && (role == authority.Session || role == authority.Root)
+		if role != authority.Owner && !agentPublish {
 			return fmt.Errorf("agents cannot publish GitHub PR comments or reviews; record feedback in Dyna")
 		}
 		s, r, err := resolve(c, a[0])
@@ -625,6 +644,9 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		roomID, err := publicationRoom(s, r)
 		if err != nil {
 			return err
+		}
+		if agentPublish {
+			return ghclient.PublishThroughApproval(c.Context(), roomID, "", []string{"pr", "comment", r.URL(), "--body", watch.Sanitize(strings.TrimSpace(body))})
 		}
 		return engineclient.New("").Call(c.Context(), "CommentPR", []any{roomID, r, body, *publishComment}, nil)
 	}
