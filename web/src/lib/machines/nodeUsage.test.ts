@@ -19,7 +19,8 @@ test('local disk names its probe time separately from live CPU and memory', asyn
     const machine = { local: true, status: 'online', seenAt: '2026-10-30T12:00:00Z', capabilities: { freeDisk: 100 * 2 ** 30, diskFloor: 20 * 2 ** 30 } }
     const body = render(Card, { props: { machine, load: null, work: null } }).body
     assert.match(body, /CPU and memory live · every 5 seconds/)
-    assert.match(body, /floor 20\.0 GiB · probed 12m ago/)
+    assert.match(body, /title="Disk probed 12m ago"/)
+    assert.match(body, /floor 20\.0 GiB/)
   } finally { mock.timers.reset() }
 })
 

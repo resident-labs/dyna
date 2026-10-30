@@ -1,6 +1,8 @@
 <script lang="ts">
   import Card from '../ui/Card.svelte'
   import StatTile from '../ui/StatTile.svelte'
+  import NodeHistory from './NodeHistory.svelte'
+  import type { NodeHistoryPoint } from '../api/machine.ts'
   import type { MachineDetail, MachineWork } from '../api/machine.ts'
   import type { SystemLoad } from '../api/system.ts'
   import { loadView } from '../system/systemLoad.ts'
@@ -8,7 +10,7 @@
   import { diskTone, freshness, usageTone } from './nodeUsage.ts'
   import { ago } from '../ui/format.ts'
 
-  let { machine, load, work }: { machine: MachineDetail; load: SystemLoad | null; work: MachineWork | null } = $props()
+  let { machine, load, work, history = [] }: { machine: MachineDetail; load: SystemLoad | null; work: MachineWork | null; history?: NodeHistoryPoint[] } = $props()
   let remote = $derived(machine.load)
   let localView = $derived(load ? loadView(load) : null)
   let cpu = $derived(machine.local ? load?.cpuPercent ?? null : remote?.cpuPercent ?? null)
@@ -27,10 +29,10 @@
   <div class="tiles stat-grid">
     <StatTile label="CPU" value={cpu == null ? '–' : `${Math.round(cpu)}%`} detail={average === undefined || !cpus ? 'No reading' : `load ${average.toFixed(1)} on ${cpus} CPUs`} tone={usageTone(cpu)} />
     <StatTile label="Memory" value={memory == null ? '–' : `${Math.round(memory)}%`} detail={used === undefined || !total ? 'No reading' : `${sizeText(used)} of ${sizeText(total)}`} tone={usageTone(memory)} />
-    <StatTile label="Disk free" value={disk === undefined ? '–' : sizeText(disk)} detail={floor === undefined ? 'No reading' : `floor ${sizeText(floor)}${machine.local ? machine.seenAt ? ` · probed ${ago(machine.seenAt)}` : ' · probe time unavailable' : ''}`} tone={diskTone(disk, floor)} />
+    <div title={machine.local ? machine.seenAt ? `Disk probed ${ago(machine.seenAt)}` : 'Disk probe time unavailable' : undefined}><StatTile label="Disk free" value={disk === undefined ? '–' : sizeText(disk)} detail={floor === undefined ? 'No reading' : `floor ${sizeText(floor)}`} tone={diskTone(disk, floor)} /></div>
     <StatTile label="Held by work" value={capacity?.cpus ? `${capacity.cpusUsed}/${capacity.cpus}` : '–'} detail="CPUs reserved" />
   </div>
-  <!-- The node history chart belongs here. -->
+  <NodeHistory points={history} />
   {#if localView}
     {#if localView.known}
       <div class="bar" role="img" aria-label="CPU split">
