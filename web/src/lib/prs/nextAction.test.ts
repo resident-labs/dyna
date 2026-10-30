@@ -10,6 +10,10 @@ test('CI actions carry a typed kind into the detail box', () => {
     assert.equal(mergeBox(row).isCI, true)
   }
   assert.equal(mergeBox({ ci: 'passed', state: 'open' }).isCI, false)
+  const completed = mergeBox({ ci: 'failed', state: 'merged', checks: [{ name: 'build', state: 'failure' }] })
+  assert.equal(completed.isCI, false)
+  assert.equal(completed.rows.find((row) => row.id === 'checks')?.title, '1 check failed')
+  assert.equal(completed.rows.find((row) => row.id === 'merge')?.title, 'Merged')
 })
 
 test('the detail merge headline matches the list action', () => {
