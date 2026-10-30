@@ -9,15 +9,6 @@ import (
 	selfupdate "dyna-agent/internal/update"
 )
 
-// UpdateNotice is a quiet line about a newer dyna release. It only checks;
-// installing stays an explicit `dyna update`, so a window never replaces
-// the binary its sessions run under.
-type UpdateNotice struct {
-	Current string `json:"current"`
-	Latest  string `json:"latest"`
-	Text    string `json:"text"`
-}
-
 // CheckUpdate compares the installed CLI version with the newest release. It
 // shares `dyna update`'s cache, so the network is asked at most once a day.
 // It returns an empty notice when updater.autoCheck is off, when disabled is

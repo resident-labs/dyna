@@ -25,21 +25,6 @@ func New(sessionRoot string) *Service {
 	return &Service{sessionRoot: sessionRoot}
 }
 
-type Device struct {
-	Current    bool      `json:"current"`
-	ID         string    `json:"id"`
-	Kind       string    `json:"kind"`
-	Name       string    `json:"name"`
-	Created    time.Time `json:"created"`
-	LastSeen   time.Time `json:"lastSeen"`
-	Expires    time.Time `json:"expires"`
-	Origin     string    `json:"origin,omitempty"`
-	Device     string    `json:"device,omitempty"`
-	Scopes     []string  `json:"scopes,omitempty"`
-	Legacy     bool      `json:"legacy,omitempty"`
-	ScopeLabel string    `json:"scopeLabel,omitempty"`
-}
-
 // DeviceList marks the calling browser only when web dispatch supplies its
 // authenticated principal. The desktop receives the unchanged list.
 type DeviceList []Device
@@ -54,12 +39,6 @@ func (list DeviceList) ForPrincipal(p websvc.Principal) any {
 		out[i].Current = p.ID != "" && out[i].Kind == kind && out[i].ID == p.ID
 	}
 	return out
-}
-
-type Pairing struct {
-	Code    string    `json:"code"`
-	URL     string    `json:"url"`
-	Expires time.Time `json:"expires"`
 }
 
 func (s *Service) deviceStores() (*devicestore.Store, *connect.Store, error) {
