@@ -596,3 +596,115 @@ func TestGitWriteCarriesToANewPublication(t *testing.T) {
 		t.Fatalf("the earlier write is missing from the new launch: %q %v", out, err)
 	}
 }
+
+// D-292: a launch that returns to an older publication gets the Git settings that
+// tools wrote under a newer publication while it was away.
+func TestGitWriteFromANewerPublicationReachesAnOlderOne(t *testing.T) {
+	scope, _, env := fixture(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	older, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := exec.Command(git, "config", "--global", "credential.helper", "gh-helper")
+	write.Env = merged(env, newer)
+	if out, err := write.CombinedOutput(); err != nil {
+		t.Fatalf("git config --global: %s %v", out, err)
+	}
+	back, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back["GIT_CONFIG_GLOBAL"] != older["GIT_CONFIG_GLOBAL"] {
+		t.Fatalf("the launch did not return to the older publication: %s", back["GIT_CONFIG_GLOBAL"])
+	}
+	get := exec.Command(git, "config", "--global", "--includes", "--get", "credential.helper")
+	get.Env = merged(env, back)
+	if out, err := get.Output(); err != nil || strings.TrimSpace(string(out)) != "gh-helper" {
+		t.Fatalf("the newer write is missing from the older publication: %q %v", out, err)
+	}
+}
+
+// D-292: when the newer publication changes or removes a Git setting, returning to
+// the older publication must show that change, with no stale or duplicate value.
+func TestGitWriteOverridesAndRemovesInAnOlderPublication(t *testing.T) {
+	scope, _, env := fixture(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	older, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitWrite := func(launch map[string]string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(git, append([]string{"config", "--global"}, args...)...)
+		cmd.Env = merged(env, launch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config --global %v: %s %v", args, out, err)
+		}
+	}
+	gitWrite(older, "credential.helper", "old")
+	gitWrite(older, "user.name", "Old Name")
+	newer, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitWrite(newer, "credential.helper", "new")
+	gitWrite(newer, "--unset", "user.name")
+	back, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := exec.Command(git, "config", "--global", "--includes", "--get-all", "credential.helper")
+	values.Env = merged(env, back)
+	if out, err := values.Output(); err != nil || strings.TrimSpace(string(out)) != "new" {
+		t.Fatalf("older publication has stale or duplicate helpers: %q %v", out, err)
+	}
+	name := exec.Command(git, "config", "--global", "--includes", "--get", "user.name")
+	name.Env = merged(env, back)
+	if out, _ := name.Output(); strings.TrimSpace(string(out)) == "Old Name" {
+		t.Fatalf("a removed setting came back: %q", out)
+	}
+}
+
+// D-292: a tool that writes the Git config must not land between the sync's check
+// and its rename. The sync holds the same lock Git takes, so a tool cannot take it.
+func TestGitConfigSyncHoldsGitLockDuringRename(t *testing.T) {
+	scope, _, env := fixture(t)
+	older, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := older["GIT_CONFIG_GLOBAL"]
+	if err := os.WriteFile(newer["GIT_CONFIG_GLOBAL"], []byte(gitConfigHeader(newer["GIT_CONFIG_GLOBAL"])+"[core]\n\tpager = new\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var toolErr error
+	syncLockHeld = func() {
+		lock, err := os.OpenFile(path+".lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
+			lock.Close()
+		}
+		toolErr = err
+	}
+	t.Cleanup(func() { syncLockHeld = func() {} })
+	if _, err := Prepare(scope, "", env); err != nil {
+		t.Fatal(err)
+	}
+	if !os.IsExist(toolErr) {
+		t.Fatalf("a tool took the Git config lock during the sync: %v", toolErr)
+	}
+}
