@@ -186,14 +186,28 @@ func attributionMarker(line string) string {
 
 var nonSpace = regexp.MustCompile(`\S+`)
 
-// withAttributionFirst puts the attribution line at the start of body, followed
-// by a blank line, unless the body's first line already starts with its marker.
+// withAttributionFirst adds the room line unless the body already has its marker.
+// Slash commands keep their start so that comment bots can recognize them.
 func withAttributionFirst(body, line string) string {
-	body = strings.Trim(body, "\n")
-	first, _, _ := strings.Cut(body, "\n")
-	if strings.HasPrefix(strings.TrimSpace(first), attributionMarker(line)) {
-		return body
+	first := ""
+	for _, candidate := range strings.Split(body, "\n") {
+		if first = strings.TrimSpace(candidate); first != "" {
+			break
+		}
 	}
+	marker := strings.TrimLeft(attributionMarker(line), "> ")
+	if strings.HasPrefix(strings.TrimLeft(first, "> "), marker) {
+		return strings.Trim(body, "\n")
+	}
+	if command, ok := strings.CutPrefix(first, "/"); ok {
+		for _, r := range command {
+			if unicode.IsLetter(r) {
+				return strings.TrimRight(body, "\n") + "\n\n" + line
+			}
+			break
+		}
+	}
+	body = strings.Trim(body, "\n")
 	if body == "" {
 		return line
 	}
