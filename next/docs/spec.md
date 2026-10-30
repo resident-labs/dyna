@@ -548,6 +548,8 @@ type Host struct {
 }
 ```
 
+The host check sets schedulable `MemBytes` to `MemTotal` minus the memory floor, and `CPUs` to online CPUs minus one, with a minimum of one CPU.
+
 **Admission** is the only placement code. A box's request is its size, and its limit is its `memory.max`. A box goes on a `ready` host only when the sum of requests on that host, plus this one, fits in `CPUs` and `MemBytes`, and free disk stays above the floor. Otherwise the box waits in `pending`, and `box.changed` names the reason. Only running boxes count for CPU and memory. A stopped (dormant) box counts only its disk. The measured free disk already includes boxes placed at or before the host's last check. Subtract the disk requests of boxes placed since that check and the new request; the result must remain at or above the floor.
 
 Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `checked_at`) and `host_labels` (`host`, `label`).

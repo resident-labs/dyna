@@ -42,6 +42,9 @@ type CheckResult struct {
 }
 
 func (r CheckResult) Ready() bool {
+	if len(r.Items) == 0 {
+		return false
+	}
 	for _, i := range r.Items {
 		if !i.OK {
 			return false
@@ -86,23 +89,9 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	add(CheckCgroup, err)
 	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
 	add(CheckPodman, err)
-	output, err := h.run(ctx, "bash", "-c", `nproc; awk '/MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
+	output, err := h.run(ctx, "bash", "-c", `getconf _NPROCESSORS_ONLN; awk '/MemTotal:|MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
 	if err == nil {
-		fields := strings.Fields(string(output))
-		if len(fields) != 3 {
-			err = fmt.Errorf("invalid capacity probe")
-		} else {
-			result.CPUs, err = strconv.Atoi(fields[0])
-			if err == nil {
-				result.MemBytes, err = strconv.ParseInt(fields[1], 10, 64)
-			}
-			if err == nil {
-				result.DiskBytes, err = strconv.ParseInt(fields[2], 10, 64)
-			}
-		}
-	}
-	if err == nil && (result.CPUs <= 0 || result.MemBytes < o.MemoryFloor || result.DiskBytes < o.DiskFloor) {
-		err = fmt.Errorf("host capacity below floor")
+		result.CPUs, result.MemBytes, result.DiskBytes, err = parseCapacity(output, o.MemoryFloor, o.DiskFloor)
 	}
 	add(CheckCapacity, err)
 	if err == nil {
@@ -120,6 +109,34 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	}
 	add(CheckForward, h.checkForward(ctx, o))
 	return result
+}
+
+// parseCapacity validates the host probe and reserves the host floor once.
+func parseCapacity(output []byte, memoryFloor, diskFloor int64) (int, int64, int64, error) {
+	fields := strings.Fields(string(output))
+	if len(fields) != 4 {
+		return 0, 0, 0, fmt.Errorf("invalid capacity probe")
+	}
+	cpus, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	total, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	available, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	disk, err := strconv.ParseInt(fields[3], 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if cpus < 1 || total <= memoryFloor || available < memoryFloor || disk < diskFloor {
+		return 0, 0, 0, fmt.Errorf("host capacity below floor")
+	}
+	return max(1, cpus-1), total - memoryFloor, disk, nil
 }
 
 func (h *Host) checkForward(ctx context.Context, o CheckOptions) error {

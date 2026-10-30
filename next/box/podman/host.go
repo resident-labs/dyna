@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -57,6 +58,14 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return nil, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
+		return nil, errors.New("insecure SSH control socket directory")
 	}
 	return &Host{destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
 }
