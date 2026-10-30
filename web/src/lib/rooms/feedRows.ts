@@ -151,8 +151,6 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
 function foldKey(post: FeedInput): string {
   const hook = hookEvent(post)
   if (hook) return hookRowKey(hook)
-  const merge = mergeEvent(post)
-  if (merge) return `merge:${merge.trialId}`
   // One result card per PR head: a new head starts a new card.
   const review = reviewEvent(post)
   if (review) return `review:${review.changeId}:${review.head}`
@@ -254,7 +252,10 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
     for (const post of group.slice(0, -1)) hidden.add(post.id)
   }
   for (const post of posts) {
-    const thread = post.notice?.thread
+    // TODO: legacy/shim remove after the upgrade floor excludes posts saved
+    // before merge events wrote their thread key.
+    const legacyMerge = post.notice?.thread ? undefined : mergeEvent(post)
+    const thread = post.notice?.thread || (legacyMerge?.trialId ? `merge:${legacyMerge.trialId}` : '')
     if (!thread) continue
     const group = openThreads.get(thread) ?? []
     group.push(post)
