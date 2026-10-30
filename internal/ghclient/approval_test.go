@@ -3,6 +3,7 @@ package ghclient
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -62,5 +63,30 @@ esac
 	class, err := ClassifyForApproval(context.Background(), exe, records[0].Repo, []string{"pr", "comment", "1", "--repo", "upstream/project", "--body", "hi"})
 	if err != nil || class != approvals.ClassAgent {
 		t.Fatalf("upstream pr comment class = %q, %v; want agent", class, err)
+	}
+}
+
+func TestRoutineCreatePinsRepositoryAfterRemoteChanges(t *testing.T) {
+	records := setupRooms(t, "owner/project")
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "gh")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\ncase \"$*\" in\n\"auth status\"*) echo '{\"hosts\":{\"github.com\":[{\"login\":\"writer\"}]}}';;\n\"auth token\"*) echo token;;\nesac\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"pr", "create", "--title", "test"}
+	class, pinned, err := ClassifyForSession(context.Background(), exe, records[0].Repo, args, func(context.Context, ItemRef) bool { return false })
+	if err != nil || class != approvals.ClassAuto {
+		t.Fatalf("class = %s, %v", class, err)
+	}
+	cmd := exec.Command("git", "remote", "set-url", "origin", "https://github.com/other/project.git")
+	cmd.Dir = records[0].Repo
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("change remote: %s: %v", output, err)
+	}
+	got := repositoryFor(context.Background(), Command(context.Background(), exe, records[0].Repo, pinned...))
+	if got.host != "github.com" || got.name != "owner/project" {
+		t.Fatalf("execution targets %+v, want github.com/owner/project", got)
 	}
 }
