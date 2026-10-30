@@ -71,6 +71,10 @@ type Tools struct {
 	// holds each token and checks the caller's grant. A nil RoomMCP lists no
 	// room MCP tool.
 	RoomMCP *RoomMCP
+	// Nodes lists the registered remote nodes. A command that starts with
+	// ssh to one of them still runs; its answer also names dyna job run. A nil
+	// Nodes adds no hint.
+	Nodes func(ctx context.Context) ([]Node, error)
 	// Steer, when set, returns a channel that closes when a new steering
 	// post is queued for the named session. A blocking wait returns early
 	// when it fires, with a note that a message arrived, so the harness
@@ -100,6 +104,11 @@ type RoomMCP struct {
 	Invoke func(ctx context.Context, in callspec.RoomMCPCallRequest) (string, error)
 }
 
+// Node is a registered remote node: its name and the SSH target that reaches it.
+type Node struct {
+	Name, SSH string
+}
+
 // Caller is the Dyna session behind one call.
 type Caller struct {
 	Owner, RoomID, Room, Cwd string
@@ -115,7 +124,7 @@ func (t *Tools) forCaller(clientSession string) *Tools {
 	if !ok {
 		return t
 	}
-	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env, Search: t.Search, RoomMCP: t.RoomMCP, Steer: t.Steer, Restart: t.Restart, outdated: t.outdated}
+	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env, Search: t.Search, RoomMCP: t.RoomMCP, Nodes: t.Nodes, Steer: t.Steer, Restart: t.Restart, outdated: t.outdated}
 }
 
 // SetRestart enables the outdated restart for this server and every caller
@@ -218,6 +227,7 @@ var toolList = []toolDefinition{
 			"Each call starts a new shell in cwd, so cd does not carry over. stdin is closed: use non-interactive flags. " +
 			"Commands run inside your room's slice (DYNA_ROOM_SLICE), so their memory and process count are capped; " +
 			"start long-lived daemons with systemd-run --user, which joins that slice by itself. " +
+			"For builds and tests on a registered node, use dyna job run --node N --commit HEAD --workspace --io heavy -- CMD, wait for its finished event, then read dyna job logs. Raw ssh is for quick one-off reads. " +
 			"Output over 16 KB is cut in the middle, and the result names the full log file.",
 		InputSchema: inputSchema{
 			Type: "object",
@@ -336,6 +346,10 @@ func (t *Tools) Call(ctx context.Context, name string, raw json.RawMessage, clie
 	switch name {
 	case "shell":
 		err = t.run(ctx, &r, args.Command, args.Description, args.Cwd)
+		if err == nil {
+			// The hint follows the result, so the "Job <id>." line stays first.
+			r.Text += t.nodeHint(ctx, args.Command)
+		}
 	case "shell_output":
 		err = t.output(ctx, &r, args.JobID, args.Wait, args.Timeout)
 	case "shell_stop":
@@ -364,6 +378,26 @@ func (t *Tools) Call(ctx context.Context, name string, raw json.RawMessage, clie
 		return Result{Text: err.Error(), Failed: true}
 	}
 	return r
+}
+
+// nodeHint names the registered node that an ssh command reaches, and points to
+// dyna job run for builds and tests. It returns "" for any other command. A node
+// list that cannot be read adds no hint, so the command is never blocked.
+func (t *Tools) nodeHint(ctx context.Context, command string) string {
+	fields := strings.Fields(command)
+	if t.Nodes == nil || len(fields) < 2 || fields[0] != "ssh" {
+		return ""
+	}
+	nodes, err := t.Nodes(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, n := range nodes {
+		if n.SSH == fields[1] {
+			return fmt.Sprintf("\nNode %s is registered. For builds and tests, use dyna job run --node %s --commit HEAD --workspace --io heavy -- CMD.", n.Name, n.Name)
+		}
+	}
+	return ""
 }
 
 func (t *Tools) run(ctx context.Context, r *Result, command, description, cwd string) (resultErr error) {

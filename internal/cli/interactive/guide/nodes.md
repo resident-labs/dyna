@@ -2,6 +2,9 @@
 
 ## Builds and tests over SSH
 
+For builds and tests on a registered node, run `dyna job run --node N --commit HEAD --workspace --io heavy -- CMD`.
+Wait for the job's finished event, then read `dyna job logs <id>`. Use raw `ssh` only for quick one-off reads.
+
 Before you use another node for builds or tests, run `dyna node list`.
 Use the SSH column as the exact `user@host`.
 
