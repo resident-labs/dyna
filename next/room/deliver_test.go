@@ -44,6 +44,14 @@ func TestDeliveries(t *testing.T) {
 	}
 }
 
+func TestEmptyMentionDoesNotWakeRoot(t *testing.T) {
+	tree := NewTree([]Node{{ID: "root"}})
+	got := tree.Deliveries(DeliveryInput{Event: contract.Event{From: contract.Principal{Kind: contract.PrincipalOwner}}, Surface: contract.SurfaceFeed, HasMentions: true})
+	if len(got) != 0 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestFinalReplies(t *testing.T) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	parent := contract.Principal{Kind: contract.PrincipalSession, Session: "parent"}
