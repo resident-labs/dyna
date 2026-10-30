@@ -149,6 +149,10 @@ func TestStoppedTrialRetryHappensOnceAndJoinsAFullQueue(t *testing.T) {
 	if !started {
 		t.Fatal("a full queue kept the retry from joining")
 	}
+	runs := e.s.nodeRuns()
+	runs.Lock()
+	run := runs.runs[registeredJobKey(job)]
+	runs.Unlock()
 	<-ci.started
 	if ci.results[head].Resumed {
 		t.Fatal("a replacement that had not finished spent the retry")
@@ -156,6 +160,9 @@ func TestStoppedTrialRetryHappensOnceAndJoinsAFullQueue(t *testing.T) {
 	close(ci.release)
 	released = true
 	<-ci.saved
+	// The run writes its refresh after it saves, so wait for the whole run to end
+	// before the test returns and its TempDir is removed.
+	<-run.ended
 	if saved := ci.results[head]; !saved.Resumed {
 		t.Fatalf("the replacement does not carry the marker: %+v", saved)
 	}
