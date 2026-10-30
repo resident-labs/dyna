@@ -14,6 +14,9 @@ import (
 	"dyna-agent/internal/store"
 )
 
+// Topic wakes the instruction worker after a profile intent commits.
+const Topic = "instruction-queue"
+
 // Migrate prepares the durable fan-out queue.
 func Migrate(dir string) error {
 	db, err := database.Open(dir)
@@ -50,7 +53,7 @@ func Insert(dir string) error {
 	if err != nil {
 		return err
 	}
-	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error { return InsertTx(conn, "") })
+	return state.For(db).Write(context.Background(), hub.Event{Topic: Topic}, func(conn *sql.Conn) error { return InsertTx(conn, "") })
 }
 
 type Entry struct {

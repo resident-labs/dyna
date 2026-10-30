@@ -536,6 +536,10 @@ func (w *wake) check(id string) error { return sessionlife.CheckTx(w.conn, w.ses
 
 // updateTx is update for changes that wake goal holders.
 func (s *Store) updateTx(fn func(*wake, *State) error, where string, args ...any) error {
+	return s.updateTxEvent(hub.Event{Topic: "goals"}, fn, where, args...)
+}
+
+func (s *Store) updateTxEvent(event hub.Event, fn func(*wake, *State) error, where string, args ...any) error {
 	db, err := s.open()
 	if err != nil {
 		return err
@@ -548,7 +552,7 @@ func (s *Store) updateTx(fn func(*wake, *State) error, where string, args ...any
 		}
 		var need []string
 		err := sessionlife.WithSessionLocks(s.sessions(), ids, func() error {
-			return state.For(db).Write(context.Background(), hub.Event{Topic: "goals"}, func(conn *sql.Conn) error {
+			return state.For(db).Write(context.Background(), event, func(conn *sql.Conn) error {
 				st, stored, err := readState(conn, where, args...)
 				if err != nil {
 					return err

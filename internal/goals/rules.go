@@ -2,6 +2,7 @@ package goals
 
 import (
 	"crypto/sha256"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
@@ -145,7 +146,7 @@ func (s *Store) AddRule(scope, by, byName, text string) (Rule, error) {
 	if err != nil {
 		return out, err
 	}
-	err = s.updateTx(func(w *wake, st *State) error {
+	err = s.updateTxEvent(hub.Event{Topic: "goals", Key: instructionqueue.Topic}, func(w *wake, st *State) error {
 		prefix := "r"
 		r := st.rules(scope)
 		if scope == Global {
@@ -201,7 +202,7 @@ func (s *Store) RemoveRule(scope, id, by string) (Rule, error) {
 
 func (s *Store) changeRule(scope, id, by string, fn func(*RuleSet, *Rule) error) (Rule, error) {
 	var out Rule
-	err := s.updateTx(func(w *wake, st *State) error {
+	err := s.updateTxEvent(hub.Event{Topic: "goals", Key: instructionqueue.Topic}, func(w *wake, st *State) error {
 		r := st.rules(scope)
 		if r == nil || r.Rules[id] == nil {
 			if scope == Global {
