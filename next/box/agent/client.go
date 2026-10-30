@@ -174,19 +174,3 @@ func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) erro
 	_, err = c.call(ctx, contract.MethodTurnOutput, body)
 	return err
 }
-
-func (c *Client) Append(ctx context.Context, chunk contract.TranscriptAppendRequest) (int64, error) {
-	body, err := json.Marshal(chunk)
-	if err != nil {
-		return 0, err
-	}
-	data, err := c.call(ctx, contract.MethodTranscriptAppend, body)
-	if err != nil {
-		return 0, err
-	}
-	var result contract.TranscriptAppendResponse
-	if err := json.Unmarshal(data, &result); err != nil {
-		return 0, err
-	}
-	return result.AckedOffset, nil
-}
