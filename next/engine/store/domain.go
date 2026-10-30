@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/room"
 )
 
 // Session describes the stored session and its box.
@@ -117,8 +118,27 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			return nil
 		}
-		_, err = s.AppendEvent(tx, event)
-		return err
+		inputs, posts, err := turnReplies(ctx, tx, session, output.Turn)
+		if err != nil {
+			return err
+		}
+		body := event.Body.(contract.TurnEnded)
+		body.Replies = room.FinalReplies(inputs, posts)
+		event.Body = body
+		seq, err := s.AppendEvent(tx, event)
+		if err != nil {
+			return err
+		}
+		for _, reply := range body.Replies {
+			if reply.Reply.Target.Kind != contract.PrincipalSession {
+				continue
+			}
+			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
+			if err := insertDelivery(ctx, tx, seq, d); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
