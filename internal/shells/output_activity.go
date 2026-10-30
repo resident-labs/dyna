@@ -3,8 +3,10 @@ package shells
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"dyna-agent/internal/activity"
@@ -15,24 +17,44 @@ import (
 // activityReader observes raw reads before line buffering and output truncation.
 type activityReader struct {
 	io.Reader
-	now     func() time.Time
-	publish func(activity.Signal)
-	signal  activity.Signal
+	now      func() time.Time
+	deadline func(time.Time) error
+	publish  func(activity.Signal)
+	signal   activity.Signal
 }
 
 func (r *activityReader) start() {
-	r.signal.Copier = activity.CopierRunning
+	r.signal.Copier = activity.CopierUnknown
 	r.signal.CPU = activity.CPUUnsupported
 	r.publish(r.signal)
 }
 
 func (r *activityReader) Read(p []byte) (int, error) {
-	n, err := r.Reader.Read(p)
-	if n > 0 {
-		r.signal.LastOutput = r.now()
-		r.publish(r.signal)
+	for {
+		// Only the copier can prove it is still observing the pipe.
+		proving := r.deadline != nil && r.deadline(r.now().Add(activity.PublishInterval)) == nil
+		if !proving {
+			r.signal.Copier = activity.CopierUnknown
+			r.signal.ObservedSince = time.Time{}
+			r.signal.LeaseUntil = time.Time{}
+			r.publish(r.signal)
+		}
+		n, err := r.Reader.Read(p)
+		if proving && (n > 0 || errors.Is(err, os.ErrDeadlineExceeded)) {
+			r.signal = r.signal.Prove(r.now())
+			if n > 0 {
+				r.signal.LastOutput = r.now()
+			}
+			r.publish(r.signal)
+		} else if n > 0 {
+			r.signal.LastOutput = r.now()
+			r.publish(r.signal)
+		}
+		if proving && errors.Is(err, os.ErrDeadlineExceeded) && n == 0 {
+			continue
+		}
+		return n, err
 	}
-	return n, err
 }
 
 func (r *activityReader) end(err error) {
@@ -67,22 +89,27 @@ func (p *activityPublisher) send(s activity.Signal) {
 
 func (p *activityPublisher) run(ticks <-chan time.Time, write func(activity.Signal) error) {
 	var pending activity.Signal
+	var storedLease time.Time
 	dirty := false
 	for {
 		select {
 		case s, ok := <-p.updates:
 			if !ok {
 				if dirty {
-					pending.LeaseUntil = time.Now().Add(activity.Lease)
 					_ = write(pending)
 				}
 				return
 			}
 			pending, dirty = s, true
-		case now := <-ticks:
+		case <-ticks:
 			if dirty {
-				pending.LeaseUntil = now.Add(activity.Lease)
-				_ = write(pending)
+				proof := pending.LeaseUntil.Add(-activity.Lease)
+				if pending.Copier == activity.CopierRunning && (storedLease.IsZero() || !proof.Before(storedLease)) {
+					pending.ObservedSince = proof
+				}
+				if write(pending) == nil {
+					storedLease = pending.LeaseUntil
+				}
 				dirty = false
 			}
 		}
@@ -92,19 +119,25 @@ func (p *activityPublisher) run(ticks <-chan time.Time, write func(activity.Sign
 func (s *Store) publishActivity(db *sql.DB, id string, signal activity.Signal) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
 	defer cancel()
-	var last int64
+	var last, since, lease int64
+	if !signal.LeaseUntil.IsZero() {
+		lease = signal.LeaseUntil.UnixNano()
+	}
+	if !signal.ObservedSince.IsZero() {
+		since = signal.ObservedSince.UnixNano()
+	}
 	if !signal.LastOutput.IsZero() {
 		last = signal.LastOutput.UnixNano()
 	}
 	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `UPDATE shell_jobs SET activity_output=?, activity_lease=?, activity_copier=?, activity_cpu=? WHERE id=?`,
-			last, signal.LeaseUntil.UnixNano(), signal.Copier, signal.CPU, id)
+		_, err := conn.ExecContext(ctx, `UPDATE shell_jobs SET activity_output=?, activity_lease=?, activity_copier=?, activity_cpu=?, activity_since=? WHERE id=?`,
+			last, lease, signal.Copier, signal.CPU, since, id)
 		return err
 	})
 }
 
 // Activity reads the last published shell observation. A missing or expired
-// lease is unknown; a quiet copier does not renew its lease.
+// lease is unknown; only copier proof can renew its lease.
 func (s *Store) Activity(id string, now time.Time) (activity.Signal, error) {
 	if !ValidID(id) {
 		return activity.Signal{}, fmt.Errorf("invalid shell id %q", id)
@@ -113,11 +146,14 @@ func (s *Store) Activity(id string, now time.Time) (activity.Signal, error) {
 	if err != nil {
 		return activity.Signal{}, err
 	}
-	var last, lease int64
+	var last, lease, since int64
 	var signal activity.Signal
-	err = db.QueryRow(`SELECT activity_output, activity_lease, activity_copier, activity_cpu FROM shell_jobs WHERE id=?`, id).Scan(&last, &lease, &signal.Copier, &signal.CPU)
+	err = db.QueryRow(`SELECT activity_output, activity_lease, activity_copier, activity_cpu, activity_since FROM shell_jobs WHERE id=?`, id).Scan(&last, &lease, &signal.Copier, &signal.CPU, &since)
 	if err != nil {
 		return activity.Signal{}, err
+	}
+	if since != 0 {
+		signal.ObservedSince = time.Unix(0, since)
 	}
 	if last != 0 {
 		signal.LastOutput = time.Unix(0, last)
