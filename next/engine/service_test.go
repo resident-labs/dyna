@@ -90,6 +90,17 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 		t.Fatalf("room persisted: %d %v", count, err)
 	}
 }
+func TestCloseParentWithChildIsRejected(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	_, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("close: %v", e)
+	}
+}
 func TestRoomRepoAPI(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}

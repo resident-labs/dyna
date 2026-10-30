@@ -471,8 +471,12 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
 	}
-	if _, err := tree.CloseOrder(session.ID); err != nil {
+	order, err := tree.CloseOrder(session.ID)
+	if err != nil {
 		return contract.SessionCloseResponse{}, invalid(err.Error())
+	}
+	if len(order) > 1 {
+		return contract.SessionCloseResponse{}, invalid("session has children")
 	}
 	// Interim backstop until room step 5 marks the subtree closing in one transaction.
 	s.admit.Lock()
