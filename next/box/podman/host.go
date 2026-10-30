@@ -270,7 +270,7 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 	return err
 }
 func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
-	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--userns=keep-id:uid=1000,gid=1000", "--user", "1000:1000", "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi"}
+	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--userns=keep-id:uid=1000,gid=1000", "--user", "1000:1000", "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-" + string(c.Box) + ":/box"}
 	for _, m := range c.Mounts {
 		v := m.HostPath + ":" + m.BoxPath
 		if m.ReadOnly {
@@ -297,7 +297,10 @@ func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
 	return err
 }
 func (h *Host) RemoveContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", string(id))
+	if _, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--ignore", string(id)); err != nil {
+		return err
+	}
+	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "volume", "rm", "-f", "dyna-box-"+string(id))
 	return err
 }
 func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error) {
