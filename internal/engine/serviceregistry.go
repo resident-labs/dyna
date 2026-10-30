@@ -119,9 +119,10 @@ func updateFacts(ctx context.Context) *serviceregistry.UpdateFacts {
 		return nil
 	}
 	for _, job := range jobs {
-		result := job.Result
+		// hookinstall stores the same pass and error values as hooks.RunResult.
+		result := hooks.RunResult(job.Result)
 		if job.Status != "finished" {
-			result = "pending"
+			result = hooks.ResultPending
 		}
 		u.Runs = append(u.Runs, serviceregistry.HookRun{Result: result, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt})
 	}

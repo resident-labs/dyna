@@ -5,12 +5,14 @@ package serviceregistry
 
 import (
 	"time"
+
+	"dyna-agent/internal/hooks"
 )
 
 // HookRun is one run of the hook behind a service.
 type HookRun struct {
 	// Result is the hook run result: pass, error, fail or pending.
-	Result     string
+	Result     hooks.RunResult
 	StartedAt  time.Time
 	FinishedAt time.Time
 }
@@ -299,9 +301,9 @@ func hookService(s *Service, h HookFacts) {
 		s.State = StateOff
 	case newest == nil:
 		s.State, s.Detail = StateWaiting, DetailNoRunYet
-	case newest.Result == "pending":
+	case newest.Result == hooks.ResultPending:
 		s.State = StateRunning
-	case newest.Result == "error" || newest.Result == "fail":
+	case newest.Result == hooks.ResultError || newest.Result == hooks.ResultFail:
 		s.State, s.Detail = StateError, DetailLastRunFailed
 	default:
 		s.State = StateOn
