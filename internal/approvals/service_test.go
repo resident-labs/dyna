@@ -54,6 +54,8 @@ func newFixture(t *testing.T) *fixture {
 	f.sibling = f.session(t, sessions, "sibling", f.parent.ID, "")
 	f.service = New(rooms, sessions)
 	f.service.Now = func() time.Time { return f.now }
+	// Cleanups run last-in first-out: wait for result delivery before the store closes and the temp dir is removed.
+	t.Cleanup(f.service.inflight.Wait)
 	return f
 }
 
