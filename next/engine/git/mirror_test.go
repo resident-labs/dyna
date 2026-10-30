@@ -9,8 +9,9 @@ import (
 )
 
 type fakeRunner struct {
-	calls [][]string
-	fail  string
+	calls  [][]string
+	fail   string
+	remote string
 }
 
 func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -19,6 +20,9 @@ func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte,
 		if arg == r.fail && r.fail != "" {
 			return nil, errors.New("git failed")
 		}
+	}
+	if args[0] == "ls-remote" {
+		return []byte(r.remote), nil
 	}
 	if len(args) > 2 && args[2] == "symbolic-ref" {
 		return []byte("main\n"), nil
@@ -56,6 +60,15 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 		}
 	}
 }
+func TestRefReadsTheRequestedRemoteReference(t *testing.T) {
+	r := &fakeRunner{remote: "abc\trefs/dyna/archive/ses_1\n"}
+	m := &Mirror{Token: "secret", Runner: r}
+	hash, err := m.Ref(context.Background(), "owner/repo", "refs/dyna/archive/ses_1")
+	if err != nil || hash != "abc" {
+		t.Fatalf("hash %q, error %v", hash, err)
+	}
+}
+
 func TestPrepareRejectsMissingToken(t *testing.T) {
 	m := &Mirror{Data: t.TempDir(), Runner: &fakeRunner{}}
 	_, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1")
