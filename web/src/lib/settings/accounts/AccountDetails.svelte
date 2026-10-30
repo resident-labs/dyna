@@ -15,12 +15,14 @@
     onsignin,
     oncreateprofile,
     onprofile,
+    onremove,
   }: {
     account: ScopeAccount
     onclose: () => void
     onsignin: (account: ScopeAccount) => void
     oncreateprofile: (selection: ModelSelection) => void
     onprofile: (name: string) => void
+    onremove: (account: ScopeAccount) => void
   } = $props()
   // The header wakes when the last blocking window resets, so it stops saying
   // "limit reached" on an open page.
@@ -50,6 +52,7 @@
   <section><h3>Linked profiles</h3><div class="profiles">
     {#each account.profiles ?? [] as name}<button class="quiet" onclick={() => onprofile(name)}>{name} ↗</button>{:else}<p class="muted">No linked profiles reported</p>{/each}
   </div><div class="actions"><button class="btn pri" onclick={createProfile} disabled={!account.activeHere} aria-describedby={!account.activeHere ? 'profile-account-hint' : undefined}>Create profile</button></div>{#if !account.activeHere}<p id="profile-account-hint" class="muted">Use this account in this scope before creating a profile.</p>{/if}</section>
+  <section><button class="btn danger" onclick={() => onremove(account)}>Remove account</button></section>
 </UsageDrawer>
 <style>
   .status { color: var(--muted); font-size: var(--t-sm); margin: -12px 0 20px; }

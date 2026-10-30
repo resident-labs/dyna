@@ -33,4 +33,7 @@ type ScopeAccount struct {
 	// snapshot's scope: the room row when the scope is a room, else the global
 	// row. Active reports the global row.
 	ActiveHere bool `json:"activeHere"`
+	// ServesHere reports whether the account's repo limit lets it run in the
+	// scope's repository. Every account serves the global scope.
+	ServesHere bool `json:"servesHere"`
 }
