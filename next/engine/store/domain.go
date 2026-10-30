@@ -1,0 +1,260 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+// Session describes the stored session and its box.
+type Session struct {
+	ID      contract.SessionID
+	Room    contract.RoomID
+	Name    string
+	Profile contract.ProfileName
+	Box     contract.BoxID
+}
+
+func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string, at time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES(?,?,?,?,?)", id, name, at.UnixMilli(), 0, 0)
+		return err
+	})
+}
+
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, goal string, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var parentID *contract.SessionID
+		if parent != "" {
+			parentID = &parent
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES(?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Profile, "pending", goal, event.Time.UnixMilli())
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", contract.BoxSizeSmall, contract.BoxPending, "", "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		if err != nil {
+			return err
+		}
+		seq, err := s.AppendEvent(tx, event)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", contract.PrincipalSession, session.ID, seq, contract.SurfaceSession, contract.ReplyNone, "", "", "", "", 1, "pending")
+		return err
+	})
+}
+
+func (s *Store) SetBoxState(ctx context.Context, id contract.BoxID, state contract.BoxState, reason string, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET state=?,reason=?,updated_at=? WHERE id=?", state, reason, event.Time.UnixMilli(), id)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return sql.ErrNoRows
+		}
+		_, err = s.AppendEvent(tx, event)
+		return err
+	})
+}
+
+func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closed',closed_at=? WHERE id=? AND closed_at IS NULL", event.Time.UnixMilli(), id)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return sql.ErrNoRows
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE boxes SET state=?,updated_at=? WHERE session=?", contract.BoxDeleted, event.Time.UnixMilli(), id); err != nil {
+			return err
+		}
+		_, err = s.AppendEvent(tx, event)
+		return err
+	})
+}
+
+func (s *Store) DeliveryDone(ctx context.Context, session contract.SessionID, seq contract.DeliverySeq) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_kind=? AND to_id=? AND seq=? AND state IN ('taken','read')", contract.PrincipalSession, session, seq)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return sql.ErrNoRows
+		}
+		return nil
+	})
+}
+
+var ErrTurnConflict = errors.New("turn output differs from the committed result")
+
+func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output contract.TurnOutputRequest, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=? WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.Turn, session)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			var body []byte
+			err := tx.QueryRowContext(ctx, "SELECT e.body FROM events e JOIN sessions s ON e.room=s.room WHERE s.id=? AND e.type='turn.ended' AND json_extract(e.body,'$.turn')=?", session, output.Turn).Scan(&body)
+			if err != nil {
+				return err
+			}
+			var previous contract.TurnEnded
+			if err := json.Unmarshal(body, &previous); err != nil {
+				return err
+			}
+			current := event.Body.(contract.TurnEnded)
+			if previous.Session != current.Session || previous.Turn != current.Turn || previous.Outcome != current.Outcome || previous.Final != current.Final || previous.Usage != current.Usage || previous.Error != current.Error {
+				return ErrTurnConflict
+			}
+			return nil
+		}
+		_, err = s.AppendEvent(tx, event)
+		return err
+	})
+}
+
+func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
+	var session Session
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Profile, &session.Box)
+	return session, err
+}
+
+func (s *Store) SessionByName(ctx context.Context, room contract.RoomID, name string) (Session, error) {
+	var session Session
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.name=? AND s.closed_at IS NULL", room, name).Scan(&session.ID, &session.Room, &session.Name, &session.Profile, &session.Box)
+	return session, err
+}
+
+func (s *Store) Post(ctx context.Context, event contract.Event, recipients []contract.SessionID) (int64, error) {
+	var seq int64
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		var err error
+		seq, err = s.AppendEvent(tx, event)
+		if err != nil {
+			return err
+		}
+		for _, recipient := range recipients {
+			_, err = tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", contract.PrincipalSession, recipient, seq, contract.SurfaceFeed, contract.ReplyNone, "", "", "", "", 1, "pending")
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return seq, err
+}
+
+// FeedInput describes a delivery selected for a box channel.
+type FeedInput struct {
+	Seq     contract.DeliverySeq
+	Surface contract.Surface
+	Queue   *contract.TurnQueue
+}
+
+// Dispatch atomically assigns pending inputs to the active turn, or starts one.
+// replay includes previously taken inputs for a new channel connection.
+func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn contract.TurnID, started contract.Event, replay bool) (contract.TurnID, []FeedInput, error) {
+	var active contract.TurnID
+	var inputs []FeedInput
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL", session).Scan(&active)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
+		if err != nil {
+			return err
+		}
+		type item struct {
+			input FeedInput
+			state string
+			queue sql.NullString
+			event contract.EventID
+			turn  sql.NullString
+		}
+		var items []item
+		for rows.Next() {
+			var v item
+			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn); err != nil {
+				rows.Close()
+				return err
+			}
+			items = append(items, v)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if active == "" {
+			if len(items) != 0 {
+				active = turn
+			}
+			if active == "" {
+				return nil
+			}
+			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES(?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), "", "", 0, 0, 0, 0)
+			if err != nil {
+				return err
+			}
+			var ids []contract.EventID
+			for _, v := range items {
+				ids = append(ids, v.event)
+			}
+			started.Body = contract.TurnStarted{Session: session, Turn: active, Inputs: ids}
+			if _, err := s.AppendEvent(tx, started); err != nil {
+				return err
+			}
+		}
+		for _, v := range items {
+			assigned := v.turn.Valid && contract.TurnID(v.turn.String) == active
+			if assigned && !replay {
+				continue
+			}
+			if !assigned {
+				var queue *contract.TurnQueue
+				if active != turn {
+					q := contract.QueueSteer
+					queue = &q
+				}
+				_, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='taken',turn=?,queue=? WHERE to_kind=? AND to_id=? AND seq=? AND state IN ('pending','taken')", active, queue, contract.PrincipalSession, session, v.input.Seq)
+				if err != nil {
+					return err
+				}
+				v.input.Queue = queue
+			} else if v.queue.Valid {
+				q := contract.TurnQueue(v.queue.String)
+				v.input.Queue = &q
+			}
+			inputs = append(inputs, v.input)
+		}
+		return nil
+	})
+	return active, inputs, err
+}
