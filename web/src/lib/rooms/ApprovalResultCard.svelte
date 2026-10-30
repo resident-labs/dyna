@@ -6,8 +6,8 @@
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { approvalResultEvent } from './eventPayloads.ts'
   import type { ApprovalState } from './events.gen.ts'
-  import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
+  import StatusPill from '../ui/StatusPill.svelte'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
@@ -18,27 +18,33 @@
   let open = $state(false)
   // A failed write opens by itself: its output is why the reader is here.
   let shown = $derived(open || result?.state === 'failed')
-  let failed = $derived(result?.state === 'failed' || result?.state === 'denied')
+  let failed = $derived(result?.state === 'failed')
+  let url = $derived(result?.url && /^https?:\/\//i.test(result.url) ? result.url : '')
+  let outputText = $derived(output.join('\n'))
+  let parts = $derived(url ? outputText.split(url) : [outputText])
 </script>
 
 {#snippet body()}
-  {#if output.length}<pre class="output">{output.join('\n')}</pre>{/if}
-  {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
+  {#if output.length}<pre class="output">{parts.join('')}</pre>{/if}
 {/snippet}
 
-{#if result}
+{#snippet resultLink()}<a href={url} target="_blank" rel="noopener noreferrer">{url}</a>{/snippet}
+
+{#if result && result.state !== 'denied'}
   <EventRow
     id={post.id}
     ts={post.ts}
     {surface}
-    title="Approved write {words[result.state]}"
-    chips={[{ label: words[result.state], failure: failed }, ...(result.exitCode ? [{ label: `exit ${result.exitCode}`, failure: true }] : [])]}
-    summary={[result.url ?? '', result.reason ?? '', output.length ? `${output.length} output line${output.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
+    title={`Approved write ${words[result.state]}`}
+    chips={result.exitCode ? [{ label: `exit ${result.exitCode}` }] : []}
+    summary={[result.reason ?? '', output.length ? `${output.length} output line${output.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
+    summaryExtra={url ? resultLink : undefined}
     open={shown}
     ontoggle={(value) => (open = value)}
-    detail={output.length || surface === 'dm' ? body : undefined}
+    detail={output.length ? body : undefined}
   >
     {#snippet icon()}<span aria-hidden="true">{failed ? '✕' : '✓'}</span>{/snippet}
+    {#snippet headline()}{#if failed}<strong>Approved write</strong> <StatusPill tone="danger" label="failed" />{:else}<strong>{result.state === 'denied' ? 'Write not run' : `Approved write ${words[result.state]}`}</strong>{/if}{/snippet}
   </EventRow>
 {/if}
 
