@@ -194,6 +194,9 @@ func workflowInput(workflow workflowcatalog.Info, text string) (json.RawMessage,
 			positional = arg.Name
 		}
 	}
+	if required == 0 && text == "" {
+		return json.RawMessage(`{}`), nil
+	}
 	if required == 0 && len(workflow.Args) == 1 {
 		positional = workflow.Args[0].Name
 	}
