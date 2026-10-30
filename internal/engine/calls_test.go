@@ -229,7 +229,7 @@ func TestBindingPreservesRequestLimits(t *testing.T) {
 		{"NewWorktree", 10 * time.Minute}, {"GCWorktrees", 2 * time.Minute}, {"RemoveWorktrees", 2 * time.Minute},
 		{"PruneWorktrees", 2 * time.Minute}, {"ApplyRunWorktreeDisposition", 2 * time.Minute},
 		{"SendToSession", 30 * time.Second}, {"Send", 30 * time.Second}, {"SendFromCard", 30 * time.Second}, {"Post", 30 * time.Second},
-		{"StartRun", 30 * time.Second}, {"CancelRun", 30 * time.Second}, {"DeleteRoom", 30 * time.Second},
+		{"StartRun", 30 * time.Second}, {"StartNamedRun", 30 * time.Second}, {"CancelRun", 30 * time.Second}, {"DeleteRoom", 30 * time.Second},
 		{"StopSession", time.Minute}, {"BulkSessionAction", time.Minute}, {"CloseSession", time.Minute}, {"ForceCloseSession", time.Minute}, {"CloseSessionOptions", time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -487,8 +487,8 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 	if callspec.Deadline("VoiceSay") <= voice.SayTimeout {
 		t.Errorf("VoiceSay deadline %v must exceed SayTimeout %v", callspec.Deadline("VoiceSay"), voice.SayTimeout)
 	}
-	if n := len(callspec.LongCalls); n != 106 {
-		t.Fatalf("LongCalls has %d calls, want 106;a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 107 {
+		t.Fatalf("LongCalls has %d calls, want 107;a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }
 
