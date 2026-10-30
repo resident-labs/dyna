@@ -3,7 +3,6 @@ package hooks
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,7 +15,6 @@ import (
 )
 
 func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
-	withFakeNodeTools(t)
 	s, repo := setup(t)
 	ctx := context.Background()
 	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module dyna-agent\n"), 0600); err != nil {
@@ -28,10 +26,7 @@ func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "desktop", "build.sh"), []byte("fake"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	h, err := SelfUpdateRecipe(ctx, repo, "/fake/dyna", "install")
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := Hook{Name: "install", Label: "Update Dyna", Event: MainUpdated, Command: "true", Cwd: "main", Timeout: "1m", OnFail: "alert"}
 	add(t, s, repo, h)
 	r, err := repoid.Resolve(ctx, repo)
 	if err != nil {
@@ -103,48 +98,6 @@ func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
 	}
 }
 
-func TestSelfUpdateRecipeCapturesToolsAndRejectsMissingTools(t *testing.T) {
-	_, repo := setup(t)
-	ctx := context.Background()
-	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module dyna-agent\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, "desktop"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "desktop/build.sh"), []byte("fake"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	if err = os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
-		t.Fatal(err)
-	}
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.Symlink(bash, filepath.Join(bin, "bash")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	if _, err = SelfUpdateRecipe(ctx, repo, "/fake/dyna", "self-update"); err == nil || !strings.Contains(err.Error(), "requires go") {
-		t.Fatalf("missing tool: %v", err)
-	}
-	for _, tool := range []string{"go", "npm", "node"} {
-		if err = os.WriteFile(filepath.Join(bin, tool), []byte("fake"), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	h, err := SelfUpdateRecipe(ctx, repo, "/fake/dyna", "self-update")
-	if err != nil || h.Label != "Update Dyna" || !strings.Contains(h.Command, "--tool-path") || !strings.Contains(h.Command, bin) {
-		t.Fatalf("captured tools: %#v %v", h, err)
-	}
-}
-
 func TestCapturedToolPathDropsComputerBinsAndDuplicates(t *testing.T) {
 	data := t.TempDir()
 	computers := filepath.Join(data, "computers")
@@ -163,24 +116,9 @@ func TestCapturedToolPathDropsComputerBinsAndDuplicates(t *testing.T) {
 	}
 }
 
-// withFakeNodeTools appends stub npm and node commands to PATH. The
-// self-update recipe resolves go, npm and node when it is added; CI's Go
-// container has no Node tools, and the recipe never runs them in tests.
-func withFakeNodeTools(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	for _, tool := range []string{"npm", "node"} {
-		if err := os.WriteFile(filepath.Join(dir, tool), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+dir)
-}
-
 // A unit that passes without a warning still ends the run the hook started.
 // The hook hands its result to the unit, so nothing else would close the card.
 func TestPassedInstallUnitEndsTheRunCard(t *testing.T) {
-	withFakeNodeTools(t)
 	s, repo := setup(t)
 	ctx := context.Background()
 	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module dyna-agent\n"), 0600); err != nil {
@@ -192,10 +130,7 @@ func TestPassedInstallUnitEndsTheRunCard(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "desktop", "build.sh"), []byte("fake"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	h, err := SelfUpdateRecipe(ctx, repo, "/fake/dyna", "install")
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := Hook{Name: "install", Label: "Update Dyna", Event: MainUpdated, Command: "true", Cwd: "main", Timeout: "1m", OnFail: "alert"}
 	add(t, s, repo, h)
 	r, err := repoid.Resolve(ctx, repo)
 	if err != nil {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"dyna-agent/internal/hookinstall"
@@ -22,6 +24,15 @@ func (s Service) StartUpdate(ctx context.Context, event Event, source string) (R
 	if err != nil {
 		return Run{}, err
 	}
+	jobs, err := s.installer().Jobs.List()
+	if err != nil {
+		return Run{}, err
+	}
+	for _, job := range jobs {
+		if job.Hook == updaterservice.RunName && job.Repo == r.ID && job.SHA == event.SHA && job.Status != "finished" {
+			return Run{ID: job.ID, Result: "pending", LogPath: job.HookLog}, nil
+		}
+	}
 	h := Hook{Name: updaterservice.RunName, Label: "Updates"}
 	event.Repo = source
 	run, log, err := s.newRun(ctx, r, event, h)
@@ -29,7 +40,15 @@ func (s Service) StartUpdate(ctx context.Context, event Event, source string) (R
 		return Run{}, err
 	}
 	s.emit(event, hookEvent(event, h, run, room.HookRunning, ""))
-	job := hookinstall.Job{ID: run.ID, SHA: event.SHA, Repo: r.ID, Hook: h.Name, Room: event.Room, Session: event.Session, HookLog: run.LogPath, Config: hookinstall.DefaultConfig(r.Main, exe)}
+	config := hookinstall.DefaultConfig(r.Main, exe)
+	var dirs []string
+	for _, tool := range []string{"go", "npm", "node"} {
+		if path, err := exec.LookPath(tool); err == nil {
+			dirs = append(dirs, filepath.Dir(path))
+		}
+	}
+	config.Path = capturedToolPath(append(dirs, filepath.SplitList(os.Getenv("PATH"))...), s.dataDir())
+	job := hookinstall.Job{ID: run.ID, SHA: event.SHA, Repo: r.ID, Hook: h.Name, Room: event.Room, Session: event.Session, HookLog: run.LogPath, Config: config}
 	err = s.installer().Start(ctx, job, log)
 	if closeErr := log.Close(); err == nil {
 		err = closeErr

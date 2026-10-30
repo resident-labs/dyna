@@ -43,6 +43,8 @@ export interface Pill {
 // pillOf is the one colored mark a row may carry (rule r16): a failed last
 // run, or a service that cannot do its work. Every other state is muted text.
 export function pillOf(s: RegistryService): Pill | null {
+  if (s.detail === 'update-source-invalid') return { label: 'Source checkout is missing or invalid', tone: 'danger' }
+  if (s.detail === 'multiple-update-hooks') return { label: 'Several update hooks; choose a source', tone: 'warning' }
   if (s.state === 'error') return { label: 'Last run failed', tone: 'danger' }
   if (s.detail === 'profile-waiting') return { label: 'Waiting for a profile', tone: 'warning' }
   if (s.detail === 'unreadable') return { label: 'Could not be read', tone: 'warning' }
