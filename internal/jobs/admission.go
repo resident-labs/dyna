@@ -27,6 +27,10 @@ var ErrNoReservation = errors.New("reservation is missing")
 // engine's pass writes the row; this only notices.
 const pollEvery = time.Second
 
+// Standalone holders recover if no engine is running, without driving a pass
+// on every poll. Engine holders rely on the engine's periodic pass.
+const standalonePassEvery = 30 * time.Second
+
 // reservationMargin gives recovery time beyond a check's own deadline.
 const reservationMargin = 5 * time.Minute
 
@@ -245,10 +249,8 @@ func (a Admission) Acquire(ctx context.Context, d Demand, wait func(context.Cont
 		wait = sleepContext
 	}
 	lastReason := ""
+	nextPass := a.now().Add(standalonePassEvery)
 	for {
-		// Whoever waits drives a pass too, so a queue with no engine watching
-		// it still admits. A failed pass retries on the next tick.
-		_, _, _ = a.Pass(ctx, nil)
 		row, err := a.get(ctx, d.ID)
 		if errors.Is(err, os.ErrNotExist) {
 			// The row was swept while its holder still waits; queue again.
@@ -262,6 +264,11 @@ func (a Admission) Acquire(ctx context.Context, d Demand, wait func(context.Cont
 		}
 		if row.State == "admitted" {
 			return row.Port, nil
+		}
+		if !a.Engine && !a.now().Before(nextPass) {
+			nextPass = a.now().Add(standalonePassEvery)
+			_, _, _ = a.Pass(ctx, nil)
+			continue
 		}
 		if row.Reason != lastReason {
 			lastReason = row.Reason
@@ -377,8 +384,20 @@ func (a Admission) Renew(ctx context.Context, node, id string) error {
 	if err != nil {
 		return err
 	}
+	base := a.now().Add(reservationMargin).UnixMilli()
+	var expiry, timeout int64
+	err = db.QueryRowContext(ctx, "SELECT expires_ms, timeout_ms FROM admissions WHERE id=? AND node=? AND state='admitted'", id, node).Scan(&expiry, &timeout)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("reservation for check %s on %s is missing", id, node)
+	}
+	if err != nil {
+		return err
+	}
+	if expiry == base+timeout {
+		return nil
+	}
 	return state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(ctx, "UPDATE admissions SET expires_ms=?+timeout_ms WHERE id=? AND node=? AND state='admitted'", a.now().Add(reservationMargin).UnixMilli(), id, node)
+		result, err := conn.ExecContext(ctx, "UPDATE admissions SET expires_ms=?+timeout_ms WHERE id=? AND node=? AND state='admitted'", base, id, node)
 		if err != nil {
 			return err
 		}
@@ -397,6 +416,16 @@ func (a Admission) Renew(ctx context.Context, node, id string) error {
 // the next pass.
 func (a Admission) Release(ctx context.Context, node, id string) error {
 	pid, start := admissionOwner()
+	row, err := a.get(ctx, id)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if row.Node != node || row.State == "released" || (a.Engine && !row.Engine) || (!a.Engine && (row.PID != pid || row.Start != start)) {
+		return nil
+	}
 	if a.Engine {
 		return a.write(ctx, "UPDATE admissions SET state='released' WHERE id=? AND node=? AND engine=1", id, node)
 	}
