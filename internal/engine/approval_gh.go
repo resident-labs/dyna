@@ -42,9 +42,26 @@ func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
 		default:
 			code = 1
 		}
-		stdoutText := string(stdout.Bytes())
-		output := approvalOutput(stdoutText, string(stderr.Bytes()))
-		result := approvals.Result{ExitCode: &code, Output: output}
+		var outputErr error
+		if stdout.Truncated() {
+			outputErr = errors.New("gh stdout exceeded 1 MiB; output is incomplete")
+		}
+		if stderr.Truncated() {
+			outputErr = errors.Join(outputErr, errors.New("gh stderr exceeded 64 KiB; output is incomplete"))
+		}
+		if outputErr != nil {
+			if code == 0 {
+				code = 1
+			}
+			runErr = errors.Join(runErr, outputErr)
+		}
+		stdoutText, stderrText := string(stdout.Bytes()), string(stderr.Bytes())
+		result := approvals.Result{
+			ExitCode: &code,
+			Output:   approvalOutput(stdoutText, stderrText),
+			Stdout:   approvalOutput(stdoutText, ""),
+			Stderr:   approvalOutput("", stderrText),
+		}
 		for _, field := range strings.Fields(stdoutText) {
 			if strings.HasPrefix(field, "https://") || strings.HasPrefix(field, "http://") {
 				result.URL = field

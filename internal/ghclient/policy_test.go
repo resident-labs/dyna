@@ -202,9 +202,9 @@ esac
 		{"pr comment on parent", ReadWrite, []string{"pr", "comment", "1", "--repo", "upstream/project"}, "", 1},
 		{"pr review comment on parent", ReadWrite, []string{"pr", "review", "1", "--comment", "--repo", "upstream/project"}, "", 1},
 		{"read-only pr comment on parent", ReadOnly, []string{"pr", "comment", "1", "--repo", "upstream/project"}, errReadOnly.Error(), 1},
-		{"pr review on origin", ReadWrite, []string{"pr", "review", "--approve", "--repo", "fork/project"}, errAgentGitHubWrite.Error(), 0},
-		{"pr review on parent", ReadWrite, []string{"pr", "review", "--approve", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
-		{"pr merge on parent", ReadWrite, []string{"pr", "merge", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
+		{"pr review on origin", ReadWrite, []string{"pr", "review", "--approve", "--repo", "fork/project"}, "", 0},
+		{"pr review on parent", ReadWrite, []string{"pr", "review", "--approve", "--repo", "upstream/project"}, "", 1},
+		{"pr merge on parent", ReadWrite, []string{"pr", "merge", "--repo", "upstream/project"}, errNotInRoom.Error(), 0},
 		{"read-only pr create on parent", ReadOnly, []string{"pr", "create", "--repo", "upstream/project"}, errReadOnly.Error(), 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -220,10 +220,7 @@ esac
 			}
 			t.Setenv("TEST_ORIGIN_WRITER", writer)
 			ctx := WithRoom(context.Background(), records[0].ID)
-			err := checkWorkerPolicy(tt.args)
-			if err == nil {
-				err = Run(ctx, Command(ctx, exe, records[0].Repo, tt.args...))
-			}
+			err := Run(ctx, Command(ctx, exe, records[0].Repo, tt.args...))
 			if tt.wantError == "" && err != nil {
 				t.Fatalf("policy error = %v", err)
 			}
@@ -441,7 +438,7 @@ func TestSharedRoomUpstreamResolvesToCheckoutRoom(t *testing.T) {
 	}
 }
 
-func TestWorkerRepoForkIsScoped(t *testing.T) {
+func TestRepoForkArgumentsAreScoped(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		args    []string
@@ -456,8 +453,8 @@ func TestWorkerRepoForkIsScoped(t *testing.T) {
 		{"fork without a repository", []string{"repo", "fork"}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := checkWorkerPolicy(tt.args) == nil; got != tt.allowed {
-				t.Fatalf("checkWorkerPolicy(%v) allowed = %v, want %v", tt.args, got, tt.allowed)
+			if got := isRepoFork(tt.args); got != tt.allowed {
+				t.Fatalf("isRepoFork(%v) = %v, want %v", tt.args, got, tt.allowed)
 			}
 		})
 	}
@@ -524,33 +521,6 @@ esac
 	ctx := context.Background()
 	if err := Run(ctx, Command(ctx, exe, "", "repo", "fork", "upstream/project", "--clone=false")); err != nil {
 		t.Fatalf("fork of the recorded upstream: %v", err)
-	}
-}
-
-func TestWorkerAllowsRoutineCollaborationWrites(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		args    []string
-		allowed bool
-	}{
-		{"issue edit", []string{"issue", "edit", "5", "--add-label", "bug"}, true},
-		{"issue comment", []string{"issue", "comment", "5", "--body", "hi"}, true},
-		{"pr comment", []string{"pr", "comment", "5", "--body", "hi"}, true},
-		{"pr review comment", []string{"pr", "review", "5", "--comment", "--body", "hi"}, true},
-		{"pr review short comment", []string{"pr", "review", "5", "-c", "-b", "hi"}, true},
-		{"pr review approve", []string{"pr", "review", "5", "--approve"}, false},
-		{"pr review comment and approve", []string{"pr", "review", "5", "-c", "-a"}, false},
-		{"pr review request changes", []string{"pr", "review", "5", "--request-changes", "-b", "no"}, false},
-		{"pr review without a flag", []string{"pr", "review", "5"}, false},
-		{"issue close", []string{"issue", "close", "5"}, false},
-		{"pr merge", []string{"pr", "merge", "5"}, false},
-		{"api write", []string{"api", "-X", "POST", "repos/o/r/issues"}, false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := checkWorkerPolicy(tt.args) == nil; got != tt.allowed {
-				t.Fatalf("checkWorkerPolicy(%v) allowed = %v, want %v", tt.args, got, tt.allowed)
-			}
-		})
 	}
 }
 

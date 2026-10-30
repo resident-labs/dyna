@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ func DisplayApprovalBody(payload approvals.GHPayload) string {
 
 // SnapshotFiles reads every file-backed argument into the immutable payload.
 // Standard input must be snapshotted by the shim, which owns that stream.
-func SnapshotFiles(args []string, cwd string) ([]approvals.FileSnapshot, error) {
+func SnapshotFiles(args []string, cwd string, stdin io.Reader) ([]approvals.FileSnapshot, error) {
 	refs, err := approvalFileArguments(commandArgs(args))
 	if err != nil {
 		return nil, err
@@ -71,7 +72,15 @@ func SnapshotFiles(args []string, cwd string) ([]approvals.FileSnapshot, error) 
 		}
 		seen[ref.path] = true
 		if ref.path == "-" {
-			return nil, errors.New("standard input needs an explicit approval snapshot")
+			if stdin == nil {
+				return nil, errors.New("standard input needs an explicit approval snapshot")
+			}
+			data, err := io.ReadAll(stdin)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, approvals.FileSnapshot{Path: ref.path, Data: data})
+			continue
 		}
 		path := ref.path
 		if !filepath.IsAbs(path) {
