@@ -188,6 +188,14 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 			result.add("shell job rows", Pruned{Items: n})
 			return nil
 		})
+		step("orphan shell directories", func(ctx context.Context) error {
+			n, err := (&shells.Store{Root: filepath.Join(store.DataDir(), "shells")}).SweepOrphanDirectories(ctx, now)
+			if err != nil {
+				return err
+			}
+			result.add("orphan shell directories", Pruned{Items: n})
+			return nil
+		})
 		step("local CI results", func(ctx context.Context) error {
 			n, err := pruneLocalCIResults(ctx, store.DataDir(), now)
 			if err != nil {
