@@ -151,18 +151,10 @@
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
   import type { ModelSelection } from './lib/settings/profiles/state.ts'
   import type { RunAgent } from './lib/api/workflow.ts'
+  import { resolveAgent } from './lib/app/agentRef.ts'
+  import type { AgentRef } from './lib/app/agentRef.ts'
 
   // A member the open view drills into. The root conversation is one made from the seat.
-  // AgentRef is the part of a session that opening its view needs. The member
-  // list gives a Member and a machine's usage rows give a load owner.
-  interface AgentRef {
-    id?: string
-    name: string
-    hue: number
-    address?: string
-    room?: string
-    roomId?: string
-  }
   interface PromptSpec {
     title: string
     lines?: string[]
@@ -534,7 +526,7 @@
   function rootMember(): Drill {
     const owner = hierarchy.find((m) => m.owner)
     const holder = rootSeat.external ? (rootSeat.harness ? rootSeat.harness + ' (external)' : 'External orchestrator') : 'Internal root'
-    return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
+    return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, computer: owner?.computer, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
   }
   // The breadcrumbs above a session and a run: root, then the parent sessions.
   let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(feedViews, drill.parent, rootMember()).filter((m) => m.id !== drill?.id) : [])
@@ -1024,7 +1016,8 @@
       const request = detailRequest
       if (!await selecting || request !== detailRequest) return
     }
-    openSession(m)
+    // A usage row names only the session, so the roster supplies its computer.
+    openSession(resolveAgent(m, hierarchy))
   }
 
   // chooseCloseRow opens the work a failed close step left behind, where the
@@ -1941,7 +1934,7 @@
           {#if narrow && !readOnlyDm}<SessionTabs bind:tab={sessionTab} media={session?.media ?? []} computer={sessionComputer} shells={drillShells.length} />{/if}
           {#key drill.id}
             {#if sessionTab === 'computer' && computers}
-              <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, onpending: (pending: boolean) => noteComposerWork('computer:' + drill.id, pending), session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
+              <ComputerPane c={computerOf(drill.computer) ?? { session: drill.computer ?? '', name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.computer ?? ''] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, onpending: (pending: boolean) => noteComposerWork('computer:' + drill.id, pending), session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
             {:else if sessionTab === 'shell'}
               <Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} jobs={shellTabJobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />
             {:else if sessionTab === 'media'}
@@ -1949,7 +1942,7 @@
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
               <Session readOnly={readOnlyDm} onstop={(m: Member) => askConfirm({ kind: 'stop', m })} bind:readingHistory={transcripts.readingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => openShellLog(job.id, job.owner ?? '')} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} onpending={(pending) => noteComposerWork('session:' + drill.id, pending)} />
-              {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
+              {#if showPreview}<ComputerPreview c={drillComputer} session={drill.computer ?? ''} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
           {/key}

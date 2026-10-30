@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/approvals"
+	"dyna-agent/internal/computers"
 	"dyna-agent/internal/listpage"
 	"dyna-agent/internal/notify"
 	prview "dyna-agent/internal/pr/view"
@@ -925,6 +926,9 @@ type Member struct {
 	Closed           bool                   `json:"closed,omitempty"`
 	Hue              int                    `json:"hue"`
 	Emoji            string                 `json:"emoji,omitempty"` // avatar; empty for the owner
+	// Computer is the ID of the computer this row uses (computers.ActorID), so
+	// the Computer tab reads the right computer without guessing from the row.
+	Computer string `json:"computer,omitempty"`
 	// Seat is set on the owner entry: who holds the room's root seat.
 	Seat *room.Seat `json:"seat,omitempty"`
 	// OwnerDisplay says this session's own shells use the owner's display.
@@ -1024,7 +1028,7 @@ func (s *Service) buildMembers(rec room.Record, all []subagent.Info, rev string,
 		}
 	}
 	seat := rec.Seat
-	out := []Member{{Name: rec.Name, Address: rec.Name, Owner: true, Status: "owner", State: StateIdle, Children: top, Hue: NameHue(rec.Name), Seat: &seat}}
+	out := []Member{{Name: rec.Name, Address: rec.Name, Owner: true, Status: "owner", State: StateIdle, Children: top, Hue: NameHue(rec.Name), Seat: &seat, Computer: computers.ActorID("", rec.ID)}}
 	var walk func([]*subagent.MemberNode, int)
 	walk = func(nodes []*subagent.MemberNode, depth int) {
 		for _, node := range nodes {
@@ -1046,6 +1050,7 @@ func (s *Service) member(info subagent.Info, depth, kids int) Member {
 		Depth: depth, Children: kids, Status: info.Status, Turns: info.Turns, Created: info.Created, Activity: info.LastActivity,
 		Finished: info.Status == subagent.StatusDormant, Resumable: info.Resumable && info.HarnessSession != "" && info.ConsumedBy == "",
 		Closed: info.Status == subagent.StatusClosed, Hue: NameHue(info.Address()), OwnerDisplay: info.OwnerDisplay,
+		Computer: computers.ActorID(info.ID, info.RoomID),
 	}
 	switch info.Status {
 	case subagent.StatusDormant:
