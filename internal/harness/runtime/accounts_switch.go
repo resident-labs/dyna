@@ -275,13 +275,38 @@ func (a *Accounts) TurnLeaseManaged(ctx context.Context, harness string) (*Resou
 		}
 	}
 	defer releaseAccountLock(gate)
-	lease, err := newResourceLease(ctx, filepath.Join(dir, ".turns"), "turn-", nil)
+	// The account is unknown until BindTurnAccount names the one this turn resolves.
+	lease, err := newResourceLease(ctx, filepath.Join(dir, ".turns"), "turn-", turnUse{})
 	if err != nil {
 		releaseAccountLock(turns)
 		return nil, err
 	}
 	lease.afterClose = func() { releaseAccountLock(turns) }
 	return lease, nil
+}
+
+// turnUse names the account a turn lease runs on. An empty name means unknown.
+type turnUse struct {
+	Account string `json:"account"`
+}
+
+// turnLeaseMayUse reports whether a live turn lease can use account id. A lease
+// with no readable account name may use any account, so it always counts.
+func turnLeaseMayUse(id string) func(resourceUse) bool {
+	return func(use resourceUse) bool {
+		var turn turnUse
+		return json.Unmarshal(use.Data, &turn) != nil || turn.Account == "" || turn.Account == id
+	}
+}
+
+// BindTurnAccount names the account that this turn resolved. Until then the
+// lease counts for every account, so a removal waits for the turn to bind.
+func (l *ResourceLease) BindTurnAccount(id string) error {
+	raw, err := json.Marshal(turnUse{Account: id})
+	if err != nil {
+		return err
+	}
+	return l.SetData(raw)
 }
 
 // SwitchStatus counts only live file-lock holders. A crashed process cannot pin it.
@@ -657,12 +682,8 @@ func (a *Accounts) Remove(id string, confirmed bool) error {
 	if err != nil {
 		return err
 	}
-	// A removal must not wait for a running harness or change sign-in underneath it.
-	pending, running := a.SwitchStatus(n.Harness)
-	if pending || running > 0 {
-		return errors.New("Wait for all harness turns and account switches before removal.")
-	}
-	// Use nonblocking locks so the no-turn condition cannot race new admission.
+	// Use nonblocking locks so the switch and admission checks cannot race new turns.
+	// Only turns that may use this account block the removal.
 	dir, err := a.harnessDirectory(n.Harness)
 	if err != nil {
 		return err
@@ -673,16 +694,23 @@ func (a *Accounts) Remove(id string, confirmed bool) error {
 			releaseAccountLock(locks[i])
 		}
 	}()
-	for _, name := range []string{".switch.lock", ".admission.lock", ".turn.lock"} {
+	for _, name := range []string{".switch.lock", ".admission.lock"} {
 		f, e := openAccountLock(filepath.Join(dir, name), true)
 		if e != nil {
 			return e
 		}
 		if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
 			f.Close()
-			return errors.New("Wait for all harness turns before removal.")
+			return errors.New("Wait for account switches before removal.")
 		}
 		locks = append(locks, f)
+	}
+	inUse, err := resourceLeaseCountWhere(filepath.Join(dir, ".turns"), turnLeaseMayUse(id))
+	if err != nil {
+		return err
+	}
+	if inUse > 0 {
+		return errors.New("Wait for turns that use this account before removal.")
 	}
 	if err = a.transaction(func(state *store.State) error {
 		current, e := a.native(state.Find(id))
