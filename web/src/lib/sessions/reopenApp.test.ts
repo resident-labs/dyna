@@ -1,19 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import vm from 'node:vm'
 import { isFinished } from '../rooms/memberOrder.ts'
 import { selectableSession } from './consolidation.ts'
 import { appLoaderStubs } from '../rooms/appStubs.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
 import { mergeFeedPage, rerouteAnchors, withViews } from '../rooms/feedPages.ts'
-import { call, runFunctions } from '../../../test/svelte-source.ts'
+import { call, moduleFunctions } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
 import { isRecord } from '../api/guards.ts'
 import { need } from '../../../test/need.ts'
 
-const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const names = ['reopenSession', 'dismissSession', 'menuItems']
+const source = readFileSync(new URL('../app/sessionActions.svelte.ts', import.meta.url), 'utf8')
+const factory = need(moduleFunctions(source).get('createSessionActions')).replace('export function', 'function')
 // The slice of App's state these handlers read and write.
 interface Member {
   id: string
@@ -54,7 +55,26 @@ function app(reopen: (room: string, id: string) => unknown) {
   c.routedParents ??= ''; c.selectableSession = selectableSession
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(c)
-  runFunctions(source, names, c)
+  Object.assign(c, { $state: (v: unknown) => v, copyText: async () => {}, errorText: String })
+  vm.createContext(c)
+  vm.runInContext(factory, c)
+  vm.runInContext(`
+    const actions = createSessionActions({
+      api,
+      room: () => roomId, request: () => roomRequest, sessionVisit: () => sessionVisit,
+      selectedId: () => drill?.id,
+      patchMember: (member) => { router.drill = member; transcripts.patchMember(member) },
+      loadSession: () => loadSession(), loadMembers: () => loadMembers(),
+      loadProfiles() {}, openSession() {}, openMember() {}, mentionMember() {},
+      selectForConsolidation() {}, moveUnder() {}, expediteItems: (m, id) => expediteItems(m, id),
+      askConfirm() {}, say: (text) => say(text),
+    })
+    Object.assign(globalThis, { reopenSession: actions.reopenSession, dismissSession: actions.dismissSession, menuItems: (m) => actions.menuItems(m, '') })
+    Object.defineProperties(globalThis, {
+      reopening: { get: () => actions.reopening, configurable: true },
+      dismissing: { get: () => actions.dismissing, configurable: true },
+    })
+  `, c)
   // The member rows and the opened room's feed live in the room loader now.
   installRoomLoader(c, c.api)
   return { c, calls }

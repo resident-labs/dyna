@@ -31,7 +31,7 @@
   import { createWorkflowData } from './lib/workflows/workflowData.ts'
   import { onMount, tick } from 'svelte'
   import { errorText } from './lib/errorText.ts'
-  import { api, onEvent, engineCheck, openExternal, copyText, onUnauthorized, logout } from './api.ts'
+  import { api, onEvent, engineCheck, openExternal, onUnauthorized, logout } from './api.ts'
   import NavPane from './lib/app/shell/NavPane.svelte'
   import PageHeader from './lib/app/shell/PageHeader.svelte'
   import PageNotices from './lib/app/shell/PageNotices.svelte'
@@ -51,6 +51,7 @@
   import Members from './lib/rooms/Members.svelte'
   import Toast from './lib/ui/Toast.svelte'
   import { clipText } from './lib/ui/toast.ts'
+  import { createSessionActions } from './lib/app/sessionActions.svelte.ts'
   import { createRoomControls } from './lib/app/roomControls.svelte.ts'
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
@@ -69,7 +70,6 @@
   import ExpediteGoal from './lib/rooms/ExpediteGoal.svelte'
   import Rules from './lib/rooms/Rules.svelte'
   import PinIcon from './lib/ui/PinIcon.svelte'
-  import { isFinished } from './lib/rooms/memberOrder.ts'
   import Session from './lib/sessions/Session.svelte'
   import DmIdentity from './lib/sessions/DmIdentity.svelte'
   import Home from './lib/rooms/Home.svelte'
@@ -81,7 +81,6 @@
   import SessionConsolidation from './lib/sessions/SessionConsolidation.svelte'
   import CloseResult from './lib/sessions/CloseResult.svelte'
   import { type CloseRow, type CloseChoice } from './lib/sessions/closeOutcomes.ts'
-  import { selectableSession } from './lib/sessions/consolidation.ts'
   import ModelTransfer from './lib/sessions/ModelTransfer.svelte'
   import Runs from './lib/workflows/Runs.svelte'
   import Run from './lib/workflows/Run.svelte'
@@ -153,14 +152,7 @@
   import type { AgentRef } from './lib/app/agentRef.ts'
 
   // A member the open view drills into. The root conversation is one made from the seat.
-  interface MenuItem {
-    label: string
-    run: () => unknown
-    hint?: string
-    danger?: boolean
-    gap?: boolean
-    disabled?: boolean
-  }
+
   // A page of one list, with its continuation cursor.
   interface ListPage<T> {
     items: T[] | null
@@ -364,7 +356,6 @@
   let dropping = $state(false) // files are being dragged over the window
   let profiles = $state<ProfileChoice[]>([]) // what "/" completes in the composer
   let fresh = $state('') // a session just started from the composer: its row flashes
-  let menu = $state<{ m: Member; x: number; y: number; anchor?: HTMLElement } | null>(null) // {m, x, y, anchor}: the open session menu
   let roomMenu = $state<{ r: Room; x: number; y: number; anchor?: HTMLElement } | null>(null) // {r, x, y, anchor}: the open room menu
   let goalId = $state('')
   // The room's goals live in lib/app/goals.svelte.ts. The page reads them
@@ -434,8 +425,20 @@
   const currentBulk = $derived(selectionView.currentBulk)
   const consolidating = $derived(selectionView.consolidating)
   const { selectionActions, closeSelectionMenu, selectionItems, moveUnder, selectForConsolidation, toggleSessionSelection, pickSession, closeConsolidation, consolidationChanged, runBulk, configureBulk, loadBulk, selectBulkFailures, closeBulk } = selectionView
-  let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
-  let expediting = $state<{ member: Member; goals: Goal[] } | null>(null) // the goal picker for a session with several goals
+  const sessionActions = createSessionActions({
+    api,
+    room: () => roomId, request: () => roomRequest, sessionVisit: () => transcripts.visit,
+    selectedId: () => drill?.id,
+    patchMember: (member) => { router.drill = member as Drill; transcripts.patchMember(member) },
+    loadSession, loadMembers, loadProfiles, openSession, openMember, mentionMember,
+    selectForConsolidation, moveUnder, expediteItems, askConfirm, say,
+  })
+  const menu = $derived(sessionActions.menu)
+  const transferring = $derived(sessionActions.transferring)
+  const expediting = $derived(sessionActions.expediting)
+  const reopening = $derived(sessionActions.reopening)
+  const dismissing = $derived(sessionActions.dismissing)
+  const { menuItems, closeMenu, reopenSession, dismissSession, takeBackSeat } = sessionActions
   // The toast line and its detail list live in lib/app/toasts.svelte.ts.
   const toast = $derived(toasts.line)
   const toastDetail = $derived(toasts.detail)
@@ -584,7 +587,7 @@
     hidePins: () => (showPins = false),
     goalId: () => goalId,
     askReplace: (goal) => askConfirm({ kind: 'expedite', goal, roomId }),
-    pickGoal: (member, held) => (expediting = { member, goals: held }),
+    pickGoal: (member, held) => sessionActions.setExpediting({ member, goals: held }),
     hierarchy: () => hierarchy,
     applyPage: (value, append = false) => applyListPage('goals', value, append),
     say,
@@ -701,7 +704,7 @@
       return focusRequest
     },
     focusMessage: (request, alive) => { tick().then(() => { if (alive() && request === router.detailRequest) composer?.focus() }) },
-    closeSessionMenu: () => (menu = null),
+    closeSessionMenu: sessionActions.dismissMenu,
     showMembers: () => { showMembers = true; showPins = false },
     loadMembers,
     loadChanges,
@@ -1059,56 +1062,6 @@
     return res
   }
 
-  let reopening = $state('')
-  async function reopenSession(m: Member) {
-    if (reopening || dismissing || !m.closed || !m.resumable) return
-    const rid = roomId, visit = roomRequest, selection = transcripts.visit
-    reopening = m.id ?? ''
-    try {
-      if (!m.id) return
-      const member = await api.reopenSession(rid, m.id)
-      if (rid !== roomId || visit !== roomRequest) return
-      if (drill?.id === m.id && selection === transcripts.visit) {
-        router.drill = member as Drill
-        transcripts.patchMember(member)
-        await loadSession()
-      }
-      await loadMembers()
-      say({ tone: 'success', subject: `${m.name} is open`, text: 'Its earlier turns are in the transcript.', action: m.id ? { label: 'Open', run: () => openSession(member) } : undefined })
-    } finally { reopening = '' }
-  }
-
-  let dismissing = $state('')
-  // Take back seat: the owner gives the root seat back to the internal root
-  // when an external orchestrator stopped without detaching.
-  async function takeBackSeat() {
-    const rid = roomId
-    try {
-      await api.returnSeat(rid)
-    } catch (e) {
-      say({ tone: 'error', subject: 'Could not take back the root seat', text: errorText(e) })
-      return
-    }
-    if (rid === roomId) await loadMembers()
-  }
-  async function dismissSession(m: Member) {
-    if (dismissing || reopening || !isFinished(m)) return
-    const rid = roomId, visit = roomRequest, selection = transcripts.visit
-    dismissing = m.id ?? ''
-    try {
-      if (!m.id) return
-      const member = await api.dismissSession(rid, m.id)
-      if (rid !== roomId || visit !== roomRequest) return
-      if (drill?.id === m.id && selection === transcripts.visit) {
-        router.drill = member as Drill
-        transcripts.patchMember(member)
-        await loadSession()
-      }
-      await loadMembers()
-      say({ tone: 'success', subject: `${m.name} is closed`, text: 'Its transcript stays available under closed sessions.' })
-    } finally { dismissing = '' }
-  }
-
   async function linkPRGoal(change: ChangeRow, goalId: string) {
     const id = roomId
     // A GitHub-only row has no record to hold its goal yet. Track it for the owner first.
@@ -1118,33 +1071,6 @@
     await api.setPRGoal(id, row.key, goalId)
     if (id === roomId) await loadChanges()
   }
-  // Session menu: safe actions first, then the two that stop work, set
-  // apart in coral. Both of those ask first.
-  // The session menu reads the page's expedited goal as the menu is drawn, so
-  // a goal that expires while the menu is open changes its item.
-  function menuItems(m: Member, expeditedId: string) {
-    const items: MenuItem[] = [
-      { label: m.closed ? 'Open transcript' : 'Message', run: () => openSession(m) },
-      { label: 'Open profile', run: () => openMember(m) },
-    ]
-    if (isFinished(m)) items.push({ label: dismissing === m.id ? 'Dismissing…' : 'Dismiss', run: () => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) })) })
-    if (m.closed && m.resumable) items.push({ label: reopening === m.id ? 'Reopening…' : 'Reopen', run: () => reopenSession(m).catch((e) => say({ tone: 'error', subject: `Could not reopen ${m.name}`, text: errorText(e) })) })
-    // The internal root holds the root seat, so it is never consolidated.
-    if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => selectForConsolidation(m) })
-    if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
-    items.push(...expediteItems(m, expeditedId))
-    items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(
-      () => say({ tone: 'success', subject: 'Copied the address', text: `Paste it to mention ${m.name}.` }),
-      (e) => say({ tone: 'error', subject: 'Could not copy the address', text: errorText(e) }),
-    ) })
-    if (!m.closed) items.push({ label: m.transfer ? 'Model transfer…' : 'Transfer to new model…', run: () => { loadProfiles(); transferring = m } })
-    if (!m.closed && m.parent) items.push({ label: 'Promote to lead', run: () => askConfirm({ kind: 'promote', m }) })
-    if (selectableSession(m)) items.push({ label: 'Move under…', run: () => moveUnder(m) })
-    if (m.state === 'live') items.push({ label: 'Stop turn', danger: true, gap: true, run: () => askConfirm({ kind: 'stop', m }) })
-    if (!m.closed) items.push({ label: 'Close session', danger: true, gap: m.state !== 'live', run: () => askConfirm({ kind: 'close', m }) })
-    return items
-  }
-
   // Room menu: everyday actions first, then Delete in coral, which asks for
   // the room's name.
   function roomMenuItems(r: Room) {
@@ -1162,12 +1088,6 @@
     say({ tone: 'success', subject: 'Workflow started', text: 'Its agents run now. Open Runs to follow it.', action: id ? { label: 'Open', run: () => showRun({ id }) } : undefined })
     await loadRuns()
     if (id) showRun({ id })
-  }
-
-  function closeMenu() {
-    const anchor = menu?.anchor
-    menu = null
-    anchor?.focus?.()
   }
 
   let roomTimer: ReturnType<typeof setTimeout> | undefined
@@ -1860,7 +1780,7 @@
       {:else if roomId && room && showPins}
         <Pins {room} {pins} ondetail={openDetail} onjump={(id: string) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} onclose={() => (showPins = false)} />
       {:else if roomId && room && showMembers && !drill}
-        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => controls.run('resume')} onreloadcontrols={() => controls.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) }))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
+        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => controls.run('resume')} onreloadcontrols={() => controls.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) }))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => sessionActions.openMenu(m, x, y, anchor)} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
       </div>
     </div>
@@ -1916,11 +1836,11 @@
   {#key context.key}<SessionConsolidation roomId={context.roomId} sessions={context.sessions} onoperation={(operation) => consolidationChanged(context, operation)} onclose={closeConsolidation} onopen={(id) => { const m = hierarchy.find((m) => m.id === id); closeConsolidation(); if (m) openSession(m) }} />{/key}
 {/if}
 {#if transferring && room}
-  <ModelTransfer member={transferring} roomId={room.id} {profiles} onclose={() => { transferring = null; loadMembers(); if (drill) loadSession() }} />
+  <ModelTransfer member={transferring} roomId={room.id} {profiles} onclose={() => { sessionActions.setTransferring(null); loadMembers(); if (drill) loadSession() }} />
 {/if}
 {#if expediting && room}
   {@const context = { ...expediting }}
-  <ExpediteGoal goals={context.goals} roomId={room.id} session={context.member.address} expeditedId={$expedite.goalId} onpick={(g: Goal) => { expediting = null; expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) })) }} onstop={() => { expediting = null; stopExpediting(context.goals) }} onclose={() => (expediting = null)} />
+  <ExpediteGoal goals={context.goals} roomId={room.id} session={context.member.address} expeditedId={$expedite.goalId} onpick={(g: Goal) => { sessionActions.setExpediting(null); expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) })) }} onstop={() => { sessionActions.setExpediting(null); stopExpediting(context.goals) }} onclose={() => (sessionActions.setExpediting(null))} />
 {/if}
 {#if confirm && confirmText}
   <Confirm {...confirmText} busy={confirm.busy} error={confirm.error} onconfirm={() => runConfirm()} oncancel={dismiss} />
