@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 type fakeAccess struct {
@@ -19,14 +20,36 @@ type fakeAccess struct {
 
 func (a fakeAccess) RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error) {
 	if a.allowed {
-		return []contract.RoomRepo{{Repo: "owner/repo"}}, nil
+		return []contract.RoomRepo{{Repo: "owner/repo"}, {Repo: "owner/other"}}, nil
 	}
 	return nil, nil
+}
+
+func (a fakeAccess) Session(context.Context, contract.SessionID) (store.Session, error) {
+	return store.Session{Repo: "owner/repo"}, nil
 }
 
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestOtherRoomRepositoryAllowsFetchButRejectsPush(t *testing.T) {
+	target, _ := url.Parse("https://github.com")
+	called := 0
+	transport := roundTrip(func(*http.Request) (*http.Response, error) {
+		called++
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+	})
+	handler := Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true})
+	fetch := httptest.NewRecorder()
+	handler.ServeHTTP(fetch, httptest.NewRequest("GET", "/git/owner/other.git/info/refs?service=git-upload-pack", nil))
+	body := &packReader{header: "pack"}
+	push := httptest.NewRecorder()
+	handler.ServeHTTP(push, httptest.NewRequest("POST", "/git/owner/other.git/git-receive-pack", body))
+	if fetch.Code != 200 || push.Code != http.StatusForbidden || !body.drained || called != 1 {
+		t.Fatalf("fetch %d, push %d, drained %v, calls %d", fetch.Code, push.Code, body.drained, called)
+	}
+}
 
 func TestRejectsOtherRooms(t *testing.T) {
 	target, _ := url.Parse("https://github.com")
