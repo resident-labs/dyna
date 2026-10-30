@@ -32,13 +32,17 @@ var layoutRules = map[string]layoutRule{
 	"migrate":  {imports: []string{"contract", "engine/store"}},
 }
 
-func (r layoutRule) violation(imp string) string {
+// violation returns why pkg may not import imp, or "" when it may.
+func (r layoutRule) violation(pkg, imp string) string {
 	rel, inModule := strings.CutPrefix(imp, modulePath+"/")
 	if !inModule {
 		first, _, _ := strings.Cut(imp, "/")
 		if r.stdlibOnly && strings.Contains(first, ".") {
 			return "is not in the standard library, which spec section 2 requires"
 		}
+		return ""
+	}
+	if rel == pkg || strings.HasPrefix(rel, pkg+"/") {
 		return ""
 	}
 	for _, allowed := range r.imports {
@@ -71,7 +75,7 @@ func importViolations(root string, rules map[string]layoutRule) ([]string, error
 				if err != nil {
 					return err
 				}
-				if msg := rule.violation(imp); msg != "" {
+				if msg := rule.violation(pkg, imp); msg != "" {
 					violations = append(violations, path+" imports "+imp+" and "+msg)
 				}
 			}
@@ -94,13 +98,15 @@ func TestDependencyDirection(t *testing.T) {
 	}
 }
 
-func TestDependencyDirectionReportsForbiddenImport(t *testing.T) {
+// plantHarnessFile writes harness/harness.go with the given import and returns its violations.
+func plantHarnessFile(t *testing.T, imp string) []string {
+	t.Helper()
 	root := t.TempDir()
 	dir := filepath.Join(root, "harness")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	src := "package harness\n\nimport _ \"" + modulePath + "/box\"\n"
+	src := "package harness\n\nimport _ \"" + imp + "\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "harness.go"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +114,17 @@ func TestDependencyDirectionReportsForbiddenImport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(violations) != 1 {
+	return violations
+}
+
+func TestDependencyDirectionReportsForbiddenImport(t *testing.T) {
+	if violations := plantHarnessFile(t, modulePath+"/box"); len(violations) != 1 {
 		t.Fatalf("got %d violations, want 1: %v", len(violations), violations)
+	}
+}
+
+func TestDependencyDirectionAllowsOwnArea(t *testing.T) {
+	if violations := plantHarnessFile(t, modulePath+"/harness/fake"); len(violations) != 0 {
+		t.Fatalf("got violations for own subpackage: %v", violations)
 	}
 }
