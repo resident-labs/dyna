@@ -99,15 +99,15 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 		t.Fatalf("room persisted: %d %v", count, err)
 	}
 }
-func TestCloseParentWithChildIsRejected(t *testing.T) {
+func TestSessionCannotDiscardChild(t *testing.T) {
 	s, room, parent, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	_, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrHasChildren {
-		t.Fatalf("close: %v", e)
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.SessionCloseRequest{Session: child.Session, Discard: true}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("discard: %v", e)
 	}
 }
 func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
@@ -122,15 +122,15 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: child.Session}); e == nil {
 		t.Fatal("expected canceled child close")
 	}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrHasChildren {
-		t.Fatalf("parent close: %v", e)
-	}
 	s.boxes = fakeBoxes{}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: child.Session}); e != nil {
-		t.Fatal(e)
-	}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
 		t.Fatal(e)
+	}
+	if _, err := s.store.Session(ctx, child.Session); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("child remains open: %v", err)
+	}
+	if _, err := s.store.Session(ctx, parent); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("parent remains open: %v", err)
 	}
 }
 func TestRoomRepoAPI(t *testing.T) {

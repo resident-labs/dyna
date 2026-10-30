@@ -98,7 +98,7 @@ func TestGitRouteUsesBoxListenerIdentity(t *testing.T) {
 }
 
 func TestOwnerOnlyMethodRejectsBox(t *testing.T) {
-	w := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/session.close", `{"session":"session-b"}`)
+	w := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/room.repo.add", `{"room":"room-a","repo":"a/b"}`)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d", w.Code)
 	}

@@ -21,6 +21,54 @@ func setupArchive(t *testing.T) (*Service, contract.RoomID, contract.SessionID, 
 	return s, room, child.Session, ctx
 }
 
+func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
+		t.Fatal(err)
+	}
+	s.SetRepositories(&fakeRepos{})
+	parentCaller := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
+	childCaller := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	parentChannel, e := s.BoxChannel(ctx, parentCaller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-parentChannel
+	childChannel, e := s.BoxChannel(ctx, childCaller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-childChannel
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := (<-childChannel).Body.(contract.Archive); !ok {
+		t.Fatal("child archive not sent")
+	}
+	select {
+	case msg := <-parentChannel:
+		t.Fatalf("parent started early: %+v", msg)
+	default:
+	}
+	if _, e := s.ArchiveDone(ctx, childCaller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := (<-parentChannel).Body.(contract.Archive); !ok {
+		t.Fatal("parent archive not sent")
+	}
+	if _, e := s.ArchiveDone(ctx, parentCaller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
+		t.Fatal(e)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
+	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
+		t.Fatalf("close order: %+v, %v", events, err)
+	}
+}
 func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
