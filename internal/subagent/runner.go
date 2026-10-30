@@ -108,11 +108,20 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		firstCall     *workeroutput.CallUsage
 		baseline      = meta.UsageBaseline
 		contextTokens = meta.ContextTokens
-		sessionID     = meta.HarnessSession
-		actualModel   string
-		mu            sync.Mutex
-		gate          *turnGate
+		// idleFor is how long the session sat idle before this turn. The
+		// first harness start consumes it, so a retry inside the turn does
+		// not compact again.
+		idleFor     time.Duration
+		sessionID   = meta.HarnessSession
+		actualModel string
+		mu          sync.Mutex
+		gate        *turnGate
 	)
+	if n > 1 {
+		if prev, err := store.ReadTurn(id, n-1); err == nil && !prev.Ended.IsZero() {
+			idleFor = time.Since(prev.Ended)
+		}
+	}
 	if meta.UsageBaselineTurn != n-1 {
 		baseline = nil
 	}
@@ -354,6 +363,8 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		}
 		mu.Lock()
 		resumeID, lastContext := sessionID, contextTokens
+		idle := idleFor
+		idleFor = 0
 		forking := forkPending && forkFrom != ""
 		mu.Unlock()
 		execution := writes.nativeExecution(meta.Role)
@@ -376,6 +387,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			},
 			UsageBaseline: baseline,
 			ContextTokens: lastContext,
+			IdleFor:       idle,
 			OnFallback: func(f harness.ModelFallback) {
 				writes.note(TurnNote{Fallback: &f})
 			},
