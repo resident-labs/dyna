@@ -18,15 +18,6 @@ import (
 	"dyna-agent/internal/store"
 )
 
-type Remote struct {
-	Ahead     int       `json:"ahead"`
-	Behind    int       `json:"behind"`
-	Head      string    `json:"remoteHead"`
-	Branch    string    `json:"branch"`
-	CheckedAt time.Time `json:"checkedAt"`
-	LastError string    `json:"lastError,omitempty"`
-	Rewrite   string    `json:"rewrite,omitempty"`
-}
 type RemoteStatus map[string]map[string]Remote
 type Snapshot struct {
 	Repositories RemoteStatus         `json:"repositories"`

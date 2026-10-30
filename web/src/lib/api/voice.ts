@@ -1,18 +1,5 @@
-// The Voice call. Sources: internal/voice/realtime/call.go (the page socket
-// at /api/voice/realtime, one JSON message per frame) and
-// internal/voice/calls.go. audio is base64 PCM.
-
-// CallStatus is voice.CallStatus, the result of voiceStart and voiceStatus.
-export interface CallStatus {
-  available: boolean
-  live: boolean
-  unavailable?: string
-  roomId?: string
-  room?: string
-  startedAt?: number // unix milliseconds
-  resumeCursor?: string // engine-issued delivery position
-  error?: string
-}
+// Voice response types come from Go. The page types below describe validated socket variants.
+export type * from './voice.gen.ts'
 
 // VoicePageEvent is realtime.PageEvent: one message from the engine to the
 // page. Go sends one struct and omits unused fields; each member lists the
