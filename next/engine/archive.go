@@ -28,10 +28,16 @@ func (s *Service) ResumeClosures(ctx context.Context) *contract.Error {
 	}
 	for _, current := range boxes {
 		if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
-			continue
+			leaf, err := s.store.ClosingLeaf(ctx, current.Session)
+			if err != nil {
+				return failure(err)
+			}
+			if !leaf {
+				continue
+			}
 		}
 		session, err := s.store.Session(ctx, current.Session)
-		if current.State == contract.BoxDeleted && errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {

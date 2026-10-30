@@ -91,6 +91,7 @@ func Run(ctx context.Context, cfg Config) error {
 	defer proxy.Shutdown(context.Background())
 	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi}
 	service := engine.New(st, boxes, profiles, time.Now)
+	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport)}, cfg.ApprovalsExpiry); err != nil {
