@@ -472,3 +472,50 @@ func TestChildWaitsForParentBox(t *testing.T) {
 		t.Fatalf("unexpected box: %+v", b)
 	}
 }
+
+type heldParentBox struct {
+	started chan BoxSpec
+	release chan struct{}
+}
+
+func (b *heldParentBox) Create(_ context.Context, spec BoxSpec) (string, error) {
+	select {
+	case b.started <- spec:
+		<-b.release
+	default:
+	}
+	return "image", nil
+}
+func (*heldParentBox) Remove(context.Context, contract.BoxID) error { return nil }
+
+func TestPendingChildStartsWhenParentStarts(t *testing.T) {
+	s, room, root, ctx := setup(t)
+	adapter := &heldParentBox{started: make(chan BoxSpec), release: make(chan struct{})}
+	s.boxes = adapter
+	result := make(chan *contract.Error, 1)
+	go func() {
+		_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
+		result <- e
+	}()
+	parent := <-adapter.started
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent.Session})
+	if e != nil {
+		t.Fatal(e)
+	}
+	pending, err := s.store.Box(ctx, child.Box)
+	if err != nil || pending.Reason != string(box.PendingParentHost) {
+		t.Fatalf("pending: %+v, %v", pending, err)
+	}
+	close(adapter.release)
+	if e := <-result; e != nil {
+		t.Fatal(e)
+	}
+	b, err := s.store.Box(ctx, child.Box)
+	if err != nil || b.State != contract.BoxStarting || b.Host != parent.Host {
+		t.Fatalf("child: %+v, %v", b, err)
+	}
+	want, err := box.SliceName([]contract.BoxID{parent.Box, child.Box})
+	if err != nil || b.Slice != want {
+		t.Fatalf("slice: %s, want %s, %v", b.Slice, want, err)
+	}
+}
