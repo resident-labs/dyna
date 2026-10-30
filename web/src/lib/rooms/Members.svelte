@@ -176,7 +176,7 @@
   {#if tail}
     <span class="tail">
       {#if shells}<span class="mark-icon" role="img" aria-label={shellTip(shells, m.shell)} title={shellTip(shells, m.shell)}><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3" /><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg></span>{/if}
-      {#if live}<button class="mark-icon" aria-label="Open {m.name}'s computer" title={computerTip(pc)} onclick={() => onopencomputer(m)}><MonitorGlyph size={15} live /></button>{/if}
+      {#if live}<button class="mark-icon" aria-label="Open {m.name}'s computer" title={computerTip(pc)} onclick={() => onopencomputer(m)}><MonitorGlyph size={15} live={false} /></button>{/if}
     </span>
   {/if}
   <button class="more" aria-label="Actions for {m.name}" title="Actions" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const anchor = e.currentTarget.previousElementSibling; onmenu(m, r.left, r.bottom + 4, anchor instanceof HTMLElement ? anchor : undefined) }}>
@@ -328,6 +328,9 @@
      actions button. The row keeps room for each mark. */
   .row.tailed { padding-right: calc(34px + var(--marks) * 26px); }
   .tail { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 2px; color: var(--faint); }
+  /* The computer mark shows only while it runs, so it needs no color of its
+     own: both marks use the same muted gray. */
+  .mark-icon :global(svg) { color: inherit; }
   .mark-icon { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 5px; color: var(--muted); }
   button.mark-icon { transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
