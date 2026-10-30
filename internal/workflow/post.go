@@ -122,6 +122,25 @@ func (e *engine) post(call goja.FunctionCall) goja.Value {
 	e.shared.postOccurrences[identityKey] = ordinal + 1
 	e.shared.mu.Unlock()
 	key := fmt.Sprintf("%s-%d", identityKey, ordinal)
+	if e.opts.Replay != nil {
+		matched, value, replayErr := e.replayCall(runstore.WorkflowCallPost, identityKey, ordinal)
+		if matched {
+			if value == nil {
+				panic(vm.NewGoError(e.opts.Replay.fail(fmt.Errorf("recorded post result is missing"))))
+			}
+			out, ok := value.(map[string]any)
+			if !ok {
+				panic(vm.NewGoError(e.opts.Replay.fail(fmt.Errorf("recorded post result is not an object"))))
+			}
+			if replayErr != nil {
+				out["error"] = replayErr.Error()
+			}
+			return vm.ToValue(out)
+		}
+		if replayErr != nil {
+			panic(vm.NewGoError(replayErr))
+		}
+	}
 	if e.opts.RecordManifest {
 		if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallPost, identityKey, ordinal); err != nil {
 			e.manifestWriteFailed()
