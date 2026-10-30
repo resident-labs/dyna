@@ -33,7 +33,7 @@ type RosterEntry struct {
 	Reason         string `json:"reason,omitempty"`
 }
 
-// Reconciliation is the plan-vs-actual roster for `dyna runs show --json`.
+// Reconciliation is the plan-vs-actual roster for `dyna workflow runs show --json`.
 type Reconciliation struct {
 	Status      string        `json:"status"` // complete|partial|unavailable|observed-only
 	Entries     []RosterEntry `json:"entries"`

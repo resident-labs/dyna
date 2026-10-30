@@ -1486,7 +1486,7 @@ func (s *Service) CompleteRun(ctx context.Context, runID string) (Result, error)
 	ev.Summary, ev.Detail = runResult(meta)
 	if meta.Status == runstore.StatusInterrupted {
 		ev.Summary = "A Dyna update stopped this workflow. Review its work before restarting it."
-		ev.Detail = fmt.Sprintf("Restart: dyna run <script.js> --resume %s. Resume can repeat steps. Full output: dyna runs show %s", meta.ID, meta.ID)
+		ev.Detail = fmt.Sprintf("Restart: dyna workflow run <script.js> --resume %s. Resume can repeat steps. Full output: dyna workflow runs show %s", meta.ID, meta.ID)
 	}
 	plan, err := s.prepareEventCompletionWithFallback(meta.RoomID, ev, s.parentTargets(meta.Room, meta.ParentSession), 0, meta.ParentSession == "", meta.Status == runstore.StatusInterrupted)
 	if err != nil || plan == nil {
@@ -1556,7 +1556,7 @@ func runResult(meta runstore.Meta) (summary, detail string) {
 			summary = "No result."
 		}
 	}
-	return summary, "Full output: dyna runs show " + meta.ID
+	return summary, "Full output: dyna workflow runs show " + meta.ID
 }
 
 // ShellExit is one finished shell job, as its owner hears of it.

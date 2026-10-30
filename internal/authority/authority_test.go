@@ -92,7 +92,7 @@ func TestRoleLimits(t *testing.T) {
 		{"call withdraw", []Role{Root}},
 		{"request question", []Role{Root}},
 		{"request withdraw", []Role{Root, Session, Worker}},
-		{"run", []Role{Owner, Root}},
+		{"workflow run", []Role{Owner, Root}},
 		{"room create", []Role{Owner, Root}},
 		{"room edit", []Role{Owner, Root}},
 		{"room delete", []Role{Owner, Root}},
@@ -190,8 +190,8 @@ func TestActorInUsesTheCallersRoom(t *testing.T) {
 }
 
 func TestSessionCannotRunWorkflow(t *testing.T) {
-	err := Check("run", Actor{Role: Session}, nil)
-	if err == nil || !strings.Contains(err.Error(), "dyna run is for room roots. Start a child with dyna subagent start, or post the job to @root.") {
+	err := Check("workflow run", Actor{Role: Session}, nil)
+	if err == nil || !strings.Contains(err.Error(), "dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root.") {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
 }
