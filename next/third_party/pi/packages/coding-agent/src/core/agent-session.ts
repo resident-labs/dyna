@@ -2140,7 +2140,7 @@ export class AgentSession {
 			this.isStreaming ? options?.streamingBehavior : undefined,
 		);
 		if (!processedInput) {
-			if (options?.deliveryId) throw new Error("Delivery input was handled by an extension");
+			if (options?.deliveryId !== undefined) throw new Error("Delivery input was handled by an extension");
 			preflightResult?.("handled");
 			return;
 		}
