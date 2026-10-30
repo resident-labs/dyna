@@ -24,7 +24,7 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
-	if err = s.store.ShellJobEnded(ctx, session.ID, event); err != nil {
+	if err = s.store.ShellJobEnded(ctx, session.ID, req.Job, event); err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
 	return contract.ShellJobEndedResponse{}, nil

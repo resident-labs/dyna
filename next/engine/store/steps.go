@@ -15,7 +15,7 @@ var steps = map[int][]string{
 		`CREATE UNIQUE INDEX operations_pending_dedup ON operations(room, by_kind, by_id, kind, args_sha256) WHERE state = 'pending';`,
 	},
 	6: {"CREATE TABLE transcript_offsets (session TEXT NOT NULL REFERENCES sessions(id), path TEXT NOT NULL, acked INTEGER NOT NULL, PRIMARY KEY(session, path))"},
-	7: {"CREATE TABLE shell_jobs (session TEXT NOT NULL, job TEXT NOT NULL, PRIMARY KEY(session, job))"},
+	7: {"CREATE TABLE shell_jobs (session TEXT NOT NULL REFERENCES sessions(id), job TEXT NOT NULL, PRIMARY KEY(session, job))"},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.
