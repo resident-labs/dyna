@@ -3,6 +3,9 @@ package ghclient
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -62,6 +65,9 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 		if err != nil {
 			return err
 		}
+		if err := refuseUpstreamClose(ctx, cmd, r, token, login); err != nil {
+			return err
+		}
 		if err := refuseForeignComment(ctx, cmd, r, token, login); err != nil {
 			return err
 		}
@@ -99,4 +105,41 @@ func runWithToken(cmd *exec.Cmd, token string) error {
 	err := cmd.Run()
 	_, _ = io.WriteString(destination, strings.ReplaceAll(string(stderr.Bytes()), token, "[redacted]"))
 	return err
+}
+
+// refuseUpstreamClose binds an upstream close to the selected account's PR.
+func refuseUpstreamClose(ctx context.Context, cmd *exec.Cmd, r repository, token, login string) error {
+	args := commandArgs(cmd.Args[1:])
+	if len(args) < 2 || args[0] != "pr" || args[1] != "close" {
+		return nil
+	}
+	_, err := roomFor(ctx, cmd.Dir, r)
+	if !errors.Is(err, errNotInRoom) {
+		return err
+	}
+	p := parseArgs(args[:2], args[2:])
+	if len(p.positional) > 1 {
+		return fmt.Errorf("upstream PR close requires one target")
+	}
+	view := []string{"pr", "view"}
+	if len(p.positional) == 1 {
+		view = append(view, p.positional[0])
+	}
+	view = append(view, "--repo", r.host+"/"+r.name, "--json", "author")
+	raw, err := authOutput(ctx, cmd, token, view...)
+	if err != nil {
+		return fmt.Errorf("could not read upstream PR author: %w", err)
+	}
+	var result struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("could not read upstream PR author: %w", err)
+	}
+	if login == "" || !strings.EqualFold(login, result.Author.Login) {
+		return fmt.Errorf("upstream PR was not written by this room's GitHub account")
+	}
+	return nil
 }
