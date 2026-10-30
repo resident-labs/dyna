@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"math/big"
+	"mime"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -635,7 +636,8 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	}
 	for i := range req.Attachments {
 		file := &req.Attachments[i]
-		if !validHash(file.SHA256) || file.Name == "" || file.Media == "" {
+		media, _, mediaErr := mime.ParseMediaType(file.Media)
+		if !validHash(file.SHA256) || file.Name == "" || mediaErr != nil {
 			return contract.PostResponse{}, invalid("invalid attachment")
 		}
 		info, err := os.Stat(filepath.Join(s.filesDir, file.SHA256))
@@ -643,6 +645,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 			return contract.PostResponse{}, invalid("attachment not found")
 		}
 		file.Bytes = info.Size()
+		file.Media = media
 	}
 	if req.Home.Kind == "" {
 		req.Home.Kind = contract.ConversationFeed
