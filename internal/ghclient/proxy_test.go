@@ -16,6 +16,8 @@ import (
 )
 
 func TestWorkerWriteSnapshotsBodyAndDoesNotRunGH(t *testing.T) {
+	records := setupRooms(t, "owner/project")
+	t.Setenv("DYNA_ROOM_ID", records[0].ID)
 	dir := t.TempDir()
 	body := filepath.Join(dir, "body.md")
 	if err := os.WriteFile(body, []byte("original body"), 0600); err != nil {
@@ -120,6 +122,7 @@ func TestPinnedReviewArgsPinAndClassifyAsAgent(t *testing.T) {
 }
 
 func TestPublishThroughApprovalHoldsPRComment(t *testing.T) {
+	records := setupRooms(t, "owner/project")
 	originalRequest, originalWait := requestApproval, waitApproval
 	t.Cleanup(func() { requestApproval, waitApproval = originalRequest, originalWait })
 	var sent approvals.RequestInput
@@ -131,7 +134,7 @@ func TestPublishThroughApprovalHoldsPRComment(t *testing.T) {
 		return approvals.Request{ID: id, State: approvals.StatePending, At: "room:parent"}, nil
 	}
 	args := []string{"pr", "comment", "https://github.com/owner/project/pull/7", "--body", "feedback"}
-	err := PublishThroughApproval(context.Background(), "room-1", t.TempDir(), args)
+	err := PublishThroughApproval(context.Background(), records[0].ID, t.TempDir(), args)
 	if SessionExitCode(err) != 75 {
 		t.Fatalf("error = %v", err)
 	}

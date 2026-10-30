@@ -55,10 +55,7 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 	if err != nil {
 		return err
 	}
-	if err := refuseOwnerIdentity(ctx, cmd); err != nil {
-		return err
-	}
-	cleanup, err := withAttribution(ctx, cmd, r)
+	cleanup, err := ComposeBody(ctx, cmd, r)
 	if err != nil {
 		return err
 	}
