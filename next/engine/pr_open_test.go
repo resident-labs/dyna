@@ -67,7 +67,7 @@ func TestPrOpenRecordsOwnerAndNotifiesParent(t *testing.T) {
 		t.Fatalf("result %+v error %+v", result, failure)
 	}
 	pr := result.Operation.Result.PR
-	if calls != 1 || request.Head != "v2/"+string(session) || request.Base != "main" || request.Title != "Trial" || !request.Draft || pr == nil || pr.Number != 42 || pr.URL != "https://github.com/owner/repo/pull/42" {
+	if calls != 1 || s.repos.(*fakeRepos).calls != 2 || request.Head != "v2/"+string(session) || request.Base != "main" || request.Title != "Trial" || !request.Draft || pr == nil || pr.Number != 42 || pr.URL != "https://github.com/owner/repo/pull/42" {
 		t.Fatalf("calls %d request %+v pr %+v", calls, request, pr)
 	}
 	var owner string
@@ -77,6 +77,32 @@ func TestPrOpenRecordsOwnerAndNotifiesParent(t *testing.T) {
 	var count int
 	if err := s.store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='pr.opened' AND d.wake=1").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("wakes %d error %v", count, err)
+	}
+}
+
+func TestPrOpenStoreFailureRequiresReconciliation(t *testing.T) {
+	calls := 0
+	s, session, ctx := prFixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"number":42}`)
+	})
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	submit := func(title string) contract.OpSubmitResponse {
+		out, failure := s.OpSubmit(ctx, caller, contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: title, Base: "main"}}})
+		if failure != nil {
+			t.Fatal(failure)
+		}
+		return out
+	}
+	submit("First")
+	second := submit("Second")
+	if calls != 2 || second.Operation.State != contract.OpFailed || second.Operation.Result == nil || !strings.Contains(second.Operation.Result.Error, "ownership could not be recorded") || !strings.Contains(second.Operation.Result.Error, "/pull/42") {
+		t.Fatalf("calls %d result %+v", calls, second.Operation)
 	}
 }
 
