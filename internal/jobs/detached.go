@@ -126,9 +126,14 @@ if [ "$unitOK" = 1 ]; then
   if [ -n "$login_path" ]; then set -- "$@" "--setenv=PATH=$login_path"; fi
   systemd-run --user --quiet --collect --unit "$unit" "$@" -- nice -n 10 bash "$d/wrap.sh" "$d" 8>&- || { rm -rf "$d"; exit 1; }
 else
-  if [ -n "$io" ]; then echo 'quick jobs need systemd user units for resource limits' >&2; exit 1; fi
   if [ -n "$login_path" ]; then PATH=$login_path; export PATH; fi
-  setsid nohup nice -n 10 bash "$d/wrap.sh" "$d" 8>&- >/dev/null 2>&1 </dev/null &
+  if [ -n "$io" ] && command -v ionice >/dev/null 2>&1; then
+    setsid nohup nice -n 19 ionice -c 3 bash "$d/wrap.sh" "$d" 8>&- >/dev/null 2>&1 </dev/null &
+  elif [ -n "$io" ]; then
+    setsid nohup nice -n 19 bash "$d/wrap.sh" "$d" 8>&- >/dev/null 2>&1 </dev/null &
+  else
+    setsid nohup nice -n 10 bash "$d/wrap.sh" "$d" 8>&- >/dev/null 2>&1 </dev/null &
+  fi
   echo $! > "$d/pid"
 fi
 `

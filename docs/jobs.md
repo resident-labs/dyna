@@ -56,6 +56,7 @@ node's queue, and store their log and exit code.
   disk; a node runs only a few heavy units at once. A job that waits shows why
   in `dyna job show`.
 
+- `--quick` uses a separate, bounded quick lane for short commands. Its default timeout is 10 minutes. Systemd user units enforce its 1 CPU and 1 GiB limits. Without systemd user units, Dyna uses low CPU priority and idle IO priority when available, but cannot enforce those hard limits. The node's quick slots still bound the number of quick jobs.
 - `--idle D` stops a running job as `timed_out` after its log has no new
   output for D. D must be positive and no longer than `--timeout`. The default
   is no idle timeout.
