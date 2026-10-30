@@ -68,7 +68,7 @@
 
 <style>
   .media { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s5) 28px 40px; }
-  section { max-width: 1040px; margin: 0 auto 28px; }
+  section { margin: 0 auto 28px; }
   h3 { color: var(--muted); font-size: var(--t-sm); font-weight: 600; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line-soft); }
   .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 20px var(--s4); }
   .item { min-width: 0; }

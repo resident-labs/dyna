@@ -64,7 +64,7 @@
   .failure .expanded .cmd, .failure .expanded pre { max-height: none; overflow-y: visible; }
   @media (pointer: coarse) { .actions button { min-height: 44px; } }
 
-  .failure { margin: 2px 0 6px 0; padding: var(--s1) var(--s3); background: var(--rail); border-radius: 6px; box-shadow: inset 2px 0 0 rgba(239, 138, 128, 0.55); font: var(--t-sm)/1.6 var(--mono, ui-monospace, monospace); color: var(--ink-2); max-width: 920px; }
+  .failure { margin: 2px 0 6px 0; padding: var(--s1) var(--s3); background: var(--rail); border-radius: 6px; box-shadow: inset 2px 0 0 rgba(239, 138, 128, 0.55); font: var(--t-sm)/1.6 var(--mono, ui-monospace, monospace); color: var(--ink-2); max-width: var(--feed-reading-width); }
   .failure .cmd { color: var(--faint); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9.6em; overflow-y: auto; }
   .failure .cmd b { font-weight: 400; margin-right: 6px; }
   .failure pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; }

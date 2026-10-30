@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/pr/state"
@@ -48,6 +49,34 @@ func qaSeedFixtures(dataDir string) error {
 	if err := state.Write(state.Root(dataDir), state.State{Version: 1, Records: map[string]*state.Record{key: pr}}); err != nil {
 		return err
 	}
+	// Saved, synthetic readings let Home show a full row of provider cards.
+	// They contain no credentials and never contact a provider.
+	accounts := &accountstore.Store{Root: filepath.Join(dataDir, "accounts")}
+	providers := []accountstore.Provider{accountstore.ProviderAnthropic, accountstore.ProviderChatGPT, accountstore.ProviderKimiCode, accountstore.ProviderXAI, accountstore.ProviderDeepSeek, accountstore.ProviderZAI}
+	used := 35.0
+	now := time.Now().UTC()
+	if err := accounts.Update(func(state *accountstore.State) error {
+		for i, provider := range providers {
+			id := fmt.Sprintf("%032x", i+1)
+			state.Entries = append(state.Entries, accountstore.Entry{Metadata: accountstore.Metadata{
+				ID: id, Harness: "pi", Provider: provider, Kind: accountstore.KindAPIKey,
+				Identity: "qa:" + string(provider), Label: string(provider),
+				NativeHome:  filepath.Join(accounts.Root, "pi", id),
+				Observation: &accountstore.Observation{ObservedAt: now, Windows: []accountstore.Window{{ID: "weekly", Label: "Weekly", UsedPercent: &used}}},
+			}})
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for i, provider := range providers {
+		if err := os.MkdirAll(filepath.Join(accounts.Root, "pi", fmt.Sprintf("%032x", i+1)), 0700); err != nil {
+			return err
+		}
+		if err := accounts.SetActive(provider, "pi", "", fmt.Sprintf("%032x", i+1)); err != nil {
+			return err
+		}
+	}
 	// A finished installer receipt appears in the Updates service activity.
 	// Writing a receipt does not start an installer or a service.
 	const id = "00000000000000000000000000000001"
@@ -59,7 +88,6 @@ func qaSeedFixtures(dataDir string) error {
 	if err := os.WriteFile(logPath, []byte("Sample update completed.\n"), 0600); err != nil {
 		return err
 	}
-	now := time.Now().UTC()
 	install := hookinstall.Store{Root: root}
 	return install.Update(id, func(job *hookinstall.Job) error {
 		*job = hookinstall.Job{ID: id, Hook: updaterservice.RunName, HookLog: logPath,
