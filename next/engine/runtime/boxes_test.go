@@ -30,7 +30,7 @@ func (r *missingContainerRunner) Run(_ context.Context, _ []byte, args ...string
 	if strings.Contains(command, "'volume' 'rm'") {
 		status = 1
 	}
-	return []byte(fmt.Sprintf("DYNA-END %020d %03d\\n", 0, status)), nil
+	return []byte(fmt.Sprintf("DYNA-END %020d %03d\n", 0, status)), nil
 }
 
 func TestRemoveHostBoxWithMissingContainer(t *testing.T) {
