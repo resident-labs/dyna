@@ -55,7 +55,9 @@ func testServices(t *testing.T, readOnly bool) services {
 	t.Cleanup(terminals.Shutdown)
 	runtime := harnessruntime.New()
 	runtime.SetLifetime(t.Context())
-	return services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: service.New(service.Options{Store: accountstore.DefaultStore()}), config: &configsvc.Service{ReadOnly: readOnly}, computers: newComputerHost(rooms), voice: &voice.Calls{}, hooks: hooks.New(), sync: lanesync.New(), health: engineHealth("", "", time.Now(), nil, hub.New(1), nil, nil), load: sysload.New()}
+	svc := services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: service.New(service.Options{Store: accountstore.DefaultStore()}), config: &configsvc.Service{ReadOnly: readOnly}, computers: newComputerHost(rooms), voice: &voice.Calls{}, hooks: hooks.New(), sync: lanesync.New(), health: engineHealth("", "", time.Now(), nil, hub.New(1), nil, nil), load: sysload.New()}
+	svc.registerGitHubWrite()
+	return svc
 }
 
 func testCalls(t *testing.T, readOnly bool) map[string]websvc.Call {

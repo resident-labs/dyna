@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,6 +17,8 @@ import (
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 )
+
+const githubWrite approvals.OperationKind = "github.write"
 
 func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput) (approvals.Request, error) {
 	actor := authority.Of(ctx)
@@ -32,71 +32,39 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 	if len(paths) != len(in.Media) {
 		return approvals.Request{}, errors.New("media arguments do not match attachments")
 	}
-	if len(paths) > 0 {
-		if (actor.Role != authority.Session && actor.Role != authority.Root) || actor.Session == "" {
-			return approvals.Request{}, errors.New("media approval requires a session")
+	for i := range in.Media {
+		media := &in.Media[i]
+		if media.Path != paths[i] || media.Name != filepath.Base(media.Path) || media.PostID != "" || media.AttachmentID != "" {
+			return approvals.Request{}, errors.New("invalid media")
 		}
-		sender, err := s.rooms.Notify.SenderOf(notify.Claim{Session: actor.Session, Room: actor.Room})
+		sum := sha256.Sum256(media.Data)
+		if fmt.Sprintf("%x", sum) != media.SHA256 {
+			return approvals.Request{}, errors.New("media hash mismatch")
+		}
+		data, err := ghclient.SanitizeMedia(media.Name, media.Data)
 		if err != nil {
 			return approvals.Request{}, err
 		}
-		for i, media := range in.Media {
-			if media.Path != paths[i] || media.Name != filepath.Base(media.Path) || media.PostID == "" || media.AttachmentID == "" {
-				return approvals.Request{}, errors.New("invalid media reference")
-			}
-			msg, err := s.rooms.Notify.Rooms.Message(actor.Room, media.PostID)
-			if err != nil {
-				return approvals.Request{}, err
-			}
-			if msg.AuthorSessionID() != actor.Session {
-				return approvals.Request{}, errors.New("media post belongs to another session")
-			}
-			found := false
-			for _, a := range msg.Attachments {
-				if a.ID == media.AttachmentID && a.Name == media.Name {
-					found = true
-				}
-			}
-			if !found {
-				return approvals.Request{}, errors.New("media attachment is not in its post")
-			}
-			path, err := s.rooms.Notify.Rooms.AttachmentPath(actor.Room, media.AttachmentID)
-			if err != nil {
-				return approvals.Request{}, err
-			}
-			f, err := os.Open(path)
-			if err != nil {
-				return approvals.Request{}, err
-			}
-			data, err := io.ReadAll(io.LimitReader(f, (25<<20)+1))
-			closeErr := f.Close()
-			if err != nil {
-				return approvals.Request{}, err
-			}
-			if closeErr != nil {
-				return approvals.Request{}, closeErr
-			}
-			sum := sha256.Sum256(data)
-			if fmt.Sprintf("%x", sum) != media.SHA256 {
-				return approvals.Request{}, errors.New("media hash mismatch")
-			}
-			data, err = ghclient.SanitizeMedia(media.Name, data)
-			if err != nil {
-				return approvals.Request{}, err
-			}
-			result, err := s.rooms.Notify.Post(ctx, notify.PostInput{NoWake: true, Sender: sender, Mentions: []string{"@root"}, Text: "Media for GitHub approval. Image metadata is removed; video metadata is not removed.", Files: []notify.File{{Name: media.Name, Data: data}}})
-			if err != nil {
-				return approvals.Request{}, err
-			}
-			if len(result.Message.Attachments) != 1 {
-				return approvals.Request{}, errors.New("sanitized media post failed")
-			}
-			sum = sha256.Sum256(data)
-			in.Media[i].PostID = result.Message.ID
-			in.Media[i].AttachmentID = result.Message.Attachments[0].ID
-			in.Media[i].SHA256 = fmt.Sprintf("%x", sum)
-		}
+		media.Data = data
+		sum = sha256.Sum256(data)
+		media.SHA256 = fmt.Sprintf("%x", sum)
 	}
+	payload := &approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files, Media: in.Media}
+	out, err := approvals.Submit(ctx, s.rooms.Approvals, actor, githubWrite, payload)
+	if err != nil {
+		return approvals.Request{}, err
+	}
+	if out.Result != nil {
+		state := approvals.StateDone
+		if out.Result.ExitCode != nil && *out.Result.ExitCode != 0 {
+			state = approvals.StateFailed
+		}
+		return approvals.Request{State: state, Result: out.Result}, nil
+	}
+	return out.Request, nil
+}
+
+func (s services) classifyGitHubWrite(ctx context.Context, actor authority.Actor, in *approvals.GHPayload) (approvals.Class, error) {
 	ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, actor.Room), s.rooms.Notify.Rooms)
 	var checkedRef ghclient.ItemRef
 	var checkedNumber int
@@ -126,56 +94,105 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 		if errors.As(err, &refusal) && actor.Session != "" {
 			rec, resolveErr := s.rooms.Notify.Rooms.Resolve(actor.Room)
 			if resolveErr != nil {
-				return approvals.Request{}, resolveErr
+				return approvals.Class(""), resolveErr
 			}
 			sender, senderErr := s.rooms.Notify.SenderOf(notify.Claim{Session: actor.Session, Room: actor.Room})
 			if senderErr != nil {
-				return approvals.Request{}, senderErr
+				return approvals.Class(""), senderErr
 			}
 			event := room.GitHubWriteRefusedEvent{Requester: sender.Session.Address(), Verb: room.GitHubWriteVerb(refusal.Write.Verb), Repository: refusal.Write.Host + "/" + refusal.Write.Repo, Reason: room.GitHubWriteReason(refusal.Decision.Refusal), Rule: room.GitHubWriteRule(refusal.Decision.Rule)}
 			if _, postErr := s.rooms.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: actor.Room, Event: event, FreshID: true, Producer: room.ProducerEngine, To: []string{rec.Name}}); postErr != nil {
-				return approvals.Request{}, postErr
+				return approvals.Class(""), postErr
 			}
 		}
-		return approvals.Request{}, err
+		return approvals.Class(""), err
 	}
 	if class == approvals.ClassRead {
-		return approvals.Request{}, errors.New("read commands do not need approval")
+		return approvals.Class(""), errors.New("read commands do not need approval")
 	}
 	in.Argv = pinnedArgs
 	if class == approvals.ClassAuto && checkedNumber != 0 {
 		in.Argv = ghclient.PinRoutinePR(in.Argv, checkedRef, checkedNumber)
 	}
-	auto := class == approvals.ClassAuto && len(in.Media) == 0
-	if class == approvals.ClassAuto {
-		class = approvals.ClassAgent
-	}
-	var destination approvals.MediaDestination
-	if len(in.Media) > 0 {
-		cmd := ghclient.Command(ctx, "", in.Cwd, in.Argv...)
-		destination, err = ghclient.ResolveMediaDestination(ctx, cmd)
-		if err != nil {
-			return approvals.Request{}, err
-		}
-	}
-	stored := approvals.GHPayload{MediaDestination: destination, Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files, Media: in.Media}
-	body := ghclient.DisplayApprovalBody(stored)
-	if len(in.Media) > 0 {
-		body += fmt.Sprintf("\n\nMedia destination: %s/%s (head %s, %s visibility)", destination.Host, destination.Base, destination.Head, destination.Visibility)
-		if destination.Number > 0 {
-			body += fmt.Sprintf(" PR #%d", destination.Number)
-		}
-	}
-	for _, media := range in.Media {
-		body += fmt.Sprintf("\n\nMedia: %s\nSHA-256: %s", media.Name, media.SHA256)
-	}
-	payload, err := json.Marshal(stored)
-	if err != nil {
-		return approvals.Request{}, err
-	}
-	return s.rooms.Approvals.Create(ctx, actor, approvals.CreateInput{
-		Kind: approvals.KindGH, Class: class, Auto: auto, Payload: payload, Repository: in.Repo,
-		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: body,
+	return class, nil
+}
+
+func (s services) registerGitHubWrite() {
+	approvals.Register(s.rooms.Approvals, approvals.Operation[*approvals.GHPayload]{
+		Kind: githubWrite,
+		Decide: func(ctx context.Context, actor authority.Actor, p *approvals.GHPayload) (approvals.Decision, error) {
+			class, err := s.classifyGitHubWrite(ctx, actor, p)
+			if err == nil && class == approvals.ClassAuto && len(p.Media) > 0 {
+				class = approvals.ClassAgent
+			}
+			if err != nil {
+				return approvals.Decision{}, err
+			}
+			if len(p.Media) > 0 {
+				c := ghclient.WithRooms(ghclient.WithRoom(ctx, actor.Room), s.rooms.Notify.Rooms)
+				p.MediaDestination, err = ghclient.ResolveMediaDestination(c, ghclient.Command(c, "", p.Cwd, p.Argv...))
+				if err != nil {
+					return approvals.Decision{}, err
+				}
+			}
+			p.ApprovedClass = class
+			return approvals.Decision{Class: class}, nil
+		},
+		Card: func(p *approvals.GHPayload) approvals.Card {
+			body := ghclient.DisplayApprovalBody(*p)
+			d := p.MediaDestination
+			if len(p.Media) > 0 {
+				body += fmt.Sprintf("\n\nMedia destination: %s/%s (head %s, %s visibility)", d.Host, d.Base, d.Head, d.Visibility)
+				if d.Number > 0 {
+					body += fmt.Sprintf(" PR #%d", d.Number)
+				}
+			}
+			for _, media := range p.Media {
+				body += fmt.Sprintf("\n\nMedia: %s\nSHA-256: %s", media.Name, media.SHA256)
+			}
+			return approvals.Card{Repository: p.Repo, Command: "gh " + strings.Join(p.Argv, " "), Title: approvalArgument(p.Argv, "--title"), Body: body}
+		},
+		PrepareHeld: func(ctx context.Context, actor authority.Actor, p *approvals.GHPayload) error {
+			if len(p.Media) == 0 {
+				return nil
+			}
+			sender, err := s.rooms.Notify.SenderOf(notify.Claim{Session: actor.Session, Room: actor.Room})
+			if err != nil {
+				return err
+			}
+			for i := range p.Media {
+				m := &p.Media[i]
+				result, err := s.rooms.Notify.Post(ctx, notify.PostInput{NoWake: true, Sender: sender, Mentions: []string{"@root"}, Text: "Media for GitHub approval. Image metadata is removed; video metadata is not removed.", Files: []notify.File{{Name: m.Name, Data: m.Data}}})
+				if err != nil {
+					return err
+				}
+				if len(result.Message.Attachments) != 1 {
+					return errors.New("sanitized media post failed")
+				}
+				m.PostID, m.AttachmentID, m.Data = result.Message.ID, result.Message.Attachments[0].ID, nil
+			}
+			return nil
+		},
+		Check: func(ctx context.Context, actor authority.Actor, p *approvals.GHPayload) error {
+			class, err := s.classifyGitHubWrite(ctx, actor, p)
+			if err != nil {
+				return err
+			}
+			if class == approvals.ClassOwner && p.ApprovedClass != approvals.ClassOwner {
+				return errors.New("GitHub write now requires owner approval")
+			}
+			if class == approvals.ClassAgent && p.ApprovedClass == approvals.ClassAuto && actor.Role == authority.Session {
+				return errors.New("GitHub write now requires agent approval")
+			}
+			return nil
+		},
+		Execute: func(ctx context.Context, actor authority.Actor, p *approvals.GHPayload) (approvals.Result, error) {
+			raw, err := json.Marshal(p)
+			if err != nil {
+				return approvals.Result{}, err
+			}
+			return ghApprovalExecutor(s.rooms.Notify.Rooms, s.rooms.PRs.Watcher().ClaimIssueComment)(ctx, approvals.Request{Room: actor.Room, Requester: actor.Session, Class: p.ApprovedClass, Payload: raw})
+		},
 	})
 }
 

@@ -129,40 +129,44 @@ func bindApprovalFilesForRoom(payload approvals.GHPayload, rooms *room.Store, ro
 			cleanup()
 			return nil, nil, errors.New("invalid approved media")
 		}
-		msg, err := rooms.Message(roomID, media.PostID)
-		if err != nil {
-			cleanup()
-			return nil, nil, err
-		}
-		found := false
-		for _, a := range msg.Attachments {
-			if a.ID == media.AttachmentID && a.Name == media.Name {
-				found = true
+		data := media.Data
+		if media.PostID != "" {
+			msg, err := rooms.Message(roomID, media.PostID)
+			if err != nil {
+				cleanup()
+				return nil, nil, err
 			}
-		}
-		if !found {
-			cleanup()
-			return nil, nil, errors.New("approved media missing from post")
-		}
-		source, err := rooms.AttachmentPath(roomID, media.AttachmentID)
-		if err != nil {
-			cleanup()
-			return nil, nil, err
-		}
-		f, err := os.Open(source)
-		if err != nil {
-			cleanup()
-			return nil, nil, err
-		}
-		data, err := io.ReadAll(io.LimitReader(f, (25<<20)+1))
-		closeErr := f.Close()
-		if err != nil {
-			cleanup()
-			return nil, nil, err
-		}
-		if closeErr != nil {
-			cleanup()
-			return nil, nil, closeErr
+			found := false
+			for _, a := range msg.Attachments {
+				if a.ID == media.AttachmentID && a.Name == media.Name {
+					found = true
+				}
+			}
+			if !found {
+				cleanup()
+				return nil, nil, errors.New("approved media missing from post")
+			}
+			source, err := rooms.AttachmentPath(roomID, media.AttachmentID)
+			if err != nil {
+				cleanup()
+				return nil, nil, err
+			}
+			f, err := os.Open(source)
+			if err != nil {
+				cleanup()
+				return nil, nil, err
+			}
+			var errRead error
+			data, errRead = io.ReadAll(io.LimitReader(f, (25<<20)+1))
+			closeErr := f.Close()
+			if errRead != nil {
+				cleanup()
+				return nil, nil, errRead
+			}
+			if closeErr != nil {
+				cleanup()
+				return nil, nil, closeErr
+			}
 		}
 		sum := sha256.Sum256(data)
 		if len(data) > 25<<20 || fmt.Sprintf("%x", sum) != media.SHA256 {
