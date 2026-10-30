@@ -4,21 +4,6 @@ import (
 	"strings"
 )
 
-// UsageNormalization describes observed coverage, not billing verification.
-// Absent metadata identifies legacy records whose counters have not been normalized.
-type UsageNormalization struct {
-	Version     int    `json:"version"`
-	Source      string `json:"source"`
-	Input       string `json:"input"`
-	CachedInput string `json:"cachedInput"`
-	Output      string `json:"output"`
-	Cost        string `json:"cost"`
-	// CostBasis is CostBasisTurn when Cost holds this turn's own spend. Claude
-	// turns saved before it was set hold the session's cumulative total.
-	CostBasis string `json:"costBasis,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-}
-
 // CostBasisTurn marks a cost that is the turn's own step, not a session total.
 const CostBasisTurn = "turn"
 

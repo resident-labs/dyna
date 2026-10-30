@@ -8,7 +8,7 @@ function deferred<T = never>(){let resolve: (value: T) => void=()=>{},reject: (e
 const sessionsOf = (opts: BulkOptions) => opts.sessions ?? []
 // accepted answers a request with every session accepted.
 const accepted = (opts: BulkOptions, ok = true): BulkSessionResult => ({ action: opts.action, results: sessionsOf(opts).map(session=>({session,ok})), succeeded: 0, failed: 0 })
-const transfer = (id: string, phase: string): TransferState => ({ id, session: 's0', phase, profile: 'model', previousProfile: 'old', previousDir: '', previousResumable: false, oldTurns: 0, requested: '', deadline: '', postId: '' })
+const transfer = (id: string, phase: string): TransferState => ({ id, session: 's0', phase, profile: 'model', previousProfile: 'old', previousDir: '', previousResumable: false, oldTurns: 0, requested: '', deadline: '', startupDeadline: '', ended: '', postId: '' })
 function setup(n: number,overrides: Partial<BulkApi>={},extra: Partial<BulkContext>={}){
  let value: BulkValue | undefined;const calls: BulkOptions[]=[];const sessions=Array.from({length:n},(_,i)=>({id:`s${i}`,name:`agent ${i}`}))
  const api: BulkApi={settings:async()=>[],profiles:async()=>[{name:'model',harness:'h'}],sessionTransfer:async()=>null,bulkSessionAction:async(_room,opts)=>{calls.push(opts);return accepted(opts)},...overrides}

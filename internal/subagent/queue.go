@@ -8,16 +8,14 @@ import (
 	"dyna-agent/internal/sessionlife"
 )
 
-// QueueState is how far one queued post got toward its target session.
-type QueueState string
-
+// Existing names stay as aliases; the prefixed names let tygo emit a closed union.
 const (
-	QueueWaiting    QueueState = "waiting"
-	QueueDelivering QueueState = "delivering"
-	QueueDelivered  QueueState = "delivered"
-	QueueForwarded  QueueState = "forwarded"
-	QueueCancelled  QueueState = "cancelled"
-	QueueDismissed  QueueState = "dismissed"
+	QueueWaiting    = QueueStateWaiting
+	QueueDelivering = QueueStateDelivering
+	QueueDelivered  = QueueStateDelivered
+	QueueForwarded  = QueueStateForwarded
+	QueueCancelled  = QueueStateCancelled
+	QueueDismissed  = QueueStateDismissed
 )
 
 // queueFacts are the stored delivery and steering facts that project one queue
@@ -43,25 +41,6 @@ func queueStateFromFacts(facts queueFacts) QueueState {
 	default:
 		return QueueWaiting
 	}
-}
-
-type QueueOrigin struct {
-	Session         string     `json:"session"`
-	Address         string     `json:"address"`
-	State           QueueState `json:"state"`
-	TargetDelivered bool       `json:"targetDelivered,omitempty"`
-}
-type QueueItem struct {
-	Human       bool          `json:"human,omitempty"`
-	Origins     []QueueOrigin `json:"origins,omitempty"`
-	ID          string        `json:"id"`
-	Text        string        `json:"text"`
-	From        string        `json:"from"`
-	TS          int64         `json:"ts"`
-	Turn        int           `json:"turn"`
-	State       QueueState    `json:"state"`
-	Cancellable bool          `json:"cancellable"`
-	ForwardedTo string        `json:"forwardedTo,omitempty"`
 }
 
 func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error) {
