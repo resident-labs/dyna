@@ -245,6 +245,10 @@ func expireApprovals(ctx context.Context, service *approvals.Service, t *timers)
 	}
 }
 
+func (s services) approvalLog(ctx context.Context, room string, since time.Duration) ([]approvals.LogEntry, error) {
+	return s.rooms.Approvals.Log(authority.Of(ctx), room, since)
+}
+
 func (s services) approvalSettings(ctx context.Context, in approvals.SettingsInput) (approvals.Settings, error) {
 	return s.rooms.Approvals.Settings(authority.Of(ctx), in)
 }
