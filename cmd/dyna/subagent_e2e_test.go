@@ -1129,17 +1129,14 @@ set -eu
 input=$(cat)
 # Sessions get no work journal.
 [ -z "${DYNA_AGENT_JOURNAL:-}" ] || { echo "session got a journal: $DYNA_AGENT_JOURNAL" >&2; exit 3; }
-case " $* " in
-  *" --resume "*)
+if [ -f "$WORK/child-address" ]; then
     printf '%s' "$input" > "$WORK/parent-followup-input"
     printf '%s\n' 'parent received explicit child post'
-    ;;
-  *)
+else
     child=$("$DYNA_BIN" subagent start --goal 'Check the left branch' --profile mock --name decoder --dir "$WORK" 'RESPOND: child job SLEEP:60000')
     printf '%s' "$child" > "$WORK/child-address"
     printf '%s\n' 'child started'
-    ;;
-esac
+fi
 `
 	e := newE2E(t,
 		profile.Profile{Name: "mock", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true},
