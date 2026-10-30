@@ -18,13 +18,13 @@ Live frames have a 2000-byte limit. Longer posts include a prefix and pointer:
 
 Read the full post once before acting on missing text.
 The owner can cancel a waiting steering post. It remains in history but was not delivered.
-Apply new instructions while preserving work that does not conflict.
+Apply new instructions while preserving compatible work.
 
 Claude stream-JSON receives messages through stdin at tool boundaries.
 Pi receives them as steering on its retained RPC session.
 Undelivered messages become continuations.
 Other harnesses interrupt and resume immediately when no tool runs, or at the next tool-call completion.
-Known tool calls are never killed for steering.
+Known tool calls finish before steering interrupts the turn.
 Plain-text output has no tool boundaries; `steering.maxToolWait` defaults to 120 seconds before interruption.
 
 ```bash
@@ -63,7 +63,7 @@ Read `dyna guide posting` for mention rules.
 ## Reports and turn boundaries
 
 The final message is the turn's full result report.
-Post only when a session must act before your final result: a blocker or a decision. A post to @root, or to your parent root, wakes root. Never copy status to @root.
+Post only when a session must act before your final result: a blocker or a decision. A post to @root, or to your parent root, wakes root. Send status to the session that needs to act.
 If a successful turn already posted to its report recipient, Dyna sends no duplicate completion. Failures still report.
 
 A session turn reports once on its first turn, with a schema, or after a parent or owner post that names the session.
@@ -86,8 +86,8 @@ State what is done, what remains, and the next action; link the full result.
 Skip routine progress, duplicate reports, and acknowledgements that need no action.
 Answer action requests promptly; if busy, act at the next safe boundary without a separate acknowledgement.
 Let siblings resolve shared interfaces; send the lead their outcome.
-Records go in the artifact: a verdict, a PR, an issue, or a file. They do not go to `@root`.
+Record a verdict, PR, issue, or file in its artifact.
 Encourage useful debate: give evidence, impact, and an alternative. Record decisions; reopen them only with new evidence.
 Send the complete final result once, in the final response.
 Keep working while a useful next step is available. End your turn when no useful work remains, including while an answer is pending.
-Do not block or poll. Read `dyna guide delegation` for questions and finishing.
+Continue available work while awaiting a response. Never poll. Read `dyna guide delegation` for questions and finishing.

@@ -35,7 +35,7 @@ The owner can also use Clear dormant or Dismiss for the same checks sooner.
 
 Closed sessions stay closed until an explicit `dyna subagent reopen <session>`.
 Reopen preserves the conversation and turn history and returns the session to idle.
-It does not start a turn. The next coordination post can start one.
+The next coordination post can start a turn.
 
 ## Instructions and their changes
 
@@ -63,7 +63,7 @@ engine, so it asks for no reply.
 
 An added or edited room rule reaches every open session in the room. Each
 session reads its own note on its next turn, and the room gets one quiet row
-that lists the sessions it reached. Do not post a new rule again to each child.
+that lists the sessions it reached. The engine delivers each new rule to children.
 
 A quiet post differs from a waking post. A coordination post wakes an idle or
 dormant session, and the post becomes its next turn. A quiet notice, such as an
@@ -78,7 +78,7 @@ the owner may correct a brief, with `dyna goal edit <id> --amend "<text>"`: the
 correction joins the holder's instructions and also arrives as a post. Another
 parent posts the correction, or asks root to amend the brief.
 
-A compaction or a model transfer does not lose the instructions. After a
+Compaction and model transfer preserve the instructions. After a
 compaction, the next turn sends the current snapshot again, so the rules, the
 goal and brief, the open questions and the running jobs return. The note
 boundary also resets, so a later change is reported once. A transfer starts a
@@ -96,9 +96,9 @@ threads or an `@children` selector. It appears only with `dyna services`:
 `list`, `show <service>`, `enable|disable <service>`,
 `profile <service> <profile|auto> [--room R | --all-rooms]`, `restart <service>` and `log <service>`.
 
-Change a service's profile with `dyna services profile` only, and never as part
-of a bulk move of sessions: a service keeps the profile chosen for it.
+Change a service's profile with `dyna services profile`. A bulk move of sessions
+leaves the service on its chosen profile.
 The owner may set any room, or every room with `--all-rooms`. A room's root may
 set only its own room.
 A failed service turn posts one alert that names the service, its turn and its error.
-Never manage a service with `dyna subagent transfer` or a raw settings key.
+Manage services with `dyna services`.
