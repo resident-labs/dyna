@@ -3,7 +3,6 @@ package contract
 type (
 	RoomID         string // "room_<ulid>"
 	SessionID      string // "ses_<ulid>"
-	MemberID       string // "mem_<ulid>", an external agent
 	BoxID          string // "box_<ulid>"
 	EventID        string // "ev_<ulid>"
 	OpID           string // "op_<ulid>"
@@ -29,7 +28,6 @@ type PrincipalKind string
 const (
 	PrincipalOwner   PrincipalKind = "owner"   // the human
 	PrincipalSession PrincipalKind = "session" // an agent session; root is one
-	PrincipalMember  PrincipalKind = "member"  // an external agent with a pull inbox
 	PrincipalEngine  PrincipalKind = "engine"  // the engine as its own sender
 )
 
@@ -38,5 +36,4 @@ const (
 type Principal struct {
 	Kind    PrincipalKind `json:"kind"`
 	Session SessionID     `json:"session,omitempty"` // Kind session only
-	Member  MemberID      `json:"member,omitempty"`  // Kind member only
 }
