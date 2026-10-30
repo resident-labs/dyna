@@ -46,10 +46,10 @@ export function issueWork(it: IssueRow): IssueWork {
 export const urlKey = (url: string) => url.replace(/\/+$/, '').toLowerCase()
 
 // trackedIssueItems is the GitHub half of the Tracked issue view: the issues
-// the room watches and the issues its own issues were promoted to. The watch
-// list comes from dyna.db, so a watched issue outside the loaded GitHub page
-// keeps the facts its watch saved. A promoted issue outside the page stays as
-// its room issue row.
+// the room watches or works on (watched, from TrackedIssues) and the issues its
+// own issues were promoted to. A watched or worked issue outside the loaded
+// GitHub page keeps the facts the engine sent. A promoted issue outside the
+// page stays as its room issue row.
 export function trackedIssueItems(github: readonly GitHubItem[], watched: readonly GitHubItem[], local: readonly RoomIssue[]): GitHubItem[] {
   const own = new Set([...watched.map(i => urlKey(i.url)), ...local.flatMap(i => i.githubUrl ? [urlKey(i.githubUrl)] : [])])
   const kept = github.filter(i => own.has(urlKey(i.url)))
