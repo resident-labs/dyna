@@ -20,17 +20,18 @@ import (
 
 // jobView is what every job command prints: the facts of the stored row.
 type jobView struct {
-	ID         string   `json:"id"`
-	Node       string   `json:"node"`
-	State      string   `json:"state"`
-	Command    []string `json:"command"`
-	Repo       string   `json:"repo,omitempty"`
-	SHA        string   `json:"sha,omitempty"`
-	ExitCode   *int     `json:"exitCode,omitempty"`
-	Note       string   `json:"note,omitempty"`
-	WaitReason string   `json:"waitReason,omitempty"`
-	Idle       string   `json:"idle,omitempty"`
-	Log        string   `json:"log,omitempty"`
+	ID         string    `json:"id"`
+	Node       string    `json:"node"`
+	State      string    `json:"state"`
+	Lane       jobs.Lane `json:"lane"`
+	Command    []string  `json:"command"`
+	Repo       string    `json:"repo,omitempty"`
+	SHA        string    `json:"sha,omitempty"`
+	ExitCode   *int      `json:"exitCode,omitempty"`
+	Note       string    `json:"note,omitempty"`
+	WaitReason string    `json:"waitReason,omitempty"`
+	Idle       string    `json:"idle,omitempty"`
+	Log        string    `json:"log,omitempty"`
 	// Artifacts names the kept outputs and how to fetch them.
 	Artifacts []string                `json:"artifacts,omitempty"`
 	Fetch     string                  `json:"fetch,omitempty"`
@@ -39,7 +40,7 @@ type jobView struct {
 }
 
 func view(job jobs.Job) jobView {
-	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID, Workspace: job.Workspace, Resources: job.Resources}
+	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Lane: job.Lane, Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID, Workspace: job.Workspace, Resources: job.Resources}
 	if job.Idle > 0 {
 		v.Idle = job.Idle.String()
 	}
@@ -85,7 +86,7 @@ func runCmd() *cobra.Command {
 	var node, commit, image, memory, ioWeight, network string
 	var artifacts, resourceNames, labels, mounts, devices []string
 	var cpus int
-	var workspace bool
+	var workspace, quick bool
 	var timeout, idle time.Duration
 	c := &cobra.Command{
 		Use:   "run [--node N | --label L] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG] [--network none] [--mount NAME:PATH] [--device PATH] -- CMD",
@@ -118,6 +119,9 @@ func runCmd() *cobra.Command {
 				seconds := int(idle / time.Second)
 				request.Idle = &seconds
 			}
+			if quick {
+				request.Lane = string(jobs.LaneQuick)
+			}
 			var job jobs.Job
 			err := callRunJob(c.Context(), request, &job)
 			if err != nil {
@@ -140,6 +144,7 @@ func runCmd() *cobra.Command {
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
 	c.Flags().StringVar(&ioWeight, "io", "light", "the job's IO weight: a node runs only a few heavy jobs at once")
 	c.Flags().StringArrayVar(&resourceNames, "resource", nil, "hold one unit of this named resource for the job's whole run (repeatable)")
+	c.Flags().BoolVar(&quick, "quick", false, "use the quick lane (1 CPU, 1 GiB, default 10m)")
 	c.Flags().BoolVar(&workspace, "workspace", false, "reuse this session's kept checkout on the node (needs --commit)")
 	return c
 }

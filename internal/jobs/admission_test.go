@@ -548,7 +548,7 @@ func TestCanAdmitUsesDemandAndEarlierWaiters(t *testing.T) {
 	ctx := t.Context()
 	node := machines.Machine{Name: "node", Enabled: true}
 	node.Capabilities.CPUs = 8
-	node.Capabilities.MemTotal = 8 << 30
+	node.Capabilities.MemTotal = 9 << 30
 	queue := Admission{DataDir: t.TempDir(), Machines: fakeMachines{byName: map[string]machines.Machine{"node": node}}, Engine: true}
 	if _, err := queue.Hold(ctx, Demand{ID: "held", Node: "node", CPUs: 2, MemoryMiB: 4096}); err != nil {
 		t.Fatal(err)
