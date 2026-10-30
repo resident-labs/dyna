@@ -386,6 +386,41 @@ failedLookup:
 	}
 }
 
+func TestComposeBodyUpstreamCommentUsesWriteAccount(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: "By {login}"}); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"login":"reader"},{"login":"writer"}]}}';;
+"auth token") case "$*" in *reader*) echo reader-secret;; *writer*) echo writer-secret;; esac;;
+"api --hostname") case "$GH_TOKEN" in reader-secret) echo '{"permissions":{"push":false}}';; writer-secret) echo '{"permissions":{"push":true}}';; esac;;
+esac
+`
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
+	cmd := exec.Command(exe, "api", "-X", "PATCH", "repos/upstream/project/issues/comments/9", "-f", "body=hello")
+	cmd.Dir = records[0].Repo
+	cleanup, err := ComposeBody(ctx, cmd, repository{"github.com", "upstream/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if !slices.Contains(cmd.Args, "body=By writer\n\nhello") {
+		t.Fatalf("args = %q", cmd.Args)
+	}
+}
+
 func TestComposeBodyRefusesMissingRoom(t *testing.T) {
 	setupRooms(t, "fork/project")
 	cmd := exec.Command("gh", "issue", "comment", "1", "--body", "hello")
