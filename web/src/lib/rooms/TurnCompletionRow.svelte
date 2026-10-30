@@ -38,11 +38,22 @@
         <pre class="stderr-text">{workerStderr}</pre>
       </details>
     {/if}
+    {#if payload?.candidates?.length || payload?.candidatesError}
+      <section class="turn-candidates" aria-label="Transfer profiles">
+        <strong>Transfer profiles</strong>
+        <div>Transfer: <code>dyna subagent transfer {payload.sessionId} --profile &lt;profile&gt;</code></div>
+        {#each payload.candidates ?? [] as candidate (candidate.profile)}
+          <div>{candidate.profile}: {candidate.state === 'available' ? 'Available' : candidate.state === 'unavailable' ? 'Unavailable' : 'Availability unknown'}{#if candidate.evidenceAt} · evidence {candidate.evidenceAt}{/if}</div>
+        {/each}
+        {#if payload.candidatesError}<div>Some availability evidence could not be read.</div>{/if}
+      </section>
+    {/if}
     <div class="turn-meta {state}">{stateWords[state]} · turn {payload?.turn ?? post.turn ?? '?'}</div>
   {/snippet}
 </FeedMessage>
 
 <style>
+  .turn-candidates { margin-top: var(--s1); color: var(--muted); font-size: var(--t-cap); }
   .turn-stderr { margin-top: var(--s1); }
   .turn-stderr summary { color: var(--muted); font-size: var(--t-cap); cursor: pointer; list-style: none; }
   .turn-stderr summary::-webkit-details-marker { display: none; }

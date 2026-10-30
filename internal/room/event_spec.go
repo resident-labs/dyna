@@ -1025,6 +1025,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(ShellState("")), Values: enumValues(shellStates)},
 	{Type: reflect.TypeOf(RunState("")), Values: enumValues(runStates)},
 	{Type: reflect.TypeOf(TurnState("")), Values: enumValues(turnStates)},
+	{Type: reflect.TypeOf(CandidateState("")), Values: enumValues(candidateStates)},
 	{Type: reflect.TypeOf(RuleVerb("")), Values: enumValues([]RuleVerb{RuleAdded, RuleEdited, RuleRemoved})},
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
@@ -1052,6 +1053,7 @@ var eventEnums = []eventEnum{
 // generator writes an interface and a guard for each, so a card reads a typed
 // list instead of a stringly field.
 var eventObjects = []reflect.Type{
+	reflect.TypeOf(TransferCandidate{}),
 	reflect.TypeOf(MergePR{}),
 	reflect.TypeOf(MergeCheckSummary{}),
 	reflect.TypeOf(InstructionChange{}),
