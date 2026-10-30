@@ -10,7 +10,8 @@
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
 
-  let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
+  let { post, posts = [post], notice = post.notice, surface = 'feed', focus = '' }: { post: EventPost; posts?: EventPost[]; notice?: EventNotice; surface?: EventSurface; focus?: string } = $props()
+  let history = $derived(posts.slice(0, -1).reverse())
 
   const stateWords: Record<CheckinState, string> = { running: 'running', queued: 'queued', idle: 'idle' }
   const stateTone: Record<CheckinState, string> = { running: 'sage', queued: 'gold', idle: 'coral' }
@@ -38,6 +39,7 @@
   id={post.id}
   ts={post.ts}
   {surface}
+  open={focus ? true : undefined}
   title={producer || 'Check-in'}
   chips={counts.map((entry) => ({ label: `${entry.count} ${stateWords[entry.state]}`, tone: stateTone[entry.state] }))}
   summary={[title, ...children.slice(0, 3).map((child) => child.name)].filter(Boolean).join(' · ')}
@@ -61,11 +63,35 @@
          events shows its child table as text. Remove when that history ages out. -->
     <p class="legacy">{post.text?.split('\n').slice(1).join('\n')}</p>
   {/if}
+  {#if history.length}
+    <details class="history" open={history.some((item) => item.id === focus)}>
+      <summary>Earlier check-ins ({history.length})</summary>
+      {#each history as item (item.id)}
+        {@const earlier = checkinEvent(item)}
+        <details open={item.id === focus} data-id={item.id}>
+          <summary>{new Date(item.ts ?? 0).toLocaleString()}</summary>
+          <ul class="children">
+            {#each earlier?.children ?? [] as child, i (i)}
+              <li>
+                <span class="name">{child.name}</span>
+                <span class="state {stateTone[child.state]}">{stateWords[child.state]}</span>
+                <span class="age">{child.age}</span>
+                <span class="work" title={child.goal}>{child.goal}</span>
+                <span class="pr">{child.pr}</span>
+              </li>
+            {/each}
+          </ul>
+        </details>
+      {/each}
+    </details>
+  {/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
   {/snippet}
 </EventRow>
 
 <style>
+  .history { margin-top: var(--s2); }
+  .history summary { cursor: pointer; color: var(--muted); }
   .children { margin: 0; padding: 0; list-style: none; }
   .children li {
     display: grid;
@@ -82,13 +108,12 @@
   .state.gold { color: var(--gold); }
   .state.coral { color: var(--coral); }
   .age { color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
-  .work { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pr { grid-column: 1 / -1; color: var(--faint); font-size: var(--t-cap); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .work { color: var(--muted); overflow-wrap: anywhere; }
+  .pr { grid-column: 1 / -1; color: var(--faint); font-size: var(--t-cap); overflow-wrap: anywhere; }
   .legacy { margin: 0; color: var(--muted); font-size: var(--t-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
   @media (max-width: 760px) {
     /* A phone shows the counts and the three stalest children. */
-    .children li:nth-child(n + 4) { display: none; }
     .children li { grid-template-columns: minmax(0, 1fr) auto auto; }
-    .work { display: none; }
+    .work { grid-column: 1 / -1; white-space: normal; }
   }
 </style>
