@@ -3,6 +3,7 @@
 // sage is good, coral failed, quiet is waiting or over.
 import type { ChangePolicy, ChangeView, CheckSummary, Finding, PolicyOverride } from '../api/change.ts'
 import type { EventNotice } from '../api/room.ts'
+import { durationMs } from '../ui/format.ts'
 
 // A check as a row shows it. A GitHub check carries only a name, a state and a link.
 export type CheckRow = Pick<CheckSummary, 'name'> & Partial<CheckSummary>
@@ -152,13 +153,7 @@ export function checkMeta(c: Partial<CheckSummary>): CheckLook {
 
 // checkTime is a check's run time: a local CI suite carries durationMs.
 export function checkTime(c: Pick<CheckSummary, 'durationMs'>): string {
-  const ms = c.durationMs
-  if (ms === undefined || !(ms > 0)) return ''
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  const s = ms / 1000
-  if (s < 10) return `${Math.round(s * 10) / 10}s`
-  if (s < 60) return `${Math.round(s)}s`
-  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
+  return durationMs(c.durationMs ?? 0)
 }
 
 // checkBuckets sorts CI checks into the groups the Checks tab shows: failed

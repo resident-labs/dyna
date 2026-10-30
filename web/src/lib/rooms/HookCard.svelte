@@ -14,7 +14,7 @@
   import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
   import HookIcon from '../ui/HookIcon.svelte'
-  import { clock } from '../ui/format.ts'
+  import { clock, durationMs } from '../ui/format.ts'
 
   let { post, notice = post.notice, surface = 'feed', hookFold }: {
     post: EventPost
@@ -52,11 +52,7 @@
   // A run under a second reads in milliseconds, so a quick hook does not look
   // like a clock that failed to move. A fold shows the time of its last pass
   // instead.
-  let elapsed = $derived.by(() => {
-    const ms = payload?.durationMs ?? 0
-    if (ms <= 0) return ''
-    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
-  })
+  let elapsed = $derived(durationMs(payload?.durationMs ?? 0))
 
   function viewLog() {
     if (!payload || !runId) return
