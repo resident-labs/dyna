@@ -555,7 +555,7 @@ Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `
 
 ### 5.2 Images
 
-- **`dyna-base`**: a small Debian image with git, CA certificates, tini, a non-root user, the usual shell tools, Node, and Pi from Dyna's fork (`third_party/pi`) at a pinned build. The fork's sign-in commands go unused, because Pi holds no credential in v2.
+- **`dyna-base`**: a small Debian image with git, CA certificates, tini, a non-root user, the usual shell tools, Node, and Pi from Dyna's fork (`next/third_party/pi`) at a pinned build. The fork's sign-in commands go unused, because Pi holds no credential in v2.
 - **The `dyna` binary is not in the image.** Each host keeps the binaries in `<hostdata>/bin/<version>/dyna`, with a `current` link. Every box mounts `<hostdata>/bin` read-only at `/opt/dyna/bin`. An engine release rebuilds no image.
 - **Toolchain layers** live in each repository at `.dyna/images/<name>/Containerfile` and start `FROM dyna-base`. A repository without that folder uses `dyna-base`.
 - **Tag**: `dyna-img-<name>:<hash>`, where the hash is SHA-256 over the base digest, the Containerfile and the sorted context files with their contents. The same inputs give the same tag on every host.
