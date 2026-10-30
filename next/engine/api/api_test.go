@@ -17,15 +17,15 @@ import (
 
 type fakeService struct {
 	Service
-	caller  Caller
+	caller  contract.Principal
 	request contract.SessionCloseRequest
 }
 
-func (f *fakeService) SessionClose(_ context.Context, c Caller, r contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
+func (f *fakeService) SessionClose(_ context.Context, c contract.Principal, r contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
 	f.caller, f.request = c, r
 	return contract.SessionCloseResponse{}, nil
 }
-func (f *fakeService) TurnOutput(_ context.Context, c Caller, _ contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error) {
+func (f *fakeService) TurnOutput(_ context.Context, c contract.Principal, _ contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error) {
 	f.caller = c
 	return contract.TurnOutputResponse{}, nil
 }
@@ -66,7 +66,7 @@ func TestBoxCallerIsListenerIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = res.Body.Close()
-	if res.StatusCode != http.StatusOK || f.caller.Principal.Session != "session-a" {
+	if res.StatusCode != http.StatusOK || f.caller.Session != "session-a" {
 		t.Fatalf("status %d, caller %+v", res.StatusCode, f.caller)
 	}
 }
@@ -132,7 +132,7 @@ func TestOwnerRejectsDifferentUID(t *testing.T) {
 
 type channelService struct{ Service }
 
-func (channelService) BoxChannel(_ context.Context, c Caller) (<-chan contract.BoxMessage, *contract.Error) {
+func (channelService) BoxChannel(_ context.Context, c contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
 	ch := make(chan contract.BoxMessage, 2)
 	ch <- contract.BoxMessage{Body: contract.TurnStart{Turn: "turn-a"}}
 	ch <- contract.BoxMessage{Body: contract.TurnStop{Turn: "turn-a"}}
