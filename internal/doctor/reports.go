@@ -81,6 +81,15 @@ func (s Reports) Recent(machine, target, fingerprint string, since time.Time) (R
 	return list[0], true, nil
 }
 
+// LatestMachine returns the latest machine-wide diagnosis for one node.
+func (s Reports) LatestMachine(machine string) (Report, bool, error) {
+	list, err := s.list(`WHERE machine=? AND target='machine' ORDER BY at DESC, id DESC LIMIT 1`, machine)
+	if err != nil || len(list) == 0 {
+		return Report{}, false, err
+	}
+	return list[0], true, nil
+}
+
 // List returns the newest limit reports, newest first.
 func (s Reports) List(limit int) ([]Report, error) {
 	return s.list(`ORDER BY at DESC, id DESC LIMIT ?`, limit)

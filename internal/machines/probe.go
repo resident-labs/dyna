@@ -172,6 +172,8 @@ type Prober struct {
 	// Alerter posts the alert of a machine whose disk starts to block new
 	// work. A nil Alerter posts nothing, as a CLI probe does.
 	Alerter Alerter
+	// Record stores a successful remote probe for history.
+	Record func(Machine, ProbeResult) error
 }
 
 // ProbeResult is one stored probe.
@@ -246,6 +248,11 @@ func (p Prober) ProbeAndSave(ctx context.Context, m Machine) (Machine, error) {
 	after, err := p.store().SaveProbe(ctx, m.ID, result)
 	if err != nil {
 		return Machine{}, err
+	}
+	if !m.Local && result.Health == HealthOnline && p.Record != nil {
+		if err := p.Record(after, result); err != nil {
+			return after, fmt.Errorf("record node history: %w", err)
+		}
 	}
 	if !blocked && p.Alerter != nil {
 		if block := after.DiskBlock(); block != "" {
