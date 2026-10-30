@@ -352,6 +352,16 @@ func saveBrowserProfile(ctx context.Context, id string) error {
 	return os.Remove(browserLeasePath(id))
 }
 
+// browserSaveBackBudget bounds one save-back: the cleanup lock, the master
+// lock, and every sqlite3 merge run inside them. A save cut off by the budget
+// keeps its lease and profile, so a later cleanup can retry it.
+const browserSaveBackBudget = 60 * time.Second
+
+// saveBackBrowserProfile saves login state under the caller's context.
+func saveBackBrowserProfile(ctx context.Context, id string) error {
+	return withBrowserCleanup(ctx, id, func() error { return saveBrowserProfile(ctx, id) })
+}
+
 // SQLite's backup command takes a consistent read-only snapshot, including
 // committed WAL data, while the owner's Chromium continues to write.
 func snapshotBrowserDatabase(ctx context.Context, src, dst string) error {
