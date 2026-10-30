@@ -1225,11 +1225,10 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	mounts, devices := marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
-			// An edit keeps who allows host checks: the engine changes grants
-			// through UpdateHostChecksGrants inside its own transaction, so a
-			// list read before that change cannot restore it.
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=?, devices=? WHERE id=?`,
-				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices, m.ID)
+			// An edit keeps access grants: the engine changes them inside their
+			// own writer transactions, so a stale list cannot restore access.
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=host_checks_grants, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=mounts, devices=devices WHERE id=?`,
+				m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1281,6 +1280,44 @@ func (s Store) UpdateHostChecksGrants(ctx context.Context, id string, change fun
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE machines SET host_checks_grants=?, updated_ms=? WHERE id=?`,
 			marshalGrants(grants), time.Now().UnixMilli(), id); err != nil {
+			return err
+		}
+		out, err = getByID(ctx, conn, id)
+		return err
+	})
+	if err != nil {
+		return Machine{}, err
+	}
+	return out, nil
+}
+
+// UpdateContainerRegistrations reads a node's mounts and devices inside the
+// writer transaction, applies change, and stores the result. Unrelated node
+// saves preserve these columns, so a stale edit cannot restore revoked access.
+func (s Store) UpdateContainerRegistrations(ctx context.Context, id string, change func(Machine) ([]NamedMount, []DeviceGrant, error)) (Machine, error) {
+	db, err := s.db()
+	if err != nil {
+		return Machine{}, err
+	}
+	stored, err := getByID(ctx, db, id)
+	if err != nil {
+		return Machine{}, err
+	}
+	var out Machine
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + stored.Name}, func(conn *sql.Conn) error {
+		m, err := getByID(ctx, conn, id)
+		if err != nil {
+			return err
+		}
+		mounts, devices, err := change(m)
+		if err != nil {
+			return err
+		}
+		if err := validateContainerRegistrations(mounts, devices); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE machines SET mounts=?, devices=?, updated_ms=? WHERE id=?`,
+			marshalContainerRegistrations(mounts), marshalContainerRegistrations(devices), time.Now().UnixMilli(), id); err != nil {
 			return err
 		}
 		out, err = getByID(ctx, conn, id)

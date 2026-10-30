@@ -249,6 +249,45 @@ func TestRegistryEditKeepsHostChecksGrants(t *testing.T) {
 	}
 }
 
+func TestRegistryEditKeepsContainerRegistrations(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	pve, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true,
+		Mounts:  []NamedMount{{Name: "data", Source: "/srv/data", Room: "room_a", Mode: MountRO}},
+		Devices: []DeviceGrant{{Path: "/dev/dri", Room: "room_a"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := pve
+	if _, err := s.UpdateContainerRegistrations(ctx, pve.ID, func(m Machine) ([]NamedMount, []DeviceGrant, error) {
+		return nil, nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateContainerRegistrations(ctx, pve.ID, func(m Machine) ([]NamedMount, []DeviceGrant, error) {
+		if len(m.Mounts) != 0 || len(m.Devices) != 0 {
+			t.Fatalf("transaction read stale registrations: %#v, %#v", m.Mounts, m.Devices)
+		}
+		return []NamedMount{{Name: "other", Source: "/srv/other", Room: "room_b", Mode: MountRO}},
+			[]DeviceGrant{{Path: "/dev/other", Room: "room_b"}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// This save models an unrelated edit that read the node before revocation.
+	stale.MaxIOHeavy = 7
+	if _, err := s.Save(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := s.GetByID(ctx, pve.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.MaxIOHeavy != 7 || len(edited.Mounts) != 1 || edited.Mounts[0].Name != "other" || len(edited.Devices) != 1 || edited.Devices[0].Path != "/dev/other" {
+		t.Fatalf("stale edit restored registrations: %#v, %#v", edited.Mounts, edited.Devices)
+	}
+}
+
 // TestMigrateKeepsAnEarlierHostCheckGrant checks the version 4 data folder that
 // kept host checks as one switch: a machine that allows them becomes the
 // owner's grant for every room, and a machine that refuses them keeps none.
