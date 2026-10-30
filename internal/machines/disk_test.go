@@ -2,6 +2,7 @@ package machines
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -65,6 +66,28 @@ func prints(out string) Command {
 	return func(_ context.Context, _ string, _ io.Reader, w, _ io.Writer, _ string, _ ...string) error {
 		_, err := io.WriteString(w, out)
 		return err
+	}
+}
+
+func TestLowDiskAlertSurvivesHistoryFailure(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	m, err := s.Save(ctx, Machine{Name: "buildhost", SSH: "pip@hermeslab", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alerts := &diskAlerts{}
+	failure := errors.New("history unavailable")
+	prober := Prober{
+		Store: s, Command: prints(lowDiskProbe), Alerter: alerts,
+		Record: func(Machine, ProbeResult) error { return failure },
+	}
+	stored, err := prober.ProbeAndSave(ctx, m)
+	if !errors.Is(err, failure) {
+		t.Fatalf("probe error = %v, want history failure", err)
+	}
+	if stored.DiskBlock() == "" || len(alerts.got) != 1 {
+		t.Fatalf("blocked = %q, alerts = %v; want blocked node and one alert", stored.DiskBlock(), alerts.got)
 	}
 }
 

@@ -88,12 +88,13 @@
       <NodeUsageCard {machine} {load} work={workHere?.value ?? null} history={historyHere?.points ?? []} />
       <MachineWorkCard work={workHere?.value ?? null} failed={workHere !== null && workHere.value === null} agents={machine.local ? machine.running ?? [] : []} runs={machine.ciRuns ?? []} {onagent} />
       {#if machine.local || historyHere?.diagnosis}
-        <Section title="Last diagnosis"><Card>
+        <Card title="Last diagnosis">
+          {#snippet action()}{#if historyHere?.diagnosis}<span class="note">{ago(historyHere.diagnosis.at)}</span>{/if}{/snippet}
           {#if historyHere?.diagnosis}
-            <p class="note">{ago(historyHere.diagnosis.at)}</p><p>{historyHere.diagnosis.summary}</p>
+            <p>{historyHere.diagnosis.summary}</p>
             {#each historyHere.diagnosis.findings as finding}<p>{finding.cause}: {finding.evidence}</p>{/each}
           {:else}<p class="note">No diagnosis yet.</p>{/if}
-        </Card></Section>
+        </Card>
       {/if}
       <Section title="Settings"><Card flush divided>
         <SettingRow title="Takes work" description="A disabled node takes no new work.">
