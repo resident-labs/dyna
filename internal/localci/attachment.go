@@ -104,6 +104,11 @@ ON CONFLICT(repo,sha,node,run_id) DO UPDATE SET payload=excluded.payload, owner_
 	})
 }
 
+// reserveAttachment reserves one fresh run before setup.
+func (s Store) reserveAttachment(ctx context.Context, repo, sha, node string, att attachment) error {
+	return s.saveAttachment(ctx, repo, sha, node, att)
+}
+
 // releaseAttachment hands a run's record over: the checks stay on the machine
 // and the next run of the commit may take the record.
 func (s Store) releaseAttachment(ctx context.Context, repo, sha, node, runID string) error {
