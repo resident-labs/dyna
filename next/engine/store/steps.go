@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 11
+const schemaVersion = 12
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -24,6 +24,7 @@ var steps = map[int][]string{
 		`CREATE INDEX sessions_parent ON sessions(parent)`,
 		`CREATE INDEX operations_state_expires ON operations(state, expires_at)`,
 	},
+	11: {"ALTER TABLE turns ADD COLUMN shell_jobs INTEGER NOT NULL DEFAULT -1"},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.

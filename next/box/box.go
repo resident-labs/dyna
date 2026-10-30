@@ -50,7 +50,7 @@ func (e TransitionError) Error() string {
 var transitions = map[contract.BoxState][]contract.BoxState{
 	contract.BoxPending:  {contract.BoxCreating, contract.BoxStarting, contract.BoxClosing},
 	contract.BoxCreating: {contract.BoxStarting, contract.BoxFailed, contract.BoxClosing},
-	contract.BoxStarting: {contract.BoxReady, contract.BoxFailed, contract.BoxClosing},
+	contract.BoxStarting: {contract.BoxReady, contract.BoxStopped, contract.BoxFailed, contract.BoxClosing},
 	contract.BoxReady:    {contract.BoxStopped, contract.BoxClosing, contract.BoxLost},
 	contract.BoxStopped:  {contract.BoxStarting, contract.BoxPending, contract.BoxClosing, contract.BoxLost},
 	contract.BoxClosing:  {contract.BoxDeleted, contract.BoxLost, contract.BoxFailed},
