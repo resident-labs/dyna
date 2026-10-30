@@ -479,6 +479,20 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if runs.Has(key) {
 		return false, nil
 	}
+	// An unclaimable attachment may still be executing on another engine.
+	// Wait for it instead of starting the same head on a different node.
+	attachedNode := ""
+	if finder, ok := registry.(interface {
+		AttachedNode(context.Context, string, string) (string, error)
+	}); ok {
+		attachedNode, err = finder.AttachedNode(ctx, repo, job.head)
+		if errors.Is(err, localci.ErrAttachmentBusy) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+	}
 	// A machine with room in the shared node queue must exist before the plan
 	// does any work, so a fleet that is only busy keeps a pull request head
 	// waiting without a fetch. A trial or a sync instead joins the node queue:
@@ -490,7 +504,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	chosen, retryResumed := s.chooseCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom, nodeFloor)
 	resumed = resumed || retryResumed
-	if chosen == nil {
+	if chosen == nil || attachedNode != "" && chosen.Name != attachedNode {
 		return false, nil
 	}
 	plan, err := s.prepareRegisteredCI(ctx, job)
@@ -544,6 +558,9 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		}
 	}
 	resumed = resumed || retryResumed
+	if attachedNode != "" && (chosen == nil || chosen.Name != attachedNode) {
+		return false, nil
+	}
 	if chosen == nil {
 		roomNodes := localci.NodesForRoom(enabled, job.record.RoomID)
 		if err := localci.BlockedSuite(roomNodes, plan.suites); err != nil {
