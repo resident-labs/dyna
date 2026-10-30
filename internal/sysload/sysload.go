@@ -30,21 +30,6 @@ const MaxTop = 3
 // build that Dyna supports.
 const userHZ = 100
 
-// Load is one reading. CPUPercent and Split are nil until two samples exist.
-// Split values are percent of the whole machine. Memory values are bytes.
-type Load struct {
-	At         time.Time  `json:"at"`
-	CPUs       int        `json:"cpus"`
-	Load       [3]float64 `json:"load"`
-	CPUPercent *float64   `json:"cpuPercent"`
-	Split      *Split     `json:"split"`
-	Memory     Memory     `json:"memory"`
-	Top        []Top      `json:"top"`
-	DynaKnown  bool       `json:"dynaKnown"`
-	// Groups feed the doctor's stored samples; the web app does not read them.
-	Groups []Group `json:"-"`
-}
-
 // Group is the use of one group of cgroups over the last interval. Groups
 // are machine, engine, agents, computers and session:<id>. They need two
 // readings; only machine exists without the cgroup tree.
@@ -59,27 +44,6 @@ type Group struct {
 // Pressure is the "some" avg10 of each PSI file: the percent of the last
 // 10 s in which at least one task stalled.
 type Pressure struct{ CPU, Memory, IO float64 }
-
-// Split divides the busy CPU time of the machine.
-type Split struct {
-	Engine    float64 `json:"engine"`
-	Agents    float64 `json:"agents"`
-	Computers float64 `json:"computers"`
-	Other     float64 `json:"other"`
-}
-
-// Memory holds machine memory in bytes. Dyna is zero when DynaKnown is false.
-type Memory struct {
-	Total uint64 `json:"total"`
-	Used  uint64 `json:"used"`
-	Dyna  uint64 `json:"dyna"`
-}
-
-// Top is one session (or run) and the cores it used in the last interval.
-type Top struct {
-	ID    string  `json:"id"`
-	Cores float64 `json:"cores"`
-}
 
 // reading is the raw counters of one sample. CPU times are in microseconds.
 type reading struct {
