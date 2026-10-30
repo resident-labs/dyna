@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"math/big"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -146,7 +147,9 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 		return contract.RoomRepoAddResponse{}, forbidden()
 	}
 	owner, name, ok := strings.Cut(string(req.Repo), "/")
-	if !ok || owner == "" || name == "" || strings.ContainsAny(owner+name, " /\\\t\n\r") {
+	ownerOK, _ := regexp.MatchString(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`, owner)
+	nameOK, _ := regexp.MatchString(`^[A-Za-z0-9_.-]+$`, name)
+	if !ok || !ownerOK || !nameOK || name == "." || name == ".." {
 		return contract.RoomRepoAddResponse{}, invalid("repository must be owner/name")
 	}
 	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default); err != nil {
