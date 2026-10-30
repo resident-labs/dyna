@@ -103,6 +103,14 @@ func TestSessionStartMapsFlags(t *testing.T) {
 		t.Fatalf("%+v", f.start)
 	}
 }
+func TestSessionCloseDiscard(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "close", "s", "--discard")
+	if f.close.Session != "s" || !f.close.Discard {
+		t.Fatalf("%+v", f.close)
+	}
+}
+
 func TestSessionCloseMapsID(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "session", "close", "s")
