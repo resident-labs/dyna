@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net"
 	"path/filepath"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 )
 
 type serverOptionConfig struct {
+	listener              net.Listener
 	extraMiddleware       []gin.HandlerFunc
 	engineConfigurator    func(*gin.Engine)
 	routerConfigurator    func(*gin.Engine, *handlers.BaseAPIHandler, *config.Config)
@@ -51,6 +53,11 @@ func effectiveSDKConfig(cfg *config.Config) *config.SDKConfig {
 		sdkCfg.RequestLog = false
 	}
 	return &sdkCfg
+}
+
+// WithListener supplies a listener owned by the embedding application.
+func WithListener(listener net.Listener) ServerOption {
+	return func(cfg *serverOptionConfig) { cfg.listener = listener }
 }
 
 // WithMiddleware appends additional Gin middleware during server construction.
