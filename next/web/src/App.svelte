@@ -52,9 +52,6 @@
   </aside>
   <main tabindex="-1" bind:this={content}>
     <header><span>{title}</span></header>
-    <section class="empty">
-      <h1>{room ? (session ? "Session conversation" : "Room feed") : "Select a room"}</h1>
-      <p>{unavailable ? "This room is not available." : room ? "Messages will appear here." : "Choose a room to see its conversation."}</p>
-    </section>
+    <p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>
   </main>
 </div>
