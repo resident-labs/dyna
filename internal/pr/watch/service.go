@@ -27,6 +27,7 @@ import (
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/worktrees"
 	"path/filepath"
 )
 
@@ -114,6 +115,10 @@ func (s *Service) Track(ctx context.Context, actor authority.Actor, ref Ref, aut
 	return s.TrackWithPolicy(ctx, actor, ref, author, lookupDir, PolicyOverride{}, author.ID)
 }
 func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, ref Ref, author subagent.Info, lookupDir string, override PolicyOverride, checkedAuthor string) (Record, bool, error) {
+	return s.trackWithSource(ctx, actor, ref, author, lookupDir, override, checkedAuthor, state.AuthorSourceExplicit)
+}
+
+func (s *Service) trackWithSource(ctx context.Context, actor authority.Actor, ref Ref, author subagent.Info, lookupDir string, override PolicyOverride, checkedAuthor string, source state.AuthorSource) (Record, bool, error) {
 	if err := authority.Check("git pr track", actor, nil); err != nil {
 		return Record{}, false, err
 	}
@@ -126,6 +131,25 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 		return Record{}, false, err
 	}
 	if old := st.Records[ref.Key()]; old != nil {
+		if source == state.AuthorSourceExplicit && old.AuthorSource == state.AuthorSourceDiscovery && actor.Session == author.ID && author.ID != "" && author.RoomID == old.RoomID {
+			trees, err := worktrees.List()
+			if err != nil {
+				return Record{}, false, err
+			}
+			for _, tree := range trees {
+				if tree.Session == author.ID && tree.Branch == old.Branch && (filepath.Clean(tree.Repo) == filepath.Clean(old.RepoPath) || filepath.Clean(tree.Path) == filepath.Clean(old.RepoPath)) && matchingCheckout(ctx, *old, lookupDir) == filepath.Clean(tree.Path) {
+					if _, err := s.transfer(ctx, old.Key, "author", author, lookupDir, transferOptions{expectAuthor: old.Author, expectSource: state.AuthorSourceDiscovery, source: state.AuthorSourceExplicit}); err != nil {
+						return Record{}, false, err
+					}
+					updated, err := s.Store.Get(old.Key)
+					if err != nil {
+						return Record{}, false, err
+					}
+					old = &updated
+					break
+				}
+			}
+		}
 		// A run-owned caller of the same controller first takes over the PR its
 		// earlier run author left (issue D-252), so this existing-record path
 		// returns a change the caller may act on.
@@ -170,7 +194,7 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	if err != nil {
 		return Record{}, false, err
 	}
-	rec := Record{PolicyOverride: override, Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(), Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: author.Dir, LookupDir: lookupDir, Head: snap.Pull.Head.SHA, State: state.PROpen, Watching: true, Created: s.now(), HeadSeen: s.now(), HeadVerifiedAt: s.now(), Seen: map[string]string{}}
+	rec := Record{PolicyOverride: override, Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(), Author: author.ID, AuthorSource: source, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: author.Dir, LookupDir: lookupDir, Head: snap.Pull.Head.SHA, State: state.PROpen, Watching: true, Created: s.now(), HeadSeen: s.now(), HeadVerifiedAt: s.now(), Seen: map[string]string{}}
 	rec.Kind = "github"
 	rec.ChangeID = rec.Key
 	rec.HeadRepo = snap.Pull.Head.Repo.FullName
