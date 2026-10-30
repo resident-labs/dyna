@@ -28,10 +28,19 @@ type Session struct {
 	Turns      []Turn             `json:"turns" tstype:"Turn[] | null"`
 }
 
+// Avatar is the typed identity shown beside a sender.
+type Avatar struct {
+	Kind  room.SenderKind `json:"kind"`
+	Emoji string          `json:"emoji,omitempty"`
+	Room  string          `json:"room"`
+	Color room.RoomColor  `json:"color"`
+}
+
 // ReferenceRow is one post of another conversation, as a session's DM shows it:
 // who wrote it, which conversation it is in, its typed event facts or text
 // preview, and how many files it carries. TS is unix milliseconds.
 type ReferenceRow struct {
+	Avatar Avatar           `json:"avatar"`
 	PostID string           `json:"postId"`
 	From   string           `json:"from"`
 	Kind   string           `json:"kind,omitempty"`

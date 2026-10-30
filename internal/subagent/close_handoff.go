@@ -210,7 +210,7 @@ func (m *Manager) forwardClosedInbox(ctx context.Context, source Info) error {
 					bound = map[string]string{to: heir.ID}
 				}
 				forwarded, err = m.rooms().Post(meta.RoomID, room.PostInput{
-					ID: id, From: room.EngineSender, To: []string{to}, SessionIDs: bound,
+					ID: id, SenderKind: room.SenderEngine, From: room.EngineSender, To: []string{to}, SessionIDs: bound,
 					Wake: original.Wake, NeedsRoot: to == meta.Room,
 					Forward: room.NewForward(original),
 				})

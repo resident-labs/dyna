@@ -129,6 +129,7 @@ type EventNotice struct {
 // changes. To holds the full resolved recipient addresses (the room name is
 // the owner); Via holds the mention tokens as the sender typed them.
 type Message struct {
+	SenderKind SenderKind `json:"senderKind,omitempty"`
 	// Wake asks the engine to start or steer the addressed sessions.
 	Wake bool `json:"wake"`
 	// SessionIDs binds participant addresses to exact sessions despite name reuse.
@@ -331,6 +332,10 @@ const (
 	// SenderSession is any other agent session of a room, bound to its
 	// session ID in SessionIDs.
 	SenderSession SenderKind = "session"
+	// SenderVoice is the voice persona.
+	SenderVoice SenderKind = "voice"
+	// SenderWorkflow is a workflow script.
+	SenderWorkflow SenderKind = "workflow"
 	// SenderUnbound is a room:agent address that SessionIDs does not bind.
 	SenderUnbound SenderKind = "unbound"
 	// SenderShell is a Dyna-managed shell.
@@ -961,6 +966,7 @@ func (s *Store) Touch(roomID string) error {
 
 // PostInput is one post to append. The store stamps ID, time, and room.
 type PostInput struct {
+	SenderKind SenderKind
 	Wake       bool
 	SessionIDs map[string]string
 	// SenderRoomID is the room of the sending session, from its stored
@@ -1179,7 +1185,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		}
 		now := s.now()
 		out = Message{
-			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs, SenderRoomID: in.SenderRoomID,
+			SenderKind: in.SenderKind, Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs, SenderRoomID: in.SenderRoomID,
 			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Script: in.Script, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text, Skill: in.Skill, Prompt: in.Prompt,
 			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}
