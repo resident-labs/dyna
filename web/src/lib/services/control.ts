@@ -5,7 +5,7 @@ import type { api } from '../../api.ts'
 import type { RegistryService } from '../api/service.ts'
 
 // Select the real browser API methods so unsupported adapters fail the type check.
-export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setMergePaused' | 'editHook' | 'editService'>
+export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setMergePaused' | 'editService'>
 
 export interface ControlHost {
   room: string

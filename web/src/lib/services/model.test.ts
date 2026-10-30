@@ -5,7 +5,7 @@ import { minutesText } from '../ui/format.ts'
 import type { RegistryService } from '../api/service.ts'
 
 const service = (s: Partial<RegistryService> & Pick<RegistryService, 'id' | 'group'>): RegistryService =>
-  ({ label: s.id, description: '', state: 'on', detail: '', count: 0, profile: '', session: '', hook: '', settingsKeys: [], ...s })
+  ({ label: s.id, description: '', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [], ...s })
 
 test('services group by their registry group in registry order, and not-set-up ones go last', () => {
   const list = [

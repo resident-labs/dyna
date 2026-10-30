@@ -67,7 +67,7 @@
 
   // The runs of a hook, with the log reason of each failure among them.
   async function hookActivity(name: string): Promise<Entry[]> {
-    const runs = readHookRuns(await api.globalHookRuns(name)).slice(0, 20)
+    const runs = readHookRuns(await (service.id === 'updates' ? api.updateRuns() : api.globalHookRuns(name))).slice(0, 20)
     const reasons: Record<string, RunReason> = {}
     // A log that cannot be read leaves only its own run without a reason.
     await Promise.all(runs.filter((r) => r.result === 'error' || r.result === 'fail').map(async (r) => {
@@ -77,7 +77,7 @@
     return hookEntries(name, service.label, runs, Date.now(), reasons)
   }
 
-  const logOf = (id: string) => api.globalHookRunLog(hook, id)
+  const logOf = (id: string) => service.id === 'updates' ? api.updateRunLog(id) : api.globalHookRunLog(hook, id)
 
   function loadActivity(): void {
     const read = service.id === 'merge-queue' ? api.roomMergeHistory(host.room).then((v) => mergeEntries(readHistory(v)))
@@ -106,13 +106,12 @@
       {#each items as it (it.key)}
         {@const text = settingLabel(it.key, it.help)}
         <SettingRow title={text.title} description={text.description}>
-          {#snippet control()}<SettingControl item={it} label={text.title} onsave={(value: string) => saveSetting(it.key, value)} />{/snippet}
+          {#snippet control()}<SettingControl item={it} label={text.title} sourceInvalid={it.key === 'updater.source' && service.detail === 'update-source-invalid'} onsave={(value: string) => saveSetting(it.key, value)} />{/snippet}
           {#snippet status()}{#if errors[it.key]}<span class="err" role="alert">{errors[it.key]}</span>{/if}{/snippet}
         </SettingRow>
       {/each}
     </Card>
   {/if}
-  {#if service.detail === 'update-source-invalid'}<p class="err" role="alert">The source checkout is missing or is not a Git repository. Choose a valid checkout path.</p>{/if}
   {#if service.detail === 'multiple-update-hooks'}<p class="err" role="alert">Several update hooks were found. Choose a source checkout to continue.</p>{/if}
   {#if service.state === 'not-set-up' && setupHint[service.id]}<p class="hint">{setupHint[service.id]}</p>{/if}
   {#if switchHint[service.id]}<p class="hint">{switchHint[service.id]}</p>{/if}
@@ -138,6 +137,7 @@
 </div>
 
 <style>
+  .detail :global(.setting) { padding-inline: 0; }
   .detail { display: flex; flex-direction: column; gap: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border-soft); }
   .micro-label { margin: var(--s1) 0 0; }
   .acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
