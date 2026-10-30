@@ -9,7 +9,7 @@ import (
 // of the author's worktree, because a file tool does not expand variables.
 func TestReviewTaskKeepsReviewerOutOfAuthorCheckout(t *testing.T) {
 	got := reviewTask(Record{Kind: "local", Key: "change_1", Head: "abc"})
-	for _, want := range []string{"never write files there", `echo "$DYNA_SCRATCH"`} {
+	for _, want := range []string{"Write all files under your scratch folder", `echo "$DYNA_SCRATCH"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("review task lacks %q", want)
 		}
