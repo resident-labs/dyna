@@ -105,7 +105,7 @@
   // The workspace mounts this view once per room, so the saved choice is read once.
   let scope = $state<ListScope>(untrack(() => loadScope(roomId, listKind)))
   let tracked = $derived(scope === 'tracked')
-  let watched = $state<GitHubItem[]>([]) // the issues the room watches, from dyna.db
+  let watched = $state<GitHubItem[]>([]) // the issues the room watches or works on
   let watchFailed = $state(false)
   let listState = $state(kind === 'issue' ? 'unhandled' : saved.state)
   let source = $state('all')
@@ -169,8 +169,8 @@
   let nothingTracked = $derived(tracked && !localIssues.length && !issueItems.length)
   let issueRows = $derived(listState === 'unhandled' || listState === 'in-progress' ? allIssueRows.filter((it) => issueWork(it) === listState) : allIssueRows)
   async function pickIssue(it: IssueRow) {
-    // The panel reads issues of the room's repository by number. A watched
-    // issue can belong to another repository, such as an upstream, so it opens
+    // The panel reads issues of the room's repository by number. A watched or
+    // worked issue can belong to another repository, such as an upstream, so it opens
     // on GitHub unless the GitHub list names the room repository as its own.
     const watch = watched.some((w) => urlKey(w.url) === urlKey(it.url))
     if (watch && !(list?.repo && it.url.toLowerCase().includes(`/${list.repo.toLowerCase()}/issues/`))) { openExternal(it.url); return }
@@ -212,8 +212,8 @@
   async function loadWatched() {
     const n = ++wseq
     try {
-      const res = await api.issueWatches(roomId)
-      if (n === wseq) { watched = res; watchFailed = false }
+      const res = await api.trackedIssues(roomId)
+      if (n === wseq) { watched = res.items; watchFailed = res.unread > 0 }
     } catch {
       if (n === wseq) watchFailed = true
     }
@@ -539,7 +539,7 @@
         <TabHeader title="Issues" usage={`${issueRows.length} ${listState === 'all' ? 'total' : listState}`} />
         {@render filters()}
         {#if failed && source !== 'dyna'}<LoadFailed title="GitHub did not answer" hint="GitHub issues are missing from this list." onretry={load} />{/if}
-        {#if tracked && watchFailed && source !== 'dyna'}<LoadFailed title="Watched issues did not load" hint="The issues this room watches are missing from this list." onretry={loadWatched} />{/if}
+        {#if tracked && watchFailed && source !== 'dyna'}<LoadFailed title="Tracked issues did not load" hint="Some issues this room watches or works on are missing from this list." onretry={loadWatched} />{/if}
         {#if !list && !failed && source !== 'dyna'}<p class="quiet">Asking GitHub…</p>{/if}
         {#if issueRows.length}
           <IssueList groups={['open', 'closed'].map((id) => ({ id, label: id, rows: issueRows.filter((i) => (i.state === 'OPEN') === (id === 'open')) }))} {sel} {onmention} onpick={pickIssue}
