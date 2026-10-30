@@ -4,5 +4,5 @@
 <span class="pill" class:error={tone !== "warning"}>{@render children()}</span>
 <style>
   .pill { color: var(--attention); border: 1px solid currentColor; border-radius: 3px; padding: 1px 5px; font-size: 12px; }
-  .error { color: #e67a76; }
+  .error { color: var(--danger); }
 </style>
