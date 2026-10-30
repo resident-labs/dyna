@@ -311,7 +311,7 @@ func TestRunAndDemoAreRefusedInWorkflowMode(t *testing.T) {
 		cmd.SetArgs(args)
 		cmd.SilenceUsage = true
 		err := cmd.Execute()
-		if err == nil || err.Error() != "run is owner or root or session only; use subagent mode to start work" {
+		if err == nil || err.Error() != "run is owner or root only; dyna run is for room roots. Start a child with dyna subagent start, or post the job to @root." {
 			t.Fatalf("dyna run %v err = %v", args, err)
 		}
 	}
