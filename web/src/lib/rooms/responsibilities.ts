@@ -30,7 +30,5 @@ export function linesOf(counts: unknown): Line[] {
   return [...known, ...other].filter((line) => line.n > 0)
 }
 
-export const totalOf = (counts: unknown): number => linesOf(counts).reduce((sum, line) => sum + line.n, 0)
-
 // summaryOf is the breakdown as one line: "1 goal, 2 shells".
 export const summaryOf = (counts: unknown): string => linesOf(counts).map((line) => `${line.n} ${line.label}`).join(', ')

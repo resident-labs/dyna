@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/state"
@@ -26,6 +27,8 @@ type Responsibility = sessionclose.Responsibility
 type owned struct {
 	info Info
 	r    Responsibility
+	// shell is the job of a shell responsibility.
+	shell shells.Meta
 }
 
 // Responsibilities lists everything the session owns. Each store is read under
@@ -50,6 +53,24 @@ func (m *Manager) Responsibilities(ctx context.Context, info Info) ([]Responsibi
 // The store collectors are served from the count cache while their revisions
 // hold. Shells are read on every call, because a shell has no revision.
 func (m *Manager) ResponsibilityCounts(ctx context.Context, infos []Info) (map[string]map[string]int, error) {
+	rows, err := m.MemberCounts(ctx, infos)
+	counts := make(map[string]map[string]int, len(rows))
+	for id, row := range rows {
+		counts[id] = row.ByKind
+	}
+	return counts, err
+}
+
+// RowCounts is what a member row shows of one session's responsibilities.
+type RowCounts struct {
+	ByKind map[string]int
+	// Shell is the description of the session's newest live shell job.
+	Shell string
+}
+
+// MemberCounts reads what ResponsibilityCounts reads and adds the newest
+// shell's description, so a member row can say what its shell runs.
+func (m *Manager) MemberCounts(ctx context.Context, infos []Info) (map[string]RowCounts, error) {
 	key, err := m.countKey()
 	if err != nil {
 		return nil, err
@@ -64,7 +85,21 @@ func (m *Manager) ResponsibilityCounts(ctx context.Context, infos []Info) (map[s
 		}
 	}
 	shells, shellErr := m.shellsOwned(ctx, infos)
-	return countsOf(append(append(cached, fresh...), shells...)), errors.Join(err, shellErr)
+	rows := map[string]RowCounts{}
+	for id, byKind := range countsOf(append(append(cached, fresh...), shells...)) {
+		rows[id] = RowCounts{ByKind: byKind}
+	}
+	// The newest shell names the row's shell, so a later start wins.
+	newest := map[string]time.Time{}
+	for _, item := range shells {
+		id := item.info.ID
+		if row := rows[id]; !item.shell.Started.Before(newest[id]) {
+			newest[id] = item.shell.Started
+			row.Shell = item.shell.Name
+			rows[id] = row
+		}
+	}
+	return rows, errors.Join(err, shellErr)
 }
 
 // countKey names the revisions that a count depends on. It reads every
@@ -392,7 +427,7 @@ func (m *Manager) shellOwned(byID map[string]Info) ([]owned, error) {
 		if !ok || job.ID == own {
 			continue
 		}
-		out = append(out, owned{info: info, r: Responsibility{Kind: "shell", ID: job.ID, Text: "owns live shell job " + job.ID + "; stop it: dyna shell stop " + job.ID}})
+		out = append(out, owned{info: info, r: Responsibility{Kind: "shell", ID: job.ID, Text: "owns live shell job " + job.ID + "; stop it: dyna shell stop " + job.ID}, shell: job.Meta})
 	}
 	return out, err
 }
