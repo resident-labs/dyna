@@ -1,152 +1,135 @@
 <script lang="ts">
-  // The Services page: one tab per service family. Each tab shows its service's
-  // state in one line with its controls, then what the service did. Results
-  // that repeat fold into one row; failures keep their own.
-  import { untrack } from 'svelte'
+  // The Services page: everything Dyna runs by itself, in the sections the
+  // engine's service registry gives. One page, no tabs. Each row says what the
+  // service does and, as muted text, when it ran and runs next; a colored pill
+  // appears only when it needs attention. A click opens the service's settings
+  // and recent runs in place.
   import { api } from '../../api.ts'
+  import { errorText } from '../errorText.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
-  import CIHealth from '../cihealth/CIHealth.svelte'
-  import EntryList from './EntryList.svelte'
-  import ServiceLine from './ServiceLine.svelte'
+  import Section from '../ui/Section.svelte'
+  import Card from '../ui/Card.svelte'
+  import SettingRow from '../ui/SettingRow.svelte'
+  import StatusPill from '../ui/StatusPill.svelte'
+  import Switch from '../ui/Switch.svelte'
+  import Skeleton from '../ui/Skeleton.svelte'
+  import ServiceDetail from './ServiceDetail.svelte'
+  import { factsOf, pillOf, sections, setupHint } from './model.ts'
+  import { switchWrite } from './control.ts'
+  import { readRegistry } from './read.ts'
+  import type { ChangeRow } from './activity.ts'
   import type { Member } from '../api/room.ts'
-  import { buildRows, type ChangeRow, type Inputs } from './model.ts'
-  import { buildTabs, type TabId } from './tabs.ts'
-  import { allParts, emptyData, loadServiceData } from './load.ts'
-  import { applyControl } from './control.ts'
-  import { openHookLog } from '../settings/hookLog.ts'
-  import { scrollFade } from '../ui/scrollFade.ts'
+  import type { RegistryService } from '../api/service.ts'
+  import type { SettingItem } from '../api/settings.ts'
 
-  // A change read here is only what the page shows: its verdict, its number,
-  // its overlaps and the watcher's last poll, so the page takes the list rows
-  // the room already holds.
-  type ChangeLike = Pick<ChangeRow, 'reviewAt' | 'number' | 'title' | 'verdict' | 'reviewerSession' | 'kind' | 'watching' | 'checked' | 'error'> & { overlaps?: { length: number } | number }
   let { roomId, repo = '', members = [], changes = [], onopen, onpr }: {
     roomId: string
     repo?: string
     members?: Member[]
-    changes?: ChangeLike[]
+    changes?: ChangeRow[]
     onopen?: (m: Member) => void
     onpr?: (pr: number) => void
   } = $props()
 
-  // Every part comes from an existing call; a failed call leaves only its own
-  // row empty. The page reads again every minute, so a change made elsewhere
-  // shows without a reload.
-  let data = $state(emptyData)
-  const reload = () => loadServiceData(api, roomId, new Date(), untrack(() => data), (d) => (data = d), undefined, repo ? () => api.hookSummary(repo) : null, repo ? (name) => api.hookRuns(repo, name) : null, repo ? (name, id) => api.hookRunLog(repo, name, id) : null, repo ? () => api.librarianDeferred(repo) : null, repo)
+  const host = $derived({ room: roomId, repo })
+  let registry = $state<RegistryService[] | null>(null)
+  let failed = $state('')
+  // Settings need the admin scope; without it the details show no keys.
+  let settings = $state<SettingItem[] | null>(null)
+  let now = $state(Date.now())
+
+  // The page reads the registry again every minute, so a change made
+  // elsewhere shows without a reload. A failed read keeps the rows it had.
+  async function reload(): Promise<void> {
+    await api.serviceRegistry(roomId, repo).then((v) => { registry = readRegistry(v) ?? []; failed = '' }, (e: unknown) => { failed = errorText(e) })
+    now = Date.now()
+  }
   $effect(() => {
     reload()
+    api.settings().then((v) => { settings = v ?? [] }, () => { settings = null })
     const t = setInterval(reload, 60 * 1000)
     return () => clearInterval(t)
   })
 
-  let now = $state(Date.now())
-  $effect(() => {
-    const t = setInterval(() => (now = Date.now()), 60 * 1000)
-    return () => clearInterval(t)
-  })
+  const groups = $derived(sections(registry ?? []))
+  let open = $state('') // the service whose detail shows
+  let notSetUp = $state(false) // the Not set up group is open
+  let saving = $state<string[]>([])
+  let errors = $state<Record<string, string>>({})
 
-  // The page keeps the change fields it shows: the verdict, the overlap count,
-  // the session behind it and the watcher's last poll.
-  const changeRows: ChangeRow[] = $derived((changes ?? []).map((c) => ({
-    reviewAt: c.reviewAt, number: c.number, title: c.title, verdict: c.verdict, reviewerSession: c.reviewerSession, overlaps: c.overlaps,
-    kind: c.kind, watching: c.watching, checked: c.checked, error: c.error,
-  })))
+  // A switch writes through its call and then reads the registry again, so the
+  // row shows the engine's state and not what the click hoped for.
+  async function flip(s: RegistryService, write: (on: boolean) => Promise<unknown>, on: boolean): Promise<void> {
+    saving = [...saving, s.id]
+    errors = { ...errors, [s.id]: '' }
+    await write(on).catch((e: unknown) => { errors = { ...errors, [s.id]: errorText(e) } })
+    await reload()
+    saving = saving.filter((id) => id !== s.id)
+  }
 
-  const inputs: Inputs = $derived({
-    reviewer: data.reviewer, queue: data.queue, mergePaused: data.mergePaused, history: data.history, registry: data.registry, services: data.services,
-    notices: data.notices, hooks: data.hooks, runs: data.runs, reasons: data.reasons, settings: data.settings, budget: data.budget, accounts: data.accounts,
-    usage: data.usage, voice: data.voice, changes: changeRows, testHealth: data.testHealth, laneSync: data.laneSync, deferred: data.deferred, repo,
-  })
-  const rows = $derived(buildRows(inputs))
-  const tabs = $derived(buildTabs(inputs, rows, now))
-  let selected = $state<TabId>('merges')
-  const tab = $derived(tabs.find((t) => t.id === selected) ?? tabs[0])
-  // A room can hold thousands of results, so a tab shows its newest PAGE
-  // entries and loads the next page on request.
-  const PAGE = 40
-  let limit = $state(PAGE)
-  const shown = $derived(tab ? tab.entries.slice(0, limit) : [])
-  const left = $derived(tab ? tab.entries.length - shown.length : 0)
-  // The first read of every part has not answered yet, so the page says it is
-  // reading instead of showing a row as unreadable.
-  const reading = $derived(data.pending.length === allParts.length)
-  const choose = (id: TabId): void => { selected = id; limit = PAGE }
-
-  // A control writes through its call and then reads the page again, so the
-  // line shows the engine's state and not what the click hoped for. A refused
-  // write throws, and the row shows the engine's message.
-  async function change(id: string, value: string | boolean): Promise<void> {
-    await applyControl(api, { room: roomId, repo }, id, value)
+  async function saveSetting(key: string, value: string): Promise<void> {
+    const item = await api.setSetting(key, value)
+    settings = settings?.map((x) => (x.key === key ? item : x)) ?? null
     await reload()
   }
 
-  async function run(): Promise<void> {
-    await applyControl(api, { room: roomId, repo }, 'update.run', true)
-    await reload()
-  }
-
+  const member = (session: string): Member | undefined => (session ? members.find((m) => m.id === session || m.address === session) : undefined)
   const openSession = (session: string): void => {
-    const member = members.find((m) => m.id === session)
-    if (member && onopen) onopen(member)
+    const m = member(session)
+    if (m && onopen) onopen(m)
   }
-
-  // A failed hook run opens its log in Room settings, as the Hooks pane shows
-  // it, so the reader sees the whole tail the row only summarises.
-  const openRun = (run: { hook: string; id: string }): void => {
-    if (repo) openHookLog({ repo, hook: run.hook, runId: run.id })
-  }
+  const toggle = (id: string): void => { open = open === id ? '' : id }
 </script>
 
+{#snippet serviceRow(s: RegistryService)}
+  {@const pill = pillOf(s)}
+  {@const write = s.switch ? switchWrite(api, host, s) : null}
+  {#snippet detail()}
+    <ServiceDetail service={s} {host} {settings} {changes} canOpen={(session: string) => !!member(session) && !!onopen} onopen={openSession} {onpr} onchanged={reload} onsetting={saveSetting} />
+  {/snippet}
+  <SettingRow inline id="service-{s.id}" title={s.label} description={s.description} expanded={open === s.id} ontoggle={() => toggle(s.id)} children={open === s.id ? detail : undefined}>
+    {#snippet status()}
+      {#if pill}<StatusPill label={pill.label} tone={pill.tone} />{/if}
+      <span>{factsOf(s, now, !!write).join(' · ')}</span>
+      {#if errors[s.id]}<span class="err" role="alert">{errors[s.id]}</span>{/if}
+    {/snippet}
+    {#snippet control()}
+      {#if s.switch && write}
+        <Switch on={s.switch.on} label="{s.label} runs" disabled={saving.includes(s.id)} onchange={(on: boolean) => flip(s, write, on)} />
+      {:else if s.state === 'not-set-up' && (s.settingsKeys.length || setupHint[s.id])}
+        <button class="btn quiet" aria-expanded={open === s.id} onclick={() => toggle(s.id)}>Set up</button>
+      {/if}
+    {/snippet}
+  </SettingRow>
+{/snippet}
+
 <section class="services" aria-label="Services">
-  <TabHeader title="Services" blurb="What each service is doing and what it just did." />
+  <TabHeader title="Services" blurb="What Dyna runs by itself, and the commands you added." />
   <div class="page">
-    <div class="strip" role="tablist" aria-label="Services" use:scrollFade>
-      {#each tabs as t (t.id)}
-        <button role="tab" class="tab" class:sel={t.id === selected} aria-selected={t.id === selected} onclick={() => choose(t.id)}>
-          <span class="dot {t.tone}" aria-hidden="true"></span>{t.name}
-        </button>
-      {/each}
-    </div>
-    {#if reading}
-      <p class="none">Reading services…</p>
-    {:else if tab}
-      <div class="panel" role="tabpanel" aria-label={tab.name}>
-        <ServiceLine rows={tab.rows} status={tab.line} wrap={tab.id !== 'more'} onWrite={change} onRun={run} />
-        {#if tab.id === 'ci'}
-          <CIHealth {roomId} {changes} {onpr} />
-        {:else if tab.id !== 'more'}
-          <EntryList entries={shown} empty="Nothing here yet." onOpen={openSession} onRun={openRun} />
-          {#if left > 0}
-            <button class="more" onclick={() => (limit += PAGE)}>Show more · {left} left</button>
-          {/if}
-        {/if}
-      </div>
+    {#if failed}<p class="err" role="alert">The service list could not be read: {failed}</p>{/if}
+    {#if registry === null && !failed}
+      <Card flush><Skeleton label="Loading services" rows={4} /></Card>
     {/if}
+    {#each groups as g (g.id)}
+      <Section title={g.title} description={g.description}>
+        <Card flush divided>
+          {#if g.id === 'not-set-up'}
+            <SettingRow title={g.services.map((s) => s.label).join(', ')} description="{g.services.length} {g.services.length === 1 ? 'service has' : 'services have'} nothing to do yet." expanded={notSetUp} ontoggle={() => (notSetUp = !notSetUp)} />
+            {#if notSetUp}{#each g.services as s (s.id)}{@render serviceRow(s)}{/each}{/if}
+          {:else}
+            {#each g.services as s (s.id)}{@render serviceRow(s)}{/each}
+          {/if}
+        </Card>
+      </Section>
+    {/each}
   </div>
 </section>
 
 <style>
   .services { flex: 1; min-height: 0; overflow: auto; container-type: inline-size; }
-  .page { max-width: 760px; padding: 0 var(--s5) var(--s5); }
-  /* The tabs scroll sideways on a phone, so none wraps or shrinks. */
-  .strip { display: flex; gap: var(--s1); overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line-soft); margin-bottom: var(--s3); }
-  .strip::-webkit-scrollbar { display: none; }
-  .tab { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: var(--s2) var(--s3); font-size: var(--t-ui); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
-  .tab:not(.sel) { transition: color var(--motion-fast) var(--ease); }
-  .tab.sel { color: var(--ink); border-bottom-color: var(--iris); }
-  @media (hover: hover) {
-    .tab:not(.sel):hover { color: var(--ink-2); }
-  }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-  .dot.live { background: var(--gold); }
-  .dot.on { background: var(--sage); }
-  .dot.off { background: var(--line); }
-  .dot.error { background: var(--coral); }
-  .panel { display: flex; flex-direction: column; gap: var(--s3); }
-  .none, .more { color: var(--faint); font-size: var(--t-ui); }
-  .more { display: block; text-align: left; padding: var(--s2) 0; }
+  .page { max-width: 760px; padding: 0 var(--s5) var(--s6); }
+  .err { margin: 0 0 var(--s3); font-size: var(--t-sm); color: var(--tone-danger-fg); }
   @container (max-width: 640px) {
-    .page { padding: 0 var(--s3) var(--s4); }
+    .page { padding: 0 var(--s3) var(--s5); }
   }
 </style>
