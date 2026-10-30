@@ -35,9 +35,8 @@
     const headline = box.rows.find((r) => r.id === 'merge')
     const checks = box.rows.find((r) => r.id === 'checks')
     if (!headline) return box.rows
-    const isCI = ['Waiting for CI', 'CI missing', 'Blocked: CI failed'].includes(headline.title)
-    const first = isCI && checks ? { ...headline, note: [checks.note, headline.note].filter(Boolean).join(' · '), link: 'checks' } : headline
-    return [first, ...box.rows.filter((r) => r.id !== 'merge' && (!isCI || r.id !== 'checks'))]
+    const first = box.isCI && checks ? { ...headline, note: [checks.note, headline.note].filter(Boolean).join(' · '), link: 'checks' } : headline
+    return [first, ...box.rows.filter((r) => r.id !== 'merge' && (!box.isCI || r.id !== 'checks'))]
   })
   let busy = $state(false)
   async function untrack() {

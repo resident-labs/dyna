@@ -3,6 +3,15 @@ import assert from 'node:assert/strict'
 import { nextAction } from './nextAction.ts'
 import { mergeBox, type Row, type MergeItem } from './prlist.ts'
 
+test('CI actions carry a typed kind into the detail box', () => {
+  for (const ci of ['pending', 'absent', 'failed'] as const) {
+    const row: Row = { ci, state: 'open' }
+    assert.equal(nextAction(row).kind, 'ci')
+    assert.equal(mergeBox(row).isCI, true)
+  }
+  assert.equal(mergeBox({ ci: 'passed', state: 'open' }).isCI, false)
+})
+
 test('the detail merge headline matches the list action', () => {
   const row: Row = { ci: 'failed', state: 'open' }
   const merge: MergeItem = { state: 'conflict' }
