@@ -390,7 +390,7 @@ const fixtures: Record<string, EventPayload> = {
     agents: 3,
     durationMs: 184_000,
     parent: 'dyna:notice-contract',
-    detail: 'Full output: dyna runs show wf_20261023-000001-aaaaaaaa',
+    detail: 'Full output: dyna workflow runs show wf_20261023-000001-aaaaaaaa',
   },
   'turn/completed': {
     session: 'dyna:notice-merge',

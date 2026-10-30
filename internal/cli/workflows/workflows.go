@@ -26,6 +26,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/runsvc"
 	"dyna-agent/internal/workflow"
+	"dyna-agent/internal/workflowresolve"
 	"dyna-agent/internal/workflowsvc"
 	"dyna-agent/internal/worktrees"
 	"dyna-agent/internal/worktreesvc"
@@ -57,19 +58,20 @@ func NewRunCommand() *cobra.Command {
 	var quiet, asJSON, detach, planOnly bool
 	var maxConc, maxAgents, maxCommands int
 	cmd := &cobra.Command{
-		Use:   "run <script.js>",
+		Use:   "run <script.js|name>",
 		Short: "Execute a workflow script (progress on stderr, result JSON on stdout)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, a []string) error {
-			if !planOnly {
-				if err := authority.Check("run", authority.Current(), nil); err != nil {
-					return err
-				}
+			if err := authority.Check("workflow run", authority.Current(), nil); err != nil {
+				return err
 			}
 			if _, err := applyRunRoom(roomRef); err != nil {
 				return err
 			}
-			src, err := os.ReadFile(a[0])
+			if dir == "" {
+				dir, _ = os.Getwd()
+			}
+			scriptPath, src, err := workflowresolve.Resolve(a[0], "", dir, workflowDir)
 			if err != nil {
 				return err
 			}
@@ -79,14 +81,9 @@ func NewRunCommand() *cobra.Command {
 					return fmt.Errorf("--args must be valid JSON: %w", err)
 				}
 			}
-			if dir == "" {
-				dir, _ = os.Getwd()
-			}
-			scriptPath := a[0]
 			if original := os.Getenv("DYNA_SCRIPT_PATH"); original != "" {
-				scriptPath = original
+				scriptPath, _ = filepath.Abs(original)
 			}
-			scriptPath, _ = filepath.Abs(scriptPath)
 			if planOnly {
 				p := plan.Extract(string(src), plan.Options{
 					SourcePath: scriptPath, WorkDir: dir, WorkflowDir: workflowDir,
@@ -106,7 +103,7 @@ func NewRunCommand() *cobra.Command {
 					return err
 				}
 				fmt.Fprintln(c.OutOrStdout(), id)
-				fmt.Fprintln(c.ErrOrStderr(), stDim.Render("running in background; completion will be messaged to its parent or room, watch live in the desktop app or with `dyna runs show`"))
+				fmt.Fprintln(c.ErrOrStderr(), stDim.Render("running in background; completion will be messaged to its parent or room, watch live in the desktop app or with `dyna workflow runs show`"))
 				return nil
 			}
 			output := "plain"
@@ -126,7 +123,7 @@ func NewRunCommand() *cobra.Command {
 	cmd.Flags().IntVar(&maxCommands, "max-commands", 0, "run() commands that execute at once (default 4)")
 	cmd.Flags().IntVar(&maxAgents, "max-agents", 0, "lifetime agent() cap for this run (default 1000)")
 	cmd.Flags().StringVar(&resumeID, "resume", "", "run id to resume: unchanged agent() calls replay from its journal")
-	cmd.Flags().StringVar(&workflowDir, "workflows-dir", "", "name-keyed workflow registry (default user config, then ./examples)")
+	cmd.Flags().StringVar(&workflowDir, "workflows-dir", "", "personal workflow directory override")
 	cmd.Flags().BoolVar(&detach, "detach", false, "run in the background; prints the run id and messages completion to its parent or room")
 	cmd.Flags().BoolVar(&planOnly, "plan", false, "extract and print the versioned planned graph; start no workers")
 	return cmd
@@ -145,7 +142,7 @@ func runObserver(c *cobra.Command, quiet bool, resumeID string) workflowsvc.Obse
 	observer := workflowsvc.Observer{
 		OnWarning: func(message string) { fmt.Fprintln(c.ErrOrStderr(), stWarn.Render("warning: "+message)) },
 		OnStart: func(meta runstore.Meta) {
-			fmt.Fprintln(c.ErrOrStderr(), stDim.Render("run "+meta.ID+"  •  watch live in the desktop app or with `dyna runs show "+meta.ID+"`"))
+			fmt.Fprintln(c.ErrOrStderr(), stDim.Render("run "+meta.ID+"  •  watch live in the desktop app or with `dyna workflow runs show "+meta.ID+"`"))
 		},
 		OnResume: func(count int) {
 			fmt.Fprintln(c.ErrOrStderr(), stDim.Render(fmt.Sprintf("resuming from %s (%d journaled calls)", resumeID, count)))
@@ -423,7 +420,7 @@ func NewRunsCommand() *cobra.Command {
 			if err := engineclient.New("").Call(c.Context(), "PauseRun", []any{a[0], true}, nil); err != nil {
 				return err
 			}
-			fmt.Fprintln(c.OutOrStdout(), "paused "+a[0]+"; resume with `dyna runs unpause "+a[0]+"`")
+			fmt.Fprintln(c.OutOrStdout(), "paused "+a[0]+"; resume with `dyna workflow runs unpause "+a[0]+"`")
 			return nil
 		},
 	}

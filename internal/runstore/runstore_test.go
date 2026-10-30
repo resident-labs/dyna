@@ -30,6 +30,23 @@ func TestCreateCapturesSession(t *testing.T) {
 	}
 }
 
+func TestCreateRoutesResultToRequestedSession(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("DYNA_RUN_ID", "wf_target")
+	t.Setenv("DYNA_RUN_RESULT_TO", "ses_target")
+	run, err := Create("target", "return null", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Meta.ParentSession != "ses_target" {
+		t.Fatalf("target = %q", run.Meta.ParentSession)
+	}
+	stored, err := ReadMeta(run.Meta.ID)
+	if err != nil || stored.ParentSession != "ses_target" {
+		t.Fatalf("stored target = %q, %v", stored.ParentSession, err)
+	}
+}
+
 func TestCreateOmitsEmptySessionAndReadsOldMeta(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_session-empty")

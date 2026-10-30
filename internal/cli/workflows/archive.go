@@ -79,8 +79,8 @@ func newArchiveCommand() *cobra.Command {
 		Short: "Move finished runs out of the live catalog (still resolvable by id)",
 		Long: "Move finished runs (ok, canceled, error) from the live runs directory into\n" +
 			"the archive (" + "$" + runstore.ArchiveDirEnv + ", default $XDG_DATA_HOME/dyna/archive/runs).\n" +
-			"Archived runs are hidden from `dyna runs list` and the desktop app, but every id-based\n" +
-			"command keeps working: runs show/output/graph/wait, and `dyna run --resume <id>`.\n\n" +
+			"Archived runs are hidden from `dyna workflow runs list` and the desktop app, but every id-based\n" +
+			"command keeps working: runs show/output/graph/wait, and `dyna workflow run --resume <id>`.\n\n" +
 			"Running and paused runs, runs still starting, and every resume ancestor of an\n" +
 			"active run are never archived. With filters, resume ancestors of runs that\n" +
 			"stay live are kept live too. Each move is one rename (or copy, verify, remove\n" +

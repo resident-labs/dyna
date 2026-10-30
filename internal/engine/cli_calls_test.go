@@ -83,8 +83,14 @@ func TestCLIRoomCallsStayInCallerRoom(t *testing.T) {
 				"SyncRefresh": cliArgs(t, other.ID, "/missing/repository"),
 				"GitExport":   cliArgs(t, other.ID, "/missing/repository"),
 			}
-			if role != authority.Worker {
+			if role == authority.Root {
 				cases["StartRun"] = cliArgs(t, other.ID, roomsvc.RunSource{Script: "missing.js"}, nil)
+			}
+			if role == authority.Session {
+				_, err := calls["StartRun"](ctx, cliArgs(t, other.ID, roomsvc.RunSource{Script: "missing.js"}, nil))
+				if err == nil || err.Error() != "dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root." {
+					t.Errorf("session StartRun refusal: %v", err)
+				}
 			}
 			for name, args := range cases {
 				_, err := calls[name](ctx, args)
@@ -93,6 +99,25 @@ func TestCLIRoomCallsStayInCallerRoom(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStartNamedRunRoutesTargetThroughEngine(t *testing.T) {
+	storetest.Isolate(t)
+	s := testServices(t, false)
+	rec, err := s.rooms.Notify.Rooms.Create(room.CreateInput{Name: "named-run", Repo: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, _, err := callsFor(s, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Owner}, authority.Actor{Role: authority.Owner})
+	req := roomsvc.StartNamedRunRequest{Room: rec.ID, Name: "deep-research", Input: json.RawMessage(`{"question":"x"}`), ResultTo: "missing-target"}
+	_, err = calls["StartNamedRun"](ctx, cliArgs(t, req))
+	if err == nil || !strings.Contains(err.Error(), "missing-target") {
+		t.Fatalf("target was not resolved: %v", err)
 	}
 }
 
@@ -105,7 +130,7 @@ func TestStartRunUsesCLIRule(t *testing.T) {
 	}
 	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Worker, Run: "wf_test"}, authority.Actor{Role: authority.Worker, Run: "wf_test", Room: "own"})
 	_, err = calls["StartRun"](ctx, cliArgs(t, "own", roomsvc.RunSource{Script: "missing.js"}, nil))
-	if err == nil || !strings.Contains(err.Error(), "use subagent mode") {
+	if err == nil || err.Error() != "dyna workflow run is for room roots. Start a child with dyna subagent start, or post the job to @root." {
 		t.Fatalf("worker passed the CLI run rule: %v", err)
 	}
 }
