@@ -121,7 +121,7 @@ script=$1; shift
 mkfifo "$tmp/out" || exit 254
 {
   cat "$tmp/out" >&3 & forward=$!
-  n=$( { bash -o pipefail -c "$script" dyna-ci "$@" < "$tmp/in"; echo $? > "$tmp/status"; } | tee "$tmp/out" | wc -c )
+  n=$( { bash -o pipefail -c "$script" dyna-ci "$@" 3>&- < "$tmp/in"; echo $? > "$tmp/status"; } | tee "$tmp/out" | wc -c )
   wait "$forward" || exit 254
 } 3>&1
 [ -s "$tmp/status" ] || exit 254
