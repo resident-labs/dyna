@@ -190,9 +190,10 @@ type Input struct {
 	Lane    Lane
 	// Repo is a local repository path and Ref the commit to check out. Both
 	// empty runs the command with no source.
-	Repo string
-	Ref  string
-	Host bool
+	Repo   string
+	Ref    string
+	Subdir string
+	Host   bool
 	// Image runs the command in this container image; Host must be false.
 	Image string
 	// Network, Mounts and Devices apply only to an image. Mount requests
@@ -246,6 +247,13 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	if len(in.Command) == 0 {
 		return Job{}, errors.New("a job needs a command")
 	}
+	if in.Subdir != "" {
+		clean := path.Clean(in.Subdir)
+		if in.Repo == "" || in.Ref == "" || path.IsAbs(in.Subdir) || clean == ".." || strings.HasPrefix(clean, "../") {
+			return Job{}, errors.New("job subdir must stay inside its checkout and needs a commit")
+		}
+		in.Subdir = clean
+	}
 	if in.Workspace && (in.Repo == "" || in.Ref == "") {
 		return Job{}, errors.New("a kept workspace needs a commit")
 	}
@@ -295,7 +303,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	job := Job{
 		ID: id, RoomID: in.RoomID, Session: in.Session, Run: in.Run, IdempotencyKey: in.IdempotencyKey, RequestHash: in.RequestHash, Node: machine.Name,
-		Command: in.Command, Lane: in.Lane, Host: host, Image: in.Image, Container: container,
+		Command: in.Command, Lane: in.Lane, Subdir: in.Subdir, Host: host, Image: in.Image, Container: container,
 		CPUs: in.CPUs, Timeout: in.Timeout, Heavy: in.Heavy, Artifacts: in.Artifacts,
 		Resources: in.Resources, State: StateQueued, Created: s.Store.now(),
 		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
@@ -1127,6 +1135,10 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		// have one place to live and --artifact paths one root.
 		inner += "mkdir -p " + q(work) + "; "
 	}
+	// Resolve symlinks before entering a requested subdirectory.
+	if job.Subdir != "" && job.Subdir != "." {
+		inner += "root=$(realpath " + q(work) + "); target=$(realpath -m " + q(path.Join(work, job.Subdir)) + "); case \"$target/\" in \"$root/\"*) ;; *) echo 'job subdir escapes checkout' >&2; exit 1;; esac; mkdir -p -- \"$target\"; "
+	}
 	// Each word is quoted on its own, so the shell that runs the script builds
 	// exactly the argv the submitter passed: no boundary moves, no
 	// metacharacter of an argument runs.
@@ -1147,6 +1159,9 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		// works there, exactly as a CI check container does, and what the job
 		// writes there stays for its artifacts.
 		mount := " -v " + q(work+":/workspace") + " -w /workspace"
+		if job.Subdir != "" && job.Subdir != "." {
+			mount = " -v " + q(work+":/workspace") + " -w " + q(path.Join("/workspace", job.Subdir))
+		}
 		for _, registered := range job.Container.Mounts {
 			mount += " -v " + q(registered.Source+":"+registered.Target+":"+string(registered.Mode))
 		}
@@ -1170,7 +1185,7 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
 			" --pids-limit=512" + network + mount + " -e " + strings.Join(childenv.NoEditor(), " -e ") + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
 	} else {
-		inner += "cd " + q(work) + "; "
+		inner += "cd " + q(path.Join(work, job.Subdir)) + "; "
 		inner += "timeout --foreground --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s bash -o pipefail -c " + q(command)
 	}
 	return inner
