@@ -146,6 +146,27 @@ func TestReconnectResendsTurnStartAndUnreadSteers(t *testing.T) {
 		t.Fatalf("unexpected replay: %+v", replayed)
 	}
 }
+func TestFailedResultReachesParent(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent})
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalSession, Session: "child"}, contract.TurnEnded{Session: "child", Outcome: contract.TurnFailed, Error: "tool failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost}, Wake: true}
+	if _, err := s.store.Post(ctx, event, []contract.Delivery{d}); err != nil {
+		t.Fatal(err)
+	}
+	steer := (<-channel).Body.(contract.TurnSteer)
+	if steer.Input.Text != "turn failed: tool failed" {
+		t.Fatalf("text %q", steer.Input.Text)
+	}
+}
+
 func TestFailedTurnRecordsError(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
