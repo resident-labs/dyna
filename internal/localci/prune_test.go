@@ -68,3 +68,32 @@ func TestMigrationStampsExistingResultsWithTheMigrationTime(t *testing.T) {
 		t.Fatalf("recorded_at is %s old, want the migration time", age)
 	}
 }
+
+func TestPruneResultLogsKeepsStatusesAndLiveResults(t *testing.T) {
+	ctx := context.Background()
+	s := fixtureStore(t)
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	t.Cleanup(func() { resultClock = time.Now })
+	for _, row := range []struct {
+		sha string
+		age time.Duration
+	}{{"a", 4 * 24 * time.Hour}, {"b", 4 * 24 * time.Hour}, {"c", time.Hour}} {
+		resultClock = func() time.Time { return now.Add(-row.age) }
+		err := s.SaveResult(ctx, Result{Repo: "github.com/acme/widgets", SHA: strings.Repeat(row.sha, 40), Status: OutcomeFailed, Suites: []SuiteResult{{Suite: "test", Status: OutcomeFailed, LogTail: "tail", FailureExcerpt: "failure"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PruneResultLogs(ctx, now.Add(-3*24*time.Hour), map[string]bool{strings.Repeat("b", 40): true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		sha  string
+		logs bool
+	}{{"a", false}, {"b", true}, {"c", true}} {
+		got, err := s.LoadResult(ctx, "github.com/acme/widgets", strings.Repeat(row.sha, 40))
+		if err != nil || got.Status != OutcomeFailed || len(got.Suites) != 1 || (got.Suites[0].LogTail != "") != row.logs || (got.Suites[0].FailureExcerpt != "") != row.logs {
+			t.Fatalf("result %s: %+v, %v", row.sha, got, err)
+		}
+	}
+}
