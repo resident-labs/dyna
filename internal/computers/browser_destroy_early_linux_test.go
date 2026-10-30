@@ -94,11 +94,10 @@ func TestOfflineDestroyWaitsForEmptyEnvironment(t *testing.T) {
 	if err := destroyOffline(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-child.done:
-	case <-time.After(8 * time.Second):
+	if info, ok := processInfo(pid); ok && info.state != "Z" {
 		t.Fatal("destroy skipped a daemon whose environment read as empty")
 	}
+	<-child.done
 	if reads < 4 {
 		t.Fatalf("the empty environment was read %d times, want it read again until readable", reads)
 	}
