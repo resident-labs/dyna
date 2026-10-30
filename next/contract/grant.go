@@ -7,9 +7,6 @@ type GrantKind string
 const (
 	GrantHostExec GrantKind = "hostexec"  // run commands on hosts (section 6)
 	GrantAskOwner GrantKind = "ask-owner" // open owner questions and terminal requests
-	GrantRead     GrantKind = "read"      // members: read the room
-	GrantPost     GrantKind = "post"      // members: post in the room
-	GrantApprove  GrantKind = "approve"   // members: approve agent-class operations
 )
 
 type GrantMode string // "approve" | "preapproved" (host exec only)
