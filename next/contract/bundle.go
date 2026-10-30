@@ -405,7 +405,7 @@ func DecodeBundle[T interface {
 	if err := dec.Decode(&b); err != nil {
 		return b, fmt.Errorf("decode bundle: %w", err)
 	}
-	if dec.More() {
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return b, errors.New("decode bundle: trailing data")
 	}
 	if v := b.version(); v != BundleV1 {
