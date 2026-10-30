@@ -48,7 +48,8 @@ CREATE TABLE approval_decisions (
  reason TEXT NOT NULL DEFAULT '',
  at INTEGER NOT NULL
 );
-CREATE INDEX approval_decision_request ON approval_decisions(request,seq);`
+CREATE INDEX approval_decision_request ON approval_decisions(request,seq);
+CREATE TABLE approval_inline_log (seq INTEGER PRIMARY KEY, room TEXT NOT NULL, actor TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL, exit_code INTEGER, at INTEGER NOT NULL);`
 
 var idPattern = regexp.MustCompile(`^A-[1-9][0-9]*$`)
 
@@ -58,7 +59,7 @@ func Migrate(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "approvals.schema", 3, func(conn *sql.Conn, from int) error {
+	return database.Migrate(db, "approvals.schema", 4, func(conn *sql.Conn, from int) error {
 		if from == 0 {
 			_, err := conn.ExecContext(context.Background(), schema)
 			return err
@@ -71,8 +72,14 @@ func Migrate(dataDir string) error {
 			}
 		}
 		// Version 3 drops approval_rules, which no code read or wrote.
-		_, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS approval_rules")
-		return err
+		if _, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS approval_rules"); err != nil {
+			return err
+		}
+		if from < 4 {
+			_, err := conn.ExecContext(context.Background(), `CREATE TABLE approval_inline_log (seq INTEGER PRIMARY KEY, room TEXT NOT NULL, actor TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL, exit_code INTEGER, at INTEGER NOT NULL)`)
+			return err
+		}
+		return nil
 	})
 }
 
