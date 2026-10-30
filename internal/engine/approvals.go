@@ -2,21 +2,99 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/notify"
 )
 
 func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput) (approvals.Request, error) {
 	actor := authority.Of(ctx)
 	if err := ghclient.ValidateFileSnapshots(in.Argv, in.Files); err != nil {
 		return approvals.Request{}, err
+	}
+	paths, err := ghclient.MediaPaths(in.Argv)
+	if err != nil {
+		return approvals.Request{}, err
+	}
+	if len(paths) != len(in.Media) {
+		return approvals.Request{}, errors.New("media arguments do not match attachments")
+	}
+	if len(paths) > 0 {
+		if (actor.Role != authority.Session && actor.Role != authority.Root) || actor.Session == "" {
+			return approvals.Request{}, errors.New("media approval requires a session")
+		}
+		sender, err := s.rooms.Notify.SenderOf(notify.Claim{Session: actor.Session, Room: actor.Room})
+		if err != nil {
+			return approvals.Request{}, err
+		}
+		for i, media := range in.Media {
+			if media.Path != paths[i] || media.Name != filepath.Base(media.Path) || media.PostID == "" || media.AttachmentID == "" {
+				return approvals.Request{}, errors.New("invalid media reference")
+			}
+			msg, err := s.rooms.Notify.Rooms.Message(actor.Room, media.PostID)
+			if err != nil {
+				return approvals.Request{}, err
+			}
+			if msg.AuthorSessionID() != actor.Session {
+				return approvals.Request{}, errors.New("media post belongs to another session")
+			}
+			found := false
+			for _, a := range msg.Attachments {
+				if a.ID == media.AttachmentID && a.Name == media.Name {
+					found = true
+				}
+			}
+			if !found {
+				return approvals.Request{}, errors.New("media attachment is not in its post")
+			}
+			path, err := s.rooms.Notify.Rooms.AttachmentPath(actor.Room, media.AttachmentID)
+			if err != nil {
+				return approvals.Request{}, err
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return approvals.Request{}, err
+			}
+			data, err := io.ReadAll(io.LimitReader(f, (25<<20)+1))
+			closeErr := f.Close()
+			if err != nil {
+				return approvals.Request{}, err
+			}
+			if closeErr != nil {
+				return approvals.Request{}, closeErr
+			}
+			sum := sha256.Sum256(data)
+			if fmt.Sprintf("%x", sum) != media.SHA256 {
+				return approvals.Request{}, errors.New("media hash mismatch")
+			}
+			data, err = ghclient.SanitizeMedia(media.Name, data)
+			if err != nil {
+				return approvals.Request{}, err
+			}
+			result, err := s.rooms.Notify.Post(ctx, notify.PostInput{NoWake: true, Sender: sender, Mentions: []string{"@root"}, Text: "Media for GitHub approval. Image metadata is removed; video metadata is not removed.", Files: []notify.File{{Name: media.Name, Data: data}}})
+			if err != nil {
+				return approvals.Request{}, err
+			}
+			if len(result.Message.Attachments) != 1 {
+				return approvals.Request{}, errors.New("sanitized media post failed")
+			}
+			sum = sha256.Sum256(data)
+			in.Media[i].PostID = result.Message.ID
+			in.Media[i].AttachmentID = result.Message.Attachments[0].ID
+			in.Media[i].SHA256 = fmt.Sprintf("%x", sum)
+		}
 	}
 	ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, actor.Room), s.rooms.Notify.Rooms)
 	var checkedRef ghclient.ItemRef
@@ -52,19 +130,46 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 	if class == approvals.ClassAuto && checkedNumber != 0 {
 		in.Argv = ghclient.PinRoutinePR(in.Argv, checkedRef, checkedNumber)
 	}
-	auto := class == approvals.ClassAuto
-	if auto {
-		class = approvals.ClassAgent
+	class, auto := mediaApprovalClass(class, len(in.Media) > 0)
+	var destination approvals.MediaDestination
+	if len(in.Media) > 0 {
+		cmd := ghclient.Command(ctx, "", in.Cwd, in.Argv...)
+		destination, err = ghclient.ResolveMediaDestination(ctx, cmd)
+		if err != nil {
+			return approvals.Request{}, err
+		}
 	}
-	stored := approvals.GHPayload{Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files}
+	stored := approvals.GHPayload{MediaDestination: destination, Argv: in.Argv, Cwd: in.Cwd, Repo: in.Repo, Files: in.Files, Media: in.Media}
+	body := ghclient.DisplayApprovalBody(stored)
+	if len(in.Media) > 0 {
+		body += fmt.Sprintf("\n\nMedia destination: %s/%s (head %s)", destination.Host, destination.Base, destination.Head)
+		if destination.Number > 0 {
+			body += fmt.Sprintf(" PR #%d", destination.Number)
+		}
+	}
+	for _, media := range in.Media {
+		body += fmt.Sprintf("\n\nMedia: %s\nSHA-256: %s", media.Name, media.SHA256)
+	}
 	payload, err := json.Marshal(stored)
 	if err != nil {
 		return approvals.Request{}, err
 	}
 	return s.rooms.Approvals.Create(ctx, actor, approvals.CreateInput{
 		Kind: approvals.KindGH, Class: class, Auto: auto, Payload: payload, Repository: in.Repo,
-		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: ghclient.DisplayApprovalBody(stored),
+		Command: "gh " + strings.Join(in.Argv, " "), Title: approvalArgument(in.Argv, "--title"), Body: body,
 	})
+}
+
+// mediaApprovalClass decides whether a classified GitHub write may run automatically.
+func mediaApprovalClass(class approvals.Class, hasMedia bool) (approvals.Class, bool) {
+	if hasMedia {
+		return approvals.ClassOwner, false
+	}
+	auto := class == approvals.ClassAuto
+	if auto {
+		class = approvals.ClassAgent
+	}
+	return class, auto
 }
 
 func approvalArgument(argv []string, flag string) string {
