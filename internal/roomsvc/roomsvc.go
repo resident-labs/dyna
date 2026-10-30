@@ -246,13 +246,14 @@ func (s *Service) sessions() *subagent.Store { return s.Notify.Sessions.Store }
 
 // Room is one row of the room rail.
 type Room struct {
-	DisplayName string `json:"displayName,omitempty"`
-	Pinned      bool   `json:"pinned"`
-	PinOrder    int    `json:"pinOrder"`
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Repo        string `json:"repo,omitempty"`
-	RootProfile string `json:"rootProfile,omitempty"`
+	Color       room.RoomColor `json:"color"`
+	DisplayName string         `json:"displayName,omitempty"`
+	Pinned      bool           `json:"pinned"`
+	PinOrder    int            `json:"pinOrder"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Repo        string         `json:"repo,omitempty"`
+	RootProfile string         `json:"rootProfile,omitempty"`
 	// CheckIn is the room's own parent check-in cadence, as typed: a duration
 	// such as 30m, or off. Empty uses the hook's global interval.
 	CheckIn string `json:"checkIn,omitempty"`
@@ -319,7 +320,7 @@ func (s *Service) Rooms() ([]Room, error) {
 	live := s.Notify.ActiveRoomIDs()
 	var out []Room
 	for _, rec := range records {
-		r := Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
+		r := Room{Color: rec.Color, DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
 		version, err := store.MessageLogVersion(rec.ID)
 		if err != nil {
 			return nil, err
@@ -805,7 +806,7 @@ func (s *Service) feedOf(rec room.Record, msgs []room.Message, offset int64, boo
 	if err != nil {
 		return Feed{}, err
 	}
-	return Feed{Room: Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
+	return Feed{Room: Room{Color: rec.Color, DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
 }
 
 // postsOf decorates messages as posts. full replaces a completion's stored
