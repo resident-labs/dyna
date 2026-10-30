@@ -76,10 +76,7 @@ func TestCommandEnv(t *testing.T) {
 
 	t.Run("no computer blocks the owner display and bus", func(t *testing.T) {
 		use(t, noComputer)
-		env, noDisplay := CommandEnv(ctx, dir, meta, desktopBase(shim))
-		if !noDisplay {
-			t.Fatal("noDisplay = false; a shell without a computer must say where GUI apps run")
-		}
+		env := CommandEnv(ctx, dir, meta, desktopBase(shim))
 		for _, key := range []string{"DISPLAY", "WAYLAND_SOCKET", "XDG_SESSION_TYPE", "DYNA_OWNER_DISPLAY", "DYNA_OWNER_WAYLAND_DISPLAY", "AGENT_BROWSER_PROFILE", "AGENT_BROWSER_SOCKET_DIR", "DYNA_CHROMIUM_EXECUTABLE", "DYNA_COMPUTER_PROCESS"} {
 			if got, ok := envLookup(env, key); ok {
 				t.Errorf("%s = %q, want the key absent", key, got)
@@ -110,10 +107,7 @@ func TestCommandEnv(t *testing.T) {
 
 	t.Run("running computer keeps its display and blocks the owner bus", func(t *testing.T) {
 		use(t, running)
-		env, noDisplay := CommandEnv(ctx, dir, meta, desktopBase(shim))
-		if noDisplay {
-			t.Fatal("noDisplay = true; a running computer needs no hint")
-		}
+		env := CommandEnv(ctx, dir, meta, desktopBase(shim))
 		if got := value(env, "DISPLAY"); got != ":240" {
 			t.Errorf("DISPLAY = %q, want the computer display", got)
 		}
@@ -140,7 +134,7 @@ func TestCommandEnv(t *testing.T) {
 		writeSession(t, testSessionRecord{ID: owner, Role: rootRole})
 		base := append(desktopBase(shim), computers.OwnerBusKey+"=unix:path=/run/user/1000/bus")
 		base = envSet(base, "DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/dyna/computers/x/bus")
-		env, _ := CommandEnv(ctx, dir, meta, base)
+		env := CommandEnv(ctx, dir, meta, base)
 		if got := value(env, "DBUS_SESSION_BUS_ADDRESS"); got != "unix:path=/run/user/1000/bus" {
 			t.Errorf("DBUS_SESSION_BUS_ADDRESS = %q, want the owner bus", got)
 		}
@@ -149,10 +143,7 @@ func TestCommandEnv(t *testing.T) {
 	t.Run("root session restores the owner display", func(t *testing.T) {
 		use(t, noComputer)
 		writeSession(t, testSessionRecord{ID: owner, Role: rootRole})
-		env, noDisplay := CommandEnv(ctx, dir, meta, desktopBase(shim))
-		if noDisplay {
-			t.Fatal("noDisplay = true; root keeps the owner display")
-		}
+		env := CommandEnv(ctx, dir, meta, desktopBase(shim))
 		if got := value(env, "DISPLAY"); got != ":0" {
 			t.Errorf("DISPLAY = %q, want the owner display :0", got)
 		}
@@ -177,9 +168,9 @@ func TestCommandEnv(t *testing.T) {
 	t.Run("granted session restores the owner display", func(t *testing.T) {
 		use(t, noComputer)
 		writeSession(t, testSessionRecord{ID: owner, OwnerDisplay: true})
-		env, noDisplay := CommandEnv(ctx, dir, meta, desktopBase(shim))
-		if noDisplay || value(env, "DISPLAY") != ":0" {
-			t.Fatalf("granted shell noDisplay = %v, DISPLAY = %q; want the owner display", noDisplay, value(env, "DISPLAY"))
+		env := CommandEnv(ctx, dir, meta, desktopBase(shim))
+		if got := value(env, "DISPLAY"); got != ":0" {
+			t.Fatalf("granted shell DISPLAY = %q; want the owner display", got)
 		}
 	})
 
@@ -187,7 +178,7 @@ func TestCommandEnv(t *testing.T) {
 		use(t, noComputer)
 		writeSession(t, testSessionRecord{ID: owner, Role: rootRole})
 		base := []string{"DISPLAY=:234", "DYNA_OWNER_DISPLAY=", "WAYLAND_DISPLAY=dyna-public"}
-		env, _ := CommandEnv(ctx, dir, meta, base)
+		env := CommandEnv(ctx, dir, meta, base)
 		if got, ok := envLookup(env, "DISPLAY"); ok {
 			t.Errorf("DISPLAY = %q, want the key absent; the owner had no display", got)
 		}
@@ -196,15 +187,15 @@ func TestCommandEnv(t *testing.T) {
 	t.Run("owner terminal keeps its environment unchanged", func(t *testing.T) {
 		use(t, noComputer)
 		base := []string{"PATH=/usr/bin:/bin", "DISPLAY=:0", "WAYLAND_DISPLAY=wayland-owner", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"}
-		env, noDisplay := CommandEnv(ctx, dir, shells.Meta{ID: meta.ID}, base)
-		if noDisplay || !slices.Equal(env, base) {
-			t.Fatalf("owner shell noDisplay = %v, env = %v; want it unchanged", noDisplay, env)
+		env := CommandEnv(ctx, dir, shells.Meta{ID: meta.ID}, base)
+		if !slices.Equal(env, base) {
+			t.Fatalf("owner shell env = %v; want it unchanged", env)
 		}
 	})
 
-	// The real shell boundary: one job runs with the policy, so a child that
-	// reads stderr sees the hint once, and the command keeps its exit code.
-	t.Run("supervised shell gets the blocked environment and one stderr hint", func(t *testing.T) {
+	// The real shell boundary: one job runs with the policy. The output holds
+	// only the command's own lines, with no hint, and the exit code is its own.
+	t.Run("supervised shell gets the blocked environment and no stderr hint", func(t *testing.T) {
 		use(t, noComputer)
 		writeSession(t, testSessionRecord{ID: owner})
 		store := &shells.Store{Root: filepath.Join(filepath.Dir(runstore.SessionsDir()), "shells"), CommandEnv: CommandEnv}
@@ -229,16 +220,8 @@ func TestCommandEnv(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := string(raw)
-		if got := strings.Count(out, shells.NoDisplayHint); got != 1 {
-			t.Errorf("hint count = %d, want 1; output:\n%s", got, out)
-		}
-		// The hint must end in a real newline: printf escapes need one literal
-		// backslash in the Go raw string, or the child writes a literal \n.
-		if !strings.HasPrefix(out, shells.NoDisplayHint+"\n") {
-			t.Errorf("output = %q, want the hint first, followed by a newline", out)
-		}
-		if strings.Contains(out, `\n`) {
-			t.Errorf("output = %q, want a real newline after the hint, not a literal \\n", out)
+		if strings.Contains(out, "no computer is running") {
+			t.Errorf("output = %q, want no display hint on stderr", out)
 		}
 		jobDir := filepath.Dir(path)
 		if !strings.Contains(out, "display=absent") || !strings.Contains(out, "bus="+noSessionBus(jobDir)) {
