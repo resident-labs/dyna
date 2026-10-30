@@ -61,12 +61,11 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			if token == "" {
 				return contract.OpResult{Error: "GitHub token is not set"}
 			}
-			input := args.(contract.PrOpenArgs)
 			// The request has only strings and a boolean, which JSON always encodes.
 			body, _ := json.Marshal(struct {
 				contract.PrOpenArgs
 				Head string `json:"head"`
-			}{input, head})
+			}{args.(contract.PrOpenArgs), head})
 			target := *endpoint
 			target.Path = strings.TrimRight(target.Path, "/") + "/repos/" + string(session.Repo) + "/pulls"
 			request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
