@@ -385,7 +385,7 @@ export interface Avatar {
   kind: "session" | "root" | "owner" | "engine" | "voice" | "workflow" | "unknown";
   emoji?: string;
   room: string;
-  color: "crimson" | "blue" | "violet" | "teal" | "orange" | "magenta" | "sky" | "olive";
+  color: "" | "crimson" | "blue" | "violet" | "teal" | "orange" | "magenta" | "sky" | "olive";
 }
 /**
  * ReferenceRow is one post of another conversation, as a session's DM shows it:

@@ -41,7 +41,7 @@ packages:
   - path: dyna-agent/internal/roomsvc
     type_mappings:
       room.SenderKind: '"session" | "root" | "owner" | "engine" | "voice" | "workflow" | "unknown"'
-      room.RoomColor: '"crimson" | "blue" | "violet" | "teal" | "orange" | "magenta" | "sky" | "olive"'
+      room.RoomColor: '"" | "crimson" | "blue" | "violet" | "teal" | "orange" | "magenta" | "sky" | "olive"'
     output_path: web/src/lib/api/session.gen.ts
     include_files: [session_types.go]
     fallback_type: unknown
