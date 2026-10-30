@@ -79,9 +79,11 @@ type document struct {
 	Hooks []Hook `json:"hooks"`
 }
 type state struct {
-	Main      string               `json:"main,omitempty"`
-	FetchedAt time.Time            `json:"fetchedAt,omitempty"`
-	Due       map[string]time.Time `json:"due,omitempty"`
+	Main string `json:"main,omitempty"`
+	// Fetched holds the last origin fetch of each local checkout, keyed by its
+	// root. Clones of one remote share a repository ID, so each clone needs its own.
+	Fetched map[string]time.Time `json:"fetched,omitempty"`
+	Due     map[string]time.Time `json:"due,omitempty"`
 	// Every is the interval that set each Due entry, so an edited interval
 	// can move the pending run instead of leaving the old deadline.
 	Every   map[string]int  `json:"every,omitempty"`

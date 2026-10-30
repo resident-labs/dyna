@@ -37,3 +37,37 @@ func TestTickFastForwardsRoomCheckoutWithoutHooks(t *testing.T) {
 		t.Fatalf("checkout HEAD = %s, want origin/main %s", got, want)
 	}
 }
+
+// Separate clones of one remote share a repository ID. Each clone must fetch its
+// own origin, so the first clone's fetch does not stand in for the second's.
+func TestTickFetchesEachCloneOfSameRemote(t *testing.T) {
+	s, first := setup(t)
+	ctx := context.Background()
+	origin := t.TempDir()
+	git(t, origin, "init", "-b", "main")
+	git(t, origin, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "first")
+	git(t, first, "remote", "add", "origin", origin)
+	git(t, first, "fetch", "-q", "origin")
+	git(t, first, "reset", "-q", "--hard", "origin/main")
+	git(t, first, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	second := t.TempDir()
+	git(t, second, "clone", "-q", origin, ".")
+	s.Checkouts = func(context.Context) ([]string, error) { return []string{first, second}, nil }
+	s.Fetch = func(_ context.Context, repo string) error {
+		git(t, repo, "fetch", "-q", "origin")
+		return nil
+	}
+
+	now := time.Now()
+	if err := s.Tick(ctx, first, now); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "second")
+	want := git(t, origin, "rev-parse", "HEAD")
+	if err := s.Tick(ctx, second, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, second, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("second clone HEAD = %s, want origin/main %s", got, want)
+	}
+}

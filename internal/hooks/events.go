@@ -132,8 +132,8 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	}
 	fetchDue := false
 	if err := s.runtime(r.ID, func(st *state) error {
-		if st.FetchedAt.IsZero() || !now.Before(st.FetchedAt.Add(5*time.Minute)) {
-			st.FetchedAt = now
+		if last, ok := st.Fetched[r.Root]; !ok || !now.Before(last.Add(5*time.Minute)) {
+			st.Fetched[r.Root] = now
 			fetchDue = true
 		}
 		return nil
