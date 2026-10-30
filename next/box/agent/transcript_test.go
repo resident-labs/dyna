@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -111,6 +112,121 @@ func TestTranscriptTurnOutputIgnoresSyncError(t *testing.T) {
 	sink := endedSink{turnSink: recordingTurnSink{}, transcript: NewTranscript(&transcriptEngine{lose: true}, dir), file: func() string { return file }}
 	if err := sink.TurnOutput(context.Background(), contract.TurnEnded{}); err != nil {
 		t.Fatalf("TurnOutput = %v, want nil after a failed sync", err)
+	}
+}
+
+type fakeCloser struct{}
+
+func (fakeCloser) Close() error { return nil }
+
+func TestCloseBoxSendsUnsentBytesBeforeArchive(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.jsonl")
+	writeSession(t, file, "abc")
+	engine := &transcriptEngine{}
+	archived := false
+	noWait := func(time.Duration) <-chan time.Time {
+		t.Fatal("closeBox waited although the sync succeeded")
+		return nil
+	}
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, noWait, func(context.Context) error {
+		archived = true
+		if len(engine.requests) != 1 || string(engine.requests[0].Bytes) != "abc" {
+			t.Fatalf("archived before the transcript reached the engine: %+v", engine.requests)
+		}
+		return nil
+	})
+	if err != nil || !archived {
+		t.Fatalf("closeBox = %v, archived = %v, want nil and true", err, archived)
+	}
+}
+
+func TestCloseBoxRetriesFailedSyncBeforeArchive(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.jsonl")
+	writeSession(t, file, "abc")
+	engine := &transcriptEngine{lose: true}
+	var waits []time.Duration
+	fired := func(d time.Duration) <-chan time.Time {
+		waits = append(waits, d)
+		ticked := make(chan time.Time, 1)
+		ticked <- time.Time{}
+		return ticked
+	}
+	archived := false
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, fired, func(context.Context) error {
+		archived = true
+		if len(engine.requests) != 2 || string(engine.requests[1].Bytes) != "abc" {
+			t.Fatalf("archived before the retry reached the engine: %+v", engine.requests)
+		}
+		return nil
+	})
+	if err != nil || !archived {
+		t.Fatalf("closeBox = %v, archived = %v, want nil and true", err, archived)
+	}
+	if len(waits) != 1 || waits[0] != transcriptRetryMin {
+		t.Fatalf("waits = %v, want one wait of %v", waits, transcriptRetryMin)
+	}
+}
+
+func TestCloseRetriesFailedArchiveDone(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.jsonl")
+	writeSession(t, file, "abc")
+	var waits []time.Duration
+	fired := func(d time.Duration) <-chan time.Time {
+		waits = append(waits, d)
+		ticked := make(chan time.Time, 1)
+		ticked <- time.Time{}
+		return ticked
+	}
+	calls := 0
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(&transcriptEngine{}, dir), file, fired, func(context.Context) error {
+		calls++
+		if calls == 1 {
+			return errors.New("engine unavailable")
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("closeBox = %v after %d ArchiveDone calls, want nil after 2", err, calls)
+	}
+	if len(waits) != 1 || waits[0] != transcriptRetryMin {
+		t.Fatalf("waits = %v, want one wait of %v", waits, transcriptRetryMin)
+	}
+}
+
+func TestCloseKeepsRunAfterRunnerErrorAndRetriesSync(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.jsonl")
+	writeSession(t, file, "abc")
+	engine := &transcriptEngine{lose: true}
+	errs := make(chan error, 1)
+	runnerErrs := make(chan error)
+	var closing atomic.Bool
+	done := make(chan error, 1)
+	go func() { done <- waitRun(context.Background(), errs, runnerErrs, &closing) }()
+	closing.Store(true)
+	runnerErrs <- errors.New("turn output: engine unavailable")
+	fired := func(time.Duration) <-chan time.Time {
+		ticked := make(chan time.Time, 1)
+		ticked <- time.Time{}
+		return ticked
+	}
+	archived := false
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, fired, func(context.Context) error {
+		archived = true
+		if len(engine.requests) != 2 || string(engine.requests[1].Bytes) != "abc" {
+			t.Fatalf("archived before the retry reached the engine: %+v", engine.requests)
+		}
+		return nil
+	})
+	if err != nil || !archived {
+		t.Fatalf("closeBox = %v, archived = %v, want nil and true", err, archived)
+	}
+	errs <- nil
+	if err := <-done; err != nil {
+		t.Fatalf("waitRun = %v, want nil when the channel ends", err)
 	}
 }
 

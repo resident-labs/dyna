@@ -328,3 +328,10 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 	})
 	return active, inputs, err
 }
+
+// SessionHasTurns reports whether a box ever ran a turn for the session. A session without turns has no work to archive.
+func (s *Store) SessionHasTurns(ctx context.Context, session contract.SessionID) (bool, error) {
+	var has bool
+	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM turns WHERE session=?)", session).Scan(&has)
+	return has, err
+}
