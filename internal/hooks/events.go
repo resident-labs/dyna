@@ -199,6 +199,9 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	}
 	errs := []error{fetchErr}
 	for _, e := range events {
+		if e.Event == MainUpdated && s.MainUpdated != nil {
+			errs = append(errs, s.MainUpdated(ctx, e))
+		}
 		errs = append(errs, s.Emit(ctx, e))
 	}
 	return errors.Join(errs...)
