@@ -634,10 +634,13 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if strings.TrimSpace(req.Text) == "" {
 		return contract.PostResponse{}, invalid("post text is required")
 	}
+	if len(req.Attachments) > 16 {
+		return contract.PostResponse{}, invalid("too many attachments")
+	}
 	for i := range req.Attachments {
 		file := &req.Attachments[i]
 		media, _, mediaErr := mime.ParseMediaType(file.Media)
-		if !validHash(file.SHA256) || file.Name == "" || mediaErr != nil {
+		if !validHash(file.SHA256) || file.Name == "" || len(file.Name) > 255 || mediaErr != nil {
 			return contract.PostResponse{}, invalid("invalid attachment")
 		}
 		info, err := os.Stat(filepath.Join(s.filesDir, file.SHA256))

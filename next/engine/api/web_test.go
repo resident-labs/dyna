@@ -15,7 +15,11 @@ import (
 func TestWebGuardAndLogin(t *testing.T) {
 	now := time.Unix(1000, 0)
 	a := New(&fakeService{}, nil)
-	w := NewWeb(a, "7790", fstest.MapFS{"index.html": {Data: []byte("app")}}, func() time.Time { return now })
+	w, err := NewWeb(a, "127.0.0.1:7790", fstest.MapFS{"index.html": {Data: []byte("app")}}, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.handler = a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
 	request := func(method, host, path, origin string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://"+host+path, strings.NewReader("{}"))
 		r.Host = host
@@ -61,6 +65,9 @@ func TestWebGuardAndLogin(t *testing.T) {
 		t.Fatal(got)
 	}
 	if got := request("POST", host, "/v1/room.list", "http://"+host, cookie).Code; got != 200 {
+		t.Fatal(got)
+	}
+	if got := request("POST", host, "/v1/web.login", "http://"+host, cookie).Code; got != http.StatusForbidden {
 		t.Fatal(got)
 	}
 	expiring, _ := w.login(nil, contract.Principal{}, contract.WebLoginRequest{})
