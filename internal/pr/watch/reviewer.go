@@ -712,12 +712,22 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			continue
 		}
 		cfg := st.Reviewers[roomID]
-		choice, e := s.chooseProfile(cfg, s.reviewRepoIdentity(ctx, *candidate))
+		r := *candidate
+		reuse := facts.Sessions[r.LastReviewer]
+		reuseID := ""
+		if reuse.Info.ID != "" && reuse.Info.RoomID == roomID && reuse.Info.ID != r.Author {
+			reuseID = reuse.Info.ID
+		}
+		choice := rolesession.Choice{Name: reuse.Info.Profile}
+		var e error
+		if reuseID == "" {
+			choice, e = s.chooseProfile(cfg, s.reviewRepoIdentity(ctx, r))
+		}
 		var unavailable *rolesession.NoProfileError
 		if e != nil && !errors.As(e, &unavailable) {
 			return s.reviewBlocked(roomID, Sanitize(e.Error()))
 		}
-		waiting := e != nil || (cfg.Profile != "" && choice.Cause != "")
+		waiting := reuseID == "" && (e != nil || (cfg.Profile != "" && choice.Cause != ""))
 		reason := choice.Reason
 		if e != nil {
 			reason = e.Error()
@@ -737,10 +747,9 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			return s.reviewBlocked(roomID, Sanitize(reason))
 		}
 		name := choice.Name
-		if busy >= reviewerProfileCap(name, profiles) {
+		if reuseID == "" && busy >= reviewerProfileCap(name, profiles) {
 			break
 		}
-		r := *candidate
 		if current, e := s.reviewHeadCurrent(ctx, r); e != nil {
 			return e
 		} else if !current {
@@ -756,11 +765,56 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		r.FastLand = nil
 		r.ReviewPublishing = PublishingLocal
 		r.ReviewerName = reviewerChangeName(&r)
-		task, e := s.prepareReviewTask(ctx, r, "")
+		taken := map[string]bool{}
+		for _, live := range facts.Sessions {
+			if live.Info.RoomID == roomID {
+				taken[live.Info.Name] = true
+			}
+		}
+		if s.Notify != nil {
+			infos, listErr := s.Notify.Sessions.Store.ListSnapshot(false)
+			if listErr != nil {
+				return listErr
+			}
+			for _, info := range infos {
+				if info.RoomID == roomID && info.Status != subagent.StatusClosed {
+					taken[info.Name] = true
+				}
+			}
+		}
+		if reuseID != "" {
+			r.ReviewerName = reuse.Info.Name
+		} else {
+			base := r.ReviewerName
+			for n := 2; taken[r.ReviewerName]; n++ {
+				r.ReviewerName = fmt.Sprintf("%s-%d", base, n)
+			}
+		}
+		seen := ""
+		if reuseID != "" {
+			seen = r.LastReviewHead
+		}
+		task, e := s.prepareReviewTask(ctx, r, seen)
 		if e != nil {
 			return e
 		}
-		id, e := s.launch(ctx, r, name, task)
+		id := reuseID
+		if id == "" {
+			base := reviewerChangeName(&r)
+			for n := 2; ; n++ {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				id, e = s.launch(ctx, r, name, task)
+				if !errors.Is(e, subagent.ErrNameTaken) {
+					break
+				}
+				for taken[fmt.Sprintf("%s-%d", base, n)] {
+					n++
+				}
+				r.ReviewerName = fmt.Sprintf("%s-%d", base, n)
+			}
+		}
 		if e != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -772,24 +826,36 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		}
 		paused, e := s.RoomPaused(roomID)
 		if e != nil || paused {
+			if reuseID != "" {
+				return e
+			}
 			closeErr := s.closeReviewer(ctx, id)
 			return errors.Join(e, closeErr)
 		}
 		applied := false
 		if e = s.Store.update(func(current *State) error {
 			applied = assignReview(current, r, id, cfg)
+			if applied && reuseID != "" {
+				retireSessionReviewNotices(current.Records[r.Key], id, "review-reassigned")
+				systemReviewNotice(current.Records[r.Key], id, task, "review-assignment:"+r.Head)
+			}
 			return nil
 		}); e != nil {
 			return e
 		}
 		if !applied {
+			if reuseID != "" {
+				continue
+			}
 			if e = s.closeReviewer(ctx, id); e != nil {
 				return e
 			}
 			continue
 		}
 		s.expediteGranted("review:"+roomID, expeditedRecord(r, facts.ExpeditedGoals))
-		busy++
+		if reuseID == "" {
+			busy++
+		}
 	}
 	return nil
 }
