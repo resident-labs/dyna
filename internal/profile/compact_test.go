@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompactNativeMapsTokensPerHarness(t *testing.T) {
@@ -45,6 +46,31 @@ func TestCompactNativeRejectsWhatTheHarnessCannotTake(t *testing.T) {
 		}
 		if err := p.Validate(); err == nil {
 			t.Errorf("%s %+v: Validate accepted it", tc.harness, c)
+		}
+	}
+}
+
+// A Claude Code session that sat idle past the cache lifetime compacts before
+// its turn when its context is at the floor. A warm cache, a small context, a
+// profile without compaction and another harness do not.
+func TestIdleCompactDueOnlyForColdLargeClaudeSessions(t *testing.T) {
+	claude := Profile{Harness: HarnessClaudeCode, Compact: &Compact{Tokens: 300000}}
+	cold := ClaudeCacheLifetime + time.Second
+	for _, tc := range []struct {
+		name    string
+		p       Profile
+		context int64
+		idle    time.Duration
+		want    bool
+	}{
+		{"cold and large", claude, IdleCompactMinTokens, cold, true},
+		{"cache still warm", claude, 400000, ClaudeCacheLifetime, false},
+		{"context below the floor", claude, IdleCompactMinTokens - 1, cold, false},
+		{"compaction off", Profile{Harness: HarnessClaudeCode}, 400000, cold, false},
+		{"other harness", Profile{Harness: HarnessPi, Compact: &Compact{Tokens: 300000}}, 400000, cold, false},
+	} {
+		if got := IdleCompactDue(tc.p, tc.context, tc.idle); got != tc.want {
+			t.Errorf("%s: IdleCompactDue = %t, want %t", tc.name, got, tc.want)
 		}
 	}
 }

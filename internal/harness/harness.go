@@ -405,6 +405,10 @@ type SessionOptions struct {
 	// ContextTokens is the previous turn's Result.ContextTokens. A resumed
 	// turn first runs the harness's compact command when profile.CompactDue.
 	ContextTokens int64
+	// IdleFor is how long the session sat idle since its last turn ended; zero
+	// when unknown. A Claude Code session idle past its prompt cache lifetime
+	// compacts first; see profile.IdleCompactDue.
+	IdleFor time.Duration
 	// OnFallback runs when the turn leaves a model for the next one in the
 	// profile's chain, so the caller can record why.
 	OnFallback func(ModelFallback)
@@ -808,7 +812,7 @@ func (r *journaledRun) compactBeforeTurn() error {
 	if r.session.ResumeID == "" {
 		return nil
 	}
-	if r.inv.compact != nil && profile.CompactDue(r.p, r.session.ContextTokens) {
+	if r.inv.compact != nil && (profile.CompactDue(r.p, r.session.ContextTokens) || profile.IdleCompactDue(r.p, r.session.ContextTokens, r.session.IdleFor)) {
 		completed, err := runCompaction(r.ctx, r.p, r.cwd, r.inv.compact(r.session.ResumeID), r.steering, r.exec, r.admitNativeAttempt)
 		if isNativeAdmissionError(err) {
 			return err

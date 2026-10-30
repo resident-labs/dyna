@@ -157,7 +157,11 @@ func decodeClaude(line []byte) Record {
 	}
 	events, known := adaptClaudeStreamJSON(p)
 	p.recordUsage.Type, p.recordUsage.ThreadID = p.Type, p.SessionID
-	return Record{Events: events, Signals: claudeToolSignals(p), SessionID: p.SessionID, Compaction: p.Type == "system" && p.Subtype == "compact_boundary", valid: true, recognized: known, recordUsage: p.recordUsage}
+	var context int64
+	if p.Type == "assistant" && p.ParentToolUseID == "" {
+		context = usageSum(p.Message.Usage, "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+	}
+	return Record{Events: events, Signals: claudeToolSignals(p), SessionID: p.SessionID, Compaction: p.Type == "system" && p.Subtype == "compact_boundary", ContextTokens: context, valid: true, recognized: known, recordUsage: p.recordUsage}
 }
 
 // scalarText reads a structured field that is a JSON string or number. A field
