@@ -336,7 +336,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 func harnessCommand(ctx context.Context, p profile.Profile, cwd string, argv []string, execution ExecutionOptions) (*exec.Cmd, error) {
 	// buildInvocation already rejected invalid compaction and instructions.
 	_, compactEnv, _ := profile.CompactNative(p)
-	baseEnv := harnessruntime.NativeEnvironmentBase(p.Harness, os.Environ())
+	baseEnv := append(harnessruntime.NativeEnvironmentBase(p.Harness, os.Environ()), childenv.NoEditor()...)
 	launchEnv := withWorkingDirectoryEnv(mergeEnv(mergeEnv(baseEnv, p.Env), compactEnv), cwd)
 	// An explicit empty scratch override means setup failed. Remove the variable
 	// so a worker cannot accidentally use its parent's or profile's scratch path.

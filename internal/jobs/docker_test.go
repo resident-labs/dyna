@@ -47,3 +47,12 @@ func TestJobScriptFallsBackToSudoDockerOnSSHNode(t *testing.T) {
 		t.Fatalf("an SSH node's job script has no sudo docker fallback:\n%s", script)
 	}
 }
+
+// A job command has no terminal, so git must not open an editor and hang. The
+// script exports the editor variables as true, so git keeps the message it has.
+func TestJobScriptSetsNoEditor(t *testing.T) {
+	script := jobScript(machines.Machine{SSH: "aria@arch"}, Job{Command: []string{"true"}}, Resources{CPUs: 1, MemoryMiB: 512}, "")
+	if want := "export EDITOR=true GIT_EDITOR=true VISUAL=true; "; !strings.Contains(script, want) {
+		t.Fatalf("job script lacks %q:\n%s", want, script)
+	}
+}
