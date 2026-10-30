@@ -1,6 +1,7 @@
 package room
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -12,52 +13,67 @@ func TestDeliveries(t *testing.T) {
 	session := func(id contract.SessionID) contract.Principal {
 		return contract.Principal{Kind: contract.PrincipalSession, Session: id}
 	}
+	feed := contract.Conversation{Kind: contract.ConversationFeed}
+	dm := contract.Conversation{Kind: contract.ConversationDM, Session: "child"}
 	for _, tt := range []struct {
 		name    string
 		from    contract.Principal
 		surface contract.Surface
 		to      contract.SessionID
+		home    contract.Conversation
+		replyTo contract.EventID
 		group   bool
-		want    contract.ReplyKind
+		want    contract.ReplyChannel
 	}{
-		{"owner feed", owner, contract.SurfaceFeed, "child", false, contract.ReplyFinal},
-		{"owner unmentioned", owner, contract.SurfaceFeed, "", false, contract.ReplyFinal},
-		{"owner dm", owner, contract.SurfaceDM, "child", false, contract.ReplyFinal},
-		{"brief", session("parent"), contract.SurfaceSession, "child", false, contract.ReplyFinal},
-		{"parent post", session("parent"), contract.SurfaceFeed, "child", false, contract.ReplyFinal},
-		{"card", owner, contract.SurfaceCard, "child", false, contract.ReplyFinal},
-		{"child result", session("child"), contract.SurfaceSession, "parent", false, contract.ReplyPost},
-		{"sibling post", session("sibling"), contract.SurfaceFeed, "child", false, contract.ReplyPost},
-		{"group", session("parent"), contract.SurfaceFeed, "child", true, contract.ReplyNone},
-		{"engine", contract.Principal{Kind: contract.PrincipalEngine}, contract.SurfaceEngine, "child", false, contract.ReplyNone},
+		{"owner feed", owner, contract.SurfaceFeed, "child", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed, ReplyTo: "event"}},
+		{"owner unmentioned", owner, contract.SurfaceFeed, "", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed, ReplyTo: "event"}},
+		{"owner dm", owner, contract.SurfaceDM, "child", dm, "", false, contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: dm}},
+		{"brief", session("parent"), contract.SurfaceSession, "child", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyFinal, Target: session("parent"), Home: feed}},
+		{"parent post", session("parent"), contract.SurfaceFeed, "child", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyFinal, Target: session("parent"), Home: feed}},
+		{"card", owner, contract.SurfaceCard, "child", feed, "card", false, contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed, ReplyTo: "card"}},
+		{"child result", session("child"), contract.SurfaceSession, "parent", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyPost, Target: session("child"), Home: feed}},
+		{"sibling post", session("sibling"), contract.SurfaceFeed, "child", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyPost, Target: session("sibling"), Home: feed}},
+		{"other room post", session("outside"), contract.SurfaceFeed, "child", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyPost, Target: session("outside"), Home: feed}},
+		{"group", session("parent"), contract.SurfaceFeed, "child", feed, "", true, contract.ReplyChannel{Kind: contract.ReplyNone}},
+		{"engine", contract.Principal{Kind: contract.PrincipalEngine}, contract.SurfaceEngine, "child", feed, "", false, contract.ReplyChannel{Kind: contract.ReplyNone}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			in := DeliveryInput{Event: contract.Event{ID: "event", Seq: 1, From: tt.from}, Surface: tt.surface, Home: contract.Conversation{Kind: contract.ConversationFeed}}
+			in := DeliveryInput{Event: contract.Event{ID: "event", Seq: 1, From: tt.from}, Surface: tt.surface, Home: tt.home, ReplyTo: tt.replyTo}
 			if tt.to != "" {
 				in.Recipients = []Recipient{{Session: tt.to, Explicit: !tt.group}}
 			}
 			got := tree.Deliveries(in)
-			if len(got) != 1 || got[0].Reply.Kind != tt.want || !got[0].Wake {
+			if len(got) != 1 || !reflect.DeepEqual(got[0].Reply, tt.want) || !got[0].Wake {
+				t.Fatalf("got %+v; want %+v", got, tt.want)
+			}
+		})
+	}
+	for _, tt := range []struct {
+		name  string
+		tree  Tree
+		input DeliveryInput
+	}{
+		{"self", tree, DeliveryInput{Event: contract.Event{From: session("child")}, Surface: contract.SurfaceFeed, Recipients: []Recipient{{Session: "child", Explicit: true}}}},
+		{"group self", tree, DeliveryInput{Event: contract.Event{From: session("child")}, Surface: contract.SurfaceFeed, Recipients: []Recipient{{Session: "child"}}}},
+		{"no root", NewTree(nil), DeliveryInput{Event: contract.Event{From: owner}, Surface: contract.SurfaceFeed}},
+		{"empty mention", tree, DeliveryInput{Event: contract.Event{From: owner}, Surface: contract.SurfaceFeed, HasMentions: true}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.tree.Deliveries(tt.input); len(got) != 0 {
 				t.Fatalf("got %+v", got)
 			}
 		})
 	}
 }
 
-func TestEmptyMentionDoesNotWakeRoot(t *testing.T) {
-	tree := NewTree([]Node{{ID: "root"}})
-	got := tree.Deliveries(DeliveryInput{Event: contract.Event{From: contract.Principal{Kind: contract.PrincipalOwner}}, Surface: contract.SurfaceFeed, HasMentions: true})
-	if len(got) != 0 {
-		t.Fatalf("got %+v", got)
-	}
-}
-
 func TestFinalReplies(t *testing.T) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	parent := contract.Principal{Kind: contract.PrincipalSession, Session: "parent"}
-	inputs := []contract.Delivery{{Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: parent}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: parent}}}
+	feed := contract.Conversation{Kind: contract.ConversationFeed}
+	dm := contract.Conversation{Kind: contract.ConversationDM, Session: "child"}
+	inputs := []contract.Delivery{{Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: dm}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: parent}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: parent}}}
 	got := FinalReplies(inputs, map[contract.Principal]contract.EventID{owner: "post"})
-	if len(got) != 2 || got[0].Wake || got[0].Posted != "post" || !got[1].Wake {
+	if len(got) != 3 || got[0].Wake || got[0].Posted != "post" || got[1].Channel.Home != dm || got[1].Wake || !got[2].Wake {
 		t.Fatalf("got %+v", got)
 	}
 }
