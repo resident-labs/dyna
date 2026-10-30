@@ -12,12 +12,9 @@ const checkpointInterval = 30 * time.Second
 // so a unit test can hold a checkpoint open while a write completes.
 func (s *Store) checkpointOnce() error { return s.checkpointRun() }
 
-func (s *Store) checkLoop(path string, now func() time.Time) {
+func (s *Store) checkLoop(path string) {
 	defer close(s.checkDone)
-	if now == nil {
-		now = time.Now
-	}
-	last := now()
+	last := time.Now()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -29,9 +26,9 @@ func (s *Store) checkLoop(path string, now func() time.Time) {
 			if err != nil {
 				continue
 			}
-			if info.Size() >= checkpointBytes || now().Sub(last) >= checkpointInterval {
+			if info.Size() >= checkpointBytes || time.Since(last) >= checkpointInterval {
 				_ = s.checkpointOnce()
-				last = now()
+				last = time.Now()
 			}
 		}
 	}
