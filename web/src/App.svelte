@@ -30,7 +30,7 @@
   import { createWorkflowData } from './lib/workflows/workflowData.ts'
   import { onMount, tick } from 'svelte'
   import { errorText } from './lib/errorText.ts'
-  import { api, onEvent, engineCheck, openExternal, onUnauthorized, logout } from './api.ts'
+  import { api, logout } from './api.ts'
   import NavPane from './lib/app/shell/NavPane.svelte'
   import PageHeader from './lib/app/shell/PageHeader.svelte'
   import PageNotices from './lib/app/shell/PageNotices.svelte'
@@ -41,7 +41,6 @@
   import { GENERAL, VOICE, isFeedView, inView, homeView, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
   import { seatDMConversation } from './lib/rooms/conversations.ts'
   import { isShellResult, shellJobID } from './lib/rooms/feedRows.ts'
-  import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
   import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.ts'
   import { visibleTo } from './lib/rooms/look.ts'
@@ -50,6 +49,7 @@
   import Members from './lib/rooms/Members.svelte'
   import Toast from './lib/ui/Toast.svelte'
   import { clipText } from './lib/ui/toast.ts'
+  import { createRuntime } from './lib/app/runtime.svelte.ts'
   import { createShortcut } from './lib/app/shortcuts.ts'
   import { createPalette } from './lib/app/palette.svelte.ts'
   import { createSessionActions } from './lib/app/sessionActions.svelte.ts'
@@ -57,7 +57,6 @@
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/lanesync/SyncBadge.svelte'
-  import { syncDelay } from './lib/lanesync/sync.ts'
   import Library from './lib/library/Library.svelte'
   import Requests from './lib/requests/Requests.svelte'
   import Visuals from './lib/rooms/Visuals.svelte'
@@ -115,11 +114,10 @@
   import type { Reference } from './lib/rooms/references.ts'
   import RoomSettings from './lib/rooms/RoomSettings.svelte'
   import { withoutReviewers } from './lib/prs/pr.ts'
-  import { boot, watch, registerWorker } from './lib/settings/link.ts'
-  import { engineWatch, browserEngine, type EngineStatus } from './lib/engineStatus.ts'
+  import { type EngineStatus } from './lib/engineStatus.ts'
   import { loadLayout, saveLayout, lastRoom, saveLastRoom, loadDock, saveDock } from './lib/ui/prefs.ts'
   import { dmView } from './lib/sessions/dm.ts'
-  import { followInternalLink, internalLinkHash, roomLabel, short } from './lib/ui/format.ts'
+  import { roomLabel, short } from './lib/ui/format.ts'
   import { parseDetailHref } from './lib/ui/details.ts'
   import { parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
   import { ROOT_SESSION, parseRoute, routeHash, routeSession } from './lib/ui/route.ts'
@@ -1364,126 +1362,34 @@
     started = true
   }
 
-  // start runs once the app may talk to the server (after Connect's landing
-  // page, if there was one). It returns the cleanup.
-  function start() {
-    const mq = window.matchMedia(NARROW)
-    const resize = () => {
-      narrow = mq.matches
-      navOpen = false
-      if (narrow) {
-        showMembers = false
-        showPins = false
-      }
-    }
-    mq.addEventListener('change', resize)
-    api.dataDir().then((d: string) => (dataDir = d))
-    api.health().then((h: { status?: string } | null) => (health = h?.status ?? ''))
-    loadProfiles()
-    // Check, never install: `dyna update` stays an explicit step.
-    api.updateNotice().then((n: UpdateNotice | null) => (update = n?.text ? n : null)).catch(() => {})
-    openFirst()
-    const link = watch((r) => (route = r))
-    // The call widget lives outside every view; it takes the same events.
-    const engine = engineWatch((s) => (engineStatus = s), browserEngine(engineCheck))
-    const off = (onEvent as (event: (ev: StreamEvent) => void, state: (up: boolean) => void) => () => void)((ev) => { handle(ev); if (ev.kind !== 'build') voiceHost?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
-    registerWorker()
-    const fromWorker = (e: MessageEvent) => {
+  const runtime = createRuntime({
+    narrowQuery: NARROW,
+    needPair: () => needPair, unauthorized: () => { needPair = true }, setHalt: (value) => { halt = value },
+    setNarrow: (value) => { narrow = value; navOpen = false; if (narrow) { showMembers = false; showPins = false } },
+    setDataDir: (value) => { dataDir = value }, setHealth: (value) => { health = value },
+    setUpdate: (value) => { update = value }, setRoute: (value) => { route = value }, setEngine: (value) => { engineStatus = value },
+    loadProfiles, openFirst,
+    handle: (ev) => { handle(ev); if (ev.kind !== 'build') voiceHost?.event(ev) },
+    workerMessage: (e) => {
       if (e.data?.type !== 'open') return
       voiceHost?.openLink(callLink(e.data.room, e.data.call ?? null))
       openTarget(e.data.room, e.data.post)
-    }
-    navigator.serviceWorker?.addEventListener('message', fromWorker)
-    window.addEventListener('hashchange', hashChanged)
-    const clicks = (e: MouseEvent) => {
-      const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href]') : null
-      if (!a) return
-      e.preventDefault()
-      const target = parseDetailHref(a.getAttribute('href'))
-      if (target) {
-        openDetail(target)
-        return
-      }
-      const internal = internalLinkHash(a.href, location)
-      if (internal !== null) {
-        followInternalLink(internal, location)
-        return
-      }
-      if (/^https?:/.test(a.href)) openExternal(a.href)
-    }
-    document.addEventListener('click', clicks)
-    const ticker = setInterval(() => (rooms = [...rooms]), 30000) // keep "ago" labels fresh
-    transcripts.start()
-    workflowData.start()
-    return () => {
-      mq.removeEventListener('change', resize)
-      off?.()
-      link.stop()
-      engine.stop()
-      navigator.serviceWorker?.removeEventListener('message', fromWorker)
-      window.removeEventListener('hashchange', hashChanged)
-      document.removeEventListener('click', clicks)
-      clearInterval(ticker)
-    }
-  }
-
-  onMount(() => {
-    // One viewer at a time: a pop-out takes the stream, so the tab goes back to Messages.
-    const popped = () => { if (sessionTab === 'computer') sessionTab = 'chat' }
-    window.addEventListener('dyna:computer-popped', popped)
-    // A hook card opens its run's log in Settings.
-    const hookLog = (event: Event) => {
-      const target = hookLogFrom(event)
-      if (target) openHookLog(target)
-    }
-    window.addEventListener(HOOK_LOG_EVENT, hookLog)
-    const visibility = () => {
-      pageVisible = document.visibilityState === 'visible'
-      if (pageVisible && started) refreshVisibleRoom()
-    }
-    document.addEventListener('visibilitychange', visibility)
-    // Changed computer events keep badges current; poll only an open desktop view.
-    // One status read a minute, every 5 seconds while an operation runs.
-    let syncAt = 0
-    const syncPoll = setInterval(() => {
-      if (needPair || !pageVisible || !roomId || Date.now() - syncAt < syncDelay(syncRepo?.operation)) return
-      syncAt = Date.now()
-      loadSync()
-    }, 1000)
-    const computerPoll = setInterval(() => { if (!needPair && pageVisible && (drill || view === 'computers')) loadComputers() }, 10000)
-    let stopApp = () => {}
-    let gone = false
-    if (!needPair) boot().then((h) => {
-      if (gone || needPair) return
-      if (h) halt = h
-      else stopApp = start()
-    })
-    const transferPoll = setInterval(() => {
-      if (needPair || !pageVisible) return
-      selectionView.refreshTransfers()
-    }, 5000)
-    // A refused session opens login and stops all background work.
-    // Unmount uses the same cleanup, including a pending boot.
-    const stop = () => {
-      if (gone) return
-      gone = true
-      window.removeEventListener('dyna:computer-popped', popped)
-      window.removeEventListener(HOOK_LOG_EVENT, hookLog)
-      document.removeEventListener('visibilitychange', visibility)
-      clearInterval(computerPoll)
-      clearInterval(syncPoll)
-      controls.destroy()
-      selectionView.destroy()
-      consolidationAlive = false
-      clearInterval(transferPoll)
-      roomData.destroy()
-      transcripts.destroy()
-      workflowData.destroy()
-      stopApp()
-    }
-    onUnauthorized(() => { needPair = true; stop() })
-    return stop
+    },
+    hashChanged, openDetail, tickRooms: () => { rooms = [...rooms] },
+    startData: () => { transcripts.start(); workflowData.start() },
+    popped: () => { if (sessionTab === 'computer') sessionTab = 'chat' },
+    openHookLog, setVisible: (value) => { pageVisible = value }, visible: () => pageVisible,
+    started: () => started, refreshVisible: refreshVisibleRoom,
+    syncRoom: () => roomId, syncOperation: () => syncRepo?.operation, loadSync,
+    computerVisible: () => !!drill || view === 'computers', loadComputers,
+    refreshTransfers: () => selectionView.refreshTransfers(),
+    destroyData: () => {
+      controls.destroy(); selectionView.destroy(); consolidationAlive = false
+      roomData.destroy(); transcripts.destroy(); workflowData.destroy()
+    },
   })
+  onMount(() => runtime.start())
+
 </script>
 
 <svelte:window onkeydown={shortcut} onresize={() => (winWidth = window.innerWidth)} />
