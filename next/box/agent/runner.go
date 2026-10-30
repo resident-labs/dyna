@@ -17,7 +17,7 @@ type turnSink interface {
 	TurnOutput(context.Context, contract.TurnEnded) error
 }
 
-type turnGuard interface{ EndTurn() error }
+type turnGuard interface{ StopAll() error }
 
 // Runner forwards inputs to Pi without maintaining a second input queue.
 type Runner struct {
@@ -53,7 +53,7 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		r.mu.Unlock()
 		if active {
 			if r.Guard != nil {
-				if err := r.Guard.EndTurn(); err != nil {
+				if err := r.Guard.StopAll(); err != nil {
 					return err
 				}
 			}
@@ -172,11 +172,6 @@ func (r *Runner) steer(ctx context.Context, input contract.TurnSteer) error {
 }
 
 func (r *Runner) finish(ctx context.Context, result contract.TurnEnded) error {
-	if r.Guard != nil {
-		if err := r.Guard.EndTurn(); err != nil {
-			return err
-		}
-	}
 	r.mu.Lock()
 	ids := make([]contract.DeliverySeq, 0, len(r.sent))
 	for id := range r.sent {
