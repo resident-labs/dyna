@@ -77,6 +77,7 @@ func TestCheckReportsAccountReadiness(t *testing.T) {
 
 func TestCheckBinaryLocatesWithoutStartingCommand(t *testing.T) {
 	isolateProfiles(t)
+	t.Setenv("HOME", t.TempDir())
 	marker := filepath.Join(t.TempDir(), "started")
 	bin := t.TempDir()
 	fake := filepath.Join(bin, "pi")
