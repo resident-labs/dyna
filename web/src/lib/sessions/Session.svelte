@@ -462,9 +462,9 @@
   .older button { color: var(--ink-2); text-decoration: underline; padding: var(--s2); }
   .notice { color: var(--gold); padding: var(--s2) var(--s4); margin: 0; font-size: var(--t-ui); border-bottom: 1px solid var(--line-soft); }
   .notice button { color: inherit; text-decoration: underline; font: inherit; }
-  .working { display: flex; align-items: center; gap: var(--s2); margin: 14px var(--s4) 0 56px; font-size: var(--t-ui); color: var(--gold); }
+  .working { display: flex; align-items: center; gap: var(--s2); margin: 14px var(--s4) 0 56px; font-size: var(--t-ui); color: var(--muted); }
   .working button { flex: none; padding: var(--s2) var(--s1); color: var(--coral); }
-  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: pulse 1.6s ease-in-out infinite; }
+  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tone-neutral); animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: 0.35; } }
 
   .composer { position: relative; padding: 0 var(--s4) 6px; flex: none; }
