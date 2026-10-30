@@ -23,6 +23,9 @@ import (
 	"dyna-agent/internal/store"
 )
 
+var revisionCounter = database.NewCounter("goals.revision")
+var itemsRevisionCounter = database.NewCounter("goal_items.revision")
+
 // Each goal is one row; open goals read through goals_state.
 // goal_rooms holds the rest of a room's state, and the Global rule set
 // under room "*".
@@ -141,42 +144,68 @@ func (s *Store) migrate(db *sql.DB) error {
 	}
 	defer unlock()
 	// goal_items migrates first: the schema-2 fold inserts item rows.
-	if err := database.Migrate(db, "goal_items.schema", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), itemsSchema)
+	if err := database.Migrate(db, "goal_items.schema", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, itemsSchema); err != nil {
+				return err
+			}
+		}
+		if err := database.CreateRevisions(ctx, conn); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT key,CAST(value AS INTEGER) FROM meta WHERE key='goal_items.revision'"); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='goal_items.revision'")
 		return err
 	}); err != nil {
 		return err
 	}
-	if err := database.Migrate(db, "goals.schema", 4, func(conn *sql.Conn, from int) error {
+	if err := database.Migrate(db, "goals.schema", 5, func(conn *sql.Conn, from int) error {
 		ctx := context.Background()
-		if from < 1 {
-			if _, err := conn.ExecContext(ctx, goalsSchema); err != nil {
+		if from < 4 {
+			if from < 1 {
+				if _, err := conn.ExecContext(ctx, goalsSchema); err != nil {
+					return err
+				}
+			}
+			if _, err := conn.ExecContext(ctx, "ALTER TABLE goals ADD COLUMN sort_at TEXT NOT NULL DEFAULT ''"); err != nil {
 				return err
 			}
+			if from < 3 {
+				if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('goals.revision','0')"); err != nil {
+					return err
+				}
+				if _, err := conn.ExecContext(ctx, "ALTER TABLE goal_rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"); err != nil {
+					return err
+				}
+				if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='goals.revision')"); err != nil {
+					return err
+				}
+			}
+			if from < 1 {
+				if err := s.importLegacy(conn); err != nil {
+					return err
+				}
+			}
+			if from < 2 {
+				if err := s.foldLegacyChildren(conn); err != nil {
+					return err
+				}
+			}
 		}
-		if _, err := conn.ExecContext(ctx, "ALTER TABLE goals ADD COLUMN sort_at TEXT NOT NULL DEFAULT ''"); err != nil {
+		if err := database.CreateRevisions(ctx, conn); err != nil {
 			return err
 		}
-		if from < 3 {
-			if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('goals.revision','0')"); err != nil {
-				return err
-			}
-			if _, err := conn.ExecContext(ctx, "ALTER TABLE goal_rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"); err != nil {
-				return err
-			}
-			if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='goals.revision')"); err != nil {
-				return err
-			}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT key,CAST(value AS INTEGER) FROM meta WHERE key='goals.revision'"); err != nil {
+			return err
 		}
-		if from < 1 {
-			if err := s.importLegacy(conn); err != nil {
-				return err
-			}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='goals.revision'"); err != nil {
+			return err
 		}
-		if from < 2 {
-			if err := s.foldLegacyChildren(conn); err != nil {
-				return err
-			}
+		if from >= 4 {
+			return nil
 		}
 		// These idempotent legacy folds must precede the page key backfill.
 		if err := migrateResting(conn, 0); err != nil {
@@ -376,13 +405,23 @@ func scan(query reader, sqlText string, each func(room string, body []byte) erro
 func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 	ctx := context.Background()
 	var revision int64
-	if err := conn.QueryRowContext(ctx, "SELECT CAST(value AS INTEGER)+1 FROM meta WHERE key='goals.revision'").Scan(&revision); err != nil {
-		return false, err
-	}
 	changed := false
 	changedRooms := map[string]bool{}
+	bump := func() error {
+		if changed {
+			return nil
+		}
+		var err error
+		revision, err = revisionCounter.Next(ctx, conn)
+		if err == nil {
+			changed = true
+		}
+		return err
+	}
 	exec := func(query string, args ...any) error {
-		changed = true
+		if err := bump(); err != nil {
+			return err
+		}
 		_, err := conn.ExecContext(ctx, query, args...)
 		return err
 	}
@@ -400,6 +439,9 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 		}
 		if old, ok := stored.rooms[id]; ok && bytes.Equal(old, body) {
 			continue
+		}
+		if err := bump(); err != nil {
+			return false, err
 		}
 		if err := exec("INSERT INTO goal_rooms(room,body,revision) VALUES (?,?,?) ON CONFLICT(room) DO UPDATE SET body=excluded.body,revision=excluded.revision", id, string(body), revision); err != nil {
 			return false, err
@@ -437,11 +479,6 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 	}
 	for room := range changedRooms {
 		if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=? WHERE room=?", revision, room); err != nil {
-			return false, err
-		}
-	}
-	if changed {
-		if _, err := conn.ExecContext(ctx, "UPDATE meta SET value=? WHERE key='goals.revision'", revision); err != nil {
 			return false, err
 		}
 	}
@@ -621,27 +658,23 @@ func (s *Store) list(locked bool, where string, args ...any) ([]Goal, error) {
 }
 
 // Revision changes only when an Update writes a row.
-func (s *Store) Revision() (string, error) {
+func (s *Store) Revision() (int64, error) {
 	db, err := s.open()
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	var revision string
-	err = db.QueryRow("SELECT value FROM meta WHERE key='goals.revision'").Scan(&revision)
-	return revision, err
+	return revisionCounter.Read(context.Background(), db)
 }
 
 // ItemsRevision changes whenever any goal item row is written, moved, deleted
 // or reassigned, including writes from another process. A missing row reads
 // as zero: no item has been written yet.
-func (s *Store) ItemsRevision() (string, error) {
+func (s *Store) ItemsRevision() (int64, error) {
 	db, err := s.open()
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	var revision string
-	err = db.QueryRow("SELECT COALESCE((SELECT value FROM meta WHERE key='goal_items.revision'), '0')").Scan(&revision)
-	return revision, err
+	return itemsRevisionCounter.Read(context.Background(), db)
 }
 
 // RoomRevisions identifies rooms changed by committed writes without decoding goals.

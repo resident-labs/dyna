@@ -65,9 +65,9 @@ func (s *Service) PriorityInputs() (string, time.Time, error) {
 	}
 	c := s.expediteCounters()
 	c.mu.Lock()
-	revision = fmt.Sprintf("%s/%d/%d", revision, c.revision, len(rooms))
+	key := fmt.Sprintf("%d/%d/%d", revision, c.revision, len(rooms))
 	c.mu.Unlock()
-	return revision, until, nil
+	return key, until, nil
 }
 
 func (s *Service) expeditedGoals() (map[string]string, time.Time, error) {
