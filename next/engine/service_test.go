@@ -6,16 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
 type fakeBoxes struct{}
 
-func (fakeBoxes) Start(context.Context, contract.SessionID, contract.BoxID, contract.BoxSizeName) (Placement, error) {
-	return Placement{State: contract.BoxReady}, nil
-}
-func (fakeBoxes) Close(context.Context, contract.BoxID) error { return nil }
+func (fakeBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
+func (fakeBoxes) Remove(context.Context, contract.BoxID) error    { return nil }
 
 type fakeProfiles struct{}
 
@@ -36,6 +35,9 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 			t.Error(err)
 		}
 	})
+	if err := st.AddHost(context.Background(), box.Host{Name: "host", State: box.HostReady, CPUs: 32, MemBytes: 64 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: now()}); err != nil {
+		t.Fatal(err)
+	}
 	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -194,12 +196,12 @@ func TestTurnOutputRetryIsIdempotent(t *testing.T) {
 
 type unavailableBoxes struct{}
 
-func (unavailableBoxes) Start(context.Context, contract.SessionID, contract.BoxID, contract.BoxSizeName) (Placement, error) {
-	return Placement{}, errors.New("host unavailable")
+func (unavailableBoxes) Create(context.Context, BoxSpec) (string, error) {
+	return "", errors.New("host unavailable")
 }
-func (unavailableBoxes) Close(context.Context, contract.BoxID) error { return nil }
+func (unavailableBoxes) Remove(context.Context, contract.BoxID) error { return nil }
 
-func TestStartErrorReturnsReachablePendingSession(t *testing.T) {
+func TestStartErrorReturnsReachableFailedSession(t *testing.T) {
 	s, room, _, ctx := setup(t)
 	s.boxes = unavailableBoxes{}
 	response, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "pending", Profile: "test"})
@@ -211,7 +213,7 @@ func TestStartErrorReturnsReachablePendingSession(t *testing.T) {
 		t.Fatal(e)
 	}
 	last := list.Events[len(list.Events)-1].Body.(contract.BoxChanged)
-	if last.Session != response.Session || last.To != contract.BoxPending || last.Reason != "host unavailable" {
+	if last.Session != response.Session || last.To != contract.BoxFailed || last.Reason != "host unavailable" {
 		t.Fatalf("unexpected placement: %+v", last)
 	}
 }
@@ -231,10 +233,101 @@ func TestSessionCannotClose(t *testing.T) {
 	}
 }
 
+func TestBoxLifecycleEmitsTransitions(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	list, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	want := []contract.BoxState{contract.BoxPending, contract.BoxCreating, contract.BoxStarting, contract.BoxReady, contract.BoxClosing, contract.BoxDeleted}
+	if len(list.Events) != len(want) {
+		t.Fatalf("got %d transitions, want %d", len(list.Events), len(want))
+	}
+	for i, event := range list.Events {
+		change := event.Body.(contract.BoxChanged)
+		if change.To != want[i] {
+			t.Fatalf("transition %d: got %s, want %s", i, change.To, want[i])
+		}
+	}
+}
+
 func TestSessionStartRejectsParentInM1(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: session})
 	if e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("expected invalid, got %v", e)
+	}
+}
+
+type blockingBoxes struct{ started chan BoxSpec }
+
+func (b blockingBoxes) Create(ctx context.Context, spec BoxSpec) (string, error) {
+	b.started <- spec
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+func (blockingBoxes) Remove(context.Context, contract.BoxID) error { return nil }
+
+func TestCloseCancelsCreatingBox(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	adapter := blockingBoxes{started: make(chan BoxSpec)}
+	s.boxes = adapter
+	done := make(chan *contract.Error, 1)
+	go func() {
+		_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "blocked", Profile: "test"})
+		done <- e
+	}()
+	spec := <-adapter.started
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: spec.Session}); e != nil {
+		t.Fatal(e)
+	}
+	if e := <-done; e != nil {
+		t.Fatal(e)
+	}
+	b, err := s.store.Box(ctx, spec.Box)
+	if err != nil || b.State != contract.BoxDeleted {
+		t.Fatalf("box: %+v, %v", b, err)
+	}
+}
+
+type cancelOnRemove struct{ cancel context.CancelFunc }
+
+func (cancelOnRemove) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
+func (b cancelOnRemove) Remove(context.Context, contract.BoxID) error  { b.cancel(); return nil }
+
+func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	closeCtx, cancel := context.WithCancel(ctx)
+	s.boxes = cancelOnRemove{cancel: cancel}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: session}); e == nil {
+		t.Fatal("expected canceled close")
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	count := 0
+	for _, event := range events.Events {
+		if event.Body.(contract.BoxChanged).To == contract.BoxDeleted {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("got %d deleted events", count)
 	}
 }
