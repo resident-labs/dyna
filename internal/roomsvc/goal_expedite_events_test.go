@@ -18,7 +18,7 @@ func TestGoalExpediteExpiryEmitsWithoutAWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, work, version := map[string]string{}, map[string]string{}, ""
+	rows, work, version := map[string]string{}, map[string]string{}, int64(-1)
 	var events []Event
 	scan := func(first bool) {
 		e.svc.scanGoalsAt(now, rows, work, &version, first, func(ev Event) { events = append(events, ev) })

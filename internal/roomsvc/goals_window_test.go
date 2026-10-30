@@ -45,7 +45,7 @@ func TestGoalsWindowSkipsUnreachableBodiesAndFollowsCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version string
-	if err = db.QueryRow("SELECT value FROM meta WHERE key='goals.schema'").Scan(&version); err != nil || version != "4" {
+	if err = db.QueryRow("SELECT value FROM meta WHERE key='goals.schema'").Scan(&version); err != nil || version != "5" {
 		t.Fatal(version, err)
 	}
 	rows, err := db.Query("SELECT id,body FROM goals")

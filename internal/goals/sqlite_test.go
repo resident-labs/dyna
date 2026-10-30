@@ -118,7 +118,7 @@ func TestRevisionMovesOnlyWhenRowsChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if now, _ := s.Revision(); now != before {
-		t.Fatalf("no-op update moved the revision from %s to %s", before, now)
+		t.Fatalf("no-op update moved the revision from %d to %d", before, now)
 	}
 	if _, err := s.Finish("r", "g1", "owner", "Shipped.", false); err != nil {
 		t.Fatal(err)

@@ -18,16 +18,17 @@ func (s *Store) migrateServiceGoals(conn *sql.Conn, _ int) error {
 	if count == 0 {
 		return nil
 	}
-	if _, err := conn.ExecContext(ctx, "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='goals.revision'"); err != nil {
+	revision, err := revisionCounter.Next(ctx, conn)
+	if err != nil {
 		return err
 	}
-	if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='goals.revision') WHERE room IN (SELECT room FROM goals WHERE json_type(body,'$.service') IS NOT NULL)"); err != nil {
+	if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=? WHERE room IN (SELECT room FROM goals WHERE json_type(body,'$.service') IS NOT NULL)", revision); err != nil {
 		return err
 	}
 	at := s.now().UTC().Format(time.RFC3339Nano)
 	if _, err := conn.ExecContext(ctx, `UPDATE goals SET state='dropped',body=json_set(body,'$.state','dropped','$.updatedAt',?1,'$.done',json_object('at',?1,'by','owner','summary','Root and service sessions no longer hold goals.')) WHERE state='active' AND `+marked, at); err != nil {
 		return err
 	}
-	_, err := conn.ExecContext(ctx, "UPDATE goals SET body=json_remove(body,'$.service') WHERE json_type(body,'$.service') IS NOT NULL")
+	_, err = conn.ExecContext(ctx, "UPDATE goals SET body=json_remove(body,'$.service') WHERE json_type(body,'$.service') IS NOT NULL")
 	return err
 }

@@ -20,7 +20,7 @@ func TestRulesAPIAndEvents(t *testing.T) {
 	if err != nil || initial.Rules == nil || initial.Max != 3000 {
 		t.Fatal(initial, err)
 	}
-	version := ""
+	version := int64(-1)
 	work := map[string]string{}
 	var events []Event
 	emit := func(ev Event) { events = append(events, ev) }
@@ -96,7 +96,7 @@ func TestRulesAPIAndEvents(t *testing.T) {
 func TestGlobalRulesNeedNoRoom(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")
-	version, work, rows := "", map[string]string{}, map[string]string{}
+	version, work, rows := int64(-1), map[string]string{}, map[string]string{}
 	var events []Event
 	emit := func(ev Event) { events = append(events, ev) }
 	e.svc.scanGoals(rows, work, &version, true, emit)

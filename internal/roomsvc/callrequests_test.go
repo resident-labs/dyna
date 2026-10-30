@@ -67,7 +67,7 @@ func TestCallRequestViewsDeliveryAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	var revision int64
-	if err := db.QueryRow("SELECT revision FROM call_requests_revision").Scan(&revision); err != nil || revision != 1 {
+	if err := db.QueryRow("SELECT n FROM revisions WHERE name='callrequests.revision'").Scan(&revision); err != nil || revision != 1 {
 		t.Fatalf("committed call-request revision = %d, %v; want 1", revision, err)
 	}
 	if len(published) != 1 {
