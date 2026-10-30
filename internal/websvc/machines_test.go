@@ -408,3 +408,15 @@ func TestMachineSummaryCarriesRoomsAndLabels(t *testing.T) {
 		t.Fatalf("probed labels = %v, want %v", got.ProbedLabels, wantProbed)
 	}
 }
+
+func TestNodeUsageSummaryAndDiskFloor(t *testing.T) {
+	m := machines.Machine{Load: machines.Load{MemTotal: 100, MemAvailable: 20}, MaxDiskPercent: 90, Capabilities: machines.Capabilities{Disk: machines.Disk{Total: 1000, Free: 150}}}
+	summary := machineSummary(m)
+	if summary.MemoryPercent == nil || *summary.MemoryPercent != 80 {
+		t.Fatalf("memory = %v, want 80", summary.MemoryPercent)
+	}
+	caps := (MachineAPI{}).capabilitiesView(m)
+	if caps.DiskFloor == nil || *caps.DiskFloor != machines.KeepFreeBytes(m.MaxDiskPercent, m.Capabilities.Disk.Total) {
+		t.Fatalf("disk floor = %v", caps.DiskFloor)
+	}
+}
