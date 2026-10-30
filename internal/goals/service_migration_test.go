@@ -18,7 +18,7 @@ func TestSchemaThreeRetiresOnlyExplicitServiceGoals(t *testing.T) {
 	}
 	if _, err := db.Exec(goalsSchema + itemsSchema + `;
  ALTER TABLE goal_rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
- INSERT INTO meta(key,value) VALUES ('goals.schema','3'),('goal_items.schema','1'),('goals.resting','1'),('goals.revision','7');
+ INSERT INTO meta(key,value) VALUES ('goals.schema','3'),('goal_items.schema','1'),('goals.resting','1'),('goals.revision','7'),('goal_items.revision','19');
  INSERT INTO goal_rooms(room,body,revision) VALUES ('r','{}',7);
  INSERT INTO goals(room,id,state,body) VALUES
  ('r','g1','active','{"id":"g1","state":"active","service":true,"futureGoal":1}'),
@@ -48,6 +48,14 @@ func TestSchemaThreeRetiresOnlyExplicitServiceGoals(t *testing.T) {
 	}
 	if st, _ := body("g4"); st != "active" {
 		t.Fatal(st)
+	}
+	itemRevision, err := s.ItemsRevision()
+	if err != nil || itemRevision != 19 {
+		t.Fatalf("item revision=%d err=%v", itemRevision, err)
+	}
+	var oldCount int
+	if err := db.QueryRow("SELECT count(*) FROM meta WHERE key IN ('goals.revision','goal_items.revision')").Scan(&oldCount); err != nil || oldCount != 0 {
+		t.Fatalf("old revisions=%d err=%v", oldCount, err)
 	}
 	after, _ := s.Revision()
 	if after != 8 {
