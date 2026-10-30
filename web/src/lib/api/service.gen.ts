@@ -114,6 +114,17 @@ export interface Switch {
   on: boolean;
 }
 /**
+ * Schedule is how often a built-in service runs and how long one run may
+ * take. The owner can change both and reset them to the defaults.
+ */
+export interface Schedule {
+  everyMinutes: number /* int */;
+  /**
+   * Timeout is a Go duration such as "5m0s".
+   */
+  timeout: string;
+}
+/**
  * Service is one row of the registry.
  */
 export interface Service {
@@ -133,6 +144,10 @@ export interface Service {
    * Switch is nil for a service the owner cannot turn off.
    */
   switch?: Switch;
+  /**
+   * Schedule is set for a built-in service whose timing the owner can edit.
+   */
+  schedule?: Schedule;
   /**
    * Profile is the agent profile the service runs on; empty for a service
    * that runs no agent.

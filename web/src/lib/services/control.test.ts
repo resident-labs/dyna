@@ -11,6 +11,8 @@ const record = () => {
     setMergePaused: (room, paused) => { calls.push(`merge-paused ${room} ${paused}`); return Promise.resolve(null) },
     runHook: (repo, name) => { calls.push(`hook-run ${repo} ${name}`); return Promise.resolve({ id: 'run', repo, name, command: '', result: '', logPath: '', startedAt: '' }) },
     editHook: (repo, name, patch) => { calls.push(`hook-edit ${repo} ${name} ${JSON.stringify(patch)}`); return Promise.resolve(null) },
+    editService: (name, patch) => { calls.push(`service-edit ${name} ${JSON.stringify(patch)}`); return Promise.resolve(null) },
+    resetService: (name) => { calls.push(`service-reset ${name}`); return Promise.resolve(null) },
   }
   return { calls, api }
 }
@@ -23,11 +25,19 @@ test('every control on the page writes through the call that owns it', async () 
   await applyControl(api, host, 'merge.paused', true)
   await applyControl(api, host, 'update.enabled', false)
   await applyControl(api, host, 'update.run', true)
+  await applyControl(api, host, 'service.enabled:doctor', false)
+  await applyControl(api, host, 'service.every:maintenance', '30')
+  await applyControl(api, host, 'service.timeout:maintenance', '2m0s')
+  await applyControl(api, host, 'service.reset:maintenance', true)
   assert.deepEqual(calls, [
     'review room_1 false',
     'merge-paused room_1 true',
     'hook-edit /repo self-update {"disabled":true}',
     'hook-run /repo self-update',
+    'service-edit doctor {"disabled":true}',
+    'service-edit maintenance {"everyMinutes":30}',
+    'service-edit maintenance {"timeout":"2m0s"}',
+    'service-reset maintenance',
   ])
 })
 

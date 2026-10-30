@@ -11,6 +11,7 @@ import type { ApprovalDecision } from './lib/api/approvals.ts'
 import type { ChangePolicy, CIBudgetSettings, PolicyOverride, PRConfig } from './lib/api/change.ts'
 import type { CreateRoomInput } from './lib/api/file.ts'
 import type { ManagedMCP, ManagedSkill } from './lib/api/harness.ts'
+import type { ServicePatch } from './lib/api/service.ts'
 import type { Attachment, RoomLimitField, SetRoomLimitResult } from './lib/api/room.ts'
 import type { BulkSessionOptions, ConsolidationOptions, TransferOptions } from './lib/api/session.ts'
 import type { RunSource } from './lib/api/workflow.ts'
@@ -338,7 +339,8 @@ export const api = {
   addGlobalHook: (hook: HookInput) => app.AddGlobalHook(hook),
   editGlobalHook: (name: string, patch: Partial<HookInput>) => app.EditGlobalHook(name, patch),
   removeGlobalHook: (name: string) => app.RemoveGlobalHook(name),
-  resetHook: (name: string) => app.ResetHook(name),
+  editService: (name: string, patch: ServicePatch) => app.EditService(name, patch),
+  resetService: (name: string) => app.ResetService(name),
   configProfiles: () => app.ConfigProfiles(),
   configCheckProfile: (name: string, live = false) => app.ConfigCheckProfile(name, live),
   saveProfile: (edit: ProfileSave) => app.SaveProfile(edit),
