@@ -251,7 +251,6 @@ export const api = {
   githubDiff: (roomRef: string, number: number) => app.GitHubDiff(roomRef, number),
   listWorkflows: (ref: string) => app.ListWorkflows(ref),
   startNamedRun: (room: string, name: string, input: unknown) => app.StartNamedRun({ room, name, input }),
-  listTemplates: () => app.ListTemplates(),
   startRun: (ref: string, source: RunSource, input: unknown) => app.StartRun(ref, source, input),
   cancelRun: (id: string) => app.CancelRun(id),
   pauseRun: (id: string, paused: boolean) => app.PauseRun(id, paused),
