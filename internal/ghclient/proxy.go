@@ -97,11 +97,8 @@ func PublishThroughApproval(ctx context.Context, roomID, dir string, args []stri
 
 func sessionApproval(ctx context.Context, cmd *exec.Cmd, roomID string, args []string) error {
 	cmd.Stdin = os.Stdin
-	if err := refuseOwnerIdentity(ctx, cmd); err != nil {
-		return err
-	}
 	repository := repositoryFor(ctx, cmd)
-	cleanup, err := withAttribution(ctx, cmd, repository)
+	cleanup, err := ComposeBody(ctx, cmd, repository)
 	if err != nil {
 		return err
 	}
