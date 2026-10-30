@@ -11,6 +11,28 @@ Agents need no flag. Shells, tests and builds that an agent starts stay in its t
 
 Once per minute, Dyna checks memory pressure with its load sample. When memory is short, it can stop up to three idle agent processes, longest idle first. It leaves processes alone until they have been idle for five minutes, and never stops a session with turn work or waiting input. The session starts a new process when it next runs.
 
+## Local test slots
+
+Dyna limits concurrent local test commands across all rooms on the engine host.
+The default is the larger of two slots and one slot per four CPU cores.
+Set `testSlots.slots` in `settings.json` to change the limit, or set it
+to 0 to turn the limit off. Set `testSlots.commands` to replace the default
+rules. Each rule has a command name and a test argument. An empty argument
+matches every invocation.
+
+```json
+{"testSlots":{"slots":2,"commands":[{"command":"go","arg":"test"},{"command":"pytest","arg":""}]}}
+```
+
+The defaults match `go test`, `node --test`, `cargo test`, `pytest`,
+and `npm test`. A test argument must occur before the first positional
+argument. Dyna skips tools absent from the owner's PATH. A waiting command
+prints one line in its tool output and gives up after 30 minutes.
+Nested test commands share their parent's slot. To limit a different command
+once, use `dyna slot run -- command args...`. The slot files live under
+`$XDG_RUNTIME_DIR/dyna/test-slots`. If `XDG_RUNTIME_DIR` is unset, Dyna uses the standard user runtime directory
+when it exists. Otherwise, Dyna uses a private per-user directory under `/tmp`. This limit does not change CI.
+
 ## Files and commands
 
 - Dyna writes `~/.config/systemd/user/dyna.slice` and one `dyna-room-<room>.slice` per room on first use and runs `systemctl --user daemon-reload`. To keep local edits, remove the `# Managed by Dyna` line. Dyna then leaves the file alone.

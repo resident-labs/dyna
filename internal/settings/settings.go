@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -82,7 +83,20 @@ const (
 )
 
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
+// TestSlotCommand identifies a command and the argument that starts its tests.
+type TestSlotCommand struct {
+	Command string `json:"command"`
+	Arg     string `json:"arg"`
+}
+
+// TestSlots configures the host-wide local test limit.
+type TestSlots struct {
+	Slots    int
+	Commands []TestSlotCommand
+}
+
 type Values struct {
+	TestSlots     TestSlots
 	PRTrustedBots []string
 	// PROutsideComments is deliver by default. Hold keeps outside comments for the owner.
 	PROutsideComments OutsideComments
@@ -162,6 +176,7 @@ func DefaultPath() string {
 
 func Defaults() Values {
 	return Values{
+		TestSlots:                TestSlots{Slots: max(2, runtime.NumCPU()/4), Commands: []TestSlotCommand{{"go", "test"}, {"node", "--test"}, {"cargo", "test"}, {"pytest", ""}, {"npm", "test"}}},
 		PRTrustedBots:            []string{"coderabbitai", "copilot-pull-request-reviewer"},
 		PROutsideComments:        OutsideCommentsDeliver,
 		LocalCIRemote:            DefaultLocalCIRemote,
@@ -236,6 +251,15 @@ func Load(path string) (Values, error) {
 		}
 	}
 	v.Extra = raw
+	if section, exists := raw["testSlots"]; exists {
+		data, err := json.Marshal(section)
+		if err != nil {
+			return Values{}, err
+		}
+		if err := v.loadTestSlots(data); err != nil {
+			return Values{}, err
+		}
+	}
 	if pr, ok := raw["pr"].(map[string]any); ok {
 		if bots, exists := pr["trustedBots"]; exists {
 			data, err := json.Marshal(bots)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -116,6 +117,20 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	files := map[string][]byte{"gitconfig": []byte(globalConfig(owner, home, config))}
 	for name, target := range resolved {
 		files["bin/"+name] = []byte(bridge(owner, target, name == "dyna"))
+	}
+	// Test wrappers preserve the harness environment. Missing tools need no bridge.
+	slotSettings, err := settings.Load("")
+	if err != nil {
+		return nil, err
+	}
+	for _, rule := range slotSettings.TestSlots.Commands {
+		if target, err := resolve(rule.Command, path); err == nil {
+			var restore map[string]string
+			if _, bridged := resolved[rule.Command]; bridged {
+				restore = owner
+			}
+			files["bin/"+rule.Command] = []byte(testSlotBridge(resolved["dyna"], target, rule.Arg, restore))
+		}
 	}
 	// The systemd-run shim is always installed when the owner PATH names a
 	// real one, so a room's own user units join the room slice. A machine
@@ -417,16 +432,38 @@ func bridge(owner map[string]string, target string, isDyna bool) string {
 	script.WriteString("#!/bin/sh\n")
 	// dyna restores the owner roots itself (RestoreOwner), however it starts.
 	if !isDyna {
-		// Restore PATH too, so nested Prepare calls resolve owner tools, not bridges.
-		for _, key := range append([]string{"HOME", "PATH"}, xdgNames...) {
-			if value, ok := owner[key]; ok {
-				fmt.Fprintf(&script, "export %s=%s\n", key, shellquote.Quote(value))
-			} else {
-				fmt.Fprintf(&script, "unset %s\n", key)
-			}
-		}
+		writeOwnerRoots(&script, owner)
 	}
 	fmt.Fprintf(&script, "exec %s \"$@\"\n", shellquote.Quote(target))
+	return script.String()
+}
+
+// writeOwnerRoots restores PATH too, so nested Prepare resolves owner tools.
+func writeOwnerRoots(script *strings.Builder, owner map[string]string) {
+	for _, key := range append([]string{"HOME", "PATH"}, xdgNames...) {
+		if value, ok := owner[key]; ok {
+			fmt.Fprintf(script, "export %s=%s\n", key, shellquote.Quote(value))
+		} else {
+			fmt.Fprintf(script, "unset %s\n", key)
+		}
+	}
+}
+
+// testSlotBridge composes an optional owner bridge with test interception.
+func testSlotBridge(dyna, target, arg string, restore map[string]string) string {
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\n")
+	if restore != nil {
+		writeOwnerRoots(&script, restore)
+	}
+	if arg == "" {
+		fmt.Fprintf(&script, "exec %s slot run -- %s \"$@\"\n", shellquote.Quote(dyna), shellquote.Quote(target))
+	} else {
+		script.WriteString("for arg do\n")
+		fmt.Fprintf(&script, "  if [ \"$arg\" = %s ]; then exec %s slot run -- %s \"$@\"; fi\n", shellquote.Quote(arg), shellquote.Quote(dyna), shellquote.Quote(target))
+		script.WriteString("  case \"$arg\" in -*) ;; *) break ;; esac\ndone\n")
+		fmt.Fprintf(&script, "exec %s \"$@\"\n", shellquote.Quote(target))
+	}
 	return script.String()
 }
 
