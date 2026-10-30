@@ -72,7 +72,7 @@ var LongCalls = map[string]time.Duration{
 	"StopSession": time.Minute, "BulkSessionAction": time.Minute, "CloseSession": time.Minute, "ForceCloseSession": time.Minute, "CloseSessionOptions": time.Minute,
 	"ReopenSession": 2 * time.Minute, "PromoteSession": 2 * time.Minute, "TransferSession": 2 * time.Minute,
 	"ConsolidateSessions": 2 * time.Minute, "ResumeSessionConsolidation": 2 * time.Minute, "RestartReviewer": 2 * time.Minute,
-	"StartRun": 30 * time.Second, "CancelRun": 30 * time.Second,
+	"StartRun": 30 * time.Second, "StartNamedRun": 30 * time.Second, "CancelRun": 30 * time.Second,
 	"DeleteRoom": 30 * time.Second,
 	// Removing runs applies their worktree disposition (git), and archiving
 	// across filesystems copies and verifies a whole run folder: 4 s for the
