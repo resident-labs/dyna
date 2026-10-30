@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -37,12 +36,7 @@ func (a *API) handler(c Caller) http.Handler {
 		call(mux, contract.MethodWebLogin, c, owner, a.web.login)
 	}
 	call(mux, contract.MethodRoomList, c, owner, a.service.RoomList)
-	call(mux, contract.MethodSessionList, c, user, func(ctx context.Context, p contract.Principal, req contract.SessionListRequest) (contract.SessionListResponse, *contract.Error) {
-		if box(c) && req.Room != c.Room {
-			return contract.SessionListResponse{}, forbidden()
-		}
-		return a.service.SessionList(ctx, p, req)
-	})
+	call(mux, contract.MethodSessionList, c, user, a.service.SessionList)
 	call(mux, contract.MethodOpSubmit, c, user, a.service.OpSubmit)
 	call(mux, contract.MethodOpDecide, c, user, a.service.OpDecide)
 	call(mux, contract.MethodOpWithdraw, c, user, a.service.OpWithdraw)
@@ -110,15 +104,8 @@ func (a *API) handler(c Caller) http.Handler {
 			return
 		}
 		f.Flush()
-		ticker := time.NewTicker(25 * time.Second)
-		defer ticker.Stop()
 		for {
 			select {
-			case <-ticker.C:
-				if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
-					return
-				}
-				f.Flush()
 			case <-r.Context().Done():
 				return
 			case event, ok := <-ch:
