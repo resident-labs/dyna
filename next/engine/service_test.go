@@ -500,7 +500,7 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
 	ctx := context.Background()
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room"})
+	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
 	if e != nil {
 		t.Fatal(e)
 	}
