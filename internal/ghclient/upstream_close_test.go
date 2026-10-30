@@ -55,3 +55,20 @@ esac
 		})
 	}
 }
+
+func TestUpstreamCloseRejectsBranchDeletion(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRoom(context.Background(), records[0].ID)
+	for _, flag := range []string{"--delete-branch", "-d"} {
+		args := []string{"pr", "close", "7", flag, "--repo", "upstream/project"}
+		if err := checkPolicy(ctx, records[0].Repo, repository{"github.com", "upstream/project"}, args); err == nil {
+			t.Fatalf("%s allowed branch deletion", flag)
+		}
+	}
+}
