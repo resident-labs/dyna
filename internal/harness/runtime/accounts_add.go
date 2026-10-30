@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	accountlabel "dyna-agent/internal/account/label"
 	"dyna-agent/internal/account/store"
 )
 
@@ -28,8 +29,9 @@ func (r *Runtime) addPiProviderKey(ctx context.Context, provider store.Provider,
 		return NativeAccount{}, errors.New("Dyna has no API-key sign-in for this provider.")
 	}
 	edit := piAPIKeyEdit(piID, key)
+	source := labelSource(label)
 	if label == "" {
-		label = string(provider) + " key"
+		label = accountlabel.PiKeyLabel(string(provider), key)
 	}
 	piKeysMu.Lock()
 	defer piKeysMu.Unlock()
@@ -38,7 +40,7 @@ func (r *Runtime) addPiProviderKey(ctx context.Context, provider store.Provider,
 		return NativeAccount{}, err
 	}
 	defer release()
-	account, err := r.Accounts.CreateProvider("pi", provider, store.KindAPIKey, label)
+	account, err := r.Accounts.createProvider("pi", provider, store.KindAPIKey, label, source)
 	if err != nil {
 		return NativeAccount{}, err
 	}

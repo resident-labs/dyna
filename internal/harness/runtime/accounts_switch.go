@@ -390,7 +390,7 @@ func (a *Accounts) saveOutgoing(state *store.State, h string, c native.Captured,
 		}
 		now := time.Now().UTC()
 		provider, kind := store.ProviderFor(h, c.Integration)
-		state.Entries = append(state.Entries, store.Entry{Metadata: store.Metadata{ID: key, Provider: provider, Kind: kind, Harness: h, Integration: c.Integration, Identity: c.Identity, Label: c.Label, NativeHome: home, CreatedAt: now, UpdatedAt: now}})
+		state.Entries = append(state.Entries, store.Entry{Metadata: store.Metadata{ID: key, Provider: provider, Kind: kind, Harness: h, Integration: c.Integration, Identity: c.Identity, Label: c.Label, LabelSource: store.LabelDefault, NativeHome: home, CreatedAt: now, UpdatedAt: now}})
 		entry = &state.Entries[len(state.Entries)-1]
 	}
 	n, err := a.native(entry)
