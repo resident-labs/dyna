@@ -607,6 +607,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	}
 	rooms := roomsvc.New(nil)
 	rooms.Notify.Sessions.CopyTime = copyTime
+	rooms.Approvals.CopyTime = copyTime
 	rooms.Approvals.Register(approvals.KindGH, ghApprovalExecutor(rooms.Notify.Rooms, rooms.PRs.Watcher().ClaimIssueComment))
 	rooms.Approvals.SetLifetime(ctx)
 	rooms.Notify.Sessions.CloseApprovals = func(ctx context.Context, info, heir subagent.Info) error {
