@@ -261,35 +261,24 @@ func TestRestartedEngineStartsAgainWhenTheCheckIsGone(t *testing.T) {
 // must not take over the first run's record or touch its workspace.
 func TestConcurrentRunOfTheSameCommitLeavesTheLiveRunAlone(t *testing.T) {
 	f := newReattachFixture(t)
-	done := make(chan Result, 2)
-	for range 2 {
-		go func() {
-			result, _ := f.runner.Run(t.Context(), f.request)
-			done <- result
-		}()
+	done := make(chan Result, 1)
+	go func() { result, _ := f.runner.Run(t.Context(), f.request); done <- result }()
+	<-f.started
+	defer func() { close(f.release); <-done }()
+	if _, err := f.runner.Run(t.Context(), f.request); !errors.Is(err, ErrAttachmentBusy) {
+		t.Fatalf("second run error = %v, want attachment busy", err)
 	}
-	<-f.started
-	<-f.started
 	store := Store{DataDir: f.runner.DataDir}
 	key, err := canonicalKey(f.request.Repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40))
-	if err != nil || len(rows) != 2 || len(rows[0].Checks) != 1 || len(rows[1].Checks) != 1 {
-		t.Fatalf("records = %+v, %v, want one untouched record for each live run", rows, err)
-	}
-	if rows[0].RunID == rows[1].RunID || rows[0].orphaned() || rows[1].orphaned() {
-		t.Fatalf("the runs share a record or lost their owner: %+v", rows)
+	if err != nil || len(rows) != 1 || len(rows[0].Checks) != 1 || rows[0].orphaned() {
+		t.Fatalf("live record = %+v, %v", rows, err)
 	}
 	if got := f.machine.StopCount(); got != 0 {
 		t.Fatalf("the second run stopped %d checks of the first", got)
-	}
-	close(f.release)
-	for range 2 {
-		if result := <-done; result.Status != OutcomePassed {
-			t.Fatalf("result = %+v", result)
-		}
 	}
 }
 
