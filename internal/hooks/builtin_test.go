@@ -89,7 +89,7 @@ func TestBuiltinRowCannotBeRemovedOrRetargeted(t *testing.T) {
 	if err != nil || len(hooks) != 1 || hooks[0].EveryMinutes != 90 || !hooks[0].Disabled {
 		t.Fatalf("edited row = %+v, %v", hooks, err)
 	}
-	if err := s.Reset(ctx, "auto-check", "owner"); err != nil {
+	if err := s.ResetBuiltin(ctx, "auto-check", "owner"); err != nil {
 		t.Fatal(err)
 	}
 	hooks, err = s.BuiltinHooks(ctx)
@@ -296,6 +296,19 @@ func TestBuiltinLeavesTheHookList(t *testing.T) {
 	}
 	if _, err := s.RunBuiltin(ctx, Event{}, "mine"); err == nil {
 		t.Fatal("service run of an owner hook succeeded")
+	}
+	every := 5
+	if err := s.EditBuiltin(ctx, "mine", "owner", ServicePatch{EveryMinutes: &every}); err == nil {
+		t.Fatal("service edit of an owner hook succeeded")
+	}
+	if err := s.EditGlobal(ctx, "auto-check", "owner", Patch{EveryMinutes: &every}); err == nil {
+		t.Fatal("hook edit of a service succeeded")
+	}
+	if err := s.EditBuiltin(ctx, "auto-check", "owner", ServicePatch{EveryMinutes: &every}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := s.BuiltinHooks(ctx); len(rows) != 1 || rows[0].EveryMinutes != 5 {
+		t.Fatalf("service rows after edit = %+v", rows)
 	}
 	if len(seen) != 0 {
 		t.Fatalf("a refused run still ran the pass: %v", seen)
