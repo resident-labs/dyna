@@ -82,7 +82,7 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 		t.Skip("Node.js is unavailable")
 	}
 	dir := t.TempDir()
-	for name, body := range map[string]string{"index.html": "<head></head><body>branch-shell</body>", "asset.js": "branch-asset"} {
+	for name, body := range map[string]string{"index.html": "<head></head><body>branch-shell</body>", "asset.js": "branch-asset", "asset.mjs": "branch-module"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 		t.Fatalf("QA controller: %v\n%s\n%s", err, strings.Join(printed, "\n"), stderr.String())
 	}
 	out := strings.Join(printed, "\n")
-	if !strings.Contains(out, "QA policy checks passed: 29") {
+	if !strings.Contains(out, "QA policy checks passed: 30") {
 		t.Fatalf("missing policy checks: %s", out)
 	}
 	for _, want := range []string{
@@ -194,6 +194,17 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 		if strings.Contains(kinds, leak) {
 			t.Errorf("blocked kinds = %q; it leaks %q", kinds, leak)
 		}
+	}
+	// A blank tab needs the page errors and failed assets, named by kind. The
+	// missing file reports the reason the route gave, not a bare 404.
+	failures := ""
+	for _, line := range printed {
+		if value, ok := strings.CutPrefix(line, "QA page errors and failed assets: "); ok {
+			failures = value
+		}
+	}
+	if want := "asset unavailable, page error, console error, script request failed, HTTP 404 asset request"; failures != want {
+		t.Errorf("failed assets = %q; want %q", failures, want)
 	}
 	if !strings.HasPrefix(screenshot, scratch+string(filepath.Separator)) || !strings.HasSuffix(screenshot, string(filepath.Separator)+"page.png") {
 		t.Fatalf("screenshot = %q; want a page.png inside the QA scratch space %q", screenshot, scratch)
