@@ -58,13 +58,21 @@ func TestTranscriptAppendRefusesGap(t *testing.T) {
 	}
 }
 
-func TestTranscriptAppendRefusesDifferentBytes(t *testing.T) {
+func TestTranscriptAppendSkipsStoredPrefix(t *testing.T) {
 	s, ctx, caller := transcriptCaller(t)
 	if _, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "abc"); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "xbc"); e == nil || e.Code != contract.ErrConflict {
-		t.Fatalf("differing error = %v; want conflict", e)
+	// The bytes below the ack are not compared. Only the new tail is written.
+	if resp, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "xbcdef"); e != nil || resp.AckedOffset != 6 {
+		t.Fatalf("prefix chunk = %+v, %v; want ack 6", resp, e)
+	}
+	stored, err := os.ReadFile(filepath.Join(s.transcriptDir, string(caller.Session), "a.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stored) != "abcdef" {
+		t.Fatalf("stored = %q, want %q", stored, "abcdef")
 	}
 }
 
