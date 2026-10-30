@@ -5,8 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"os/exec"
 	"sync"
+	"time"
 )
 
 type rpcID struct {
@@ -38,9 +42,10 @@ type shellRequest struct {
 	Params  struct {
 		Name      string `json:"name"`
 		Arguments struct {
-			Command string  `json:"command"`
-			Cwd     string  `json:"cwd"`
-			Node    *string `json:"node"`
+			Command        string  `json:"command"`
+			Cwd            string  `json:"cwd"`
+			Node           *string `json:"node"`
+			TimeoutSeconds int     `json:"timeoutSeconds"`
 		} `json:"arguments"`
 	} `json:"params"`
 }
@@ -64,8 +69,9 @@ type toolProperty struct {
 type toolSchema struct {
 	Type       string `json:"type"`
 	Properties struct {
-		Command toolProperty `json:"command"`
-		Cwd     toolProperty `json:"cwd"`
+		Command        toolProperty `json:"command"`
+		Cwd            toolProperty `json:"cwd"`
+		TimeoutSeconds toolProperty `json:"timeoutSeconds"`
 	} `json:"properties"`
 	Required             []string `json:"required"`
 	AdditionalProperties bool     `json:"additionalProperties"`
@@ -92,18 +98,61 @@ type initializeResult struct {
 }
 
 type ShellExecutor interface {
-	Run(context.Context, string, string) (string, error)
+	Run(context.Context, string, string, int) (string, error)
 }
 
 type GuardedShell struct{ Guard *Guard }
 
-func (s GuardedShell) Run(_ context.Context, command, cwd string) (string, error) {
-	var stdout, stderr bytes.Buffer
-	job, err := s.Guard.Start(command, cwd, &stdout, &stderr)
-	if err == nil {
-		err = job.Wait()
+type boundedOutput struct {
+	mu        sync.Mutex
+	data      bytes.Buffer
+	truncated bool
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	remaining := 64*1024 - b.data.Len()
+	if remaining < len(p) {
+		b.truncated = true
+		p = p[:remaining]
 	}
-	return stdout.String() + stderr.String(), err
+	_, _ = b.data.Write(p)
+	return n, nil
+}
+
+func (s GuardedShell) Run(ctx context.Context, command, cwd string, timeoutSeconds int) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+	var output boundedOutput
+	job, err := s.Guard.Start(command, cwd, &output, &output)
+	if err != nil {
+		return "", err
+	}
+	done := make(chan error, 1)
+	go func() { done <- job.Wait() }()
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		_ = job.Stop()
+		<-done
+		err = ctx.Err()
+	}
+	code := 0
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		} else {
+			code = -1
+		}
+	}
+	text := fmt.Sprintf("Exit code %d.\n%s", code, output.data.String())
+	if output.truncated {
+		text += "\n[Output truncated at 64 KiB.]"
+	}
+	return text, err
 }
 
 // Shell serves the box-local MCP shell over newline-delimited JSON-RPC.
@@ -135,18 +184,23 @@ func Shell(ctx context.Context, executor ShellExecutor, input io.Reader, output 
 			schema := toolSchema{Type: "object", Required: []string{"command"}}
 			schema.Properties.Command = toolProperty{Type: "string", Description: "Shell command to run locally"}
 			schema.Properties.Cwd = toolProperty{Type: "string", Description: "Working directory"}
+			schema.Properties.TimeoutSeconds = toolProperty{Type: "integer", Description: "Timeout in seconds; defaults to 600"}
 			result := shellToolList{Tools: []shellTool{{Name: "shell", Description: "Run a command in this box.", InputSchema: schema}}}
 			if err := write(envelope[shellToolList]{ID: req.ID, Result: result}); err != nil {
 				return err
 			}
 		case "tools/call":
-			if req.Params.Name != "shell" || req.Params.Arguments.Command == "" || req.Params.Arguments.Node != nil {
+			if req.Params.Name != "shell" || req.Params.Arguments.Command == "" || req.Params.Arguments.Node != nil || req.Params.Arguments.TimeoutSeconds < 0 {
 				if err := write(envelope[shellCallResult]{ID: req.ID, Error: &rpcError{Code: -32602, Message: "invalid shell arguments"}}); err != nil {
 					return err
 				}
 				continue
 			}
-			text, err := executor.Run(ctx, req.Params.Arguments.Command, req.Params.Arguments.Cwd)
+			timeout := req.Params.Arguments.TimeoutSeconds
+			if timeout == 0 {
+				timeout = 600
+			}
+			text, err := executor.Run(ctx, req.Params.Arguments.Command, req.Params.Arguments.Cwd, timeout)
 			if err != nil {
 				text += "\n" + err.Error()
 			}

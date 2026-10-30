@@ -52,6 +52,11 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		active := r.active == m.Turn
 		r.mu.Unlock()
 		if active {
+			if r.Guard != nil {
+				if err := r.Guard.EndTurn(); err != nil {
+					return err
+				}
+			}
 			return r.Harness.Abort(ctx)
 		}
 		return nil
