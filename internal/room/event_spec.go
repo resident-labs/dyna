@@ -49,6 +49,7 @@ type EventSpec struct {
 // renderer in web/src/lib/rooms/eventRenderers.ts. TestEventsFileMatchesRegistry
 // writes the web types.
 var eventSpecs = []EventSpec{
+	{Family: FamilyGitHubWrite, Type: TypeGitHubWriteRefused, Renderer: "GitHubWriteRefusedCard", Payload: reflect.TypeOf(GitHubWriteRefusedEvent{}), Quiet: true, Wake: WakeNever, Text: "GitHub refused {verb} on {repository} for {requester}: {reason} (rule {rule})."},
 	{
 		Family:   FamilyMCP,
 		Type:     TypeResult,
@@ -1023,6 +1024,8 @@ type eventEnum struct {
 const checkinText = "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting."
 
 var eventEnums = []eventEnum{
+	{Type: reflect.TypeOf(GitHubWriteReason("")), Values: enumValues(gitHubWriteReasons)},
+	{Type: reflect.TypeOf(GitHubWriteVerb("")), Values: enumValues(gitHubWriteVerbs)},
 	{Type: reflect.TypeOf(MCPOutcome("")), Values: enumValues(mcpOutcomes)},
 	{Type: reflect.TypeOf(JobState("")), Values: enumValues(jobStates)},
 	{Type: reflect.TypeOf(PRType("")), Values: enumValues(prTypes)},
@@ -1091,7 +1094,7 @@ var eventObjects = []reflect.Type{
 // eventOpenStrings are named string types whose values are open, such as a
 // session address or the engine that made a change. The generator reads each
 // as a plain string, because a union of its values would be incomplete.
-var eventOpenStrings = []reflect.Type{reflect.TypeOf(IssueActor(""))}
+var eventOpenStrings = []reflect.Type{reflect.TypeOf(IssueActor("")), reflect.TypeOf(GitHubWriteRule(""))}
 
 // DescribeEvent returns the post of an event from the registry.
 func DescribeEvent(ev Event) (EventPost, bool) {

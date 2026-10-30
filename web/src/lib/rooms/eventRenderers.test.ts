@@ -493,7 +493,7 @@ test('a stopped job card states its cause without an exit code', () => {
 // nothing meaningful fails.
 function fixtureTip(payload: EventPayload): string {
   if ('resultBytes' in payload) return `${payload.server} / ${payload.tool}`
-  if ('requester' in payload) return payload.title ?? ''
+  if ('requestId' in payload && 'requester' in payload) return payload.title ?? ''
   if ('action' in payload) return payload.actor
   if ('requestId' in payload && 'state' in payload) return payload.url ?? ''
   if ('kind' in payload && 'changeId' in payload) return payload.label

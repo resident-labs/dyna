@@ -8,6 +8,7 @@
 // room's post bar, so a card in the feed keeps the actions a card in a DM does
 // not need.
 import type { Component } from 'svelte'
+import GitHubWriteRefusedCard from './GitHubWriteRefusedCard.svelte'
 import WorktreeCard from './WorktreeCard.svelte'
 import HookCard from './HookCard.svelte'
 import ShellResultRow from './ShellResultRow.svelte'
@@ -123,7 +124,7 @@ export type EventRenderer = Component<EventProps>
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
 export const eventComponents: Record<string, EventRenderer> = {
-  WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, IssueWatchCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineCacheCleanCard, MachineScratchCard, MachineLimitsCard, RoomCapCard, WorktreePortsCard,
+  GitHubWriteRefusedCard, WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, IssueWatchCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineCacheCleanCard, MachineScratchCard, MachineLimitsCard, RoomCapCard, WorktreePortsCard,
   CallCard, VoiceSessionCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, ServiceWaitCard, HelperOutcomeRow, MCPCallRow, EngineNoticeCard, QuestionNoteCard, TerminalRequestCard, ReviewResultCard,
   ApprovalRequestCard, ApprovalDecisionRow, ApprovalResultCard,
   ShellResultRow, ShellSilenceCard, ShellInactivityCard, RunResultCard, JobCard, TurnCompletionRow,
