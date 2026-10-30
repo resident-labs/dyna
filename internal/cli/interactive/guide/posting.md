@@ -1,7 +1,7 @@
 # Dyna posting
 
-A room has no private messages. Mentions decide who wakes, not who can read.
-A room is not a security boundary. Never post secrets.
+All room members can read posts. Mentions decide who wakes.
+A room is a shared space, not a security boundary. Never post secrets.
 
 ## Room history
 
@@ -82,7 +82,7 @@ dyna post @parent --html "$DYNA_SCRATCH/report.html" "The chart shows three fail
 dyna room pin <room> <post-id>
 ```
 
-Read every file listed in a task or post. File contents never create mentions.
+Read every file listed in a task or post. Mentions in post text control delivery.
 Defaults allow 25 MiB per file or card, eight attachments, and one card per post.
 Change limits with `dyna settings`: `content.maxFileBytes` and `content.maxCardBytes`.
 
@@ -105,7 +105,7 @@ dyna post @parent --html "$DYNA_SCRATCH/report.html" "Median CI time fell to 6.4
 dyna post @parent --html "$DYNA_SCRATCH/report.html" --update <post-id> "Added the PR count."
 ```
 
-To change a visual, edit its file and post it with `--update <post-id>`. Never post it again as a new card.
+To change a visual, edit its file and update the existing card with `--update <post-id>`.
 Every view then shows the newest version; older versions stay in the full view.
 `dyna attachment get` prints the current file when you no longer have it.
 Pin decisions and results sparingly.
