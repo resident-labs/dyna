@@ -70,22 +70,36 @@ type job struct {
 	finished   bool
 	background bool
 	stopped    bool
+	skipping   bool // inside a line that was cut; drop it to its newline
 }
 
 func (j *job) Write(p []byte) (int, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	n := len(p)
+	if j.skipping {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			j.base += n
+			return n, nil
+		}
+		j.base += i + 1
+		p, j.skipping = p[i+1:], false
+	}
 	j.output = append(j.output, p...)
 	if len(j.output) > 2*outputLimit {
 		// Drop the oldest bytes through the next newline, so no token is left half-cut.
+		// With no newline, drop everything and the rest of that line as well.
 		cut := len(j.output) - outputLimit
 		if i := bytes.IndexByte(j.output[cut:], '\n'); i >= 0 {
 			cut += i + 1
+		} else {
+			cut, j.skipping = len(j.output), true
 		}
 		j.output = append(j.output[:0], j.output[cut:]...)
 		j.base += cut
 	}
-	return len(p), nil
+	return n, nil
 }
 
 // unread returns the masked output not yet returned, and whether the job still runs.
