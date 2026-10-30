@@ -10,13 +10,26 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// ArchiveVerifier checks the remote archive ref or published branch tip.
 type ArchiveVerifier interface {
 	Verify(context.Context, contract.SessionID, contract.ArchiveDoneRequest) error
 }
 
-// SetArchiveVerifier configures verification before the service starts.
+type archiveState struct {
+	reports map[contract.RepoName]store.Archive
+	wake    chan struct{}
+}
+
 func (s *Service) SetArchiveVerifier(v ArchiveVerifier) { s.archiveVerifier = v }
+
+// archiveStateLocked returns the pending reports; the caller holds s.mu.
+func (s *Service) archiveStateLocked(session contract.SessionID) *archiveState {
+	state := s.archives[session]
+	if state == nil {
+		state = &archiveState{reports: make(map[contract.RepoName]store.Archive), wake: make(chan struct{})}
+		s.archives[session] = state
+	}
+	return state
+}
 
 func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, current box.Box, reason string) error {
 	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: current.ID, Session: current.Session, Host: current.Host, From: contract.BoxClosing, To: contract.BoxClosing, Reason: reason})
@@ -26,34 +39,34 @@ func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, curre
 	return s.store.SetClosingReason(ctx, current.ID, reason, event)
 }
 
-func (s *Service) wakeArchive(session contract.SessionID) {
-	s.mu.Lock()
-	if ch := s.archiveWake[session]; ch != nil {
-		close(ch)
-		delete(s.archiveWake, session)
-	}
-	s.mu.Unlock()
-}
-
 func (s *Service) waitArchives(ctx context.Context, session store.Session) error {
-	defer func() {
-		s.mu.Lock()
-		delete(s.archiveWake, session.ID)
-		s.mu.Unlock()
-	}()
+	repos, err := s.store.RoomRepos(ctx, session.Room)
+	if err != nil || len(repos) == 0 {
+		return err
+	}
+	if s.archiveVerifier == nil {
+		return errors.New("archive verification unavailable")
+	}
 	for {
 		s.mu.Lock()
-		ch := s.archiveWake[session.ID]
-		if ch == nil {
-			ch = make(chan struct{})
-			s.archiveWake[session.ID] = ch
+		state := s.archiveStateLocked(session.ID)
+		wake := state.wake
+		reports := make([]store.Archive, 0, len(repos))
+		for _, repo := range repos {
+			report, ok := state.reports[repo.Repo]
+			if !ok {
+				break
+			}
+			reports = append(reports, report)
 		}
 		s.mu.Unlock()
-		repos, err := s.store.RoomRepos(ctx, session.Room)
-		if err != nil {
-			return err
-		}
-		if len(repos) == 0 {
+		if len(reports) == len(repos) {
+			if err := s.store.SaveArchives(ctx, reports); err != nil {
+				return err
+			}
+			s.mu.Lock()
+			delete(s.archives, session.ID)
+			s.mu.Unlock()
 			return nil
 		}
 		current, err := s.store.Box(ctx, session.Box)
@@ -63,33 +76,8 @@ func (s *Service) waitArchives(ctx context.Context, session store.Session) error
 		if current.Reason != "" {
 			return errors.New(current.Reason)
 		}
-		if s.archiveVerifier == nil {
-			err = errors.New("archive verification unavailable")
-			if saveErr := s.archiveReason(context.WithoutCancel(ctx), session.Room, current, err.Error()); saveErr != nil {
-				return saveErr
-			}
-			return err
-		}
-		archives, err := s.store.Archives(ctx, session.ID)
-		if err != nil {
-			return err
-		}
-		done := make(map[contract.RepoName]bool, len(archives))
-		for _, item := range archives {
-			done[item.Repo] = true
-		}
-		complete := true
-		for _, repo := range repos {
-			if !done[repo.Repo] {
-				complete = false
-				break
-			}
-		}
-		if complete {
-			return nil
-		}
 		select {
-		case <-ch:
+		case <-wake:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -144,8 +132,10 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 		if channel := s.channels[session.ID]; channel != nil {
 			channel.stop()
 		}
+		state := s.archiveStateLocked(session.ID)
+		close(state.wake)
+		state.wake = make(chan struct{})
 		s.mu.Unlock()
-		s.wakeArchive(session.ID)
 		return contract.ArchiveDoneResponse{}, nil
 	}
 	ref := ""
@@ -153,9 +143,11 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 		ref = "refs/dyna/archive/" + string(session.ID)
 	}
 	now := s.now()
-	if err := s.store.SaveArchive(ctx, store.Archive{Session: session.ID, Repo: req.Repo, Ref: ref, Commit: req.Commit, CreatedAt: now, ExpiresAt: now.Add(14 * 24 * time.Hour)}); err != nil {
-		return contract.ArchiveDoneResponse{}, failure(err)
-	}
-	s.wakeArchive(session.ID)
+	s.mu.Lock()
+	state := s.archiveStateLocked(session.ID)
+	state.reports[req.Repo] = store.Archive{Session: session.ID, Repo: req.Repo, Ref: ref, Commit: req.Commit, CreatedAt: now, ExpiresAt: now.Add(14 * 24 * time.Hour)}
+	close(state.wake)
+	state.wake = make(chan struct{})
+	s.mu.Unlock()
 	return contract.ArchiveDoneResponse{}, nil
 }

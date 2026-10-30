@@ -33,7 +33,7 @@ type Service struct {
 	profiles        Profiles
 	repos           Repositories
 	archiveVerifier ArchiveVerifier
-	archiveWake     map[contract.SessionID]chan struct{}
+	archives        map[contract.SessionID]*archiveState
 	now             func() time.Time
 	mu              sync.Mutex
 	channels        map[contract.SessionID]*boxChannel
@@ -49,7 +49,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), archiveWake: make(map[contract.SessionID]chan struct{}), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
+	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), archives: make(map[contract.SessionID]*archiveState), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -350,6 +350,9 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 			return contract.SessionCloseResponse{}, failure(err)
 		}
 	}
+	s.mu.Lock()
+	delete(s.archives, session.ID)
+	s.mu.Unlock()
 	event, err := s.event(session.Room, caller, contract.SessionClosed{Session: session.ID})
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
