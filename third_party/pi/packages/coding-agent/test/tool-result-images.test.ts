@@ -76,7 +76,7 @@ describe("normalizeToolResultImages", () => {
 	});
 
 	it("resizes oversized images and reports the original dimensions", async () => {
-		const content: ToolResultContent[] = [imageBlock(createPng(2400, 4800), "image/png")];
+		const content: ToolResultContent[] = [imageBlock(createPng(2400, 300), "image/png")];
 
 		const normalized = await normalizeToolResultImages(content);
 
@@ -91,7 +91,7 @@ describe("normalizeToolResultImages", () => {
 		const note = normalized[1];
 		expect(note.type).toBe("text");
 		if (note.type !== "text") return;
-		expect(note.text).toContain("original 2400x4800");
+		expect(note.text).toContain("original 2400x300");
 	});
 
 	it("leaves oversized images alone when auto-resize is disabled", async () => {

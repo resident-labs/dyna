@@ -20,7 +20,7 @@ import type { ExtensionAPI } from "../../src/core/extensions/types.ts";
 import type { CustomEntry } from "../../src/core/session-manager.ts";
 import { createToolDefinitionFromAgentTool } from "../../src/core/tools/tool-definition-wrapper.ts";
 import { readCodemodeStore } from "../../src/extensions/codemode/execute.ts";
-import { createCodemodeExtension } from "../../src/extensions/codemode/index.ts";
+import { type CodemodeExtensionOptions, createCodemodeExtension } from "../../src/extensions/codemode/index.ts";
 import {
 	CODEMODE_DOCS_PATH,
 	CODEMODE_STORE_ENTRY_TYPE,
@@ -524,10 +524,10 @@ describe("codemode options and store", () => {
 	});
 
 	// No tools override: the session builds its own codemode tool, including the store writer.
-	async function setup() {
+	async function setup(options?: CodemodeExtensionOptions) {
 		const harness = await createHarness({
 			initialActiveToolNames: ["codemode"],
-			extensionFactories: [createCodemodeExtension()],
+			extensionFactories: [createCodemodeExtension(options)],
 		});
 		harnesses.push(harness);
 		return harness;
@@ -580,7 +580,8 @@ describe("codemode options and store", () => {
 	});
 
 	it("limits script memory so runaway allocations fail inside the script", async () => {
-		const harness = await setup();
+		// A 16 MiB limit fails after about 16 entries, so the script ends in milliseconds, not after 256 MiB.
+		const harness = await setup({ memoryLimitBytes: 16 * 1024 * 1024 });
 		const result = await run(
 			harness,
 			'// @options: {"timeout_ms": 30000}\nlet a = [];\ntry { while (true) a.push("x".repeat(1 << 20) + a.length); } catch (error) { const n = a.length; a = null; return { n, error: String(error) }; }',
