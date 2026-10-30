@@ -260,7 +260,7 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 		return nil, fmt.Errorf("%w: %v", err, sshErr)
 	}
 	if status != 0 {
-		return nil, remoteExit(status)
+		return body, remoteExit(status)
 	}
 	return body, nil
 }
