@@ -31,12 +31,12 @@ func TestInstructionsTeachDynaOnlyDelegation(t *testing.T) {
 	for _, want := range []string{
 		"You are amber-otter-42:decoder", "Room: amber-otter-42   You: amber-otter-42:decoder",
 		"`dyna post @<mention>... \"...\"`", "From: amber-otter-42:lead",
-		"dyna room members amber-otter-42", "Never create rooms or room watches", "Across turns, set", "dyna goal done <id>",
-		"Put temporary files in $DYNA_SCRATCH, never repos.",
-		"Edit code only in dyna git worktrees new trees, never main.",
-		"Delegate only through Dyna", "never harness subagents, Task/Agent or workflow tools",
+		"dyna room members amber-otter-42", "Use the inherited room and its existing watches", "Across turns, set", "dyna goal done <id>",
+		"Put temporary files in $DYNA_SCRATCH.",
+		"Edit code only in dyna git worktrees new trees. Never edit the owner’s main checkout.",
+		"Delegate only through Dyna", "rather than harness subagents, Task/Agent or workflow tools",
 		`"$DYNA_BIN" subagent start --name <unique-name> --profile <profile>`,
-		"or pass --room", "Never wait or poll for children", "dyna request question", "goes dormant by itself", "Never auto-merge",
+		"omit --room", "Continue work while children run", "dyna request question", "goes dormant by itself", "Leave merging to the Dyna merge service",
 		"git`: before you create a worktree, open, track, review or comment on a pull request",
 		"dyna git pr comment", clearEnglishPrompt, parentCheckInPrompt,
 		"Turns started only by child, sibling or group posts end silently.",
@@ -130,7 +130,7 @@ func TestSessionRuleSizesStayComparable(t *testing.T) {
 // Root and workers both get the post-on-change rule, so room rule r11 can go.
 func TestBothRolesPostOnlyOnChange(t *testing.T) {
 	for role, rules := range map[string]string{"worker": rulesFor(Meta{}), "root": rulesFor(Meta{Role: RoleRoot})} {
-		for _, want := range []string{"Post only to the session that must act next", "Never copy @root for information", "Your final result is your report; do not post it too"} {
+		for _, want := range []string{"Post only to the session that must act next", "Address @root only when root must act", "Your final result is your report."} {
 			if !strings.Contains(rules, want) {
 				t.Errorf("%s rules lack %q", role, want)
 			}
