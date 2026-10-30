@@ -532,7 +532,7 @@ func (s Service) Run(ctx context.Context, e Event, name string) (Run, error) {
 // RunGlobal runs one hook the owner added for the machine, now. A built-in
 // runs as a service: see RunBuiltin.
 func (s Service) RunGlobal(ctx context.Context, e Event, name string) (Run, error) {
-	if err := s.requireBuiltin(ctx, name, false); err != nil {
+	if err := s.requireBuiltin(ctx, name, false, "dyna services run "+name, ""); err != nil {
 		return Run{}, err
 	}
 	e.Repo = ""
@@ -541,15 +541,16 @@ func (s Service) RunGlobal(ctx context.Context, e Event, name string) (Run, erro
 
 // RunBuiltin runs one built-in service pass now, as `dyna services run` asks.
 func (s Service) RunBuiltin(ctx context.Context, e Event, name string) (Run, error) {
-	if err := s.requireBuiltin(ctx, name, true); err != nil {
+	if err := s.requireBuiltin(ctx, name, true, "", "dyna git hooks run --global "+name); err != nil {
 		return Run{}, err
 	}
 	e.Repo = ""
 	return s.run(ctx, e, name, nil, true)
 }
 
-// requireBuiltin checks that a global hook is built in, or is not.
-func (s Service) requireBuiltin(ctx context.Context, name string, builtin bool) error {
+// requireBuiltin checks that a global hook is built in, or is not. use names
+// the command that works on the kind the caller found.
+func (s Service) requireBuiltin(ctx context.Context, name string, builtin bool, useService, useHook string) error {
 	all, err := s.load(ctx, globalKey)
 	if err != nil {
 		return err
@@ -562,9 +563,9 @@ func (s Service) requireBuiltin(ctx context.Context, name string, builtin bool) 
 			return nil
 		}
 		if builtin {
-			return fmt.Errorf("%q is a hook you added, so it runs with `dyna git hooks run --global`", name)
+			return fmt.Errorf("%q is a hook you added, so use `%s`", name, useHook)
 		}
-		return fmt.Errorf("%q is a service, so it runs with `dyna services run %s`", name, name)
+		return fmt.Errorf("%q is a service, so use `%s`", name, useService)
 	}
 	return fmt.Errorf("no global hook named %q", name)
 }

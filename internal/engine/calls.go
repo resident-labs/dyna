@@ -293,17 +293,24 @@ func bindings(s services) []websvc.Binding {
 			if err != nil {
 				return err
 			}
-			return s.hooks.Edit(ctx, "", name, by, patch)
+			return s.hooks.EditGlobal(ctx, name, by, patch)
 		}},
-		{Name: "RemoveGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
-			return s.hooks.Remove(ctx, "", name)
-		}},
-		{Name: "ResetHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
+		{Name: "EditService", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string, patch hooks.ServicePatch) error {
 			by, err := actor(ctx)
 			if err != nil {
 				return err
 			}
-			return s.hooks.Reset(ctx, name, by)
+			return s.hooks.EditBuiltin(ctx, name, by, patch)
+		}},
+		{Name: "RemoveGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
+			return s.hooks.Remove(ctx, "", name)
+		}},
+		{Name: "ResetService", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
+			by, err := actor(ctx)
+			if err != nil {
+				return err
+			}
+			return s.hooks.ResetBuiltin(ctx, name, by)
 		}},
 		{Name: "HookRunLog", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.HookRunLog},
 		{Name: "GlobalHookRunLog", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name, id string) (hooks.HookRunLog, error) {
