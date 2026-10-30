@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -25,7 +24,6 @@ const (
 	CheckPodman    CheckName = "rootless Podman 5 with systemd"
 	CheckCapacity  CheckName = "capacity"
 	CheckHostSlice CheckName = "host slice"
-	CheckReflink   CheckName = "reflink probe"
 	CheckForward   CheckName = "stream-local forwarding"
 )
 
@@ -38,7 +36,6 @@ type CheckResult struct {
 	Items               []CheckItem
 	CPUs                int
 	MemBytes, DiskBytes int64
-	NoReflink           bool
 }
 
 func (r CheckResult) Ready() bool {
@@ -97,15 +94,6 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	if err == nil {
 		_, err = h.run(ctx, "systemctl", "--user", "set-property", "--runtime", "dyna.slice", fmt.Sprintf("MemoryMax=%d", result.MemBytes))
 		add(CheckHostSlice, err)
-	}
-	_, err = h.run(ctx, "bash", "-c", `d=$(mktemp -d "$1/.dyna-reflink.XXXXXX") || exit 1; trap 'rm -rf "$d"' EXIT; printf test > "$d/a"; cp --reflink=always "$d/a" "$d/b"`, "probe", o.HostData)
-	if err != nil {
-		var exit remoteExit
-		if errors.As(err, &exit) {
-			result.NoReflink = true
-		} else {
-			add(CheckReflink, err)
-		}
 	}
 	add(CheckForward, h.checkForward(ctx, o))
 	return result
