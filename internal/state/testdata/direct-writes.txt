@@ -99,6 +99,7 @@ not-state internal/harness/config/mcp_exec.go RunGeneratedMCP 1 # a harness CLI'
 not-state internal/harness/fakeruntime/fakeruntime.go installClaude 4 # test fixture runtime
 not-state internal/harness/home/home.go atomicFile 2 # a harness CLI's private home
 not-state internal/harness/home/prepare.go createWritableGitConfig 1 # a harness CLI's private home: its writable global Git config
+not-state internal/harness/home/prepare.go syncNewerToolSettings 4 # a harness CLI's private home: replaces its writable global Git config with the newer tool settings
 not-state internal/harness/home/prepare.go removeWorktreesLink 1 # a harness CLI's private home
 not-state internal/harness/home/publication.go publish 2 # a harness CLI's private home
 not-state internal/harness/inprocess.go runInProcess 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
