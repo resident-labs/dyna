@@ -122,7 +122,7 @@
         </Row>
       {:else}
         <Row text={r.text} clamp={false} {lead}>
-          {#snippet meta()}{#if agent}<Avatar name={m?.name ?? r.setterName} hue={m?.hue ?? 0} emoji={m?.emoji} size={18} /><span>{m?.name ?? r.setterName ?? r.setter}</span>{:else}<span>owner</span>{/if}<span>· {ruleTime(r, now)}</span>{/snippet}
+          {#snippet meta()}{#if agent}{#if m}<Avatar name={m?.name ?? r.setterName} hue={m?.hue ?? 0} avatar={m.avatar} here={m.avatar.room} size={18} />{/if}<span>{m?.name ?? r.setterName ?? r.setter}</span>{:else}<span>owner</span>{/if}<span>· {ruleTime(r, now)}</span>{/snippet}
           {#snippet actions()}<button id="rule-control-{r.id}" onclick={() => startEdit(r)}>Edit</button><button aria-label="Remove rule {r.id}" onclick={() => (agent ? remove(r) : (removing = r))}>Remove ×</button>{/snippet}
         </Row>
       {/if}

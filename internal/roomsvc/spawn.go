@@ -262,7 +262,7 @@ func (s *Service) StartSession(ctx context.Context, roomRef, draft string, atts 
 		// Save a normal owner post before launching the session. It targets
 		// only the owner; the task reaches the agent once, in its first prompt.
 		request, err = s.rooms().Post(rec.ID, room.PostInput{
-			From: rec.Name, Human: true, To: []string{rec.Name}, Text: p.Task, Attachments: atts,
+			SenderKind: room.SenderOwner, From: rec.Name, Human: true, To: []string{rec.Name}, Text: p.Task, Attachments: atts,
 		})
 		if err != nil {
 			return SpawnResult{}, err
@@ -278,7 +278,7 @@ func (s *Service) StartSession(ctx context.Context, roomRef, draft string, atts 
 		return SpawnResult{}, err
 	}
 	out := SpawnResult{Member: s.member(info, 0, 0)}
-	out.Member.Emoji = s.avatars(rec.ID).byID[info.ID]
+	out.Member.Avatar = s.avatars(rec.ID).member(info.ID, info.Room)
 	// Start puts the task only in the turn 1 prompt. This typed record shows
 	// the owner's request in the feed. It is addressed to the owner alone, so
 	// the turn gate never delivers it to the new session as steering.

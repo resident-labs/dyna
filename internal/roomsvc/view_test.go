@@ -206,7 +206,7 @@ func TestTranscriptPageWithoutTurnsKeepsConversation(t *testing.T) {
 	if len(got.Turns) != 0 || len(got.Posts) != 0 || len(got.References) != 1 || got.References[0].PostID != post.ID || len(got.Media) != 1 {
 		t.Fatalf("zero-turn page lost conversation: %+v", got)
 	}
-	if got.Dir != want.Dir || got.Member.Emoji != want.Member.Emoji || got.Usage != want.Usage {
+	if got.Dir != want.Dir || got.Member.Avatar.Emoji != want.Member.Avatar.Emoji || got.Usage != want.Usage {
 		t.Fatalf("zero-turn page lost session metadata")
 	}
 }

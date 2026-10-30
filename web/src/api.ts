@@ -270,6 +270,7 @@ export const api = {
   unarchiveRoom: (ref: string) => app.UnarchiveRoom(ref),
   renameRoom: (ref: string, name: string) => app.RenameRoom(ref, name),
   setRoomRootProfile: (ref: string, name: string) => app.SetRoomRootProfile(ref, name),
+  setRoomColor: (ref: string, value: import('./lib/api/room.gen.ts').Room['color']) => app.SetRoomColor(ref, value),
   setRoomCheckIn: (ref: string, value: string) => app.SetRoomCheckIn(ref, value),
   setRoomLimit: (ref: string, field: RoomLimitField, value: string): Promise<SetRoomLimitResult> => app.SetRoomLimit(ref, field, value),
   deleteRoom: (ref: string) => app.DeleteRoom(ref),

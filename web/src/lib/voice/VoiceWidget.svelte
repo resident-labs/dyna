@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { voiceIdentity } from '../ui/avatar.ts'
   // The floating Voice call widget. It is one overlay above every view: it
   // collapses to Voice's line and the call controls, and expands into this
   // call's conversation. Drag it by its top line.
@@ -261,7 +262,7 @@
     <div class="glass">
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="whead" class:drag={!!drag} tabindex="0" role="group" aria-label="Voice call. Drag, or use the arrow keys, to move it." onpointerdown={grab} onpointermove={move} onpointerup={release} onpointercancel={release} onkeydown={nudge}>
-        <span class="ring" class:speak={s.phase === 'live' && s.activity === 'speaking'} class:wait={s.phase === 'starting' || s.phase === 'connecting'}><Avatar name="Voice" hue={3} size={36} ring="var(--raise)" /></span>
+        <span class="ring" class:speak={s.phase === 'live' && s.activity === 'speaking'} class:wait={s.phase === 'starting' || s.phase === 'connecting'}><Avatar avatar={voiceIdentity} name="Voice" hue={3} size={36} dotGap="var(--raise)" /></span>
         <div class="wid">
           <strong>Voice{#if active && s.startedAt}<span>{length}</span>{/if}</strong>
           <span class:live={s.phase === 'live' && capturing(s)} class:bad={s.phase === 'error'} role="status">{line}</span>

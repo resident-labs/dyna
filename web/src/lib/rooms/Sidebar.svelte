@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ownerIdentity } from '../ui/avatar.ts'
   import type { Member, Room } from '../api/room.ts'
   import type { ComputerInfo } from '../api/computer.ts'
   import type { MachineSummary } from '../api/machine.ts'
@@ -74,7 +75,7 @@
   {@const attention = prAttention(pr)}
   <!-- A row is the name, one muted fact and at most one dot. The profile says why. -->
   <button class="chan person" class:sel style="--depth: 0" {onclick}>
-    <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
+    <Avatar here={room?.name} avatar={m.avatar} name={m.name} hue={m.hue} size={22} state={m.state} dotGap="var(--side)" />
     <span class="fit"><span class="label hue-{m.hue}">{m.name}</span><span class="turn">{pr ? changeName(pr) : m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span></span>
     {#if agentExpedited($expedite, m)}<ExpediteBadge short />{/if}
     {#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}
@@ -129,7 +130,7 @@
     </div>
   {/if}
   <footer class="me">
-    <Avatar name="you" owner hue={ownerHue} size={32} ring="#18171a" />
+    <Avatar avatar={ownerIdentity} name="you" hue={ownerHue} size={32} dotGap="#18171a" />
     <div class="who">
       <strong>you</strong>
       <span title={dataDir}>{room ? `owner of ${roomLabel(room)}` : 'room owner'}</span>

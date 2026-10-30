@@ -379,11 +379,21 @@ export interface Session {
   turns: Turn[] | null;
 }
 /**
+ * Avatar is the typed identity shown beside a sender.
+ */
+export interface Avatar {
+  kind: "session" | "root" | "owner" | "engine" | "voice" | "workflow" | "unknown";
+  emoji?: string;
+  room: string;
+  color: "" | "crimson" | "blue" | "violet" | "teal" | "orange" | "magenta" | "sky" | "olive";
+}
+/**
  * ReferenceRow is one post of another conversation, as a session's DM shows it:
  * who wrote it, which conversation it is in, its typed event facts or text
  * preview, and how many files it carries. TS is unix milliseconds.
  */
 export interface ReferenceRow {
+  avatar: Avatar;
   postId: string;
   from: string;
   kind?: string;

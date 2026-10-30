@@ -155,7 +155,7 @@ api.accountsRemove = (id: string) => {
 const none = { tokens: null, completeTurns: 0, partialTurns: 0, unknownTurns: 0 }
 const emptyRollup: ActivityRollup = { from: '', to: '', totals: { turns: 0, wallMs: 0, input: none, cached: none, output: none, cost: { usd: null, completeTurns: 0, partialTurns: 0, unknownTurns: 0 }, cachePaired: { input: 0, cached: 0, turns: 0 } }, byDayModel: [], byRoleModel: [] }
 api.usageRollup = (_room: string | undefined, from: string, to: string) => later(empty ? emptyRollup : rollupFixture(Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1)))
-api.rooms = () => later([{ id: 'room-a', name: 'dyna-agent', lastActivity: minutes(3), unread: 0, running: 0, members: 2, pinned: false, pinOrder: 0, archived: false }])
+api.rooms = () => later([{ color: 'crimson', id: 'room-a', name: 'dyna-agent', lastActivity: minutes(3), unread: 0, running: 0, members: 2, pinned: false, pinOrder: 0, archived: false }])
 
 const item = (fields: Pick<SettingItem, 'key' | 'kind' | 'value' | 'source' | 'help'> & Partial<SettingItem>): SettingItem => ({ liveVsRestart: '', ...fields })
 const settingItems: SettingItem[] = [

@@ -108,7 +108,7 @@ func (s *Service) memberByID(id string) (Member, error) {
 		return Member{}, err
 	}
 	m := s.member(info, 0, 0)
-	m.Emoji = s.avatars(info.RoomID).byID[info.ID]
+	m.Avatar = s.avatars(info.RoomID).member(info.ID, info.Room)
 	return m, nil
 }
 

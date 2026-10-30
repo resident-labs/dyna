@@ -211,6 +211,7 @@ var WriteCalls = map[string]bool{
 	"SetReviewerProfile":          true,
 	"SetRoomCIBudget":             true,
 	"SetRoomChangePolicy":         true,
+	"SetRoomColor":                true,
 	"SetRoomCheckIn":              true,
 	"SetRoomLimit":                true,
 	"SetRoomRootProfile":          true,

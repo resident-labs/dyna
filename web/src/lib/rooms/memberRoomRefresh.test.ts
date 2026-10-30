@@ -19,7 +19,7 @@ const nodes = parse(source, { modern: true }).instance?.content.body ?? []
 // The controller keys a roster by name, owner flag, state and turns; the rows
 // carry the other Member fields with their empty values.
 const row = (patch: Partial<Member> & { name: string }): Member => ({
-  resumable: false, address: '', depth: 0, children: 0, status: '', state: '', turns: 0, created: '', lastActivity: '', hue: 0, ...patch,
+  avatar: { kind: 'session', room: 'room', color: 'crimson' }, resumable: false, address: '', depth: 0, children: 0, status: '', state: '', turns: 0, created: '', lastActivity: '', hue: 0, ...patch,
 })
 
 interface MemberChange {
