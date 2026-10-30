@@ -34,6 +34,8 @@ const (
 	ActionApprove Action = "approve"
 	ActionDeny    Action = "deny"
 	ActionPass    Action = "pass"
+	// ActionAuto is a legacy/shim read value for decisions recorded before inline execution.
+	ActionAuto Action = "auto"
 )
 
 const (
