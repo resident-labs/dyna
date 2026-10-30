@@ -2,6 +2,7 @@
   // A small pill for an agent's tracked pull request: its number and where
   // it stands. more counts the agent's other PRs.
   import Chip from '../ui/Chip.svelte'
+  import { toneOf } from '../ui/tone.ts'
   import { statusMeta, changeName, type Facts, type Meta } from './pr.ts'
   import { fade } from 'svelte/transition'
   import { motion, FAST } from '../ui/motion.ts'
@@ -9,7 +10,7 @@
   // badge marks a PR linked to the expedited goal with a bolt.
   let { pr, more = 0, short = false, number = true, meta: shown = null, badge = true }: { pr: Facts; more?: number; short?: boolean; number?: boolean; meta?: Meta | null; badge?: boolean } = $props()
   let meta = $derived(shown ?? statusMeta(pr))
-  let tone = $derived(meta.tone === 'done' ? 'sage' : ['gold', 'sage', 'coral', 'iris'].includes(meta.tone) ? meta.tone : '')
+  let tone = $derived(meta.tone === 'done' ? 'success' : toneOf(meta.tone))
 </script>
 
 <Chip {tone} outline={meta.tone === 'done' || meta.tone === 'faint'} dot={meta.tone === 'run'} title="{pr.kind === 'local' ? 'Local change' : `PR #${pr.number}`}{pr.title ? ': ' + pr.title : ''} · {meta.label}{more ? ` · ${more} more` : ''}">

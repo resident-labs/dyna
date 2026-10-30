@@ -12,7 +12,7 @@
   //   onback     the back link, on a narrow screen only
   import { ago } from '../ui/format.ts'
   import Card from '../ui/Card.svelte'
-  import Chip from '../ui/Chip.svelte'
+  import StatusPill from '../ui/StatusPill.svelte'
   import FactsLine from './FactsLine.svelte'
   import MentionInChat from './MentionInChat.svelte'
   import PRGlyph from './PRGlyph.svelte'
@@ -59,19 +59,19 @@
     {#if it.workingSession}
       <div class="link">
         {#if onsession}<button class="name" onclick={onsession}>Session {it.workingSessionName || it.workingSession}</button>{:else}<span class="name">Session {it.workingSessionName || it.workingSession}</span>{/if}
-        <Chip tone={it.workingSessionLive ? 'iris' : ''} outline={!it.workingSessionLive} dot={it.workingSessionLive}>{it.workingSessionLive ? 'Working' : 'Not running'}</Chip>
+        {#if it.workingSessionLive}<StatusPill tone="live" dot label="Working" />{:else}<span class="state">Not running</span>{/if}
       </div>
     {/if}
     {#each prs as p (p.number)}
       <div class="link">
         <button class="name" onclick={() => onpr(p.number)}>PR #{p.number}</button>
-        <Chip tone={p.state === 'MERGED' ? 'iris' : p.state === 'OPEN' ? 'sage' : ''} outline={p.state === 'CLOSED'}>{p.isDraft ? 'Draft' : p.state[0] + p.state.slice(1).toLowerCase()}</Chip>
+        <span class="state">{p.isDraft ? 'Draft' : p.state[0] + p.state.slice(1).toLowerCase()}</span>
       </div>
     {/each}
     {#if it.fixPR}
       <div class="link">
         <button class="name" onclick={() => onpr(it.fixPR ?? 0)}>Fix in #{it.fixPR}</button>
-        <Chip tone="sage">Open</Chip>
+        <span class="state">Open</span>
       </div>
     {/if}
     {#if !it.workingSession && !prs.length && !it.fixPR}<p class="quiet">No agent is working on this yet.</p>{/if}
@@ -114,6 +114,7 @@
   .conv { margin: 0; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); font-size: 13px; font-weight: 600; color: var(--ink); }
   .conv span { font-size: 11.5px; color: var(--faint); font-weight: 500; margin-left: 4px; }
   .quiet { color: var(--faint); font-size: 13.5px; margin: 0; }
+  .state { color: var(--muted); font-size: var(--t-sm); }
   .err { color: var(--coral); overflow-wrap: anywhere; }
   @media (max-width: 760px) {
     h1 { font-size: 18px; }

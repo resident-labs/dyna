@@ -18,6 +18,7 @@
   import { routeHash } from '../ui/route.ts'
   import { ago } from '../ui/format.ts'
   import Chip from '../ui/Chip.svelte'
+  import { toneOf } from '../ui/tone.ts'
   import Document from '../files/Document.svelte'
   import History from '../files/History.svelte'
   import { markdownDocument } from '../files/preview.ts'
@@ -378,7 +379,7 @@
   <span class="marker">
     {#if change}
       {@const letter = statusLetter(change)}
-      <Chip tone={STATUS[letter].tone} outline title={STATUS[letter].word}>{letter === '?' ? 'U' : letter}</Chip>
+      <Chip tone={toneOf(STATUS[letter].tone)} outline title={STATUS[letter].word}>{letter === '?' ? 'U' : letter}</Chip>
     {/if}
   </span>
 {/snippet}
