@@ -1,3 +1,4 @@
+not-state internal/jobs/snapshot.go SnapshotTree 3 # temporary Git index copy, not persistent Dyna state
 not-state internal/jobs/service.go Service.run 1 # the job's log file is an output blob that streams outside SQLite, like a CI report
 not-state internal/jobs/artifacts.go copyArtifacts 1 # a job's kept artifacts are output blobs copied from its node, like a CI report
 # Direct state writes outside internal/state. TestStateWritesGoThroughHelper fails on
