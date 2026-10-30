@@ -122,6 +122,9 @@ type registeredCIRun struct {
 	// on the machine that holds the cache lock for hours.
 	stopped  chan struct{}
 	stopOnce sync.Once
+	// ended is closed after the run has left the run set and written its last
+	// result or refresh, so a caller can wait for every write the run makes.
+	ended chan struct{}
 
 	repo   string
 	number int
@@ -669,7 +672,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	run := &registeredCIRun{
-		node: chosen.Name, cancel: cancel, stopped: make(chan struct{}),
+		node: chosen.Name, cancel: cancel, stopped: make(chan struct{}), ended: make(chan struct{}),
 		repo: job.record.Repo, number: job.record.Number, kind: job.kind(), branch: job.branch,
 		trial: job.trial, local: !job.hosted(),
 		head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
@@ -978,6 +981,8 @@ func checkKind(kind RunningCIKind) jobs.CheckKind {
 }
 
 func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, plan localCIPlan, repo string, node localci.Node, key string, run *registeredCIRun, retriedFrom string, resumed bool) {
+	// The last deferred call, so every write below lands before ended closes.
+	defer close(run.ended)
 	// A run that ends on any path has no work left on the node.
 	defer run.markStopped()
 	defer func() {
