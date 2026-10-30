@@ -406,9 +406,10 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		mu.Lock()
 		if r.ContextTokens > 0 {
 			contextTokens = r.ContextTokens
-		} else if turn.CompactOnly {
+		} else if turn.CompactOnly && r.Compaction != nil && r.Compaction.State == "completed" {
 			// The summary replaced the history, so the old size is stale and
-			// the next real turn reports the new one.
+			// the next real turn reports the new one. A failed compaction
+			// keeps the size, so the next turn still sees a big context.
 			contextTokens = 0
 		}
 		if r.Model != "" {
@@ -426,6 +427,13 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		mu.Unlock()
 		if r.AccountSwitch != nil {
 			writes.note(TurnNote{AccountSwitch: r.AccountSwitch})
+		}
+		if turn.CompactOnly && err == nil && (r.Compaction == nil || r.Compaction.State != "completed") {
+			reason := "the compact command did not run"
+			if r.Compaction != nil {
+				reason = r.Compaction.Reason
+			}
+			err = fmt.Errorf("idle compaction did not complete: %s", reason)
 		}
 		return r, err
 	}
