@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/runstore/runstoretest"
@@ -45,6 +46,10 @@ func TestSuperviseRecordsOutputAndExitWithoutEventLog(t *testing.T) {
 	}
 	if m, err := store.ReadMeta(meta.ID); err != nil || m.OutputLines != 1 {
 		t.Fatalf("lines = %d, %v", m.OutputLines, err)
+	}
+	signal, err := store.Activity(meta.ID, time.Now())
+	if err != nil || signal.Copier != activity.CopierEnded || signal.LastOutput.IsZero() {
+		t.Fatalf("final activity = %+v, %v", signal, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "events.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("events.jsonl should not exist, stat err = %v", err)
