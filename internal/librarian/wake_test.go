@@ -588,3 +588,26 @@ func TestBatchedWakeDefersToItsInterval(t *testing.T) {
 		t.Fatalf("deferred wake started no pass: tasks %d -> %d", tasks, len(h.sessions.tasks))
 	}
 }
+
+// A pass counts as running only while its assigned turn has not ended, and
+// either pass can be the one running.
+func TestRunningFollowsTheAssignedTurn(t *testing.T) {
+	sessions := &fakeSessions{info: subagent.Info{Meta: subagent.Meta{ID: "s1", Turns: 2}}, turns: []subagent.Turn{{N: 1, Status: subagent.TurnOK}, {N: 2, Status: subagent.TurnRunning}}}
+	svc := Service{Sessions: sessions}
+	cases := []struct {
+		name string
+		st   librarianstate.State
+		want bool
+	}{
+		{"idle", librarianstate.State{}, false},
+		{"map turn ended", librarianstate.State{Session: "s1", Pending: "abc", PendingTurn: 1}, false},
+		{"map turn running", librarianstate.State{Session: "s1", Pending: "abc", PendingTurn: 2}, true},
+		{"smell turn running", librarianstate.State{SmellSession: "s1", SmellPending: "abc", SmellPendingTurn: 2}, true},
+		{"turn lost", librarianstate.State{Session: "gone", Pending: "abc", PendingTurn: 1}, false},
+	}
+	for _, c := range cases {
+		if got := svc.Running(c.st); got != c.want {
+			t.Errorf("%s: Running = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

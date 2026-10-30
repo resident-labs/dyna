@@ -254,6 +254,20 @@ func (s Service) settlePending(states librarianstate.Store, repo string, st libr
 	return st, true, err
 }
 
+// Running reports whether either pass has an assigned turn that has not ended.
+func (s Service) Running(st librarianstate.State) bool {
+	for _, pass := range []func(*librarianstate.State) wakePass{mapPass, smellPass} {
+		p := pass(&st)
+		if *p.pending == "" {
+			continue
+		}
+		if turn, err := s.Sessions.Turn(*p.session, *p.pendingTurn); err == nil && !turn.Done() {
+			return true
+		}
+	}
+	return false
+}
+
 func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	r, err := repoid.Resolve(ctx, repoDir)
 	if err != nil {

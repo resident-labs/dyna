@@ -144,7 +144,7 @@ func (s services) libraryFacts(ctx context.Context, repo, roomName string, view 
 	if r, err := repoid.Resolve(ctx, repo); err == nil {
 		if st, err := (librarianstate.Store{DataDir: store.DataDir()}).Get(r.ID); err == nil {
 			l.LastRun = st.LastRun
-			l.Running = st.Pending != ""
+			l.Running = s.librarianService().Running(st)
 		}
 	}
 	l.NextRun, _ = s.librarianDeferred(ctx, repo)
