@@ -75,14 +75,14 @@ func filledRoomBundle() RoomBundle {
 			Fixes: []string{"D-584"}, Dependencies: []string{"1288"}, Hold: &PRHold{Reason: "wait", By: root, At: bundleTime},
 		}},
 		Questions: []QuestionBundle{{
-			Label: "q33", Asker: root, Text: "mount the drive?", Options: []string{"yes"},
-			Meanwhile: "waiting", Asked: bundleTime,
+			Label: "q33", Kind: QuestionTerminal, Asker: root, Text: "mount the drive", Options: []string{"yes"},
+			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Asked: bundleTime,
 		}},
 		Subscriptions: []Subscription{{
 			ID: "sub_2", Scope: ScopeRoom, On: []EventType{"pr.merged"}, Run: &RunSpec{Command: []string{"true"}, Image: "dyna-base", Size: "small"},
 		}},
 		Handoff: []SessionHandoff{{
-			Name: "dyna:builder", Profile: "terra", Parent: "dyna:lead", Goals: []GoalLabel{"g1084"},
+			Name: "dyna:builder", Profile: "terra", Parent: "dyna:lead", Goals: []GoalID{"g1084"},
 			ArchiveRef: "refs/dyna/archive/builder", LastPost: "done",
 		}},
 		Counts: BundleCounts{Rules: 1, Goals: 1, GoalItems: 1, Issues: 1, PRs: 1, Questions: 1, Sessions: 1},
