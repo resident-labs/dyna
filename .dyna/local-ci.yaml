@@ -3,7 +3,7 @@ version: 1
 # Pull requests select only the trial suites whose file patterns match. Merge
 # trials run every suite in this list. The other suites remain available to
 # `dyna git ci run --suite` for focused manual runs.
-trial: [relay, pi, go, cross, computer-smoke]
+trial: [relay, pi, go, cross, computer-smoke, next]
 
 caches:
   - name: go-build
@@ -162,6 +162,21 @@ checks:
     hostUser: true
     setup: timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69
     command: bash scripts/ci.sh go modules && bash scripts/ci.sh go format && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+
+  # next/ is a separate Go module, so the root Go commands never reach it. Its
+  # hosted job vets and tests it, and the base graph requires the name next. The
+  # golang image matches the go line in next/go.mod.
+  - id: next
+    name: next
+    image: golang:1.26.10
+    hostUser: true
+    command: bash scripts/ci.sh next
     caches: [go-build, go-mod]
     env:
       GOMAXPROCS: "2"
@@ -393,9 +408,13 @@ suites:
   - id: go-static
     checks: [go-static]
 
+  - id: next
+    files: ['^next/', '^scripts/ci\.sh$']
+    checks: [next]
+
   - id: cross
     group: cross-build
-    files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
+    files: ['^\.github/', '^scripts/ci\.sh$', '^[^/]*\.go$', '^(cmd|desktop|examples|internal|scripts|web)/.*\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
     checks: [cross-build-linux-amd64, cross-build-linux-arm64, cross-build-darwin-amd64, cross-build-darwin-arm64]
 
   - id: computer-smoke
@@ -404,5 +423,5 @@ suites:
 
   - id: go
     group: go-test
-    files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^tygo\.yaml$', '^tygo/.*\.yaml$', '^desktop/', '^web/', '^install\.sh$']
+    files: ['^\.github/', '^scripts/ci\.sh$', '^[^/]*\.go$', '^(cmd|desktop|examples|internal|scripts|web)/.*\.go$', '^internal/', '^go\.(mod|sum)$', '^tygo\.yaml$', '^tygo/.*\.yaml$', '^desktop/', '^web/', '^install\.sh$']
     checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, desktop, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7, go-test-shard-8, go-test-shard-9]
