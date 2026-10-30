@@ -140,7 +140,7 @@
   .account + .account { border-top: 1px solid var(--border-soft); }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
   .identity { flex: 1 1 14rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); }
-  b { font-size: var(--t-ui); font-weight: var(--w-medium); overflow-wrap: anywhere; }
+  b { flex-basis: 100%; font-size: var(--t-ui); font-weight: var(--w-medium); overflow-wrap: anywhere; }
   .facts { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
   .repos-label { color: var(--muted); }
