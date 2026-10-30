@@ -340,6 +340,7 @@ const fixtures: Record<string, EventPayload> = {
   'engine/root-flush': { minutes: 15 },
   'terminal/request': { requestId: 'q3', asker: 'dyna:leaf', argv: ['gh', 'auth', 'login'], cwd: '/work', reason: 'sign in to GitHub' },
   'terminal/request.done': { requestId: 'q3', verdict: 'done', exit: { code: 0 }, note: 'logged in', detail: 'Exit code 0.' },
+  'github-write/refused': { requester: 'dyna:worker', verb: 'issue.close', repository: 'github.com/acme/app', reason: 'read-only-room', rule: 'read-only' },
   'approval/requested': { requestId: 'A-12', kind: 'gh', class: 'owner', requester: 'dyna:leaf', at: 'owner', repository: 'acme/app', command: 'gh pr create', title: 'Fix the cache', body: 'Fixes the stale cache.\n\nPosted by the swarm.' },
   'approval/decided': { requestId: 'A-12', actor: 'dyna:parent', action: 'deny', reason: 'wrong branch' },
   'approval/result': { requestId: 'A-12', state: 'failed', exitCode: 1, url: 'https://github.com/acme/app/pull/9', output: ['gh: not found', 'exit 1'] },
@@ -492,8 +493,9 @@ test('a stopped job card states its cause without an exit code', () => {
 // fixtureTip is a value every payload fixture shows, so a card that renders
 // nothing meaningful fails.
 function fixtureTip(payload: EventPayload): string {
+  if ('requester' in payload && 'rule' in payload) return payload.requester
   if ('resultBytes' in payload) return `${payload.server} / ${payload.tool}`
-  if ('requester' in payload) return payload.title ?? ''
+  if ('requestId' in payload && 'requester' in payload) return payload.title ?? ''
   if ('action' in payload) return payload.actor
   if ('requestId' in payload && 'state' in payload) return payload.url ?? ''
   if ('kind' in payload && 'changeId' in payload) return payload.label
