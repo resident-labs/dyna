@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	"dyna-agent/internal/runstore"
@@ -20,10 +21,13 @@ type replayIdentity struct {
 
 // ReplayBarrier prevents new effects until every recorded call has matched.
 type ReplayBarrier struct {
-	mu      sync.Mutex
-	pending map[replayIdentity]runstore.WorkflowManifestCall
-	seen    map[replayIdentity]bool
-	failure error
+	mu       sync.Mutex
+	pending  map[replayIdentity]runstore.WorkflowManifestCall
+	seen     map[replayIdentity]bool
+	order    []replayIdentity
+	deferred []replayIdentity
+	cursor   int
+	failure  error
 }
 
 func NewReplayBarrier(manifest runstore.WorkflowManifest) (*ReplayBarrier, error) {
@@ -37,6 +41,7 @@ func NewReplayBarrier(manifest runstore.WorkflowManifest) (*ReplayBarrier, error
 			return nil, fmt.Errorf("%w: ambiguous or incomplete call", ErrReplayMismatch)
 		}
 		b.pending[key] = call
+		b.order = append(b.order, key)
 	}
 	return b, nil
 }
@@ -49,7 +54,25 @@ func (b *ReplayBarrier) Match(kind runstore.WorkflowCallKind, identity string, o
 		return runstore.WorkflowManifestCall{}, false, b.failure
 	}
 	key := replayIdentity{kind, identity, ordinal}
-	if call, ok := b.pending[key]; ok {
+	call, matched := b.pending[key]
+	if matched && kind == runstore.WorkflowCallPost {
+		delete(b.pending, key)
+		b.seen[key] = true
+		b.deferred = append(b.deferred, key)
+		return call, true, nil
+	}
+	if matched {
+		b.deferred = append(b.deferred, key)
+	}
+	for _, observed := range b.deferred {
+		if b.cursor >= len(b.order) || b.order[b.cursor] != observed {
+			b.failure = fmt.Errorf("%w: calls occurred in a different order", ErrReplayMismatch)
+			return runstore.WorkflowManifestCall{}, false, b.failure
+		}
+		b.cursor++
+	}
+	b.deferred = nil
+	if matched {
 		delete(b.pending, key)
 		b.seen[key] = true
 		return call, true, nil
@@ -67,7 +90,14 @@ func (b *ReplayBarrier) Finish() error {
 	if b.failure != nil {
 		return b.failure
 	}
-	if len(b.pending) != 0 {
+	for _, observed := range b.deferred {
+		if b.cursor >= len(b.order) || b.order[b.cursor] != observed {
+			return fmt.Errorf("%w: calls occurred in a different order", ErrReplayMismatch)
+		}
+		b.cursor++
+	}
+	b.deferred = nil
+	if len(b.pending) != 0 || b.cursor != len(b.order) {
 		return fmt.Errorf("%w: %d calls were not replayed", ErrReplayMismatch, len(b.pending))
 	}
 	return nil
@@ -107,4 +137,27 @@ func (e *engine) replayCall(kind runstore.WorkflowCallKind, identity string, ord
 		}
 	}
 	return true, value, callErr
+}
+
+// checkReplayCwd rejects working directories not covered by the input capture.
+func (e *engine) checkReplayCwd(cwd string) error {
+	if !e.opts.CheckReplaySources {
+		return nil
+	}
+	workDir, err := filepath.Abs(e.opts.WorkDir)
+	if err != nil {
+		return err
+	}
+	if cwd == workDir {
+		return nil
+	}
+	reason := fmt.Errorf("working directory %q was not captured before the run", cwd)
+	if e.opts.Replay != nil {
+		return e.opts.Replay.fail(reason)
+	}
+	if err := runstore.MarkWorkflowManifestUnsafe(e.ctx, e.runID(), reason.Error()); err != nil {
+		e.manifestWriteFailed()
+		return fmt.Errorf("mark working directory unsafe: %w", err)
+	}
+	return nil
 }

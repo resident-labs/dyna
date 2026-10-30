@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"dyna-agent/internal/workflowsvc"
 	"log"
 	"sync"
 	"time"
@@ -30,7 +31,12 @@ func reportUpdateNotice(ctx context.Context, w *state.Writer, notices *notify.Se
 	if !pending {
 		return
 	}
-	result, err := notices.CompleteRun(ctx, id)
+	replayRun, reason, err := workflowsvc.TryAutomaticReplay(ctx, id)
+	if err != nil {
+		log.Printf("check workflow replay %s: %v", id, err)
+		return
+	}
+	result, err := notices.CompleteRunWithReplay(ctx, id, reason, replayRun)
 	if err != nil {
 		log.Printf("deliver workflow update notice %s: %v", id, err)
 		return
