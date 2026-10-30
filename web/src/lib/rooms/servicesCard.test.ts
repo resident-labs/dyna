@@ -4,7 +4,7 @@ import { groupRows, healthyLine, hookRows, logKey, readLog, serviceRows, settleR
 import type { Hook, HookRun, HookSummary } from '../api/settings.ts'
 import type { ServiceView } from '../api/service.ts'
 
-const hook = (over: Partial<Hook>): Hook => ({ name: 'maintenance', event: 'schedule', command: '', cwd: '', timeout: '5m', onFail: 'alert', addedBy: 'dyna', addedAt: '', ...over })
+const hook = (over: Partial<Hook>): Hook => ({ name: 'maintenance', event: 'schedule', command: '', cwd: '', timeout: '5m', onFail: 'alert', scope: 'global', addedBy: 'dyna', addedAt: '', ...over })
 const run = (result: string, id = 'r1'): HookRun => ({ id, repo: '', name: 'maintenance', command: '', result, logPath: '', startedAt: '2026-10-26T10:00:00Z' })
 const summary = (h: Partial<Hook>, last?: HookRun): HookSummary => ({ hook: hook(h), lastRun: last })
 const service = (over: Partial<ServiceView>): ServiceView => ({ role: 'librarian', name: 'Librarian', page: '', profile: 'sol', pinned: '', source: '', reason: '', scope: 'global', sessions: 0, profiles: [], ...over })

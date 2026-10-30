@@ -46,7 +46,7 @@ export function runByHand(h: Pick<Hook, 'name'>): string {
 
 // scopeOf reads a stored hook's scope. A hook stored before scope existed
 // belongs to its repository.
-export function scopeOf(h: Pick<Hook, 'scope'>): 'repository' | 'global' {
+export function scopeOf(h: Partial<Pick<Hook, 'scope'>>): 'repository' | 'global' {
   return h.scope === 'global' ? 'global' : 'repository'
 }
 
