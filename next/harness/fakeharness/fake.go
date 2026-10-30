@@ -10,11 +10,20 @@ import (
 	"github.com/resident-labs/dyna/harness"
 )
 
+// ToolCall is a scripted tool action observed by the test.
+type ToolCall struct {
+	Name   string
+	Input  string
+	Output string
+	Failed bool
+}
+
 // Turn supplies a result after Release is closed. The caller controls when a turn settles.
 type Turn struct {
 	Result  contract.TurnEnded
 	Err     error
 	Release <-chan struct{}
+	Tools   []ToolCall
 }
 
 type Input struct {
@@ -27,6 +36,7 @@ type Harness struct {
 	mu        sync.Mutex
 	Turns     []Turn
 	Inputs    []Input
+	OnTool    func(ToolCall)
 	delivered map[contract.DeliverySeq]bool
 	stopped   chan struct{}
 }
@@ -51,6 +61,11 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	stop := make(chan struct{})
 	h.stopped = stop
 	h.mu.Unlock()
+	for _, tool := range turn.Tools {
+		if h.OnTool != nil {
+			h.OnTool(tool)
+		}
+	}
 	if turn.Release != nil {
 		select {
 		case <-turn.Release:
