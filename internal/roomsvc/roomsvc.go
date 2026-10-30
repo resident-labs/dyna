@@ -1028,7 +1028,7 @@ func (s *Service) buildMembers(rec room.Record, all []subagent.Info, rev string,
 		}
 	}
 	seat := rec.Seat
-	out := []Member{{Name: rec.Name, Address: rec.Name, Owner: true, Status: "owner", State: StateIdle, Children: top, Hue: NameHue(rec.Name), Seat: &seat}}
+	out := []Member{{Name: rec.Name, Address: rec.Name, Owner: true, Status: "owner", State: StateIdle, Children: top, Hue: NameHue(rec.Name), Seat: &seat, Computer: computers.ActorID("", rec.ID)}}
 	var walk func([]*subagent.MemberNode, int)
 	walk = func(nodes []*subagent.MemberNode, depth int) {
 		for _, node := range nodes {
@@ -1040,7 +1040,6 @@ func (s *Service) buildMembers(rec room.Record, all []subagent.Info, rev string,
 	book := s.avatarBook(rec.ID, all, rev)
 	for i := range out {
 		out[i].Emoji = book.byID[out[i].ID]
-		out[i].Computer = computers.ActorID(out[i].ID, rec.ID)
 	}
 	return out
 }
@@ -1051,6 +1050,7 @@ func (s *Service) member(info subagent.Info, depth, kids int) Member {
 		Depth: depth, Children: kids, Status: info.Status, Turns: info.Turns, Created: info.Created, Activity: info.LastActivity,
 		Finished: info.Status == subagent.StatusDormant, Resumable: info.Resumable && info.HarnessSession != "" && info.ConsumedBy == "",
 		Closed: info.Status == subagent.StatusClosed, Hue: NameHue(info.Address()), OwnerDisplay: info.OwnerDisplay,
+		Computer: computers.ActorID(info.ID, info.RoomID),
 	}
 	switch info.Status {
 	case subagent.StatusDormant:

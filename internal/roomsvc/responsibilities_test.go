@@ -70,6 +70,22 @@ func TestMembersNameTheComputerEachRowUses(t *testing.T) {
 	}
 }
 
+// A single-member response names its computer too: session detail, reopen,
+// profile and spawn build their member with the same builder as the roster.
+func TestSingleMemberNamesItsComputer(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("single-computer")
+	lead := e.start(rec, "lead", nil)
+
+	got, err := e.svc.memberByID(lead.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Computer != lead.ID {
+		t.Fatalf("session computer = %q, want its session ID %q", got.Computer, lead.ID)
+	}
+}
+
 // A member row shows what stops its session from finishing: the owner row keeps
 // no count, and a new child counts for its parent.
 func TestMembersCountWhatStopsAnOpenSession(t *testing.T) {
