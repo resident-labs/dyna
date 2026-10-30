@@ -43,6 +43,7 @@ type sessionMeta struct {
 	ID            string
 	Name          string
 	Role          string
+	Service       bool
 	RoomID        string
 	Room          string
 	ParentSession string
@@ -105,6 +106,25 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		Payload: append(json.RawMessage(nil), in.Payload...), PayloadHash: hex.EncodeToString(hash[:]),
 		Repository: in.Repository, Server: in.Server, Command: in.Command, Tool: in.Tool, Title: in.Title, Body: in.Body,
 		State: StatePending, atID: requester.ParentSession,
+	}
+	if requester.Service && requester.Role != "root" && in.Class == ClassAgent {
+		r.atID = ""
+		err := sessionlife.Each(s.SessionRoot, true, func(_ string, raw []byte, readErr error) error {
+			if readErr != nil {
+				return readErr
+			}
+			var candidate sessionMeta
+			if err := json.Unmarshal(raw, &candidate); err != nil {
+				return err
+			}
+			if candidate.RoomID == rec.ID && candidate.Role == "root" && !candidate.Closing.Active() {
+				r.atID = candidate.ID
+			}
+			return nil
+		})
+		if err != nil {
+			return Request{}, err
+		}
 	}
 	if r.atID == "" || in.Class == ClassOwner {
 		r.atID = Owner
