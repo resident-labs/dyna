@@ -90,6 +90,39 @@ func TestRulesAPIAndEvents(t *testing.T) {
 	}
 }
 
+// Settings shows global rules with no room open, so a global rule call may
+// name no room. It posts no room notice, and the scan sends one roomless
+// goals event even when no room has goal state.
+func TestGlobalRulesNeedNoRoom(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	version, work, rows := "", map[string]string{}, map[string]string{}
+	var events []Event
+	emit := func(ev Event) { events = append(events, ev) }
+	e.svc.scanGoals(rows, work, &version, true, emit)
+	rule, err := e.svc.AddRule(t.Context(), "", true, "Use Central time")
+	if err != nil || rule.ID != "u1" {
+		t.Fatal(rule, err)
+	}
+	e.svc.scanGoals(rows, work, &version, false, emit)
+	if len(events) != 1 || events[0].Kind != "goals" || events[0].RoomID != "" {
+		t.Fatalf("events = %+v, want one roomless goals event", events)
+	}
+	if _, err := e.svc.EditRule(t.Context(), "", true, rule.ID, "Use UTC"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := e.svc.Rules("", true)
+	if err != nil || len(view.Rules) != 1 || view.Rules[0].Text != "Use UTC" {
+		t.Fatal(view, err)
+	}
+	if _, err := e.svc.RemoveRule(t.Context(), "", true, rule.ID); err != nil {
+		t.Fatal(err)
+	}
+	if msgs, err := e.svc.rooms().Messages(r.ID); err != nil || len(msgs) != 0 {
+		t.Fatal(msgs, err)
+	}
+}
+
 // A shared edit has one owner row, while every session keeps its own agent
 // note in its DM. A rule edit uses its existing rule row; another shared edit
 // uses one instruction-batch row.
