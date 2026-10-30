@@ -22,6 +22,11 @@ node's queue, and store their log and exit code.
   `arch=<node architecture>`, `gpu` when a GPU is visible, and `docker`
   or `containerd` for a container runtime. Both kinds place jobs. For example:
   `dyna job run --label os=linux --label gpu -- nvidia-smi`.
+- `--commit tree` snapshots the current working tree, including untracked files
+  that Git does not ignore. It leaves the real index and worktree unchanged.
+  The job runs in the caller's repository subdirectory, including in a kept
+  workspace. Git may prune the unreferenced snapshot before a long-queued job
+  pushes it; a successful push protects the node copy with a ref.
 - `--commit REF` pushes that exact commit of the current repository to the
   node the way local CI does, checks it out in a fresh per-job directory, and
   removes the directory at the end. Without it the command runs with no source,
