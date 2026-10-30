@@ -157,6 +157,15 @@ func (c *Client) Hello(ctx context.Context, version string) (contract.BoxHelloRe
 	return result, err
 }
 
+func (c *Client) ArchiveDone(ctx context.Context, result contract.ArchiveDoneRequest) error {
+	body, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = c.call(ctx, contract.MethodArchiveDone, body)
+	return err
+}
+
 func (c *Client) DeliveryDone(ctx context.Context, id contract.DeliverySeq) error {
 	body, err := json.Marshal(contract.DeliveryDoneRequest{Delivery: id})
 	if err != nil {

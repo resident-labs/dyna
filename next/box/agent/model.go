@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 	"time"
 )
 
@@ -28,9 +29,11 @@ func modelRoute(transport http.RoundTripper) http.Handler {
 		Director: func(r *http.Request) {
 			r.URL.Scheme = "http"
 			r.URL.Host = "dyna"
-			r.URL.Path = "/model" + r.URL.Path
-			if r.URL.RawPath != "" {
-				r.URL.RawPath = "/model" + r.URL.RawPath
+			if !strings.HasPrefix(r.URL.Path, "/git/") {
+				r.URL.Path = "/model" + r.URL.Path
+				if r.URL.RawPath != "" {
+					r.URL.RawPath = "/model" + r.URL.RawPath
+				}
 			}
 		},
 	}
