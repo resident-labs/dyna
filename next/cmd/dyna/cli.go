@@ -149,13 +149,15 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(host)
 
 	room := &cobra.Command{Use: "room"}
+	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0]})
+		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Room)
 		}
 		return err
 	}}
+	create.Flags().StringVar(&rootProfile, "root-profile", "", "Root session profile")
 	var follow bool
 	log := &cobra.Command{Use: "log ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
