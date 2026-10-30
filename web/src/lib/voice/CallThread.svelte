@@ -34,7 +34,7 @@
     <VoiceRelay icon="mic" label="Started" text={r.post?.text ?? ''} state={r.state} />
   {:else if r.post}
     <article class="tp">
-      <div class="gutter"><Avatar avatar={r.who === 'you' ? ownerIdentity : voiceIdentity} name={nameOf(r.who)} hue={hueOf(r.who)} size={28} /></div>
+      <div class="gutter">{#if r.post.avatar}<Avatar avatar={r.post.avatar} name={nameOf(r.who)} hue={hueOf(r.who)} size={28} />{:else if r.who === 'you' || r.who === 'voice'}<Avatar avatar={r.who === 'you' ? ownerIdentity : voiceIdentity} name={nameOf(r.who)} hue={hueOf(r.who)} size={28} />{/if}</div>
       <div>
         <header>
           <span class="name hue-{hueOf(r.who)}">{nameOf(r.who)}</span>
