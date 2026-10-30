@@ -27,7 +27,7 @@
     hint: string
     label?: string
     group?: string
-    arg?: SlashCommand
+    arg?: string
     file?: RepoEntry
     reference?: Reference
   }
@@ -185,11 +185,16 @@
     return commandLoad
   }
   let appCommands = $derived(commands.filter((c) => !profiles.some((p) => p.name === c.name)))
-  let skillCommands = $derived(roomCommands.filter((c) => c.source === 'skill' && !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
-  let skillCommand = $derived.by(() => {
-    const match = draft.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/)
-    const skill = match && skillCommands.find((item) => item.name === match[1])
-    return skill ? { skill, text: (match[2] ?? '').trim() } : null
+  let availableRoomCommands = $derived(roomCommands.filter((c) => (c.source === 'skill' || c.source === 'mcp-prompt') && !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
+  let roomCommand = $derived.by(() => {
+    // Names come from the command catalog, not a restricted identifier grammar.
+    // Prefer the longest match when one name is a prefix of another.
+    const item = availableRoomCommands.reduce<typeof availableRoomCommands[number] | undefined>((best, c) => {
+      const prefix = '/' + c.name
+      if (!draft.startsWith(prefix) || (draft.length > prefix.length && !/\s/.test(draft.charAt(prefix.length)))) return best
+      return !best || c.name.length > best.name.length ? c : best
+    }, undefined)
+    return item ? { item, text: draft.slice(item.name.length + 1).trim() } : null
   })
   let command = $derived.by(() => {
     const m = draft.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/)
@@ -209,7 +214,8 @@
     token?.slash ? [
       ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: profileHint(p) })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
-      ...skillCommands.map((c) => ({ value: '/' + c.name, group: 'Skills', arg: 'message', hint: c.description })),
+      ...availableRoomCommands.filter((c) => c.source === 'skill').map((c) => ({ value: '/' + c.name, group: 'Skills', arg: 'message', hint: c.description })),
+      ...availableRoomCommands.filter((c) => c.source === 'mcp-prompt').map((c) => ({ value: '/' + c.name, group: 'MCP prompts', arg: c.args.map((arg) => arg.name).join(', '), hint: c.description })),
     ] :
     [...mentionOptions(choices).map((option) => ({ ...option, group: 'Sessions' })), ...fileMentionOptions(fileEntries, token?.text || '@')]
   )
@@ -394,15 +400,15 @@
       busy = false
       if (!loaded || !active || draft !== original) return
     }
-    if (skillCommand && !forwarding) {
-      if (!skillCommand.text) { error = 'Type a message for the skill.'; return }
-      if (references.length || $attachments.items.length || reply) { error = 'Send the skill message without files, references, or a reply.'; return }
+    if (roomCommand && !forwarding) {
+      if (roomCommand.item.source === 'skill' && !roomCommand.text) { error = 'Type a message for the skill.'; return }
+      if (references.length || $attachments.items.length || reply) { error = 'Send the command without files, references, or a reply.'; return }
       error = ''
       busy = true
       try {
-        const text = await prepareText(skillCommand.text)
+        const text = roomCommand.text ? await prepareText(roomCommand.text) : ''
         if (!active) return
-        const result = await api.runCommand(room.id, skillCommand.skill.name, text)
+        const result = await api.runCommand(room.id, roomCommand.item.name, text)
         if (result.failed?.length) error = result.failed.map((f) => `${short(f.to, room.name)}: ${f.error || 'delivery failed'}`).join(' · ')
         else { note = result.deliveries?.length ? `Delivered to ${result.deliveries.length} recipient${result.deliveries.length === 1 ? '' : 's'}` : 'Posted'; setTimeout(() => (note = ''), 2400) }
         if (result.message.id) draft = ''
@@ -461,7 +467,7 @@
       if (e.key === 'ArrowDown') { e.preventDefault(); pick = (pick + 1) % matches.length; return }
       if (e.key === 'ArrowUp') { e.preventDefault(); pick = (pick - 1 + matches.length) % matches.length; return }
       // Enter on a typed command that needs nothing more runs it.
-      if (e.key === 'Enter' && !e.shiftKey && command && !command.c.arg && selected?.value === '/' + command.c.name) { e.preventDefault(); token = null; send(); return }
+      if (e.key === 'Enter' && !e.shiftKey && ((command && !command.c.arg && selected?.value === '/' + command.c.name) || (roomCommand?.item.source === 'mcp-prompt' && !roomCommand.item.args.length && selected?.value === '/' + roomCommand.item.name))) { e.preventDefault(); token = null; send(); return }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); complete(selected); return }
       if (e.key === 'Escape') { e.preventDefault(); token = null; return }
     }
@@ -513,13 +519,13 @@
   {#if fileDirectory !== null && (fileLoading || fileError)}
     <div class="file-status" role="status">{fileLoading ? 'Loading files…' : 'Files unavailable: ' + fileError}</div>
   {/if}
-  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message ${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command && !skillCommand))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
+  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message ${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command && !roomCommand))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
     {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
     {#snippet tools()}
       <button class="command-chip" type="button" aria-label="Browse commands" title="Type / for sessions and commands" disabled={busy} onclick={openCommands}>/</button>
     {/snippet}
   </ComposerBox>
-  {#if error || failed || command || spawn || wakeLine || note}
+  {#if error || failed || command || roomCommand || spawn || wakeLine || note}
   <div class="foot">
     {#if error}
       <span class="err">{error}</span>
@@ -527,8 +533,8 @@
       <span class="err">A file did not save. Retry it or remove it before you send.</span>
     {:else if command}
       <span class="go">{commandLine} · <kbd>Enter</kbd> to run</span>
-    {:else if skillCommand}
-      <span class="go">/{skillCommand.skill.name} · {skillCommand.skill.description} · <kbd>Enter</kbd> to send</span>
+    {:else if roomCommand}
+      <span class="go">/{roomCommand.item.name} · {roomCommand.item.description} · <kbd>Enter</kbd> to send</span>
     {:else if spawn?.error}
       <span class="err">{spawn.error}</span>
     {:else if spawn}

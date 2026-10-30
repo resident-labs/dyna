@@ -26,7 +26,7 @@ type Call = string | { room: string; text: string; atts: Attachment[] }
 interface ComposerState {
   references: unknown[]
   command: null
-  skillCommand: null
+  roomCommand: null
   selectedProfile: null
   forwarding: null
   canSend: boolean
@@ -56,7 +56,7 @@ function composer() {
   const cleanup: (() => void)[] = []
   const calls: Call[] = []
   const c: ComposerState = {
-    references: [], command: null, skillCommand: null, selectedProfile: null, forwarding: null, canSend: true, busy: false, error: '', note: '',
+    references: [], command: null, roomCommand: null, selectedProfile: null, forwarding: null, canSend: true, busy: false, error: '', note: '',
     $attachments: { atts: [] }, attachments: { destroy() {} }, draft: 'old view draft', currentRoom: 'old-room',
     prepareText: () => pending,
     onDestroy: (fn: () => void) => cleanup.push(fn),
