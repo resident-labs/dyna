@@ -82,6 +82,9 @@ func TestGeneratedWireTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	ts := string(data)
+	if !strings.Contains(ts, "seconds: number;") {
+		t.Fatal("floating-point fields must be TypeScript numbers")
+	}
 	if !strings.Contains(ts, "export type HostName = string;") {
 		t.Fatal("registered hosts must be accepted")
 	}
