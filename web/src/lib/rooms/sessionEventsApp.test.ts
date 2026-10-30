@@ -134,6 +134,7 @@ function app(view: string) {
   // is the test's own, so the counts stay visible.
   installSessionView(app, state.sessionData)
   // The screen state lives in the router now, so the sliced functions write through it.
+  Object.assign(app, { controls: roomSessionController })
   installRouterShim(app)
   vm.createContext(app)
   for (const name of ['applyItemEvent', 'handle', 'loadMembers', 'resync']) {

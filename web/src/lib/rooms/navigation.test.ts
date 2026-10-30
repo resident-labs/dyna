@@ -365,6 +365,7 @@ function navigation() {
   // entries records each address write: ['push' | 'replace', hash].
   const write = (kind: string, url: string) => { state.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; state.entries.push([kind, state.location.hash]) }
   state.history = { replaceState(_state: unknown, _title: string, url: string) { write('replace', url) }, pushState(_state: unknown, _title: string, url: string) { write('push', url) } }
+  Object.assign(state, { controls: { load() {} }, roomControls: null })
   vm.createContext(state)
   vm.runInContext(stripTypes(code), state)
   const fns = vm.runInContext(`({ ${names.join(', ')} })`, state) as Pick<NavApp, keyof NavFns>
@@ -880,6 +881,7 @@ test('successful read batches refresh view counts through the existing room debo
     afterRead: () => {},
   }
   const c = state
+  Object.assign(c, { controls: { load() {} }, roomControls: null })
   vm.createContext(c)
   const refreshRange = sourceRange(refresh)
   const callbackRange = sourceRange(read.value)
@@ -928,6 +930,7 @@ test('a view count refresh preserves over 200 displayed posts while scrolled up'
     setTimeout(fn: () => void) { c.timer = fn }, clearTimeout() {},
     handle: () => {}, applyUnread: () => {},
   }
+  Object.assign(c, { controls: { load() {} }, roomControls: null })
   vm.createContext(c)
   runDeclaration(c, 'soonRooms')
   runDeclaration(c, 'handle')
