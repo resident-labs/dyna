@@ -36,6 +36,9 @@ func TestAddRepo(t *testing.T) {
 }
 
 func TestRepoForSession(t *testing.T) {
+	if got, err := RepoForSession(nil, "", ""); got != "" || err != nil {
+		t.Fatalf("empty room: %q, %v", got, err)
+	}
 	rows := []contract.RoomRepo{{Repo: "a", Default: true}, {Repo: "b"}}
 	for _, tt := range []struct {
 		name                    string
