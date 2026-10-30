@@ -26,6 +26,7 @@ const row = (fields: Partial<ScopeAccount> & Pick<ScopeAccount, 'id' | 'provider
   ...account({ id: fields.id, harness: 'pi' }),
   label: fields.id,
   activeHere: false,
+  servesHere: true,
   ...fields,
 })
 
@@ -62,7 +63,7 @@ test('accounts are grouped by provider and Use calls the API with the selected s
     mounted = mount(AccountsPane, { target, props: { roomId: 'room-a', onmodal: () => {} } })
     await settle(flushSync)
 
-    assert.deepEqual([...target.querySelectorAll('h4')].map(textOf), ['Anthropic', 'Z.ai'], 'one group per provider, in engine order')
+    assert.deepEqual([...target.querySelectorAll('h4')].map((h) => textOf(h).replace(/\d+$/, '')), ['Anthropic', 'Z.ai'], 'one group per provider, in engine order')
     assert.deepEqual(rows(target).map((r) => textOf(need(r.querySelector('b'), 'account label'))), ['Claude · Work', 'Claude · Personal', 'Z.ai key'])
     assert.match(textOf(need(rows(target)[2], 'zai row')), /Usage unavailable for an API key/, 'a key account names why it has no meters')
 

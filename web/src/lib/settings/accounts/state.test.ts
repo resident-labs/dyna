@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, problemText, providerColor, providerName, remainingPercent, renewalText, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
+import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, PI_KEY_PROVIDERS, poolMean, poolWindows, PI_OAUTH_PROVIDERS, problemText, providerColor, providerName, remainingPercent, renewalText, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
 import { account } from '../../../../test/account-fixtures.ts'
-import type { UsageWindow } from '../../api/account.ts'
+import type { ScopeAccount, UsageWindow } from '../../api/account.ts'
 
 // A window with the fields a test leaves out.
 const win = (fields: Partial<UsageWindow> = {}): UsageWindow => ({ id: '', label: '', ...fields })
@@ -166,9 +166,9 @@ test('the cards word the repo limit, the selection and a skipped saved row', () 
   assert.equal(reposLabel({ repos: null }), 'All repos')
   assert.equal(reposLabel({ repos: ['github.com/me/one'] }), '1 repo only')
   assert.equal(reposLabel({ repos: ['a', 'b'] }), '2 repos only')
-  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: true }, false), 'In use')
-  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: false, active: true }, true), 'Global choice')
-  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: false, active: false }, true), '')
+  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: true, servesHere: true }, false), 'In use')
+  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: false, active: true, servesHere: true }, true), 'Global choice')
+  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: false, active: false, servesHere: true }, true), '')
   assert.match(problemText({ id: 'x', label: 'Work', reason: 'missing-home' }), /^Work: its saved home directory is gone\.$/)
   assert.match(problemText({ id: 'x', reason: 'unreadable' }), /^A saved account: Dyna could not read this saved account\.$/)
 })
@@ -176,7 +176,7 @@ test('the cards word the repo limit, the selection and a skipped saved row', () 
 test('accountsOf flattens the provider groups in their engine order', () => {
   const work = account({ id: 'w', harness: 'pi' })
   const home = account({ id: 'h', harness: 'pi' })
-  assert.deepEqual(accountsOf({ providers: [{ provider: 'anthropic', accounts: [{ ...work, activeHere: true }] }, { provider: 'zai', accounts: [{ ...home, activeHere: false }] }] }).map((a) => a.id), ['w', 'h'])
+  assert.deepEqual(accountsOf({ providers: [{ provider: 'anthropic', accounts: [{ ...work, activeHere: true, servesHere: true }] }, { provider: 'zai', accounts: [{ ...home, activeHere: false, servesHere: true }] }] }).map((a) => a.id), ['w', 'h'])
   assert.deepEqual(accountsOf(null), [])
   assert.deepEqual(accountsOf({ providers: null }), [])
 })
@@ -184,4 +184,41 @@ test('accountsOf flattens the provider groups in their engine order', () => {
 test('provider colors use a neutral fallback for unknown IDs', () => {
   assert.equal(providerColor('anthropic'), 'var(--provider-anthropic)')
   assert.equal(providerColor('toString'), 'var(--provider-unknown)')
+})
+
+// A provider account in the scope, with the fields the pool reads.
+const member = (id: string, fields: Partial<ScopeAccount> = {}): ScopeAccount => ({ ...account({ id, harness: 'pi', provider: 'anthropic' }), activeHere: false, servesHere: true, ...fields })
+
+test('the pool headline is the mean left over accounts that can serve the scope, and none qualifying is not reported', () => {
+  const now = Date.parse('2026-10-20T12:00:00Z')
+  const five = (usedPercent: number) => win({ id: 'five_hour', label: '5-hour', usedPercent })
+  const pool = (accounts: ScopeAccount[]) => {
+    const [first] = poolWindows(accounts)
+    assert.ok(first)
+    return first
+  }
+  const counted = [member('work', { windows: [five(62)] }), member('home', { windows: [five(16)] })]
+  const skipped = [
+    member('signed-out', { needsLogin: true, windows: [five(0)] }),
+    member('expired', { usageReason: 'expired', windows: [five(0)] }),
+    member('other-repo', { servesHere: false, windows: [five(0)] }),
+  ]
+  const both = pool([...counted, ...skipped])
+  assert.equal(both.segments.length, 5, 'every account keeps its segment')
+  assert.equal(poolMean(both, now), 61)
+  assert.equal(poolMean(pool(skipped), now), null)
+  assert.equal(percent(poolMean(pool(skipped), now)), 'Not reported')
+})
+
+test('pool windows line up across accounts by id or label and keep amounts out', () => {
+  const pools = poolWindows([
+    member('a', { windows: [win({ id: 'five_hour', label: '5-hour', usedPercent: 10 }), win({ id: 'seven_day', label: 'Weekly', usedPercent: 20 })] }),
+    member('b', { windows: [win({ id: 'seven_day', label: 'Weekly limit', usedPercent: 30 }), win({ label: 'Opus weekly', usedPercent: 40 }), win({ id: 'balance', label: 'Balance', balance: 5, unit: 'USD' })] }),
+    member('c', { windows: [win({ label: 'Opus weekly', usedPercent: 50 })] }),
+  ])
+  assert.deepEqual(pools.map((pool) => [pool.key, pool.segments.map((segment) => segment.account.id)]), [
+    ['five_hour', ['a']],
+    ['seven_day', ['a', 'b']],
+    ['Opus weekly', ['b', 'c']],
+  ])
 })
