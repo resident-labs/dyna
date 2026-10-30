@@ -31,7 +31,7 @@ func TestInstructionsTeachDynaOnlyDelegation(t *testing.T) {
 	for _, want := range []string{
 		"You are amber-otter-42:decoder", "Room: amber-otter-42   You: amber-otter-42:decoder",
 		"`dyna post @<mention>... \"...\"`", "From: amber-otter-42:lead",
-		"dyna room members amber-otter-42", "Use the inherited room and its existing watches", "Across turns, set", "dyna goal done <id>",
+		"dyna room members amber-otter-42", "Use the inherited room and watches", "Across turns, set", "dyna goal done <id>",
 		"Put temporary files in $DYNA_SCRATCH.",
 		"Edit code only in dyna git worktrees new trees. Never edit the owner’s main checkout.",
 		"Delegate only through Dyna", "rather than harness subagents, Task/Agent or workflow tools",
