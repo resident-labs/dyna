@@ -20,22 +20,6 @@ import (
 	harnesshome "dyna-agent/internal/harness/home"
 )
 
-type NativeAccount struct {
-	prepared  *preparedAccount
-	ID        string         `json:"id"`
-	Harness   string         `json:"harness"`
-	Provider  store.Provider `json:"provider,omitempty"`
-	Kind      store.Kind     `json:"kind,omitempty"`
-	Label     string         `json:"label"`
-	Home      string         `json:"home"`
-	Identity  string         `json:"identity"`
-	Status    string         `json:"status"`
-	Active    bool           `json:"active"`
-	ExpiresAt *time.Time     `json:"expiresAt,omitempty"`
-	// Repos lists the repositories this account is limited to; empty means any.
-	Repos []string `json:"repos"`
-}
-
 type Accounts struct {
 	Root string
 	// NativeManager permits offline adapter injection and additional account backends.
