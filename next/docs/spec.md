@@ -447,6 +447,7 @@ type BundleSource struct {
 - **Identity.** The listener decides the caller: the owner socket is the owner, a box socket is its session, and a device session is the owner with the device's scopes (section 7). A request body never names its own caller.
 - **Calls.** `POST /v1/<method>` with a contract request struct. The response is the contract response struct, or `Error{Code, Message}`. Each method is a `Method` constant with its request and response types, so the generated TypeScript client is typed.
 - **Events.** `GET /v1/events?room=<id>&after=<seq>` streams `Event` values as server-sent events. The web app and `dyna room log --follow` use it.
+- **Box model.** `box.hello` returns a `ModelChoice` with a `ModelProvider` (`anthropic` or `openai` in M1), model ID, and `ThinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`). The engine gets this choice from the session profile. M1 does not change it per turn.
 - **Box channel.** The box agent holds `GET /v1/box/channel` open. The engine sends `TurnStart`, `TurnSteer`, `TurnStop` and `Upgrade` on it. The box agent posts turn output back with `POST` calls, and transcript chunks from M2.
 - **Box routes.** Only box sockets serve `/model/` (the model route) and `/git/<repo>/` (the git route).
 
@@ -470,7 +471,7 @@ type Error struct {
 }
 ```
 
-M1 methods: `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`, `transcript.append`. Each later milestone adds its methods in the same way.
+M1 methods: `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`. Each later milestone adds its methods in the same way.
 
 ## 4. Store
 
@@ -497,7 +498,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M1 | `rooms` | `id` PK, `name` UNIQUE, `created_at`, `cpus`, `mem_bytes` (room limit), `paused_at` |
 | M1 | `sessions` | `id` PK, `room`, `name`, `parent` NULL, `profile`, `state` (open, dormant, closed), `goal`, `created_at`, `closed_at`; UNIQUE (`room`, `name`) WHERE `closed_at` IS NULL |
 | M1 | `events` | `seq` INTEGER PK, `id` UNIQUE, `at`, `room`, `type`, `from_kind`, `from_id`, `body` BLOB; indexes (`room`, `seq`) and (`type`, `seq`) |
-| M1 | `deliveries` | (`to_kind`, `to_id`, `seq`) PK, `surface`, `reply_kind`, `reply_target_kind`, `reply_target_id`, `reply_home`, `reply_to`, `wake`, `state` (pending, taken, read), `turn` |
+| M1 | `deliveries` | (`to_kind`, `to_id`, `seq`) PK, `surface`, `reply_kind`, `reply_target_kind`, `reply_target_id`, `reply_home`, `reply_to`, `wake`, `state` (pending, taken, read), `turn`, `queue` (NULL for turn start, otherwise steer or follow_up) |
 | M1 | `turns` | `id` PK, `session`, `started_at`, `ended_at`, `outcome`, `model`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` |
 | M1 | `hosts`, `host_labels` | section 5.1 |
 | M1 | `boxes` | section 5.3 |
@@ -698,7 +699,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 
 - **Turn runner.** It drives one Pi process per box over RPC. It takes `TurnStart`, starts or resumes Pi, and posts the typed turn result. Pi's own queues hold the input; the box agent keeps none:
   - A delivery that arrives during a turn goes to Pi's steer queue, or to its follow-up queue when its wake rule waits for the turn end.
-  - Each input carries its delivery ID. A delivery is done only when Pi's session file shows the input. After a reconnect, the engine resends the deliveries that are not done, and the turn runner skips an ID that the session file already holds.
+  - Each input carries its delivery ID. A delivery is done only when Pi's session file shows the input. Until `turn.output` commits, every channel reconnect resends `TurnStart` for the active turn with all original inputs, including done deliveries. It then resends each later unread input as `TurnSteer`, in sequence order. The turn runner skips an ID that the session file already holds. An identical `turn.output` retry succeeds without a second event; a different result for an ended turn returns a typed conflict.
   - When Pi resumes a session whose process ended during a turn, the turn runner gives each tool call that started without a result the result "interrupted; state unknown", and Pi never runs that call again.
   - Pi compacts by itself, also after a context-overflow error. The box agent adds no compaction logic. Pi loads only the extensions that the image lists.
 - **Shell server (M2).** The MCP shell for the harness, with secret masking. Commands run locally in the box, with no `node=` option and no SSH hint (D-585). Each shell job runs in its own process group, and stopping a job kills its group. In M1, Pi's built-in bash tool runs commands, and Pi's abort stops it.
@@ -1179,6 +1180,8 @@ M0c result: **yes for Claude, with one fix.** Pi 1.4.0-dyna.10 with `claude-opus
 ### M1: the thin slice
 
 Scope: `contract` (3.2 to 3.4, the `Operation` types, `GlobalBundle`, `RoomBundle` and their parts, the M1 methods), `engine/store`, the owner socket and box sockets, the vendored CLIProxyAPI in-process and the model route to it, one host (hermeslab) with admission, `dyna-base`, the box lifecycle without children, the box agent with the Pi adapter, `dyna post` and `dyna room log`.
+
+M1 limits. Only the owner starts and closes sessions, and a session has no children, so close ends one box and the tree rules of 7.4 do not apply yet. A delivery comes only from the start brief and from a post that mentions the session; root, unmentioned posts and the reply channels of 7.5 come in M2.
 
 Acceptance:
 
