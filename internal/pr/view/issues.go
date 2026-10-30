@@ -1,11 +1,13 @@
 package view
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
+	"dyna-agent/internal/pr/issuewatch"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/subagent"
 )
@@ -28,6 +30,60 @@ func IssueRepository(issueURL string) (string, error) {
 		return "", fmt.Errorf("invalid issue URL %q", issueURL)
 	}
 	return strings.ToLower(u.Host + "/" + parts[0] + "/" + parts[1]), nil
+}
+
+// TrackedIssues is the GitHub half of the Issues tab's Tracked view.
+type TrackedIssues struct {
+	Items []GitHubItem `json:"items"`
+	// Unread counts issues with live room work that GitHub could not describe;
+	// the view offers Retry for them.
+	Unread int `json:"unread"`
+}
+
+// TrackedIssues lists the issues the room watches (dyna git issue watch), with
+// the facts the last read saved, and the GitHub issues a live room session
+// works on. Watches come from dyna.db. Worked issues come from one GitHub query
+// per host, so they appear whatever page the GitHub list shows.
+func (s *Service) TrackedIssues(roomRef string) (TrackedIssues, error) {
+	rec, err := s.Notify.Rooms.Resolve(roomRef)
+	if err != nil {
+		return TrackedIssues{}, err
+	}
+	watches, err := issuewatch.Store{DataDir: s.dataDir()}.Room(context.Background(), rec.ID)
+	if err != nil {
+		return TrackedIssues{}, err
+	}
+	out := TrackedIssues{Items: make([]GitHubItem, 0, len(watches))}
+	watched := map[string]bool{}
+	for _, w := range watches {
+		// A watch saved before its first read has no update time yet.
+		updated, _ := time.Parse(time.RFC3339, w.Updated)
+		out.Items = append(out.Items, GitHubItem{Number: w.Number, Title: w.Title, State: strings.ToUpper(w.State), Labels: []GitHubLabel{},
+			UpdatedAt: updated, URL: fmt.Sprintf("https://%s/%s/issues/%d", w.Host, w.Repo, w.Number)})
+		watched[state.IssueWorkKey(rec.ID, w.Host+"/"+w.Repo, w.Number)] = true
+	}
+	st, err := s.Watcher().Store.Read()
+	if err != nil {
+		return TrackedIssues{}, err
+	}
+	var work []state.IssueWork
+	for key, w := range st.IssueWork {
+		if w.RoomID != rec.ID || watched[key] || w.Session == "" {
+			continue
+		}
+		info, err := s.Notify.Sessions.Store.Inspect(w.Session)
+		if err == nil && info.RoomID == rec.ID && info.Status != subagent.StatusClosed && info.Status != subagent.StatusDormant {
+			work = append(work, w)
+		}
+	}
+	if len(work) > 0 {
+		worked, err := s.workedIssues(roomRef, work)
+		if err != nil {
+			out.Unread = len(work)
+		}
+		out.Items = append(out.Items, worked...)
+	}
+	return out, s.issueWork(rec.ID, out.Items)
 }
 
 // IssueGroup gives closed issues priority, followed by open PRs and live sessions.

@@ -327,6 +327,8 @@
   const reviewer = $derived(changeView.reviewer)
   const changes = $derived(changeView.changes)
   const mergeVersion = $derived(changeView.mergeVersion)
+  // issuesVersion counts committed issue changes, including new issue work, so the Issues tab reloads its tracked list.
+  let issuesVersion = $state(0)
   const prError = $derived(changeView.error)
   const prMap = $derived(changeView.bySession)
   const openPRMap = $derived(changeView.openBySession)
@@ -1451,7 +1453,7 @@
     if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules(); loadIssues(); loadIssues(true) }
     if (ev.kind === 'machines') machineView.changed()
     if (ev.kind === 'pins' && evRoom === roomId) loadPins()
-    if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); loadIssues(true) }
+    if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); loadIssues(true); issuesVersion++ }
     if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) roomSessionController?.load()
     // A prs event without a row says the room's PR settings changed.
     if ((ev.kind === 'prs' || ev.kind === 'changes') && (!evRoom || evRoom === roomId)) {
@@ -1988,7 +1990,7 @@
               <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="pr" active={reviewTab === 'prs'} session={routeSession(drill)} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m) => openSession(m)} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
             {/snippet}
             {#snippet issuesTab()}
-              <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="issue" active={reviewTab === 'issues'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab === 'prs') openReview('prs'); else if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
+              <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="issue" {issuesVersion} active={reviewTab === 'issues'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab === 'prs') openReview('prs'); else if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
             {/snippet}
           </ReviewWorkspace>
         {/key}
