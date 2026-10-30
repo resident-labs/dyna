@@ -175,6 +175,20 @@ func (c *Client) DeliveryDone(ctx context.Context, id contract.DeliverySeq) erro
 	return err
 }
 
+func (c *Client) TranscriptAppend(ctx context.Context, req contract.TranscriptAppendRequest) (contract.TranscriptAppendResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return contract.TranscriptAppendResponse{}, err
+	}
+	data, err := c.call(ctx, contract.MethodTranscriptAppend, body)
+	if err != nil {
+		return contract.TranscriptAppendResponse{}, err
+	}
+	var result contract.TranscriptAppendResponse
+	err = json.Unmarshal(data, &result)
+	return result, err
+}
+
 func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
 	body, err := json.Marshal(contract.TurnOutputRequest{Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Final: result.Final, Model: result.Usage.Model, Usage: result.Usage})
 	if err != nil {
