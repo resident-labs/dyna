@@ -61,9 +61,8 @@ export class RoomStore {
     for (const post of this.pendingPosts) {
       if (post.seq === event.seq) this.pendingPosts.delete(post);
     }
-    // A live event is the newest, so only its own change applies; an older one refolds.
-    if (event.seq === this.newest) this.step(event, this);
-    else this.fold();
+    // Live events update the session.list and op.list snapshots one by one; open() folds the first page once.
+    this.step(event, this);
   }
 
   private insert(event: Event): boolean {
