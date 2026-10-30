@@ -168,7 +168,7 @@ func TestEnableInstallsHooksOnce(t *testing.T) {
 	ctx := context.Background()
 	svc := hooks.Service{DataDir: h.svc.DataDir}
 	list, err := svc.List(ctx, h.repo)
-	if err != nil || len(list) != 3 {
+	if err != nil || len(list) != 1 || list[0].Name != "librarian-main" {
 		t.Fatalf("hooks = %+v %v", list, err)
 	}
 	for _, hk := range list {
@@ -179,7 +179,7 @@ func TestEnableInstallsHooksOnce(t *testing.T) {
 	if _, err := h.svc.Enable(ctx, authority.Actor{Role: authority.Owner}, h.repo, "room_1", "/usr/bin/dyna"); err != nil {
 		t.Fatalf("second enable: %v", err)
 	}
-	if again, _ := svc.List(ctx, h.repo); len(again) != 3 || !again[0].AddedAt.Equal(list[0].AddedAt) {
+	if again, _ := svc.List(ctx, h.repo); len(again) != 1 || !again[0].AddedAt.Equal(list[0].AddedAt) {
 		t.Fatalf("second enable replaced unchanged hooks: %+v", again)
 	}
 }
@@ -554,5 +554,37 @@ func TestPinnedLibrarianDoesNotSwitch(t *testing.T) {
 	ev, ok := notices[0].(room.ServiceWaitEvent)
 	if !ok || ev.Profile != "sonnet" || ev.Service != room.ServiceLibrarian || ev.Reason == "" {
 		t.Fatalf("notice = %#v", notices[0])
+	}
+}
+
+// deferral is one wake that the service asked to run later. The test fires
+// it by hand, so no real timer runs.
+type deferral struct {
+	repo string
+	at   time.Time
+	wake func()
+}
+
+// A merge batched inside the interval is deferred to the interval's end,
+// and the deferred wake runs the pass without any hook.
+func TestBatchedWakeDefersToItsInterval(t *testing.T) {
+	h := setup(t)
+	var deferred []deferral
+	h.svc.Defer = func(repo string, at time.Time, wake func()) {
+		deferred = append(deferred, deferral{repo: repo, at: at, wake: wake})
+	}
+	start := h.clock
+	h.wake(t, "started")
+	commitFile(t, h.repo, "web/app.ts", "x")
+	h.wake(t, "batched")
+	last := deferred[len(deferred)-1]
+	if last.repo != h.repo || !last.at.Equal(start.Add(Interval)) {
+		t.Fatalf("deferred %s at %v, want %s at %v", last.repo, last.at, h.repo, start.Add(Interval))
+	}
+	tasks := len(h.sessions.tasks)
+	h.clock = last.at
+	last.wake()
+	if len(h.sessions.tasks) != tasks+1 {
+		t.Fatalf("deferred wake started no pass: tasks %d -> %d", tasks, len(h.sessions.tasks))
 	}
 }

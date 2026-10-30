@@ -50,6 +50,7 @@ type services struct {
 	voice     *voice.Calls
 	say       *voice.Sayer
 	hooks     hooks.Service
+	timers    *timers
 	sync      *lanesync.Service
 	health    func() Health
 	load      *sysload.Sampler
@@ -237,6 +238,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ListHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.List},
 		{Name: "ListGlobalHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.ListGlobal},
 		{Name: "HookSummary", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Summaries},
+		{Name: "LibrarianDeferred", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.librarianDeferred},
 		{Name: "GlobalHookSummary", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.SummariesGlobal},
 		{Name: "HookRuns", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Runs},
 		{Name: "GlobalHookRuns", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) ([]hooks.Run, error) {

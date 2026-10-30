@@ -12,13 +12,20 @@ dyna library enable --repo /path/to/main/checkout --room <room>
 
 Only the owner or root can run `enable` and `disable`. `enable` adds the
 repository to `library.enabled` and records the room that holds the session.
-It adds three normal repository hooks. Each hook runs `dyna library wake`:
+It adds one repository hook, `librarian-main`, on `main-updated`. The hook
+runs `dyna library wake`. A merge always moves main, so one hook covers it.
 
-- `librarian-merged` on `pr-merged`
-- `librarian-main` on `main-updated`
-- `librarian-batch` on `schedule`, every 10 minutes
+When a wake must wait for the librarian's interval, the engine keeps that
+wake itself. It runs one in-process timer per repository and fires the wake
+when the interval ends. No hook or schedule runs it. When the engine starts,
+it restores that wake for every enabled repository, so a restart keeps the
+pending pass. A deferred wake that fails retries after ten minutes, up to five
+times, so a transient error does not drop the pass.
 
-`dyna library disable` removes the hooks and closes the session. The map stays.
+When the engine starts, it removes the `librarian-merged` and `librarian-batch`
+hooks that earlier releases added. Each one ran `dyna library wake`.
+
+`dyna library disable` removes the hook and closes the session. The map stays.
 
 ## When it runs
 
@@ -28,8 +35,8 @@ It adds three normal repository hooks. Each hook runs `dyna library wake`:
 2. The last librarian turn has finished. A successful turn moves the checkpoint
    to its commit. A failed turn is retried from the last checkpoint.
 3. Main moved since the checkpoint.
-4. 30 minutes passed since the last run. The schedule hook picks up merges
-   that wait inside this interval.
+4. 30 minutes passed since the last run. The engine's own timer runs the
+   deferred wake when this interval ends.
 5. The gate finds an unmapped source file, or an owned file whose change is
    more than whitespace. Otherwise the checkpoint moves and no turn runs.
 6. The session is idle.

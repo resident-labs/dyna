@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,7 +30,15 @@ const Interval = 30 * time.Minute
 // SmellInterval limits code-reading passes to four per repository per day.
 const SmellInterval = 6 * time.Hour
 
-// Service runs librarian wakes. Tests replace Sessions, Settings and Now.
+// RetryAfter is when a wake checks again a turn that is still running, or a
+// pin that cannot run yet. No hook fires when such a turn ends.
+const RetryAfter = 10 * time.Minute
+
+// MaxWakeRetries bounds how often a failed deferred wake retries. After the last
+// retry, the next main update or engine restart runs the pass again.
+const MaxWakeRetries = 5
+
+// Service runs librarian wakes. Tests replace Sessions, Settings, Now and Defer.
 type Service struct {
 	// Hook functions are supplied by the engine's existing hook handlers.
 	ListHooks  func(context.Context, string) ([]hooks.Hook, error)
@@ -40,6 +49,9 @@ type Service struct {
 	Issues     Issues
 	Settings   func() (settings.Values, error)
 	Now        func() time.Time
+	// Defer runs wake at the given time, in place of any earlier deferral for
+	// the repository. Nil skips deferral; a pass then waits for the next merge.
+	Defer func(repo string, at time.Time, wake func())
 	// Notice posts one typed event to the librarian's room. Nil skips it.
 	Notice func(ctx context.Context, roomID string, ev room.Event) error
 	// Rooms reads a room pin. Nil keeps the global library.profile.
@@ -74,9 +86,11 @@ func (s Service) settings() (settings.Values, error) {
 
 // Result says what one wake did and why.
 type Result struct {
-	Action string `json:"action"` // off, current, batched, skipped, busy, assigned or started
+	Action string `json:"action"` // off, current, batched, skipped, busy, waiting, assigned or started
 	Reason string `json:"reason,omitempty"`
 	Head   string `json:"head,omitempty"`
+	// next is when a batched pass may run, so the deferral can wait for it.
+	next time.Time
 }
 
 // Wake runs the cheap checks in order and gives the librarian a turn only
@@ -91,13 +105,63 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	res := mapped
 	if smelled.Action == "waiting" && (mapped.Action == "current" || mapped.Action == "skipped" || mapped.Action == "batched") {
-		return smelled, nil
+		res = smelled
 	}
 	if mapped.Action == "current" && (smelled.Action == "assigned" || smelled.Action == "started" || smelled.Action == "busy") {
-		return smelled, nil
+		res = smelled
 	}
-	return mapped, nil
+	return res, s.deferWake(ctx, repoDir, mapped, smelled)
+}
+
+// deferWake asks Defer to run the next wake of the repository at the earliest
+// due time of the results. A batched pass is due at its interval's end. A busy,
+// waiting, started or assigned pass is due after RetryAfter.
+func (s Service) deferWake(ctx context.Context, repoDir string, results ...Result) error {
+	if s.Defer == nil {
+		return nil
+	}
+	var due time.Time
+	for _, res := range results {
+		at := res.next
+		if slices.Contains([]string{"busy", "waiting", "started", "assigned"}, res.Action) {
+			at = s.now().Add(RetryAfter)
+		}
+		if !at.IsZero() && (due.IsZero() || at.Before(due)) {
+			due = at
+		}
+	}
+	if due.IsZero() {
+		return nil
+	}
+	r, err := repoid.Resolve(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	s.Defer(r.Main, due, s.deferredWake(repoDir, r.Main, 0))
+	return nil
+}
+
+// deferredWake runs one deferred wake. A failed wake keeps its work: it retries
+// after RetryAfter, up to MaxWakeRetries times, so a transient Git, database or
+// session error does not strand the pending pass.
+func (s Service) deferredWake(repoDir, main string, attempt int) func() {
+	return func() {
+		if _, err := s.Wake(context.Background(), repoDir); err != nil {
+			log.Printf("librarian wake of %s: %v", main, err)
+			if attempt < MaxWakeRetries {
+				s.Defer(main, s.now().Add(RetryAfter), s.deferredWake(repoDir, main, attempt+1))
+			}
+		}
+	}
+}
+
+// Restore runs one wake of the repository at once. A deferred wake lives only in
+// memory, so after a restart this wake checks the repository and defers its own
+// next pass again.
+func (s Service) Restore(ctx context.Context, repoDir string) error {
+	return s.deferWake(ctx, repoDir, Result{next: s.now()})
 }
 
 // WakeSmellsNow runs only the smell pass, without waiting for SmellInterval.
@@ -122,7 +186,11 @@ func (s Service) WakeSmellsNow(ctx context.Context, actor authority.Actor, calle
 			return Result{}, fmt.Errorf("library wake now: the librarian of %s lives in another room; ask that room's root or the owner", r.Main)
 		}
 	}
-	return s.wakeSmells(ctx, repoDir, true)
+	res, err := s.wakeSmells(ctx, repoDir, true)
+	if err != nil {
+		return res, err
+	}
+	return res, s.deferWake(ctx, repoDir, res)
 }
 
 // pinnedWait reports that the librarian pin cannot run. The service waits
@@ -193,7 +261,7 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 		return Result{Action: "current", Head: target}, nil
 	}
 	if next := st.LastRun.Add(Interval); s.now().Before(next) {
-		return Result{Action: "batched", Reason: "next run after " + next.Format(time.RFC3339), Head: st.Head}, nil
+		return Result{Action: "batched", Reason: "next run after " + next.Format(time.RFC3339), Head: st.Head, next: next}, nil
 	}
 
 	entries, err := library.Store{DataDir: s.DataDir}.List(r.ID, false)
@@ -325,7 +393,7 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string, now bool) (Resu
 		return Result{Action: "current", Head: target}, nil
 	}
 	if next := st.SmellLastRun.Add(SmellInterval); !now && s.now().Before(next) {
-		return Result{Action: "batched", Reason: "next smell run after " + next.Format(time.RFC3339), Head: st.SmellHead}, nil
+		return Result{Action: "batched", Reason: "next smell run after " + next.Format(time.RFC3339), Head: st.SmellHead, next: next}, nil
 	}
 	lookup := rolesession.Lookup(st.SmellSession, st.RoomID, subagent.RoleLibrarian, s.Sessions.Inspect, func() (subagent.Info, error) { return s.Sessions.Named(st.RoomID, true) })
 	info, turn, usable := lookup.Info, lookup.Turn, lookup.Usable

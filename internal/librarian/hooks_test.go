@@ -45,11 +45,11 @@ func TestLibraryHookChangesUseProvidedFunctions(t *testing.T) {
 	if _, err := h.svc.Enable(t.Context(), authority.Actor{Role: authority.Owner}, h.repo, "room_1", "/usr/bin/dyna"); err != nil {
 		t.Fatal(err)
 	}
-	if counts["AddHook"] != 3 || counts["RemoveHook"] != 3 {
-		t.Fatalf("hook calls = %v, want 3 add and 3 remove", counts)
+	if counts["AddHook"] != 1 || counts["RemoveHook"] != 1 {
+		t.Fatalf("hook calls = %v, want 1 add and 1 remove", counts)
 	}
 	list, err := (hooks.Service{DataDir: h.svc.DataDir}).List(t.Context(), h.repo)
-	if err != nil || len(list) != 3 {
+	if err != nil || len(list) != 1 {
 		t.Fatalf("installed hooks = %+v, %v", list, err)
 	}
 	for _, hook := range list {
