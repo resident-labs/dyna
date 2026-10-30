@@ -12,11 +12,10 @@
   import RoomSessionStatus from './RoomSessionStatus.svelte'
   import { ago, clock, stamp } from '../ui/format.ts'
   import DoingLine from '../sessions/DoingLine.svelte'
-  import ResponsibilityCount from './ResponsibilityCount.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, agentExpedited } from './expedite.ts'
   import MonitorGlyph from '../computers/MonitorGlyph.svelte'
-  import { isLive, hasComputer, appName, ageText } from '../computers/computers.ts'
+  import { isLive, appName, ageText } from '../computers/computers.ts'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.ts'
   import StatusPill from '../ui/StatusPill.svelte'
   import { changeName, prAttention, type Facts } from '../prs/pr.ts'
@@ -96,6 +95,8 @@
 
   const computerOf = (id: string | undefined) => computers.find((c) => c.session === id)
   // The small hover note on the monitor glyph: the app and the picture age.
+  // The shell mark's hover names the count and what the newest shell runs.
+  const shellTip = (n: number, newest: string | undefined) => `${n} shell${n === 1 ? '' : 's'} running${newest ? ` · newest: ${newest}` : ''}`
   const computerTip = (c: ComputerInfo | undefined) => [appName(c?.apps?.[0]?.appId) || (isLive(c) ? 'Computer' : 'Computer stopped'), c?.shotAt && ageText(c.shotAt, now)].filter(Boolean).join(' · ')
   let pickedSet = $derived(new Set(picked))
   let owner = $derived(members.find((m) => m.owner))
@@ -144,21 +145,25 @@
   {@const status = sessionStatus(m)}
   {@const pr = prs[m.id ?? '']?.[0]}
   {@const attention = prAttention(pr)}
+  {@const shells = m.responsibilities?.shell ?? 0}
+  {@const live = isLive(pc)}
+  {@const tail = (shells ? 1 : 0) + (live ? 1 : 0)}
   <div class="item" style="--depth:{m.depth}">
   {#if row.hasChildren && !selecting}
-    <button class="fold" aria-expanded={!row.folded} aria-label="{row.folded ? 'Show' : 'Hide'} subagents of {m.name}" title={row.folded ? 'Show subagents' : 'Hide subagents'} onclick={() => toggleFold(m.id)}>
-      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+    <!-- A folded row counts its hidden subagents beside the chevron, so the
+         chevron and its count are one target. -->
+    <button class="fold" aria-expanded={!row.folded} aria-label="{row.folded ? `Show ${row.hidden} subagent${row.hidden === 1 ? '' : 's'}` : 'Hide subagents'} of {m.name}" title={row.folded ? `${row.hidden} subagent${row.hidden === 1 ? '' : 's'} folded` : 'Hide subagents'} onclick={() => toggleFold(m.id)}>
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>{#if row.folded}<span class="kids">{row.hidden}</span>{/if}
     </button>
   {/if}
-  <button class="row" class:sel={selecting ? pickedSet.has(m.id ?? '') : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:pc={hasComputer(pc)} onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id ?? '') : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.name} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
+  <button class="row" class:sel={selecting ? pickedSet.has(m.id ?? '') : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:tailed={tail > 0} style="--marks:{tail}" onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id ?? '') : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.name} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
     {#if m.depth > 0}
       <span class="guide" aria-hidden="true"></span>
     {/if}
     <Avatar avatar={m.avatar} here={m.avatar.room} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} dotGap="var(--side)" />
     <span class="text">
-      <span class="name hue-{m.hue}"><span class="fit"><span class="nm">{offSeat ? 'root (internal)' : m.name}</span>{#if pr}<span class="pr">{changeName(pr)}</span>{/if}</span>{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if m.ownerDisplay}<span class="display" title="This session's own shells use your display">uses your display</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}{#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}</span>
-      <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}{#if status}<span class="now" class:working={status === 'working'}>{status}</span> · {/if}{#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
-      <ResponsibilityCount counts={m.responsibilities} />
+      <span class="name hue-{m.hue}"><span class="nm">{offSeat ? 'root (internal)' : m.name}</span>{#if m.ownerDisplay}<span class="display" title="This session's own shells use your display">uses your display</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}{#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}</span>
+      <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}{#if status}<span class="now" class:working={status === 'working'}>{status}</span> · {/if}{#if pr}<span class="pr">{changeName(pr)}</span> · {/if}{#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
     </span>
   </button>
       {#if finished(m) && !selecting && ondismiss}
@@ -166,7 +171,14 @@
           <button type="button" class="row-action" disabled={!!dismissing} onclick={(e) => { e.stopPropagation(); ondismiss(m) }}>{dismissing === m.id ? 'Dismissing…' : 'Dismiss'}</button>
         </div>
       {/if}
-  {#if hasComputer(pc)}<button class="pc-glyph" aria-label="Open {m.name}'s computer" title={computerTip(pc)} onclick={() => onopencomputer(m)}><MonitorGlyph size={15} live={isLive(pc)} /></button>{/if}
+  <!-- Activity marks sit at the right in a fixed order: shell, then computer.
+       Each shows only while it runs. -->
+  {#if tail}
+    <span class="tail">
+      {#if shells}<span class="mark-icon" role="img" aria-label={shellTip(shells, m.shell)} title={shellTip(shells, m.shell)}><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3" /><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg></span>{/if}
+      {#if live}<button class="mark-icon" aria-label="Open {m.name}'s computer" title={computerTip(pc)} onclick={() => onopencomputer(m)}><MonitorGlyph size={15} live={false} /></button>{/if}
+    </span>
+  {/if}
   <button class="more" aria-label="Actions for {m.name}" title="Actions" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const anchor = e.currentTarget.previousElementSibling; onmenu(m, r.left, r.bottom + 4, anchor instanceof HTMLElement ? anchor : undefined) }}>
     <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="5" cy="10" r="1.6" fill="currentColor" /><circle cx="10" cy="10" r="1.6" fill="currentColor" /><circle cx="15" cy="10" r="1.6" fill="currentColor" /></svg>
   </button>
@@ -312,17 +324,23 @@
   }
   .row-action:disabled { color: var(--faint); cursor: default; }
   .item { position: relative; }
-  /* The agent's computer: a small monitor at the right of its row. The
-     actions button covers it on hover, so it sits left of that button. */
-  .row.pc { padding-right: 56px; }
-  .pc-glyph { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; transition: background-color var(--motion-fast) var(--ease); }
+  /* The activity marks: shell, then computer, right aligned left of the
+     actions button. The row keeps room for each mark. */
+  .row.tailed { padding-right: calc(34px + var(--marks) * 26px); }
+  .tail { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 2px; color: var(--faint); }
+  /* The computer mark shows only while it runs, so it needs no color of its
+     own: both marks use the same muted gray. */
+  .mark-icon :global(svg) { color: inherit; }
+  .mark-icon { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 5px; color: var(--muted); }
+  button.mark-icon { transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
-    .pc-glyph:hover { background: var(--hover); }
+    button.mark-icon:hover { background: var(--hover); color: var(--ink); }
   }
-  .pc-glyph:active {
+  button.mark-icon:active {
     background: var(--select);
 }
-  /* The chevron sits in the gutter left of the avatar. */
+  /* The chevron sits in the gutter left of the avatar. On a folded row its
+     subagent count stacks under it, so the gutter keeps its width. */
   .fold {
     position: absolute;
     z-index: 1;
@@ -330,9 +348,12 @@
     top: 50%;
     transform: translateY(-50%);
     width: 16px;
-    height: 24px;
-    display: grid;
-    place-items: center;
+    min-height: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 0;
     border-radius: 4px;
     color: var(--faint);
     transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease);
@@ -366,11 +387,12 @@
      text callout. */
   @media (hover: none) {
     .more { display: grid; width: 40px; height: 40px; }
-    .pc-glyph { right: 46px; width: 40px; height: 40px; }
-    .row.pc { padding-right: 92px; }
+    .tail { right: 46px; }
+    button.mark-icon { height: 40px; min-width: 40px; }
+    .row.tailed { padding-right: calc(46px + var(--marks) * 40px); }
     /* The chevron keeps its 12 px glyph and takes a taller target in the
        gutter left of the avatar. */
-    .fold { width: 24px; height: 44px; }
+    .fold { width: 24px; min-height: 44px; }
     .select-mode, .room-actions { min-width: 44px; min-height: 44px; }
     .group-toggle, .group-clear, .toggle { min-height: 44px; }
     .row { -webkit-touch-callout: none; user-select: none; }
@@ -408,21 +430,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .kids {
-    font-size: var(--t-cap);
-    font-weight: 600;
-    color: var(--muted);
-    background: var(--raise);
-    border-radius: 7px;
-    padding: 0 5px;
-    line-height: 15px;
-  }
+  .kids { font-size: var(--t-micro); font-weight: 600; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
   .sub { font-size: var(--t-sm); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* The owner-display grant is quiet plain text: it names a capability, not a state. */
-  /* The name gets the width first; the PR number takes what is left. A
-     max-content grid track fills before the 1fr track. */
-  .fit { min-width: 0; display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); align-items: baseline; }
-  .pr { padding-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-sm); font-weight: 400; color: var(--faint); }
+  /* The PR number sits on the status line, so the name keeps the first line. */
+  .sub .pr { color: var(--muted); }
   .display { font-size: var(--t-cap); font-weight: 500; color: var(--faint); white-space: nowrap; }
   /* The status reads as the DM header does: gold only while working. */
   .sub .now.working { color: var(--gold); }

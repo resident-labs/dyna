@@ -1,11 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { linesOf, summaryOf, totalOf } from './responsibilities.ts'
-
-test('the total is the sum of every kind', () => {
-  assert.equal(totalOf({ pr: 1, goal: 1, shell: 3 }), 5)
-  assert.equal(totalOf({}), 0)
-})
+import { linesOf, summaryOf } from './responsibilities.ts'
 
 test('lines come in a fixed order, skip zero counts and use singular or plural labels', () => {
   assert.deepEqual(linesOf({ shell: 2, goal: 1, child: 0, pr: 1 }), [
@@ -22,13 +17,11 @@ test('an assigned goal item is one of the kinds', () => {
 
 test('a kind the web does not know still counts, after the known kinds', () => {
   assert.deepEqual(linesOf({ zeta: 1, goal: 2 }).map((l) => l.kind), ['goal', 'zeta'])
-  assert.equal(totalOf({ zeta: 1, goal: 2 }), 3)
 })
 
 test('missing or malformed counts give nothing', () => {
   for (const value of [undefined, null, 'x', 4, { goal: 'many' }]) {
     assert.deepEqual(linesOf(value), [])
-    assert.equal(totalOf(value), 0)
   }
 })
 
