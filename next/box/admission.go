@@ -62,12 +62,19 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 			return Placement{Reason: PendingParentHost}
 		}
 	}
+	var existing *Box
+	for i := range boxes {
+		if boxes[i].ID == request.ID && boxes[i].Host != "" {
+			existing = &boxes[i]
+			break
+		}
+	}
 	reason := PendingNoReadyHost
 	var chosen contract.HostName
 	var best int64 = -1
 	component := fmt.Sprintf("%x", sha256.Sum256([]byte(request.ID)))[:12]
 	for _, h := range hosts {
-		if h.State != HostReady || (parentHost != "" && h.Name != parentHost) {
+		if h.State != HostReady || (parentHost != "" && h.Name != parentHost) || (existing != nil && h.Name != existing.Host) {
 			continue
 		}
 		cpu, mem, disk := 0, int64(0), h.DiskBytes
@@ -100,7 +107,12 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 			reason = PendingMemory
 			continue
 		}
-		if disk-diskRequest(request.Size.Name) < diskFloor {
+		if existing == nil {
+			disk -= diskRequest(request.Size.Name)
+		} else if existing.PlacedAt.After(h.CheckedAt) {
+			disk -= diskRequest(existing.Size.Name)
+		}
+		if disk < diskFloor {
 			reason = PendingDisk
 			continue
 		}

@@ -69,6 +69,26 @@ func TestStoppedCountsDiskNotCPUOrMemory(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+func TestWakeStaysOnHostAndAccountsDisk(t *testing.T) {
+	now := time.Unix(100, 0)
+	size, _ := box.Size(contract.BoxSizeSmall)
+	hosts := []box.Host{
+		{Name: "original", State: box.HostReady, CPUs: 2, MemBytes: 4 * box.GiB, DiskBytes: 20 * box.GiB, CheckedAt: now},
+		{Name: "other", State: box.HostReady, CPUs: 8, MemBytes: 32 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: now},
+	}
+	stopped := box.Box{ID: "box_a", Host: "original", Size: size, State: contract.BoxStopped, PlacedAt: now.Add(-time.Second)}
+	if p := box.Admit(hosts, []box.Box{stopped}, stopped, 20*box.GiB); p.Host != "original" {
+		t.Fatal(p)
+	}
+	stopped.PlacedAt = now.Add(time.Second)
+	if p := box.Admit(hosts, []box.Box{stopped}, stopped, 20*box.GiB); p.Reason != box.PendingDisk {
+		t.Fatal(p)
+	}
+	hosts[0].DiskBytes = 30 * box.GiB
+	if p := box.Admit(hosts, []box.Box{stopped}, stopped, 20*box.GiB); p.Host != "original" {
+		t.Fatal(p)
+	}
+}
 func TestSliceAndCgroup(t *testing.T) {
 	name, err := box.SliceName([]contract.BoxID{"box_a", "box_b", "box_c"})
 	if err != nil || name != "dyna-fefe13ab0a05-01052e8504ae-1636b387f6bc.slice" {
