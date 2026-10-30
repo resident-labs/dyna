@@ -24,6 +24,8 @@ type ChangeView struct {
 	// repository of the room, so Dyna tracks it but never queues or merges it.
 	UpstreamPR    bool   `json:"upstreamPr,omitempty"`
 	ReviewBlocked string `json:"reviewBlocked,omitempty"`
+	// ReviewBlockKind types ReviewBlocked; head-refresh is a routine wait.
+	ReviewBlockKind watch.ReviewBlockKind `json:"reviewBlockKind,omitempty" tstype:"ReviewBlockKind"`
 
 	Key                 string               `json:"key,omitempty"`
 	Repo                string               `json:"repo,omitempty"`
