@@ -1281,12 +1281,23 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		noQueue = !on
 	}
 
-	err = s.Store.update(func(st *State) error {
+	err = s.recordReviewResult(key, actor, in, snap, pull, registered, noQueue, confirmed != nil)
+	if err != nil {
+		return err
+	}
+	return s.flush(ctx, key)
+}
+
+// recordReviewResult validates the current state and commits the review and notices atomically.
+func (s *Service) recordReviewResult(key, actor string, in ReviewResult, snap Snapshot, pull Pull, registered *Comment, noQueue, replay bool) error {
+	reviewID, head, summary, verdict := in.ReviewID, in.Head, in.Summary, in.Verdict
+	prepared := in.Findings
+	return s.Store.update(func(st *State) error {
 		r := st.Records[key]
 		if r == nil {
 			return fmt.Errorf("PR is not tracked")
 		}
-		named := s.namedReviewer(*st, *r, actor) || (confirmed != nil && deferredReplayReviewer(*r, actor, head))
+		named := s.namedReviewer(*st, *r, actor) || (replay && deferredReplayReviewer(*r, actor, head))
 		if err := staleVerdict(*r, actor, head, snap.Pull, reviewID, named); err != nil {
 			return err
 		}
@@ -1398,11 +1409,8 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		noticeIfLandable(*st, r, snap.GitHubFacts(*r, EffectivePolicy(*st, *r).RequiredChecks...))
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	return s.flush(ctx, key)
 }
+
 func hasPendingNotices(r *Record) bool {
 	if r == nil {
 		return false
