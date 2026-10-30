@@ -10,6 +10,8 @@
   let { item, label, onsave }: { item: SettingItem; label: string; onsave: (value: string) => Promise<void> } = $props()
 
   let draft = $state<string | null>(null)
+  let sourceChoice = $state<'release' | 'checkout' | null>(null)
+  const sourceMode = $derived(sourceChoice ?? (item.value ? 'checkout' : 'release'))
   const fixed = $derived(item.source === 'env')
 
   async function commit() {
@@ -29,7 +31,15 @@
   }
 </script>
 
-{#if item.kind === 'bool'}
+{#if item.key === 'updater.source'}
+  <div class="source">
+    <Segmented options={[["release", "Release"], ["checkout", "Source checkout"]]} value={sourceMode} {label} onchange={(value: string) => { sourceChoice = value === 'checkout' ? 'checkout' : 'release'; if (value === 'release') choose('') }} />
+    {#if sourceMode === 'checkout'}
+      <input class="field mono" aria-label="Source checkout path" placeholder="/path/to/checkout" disabled={fixed} value={draft ?? String(item.value)}
+        oninput={(e) => (draft = e.currentTarget.value)} onkeydown={key} onblur={commit} />
+    {/if}
+  </div>
+{:else if item.kind === 'bool'}
   <Switch on={item.value === true} {label} disabled={fixed} onchange={(on: boolean) => choose(String(on))} />
 {:else if item.kind === 'enum'}
   <Segmented options={(item.options ?? []).map((o) => [o, o])} value={String(item.value)} {label} onchange={(o: string) => choose(o)} />
@@ -43,6 +53,7 @@
 {/if}
 
 <style>
+  .source { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; }
   .field { width: 12rem; max-width: 100%; min-height: 30px; padding: 0 var(--s2); background: var(--rail); border: 1px solid var(--border-soft); border-radius: var(--r-xs); color: var(--ink); font-size: var(--t-sm); }
   .field:focus { border-color: var(--iris-edge); outline: none; }
 </style>
