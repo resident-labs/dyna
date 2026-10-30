@@ -183,6 +183,9 @@ func checkState(status, conclusion string) string {
 	switch conclusion {
 	case "cancelled", "skipped":
 		return conclusion
+	case "action_required":
+		// Waiting for a maintainer to approve the run is not a failure.
+		return "pending"
 	}
 	if success(conclusion) {
 		return "success"
@@ -718,6 +721,9 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 		// until a push or rerun, but the check names no failed job.
 		if c.Status != "completed" || c.Conclusion == "" {
 			pending = true
+		} else if c.Conclusion == "action_required" {
+			// A fork pull request waits for a maintainer to approve its workflows.
+			pending = true
 		} else if c.Conclusion == "cancelled" {
 			failed = true
 		} else if !success(c.Conclusion) {
@@ -733,6 +739,9 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 		// Over-budget cancels fail through budgetFailure; other cancels fail
 		// without a failed run.
 		if r.Status != "completed" || r.Conclusion == "" {
+			pending = true
+		} else if r.Conclusion == "action_required" {
+			// A fork pull request waits for a maintainer to approve its workflows.
 			pending = true
 		} else if r.Conclusion == "cancelled" {
 			failed = true
@@ -1040,16 +1049,20 @@ func (s *Service) Comment(ctx context.Context, r Ref, session, body string, publ
 	if created.ID < 1 {
 		return fmt.Errorf("the comment is posted, but GitHub returned no comment ID; do not post it again")
 	}
-	posted := created.ID
-	err = s.Store.update(func(st *State) error {
-		claimComment(st, "issue-comments", posted, session)
-		return nil
-	})
-	if err != nil {
+	if err := s.ClaimIssueComment(session, created.ID); err != nil {
 		return err
 	}
-	log.Printf("PR %s: recorded comment %d for session %s", r.Key(), posted, session)
+	log.Printf("PR %s: recorded comment %d for session %s", r.Key(), created.ID, session)
 	return nil
+}
+
+// ClaimIssueComment records which session posted a PR issue comment, so its
+// replies route back to that session.
+func (s *Service) ClaimIssueComment(session string, id int64) error {
+	return s.Store.update(func(st *State) error {
+		claimComment(st, "issue-comments", id, session)
+		return nil
+	})
 }
 
 // ReviewComment is one inline comment inside a published review.

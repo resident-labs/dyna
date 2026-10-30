@@ -383,7 +383,10 @@ func checkResult(status, conclusion string) string {
 	switch conclusion {
 	case "SUCCESS":
 		return "success"
-	case "FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE":
+	case "ACTION_REQUIRED":
+		// A fork pull request waits for a maintainer to approve its workflows.
+		return "pending"
+	case "FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE":
 		return "failure"
 	case "SKIPPED":
 		return "skipped"

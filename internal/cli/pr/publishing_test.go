@@ -139,8 +139,7 @@ esac
 	for _, agentMode := range []string{mode.Subagent, mode.Root} {
 		t.Setenv(mode.EnvMode, agentMode)
 		for _, args := range [][]string{
-			{"comment", url, "explicit public post", "--publish"},
-			{"review", url, "--body-file", file, "--head", head, "--publish"},
+			{"review", url, "--body-file", file, "--head", head, "--publish", "--comments-file", file},
 			{"publishing", "github", "--room", rec.Name},
 		} {
 			if _, err := call(args...); err == nil {
@@ -150,6 +149,11 @@ esac
 	}
 	if _, err := os.Stat(writes); !os.IsNotExist(err) {
 		t.Fatalf("agent wrote GitHub: %v", err)
+	}
+	t.Setenv(mode.EnvMode, mode.Subagent)
+	stale := strings.Repeat("b", 40)
+	if _, err := call("review", url, "--body-file", file, "--head", stale, "--publish"); err == nil || !strings.Contains(err.Error(), "tracked head") {
+		t.Fatalf("stale agent review head: %v", err)
 	}
 	reviewFile := file
 	// The owner can still publish comments and reviews without attribution.
