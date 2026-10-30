@@ -73,14 +73,16 @@ func NewCommand() *cobra.Command {
 	terminal.Flags().StringVar(&cwd, "cwd", "", "folder to run in (default: your working directory)")
 	terminal.Flags().BoolVar(&noCommand, "no-command", false, "ask for a plain login shell in the folder, with no command")
 
+	var withApprovals bool
 	list := &cobra.Command{Use: "list", Short: "List your requests and the requests you hold", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		s := notify.Default()
 		snd, err := s.SelfSender()
 		if err != nil {
 			return err
 		}
-		return listMine(c, s, snd, roomRef, jsonOut)
+		return listMine(c, s, snd, roomRef, jsonOut, withApprovals)
 	}}
+	list.Flags().BoolVar(&withApprovals, "with-approvals", false, "with --json, print an object with questions and approvals")
 
 	approve := &cobra.Command{Use: "approve <id>", Short: "Approve an approval or pass a terminal request to your parent", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		if approvalID(args[0]) {
@@ -132,7 +134,7 @@ func NewCommand() *cobra.Command {
 	return cmd
 }
 
-// listing is the JSON shape of dyna request list.
+// listing is the JSON shape of dyna request list --json --with-approvals.
 type listing struct {
 	Questions []questions.Question    `json:"questions"`
 	Approvals []approvals.HeldRequest `json:"approvals"`
@@ -140,7 +142,7 @@ type listing struct {
 
 // listMine prints the requests the caller filed, the ones it holds, and the
 // pending approvals that wait on it.
-func listMine(c *cobra.Command, s *notify.Service, snd notify.Sender, roomRef string, jsonOut bool) error {
+func listMine(c *cobra.Command, s *notify.Service, snd notify.Sender, roomRef string, jsonOut, withApprovals bool) error {
 	rec, err := s.QuestionRoom(snd, roomRef)
 	if err != nil {
 		return err
@@ -163,8 +165,11 @@ func listMine(c *cobra.Command, s *notify.Service, snd notify.Sender, roomRef st
 	if err := engineClient().Call(c.Context(), "ApprovalHeld", []any{rec.ID}, &held); err != nil {
 		return err
 	}
-	if jsonOut {
+	if jsonOut && withApprovals {
 		return json.NewEncoder(c.OutOrStdout()).Encode(listing{Questions: out, Approvals: held})
+	}
+	if jsonOut {
+		return json.NewEncoder(c.OutOrStdout()).Encode(out)
 	}
 	for _, q := range out {
 		role := "yours"
