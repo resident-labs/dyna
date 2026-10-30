@@ -343,7 +343,7 @@ const fixtures: Record<string, EventPayload> = {
   'approval/decided': { requestId: 'A-12', actor: 'dyna:parent', action: 'deny', reason: 'wrong branch' },
   'approval/result': { requestId: 'A-12', state: 'failed', exitCode: 1, url: 'https://github.com/acme/app/pull/9', output: ['gh: not found', 'exit 1'] },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
-  'shell/output-silence': { shellId: 'sh_20261023-120000-0000000a', label: 'build', minutes: 30 },
+  'shell/output-silence': { shellId: 'sh_20261023-120000-0000000a', label: 'build', session: 'builder', minutes: 30 },
   'job/queued': {
     jobId: 'job_0123456789ab',
     node: 'pve',

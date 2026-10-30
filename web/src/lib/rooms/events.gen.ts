@@ -559,6 +559,7 @@ export interface ShellEvent {
 export interface ShellSilenceEvent {
   shellId: string
   label: string
+  session: string
   minutes: number
 }
 
@@ -1452,7 +1453,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "target",
     once: true,
     audience: "room",
-    text: "Shell job {label} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
+    text: "Shell job {label} started by {session} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
   },
   {
     family: "job",
@@ -2040,6 +2041,7 @@ export function isShellSilenceEvent(v: unknown): v is ShellSilenceEvent {
   return isRecord(v) &&
     typeof v.shellId === "string" &&
     typeof v.label === "string" &&
+    typeof v.session === "string" &&
     Number.isInteger(v.minutes)
 }
 

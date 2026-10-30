@@ -50,6 +50,9 @@ func (s ShellEvent) eventDedupe() string { return s.ShellID }
 type ShellSilenceEvent struct {
 	ShellID string `json:"shellId"`
 	Label   string `json:"label"`
+	// Session is the name of the session that started the job, or the owner
+	// when no session did.
+	Session string `json:"session"`
 	Minutes int    `json:"minutes"`
 }
 
