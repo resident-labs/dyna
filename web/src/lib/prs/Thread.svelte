@@ -23,7 +23,7 @@
   let { detail = null, opener = '', events = [], bots = [], round = null, after = null }: Props = $props()
   let showAll = $state(new Set<number>()) // long comments the owner expanded
   const longBody = (b?: string | null) => (b || '').length > 1400
-  let first = $derived(opener || detail?.author?.login)
+  let first = $derived(opener || detail?.author?.login || 'unknown')
   const hue = (login?: string) => [...(login || '')].reduce((n, c) => n + c.charCodeAt(0), 0) % 6
 </script>
 
