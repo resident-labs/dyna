@@ -20,6 +20,7 @@ func TestWritePolicy(t *testing.T) {
 		reason              Reason
 	}{
 		{name: "room create", args: []string{"pr", "create"}, target: TargetRoom, rule: "pr-create-room", class: approvals.ClassAuto},
+		{name: "REST create requires agent", args: []string{"api", "repos/o/r/pulls", "-f", "title=x"}, target: TargetRoom, rule: "pr-create-api", class: approvals.ClassAgent},
 		{name: "upstream create", args: []string{"pr", "create"}, target: TargetUpstream, rule: "pr-create-upstream", class: approvals.ClassAgent},
 		{name: "own tracked pr", args: []string{"pr", "comment", "3"}, target: TargetRoom, own: true, rule: "pr-own", class: approvals.ClassAuto},
 		{name: "other pr", args: []string{"pr", "comment", "3"}, target: TargetRoom, rule: "pr-collaborate", class: approvals.ClassAgent},

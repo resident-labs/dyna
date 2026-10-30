@@ -44,6 +44,7 @@ type Write struct {
 	Target       Target
 	Ref          ItemRef
 	Argv         []string
+	API          bool
 	DeleteBranch bool
 	ValidItem    bool
 }
@@ -56,6 +57,7 @@ func ParseWrite(args []string, host, repo string, target Target) Write {
 		return w
 	}
 	if a[0] == "api" {
+		w.API = true
 		return parseAPIWrite(w, a)
 	}
 	if len(a) < 2 {
@@ -201,6 +203,7 @@ const (
 	conditionReadOnly
 	conditionDeleteBranch
 	conditionForeignHead
+	conditionREST
 )
 
 // Rule is one row of the policy table. Empty matchers are wildcards.
@@ -220,6 +223,7 @@ var writeRules = []Rule{
 	{ID: "upstream-branch-delete", Verbs: []Verb{"pr.close"}, Targets: []Target{TargetUpstream}, condition: conditionDeleteBranch, Refusal: ReasonBranchDelete},
 	{ID: "upstream-edit-head", Verbs: []Verb{"pr.edit"}, Targets: []Target{TargetUpstream}, condition: conditionForeignHead, Refusal: ReasonForeignHead},
 	{ID: "item-foreign-upstream", Verbs: []Verb{"issue.close", "issue.reopen", "pr.close", "pr.reopen"}, Targets: []Target{TargetUpstream}, Item: ItemForeign, Refusal: ReasonForeignItem},
+	{ID: "pr-create-api", Verbs: []Verb{"pr.create"}, Targets: []Target{TargetRoom}, condition: conditionREST, Class: approvals.ClassAgent},
 	{ID: "pr-create-room", Verbs: []Verb{"pr.create"}, Targets: []Target{TargetRoom}, Class: approvals.ClassAuto},
 	{ID: "pr-create-upstream", Verbs: []Verb{"pr.create"}, Targets: []Target{TargetUpstream}, Class: approvals.ClassAgent},
 	{ID: "pr-own", Verbs: []Verb{"pr.edit", "pr.ready", "pr.comment"}, Targets: []Target{TargetRoom}, Item: ItemSessionPR, Class: approvals.ClassAuto},
@@ -289,6 +293,10 @@ func Decide(ctx context.Context, rec room.Record, w Write, lookups WriteLookups)
 		switch rule.condition {
 		case conditionReadOnly:
 			if Access(ctx, rec) == ReadWrite {
+				continue
+			}
+		case conditionREST:
+			if !w.API {
 				continue
 			}
 		case conditionDeleteBranch:
