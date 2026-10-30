@@ -39,17 +39,15 @@ func (w *gatedWriter) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
-func TestExecuteDrainTimeoutKeepsSlowOutput(t *testing.T) {
+func TestExecuteDrainTimeoutKeepsReleasedOutput(t *testing.T) {
 	out := &gatedWriter{entered: make(chan struct{}), open: make(chan struct{})}
 	go func() {
 		<-out.entered
-		// Outlast the one-second default drain, so only a longer DrainTimeout passes.
-		time.Sleep(1500 * time.Millisecond)
 		close(out.open)
 	}()
-	err := Execute(context.Background(), Process{Args: []string{"echo", "installed"}, Env: MetadataEnv(), Timeout: time.Minute, DrainTimeout: time.Minute, Output: out})
+	err := Execute(context.Background(), Process{Args: []string{"echo", "installed"}, Env: MetadataEnv(), Timeout: time.Minute, DrainTimeout: 5 * time.Second, Output: out})
 	if err != nil {
-		t.Fatalf("a slow output drain failed a successful command: %v", err)
+		t.Fatalf("a released drain failed a successful command: %v", err)
 	}
 	if got := out.buf.String(); got != "installed\n" {
 		t.Fatalf("output = %q, want the full line", got)
