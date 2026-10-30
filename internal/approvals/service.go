@@ -523,7 +523,11 @@ func (s *Service) postRequested(r Request) error {
 		return err
 	}
 	detail := fmt.Sprintf("Decide it with: dyna request approve %s\nRefuse it with: dyna request deny %s --reason \"<why>\"", r.ID, r.ID)
-	ev := room.ApprovalRequestedEvent{RequestID: r.ID, Kind: string(r.Kind), Class: room.ApprovalClass(r.Class), Requester: requester.Address(), At: at, Repository: r.Repository, Server: r.Server, Command: r.Command, Tool: r.Tool, Title: r.Title, Body: r.Body, Detail: detail}
+	title := r.Title
+	if strings.TrimSpace(title) == "" {
+		title = r.Command
+	}
+	ev := room.ApprovalRequestedEvent{RequestID: r.ID, Kind: string(r.Kind), Class: room.ApprovalClass(r.Class), Requester: requester.Address(), At: at, Repository: r.Repository, Server: r.Server, Command: r.Command, Tool: r.Tool, Title: title, Body: r.Body, Detail: detail}
 	_, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: r.Room, Event: ev, To: []string{at}, SessionIDs: sessionIDs, NoWake: r.atID == Owner})
 	return err
 }
