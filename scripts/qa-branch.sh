@@ -100,11 +100,11 @@ if [[ $isolated == true ]]; then
     esac
   done
   if [[ -n $steps ]]; then
-    run "$node" scripts/qa-isolated-steps.mjs prepare "$build_dir/root" "$steps"
+    run "$node" scripts/qa-isolated-steps.mjs prepare "$build_dir/root" "$build_dir/screenshots.json" "$steps"
     args+=(--steps "$build_dir/root/steps.json")
   fi
   run scripts/qa-sandbox.sh "$build_dir/root" "$build_dir/dyna" "$PWD/web/dist" "$build_dir/deps/node_modules/playwright-core/index.mjs" "$node" "$chromium" -- "$build_dir/qa-isolated" "${args[@]}"
-  if [[ -n $steps ]]; then run "$node" scripts/qa-isolated-steps.mjs finish "$build_dir/root"; fi
+  if [[ -n $steps ]]; then run "$node" scripts/qa-isolated-steps.mjs finish "$build_dir/root" "$build_dir/screenshots.json"; fi
 else
   qa_started=true
   run env DYNA_QA_READY=1 "$build_dir/qa-branch" "$@"
