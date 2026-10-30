@@ -34,7 +34,6 @@ const (
 	ActionApprove Action = "approve"
 	ActionDeny    Action = "deny"
 	ActionPass    Action = "pass"
-	ActionAuto    Action = "auto"
 )
 
 const (
@@ -57,6 +56,7 @@ type FileSnapshot struct {
 
 // Media binds an attachment post to sanitized bytes and an argument path.
 type Media struct {
+	Data         []byte `json:"data,omitempty"`
 	Path         string `json:"path"`
 	Name         string `json:"name"`
 	PostID       string `json:"postId"`
@@ -93,6 +93,7 @@ type RequestInput struct {
 
 // GHPayload is the exact stored payload of a gh request.
 type GHPayload struct {
+	ApprovedClass    Class            `json:"approvedClass,omitempty"`
 	MediaDestination MediaDestination `json:"mediaDestination,omitempty"`
 	Argv             []string         `json:"argv"`
 	Cwd              string           `json:"cwd"`
@@ -101,20 +102,19 @@ type GHPayload struct {
 	Media            []Media          `json:"media,omitempty"`
 }
 
-// CreateInput is the typed input to the kind-independent core.
-type CreateInput struct {
-	// Auto is set only by the engine after it verifies a routine write.
-	Auto       bool
-	Room       string
-	Kind       Kind
-	Class      Class
-	Payload    json.RawMessage
-	Repository string
-	Server     string
-	Command    string
-	Tool       string
-	Title      string
-	Body       string
+// createInput is the typed input to the kind-independent core.
+type createInput struct {
+	Room        string
+	Kind        Kind
+	Class       Class
+	Payload     json.RawMessage
+	PayloadHash string
+	Repository  string
+	Server      string
+	Command     string
+	Tool        string
+	Title       string
+	Body        string
 }
 
 // Result is the outcome that the requester receives.
