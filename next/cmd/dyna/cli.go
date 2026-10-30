@@ -30,6 +30,7 @@ type client interface {
 	Events(context.Context, contract.RoomID, int64, func(contract.Event) error) error
 	OpList(context.Context, contract.OpListRequest) (contract.OpListResponse, error)
 	OpDecide(context.Context, contract.OpDecideRequest) (contract.OpDecideResponse, error)
+	OpSubmit(context.Context, contract.OpSubmitRequest) (contract.OpSubmitResponse, error)
 }
 
 type socketClient struct{ http *http.Client }
@@ -41,10 +42,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest
+	contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
 }
 type responseType interface {
-	contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse
+	contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -102,6 +103,9 @@ func (c *socketClient) OpList(ctx context.Context, q contract.OpListRequest) (co
 }
 func (c *socketClient) OpDecide(ctx context.Context, q contract.OpDecideRequest) (contract.OpDecideResponse, error) {
 	return call[contract.OpDecideRequest, contract.OpDecideResponse](ctx, c, contract.MethodOpDecide, q)
+}
+func (c *socketClient) OpSubmit(ctx context.Context, q contract.OpSubmitRequest) (contract.OpSubmitResponse, error) {
+	return call[contract.OpSubmitRequest, contract.OpSubmitResponse](ctx, c, contract.MethodOpSubmit, q)
 }
 func (c *socketClient) Events(ctx context.Context, room contract.RoomID, after int64, emit func(contract.Event) error) error {
 	u := "http://dyna/v1/events?room=" + url.QueryEscape(string(room)) + "&after=" + strconv.FormatInt(after, 10)
@@ -287,4 +291,41 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	_ = opDeny.MarkFlagRequired("reason") // fails only for an undefined flag, and "reason" is defined above
 	op.AddCommand(opList, opApprove, opDeny)
 	root.AddCommand(op)
+
+	pr := &cobra.Command{Use: "pr"}
+	var prTitle, prBodyFile, prBase string
+	var prDraft bool
+	prOpen := &cobra.Command{Use: "open", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		var body string
+		if prBodyFile != "" {
+			data, err := os.ReadFile(prBodyFile)
+			if err != nil {
+				return err
+			}
+			body = string(data)
+		}
+		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{
+			Kind: "pr.open",
+			Args: contract.PrOpenArgs{Title: prTitle, Body: body, Base: prBase, Draft: prDraft},
+		}})
+		if err != nil {
+			return err
+		}
+		res := r.Operation.Result
+		if res == nil {
+			return fmt.Errorf("pr open %s has no result yet (state %s)", r.Operation.ID, r.Operation.State)
+		}
+		if res.Error != "" || res.ExitCode != 0 {
+			return fmt.Errorf("pr open %s failed (exit code %d): %s", r.Operation.ID, res.ExitCode, res.Error)
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), res.Output)
+		return err
+	}}
+	prOpen.Flags().StringVar(&prTitle, "title", "", "Pull request title")
+	prOpen.Flags().StringVar(&prBodyFile, "body-file", "", "File with the pull request body")
+	prOpen.Flags().StringVar(&prBase, "base", "main", "Base branch")
+	prOpen.Flags().BoolVar(&prDraft, "draft", false, "Open as a draft")
+	_ = prOpen.MarkFlagRequired("title") // fails only for an undefined flag, and "title" is defined above
+	pr.AddCommand(prOpen)
+	root.AddCommand(pr)
 }
