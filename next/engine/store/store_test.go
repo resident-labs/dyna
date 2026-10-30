@@ -23,6 +23,30 @@ func TestFreshSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestUpgradeAddsArchives(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.writer.Exec("DROP TABLE archives; UPDATE meta SET value='3' WHERE key='schema_version'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Archives(context.Background(), "session"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInterruptedInitializationCanRestart(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".store-init-interrupted"), []byte("incomplete"), 0600); err != nil {
