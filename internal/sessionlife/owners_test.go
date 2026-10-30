@@ -193,3 +193,46 @@ func TestOwnerColumnsImport(t *testing.T) {
 		t.Fatal("expected the ID-mismatched row to fail Owners")
 	}
 }
+
+// Cached rows are reused until their revision changes; newly read rows still
+// fail closed if their stored metadata no longer matches the digest.
+func TestOwnersCachesVerifiedRevisions(t *testing.T) {
+	sessions := ownersStore(t)
+	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/tree"}); err != nil {
+		t.Fatal(err)
+	}
+	visit := func(OwnerRow) error { return nil }
+	if err := Owners(sessions, visit); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(filepath.Dir(sessions))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE session_records SET meta = 'x' || substr(meta, 2) WHERE id = 'owner'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Owners(sessions, visit); err != nil {
+		t.Fatalf("unchanged revision was read again: %v", err)
+	}
+	if _, err := db.Exec("UPDATE session_records SET revision = revision + 1 WHERE id = 'owner'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Owners(sessions, visit); err == nil {
+		t.Fatal("changed revision with bad metadata must fail closed")
+	}
+	if err := Delete(sessions, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/new"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Owners(sessions, func(row OwnerRow) error {
+		if row.Dir != "/new" {
+			t.Fatalf("recreated owner has stale directory %q", row.Dir)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
