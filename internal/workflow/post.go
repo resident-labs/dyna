@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
+
+	"dyna-agent/internal/runstore"
 )
 
 // PostResult is what post() returns to a workflow script.
@@ -120,7 +122,19 @@ func (e *engine) post(call goja.FunctionCall) goja.Value {
 	e.shared.postOccurrences[identityKey] = ordinal + 1
 	e.shared.mu.Unlock()
 	key := fmt.Sprintf("%s-%d", identityKey, ordinal)
+	if e.opts.RecordManifest {
+		if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallPost, identityKey, ordinal); err != nil {
+			e.manifestWriteFailed()
+			panic(vm.NewGoError(fmt.Errorf("record post manifest intent: %w", err)))
+		}
+	}
 	res, err := e.opts.Poster(context.Background(), e.opts.Run.Meta.ID, key, mentions, text)
+	if e.opts.RecordManifest && res.ID != "" {
+		if recordErr := runstore.CompleteWorkflowCall(context.WithoutCancel(e.ctx), e.runID(), runstore.WorkflowCallPost, identityKey, ordinal, res.ID, res, err); recordErr != nil {
+			e.manifestWriteFailed()
+			panic(vm.NewGoError(fmt.Errorf("record post manifest result: %w", recordErr)))
+		}
+	}
 	if err != nil && res.ID == "" {
 		panic(vm.NewGoError(err))
 	}
