@@ -18,6 +18,47 @@ import (
 	"dyna-agent/internal/repoid"
 )
 
+func TestPRSuites(t *testing.T) {
+	const definition = `version: 1
+trial: [full]
+%s
+checks:
+  - id: test
+    image: test
+    command: "true"
+suites:
+  - id: full
+    files: ['^src/']
+    checks: [test]
+  - id: light
+    checks: [test]
+`
+	for _, tc := range []struct {
+		name, field string
+		want        []Suite
+	}{
+		{"absent", "", []Suite{"full"}},
+		{"list", "pr: [light]", []Suite{"light"}},
+		{"empty", "pr: []", []Suite{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := ParseDefinition([]byte(fmt.Sprintf(definition, tc.field)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := d.PRSuites([]string{"src/main"})
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("PR suites = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	for _, field := range []string{"pr: [unknown]", "pr: [light, light]"} {
+		if _, err := ParseDefinition([]byte(fmt.Sprintf(definition, field))); err == nil {
+			t.Fatalf("%s was accepted", field)
+		}
+	}
+}
+
 func TestLoadDefinitionFromRepository(t *testing.T) {
 	repo := t.TempDir()
 	definitionGit(t, repo, "init", "--quiet")
