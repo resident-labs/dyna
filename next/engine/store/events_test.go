@@ -61,6 +61,25 @@ func TestRolledBackEventIsNotPublished(t *testing.T) {
 	}
 	_ = s.Close()
 }
+func TestMachineEventReplay(t *testing.T) {
+	s, err := Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	err = s.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := s.AppendEvent(tx, contract.Event{ID: "ev_machine", Time: time.UnixMilli(10), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: "machine"}})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.Events(context.Background(), "", 0, 10, nil)
+	if err != nil || len(events) != 1 || events[0].ID != "ev_machine" {
+		t.Fatalf("events %v, error %v", events, err)
+	}
+}
+
 func TestEventsReplay(t *testing.T) {
 	s, err := Open(t.TempDir(), time.Now)
 	if err != nil {
