@@ -36,14 +36,14 @@ type Resources struct {
 
 // Facts is the machine capacity a request is clamped against.
 type Facts struct {
-	CPUs        int
-	MemoryBytes uint64
+	CPUs            int
+	MemoryBytes     uint64
+	QuickReserveMiB int64
 }
 
 // ClampResources bounds a job's request by the machine's last probe. A
-// request within the bound is granted. A default is never clamped, so a
-// small machine keeps the limits its jobs already had, and a machine with no
-// probe keeps the job's own request.
+// request within the bound is granted. A probed node reserves memory for
+// quick jobs before it clamps declared work.
 func ClampResources(host bool, cpus int, memoryMiB int64, facts Facts) Resources {
 	resources := Resources{CPUs: DefaultCPUs, MemoryMiB: DefaultContainerMemoryMiB}
 	if host {
@@ -63,11 +63,9 @@ func ClampResources(host bool, cpus int, memoryMiB int64, facts Facts) Resources
 		// A probe total sits a little below the nominal size, so the bound is
 		// a whole GiB and reads as one number in a report.
 		probed := int64(facts.MemoryBytes / (1 << 20))
-		memoryLimit = probed - probed%1024
-	}
-	memoryLimit = max(memoryLimit, DefaultContainerMemoryMiB)
-	if host {
-		memoryLimit = max(memoryLimit, DefaultHostMemoryMiB)
+		memoryLimit = max(1, probed-probed%1024-facts.QuickReserveMiB)
+	} else if host {
+		memoryLimit = DefaultHostMemoryMiB
 	}
 	var clamped []string
 	if resources.CPUs > cpuLimit {
@@ -75,7 +73,11 @@ func ClampResources(host bool, cpus int, memoryMiB int64, facts Facts) Resources
 		resources.CPUs = cpuLimit
 	}
 	if resources.MemoryMiB > memoryLimit {
-		clamped = append(clamped, "memory from "+MemoryLabel(resources.MemoryMiB)+" to "+MemoryLabel(memoryLimit))
+		message := "memory from " + MemoryLabel(resources.MemoryMiB) + " to " + MemoryLabel(memoryLimit)
+		if facts.QuickReserveMiB > 0 {
+			message += " (quick lane reserve)"
+		}
+		clamped = append(clamped, message)
 		resources.MemoryMiB = memoryLimit
 	}
 	if len(clamped) > 0 {
