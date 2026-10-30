@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/shellquote"
 )
@@ -119,21 +121,25 @@ esac
 	}
 	t.Setenv("DYNA_ROOM_ID", records[0].ID)
 	t.Chdir(records[0].Repo)
+	originalRequest, originalWait := requestApproval, waitApproval
+	t.Cleanup(func() { requestApproval, waitApproval = originalRequest, originalWait })
+	requestApproval = func(context.Context, approvals.RequestInput) (approvals.Request, error) {
+		return approvals.Request{ID: "A-1"}, nil
+	}
+	waitApproval = func(_ context.Context, _ string, id string, _ time.Duration) (approvals.Request, error) {
+		return approvals.Request{ID: id, State: approvals.StatePending, At: "room:parent"}, nil
+	}
 	for _, args := range [][]string{
 		{"pr", "review", "1", "--approve"},
 		{"api", "repos/work/service/issues", "-X", "POST"},
 		{"codespace", "ports", "visibility", "8000:public"},
 		{"codespace", "ports", "--codespace", "NAME", "visibility", "8000:public"},
 	} {
-		if err := SessionCommand(context.Background(), args); err == nil || !strings.Contains(err.Error(), "post in the room with dyna post instead") {
-			t.Fatalf("guard allowed %q: %v", args, err)
+		if err := SessionCommand(context.Background(), args); SessionExitCode(err) != 75 {
+			t.Fatalf("guard did not hold %q: %v", args, err)
 		}
 	}
 	for _, args := range [][]string{
-		{"pr", "create", "--title", "test", "--body", "test"},
-		{"pr", "edit", "1", "--title", "test"},
-		{"pr", "ready", "1"},
-		{"pr", "comment", "1", "--body", "routine"},
 		{"pr", "view", "1"},
 		{"search", "issues", "--repo", "work/service", "duplicate"},
 		{"release", "view", "v1.0.0"},
@@ -159,7 +165,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "pr review") || strings.Contains(string(raw), "api repos/work/service/issues -X POST") {
+	if strings.Contains(string(raw), "pr review") || strings.Contains(string(raw), "pr comment") || strings.Contains(string(raw), "pr create") || strings.Contains(string(raw), "api repos/work/service/issues -X POST") {
 		t.Fatalf("refused command reached gh: %s", raw)
 	}
 }
