@@ -112,6 +112,13 @@ export interface RunResultView {
   journal?: RunJournalEntry[]
 }
 
+// WorkflowInfo is workflowcatalog.Info.
+export interface WorkflowInfo {
+  name: string
+  scope: 'project' | 'personal' | 'bundled'
+  description: string
+}
+
 // TemplateInfo is workflowtemplate.Info.
 export interface TemplateInfo {
   name: string

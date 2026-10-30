@@ -378,6 +378,9 @@ func create(name, scriptSrc string, args any) (*Run, error) {
 			r.Meta.ParentSession = session
 		}
 	}
+	if target := os.Getenv("DYNA_RUN_RESULT_TO"); IsSessionDirID(target) {
+		r.Meta.ParentSession = target
+	}
 	if stamp, ok := mode.StampFromEnv(); ok {
 		r.Meta.RoomID = stamp.RoomID
 		r.Meta.Room = stamp.Room

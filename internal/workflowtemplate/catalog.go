@@ -4,7 +4,7 @@
 // registry (normally $XDG_CONFIG_HOME/dyna/templates). The filename is the
 // stable identity. Listing, saving, showing, and copying never execute source
 // and never inspect <work-dir>/examples or the process cwd. Copied files are
-// ordinary scripts launched with dyna run <file>; the catalog is not a
+// ordinary scripts launched with dyna workflow run <file>; the catalog is not a
 // runtime name resolver.
 //
 // Install and update seed the shipped examples/ starters into that registry.
