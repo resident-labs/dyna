@@ -481,7 +481,7 @@ func (s *Service) closeGuard(ctx context.Context, parent contract.BoxID) *contra
 }
 
 func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, req contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
+	if req.Discard && caller.Kind != contract.PrincipalOwner {
 		return contract.SessionCloseResponse{}, forbidden()
 	}
 	session, err := s.store.Session(ctx, req.Session)
@@ -491,36 +491,68 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
 		return contract.SessionCloseResponse{}, e
 	}
-	// Interim backstop until room step 5 marks the subtree closing in one transaction.
+	var tree room.Tree
+	var order []contract.SessionID
+	if e := func() *contract.Error {
+		s.admit.Lock()
+		defer s.admit.Unlock()
+		tree, err = s.store.RoomTree(ctx, session.Room)
+		if err != nil {
+			return failure(err)
+		}
+		if !tree.CanManage(caller, session.ID) {
+			return forbidden()
+		}
+		order, err = tree.CloseOrder(session.ID)
+		if err != nil {
+			return &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
+		}
+		s.boxLockMu.Lock()
+		for _, id := range order {
+			if id != session.ID && s.boxRuns[id] != nil {
+				s.boxLockMu.Unlock()
+				return &contract.Error{Code: contract.ErrConflict, Message: "child is starting"}
+			}
+		}
+		s.boxLockMu.Unlock()
+		if err := s.store.MarkClosing(ctx, session.ID); err != nil {
+			return failure(err)
+		}
+		return nil
+	}(); e != nil {
+		return contract.SessionCloseResponse{}, e
+	}
+	for _, id := range tree.Leaves(order) {
+		child, err := s.store.Session(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+		if e := s.closeSession(ctx, caller, child, req.Discard); e != nil {
+			return contract.SessionCloseResponse{}, e
+		}
+	}
+	return contract.SessionCloseResponse{}, nil
+}
+
+func (s *Service) closeSession(ctx context.Context, caller contract.Principal, session store.Session, discard bool) *contract.Error {
 	s.admit.Lock()
-	tree, err := s.store.RoomTree(ctx, session.Room)
-	if err != nil {
-		s.admit.Unlock()
-		return contract.SessionCloseResponse{}, failure(err)
-	}
-	order, err := tree.CloseOrder(session.ID)
-	if err != nil {
-		s.admit.Unlock()
-		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
-	}
-	if len(order) > 1 {
-		s.admit.Unlock()
-		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrHasChildren, Message: "session has child sessions"}
-	}
 	if e := s.closeGuard(ctx, session.Box); e != nil {
 		s.admit.Unlock()
-		return contract.SessionCloseResponse{}, e
+		return e
 	}
 	current, err := s.store.Box(ctx, session.Box)
 	if err != nil {
 		s.admit.Unlock()
-		return contract.SessionCloseResponse{}, failure(err)
+		return failure(err)
 	}
 	if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
 		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
 		if err != nil {
 			s.admit.Unlock()
-			return contract.SessionCloseResponse{}, failure(err)
+			return failure(err)
 		}
 	}
 	s.boxLockMu.Lock()
@@ -532,24 +564,29 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	s.admit.Unlock()
 	unlock := s.lockBox(session.ID)
 	defer unlock()
+	if _, err := s.store.Session(ctx, session.ID); errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return failure(err)
+	}
 	current, err = s.store.Box(ctx, session.Box)
 	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+		return failure(err)
 	}
-	if !req.Discard && current.State != contract.BoxDeleted {
+	if !discard && current.State != contract.BoxDeleted {
 		if session.Repo != "" {
 			if current.Reason != "" {
 				if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
-					return contract.SessionCloseResponse{}, failure(err)
+					return failure(err)
 				}
 			}
-			return contract.SessionCloseResponse{}, nil
+			return nil
 		}
 	}
-	return contract.SessionCloseResponse{}, s.finishClose(ctx, session, current, caller)
+	return s.finishClose(ctx, session, current, caller, discard)
 }
 
-func (s *Service) finishClose(ctx context.Context, session store.Session, current box.Box, caller contract.Principal) *contract.Error {
+func (s *Service) finishClose(ctx context.Context, session store.Session, current box.Box, caller contract.Principal, discard bool) *contract.Error {
 	if current.State != contract.BoxDeleted {
 		if err := s.boxes.Remove(ctx, session.Box); err != nil {
 			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
@@ -569,7 +606,15 @@ func (s *Service) finishClose(ctx context.Context, session store.Session, curren
 	if err := s.store.CloseSession(ctx, session.ID, event); err != nil {
 		return failure(err)
 	}
-	return nil
+	parent, err := s.store.ClosingParent(ctx, session.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return failure(err)
+	}
+	_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: parent, Discard: discard})
+	return e
 }
 
 func (s *Service) Post(ctx context.Context, caller contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
