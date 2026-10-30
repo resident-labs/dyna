@@ -45,8 +45,11 @@ esac
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TEST_AUTHOR", tc.author)
 			class, err := ClassifyForApproval(ctx, exe, records[0].Repo, args)
-			if err != nil || class != tc.class {
+			if tc.allowed && (err != nil || class != tc.class) {
 				t.Fatalf("class = %q, %v", class, err)
+			}
+			if !tc.allowed && err == nil {
+				t.Fatal("foreign upstream write was not refused")
 			}
 			err = Run(ctx, Command(ctx, exe, records[0].Repo, args...))
 			if (err == nil) != tc.allowed {
@@ -108,8 +111,11 @@ esac
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TEST_AUTHOR", tc.author)
 			class, err := ClassifyForApproval(ctx, exe, records[0].Repo, args)
-			if err != nil || class != tc.class {
+			if tc.allowed && (err != nil || class != tc.class) {
 				t.Fatalf("class = %q, %v", class, err)
+			}
+			if !tc.allowed && err == nil {
+				t.Fatal("foreign upstream write was not refused")
 			}
 			err = Run(ctx, Command(ctx, exe, records[0].Repo, args...))
 			if (err == nil) != tc.allowed {

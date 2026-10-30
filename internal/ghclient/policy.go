@@ -277,15 +277,23 @@ func sameCheckout(dir, root string) bool {
 }
 
 func matchesRepository(ctx context.Context, rec room.Record, r repository) bool {
-	if rec.Repo == "" || r.name == "" {
+	if r.name == "" {
 		return false
 	}
-	remote, err := repoid.Git(ctx, rec.Repo, "remote", "get-url", "origin")
-	if err != nil {
-		return false
+	for _, checkout := range append([]string{rec.Repo}, rec.ExtraRepos...) {
+		if checkout == "" {
+			continue
+		}
+		remote, err := repoid.Git(ctx, checkout, "remote", "get-url", "origin")
+		if err != nil {
+			continue
+		}
+		identity, err := repoid.RemoteIdentity(checkout, remote)
+		if err == nil && strings.EqualFold(identity, r.host+"/"+r.name) {
+			return true
+		}
 	}
-	identity, err := repoid.RemoteIdentity(rec.Repo, remote)
-	return err == nil && strings.EqualFold(identity, r.host+"/"+r.name)
+	return false
 }
 
 // matchesUpstream reports whether r is the room's upstream repository, the parent
@@ -460,6 +468,7 @@ type apiCall struct {
 	keys []string
 	// event is the value of the event field, upper case, when one is sent.
 	event string
+	state string
 }
 
 func parseAPICall(args []string) apiCall {
@@ -497,6 +506,9 @@ func parseAPICall(args []string) apiCall {
 			call.keys = append(call.keys, key)
 			if key == "event" {
 				call.event = strings.ToUpper(value)
+			}
+			if key == "state" {
+				call.state = strings.ToLower(value)
 			}
 		}
 		if strings.HasPrefix(arg, "query=") {
@@ -739,68 +751,16 @@ func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string
 	if len(args) == 1 && args[0] == "--version" {
 		return nil
 	}
-	rec, err := roomFor(ctx, cmdDir, r)
-	if errors.Is(err, errNotInRoom) && (isRead(args) || isRepoFork(args)) && matchesUpstream(rec, r) {
-		err = nil
-	}
-	// A comment of the room's account on the recorded upstream may be edited or
-	// deleted. refuseForeignComment checks the author once the account is known.
-	if _, ok := ownCommentCall(args); ok && errors.Is(err, errNotInRoom) && matchesUpstream(rec, r) {
-		err = nil
-	}
-	if err != nil {
-		command := commandArgs(args)
-		allowed := false
-		if len(command) >= 2 {
-			switch command[0] + " " + command[1] {
-			case "issue create", "issue comment", "issue close", "issue reopen", "pr create", "pr comment", "pr edit", "pr ready", "pr review", "pr close":
-				allowed = true
-			}
-		}
-		if !errors.Is(err, errNotInRoom) || !allowed {
-			return err
-		}
-		owned := matchesUpstream(rec, r)
-		// A comment on a repository that is not the room's is a room mismatch,
-		// whatever the access, so the owner learns which repository was wrong.
-		if !owned && Access(ctx, rec) != ReadWrite && command[1] != "create" && command[1] != "edit" && command[1] != "ready" {
-			owned = matchesForkParent(ctx, rec, cmdDir, r)
-			if !owned {
-				return err
-			}
-		}
-		if Access(ctx, rec) != ReadWrite {
-			return errReadOnly
-		}
-		if !owned && !matchesForkParent(ctx, rec, cmdDir, r) {
-			return err
-		}
-		switch command[0] + " " + command[1] {
-		case "issue create":
-			if len(command) == len(args) && !createNamesRepo(command[2:]) {
-				return err
-			}
-		case "pr close":
-			flags := parseArgs(command[:2], command[2:]).flags
-			if _, ok := flags["--delete-branch"]; ok {
-				return errors.New("deleting a branch during an upstream PR close is not allowed")
-			}
-			if _, ok := flags["-d"]; ok {
-				return errors.New("deleting a branch during an upstream PR close is not allowed")
-			}
-		case "pr edit":
-			if !editsForkPull(ctx, rec, cmdDir, r, command) {
-				return errUpstreamEdit
-			}
-		}
-	}
-	if Access(ctx, rec) != ReadWrite && !isRead(args) {
-		return errReadOnly
-	}
-	if err := refuseImplicitForkPR(rec, cmdDir, r, args); err != nil {
+	if !isRead(args) {
+		cmd := Command(ctx, "", cmdDir, args...)
+		_, _, err := decideCommand(ctx, cmd, r, "", nil)
 		return err
 	}
-	return refuseHeldReady(ctx, rec, cmdDir, r, args)
+	rec, err := roomFor(ctx, cmdDir, r)
+	if errors.Is(err, errNotInRoom) && matchesUpstream(rec, r) {
+		err = nil
+	}
+	return err
 }
 
 // createValueFlags are the gh pr create flags that consume the next argument.
