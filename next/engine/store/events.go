@@ -42,6 +42,14 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 
 // Events returns matching events in sequence order.
 func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64, limit int, types []contract.EventType) ([]contract.Event, error) {
+	return s.events(ctx, room, afterSeq, 0, limit, types)
+}
+
+func (s *Store) EventsBefore(ctx context.Context, room contract.RoomID, beforeSeq int64, limit int, types []contract.EventType) ([]contract.Event, error) {
+	return s.events(ctx, room, 0, beforeSeq, limit, types)
+}
+
+func (s *Store) events(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType) ([]contract.Event, error) {
 	query := "SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE "
 	// database/sql requires a heterogeneous variadic slice for query arguments.
 	var args []interface{}
@@ -52,13 +60,21 @@ func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64
 		query += "room=? AND seq>?"
 		args = append(args, room, afterSeq)
 	}
+	if beforeSeq > 0 {
+		query += " AND seq<?"
+		args = append(args, beforeSeq)
+	}
 	if len(types) > 0 {
 		query += " AND type IN (" + strings.TrimRight(strings.Repeat("?,", len(types)), ",") + ")"
 		for _, kind := range types {
 			args = append(args, kind)
 		}
 	}
-	query += " ORDER BY seq LIMIT ?"
+	if beforeSeq > 0 {
+		query += " ORDER BY seq DESC LIMIT ?"
+	} else {
+		query += " ORDER BY seq LIMIT ?"
+	}
 	args = append(args, limit)
 	rows, err := s.read.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -84,6 +100,11 @@ func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64
 			return nil, fmt.Errorf("event %d: %w", event.Seq, err)
 		}
 		events = append(events, event)
+	}
+	if beforeSeq > 0 {
+		for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+			events[i], events[j] = events[j], events[i]
+		}
 	}
 	return events, rows.Err()
 }

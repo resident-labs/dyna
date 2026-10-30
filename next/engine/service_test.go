@@ -903,3 +903,14 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 		t.Fatalf("wakes = %d, jobs = %d, want 1 each", wakes, jobs)
 	}
 }
+
+func TestPostRejectsMissingAttachment(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	s.SetFilesDir(t.TempDir())
+	_, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{
+		Room: room, Text: "hello", Attachments: []contract.Attachment{{Name: "missing", Media: "text/plain", SHA256: "0000000000000000000000000000000000000000000000000000000000000000"}},
+	})
+	if e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("got %v", e)
+	}
+}

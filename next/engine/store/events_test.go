@@ -136,3 +136,26 @@ func TestEventsReplay(t *testing.T) {
 		t.Fatalf("got %#v, %v", got, err)
 	}
 }
+
+func TestEventsBefore(t *testing.T) {
+	s, err := Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	err = s.Write(context.Background(), func(tx *sql.Tx) error {
+		for _, id := range []contract.EventID{"a", "b", "c", "d"} {
+			if _, err := s.AppendEvent(tx, contract.Event{ID: id, Time: time.UnixMilli(10), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: string(id)}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.EventsBefore(context.Background(), "", 4, 2, nil)
+	if err != nil || len(events) != 2 || events[0].ID != "b" || events[1].ID != "c" {
+		t.Fatalf("events %v, error %v", events, err)
+	}
+}
