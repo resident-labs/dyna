@@ -106,7 +106,33 @@ ON CONFLICT(repo,sha,node,run_id) DO UPDATE SET payload=excluded.payload, owner_
 
 // reserveAttachment reserves one fresh run before setup.
 func (s Store) reserveAttachment(ctx context.Context, repo, sha, node string, att attachment) error {
-	return s.saveAttachment(ctx, repo, sha, node, att)
+	raw, err := json.Marshal(att)
+	if err != nil {
+		return err
+	}
+	db, err := s.open()
+	if err != nil {
+		return err
+	}
+	pid, start := attachmentOwner()
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: AttachEventKey(sha).String()}, func(conn *sql.Conn) error {
+		if _, err := conn.ExecContext(ctx, attachmentSchema); err != nil {
+			return err
+		}
+		result, err := conn.ExecContext(ctx, `INSERT INTO local_ci_attachments(repo,sha,node,run_id,payload,owner_pid,owner_start,saved_at)
+SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM local_ci_attachments WHERE repo=? AND sha=?)`, repo, sha, node, att.RunID, raw, pid, start, resultClock().Unix(), repo, sha)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrAttachmentBusy
+		}
+		return nil
+	})
 }
 
 // releaseAttachment hands a run's record over: the checks stay on the machine
