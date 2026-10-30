@@ -6,7 +6,7 @@
   import Avatar from '../ui/Avatar.svelte'
   import type { MachineAgent, MachineCIRun, MachineWork, MachineWorkItem } from '../api/machine.ts'
   import { ago, duration } from '../ui/format.ts'
-  import { ciRunDetail, ciRunText, diskLimitText, cpuUseText, memoryUseText, workHoldsText, workKindText, workLabelText, workWhoText } from './machines.ts'
+  import { ciRunDetail, ciRunText, memoryUseText, workHoldsText, workKindText, workLabelText, workWhoText } from './machines.ts'
 
   let { work, failed = false, agents = [], runs = [], onagent }: {
     work: MachineWork | null; failed?: boolean; agents?: MachineAgent[]; runs?: MachineCIRun[]; onagent?: (agent: MachineAgent) => void
@@ -33,7 +33,7 @@
     {:else}
       {@const c = work.capacity}
       {#if c.diskBlock}<p class="wait">Blocked: {c.diskBlock}. Dyna admits no new work here.</p>{/if}
-      <p class="note">{cpuUseText(c)} · {memoryUseText(c)} · {diskLimitText(c)} · {c.heavyRunning} of {c.heavyLimit} IO-heavy</p>
+      <p class="note">{memoryUseText(c)} · {c.heavyRunning} of {c.heavyLimit} IO-heavy</p>
       {#each c.resources ?? [] as resource (resource.name)}<p class="note">{resource.name}: {resource.used} of {resource.limit} in use</p>{/each}
       <h3>Running</h3>
       {#each agents as agent (agent.id)}
