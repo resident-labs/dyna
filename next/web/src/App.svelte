@@ -25,12 +25,23 @@
     history.pushState(null, "", event.currentTarget.href);
     path = window.location.pathname;
   }
-  let title = $derived(!room ? "Welcome" : session ? store?.sessions.get(session)?.name ?? "Session"
+  let sidebar: HTMLElement;
+  let content: HTMLElement;
+  // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
+  function cycle(event: KeyboardEvent) {
+    if (event.key !== "F6") return;
+    event.preventDefault();
+    const areas = [sidebar, content];
+    const index = areas.findIndex(area => area.contains(document.activeElement));
+    areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
+  }
+  let title =$derived(!room ? "Welcome" : session ? store?.sessions.get(session)?.name ?? "Session"
     : rooms.find(item => item.id === room)?.name ?? "Room");
 </script>
 
+<svelte:window onkeydown={cycle} />
 <div class="shell">
-  <aside aria-label="Rooms">
+  <aside aria-label="Rooms" tabindex="-1" bind:this={sidebar}>
     <header><strong>Dyna</strong></header>
     <div class="section-title">Rooms</div>
     {#if rooms.length}
@@ -39,7 +50,7 @@
       {/each}</nav>
     {:else}<p class="hint">Your rooms will appear here.</p>{/if}
   </aside>
-  <main>
+  <main tabindex="-1" bind:this={content}>
     <header><span>{title}</span></header>
     <section class="empty">
       <h1>{room ? (session ? "Session conversation" : "Room feed") : "Select a room"}</h1>
