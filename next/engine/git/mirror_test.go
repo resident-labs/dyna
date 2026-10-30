@@ -10,15 +10,20 @@ import (
 
 type fakeRunner struct {
 	calls [][]string
-	fail  bool
+	fail  string
 }
 
-func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) error {
+func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
 	r.calls = append(r.calls, args)
-	if r.fail && len(r.calls) == 2 {
-		return errors.New("fetch failed")
+	for _, arg := range args {
+		if arg == r.fail && r.fail != "" {
+			return nil, errors.New("git failed")
+		}
 	}
-	return nil
+	if len(args) > 2 && args[2] == "symbolic-ref" {
+		return []byte("main\n"), nil
+	}
+	return nil, nil
 }
 
 type fakeCache struct {
@@ -37,12 +42,13 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 	r := &fakeRunner{}
 	c := &fakeCache{}
 	dir := t.TempDir()
-	cache, err := (Mirror{Data: dir, Token: "secret", Runner: r}).Prepare(context.Background(), c, "/host", "owner/repo", []string{"+refs/heads/main:refs/heads/main"})
+	m := &Mirror{Data: dir, Token: "secret", Runner: r}
+	result, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.calls) != 2 || r.calls[1][2] != "fetch" || !c.called || c.mirror != filepath.Join(dir, "git/owner/repo.git") || cache != "/host/git/owner/repo.git" {
-		t.Fatalf("calls %v, cache %q, host %+v", r.calls, cache, c)
+	if len(r.calls) != 2 || r.calls[0][0] != "clone" || !c.called || c.mirror != filepath.Join(dir, "git/owner/repo.git") || result.Cache != "/host/git/owner/repo.git" || result.Base != "main" || len(c.refs) != 1 || c.refs[0] != "+refs/heads/*:refs/heads/*" {
+		t.Fatalf("calls %v, repo %+v, host %+v", r.calls, result, c)
 	}
 	for _, call := range r.calls {
 		if strings.Contains(strings.Join(call, " "), "secret") {
@@ -50,10 +56,11 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 		}
 	}
 }
-func TestPrepareDoesNotPushWhenFetchFails(t *testing.T) {
-	r := &fakeRunner{fail: true}
+func TestPrepareDoesNotPushWhenCloneFails(t *testing.T) {
+	r := &fakeRunner{fail: "clone"}
 	c := &fakeCache{}
-	_, err := (Mirror{Data: t.TempDir(), Runner: r}).Prepare(context.Background(), c, "/host", "owner/repo", nil)
+	m := &Mirror{Data: t.TempDir(), Runner: r}
+	_, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1")
 	if err == nil || c.called {
 		t.Fatalf("error %v, cache called %v", err, c.called)
 	}
