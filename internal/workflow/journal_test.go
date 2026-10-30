@@ -166,7 +166,7 @@ return "workflow done";
 	engine.Profiles = store
 	resultJSON, err := executeTest(ctx, Options{
 		ScriptSrc: script, Store: store, Run: run, WorkDir: dir, Engine: engine,
-		Poster: func(_ context.Context, _ string, _ []string, _ string) (PostResult, error) {
+		Poster: func(_ context.Context, _, _ string, _ []string, _ string) (PostResult, error) {
 			select {
 			case err := <-started:
 				return PostResult{ID: "worker-ready"}, err
