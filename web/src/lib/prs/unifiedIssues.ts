@@ -43,9 +43,24 @@ export function issueWork(it: IssueRow): IssueWork {
   return it.group === 'working' || it.group === 'has-pr' || it.workingSessionLive ? 'in-progress' : 'unhandled'
 }
 
-const urlKey = (url: string) => url.replace(/\/+$/, '').toLowerCase()
+export const urlKey = (url: string) => url.replace(/\/+$/, '').toLowerCase()
 
-export function unifiedIssues(github: readonly GitHubItem[], local: readonly RoomIssue[], source: string, state: string, query: string): IssueRow[] {
+// trackedIssueItems is the GitHub half of the Tracked issue view: the issues
+// the room watches or works on (watched, from TrackedIssues) and the issues its
+// own issues were promoted to. A watched or worked issue outside the loaded
+// GitHub page keeps the facts the engine sent. A promoted issue outside the
+// page stays as its room issue row.
+export function trackedIssueItems(github: readonly GitHubItem[], watched: readonly GitHubItem[], local: readonly RoomIssue[]): GitHubItem[] {
+  const own = new Set([...watched.map(i => urlKey(i.url)), ...local.flatMap(i => i.githubUrl ? [urlKey(i.githubUrl)] : [])])
+  const kept = github.filter(i => own.has(urlKey(i.url)))
+  const seen = new Set(kept.map(i => urlKey(i.url)))
+  return [...kept, ...watched.filter(i => !seen.has(urlKey(i.url)))]
+}
+
+// unifiedIssues joins GitHub and room issues and applies the filters. GitHub
+// already searched its own rows when searchedOnGitHub is true; otherwise the
+// query matches GitHub rows here too, by title or number.
+export function unifiedIssues(github: readonly GitHubItem[], local: readonly RoomIssue[], source: string, state: string, query: string, searchedOnGitHub = true): IssueRow[] {
   // Open and history requests can finish separately during a state change.
   const locals = [...new Map(local.map(i => [i.id, i])).values()]
   const exported = new Map(locals.filter(i => i.githubUrl).map(i => [urlKey(i.githubUrl || ''), i]))
@@ -66,8 +81,8 @@ export function unifiedIssues(github: readonly GitHubItem[], local: readonly Roo
     // A number query must not match the label of another issue.
     return [...(wanted ? [] : label), i.title, i.local?.file || '', i.local?.filer || ''].join(' ').toLowerCase()
   }
-  const matchesQuery = (i: IssueRow) => !q || i.source === 'GitHub' ||
-    (wanted ? i.local?.number === Number(wanted) || haystack(i).includes(q) : haystack(i).includes(q))
+  const matchesQuery = (i: IssueRow) => !q || (searchedOnGitHub && i.source === 'GitHub') ||
+    (wanted ? (Number(wanted) > 0 && [i.number, i.local?.number].includes(Number(wanted))) || haystack(i).includes(q) : haystack(i).includes(q))
   return rows.filter(i => (source === 'all' || i.source?.toLowerCase() === source) && (state === 'all' || i.state === state.toUpperCase()) && matchesQuery(i))
     .sort((a, b) => Number(b.state === 'OPEN') - Number(a.state === 'OPEN') || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
 }

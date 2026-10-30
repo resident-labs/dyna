@@ -15,7 +15,7 @@ import type { ChangeDetail, ChangePolicy, ChangeView, HeldComment, MergeControlS
 import type { ComputerInfo } from './computer.ts'
 import type { DiffComment } from '../files/diffComments.ts'
 import type { Browse, BrowseInfo, CreatedRoom, CreateRoomInput, DirectoryEntries, GitBlameResult, GitDiffResult, GitHistoryResult, GitLastCommitsResult, GitStatusResult, PathCheck, WorkspaceFile } from './file.ts'
-import type { GitHubDetail, GitHubListResult } from './github.ts'
+import type { GitHubDetail, GitHubListResult, TrackedIssues } from './github.ts'
 import type { Goal, GoalEvent, GoalItem, GoalJournalEntry, GoalRule, GoalStatus, RulesView } from './goal.ts'
 import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, SignInState } from './harness.ts'
 import type { SyncStarted, SyncStatus } from './lanesync.ts'
@@ -210,6 +210,8 @@ export interface Engine {
   TrackPR(roomRef: string, sessionRef: string, number: number): Promise<ChangeView>
   GitHubList(roomRef: string, kind: string, state: string, search: string): Promise<GitHubListResult>
   GitHubView(roomRef: string, kind: string, number: number): Promise<GitHubDetail>
+  // TrackedIssues is the room's watched issues and the issues its live sessions work on.
+  TrackedIssues(roomRef: string): Promise<TrackedIssues>
   StartIssueWork(roomRef: string, number: number): Promise<SpawnResult>
   GitHubDiff(roomRef: string, number: number): Promise<GitDiffResult>
   CIHealth(roomId: string, runs: number): Promise<unknown>

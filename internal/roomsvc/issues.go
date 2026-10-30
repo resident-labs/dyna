@@ -49,5 +49,10 @@ func (s *Service) StartIssueWork(ctx context.Context, roomRef string, number int
 	if err != nil {
 		return result, fmt.Errorf("session %s started, but saving its issue failed: %w", result.Member.ID, err)
 	}
+	// The session became visible before its issue work was saved, so clients
+	// reload the issue list only now, when the work record is committed.
+	if err := s.rooms().TouchIssues(rec.ID); err != nil {
+		return result, fmt.Errorf("session %s started, but its issue list did not refresh: %w", result.Member.ID, err)
+	}
 	return result, nil
 }

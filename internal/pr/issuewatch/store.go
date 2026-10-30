@@ -146,6 +146,29 @@ func (s Store) Remove(ctx context.Context, room, host, repo string, number int) 
 	return n > 0, err
 }
 
+// Room returns one room's watches by repository and number. It reads only
+// the issue facts, not the cursor or the saved pages.
+func (s Store) Room(ctx context.Context, room string) ([]Watch, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT host, repo, number, title, state, updated FROM issue_watches WHERE room = ? ORDER BY repo, number`, room)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Watch
+	for rows.Next() {
+		w := Watch{Room: room}
+		if err := rows.Scan(&w.Host, &w.Repo, &w.Number, &w.Title, &w.State, &w.Updated); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 // List returns every watch, in no set order.
 func (s Store) List(ctx context.Context) ([]Watch, error) {
 	db, err := s.db()

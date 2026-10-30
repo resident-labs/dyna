@@ -2,11 +2,14 @@
 // the merge service, never from inferred readiness in the browser.
 import type { MainWaitKind, MergeControlStatus, MergeQueueItem, MergeTrialStatus } from '../api/change.ts'
 import { checkSummary, isLocal, prTracks, type Meta } from './pr.ts'
-import { isDone, type Row } from './prlist.ts'
+import { isDone, isUntracked, type Row } from './prlist.ts'
+import type { ListScope } from './github.ts'
 
-export function openPRs(rows: Row[], queue: MergeQueueItem[] = []): Row[] {
+// openPRs lists the open PRs, merge order first. The Tracked scope keeps only
+// the PRs the room tracks; All also lists the other open PRs on GitHub.
+export function openPRs(rows: Row[], queue: MergeQueueItem[] = [], scope: ListScope = 'all'): Row[] {
   const order = new Map(queue.filter((q) => q.trial || q.state === 'ready').map((q, i) => [q.changeId, i]))
-  return rows.filter((r) => !isLocal(r) && !isDone(r)).sort((a, b) => {
+  return rows.filter((r) => !isLocal(r) && !isDone(r) && (scope === 'all' || !isUntracked(r))).sort((a, b) => {
     const ai = order.get(a.changeId ?? '') ?? Infinity
     const bi = order.get(b.changeId ?? '') ?? Infinity
     return ai - bi || (b.number ?? 0) - (a.number ?? 0)
