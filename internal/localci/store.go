@@ -43,6 +43,7 @@ type Node struct {
 	// admission queue bounds the request instead.
 	CPUs        int    `json:"cpus,omitempty"`
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
+	QuickSlots  int    `json:"quickSlots,omitempty"`
 	// Disk and MaxDiskPercent carry the machine's one disk rule from its last
 	// probe. The admission queue holds new work while the disk blocks, and
 	// cache recovery frees space up to the boundary the rule keeps. A zero
@@ -240,7 +241,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 	}
 	nodes := []Node{}
 	for _, m := range list {
-		node := Node{Name: m.Name, SSH: m.SSH, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Labels: m.Labels, ProbedLabels: m.ProbedLabels(), ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
+		node := Node{Name: m.Name, SSH: m.SSH, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, QuickSlots: m.QuickSlots, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Labels: m.Labels, ProbedLabels: m.ProbedLabels(), ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
