@@ -223,7 +223,7 @@ func TestRequestNoticeNamesTheDecidingCommands(t *testing.T) {
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("messages = %+v, %v", messages, err)
 	}
-	for _, want := range []string{"dyna request approve " + r.ID, "dyna request deny " + r.ID + " --why \"<why>\""} {
+	for _, want := range []string{"dyna request approve " + r.ID, "dyna request deny " + r.ID + " --reason \"<why>\""} {
 		if !strings.Contains(messages[0].Text, want) {
 			t.Fatalf("notice %q does not name %q", messages[0].Text, want)
 		}
