@@ -62,6 +62,12 @@ func (h HookEvent) eventType() EventType {
 }
 
 func (h HookEvent) eventSubject() string { return h.RunID }
+func (h HookEvent) eventThread() string {
+	if h.RunID == "" {
+		return ""
+	}
+	return "hook:" + h.RunID
+}
 
 // eventDedupe keys one post per run and type, so a start and its result are two
 // posts that the web folds into one card.
