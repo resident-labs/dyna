@@ -168,10 +168,29 @@ func (s Service) List(ctx context.Context, repo string) ([]Hook, error) {
 	return s.load(ctx, r.ID)
 }
 
-// ListGlobal returns the global hooks: the built-ins the engine seeds and the
-// hooks the owner added for the whole machine.
+// ListGlobal returns the global hooks the owner added for the whole machine.
+// The built-ins the engine seeds are services, not hooks: see BuiltinHooks.
 func (s Service) ListGlobal(ctx context.Context) ([]Hook, error) {
-	return s.load(ctx, globalKey)
+	all, err := s.load(ctx, globalKey)
+	return filterBuiltin(all, false), err
+}
+
+// BuiltinHooks returns the built-in hooks the engine seeds. They schedule the
+// engine's own services, and only the service list and `dyna services` show them.
+func (s Service) BuiltinHooks(ctx context.Context) ([]Hook, error) {
+	all, err := s.load(ctx, globalKey)
+	return filterBuiltin(all, true), err
+}
+
+// filterBuiltin keeps the built-in hooks, or the others.
+func filterBuiltin(all []Hook, builtin bool) []Hook {
+	out := make([]Hook, 0, len(all))
+	for _, h := range all {
+		if (h.Builtin != "") == builtin {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 func (s Service) Add(ctx context.Context, repo string, h Hook) error {
@@ -510,11 +529,44 @@ func (s Service) Run(ctx context.Context, e Event, name string) (Run, error) {
 	return s.run(ctx, e, name, nil, true)
 }
 
-// RunGlobal runs one named global hook now, whether the owner added it or the
-// engine seeded it.
+// RunGlobal runs one hook the owner added for the machine, now. A built-in
+// runs as a service: see RunBuiltin.
 func (s Service) RunGlobal(ctx context.Context, e Event, name string) (Run, error) {
+	if err := s.requireBuiltin(ctx, name, false); err != nil {
+		return Run{}, err
+	}
 	e.Repo = ""
 	return s.run(ctx, e, name, nil, true)
+}
+
+// RunBuiltin runs one built-in service pass now, as `dyna services run` asks.
+func (s Service) RunBuiltin(ctx context.Context, e Event, name string) (Run, error) {
+	if err := s.requireBuiltin(ctx, name, true); err != nil {
+		return Run{}, err
+	}
+	e.Repo = ""
+	return s.run(ctx, e, name, nil, true)
+}
+
+// requireBuiltin checks that a global hook is built in, or is not.
+func (s Service) requireBuiltin(ctx context.Context, name string, builtin bool) error {
+	all, err := s.load(ctx, globalKey)
+	if err != nil {
+		return err
+	}
+	for _, h := range all {
+		if h.Name != name {
+			continue
+		}
+		if (h.Builtin != "") == builtin {
+			return nil
+		}
+		if builtin {
+			return fmt.Errorf("%q is a hook you added, so it runs with `dyna git hooks run --global`", name)
+		}
+		return fmt.Errorf("%q is a service, so it runs with `dyna services run %s`", name, name)
+	}
+	return fmt.Errorf("no global hook named %q", name)
 }
 
 // run records preparationErr without executing a command, or executes the hook

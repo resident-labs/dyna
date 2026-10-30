@@ -1,6 +1,6 @@
 // Package automations holds the one table of automatic hooks. The engine seeds
-// a global hook for each entry, the Hooks screen lists them, and
-// `dyna git hooks run <name> --global` runs the same function by hand, so a new
+// a global hook for each entry, the service list shows them, and
+// `dyna services run <name>` runs the same function by hand, so a new
 // automatic hook is one table entry and its function.
 package automations
 
