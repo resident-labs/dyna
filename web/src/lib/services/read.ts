@@ -48,7 +48,7 @@ export const readRegistry = (v: unknown): RegistryService[] | null =>
         id, group, state, detail, label: str(r.label), description: str(r.description), count: num(r.count),
         schedule: isRecord(r.schedule) ? { everyMinutes: num(r.schedule.everyMinutes), timeout: str(r.schedule.timeout) } : undefined,
         lastRun: str(r.lastRun) || undefined, nextRun: str(r.nextRun) || undefined, switch: sw,
-        profile: str(r.profile), session: str(r.session), hook: str(r.hook), settingsKeys: strings(r.settingsKeys),
+        profile: str(r.profile), session: str(r.session), settingsKeys: strings(r.settingsKeys),
       }]
     })
     : null
