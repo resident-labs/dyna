@@ -20,35 +20,35 @@ import (
 )
 
 var help = map[string]string{
-	settings.KeyVoiceDucking:           "Lower Voice by 10 dB after sustained speech above the microphone noise floor. Off by default. Applies to the next call; server speech detection still controls interruption.",
-	settings.KeyVoiceAgent:             "Let agents use voice: dyna voice say and dyna voice session. On by default. Both spend the voice provider's quota, such as the ChatGPT sign-in's. Turn it off to stop them; owner calls are not affected. Applies to the next say or session.",
-	settings.KeyVoiceProvider:          "The realtime voice provider for the next call: openai (the ChatGPT sign-in), speech-to-speech (a self-hosted server), dashscope (Alibaba Cloud, with DASHSCOPE_API_KEY) google-live (Gemini Live, with GOOGLE_API_KEY or GEMINI_API_KEY) doubao-seeduplex (Volcengine, with DOUBAO_API_KEY) stepfun (StepFun, with STEPFUN_API_KEY) or minicpm-o (a self-hosted MiniCPM-o server at voice.url; it cannot use tools, so Voice cannot dispatch work on it).",
+	settings.KeyVoiceDucking:           "Lower Voice by 10 dB while you speak. Off by default. Applies to the next call.",
+	settings.KeyVoiceAgent:             "Let agents use voice through dyna voice say and dyna voice session. On by default. Their calls spend the voice provider's quota.",
+	settings.KeyVoiceProvider:          "The realtime voice provider for the next call.",
 	settings.KeyVoiceModel:             "The voice provider's model, such as qwen3.5-omni-plus-realtime for dashscope. Empty uses the provider's default.",
-	settings.KeyVoiceURL:               "The voice provider's WebSocket address. Required for speech-to-speech, such as ws://host:8000/v1/realtime; for dashscope it overrides the public endpoint, as a Model Studio workspace model needs.",
+	settings.KeyVoiceURL:               "The provider's WebSocket address, such as ws://host:8000/v1/realtime. Required for speech-to-speech; for dashscope it overrides the public endpoint.",
 	settings.KeyComputersEnabled:       "Give agent sessions a lazy Linux computer when labwc is installed. Applies to the next harness turn.",
-	settings.KeyShellSilenceMinutes:    "Minutes of continuously observed local shell output inactivity before a notice. 0 turns notices off. CPU activity is not measured. Turn and workflow step output is not yet watched.",
-	settings.KeyComputersReminder:      "Minutes between reminders to a session whose computer is open: look at the screen with dyna computer shot, and stop the computer when done. A computer with keep on, one with a viewer, and a root computer get none. 0 turns reminders off. Applies to the next reminder.",
-	settings.KeyComputersRenderNode:    "GPU that Dyna computers render on: auto, or a /dev/dri/renderD* path. auto keeps computers off the GPU that drives the owner's display when another GPU exists. Applies to the next computer start; a running computer keeps its GPU until it stops.",
+	settings.KeyShellSilenceMinutes:    "Minutes without local shell output before a notice. 0 turns notices off. Turn and workflow step output is not watched yet.",
+	settings.KeyComputersReminder:      "Minutes between reminders to check and stop an open computer. Computers kept on, with a viewer, or owned by root get none. 0 turns reminders off.",
+	settings.KeyComputersRenderNode:    "GPU for Dyna computers: auto, or a /dev/dri/renderD* path. auto avoids the GPU that drives the display when another exists. Applies to the next computer start.",
 	settings.KeySessionCheckInInterval: "Parent check-in interval (default 15m). Zero disables check-ins.",
 	settings.KeyDoctorCondition:        "When the doctor hook examines a machine, such as \"load>2/core for 5m or memory>85%\". Empty uses the default. Applies to the next doctor run.",
 	settings.KeyLibraryEnabled:         "JSON list of main checkout paths whose librarian runs. Use dyna library enable and disable, which also add and remove the librarian hooks.",
 	settings.KeyLibraryProfile:         "Default librarian profile when a room has no pin. Auto ranks enabled service profiles. A room pin is dyna services profile library.",
-	settings.KeyLibrarySmellsPerDay:    "Most smells the librarian files for one repository in a UTC day (default 10). Zero means no cap. A pass started with dyna library wake --smells --now has no cap. Applies to the next smell.",
+	settings.KeyLibrarySmellsPerDay:    "Most smells filed for one repository each UTC day (default 10). Zero means no cap, and so does dyna library wake --smells --now.",
 	settings.KeyLibraryReadmeMaxLines:  "Longest README.md the librarian may leave (default 300 lines). Its README change fails dyna library check-readme when it is longer.",
 	settings.KeyRulesMaxChars:          "Most characters the owner allows in room rules, and in global rules, each (default 3000, at least 500). Applies to the next rule change or rules list.",
-	settings.KeyMaxCardBytes:           "Maximum HTML/JavaScript card size (default 25 MiB). Accepts 25 MiB, 25MB, 25m or a byte count; MB means MiB. Applies to the next operation, without restart.",
-	settings.KeyMaxFileBytes:           "Maximum file attachment size (default 25 MiB). Accepts 25 MiB, 25MB, 25m or a byte count; MB means MiB. Post total is derived for eight files or one card and seven files. Applies to the next operation.",
+	settings.KeyMaxCardBytes:           "Largest HTML/JavaScript card (default 25 MiB). Accepts 25 MiB, 25MB, 25m or a byte count; MB means MiB. Applies to the next operation.",
+	settings.KeyMaxFileBytes:           "Largest file attachment (default 25 MiB). Accepts 25 MiB, 25MB, 25m or a byte count; MB means MiB. Applies to the next operation.",
 	settings.KeyAutoCheck:              "Check for a new dyna release at most once a day and tell you about it.",
 	settings.KeyDatabaseCallerDetail:   "Count database writes by caller for the engine status. Adds a stack walk to each write; off by default.",
 	settings.KeyRunsRetention:          "Delete archived workflow runs after this time without changes. Use 0 or off to disable deletion.",
 	settings.KeyWorktreesRetention:     "Which isolated worktrees a workflow keeps after an agent ends: changed ones, all, or none.",
 	settings.KeyLocalCIRemote:          "SSH destination and absolute cache directory for local CI. Applies to the next CI run.",
 	settings.KeyWorktreesRoot:          "Directory for new managed worktrees. Defaults to ~/.dyna-worktrees. Applies to the next worktree creation.",
-	settings.KeyWorktreesMinFreeBytes:  "Minimum free disk space before worktree maintenance runs garbage collection. Defaults to 10 GiB. Accepts byte counts and sizes such as 10 GiB; zero disables the free-space trigger. A RAM-backed file system such as /tmp is judged by its share of free space instead.",
-	settings.KeyRootProfile:            "Profile for new internal root sessions (default opus). Existing roots keep their profile. Missing or disabled profiles use the default profile.",
+	settings.KeyWorktreesMinFreeBytes:  "Free disk space below which worktree cleanup runs (default 10 GiB). Zero turns this check off. A RAM-backed file system such as /tmp uses its share of free space.",
+	settings.KeyRootProfile:            "Profile for new internal root sessions (default opus). Existing roots keep theirs. A missing or disabled profile uses the default.",
 	settings.KeySubagentMaxDepth:       "How deep sessions may nest. Your own sessions are depth 1.",
 	settings.KeyPiCodeMode:             "Pi code mode: only routes tools through codemode; off restores Pi's previous behavior. Applies to new processes.",
-	settings.KeyIdleUnloadMinutes:      "Minutes an idle session's Pi or Claude process stays loaded before Dyna stops it to free memory. The next turn resumes the same session in a new process, which takes a few seconds longer to start. 0 keeps processes loaded. Applies to the next process Dyna starts.",
+	settings.KeyIdleUnloadMinutes:      "Minutes before an idle Pi or Claude process unloads to free memory. Its next turn starts a new process. 0 keeps processes loaded.",
 	settings.KeySteeringToolWait:       "How long a message to a busy session waits for a running tool before it interrupts the tool.",
 }
 
@@ -69,6 +69,10 @@ func Items() ([]Item, error) {
 			options = append(options, p.Name)
 			labels = append(labels, fmt.Sprintf("%s · thrift %d", p.Name, p.Cost))
 		}
+	}
+	voiceNeeds := make([]string, 0, len(settings.VoiceProviders))
+	for _, name := range settings.VoiceProviders {
+		voiceNeeds = append(voiceNeeds, settings.VoiceProviderNeeds[name])
 	}
 	rootOptions, rootLabels := []string{""}, []string{"Default profile"}
 	if profiles != nil {
@@ -110,7 +114,7 @@ func Items() ([]Item, error) {
 		{Key: settings.KeyPiCodeMode, Value: v.PiCodeMode, Source: v.Source(settings.KeyPiCodeMode), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyIdleUnloadMinutes, Value: v.HarnessIdleUnloadMinutes, Source: v.Source(settings.KeyIdleUnloadMinutes), LiveVsRestart: settings.LiveNextOperation, Kind: "int"},
 		{Key: settings.KeySteeringToolWait, Value: v.SteeringMaxToolWait.String(), Source: v.Source(settings.KeySteeringToolWait), LiveVsRestart: settings.LiveNextOpen, Kind: "duration"},
-		{Key: settings.KeyVoiceProvider, Value: v.VoiceProvider, Source: v.Source(settings.KeyVoiceProvider), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: settings.VoiceProviders},
+		{Key: settings.KeyVoiceProvider, Value: v.VoiceProvider, Source: v.Source(settings.KeyVoiceProvider), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: settings.VoiceProviders, OptionNotes: voiceNeeds},
 		{Key: settings.KeyVoiceModel, Value: v.VoiceModel, Source: v.Source(settings.KeyVoiceModel), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyVoiceURL, Value: v.VoiceURL, Source: v.Source(settings.KeyVoiceURL), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 	}
@@ -187,7 +191,7 @@ func browserItems(v settings.Values, copyMine bool, profiles []browserconfig.Pro
 		modes = append(modes, "copy-mine")
 		labels = append(labels, "Copy my Chromium profile")
 	} else {
-		modeHelp += " Copy my profile is unavailable in WSL and systemd-nspawn because the owner keyring is unavailable."
+		modeHelp += " Copy my profile is unavailable here: WSL and systemd-nspawn have no owner keyring."
 	}
 	options, names := []string{}, []string{}
 	for _, p := range profiles {

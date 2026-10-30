@@ -21,3 +21,17 @@ export function settingDisplay(item: Pick<SettingItem, 'display' | 'kind' | 'val
   if (item.kind === 'duration') return String(item.value).replace(/m0s$/, 'm').replace(/h0m/g, 'h')
   return String(item.value)
 }
+
+// A choice list longer than this shows as a select; a shorter one as a segmented control.
+const SEGMENT_LIMIT = 4
+
+// usesSelect says a choice setting shows as a select, so a long list fits its row.
+export function usesSelect(item: Pick<SettingItem, 'kind' | 'options'>): boolean {
+  return item.kind === 'select' || (item.kind === 'enum' && (item.options?.length ?? 0) > SEGMENT_LIMIT)
+}
+
+// choiceNote is the line under the control for the chosen option, or '' when it has none.
+export function choiceNote(item: Pick<SettingItem, 'options' | 'optionNotes' | 'value'>): string {
+  const index = item.options?.indexOf(String(item.value)) ?? -1
+  return index < 0 ? '' : (item.optionNotes?.[index] ?? '')
+}
