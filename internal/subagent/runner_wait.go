@@ -3,11 +3,11 @@ package subagent
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/memo"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
 )
@@ -153,18 +153,12 @@ func (r canonicalInputReader) ReadMeta(id string) (Meta, error) {
 // Callers must not modify the returned Meta's slices or maps. It holds at
 // most metaCacheSize records: a session that stops waiting leaves its entry
 // until a newer one displaces it.
-var storedMetas metaCache
+var storedMetas = metaCache{memo.New[[2]string, sessionlife.Version, Meta](metaCacheSize)}
 
 const metaCacheSize = 256
 
 type metaCache struct {
-	mu   sync.Mutex
-	byID map[[2]string]versionedMeta
-}
-
-type versionedMeta struct {
-	version sessionlife.Version
-	meta    Meta
+	cache *memo.Memo[[2]string, sessionlife.Version, Meta]
 }
 
 func (c *metaCache) load(ctx context.Context, db state.Reader, root, id string) (Meta, error) {
@@ -173,32 +167,19 @@ func (c *metaCache) load(ctx context.Context, db state.Reader, root, id string) 
 	if err != nil {
 		return Meta{}, err
 	}
-	c.mu.Lock()
-	hit, ok := c.byID[key]
-	c.mu.Unlock()
-	if ok && hit.version == version {
-		return hit.meta, nil
+	if hit, ok := c.cache.Lookup(key, version); ok {
+		return hit, nil
 	}
 	var meta Meta
-	if version, err = sessionlife.LoadStoredVersion(ctx, db, id, &meta); err != nil {
+	version, err = sessionlife.LoadStoredVersion(ctx, db, id, &meta)
+	if err != nil {
 		return Meta{}, err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if !meta.Closed.IsZero() {
-		delete(c.byID, key)
-		return meta, nil
+		c.cache.Delete(key)
+	} else {
+		c.cache.Put(key, version, meta)
 	}
-	if c.byID == nil {
-		c.byID = map[[2]string]versionedMeta{}
-	}
-	if _, kept := c.byID[key]; !kept && len(c.byID) >= metaCacheSize {
-		for old := range c.byID {
-			delete(c.byID, old)
-			break
-		}
-	}
-	c.byID[key] = versionedMeta{version, meta}
 	return meta, nil
 }
 
