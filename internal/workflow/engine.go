@@ -90,6 +90,8 @@ type Options struct {
 	ResumeFrom string
 	// RecordManifest records the calls accepted by this run for later safe replay.
 	RecordManifest bool
+	// Replay gates side effects until every recorded call is matched.
+	Replay *ReplayBarrier
 	// JobNamespace is the stable identity shared by every run in a resume
 	// chain. The workflow service sets it for durable job idempotency keys.
 	JobNamespace string
@@ -176,6 +178,9 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 			cmdSem:   newCommandLimit(o.MaxCommands),
 			profSems: map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
 		}
+	}
+	if depth == 0 && o.Replay != nil {
+		defer func() { resultErr = errors.Join(resultErr, o.Replay.Finish()) }()
 	}
 	if depth == 0 && o.RecordManifest {
 		defer func() {
@@ -637,6 +642,17 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	}
 	emitA(runstore.Event{T: "agent_start", ID: id, Label: label, Profile: prof.Name, Phase: phase, Preview: textutil.ClipOneLine(prompt, 160)})
 
+	if e.opts.Replay != nil {
+		matched, value, replayErr := e.replayCall(runstore.WorkflowCallAgent, key, id)
+		if matched || replayErr != nil {
+			if replayErr != nil {
+				reject(replayErr)
+			} else {
+				resolve(value)
+			}
+			return vm.ToValue(promise)
+		}
+	}
 	// Resume: replay a cached result without consuming a worker slot.
 	if e.opts.Cache != nil && isolation == "" {
 		if cached, ok := e.opts.Cache.pop(key); ok {
