@@ -198,4 +198,9 @@ esac
 	if err != nil || len(after) != len(before) {
 		t.Fatalf("inline messages = %d before, %d after, %v", len(before), len(after), err)
 	}
+	log, err := s.rooms.Approvals.Log(authority.Actor{Role: authority.Owner}, rec.ID, 0)
+	if err != nil || len(log) != 2 {
+		t.Fatalf("inline log = %+v, %v", log, err)
+	}
+
 }

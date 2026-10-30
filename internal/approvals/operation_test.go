@@ -4,11 +4,41 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/authority"
 )
 
 type testPayload struct{ Class Class }
+
+func TestLogKeepsDecisionRoomsAndLegacyActions(t *testing.T) {
+	f := newFixture(t)
+	r := f.create(t, ClassAgent)
+	db, err := f.service.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO approval_requests(room,id,requester,kind,class,payload,payload_hash,repository,server,command,tool,title,body,state,at,expires_at,result,created_at,updated_at) SELECT 'other',id,requester,kind,class,payload,payload_hash,repository,server,command,tool,title,body,state,at,expires_at,result,created_at,updated_at FROM approval_requests WHERE room=? AND id=?`, f.rec.ID, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO approval_decisions(room,request,actor,action,reason,at) VALUES(?,?,?,?,?,?),(?,?,?,?,?,?)`, f.rec.ID, r.ID, f.child.ID, ActionAuto, "", f.now.UnixNano(), "other", r.ID, f.child.ID, ActionDeny, "other room", f.now.UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`UPDATE approval_requests SET state='done' WHERE room=? AND id=?`, f.rec.ID, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO approval_decisions(room,request,actor,action,reason,at) VALUES(?,?,?,?,?,?)`, f.rec.ID, r.ID, f.parent.ID, ActionPass, "", f.now.Add(time.Second).UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := f.service.Log(f.owner(), f.rec.ID, 0)
+	if err != nil || len(log) != 2 || log[0].Action != ActionPass || log[1].Action != ActionAuto || log[0].State != "" {
+		t.Fatalf("legacy log = %+v, %v", log, err)
+	}
+}
 
 func TestInlineExecutionErrorOverridesZeroExit(t *testing.T) {
 	f := newFixture(t)
@@ -67,6 +97,10 @@ func TestSubmitRoutesAndAudits(t *testing.T) {
 	if err := db.QueryRow("SELECT count(*) FROM approval_requests").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("inline request count = %d, %v", count, err)
 	}
+	log, err := f.service.Log(f.owner(), f.rec.ID, 0)
+	if err != nil || len(log) != 2 {
+		t.Fatalf("inline log = %+v, %v", log, err)
+	}
 	held, err := Submit(ctx, f.service, f.actor(f.child), "test.write", testPayload{ClassAgent})
 	if err != nil || held.Request.At != "parent" {
 		t.Fatalf("held = %+v, %v", held, err)
@@ -76,11 +110,19 @@ func TestSubmitRoutesAndAudits(t *testing.T) {
 	}
 	<-runs
 	f.service.inflight.Wait()
+	log, err = f.service.Log(f.owner(), f.rec.ID, 0)
+	if err != nil || len(log) != 3 {
+		t.Fatalf("combined log = %+v, %v", log, err)
+	}
 	owner, err := Submit(ctx, f.service, f.actor(f.root), "test.write", testPayload{ClassOwner})
 	if err != nil || owner.Request.At != Owner {
 		t.Fatalf("owner = %+v, %v", owner, err)
 	}
 	if _, err := Submit(ctx, f.service, f.actor(f.root), "test.write", testPayload{}); err == nil {
 		t.Fatal("refusal succeeded")
+	}
+	log, err = f.service.Log(f.owner(), f.rec.ID, 0)
+	if err != nil || len(log) != 3 {
+		t.Fatalf("refusal log = %+v, %v", log, err)
 	}
 }
