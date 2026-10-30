@@ -94,7 +94,7 @@ func TestHookDocumentMigrationConvertsAliasesAndRecipesOnce(t *testing.T) {
 		t.Fatalf("migrated document = %s; want %s", got, expected)
 	}
 	var version int
-	if err := db.QueryRow("SELECT value FROM meta WHERE key='hooks.documents'").Scan(&version); err != nil || version != 4 {
+	if err := db.QueryRow("SELECT value FROM meta WHERE key='hooks.documents'").Scan(&version); err != nil || version != 5 {
 		t.Fatalf("version = %d, %v", version, err)
 	}
 	var stamp, pending string

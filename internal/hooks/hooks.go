@@ -56,6 +56,8 @@ type document struct {
 }
 type state struct {
 	Main string `json:"main,omitempty"`
+	// PendingMain remains until the engine observer acknowledges this commit.
+	PendingMain string `json:"pendingMain,omitempty"`
 	// Fetched holds the last origin fetch of each local checkout, keyed by its
 	// root. Clones of one remote share a repository ID, so each clone needs its own.
 	Fetched map[string]time.Time `json:"fetched,omitempty"`
@@ -84,6 +86,10 @@ type Service struct {
 	// Checkouts lists the room checkouts that follow their default branch; tests
 	// replace it. The default reads the repositories of every room.
 	Checkouts func(context.Context) ([]string, error)
+	// MainUpdated observes a default branch change without a repository hook.
+	MainUpdated func(context.Context, Event) error
+	// ExtraRepositories adds repositories that need default branch observation.
+	ExtraRepositories func(context.Context) ([]string, error)
 }
 
 // New returns a hook service that seeds and runs the given automatic hooks.
