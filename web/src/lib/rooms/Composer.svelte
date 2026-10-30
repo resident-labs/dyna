@@ -41,6 +41,7 @@
     slash?: boolean
     arg?: SlashCommand
     reference?: boolean
+    profile?: boolean
     file?: boolean
   }
 
@@ -52,8 +53,7 @@
     profiles?: ProfileChoice[]
     // commands are app actions typed as "/name [arg]": [{name, hint, arg?,
     // options?() -> [{value, hint}], pickRuns?, run(arg) -> error text or
-    // nothing}]. A profile with the same name wins, so "/<profile> <task>"
-    // always starts a session.
+    // nothing}].
     commands?: SlashCommand[]
     reply?: Post | null
     onopenfile?: (attachment: Attachment & { roomId?: string; postId?: string }) => void
@@ -84,7 +84,7 @@
   // repo's three kinds.
   const repoEntries = (entries: DirectoryEntries['entries']): RepoEntry[] =>
     (entries ?? []).map((e) => ({ path: e.path, name: e.name, kind: e.kind === 'dir' ? 'dir' : e.kind === 'symlink' ? 'symlink' : 'file' }))
-  const fileDirectory = $derived(token && !token.slash && !token.arg && !token.reference ? fileMentionDirectory(token.text) : null)
+  const fileDirectory = $derived(token && !token.slash && !token.arg && !token.reference && !token.profile ? fileMentionDirectory(token.text) : null)
   $effect(() => {
     const directory = fileDirectory
     const id = room.id
@@ -133,12 +133,22 @@
     if (!references.some((item) => referenceKey(item) === referenceKey(reference))) references = [...references, reference]
     field?.focus()
   }
-  const selectedProfile = $derived(profiles.find((profile) => draft.startsWith('/' + profile.name + ' ') || draft === '/' + profile.name))
+  let selectedProfile = $state<ProfileChoice | null>(null)
+  $effect(() => { room.id; selectedProfile = null })
   async function openCommands() {
     if (!draft.startsWith('/')) draft = '/' + draft
     await tick()
     field?.focus()
     field?.setSelectionRange(1, 1)
+    findToken()
+  }
+  async function openModels() {
+    const pos = field?.selectionStart ?? draft.length
+    const prefix = pos && !/\s/.test(draft[pos - 1] ?? '') ? ' !' : '!'
+    draft = draft.slice(0, pos) + prefix + draft.slice(pos)
+    await tick()
+    field?.focus()
+    field?.setSelectionRange(pos + prefix.length, pos + prefix.length)
     findToken()
   }
   async function openReferences() {
@@ -167,7 +177,7 @@
   $effect(() => { onpending(busy || $attachments.items.length > 0 || !!forwarding || references.length > 0) })
   onDestroy(() => { attachments.destroy(); onpending(false) })
 
-  // App commands a profile does not shadow, and the one the draft names.
+  // Discover room commands and match the command in the draft.
   let roomCommands = $state<import('../../api.ts').SlashCommand[]>([])
   let commandLoad: Promise<boolean> | null = null
   let commandRoom = ''
@@ -185,8 +195,8 @@
     })
     return commandLoad
   }
-  let appCommands = $derived(commands.filter((c) => !profiles.some((p) => p.name === c.name)))
-  let availableRoomCommands = $derived(roomCommands.filter((c) => !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
+  let appCommands = $derived(commands)
+  let availableRoomCommands = $derived(roomCommands.filter((c) => !appCommands.some((a) => a.name === c.name)))
   let roomCommand = $derived(matchCommand(availableRoomCommands, draft))
   let command = $derived.by(() => {
     const m = draft.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/)
@@ -197,14 +207,12 @@
   let commandLine = $derived(command ? `/${command.c.name}${command.c.arg && !command.arg ? ` ‹${command.c.arg}›` : ''} · ${command.c.hint}` : '')
   const composerMode = $derived(command ? 'Command' : selectedProfile ? 'Start session' : 'Message')
 
-  // A token is "@name" anywhere, "/profile" or "/command" at the very start
-  // of the draft (only a draft's first word can start a session), or the
-  // argument of a command that offers choices.
+  // A token selects a mention, model, reference, command, or command argument.
   let options = $derived<MenuOption[]>(
+    token?.profile ? profiles.map((p) => ({ value: '!' + p.name, group: 'Pick a model', hint: profileHint(p) })) :
     token?.reference ? matchReferences(referenceOptions, token.text).map((reference) => ({ value: referenceKey(reference), hint: reference.title + ' · ' + reference.state, label: referenceLabel(reference), reference })) :
     token?.arg ? token.arg.options?.() ?? [] :
     token?.slash ? [
-      ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: profileHint(p) })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
       ...commandOptions(availableRoomCommands),
     ] :
@@ -215,7 +223,7 @@
     if (!t) return []
     if (t.reference) return options
     if (t.arg) return options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(t.text.toLowerCase())).slice(0, 8)
-    if (t.slash) return matchMentions(options, t.text, 20)
+    if (t.slash || t.profile) return matchMentions(options, t.text, 20)
     return [...matchMentions(options.filter((option) => !option.file), t.text, 6), ...options.filter((option) => option.file)]
   })
   // One line for every token kind that finds nothing, so "/cl" and "@xx"
@@ -225,7 +233,8 @@
     if (!t || matches.length) return ''
     if (fileDirectory !== null && (fileLoading || fileError)) return ''
     if (t.reference) return referenceLoading ? 'Loading PRs and issues…' : `No PRs or issues match “${t.text}”.`
-    if (t.slash) return `No session or command matches “${t.text}”.`
+    if (t.profile) return `No model matches “${t.text}”.`
+    if (t.slash) return `No command matches “${t.text}”.`
     if (t.arg) return `No choice matches “${t.text}”.`
     return `No sessions or files match “${t.text}”.`
   })
@@ -262,6 +271,7 @@
   // The Go parser decides who a draft goes to; ask it shortly after typing stops.
   $effect(() => {
     const text = draft
+    const profile = selectedProfile
     const prepare = prepareText
     const id = room.id
     const files = $attachments.items.length
@@ -270,7 +280,7 @@
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
-        const prepared = await prepare(text)
+        const prepared = await prepare(profile ? `/${profile.name} ${text}` : text)
         const result = await api.preview(id, prepared)
         if (!cancelled) preview = result
       } catch {
@@ -316,6 +326,7 @@
       token = { start, end: pos, text, slash: true }
     }
     else if (withArg && pos >= argStart && !draft.slice(argStart, pos).includes(' ')) token = { start: argStart, end: pos, text: draft.slice(argStart, pos), arg: withArg }
+    else if (text.startsWith('!')) token = { start, end: pos, text, profile: true }
     else if (text.startsWith('#')) { token = { start, end: pos, text, reference: true }; fetchReferences() }
     else token = text.startsWith('@') ? { start, end: pos, text } : null
     pick = 0
@@ -332,6 +343,16 @@
       draft = draft.slice(0, start) + text + draft.slice(token.end)
       token = text.startsWith('@') ? { start, end: caret, text, file: true } : null
       pick = 0
+      await tick()
+      field?.focus()
+      field?.setSelectionRange(caret, caret)
+      return
+    }
+    if (token.profile) {
+      selectedProfile = profiles.find((profile) => '!' + profile.name === choice) ?? null
+      const caret = token.start
+      draft = draft.slice(0, token.start) + draft.slice(token.end)
+      token = null
       await tick()
       field?.focus()
       field?.setSelectionRange(caret, caret)
@@ -383,6 +404,10 @@
 
   async function send() {
     if (busy) return
+    if (!selectedProfile && !command && !roomCommand && profiles.some((profile) => draft === '/' + profile.name || draft.startsWith('/' + profile.name + ' '))) {
+      error = 'Pick a model with ! instead.'
+      return
+    }
     if (draft.startsWith('/') && !draft.startsWith('//') && !command && !selectedProfile) {
       const original = draft
       busy = true
@@ -391,7 +416,7 @@
       busy = false
       if (!loaded || !active || draft !== original) return
     }
-    if (roomCommand && !forwarding) {
+    if (roomCommand && !forwarding && !selectedProfile) {
       if (roomCommand.item.source === 'skill' && !roomCommand.text) { error = 'Type a message for the skill.'; return }
       if (references.length || $attachments.items.length || reply) { error = 'Send the command without files, references, or a reply.'; return }
       error = ''
@@ -412,7 +437,7 @@
       finally { busy = false; await tick(); field?.focus() }
       return
     }
-    if (command && !forwarding) {
+    if (command && !forwarding && !selectedProfile) {
       if (references.length) { error = 'Remove references before running a command.'; return }
       return runCommand(command.c, command.arg)
     }
@@ -421,13 +446,14 @@
     busy = true
     try {
       const atts = $attachments.atts
-      const text = await prepareText(draft)
+      const text = await prepareText(selectedProfile ? `/${selectedProfile.name} ${draft}` : draft)
       if (!active) return
       const sent = await onsend(text, atts, forwarding?.id ?? '', references)
       if (sent?.kind === 'spawn') {
         const m = sent.spawn.member
         note = sent.spawn.warning ? `Started @${m.name}, but ${sent.spawn.warning.replace(/^the session started, but /, '')}` : `Started @${m.name} · ${m.profile}`
         setTimeout(() => (note = ''), 4000)
+        selectedProfile = null
         return
       }
       const res = sent?.post
@@ -515,9 +541,10 @@
     <div class="file-status" role="status">{fileLoading ? 'Loading files…' : 'Files unavailable: ' + fileError}</div>
   {/if}
   <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message ${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command && !roomCommand))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
-    {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
+    {#snippet context()}{#if selectedProfile}<button type="button" class="profile-chip" aria-label="Remove selected model" onclick={() => (selectedProfile = null)}>{selectedProfile.name} ×</button>{/if}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
     {#snippet tools()}
-      <button class="command-chip" type="button" aria-label="Browse commands" title="Type / for sessions and commands" disabled={busy} onclick={openCommands}>/</button>
+      <button class="command-chip" type="button" aria-label="Browse commands" title="Browse commands" disabled={busy} onclick={openCommands}>/</button>
+      <button class="model-button" type="button" aria-label="Pick a model" title="Pick a model" disabled={busy} onclick={openModels}>!</button>
     {/snippet}
   </ComposerBox>
   {#if error || failed || command || roomCommand || spawn || wakeLine || note}
@@ -546,6 +573,10 @@
 <style>
   .file-status { padding: 5px var(--s2); font-size: var(--t-sm); color: var(--muted); }
   .pop.status { padding: 8px var(--s3); font-size: var(--t-sm); color: var(--muted); }
+  .profile-chip { color: var(--muted); padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  .model-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
+  .model-button:hover { background: var(--hover); color: var(--ink); }
+  .model-button:active { background: var(--select); }
   .command-chip { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   .command-chip:hover { background: var(--hover); color: var(--ink); }
   .command-chip:active { background: var(--select); }
