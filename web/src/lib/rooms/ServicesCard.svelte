@@ -14,8 +14,11 @@
 
   let { onsettings }: { onsettings: (pane: string) => void } = $props()
 
-  let rows = $state<ServiceCardRow[]>([])
-  let error = $state('')
+  let services = $state<ServiceCardRow[]>([])
+  let hooks = $state<ServiceCardRow[]>([])
+  let serviceError = $state('')
+  let hookError = $state('')
+  const rows = $derived([...services, ...hooks])
   let folded = $state(true) // the healthy line is closed
   let open = $state('') // id of the hook row whose log shows
   let logs = $state<Record<string, string>>({}) // hook/run id -> log text
@@ -23,16 +26,17 @@
   let groups = $derived(groupRows(rows))
 
   // A part that fails to load leaves the other parts on screen.
-  async function load() {
-    try {
-      const hooks = hookRows((await api.globalHookSummary()) ?? [])
-      const registry = readRegistry(await api.serviceRegistry('', ''))
-      if (!registry) throw new Error('The service registry returned an invalid list.')
-      rows = [...serviceRows(registry), ...hooks]
-      error = ''
-    } catch (e) {
-      error = errorText(e)
-    }
+  function load(): void {
+    api.globalHookSummary().then((summary) => {
+      hooks = hookRows(summary ?? [])
+      hookError = ''
+    }, (e: unknown) => { hookError = errorText(e) })
+    api.serviceRegistry('', '').then((value) => {
+      const registry = readRegistry(value)
+      if (!registry) { serviceError = 'The service registry returned an invalid list.'; return }
+      services = serviceRows(registry)
+      serviceError = ''
+    }, (e: unknown) => { serviceError = errorText(e) })
   }
 
   async function show(row: ServiceCardRow) {
@@ -67,7 +71,7 @@
   {#if open === row.id && row.log?.kind === 'hook'}<pre class="log mono">{logs[logKey(row.log)] ?? 'Loading…'}</pre>{/if}
 {/snippet}
 
-{#if rows.length || error}
+{#if rows.length || serviceError || hookError}
   <Card title="Services" count={rows.length}>
     <div class="scroll">
       {#each groups.failing as row (row.id)}{@render line(row)}{/each}
@@ -78,7 +82,8 @@
         </Row>
         {#if !folded}{#each groups.healthy as row (row.id)}{@render line(row)}{/each}{/if}
       {/if}
-      {#if error}<p class="err small" role="alert">Could not read services: {error}</p>{/if}
+      {#if serviceError}<p class="err small" role="alert">Could not read services: {serviceError}</p>{/if}
+      {#if hookError}<p class="err small" role="alert">Could not read hooks: {hookError}</p>{/if}
     </div>
   </Card>
 {/if}
