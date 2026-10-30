@@ -820,6 +820,7 @@ func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
 }
 
 func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
+	t.Setenv("DYNA_CI_TRAILER", "")
 	dir := t.TempDir()
 	for _, name := range []string{"docker", "git"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
@@ -1220,6 +1221,7 @@ esac
 // cleanup kills it, and the test reaps it, so no timer and no zombie decide the
 // result.
 func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
+	t.Setenv("DYNA_CI_TRAILER", "")
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
