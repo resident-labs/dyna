@@ -78,7 +78,7 @@ func (m *Manager) wrapUp(ctx context.Context, id string, n int) {
 		markChecked()
 		return
 	}
-	prompt := "[DYNA WRAP-UP] Before you go idle:\n- " + strings.Join(lines, "\n- ") + "\nReply in one line. Do not start new work."
+	prompt := "[DYNA WRAP-UP] Before you go idle:\n- " + strings.Join(lines, "\n- ") + "\nReply in one line and leave new work for a later turn."
 	if result, err := m.Wake(ctx, id, WakeOptions{continuation: prompt, wrapUp: true}); err == nil && !result.Steered && !result.Paused {
 		markChecked()
 	}

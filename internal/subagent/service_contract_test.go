@@ -12,7 +12,7 @@ func TestServiceContractUsesOneClassification(t *testing.T) {
 	for _, role := range []string{"reviewer", RoleLibrarian, ""} {
 		meta := Meta{Service: true, Role: role, ID: "service", RoomID: "room", ParentSession: "parent"}
 		contract := meta.ServiceContract()
-		if !contract.Active() || !strings.Contains(contract.Prompt(), "Do not post status messages") {
+		if !contract.Active() || !strings.Contains(contract.Prompt(), "Keep posts to the allowed outputs") {
 			t.Fatalf("missing contract for %q", role)
 		}
 		if !contract.CrewTarget(Meta{ID: "parent", RoomID: "room"}) || !contract.CrewTarget(Meta{ID: "child", ParentSession: "service", RoomID: "room"}) {
