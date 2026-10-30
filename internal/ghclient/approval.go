@@ -102,22 +102,23 @@ func decideCommand(ctx context.Context, cmd *exec.Cmd, r repository, login strin
 // failed read makes Classify choose owner; it never widens the agent class.
 func approvalAuthor(ctx context.Context, binary, dir string, ref ItemRef) (string, error) {
 	var args []string
-	if ref.Kind == ItemComment {
+	switch ref.Kind {
+	case ItemComment:
 		args = []string{"api", "--hostname", ref.Host, "repos/" + ref.Repo + "/" + ref.Target}
-	} else {
-		switch ref.Kind {
-		case ItemIssue, ItemPR, ItemRun:
-			args = []string{string(ref.Kind), "view"}
-		default:
-			return "", errors.New("unknown approval item kind")
+	case ItemRun:
+		// gh run view has no actor JSON field, so the REST run gives the actor.
+		if _, err := strconv.ParseUint(ref.Target, 10, 64); err != nil {
+			return "", fmt.Errorf("run %q is not a numeric ID", ref.Target)
 		}
+		args = []string{"api", "--hostname", ref.Host, "repos/" + ref.Repo + "/actions/runs/" + ref.Target}
+	case ItemIssue, ItemPR:
+		args = []string{string(ref.Kind), "view"}
 		if ref.Target != "" {
 			args = append(args, ref.Target)
 		}
 		args = append(args, "--repo", ref.Host+"/"+ref.Repo, "--json", "author")
-		if ref.Kind == ItemRun {
-			args[len(args)-1] = "actor"
-		}
+	default:
+		return "", errors.New("unknown approval item kind")
 	}
 	cmd := Command(ctx, binary, dir, args...)
 	stdout, stderr := boundedio.New(64*1024), boundedio.New(8192)
