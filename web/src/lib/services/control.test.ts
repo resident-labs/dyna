@@ -4,7 +4,7 @@ import { switchWrite, type ControlApi } from './control.ts'
 import type { RegistryService } from '../api/service.ts'
 
 const service = (id: RegistryService['id']): RegistryService =>
-  ({ id, group: 'this-computer', label: id, description: '', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [] })
+  ({ id, scope: 'global', group: 'this-computer', label: id, description: '', state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [] })
 
 test('each switch writes through the call that owns it, and the librarian has none', async () => {
   const calls: string[] = []

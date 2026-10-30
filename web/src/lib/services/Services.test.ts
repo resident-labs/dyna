@@ -19,7 +19,7 @@ type Harness = {
 // shared global, because the page runs as its own module instance.
 declare global { var __writes: string[] }
 const api = `
-const row = (id, group, extra) => ({ id, group, label: id, description: 'Does ' + id, state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [], ...extra })
+const row = (id, group, extra) => ({ id, group, scope: 'room', label: id, description: 'Does ' + id, state: 'on', detail: '', count: 0, profile: '', session: '', settingsKeys: [], ...extra })
 const record = (w) => { globalThis.__writes = (globalThis.__writes || []).concat(w) }
 export const api = {
   serviceRegistry: () => Promise.resolve([
@@ -49,7 +49,7 @@ export const openExternal = () => {}
 
 test('the page shows the registry groups in order, Not set up last, then Hooks without service hooks; only the failed service has a pill', async () => {
   globalThis.__writes = []
-  const dom = installDom()
+  const dom = installDom({ ResizeObserver: class { observe() {} unobserve() {} disconnect() {} } })
   const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/Services', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/Services')
   const root = need(document.getElementById('app'))
   let app: Mounted | undefined

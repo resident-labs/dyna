@@ -28,7 +28,7 @@ function fakeChromium() {
     newPage: async () => page,
   };
   const browser = {
-    newContext: async () => context,
+    newContext: async options => { seen.context = options; return context; },
     close: async () => { seen.closed = true; },
   };
   return {
@@ -64,6 +64,7 @@ test('runQA launches headless Chromium and adds the device cookie without loggin
   await runQA(parseConfig(config({ Steps: [{ goto: '/' }] })), fake.chromium, line => lines.push(line));
   assert.equal(fake.seen.launch.executablePath, '/usr/bin/chromium');
   assert.equal(fake.seen.launch.headless, true);
+  assert.equal(fake.seen.context.reducedMotion, 'reduce');
   assert.deepEqual(fake.seen.cookies, [{ name: 'dyna_device', value: token, url: origin }]);
   assert.equal(lines.join('\n').includes(token), false);
   assert.equal(fake.seen.closed, true);

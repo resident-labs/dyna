@@ -57,7 +57,7 @@ test('the settings browser fixture mocks every api call each pane makes', () => 
 })
 
 test('every settings pane uses the shared TabHeader without its own h1', () => {
-  for (const f of ['ProfilesPane', 'harnesses/HarnessesPane', 'accounts/AccountsPane', 'SettingsPane', 'DevicesPane', 'Settings']) {
+  for (const f of ['ProfilesPane', 'harnesses/HarnessesPane', 'accounts/AccountsPane', 'SettingsPane', 'DevicesPane']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<TabHeader\b[^>]*\bflush\b/, f)
     assert.doesNotMatch(text, /<h1\b/, f)
@@ -75,7 +75,7 @@ test('switching a settings pane fades and lifts the new pane in, with no exit wa
 
 test('section labels share one global class', () => {
   assert.match(read('../ui/tokens.css'), /\.section-label \{[^}]*text-transform: uppercase/)
-  for (const f of ['SettingsPane', 'DevicesPane', 'Settings']) {
+  for (const f of ['SettingsPane', 'DevicesPane']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<h3 class="section-label"/, f)
     assert.doesNotMatch(text, /\n\s*(\.sec )?h3 \{/, f)

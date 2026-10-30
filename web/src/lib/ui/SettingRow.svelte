@@ -25,7 +25,7 @@
   let { title, description = '', status, control, children, disabled = false, id, expanded = false, ontoggle, inline = false, stacked = false }: Props = $props()
 </script>
 
-<div class="setting" class:disabled class:inline class:stacked class:toggles={!!ontoggle} aria-disabled={disabled || undefined} {id}>
+<div class="setting" class:disabled class:inline class:stacked class:expanded class:toggles={!!ontoggle} aria-disabled={disabled || undefined} {id}>
   <div class="grid">
     <div class="text">
       <h3>{#if ontoggle}<button class="toggle" aria-expanded={expanded} onclick={ontoggle}>{title}</button>{:else}{title}{/if}</h3>
@@ -40,6 +40,8 @@
 <style>
   .setting { container-type: inline-size; padding: var(--s3) var(--s4); min-width: 0; }
   .disabled { opacity: 0.64; }
+  .toggles.expanded { background: var(--select); }
+  .toggles.expanded .toggle::after { background: transparent; }
   .grid { display: flex; flex-direction: column; gap: var(--s3); }
   .text { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
   h3 { margin: 0; font-size: var(--t-body); font-weight: var(--w-medium); line-height: var(--leading-tight); color: var(--ink); }
@@ -64,6 +66,8 @@
   .toggle:focus-visible::after { box-shadow: 0 0 0 2px var(--iris-edge); }
   @container (min-width: 32rem) {
     .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(10rem, auto); align-items: center; gap: var(--s6); }
+    .grid:has(> .control:empty) { grid-template-columns: minmax(0, 1fr); }
+    .control:empty { display: none; }
     .control { justify-content: flex-end; }
     .stacked > .grid { display: flex; align-items: stretch; }
     .stacked > .grid > .control { justify-content: flex-start; }
