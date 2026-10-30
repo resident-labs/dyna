@@ -13,6 +13,8 @@ import (
 
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
+
+	"golang.org/x/sys/unix"
 )
 
 // A daemon writes its pid file only after it starts. Destroying the computer
@@ -91,12 +93,26 @@ func TestOfflineDestroyWaitsForEmptyEnvironment(t *testing.T) {
 		return fired
 	}
 	t.Cleanup(func() { browserEnvTick = tick })
+	signalled := false
+	killBrowser := killBrowserProcess
+	killBrowserProcess = func(p int, sig unix.Signal) error {
+		if p == pid && sig == unix.SIGTERM {
+			signalled = true
+		}
+		return nil
+	}
+	t.Cleanup(func() { killBrowserProcess = killBrowser })
+	stopTick := browserStopTick
+	browserStopTick = func() <-chan time.Time {
+		fired := make(chan time.Time)
+		close(fired)
+		return fired
+	}
+	t.Cleanup(func() { browserStopTick = stopTick })
 	if err := destroyOffline(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-child.done:
-	case <-time.After(8 * time.Second):
+	if !signalled {
 		t.Fatal("destroy skipped a daemon whose environment read as empty")
 	}
 	if reads < 4 {
