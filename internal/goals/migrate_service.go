@@ -18,7 +18,7 @@ func (s *Store) migrateServiceGoals(conn *sql.Conn, _ int) error {
 	if count == 0 {
 		return nil
 	}
-	revision, err := revisionCounter.Bump(ctx, conn)
+	revision, err := revisionCounter.Next(ctx, conn)
 	if err != nil {
 		return err
 	}
