@@ -85,10 +85,10 @@ func runCmd() *cobra.Command {
 	var node, commit, image, memory, ioWeight, network string
 	var artifacts, resourceNames, labels, mounts, devices []string
 	var cpus int
-	var host, workspace bool
+	var workspace bool
 	var timeout, idle time.Duration
 	c := &cobra.Command{
-		Use:   "run [--node N | --label L] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG | --host] [--network none] [--mount NAME:PATH] [--device PATH] -- CMD",
+		Use:   "run [--node N | --label L] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG] [--network none] [--mount NAME:PATH] [--device PATH] -- CMD",
 		Short: "Submit a job and return",
 		Args: func(c *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -100,9 +100,6 @@ func runCmd() *cobra.Command {
 			if workspace && commit == "" {
 				return fmt.Errorf("--workspace needs --commit")
 			}
-			if host && image != "" {
-				return fmt.Errorf("a job runs either on the host or in an image, not both")
-			}
 			if ioWeight != "" && ioWeight != "heavy" && ioWeight != "light" {
 				return fmt.Errorf("io must be heavy or light, not %q", ioWeight)
 			}
@@ -112,7 +109,7 @@ func runCmd() *cobra.Command {
 			}
 			request := callspec.RunJobInput{
 				Node: node, Labels: labels, Command: args, Repo: repo, Ref: commit,
-				Host: host, Image: image, Network: network, Mounts: mounts, Devices: devices,
+				Image: image, Network: network, Mounts: mounts, Devices: devices,
 				CPUs: cpus, Memory: memory,
 				Timeout: int(timeout / time.Second), IO: ioWeight, Artifacts: artifacts,
 				Resources: resourceNames, Workspace: workspace,
@@ -140,7 +137,6 @@ func runCmd() *cobra.Command {
 	c.Flags().StringVar(&network, "network", "", "container network; only none is supported")
 	c.Flags().StringArrayVar(&mounts, "mount", nil, "mount NAME:CONTAINER_PATH[:ro|rw] from this room's node registrations (repeatable)")
 	c.Flags().StringArrayVar(&devices, "device", nil, "allow this container to use a device on this room's node allow list (repeatable)")
-	c.Flags().BoolVar(&host, "host", false, "run the command on the node itself (the default without --image)")
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
 	c.Flags().StringVar(&ioWeight, "io", "light", "the job's IO weight: a node runs only a few heavy jobs at once")
 	c.Flags().StringArrayVar(&resourceNames, "resource", nil, "hold one unit of this named resource for the job's whole run (repeatable)")
