@@ -1,10 +1,17 @@
 import { Worker } from "node:worker_threads";
 import * as codemode from "@earendil-works/pi-codemode";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { getQuickJSWasmPath } from "../src/config.ts";
 import { executeCodemode } from "../src/extensions/codemode/execute.ts";
 
 const terminate = Worker.prototype.terminate;
 const terminations = new Map<Worker, (code: number) => void>();
+
+// Compile the wasm before any timed script runs. A cold load can outlast a 200 ms script timeout,
+// which would settle the script before its worker exists and leave nothing to terminate.
+beforeAll(async () => {
+	await codemode.loadQuickJSWasm(getQuickJSWasmPath());
+});
 
 beforeEach(() => {
 	vi.spyOn(Worker.prototype, "terminate").mockImplementation(function (this: Worker) {
