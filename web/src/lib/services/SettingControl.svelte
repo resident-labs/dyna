@@ -1,6 +1,7 @@
 <script lang="ts">
   // The control for one `dyna settings` key, chosen by its kind. A switch or a
   // choice saves on change; text saves on Enter or blur, and Escape drops it.
+  // A refused save keeps the text, so the owner can correct it.
   import Switch from '../ui/Switch.svelte'
   import Segmented from '../ui/Segmented.svelte'
   import { settingDisplay } from '../settings/display.ts'
@@ -13,9 +14,12 @@
 
   async function commit() {
     if (draft === null || draft === settingDisplay(item)) { draft = null; return }
-    await onsave(draft)
-    draft = null
+    await onsave(draft).then(() => { draft = null }, () => {})
   }
+
+  // A choice saves at once; the row shows a refusal, and the control keeps
+  // the stored value.
+  const choose = (value: string): void => { onsave(value).catch(() => {}) }
 
   function key(e: KeyboardEvent & { currentTarget: HTMLInputElement }) {
     if (e.key === 'Enter') e.currentTarget.blur()
@@ -24,11 +28,11 @@
 </script>
 
 {#if item.kind === 'bool'}
-  <Switch on={item.value === true} {label} disabled={fixed} onchange={(on: boolean) => onsave(String(on))} />
+  <Switch on={item.value === true} {label} disabled={fixed} onchange={(on: boolean) => choose(String(on))} />
 {:else if item.kind === 'enum'}
-  <Segmented options={(item.options ?? []).map((o) => [o, o])} value={String(item.value)} {label} onchange={(o: string) => onsave(o)} />
+  <Segmented options={(item.options ?? []).map((o) => [o, o])} value={String(item.value)} {label} onchange={(o: string) => choose(o)} />
 {:else if item.kind === 'select'}
-  <select class="field" aria-label={label} disabled={fixed} value={String(item.value)} onchange={(e) => onsave(e.currentTarget.value)}>
+  <select class="field" aria-label={label} disabled={fixed} value={String(item.value)} onchange={(e) => choose(e.currentTarget.value)}>
     {#each item.options ?? [] as value, i}<option {value}>{item.optionLabels?.[i] ?? value}</option>{/each}
   </select>
 {:else}
