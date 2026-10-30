@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { factsOf, pillOf, sections } from './model.ts'
+import { factsOf, minutes, pillOf, sections } from './model.ts'
+import { minutesText } from '../ui/format.ts'
 import type { RegistryService } from '../api/service.ts'
 
 const service = (s: Partial<RegistryService> & Pick<RegistryService, 'id' | 'group'>): RegistryService =>
@@ -37,4 +38,9 @@ test('only a failed service gets the coral pill; quiet and working states stay m
   const working = service({ id: 'reviewer', group: 'pull-requests', state: 'running', detail: 'working', count: 1, switch: { on: true } })
   assert.equal(pillOf(working), null)
   assert.deepEqual(factsOf(working, now, true), ['Working · 1 waiting'])
+})
+
+test('a schedule time reads and writes the way the settings show a time', () => {
+  assert.deepEqual(['10m', '1h', '1h30m', '1d', '90'].map(minutes), [10, 60, 90, 1440, null])
+  assert.deepEqual([10, 60, 90, 1440].map(minutesText), ['10m', '1h', '1h30m', '1d'])
 })
