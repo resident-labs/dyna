@@ -19,7 +19,7 @@ import (
 // TODO: legacy/shim remove later — the previous release reads each moved
 // store's JSON file and writes it too, so a downgrade keeps every record
 // (requirement 24) and an old binary's write reaches dyna.db. Mirror,
-// ImportIfForeign, ForgetMirrors and the state_mirrors table go with item 31,
+// ForgetMirrors and the state_mirrors table go with item 31,
 // when no binary from before dyna.db is alive.
 
 // A stamp names the copy that Mirror last wrote for a key: version is the
@@ -106,15 +106,9 @@ var mirrorStep = func(step, path string) error { return nil }
 // renames it onto path, then stamps its version and clears pending. A crash
 // before the rename leaves the old copy, which matches the stamp; a crash
 // after it leaves our copy, which matches pending. Either way the record
-// wins. Mirror never renames over a file another binary wrote: it leaves
-// that file for ImportIfForeign. So a store calls ImportIfForeign before its
-// own read-modify-write, then writes, then calls Mirror; if it committed
-// first, the next import would write the old binary's older content over the
-// new record. mirrorMu orders one process only: a store whose record is
-// written from several processes (the CLI and the engine) holds its own
-// record lock across ImportIfForeign, its Write and Mirror, as turns hold the
-// session lock. A writer that edits the file in place, keeping its inode, is
-// not detected; old binaries write by rename.
+// wins. Mirror never renames over a file another binary wrote. A writer
+// that edits the file in place, keeping its inode, is not detected; old
+// binaries write by rename.
 func (w *Writer) Mirror(ctx context.Context, key, path string, write func(io.Writer) error) error {
 	w.mirrorMu.Lock()
 	defer w.mirrorMu.Unlock()
@@ -170,7 +164,7 @@ ON CONFLICT(key) DO UPDATE SET pending = excluded.pending`, key, fileID(ours))
 			return err
 		}
 		// Another writer renamed its file onto path after us: leave it
-		// unstamped, so ImportIfForeign reads it.
+		// unstamped, so migration can identify it as foreign.
 		if os.SameFile(ours, now) {
 			version = store.VersionOf(now).Key()
 		}
@@ -216,7 +210,7 @@ func writeTemp(path string, write func(io.Writer) error) (string, os.FileInfo, e
 // Foreign reports whether path holds a file that another binary wrote: it
 // exists and is not a copy that Mirror wrote for key. It takes no lock and
 // writes nothing, so a store can check cheaply before it takes its record
-// lock for ImportIfForeign.
+// lock for a migration.
 func (w *Writer) Foreign(ctx context.Context, key, path string) (bool, error) {
 	info, err := importSource(ctx, w.db, key, path)
 	return info != nil, err
@@ -240,64 +234,7 @@ func (w *Writer) MirrorVersion(ctx context.Context, key, path string) (string, e
 	return stamp.version, nil
 }
 
-// ImportIfForeign reads path into state when another binary wrote it: the
-// file exists and is not a copy that Mirror wrote. Call it after Write
-// returns, never inside a Write fn: mirrorMu is taken before the writer
-// lock. read stores raw on conn, in the same transaction that saves the new
-// stamp, and must use only conn. The stamp is checked again inside that
-// transaction, which also reads the file, under the writer lock, so two
-// racing readers import once. path must be a regular file, not a symlink.
-// It reports whether it imported.
-//
-// read returns ErrSkipForeign for a file it cannot use, such as one that is
-// not valid JSON. ImportIfForeign then keeps the record as it is, logs the
-// file once and stamps its version, so it is not tried again. A later write
-// by another binary lands as a new file and is imported.
-func (w *Writer) ImportIfForeign(ctx context.Context, key, path string, read func(conn *sql.Conn, raw []byte) error) (bool, error) {
-	if foreign, err := w.Foreign(ctx, key, path); err != nil || !foreign {
-		return false, err
-	}
-	w.mirrorMu.Lock()
-	defer w.mirrorMu.Unlock()
-	imported := false
-	err := w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		info, err := importSource(ctx, conn, key, path)
-		if err != nil || info == nil {
-			return err
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		err = read(conn, raw)
-		skipped := errors.Is(err, ErrSkipForeign)
-		if err != nil && !skipped {
-			return err
-		}
-		if err := setStamp(ctx, conn, key, store.VersionOf(info).Key()); err != nil {
-			return err
-		}
-		if skipped {
-			w.logf("state: skipped %s for %s: %v", path, key, err)
-			return nil
-		}
-		imported = true
-		return nil
-	})
-	if errors.Is(err, ErrRecordExists) {
-		return false, nil
-	}
-	return imported, err
-}
-
-// ErrRecordExists is what an ImportIfForeign read returns when it imports
-// only a missing record and finds the record there. ImportIfForeign then
-// writes nothing and leaves the file unstamped, so a later import under the
-// record's lock still reads it.
-var ErrRecordExists = errors.New("the record exists")
-
-// ErrSkipForeign is what an ImportIfForeign read returns for a file it
-// cannot use. Wrap it to say why.
+// ErrSkipForeign marks a migration file that cannot be used. Wrap it to say why.
 var ErrSkipForeign = errors.New("the file was skipped")
 
 // regularFile is path's info, or nil when there is no file.
