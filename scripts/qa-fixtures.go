@@ -62,7 +62,8 @@ func qaSeedFixtures(dataDir string) error {
 	if err := accounts.Update(func(state *accountstore.State) error {
 		for i, provider := range providers {
 			id := fmt.Sprintf("%032x", i+1)
-			windows := []accountstore.Window{{ID: "weekly", Label: "Weekly", UsedPercent: &used, ResetsAt: now.Add(72 * time.Hour).Format(time.RFC3339)}}
+			// A week period lets each weekly bar show its pace word.
+			windows := []accountstore.Window{{ID: "weekly", Label: "Weekly", Period: "week", UsedPercent: &used, ResetsAt: now.Add(72 * time.Hour).Format(time.RFC3339)}}
 			// Anthropic also reports a five-hour window, so one card shows several rows.
 			if provider == accountstore.ProviderAnthropic {
 				windows = []accountstore.Window{{ID: "five_hour", Label: "5-hour", UsedPercent: &fiveHour, ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339)}, windows[0]}
