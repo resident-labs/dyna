@@ -75,7 +75,7 @@ func TestLibrarianCommandOutput(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"enable", "--room", "room"}, "librarian on for " + repo + " in room room; hook librarian-main runs dyna library wake\n"},
+		{[]string{"enable", "--room", "room"}, "librarian on for " + repo + " in room room; the engine wakes it when main updates\n"},
 		{[]string{"disable"}, "librarian off for " + repo + "\n"},
 		{[]string{"wake"}, "librarian current up to date\n"},
 		{[]string{"wake", "--json"}, "{\"action\":\"current\",\"reason\":\"up to date\"}\n"},

@@ -307,6 +307,39 @@ func TestCommandTimeout(t *testing.T) {
 	}
 }
 
+func TestMainUpdateObserverRetriesAfterFailure(t *testing.T) {
+	s, repo := setup(t)
+	ctx := t.Context()
+	now := time.Now()
+	calls := 0
+	s.MainUpdated = func(_ context.Context, e Event) error {
+		calls++
+		if calls == 1 {
+			return errors.New("temporary failure")
+		}
+		if e.SHA == "" {
+			t.Fatal("retry lost the commit")
+		}
+		return nil
+	}
+	if err := s.Tick(ctx, repo, now); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "next")
+	if err := s.Tick(ctx, repo, now.Add(time.Minute)); err == nil {
+		t.Fatal("expected observer error")
+	}
+	if err := s.Tick(ctx, repo, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tick(ctx, repo, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("observer called %d times, want 2", calls)
+	}
+}
+
 func TestScheduleAndMainMovementClaimOnce(t *testing.T) {
 	s, repo := setup(t)
 	ctx := context.Background()

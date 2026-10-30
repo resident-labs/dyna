@@ -158,6 +158,7 @@ export interface Inputs {
   laneSync: SyncInfoByRepo | null
   // deferred is when the engine's librarian wake is due; null when none is deferred.
   deferred: string | null
+  libraryLastRun?: string | null
   repo: string
 }
 
@@ -415,7 +416,6 @@ export function buildRows(i: Inputs): Row[] {
   // Librarian activation stays local; the browser shows status and profile.
   const repos = libraryRepos(i.settings)
   const libraryOn = repos === null || !i.repo ? null : repos.includes(i.repo)
-  const main = hook(i.hooks, 'librarian-main')
   const library = svc('librarian')
   const libraryWait = library?.reason
   const libraryWaiting = libraryWait?.startsWith('waiting:') ? libraryWait : ''
@@ -432,7 +432,7 @@ export function buildRows(i: Inputs): Row[] {
       ? { id: 'library.profile', value: library.pinned, options: ['', ...library.profiles] }
       : i.settings ? { id: 'library.profile', value: i.settings['library.profile'] ?? '', options: [] } : null,
     value: turnsOf(i.usage, 'librarian'),
-    last: main?.lastRun?.startedAt ?? '',
+    last: i.libraryLastRun ?? '',
     // The next pass is the engine's deferred wake; nothing shows when no pass is deferred.
     nextAt: libraryOn ? i.deferred ?? '' : '',
   })
