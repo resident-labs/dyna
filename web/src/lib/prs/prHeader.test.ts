@@ -32,7 +32,7 @@ test('the header holds no author, reviewer or rules line', async () => {
     assert.match(h, /T #7/)
     assert.doesNotMatch(h, /\bOpen\b/)
     assert.match(h, /a → b/)
-    assert.equal(head(target).querySelectorAll('.chip').length, 0, 'no redundant status chip')
+    assert.equal(head(target).querySelectorAll('.pr-chip').length, 0, 'no redundant status label')
     assert.ok(button(head(target), 'GitHub ↗'))
     assert.equal(target.querySelector('.factsline'), null)
     // The description still names the author.
