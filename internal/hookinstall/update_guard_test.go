@@ -7,10 +7,26 @@ import (
 	"time"
 
 	prstate "dyna-agent/internal/pr/state"
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/updaterservice"
 )
+
+func TestUpdateBusyWorkflowRuns(t *testing.T) {
+	storetest.Isolate(t)
+	for _, tc := range []struct {
+		status string
+		busy   bool
+	}{{"running", true}, {"ok", false}, {"error", false}, {"canceled", false}, {"interrupted", false}} {
+		runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: "wf_guard", RoomID: "another-room", Status: tc.status})
+		busy, err := updateBusy(t.Context())
+		if err != nil || busy != tc.busy {
+			t.Fatalf("status %s: busy=%v err=%v", tc.status, busy, err)
+		}
+	}
+}
 
 func TestForcedUpdateRecordsRestart(t *testing.T) {
 	s, j := fixture(t)
