@@ -35,6 +35,25 @@ func (r Ref) Key() string {
 	return fmt.Sprintf("%s/%s#%d", strings.ToLower(r.Host), strings.ToLower(r.Repo), r.Number)
 }
 func (r Ref) URL() string { return fmt.Sprintf("https://%s/%s/pull/%d", r.Host, r.Repo, r.Number) }
+
+// parseItemURL reads an http or https URL that names an item as
+// owner/repo/segment/number, such as a pull request or an issue. It reports
+// false when the URL has another shape.
+func parseItemURL(text, segment string) (Ref, bool) {
+	u, err := url.Parse(text)
+	if err != nil || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" {
+		return Ref{}, false
+	}
+	p := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(p) != 4 || p[2] != segment {
+		return Ref{}, false
+	}
+	n, err := strconv.Atoi(p[3])
+	if err != nil || n < 1 {
+		return Ref{}, false
+	}
+	return Ref{u.Host, p[0] + "/" + p[1], n}, true
+}
 func (r Ref) path(suffix string) string {
 	return fmt.Sprintf("repos/%s/pulls/%d%s", r.Repo, r.Number, suffix)
 }
@@ -495,19 +514,11 @@ func (g GitHub) pages(ctx context.Context, r Ref, path string, out any) error {
 }
 func (g GitHub) Resolve(ctx context.Context, text, dir string) (Ref, error) {
 	if strings.Contains(text, "://") {
-		u, err := url.Parse(text)
-		if err != nil || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") {
-			return Ref{}, fmt.Errorf("invalid PR URL")
-		}
-		p := strings.Split(strings.Trim(u.Path, "/"), "/")
-		if len(p) != 4 || p[2] != "pull" {
+		ref, ok := parseItemURL(text, "pull")
+		if !ok {
 			return Ref{}, fmt.Errorf("expected a pull request URL")
 		}
-		n, err := strconv.Atoi(p[3])
-		if err != nil || n < 1 || u.Hostname() == "" {
-			return Ref{}, fmt.Errorf("invalid PR number")
-		}
-		return Ref{u.Host, p[0] + "/" + p[1], n}, nil
+		return ref, nil
 	}
 	n, err := strconv.Atoi(text)
 	if err != nil || n < 1 {
