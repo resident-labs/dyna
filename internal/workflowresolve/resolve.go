@@ -53,6 +53,16 @@ func Resolve(ref, scriptPath, workDir, workflowDir string) (string, string, erro
 		}
 		candidates = append(candidates, filepath.Join(workDir, ref))
 	}
+	if scriptPath != "" || filepath.Base(ref) != ref {
+		paths := candidates
+		candidates = nil
+		for _, path := range paths {
+			candidates = append(candidates, path)
+			if filepath.Ext(path) != ".js" {
+				candidates = append(candidates, path+".js")
+			}
+		}
+	}
 	for _, path := range candidates {
 		info, err := os.Stat(path)
 		if err == nil && info.Mode().IsRegular() {

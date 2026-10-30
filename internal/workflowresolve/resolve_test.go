@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestResolveNestedExtensionlessPath(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "parent.js")
+	child := filepath.Join(root, "child.js")
+	if err := os.WriteFile(child, []byte("nested"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"child", "./child"} {
+		path, source, err := Resolve(ref, script, root, "")
+		if err != nil || path != child || source != "nested" {
+			t.Fatalf("%s: %q %q %v", ref, path, source, err)
+		}
+	}
+}
+
 func TestResolvePrecedence(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, ".dyna", "workflows")
