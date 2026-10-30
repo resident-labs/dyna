@@ -154,7 +154,7 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 	if err := s.store.CreateRoom(ctx, room, req.Name, now); err != nil {
 		return contract.RoomCreateResponse{}, failure(err)
 	}
-	if _, e := s.SessionStart(ctx, caller, contract.SessionStartRequest{Room: room, Name: "root", Profile: req.RootProfile}); e != nil {
+	if _, e := s.startSession(ctx, caller, contract.SessionStartRequest{Room: room, Name: "root", Profile: req.RootProfile}, true); e != nil {
 		return contract.RoomCreateResponse{}, e
 	}
 	return contract.RoomCreateResponse{Room: room}, nil
@@ -194,6 +194,10 @@ func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req 
 }
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
+	return s.startSession(ctx, caller, req, false)
+}
+
+func (s *Service) startSession(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest, root bool) (contract.SessionStartResponse, *contract.Error) {
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.SessionStartResponse{}, e
 	}
@@ -204,11 +208,9 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	tree, err := s.store.RoomTree(ctx, req.Room)
-	if err != nil {
-		return contract.SessionStartResponse{}, failure(err)
-	}
+	if err != nil { return contract.SessionStartResponse{}, failure(err) }
 	parent := contract.SessionID("")
-	if tree.Root() != "" || caller.Kind != contract.PrincipalOwner || req.Parent != "" {
+	if !root {
 		parent, err = tree.ParentFor(caller, req.Parent)
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())
