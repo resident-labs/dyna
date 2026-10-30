@@ -71,6 +71,8 @@ export interface CodemodeToolOptions {
 	getMode?: () => CodemodeMode;
 	/** Token budget for tool declarations in the description. Default: {@link DEFAULT_CODEMODE_INLINE_BUDGET}. */
 	getInlineBudget?: () => number | undefined;
+	/** Heap limit of each script's VM in bytes. Default: 256 MiB. */
+	memoryLimitBytes?: number;
 }
 
 const TEXT_OUTPUT_SCHEMA: CodemodeJsonSchema = { type: "string" };
