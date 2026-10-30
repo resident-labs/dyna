@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -521,7 +522,8 @@ func (s *Service) postRequested(r Request) error {
 	if err != nil {
 		return err
 	}
-	ev := room.ApprovalRequestedEvent{RequestID: r.ID, Kind: string(r.Kind), Class: room.ApprovalClass(r.Class), Requester: requester.Address(), At: at, Repository: r.Repository, Server: r.Server, Command: r.Command, Tool: r.Tool, Title: r.Title, Body: r.Body}
+	detail := fmt.Sprintf("Decide it with: dyna request approve %s\nRefuse it with: dyna request deny %s --why \"<why>\"", r.ID, r.ID)
+	ev := room.ApprovalRequestedEvent{RequestID: r.ID, Kind: string(r.Kind), Class: room.ApprovalClass(r.Class), Requester: requester.Address(), At: at, Repository: r.Repository, Server: r.Server, Command: r.Command, Tool: r.Tool, Title: r.Title, Body: r.Body, Detail: detail}
 	_, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: r.Room, Event: ev, To: []string{at}, SessionIDs: sessionIDs, NoWake: r.atID == Owner})
 	return err
 }
