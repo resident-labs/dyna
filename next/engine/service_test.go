@@ -117,13 +117,18 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	closeCtx, cancel := context.WithCancel(ctx)
-	s.boxes = cancelOnRemove{cancel: cancel}
-	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: child.Session}); e == nil {
-		t.Fatal("expected canceled child close")
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: child.Session}); e != nil {
+		t.Fatal(e)
 	}
-	s.boxes = fakeBoxes{}
+	childAck := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	if _, e := s.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
+		t.Fatal(e)
+	}
+	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
+	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	if _, err := s.store.Session(ctx, child.Session); !errors.Is(err, sql.ErrNoRows) {
@@ -497,6 +502,9 @@ func TestBoxLifecycleEmitsTransitions(t *testing.T) {
 		t.Fatal(e)
 	}
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	list, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})

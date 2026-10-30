@@ -558,8 +558,8 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		s.admit.Unlock()
 		return failure(err)
 	}
-	// A pending box has no agent and no transcript bytes, so it never acknowledges an archive.
-	pending := current.State == contract.BoxPending
+	// A pending or creating box has no agent yet, so it has no transcript bytes and never acknowledges an archive.
+	noAgent := current.State == contract.BoxPending || current.State == contract.BoxCreating
 	if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
 		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
 		if err != nil {
@@ -585,7 +585,7 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 	if err != nil {
 		return failure(err)
 	}
-	if !discard && !pending && current.State != contract.BoxDeleted {
+	if !discard && !noAgent && current.State != contract.BoxDeleted {
 		if current.Reason != "" {
 			if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
 				return failure(err)
