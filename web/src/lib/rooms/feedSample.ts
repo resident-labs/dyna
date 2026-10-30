@@ -12,7 +12,7 @@ let n = 0
 const post = (from: string, speaker: string, text: string, extra: Partial<SamplePost> = {}): SamplePost => ({ id: `sample_${++n}`, roomId: sampleRoom.id, wake: false, ts: t + n * 60000, from, speaker, text, to: ['dyna-agent'], fromHue: n % 8, kind: 'message', owner: false, completion: false, ...extra })
 const done = (who: string, turn: number, text: string, kind = 'completed'): SamplePost => post(`dyna-agent:${who}`, who, `dyna-agent:${who} turn ${turn} ${kind}. Result: ${text}`, { kind, completion: true, turn })
 
-export const sampleRoom: Room = { id: 'preview', name: 'dyna-agent', lastActivity: '', unread: 0, running: 0, members: 1, pinned: false, pinOrder: 0, archived: false }
+export const sampleRoom: Room = { color: 'crimson', id: 'preview', name: 'dyna-agent', lastActivity: '', unread: 0, running: 0, members: 1, pinned: false, pinOrder: 0, archived: false }
 
 // Workflow script posts for the feed fixture (?workflow=1): the data form, a
 // post from before runs were stored on the post, and a long inline value.

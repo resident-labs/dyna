@@ -8,7 +8,7 @@ import { setVisuals } from '../src/lib/files/visuals.svelte.ts'
 import type { CallRequest } from '../src/lib/voice/callRequests.ts'
 import type { Attachment, Post, Room } from '../src/lib/api/room.ts'
 
-const room: Room = { id: 'room_20260101-000000-abcdef12', name: 'alpha', lastActivity: '', unread: 0, running: 0, members: 0, pinned: false, pinOrder: 0, archived: false }
+const room: Room = { color: 'crimson', id: 'room_20260101-000000-abcdef12', name: 'alpha', lastActivity: '', unread: 0, running: 0, members: 0, pinned: false, pinOrder: 0, archived: false }
 const id = '225353899c144463bce35c27'
 const noop = (): void => {}
 export const manifest = `Attachments (1), saved with the room:\n- home-design.md · text/markdown · 6.1 KB · /home/a/rooms/r/files/${id}.txt\nOpen each file with your file-reading tool.\nIf a path does not open: dyna attachment get r <id> prints it, and -o - writes the bytes.`
