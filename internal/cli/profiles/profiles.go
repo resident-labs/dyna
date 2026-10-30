@@ -273,7 +273,21 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(newCheckCommand(), list, show, add, set, rm, enable, disable, setDefault)
+	edit := &cobra.Command{
+		Use:   "edit <name> <field> <value>",
+		Short: "Change one profile field and keep the rest, including env",
+		Long:  "Change one profile field and keep every other field, including env. Fields: description, fallback, compact (tokens), taste, intelligence, cost, diagnostics, timeout, limit-concurrent, limit-calls.",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(c *cobra.Command, a []string) error {
+			if err := engineClient().Call(c.Context(), "EditProfileField", []any{a[0], a[1], a[2]}, nil); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "edited profile %q: %s = %s\n", a[0], a[1], a[2])
+			return nil
+		},
+	}
+
+	cmd.AddCommand(newCheckCommand(), list, show, add, set, edit, rm, enable, disable, setDefault)
 	return cmd
 }
 
