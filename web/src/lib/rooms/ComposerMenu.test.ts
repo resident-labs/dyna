@@ -9,7 +9,7 @@ const code = await bundle({ component: '../rooms/Composer',
   api: `export const api = {
     preview: async () => ({mentions: [], wakes: []}),
     commands: async () => globalThis.loadCommands ? globalThis.loadCommands() : [{ name: 'review', source: 'skill', description: 'Review code', args: [] }],
-    runCommand: async (...args) => { globalThis.commandArgs = args; return { message: { id: 'sent' }, deliveries: [], failed: [{ to: 'lead', error: 'unavailable' }] } },
+    runCommand: async (...args) => { globalThis.commandArgs = args; globalThis.commandCalls = (globalThis.commandCalls || 0) + 1; return { message: { id: 'sent' }, deliveries: [], failed: [{ to: 'lead', error: 'unavailable' }] } },
     listEntries: async () => ({entries: []}),
   }`,
 })
@@ -60,6 +60,7 @@ test('sending waits for the command list', async () => {
   let resolve: (value: unknown[]) => void = () => {}
   Reflect.set(globalThis, 'loadCommands', () => new Promise<unknown[]>((done) => { resolve = done }))
   Reflect.deleteProperty(globalThis, 'commandArgs')
+  Reflect.set(globalThis, 'commandCalls', 0)
   const ui = await importBundle(code, 'Composer')
   const target = need(document.getElementById('app'))
   let normalSends = 0
@@ -72,11 +73,50 @@ test('sending waits for the command list', async () => {
     input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await settle()
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
     assert.equal(normalSends, 0)
     assert.equal(Reflect.get(globalThis, 'commandArgs'), undefined)
     resolve([{ name: 'review', source: 'skill', description: 'Review code', args: [] }])
     await settle()
     assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'review', 'check'])
+    assert.equal(Reflect.get(globalThis, 'commandCalls'), 1)
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    Reflect.deleteProperty(globalThis, 'loadCommands')
+    for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('known profiles and app commands work while discovery is unavailable', async () => {
+  const dom = installDom()
+  Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
+  Reflect.set(globalThis, 'loadCommands', () => Promise.reject(new Error('unavailable')))
+  const ui = await importBundle(code, 'Composer')
+  const target = need(document.getElementById('app'))
+  const sent: string[] = []
+  const commands: string[] = []
+  const component = ui.mount(ui.default, { target, props: {
+    room: { id: 'r', name: 'room' }, profiles,
+    commands: [{ id: 'help', name: 'help', hint: 'Show help', run: () => { commands.push('help') } }],
+    onsend: async (text: string) => { sent.push(text); return {} },
+  } })
+  try {
+    await settle()
+    const input = element<HTMLTextAreaElement>(target, 'textarea')
+    const submit = async (value: string) => {
+      input.value = value
+      input.setSelectionRange(value.length, value.length)
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      await settle()
+    }
+    await submit('/sol inspect')
+    assert.deepEqual(sent, ['/sol inspect'])
+    await submit('/help')
+    assert.deepEqual(commands, ['help'])
   } finally {
     await ui.unmount(component)
     dom.window.close()
