@@ -8,6 +8,34 @@ import (
 	"dyna-agent/internal/account/store"
 )
 
+func TestAccountQuotaAvailability(t *testing.T) {
+	a := testAccounts(t)
+	now := time.Now()
+	check := func(want QuotaAvailability) {
+		t.Helper()
+		got, err := a.QuotaAvailability("claude-code", store.ProviderAnthropic, "repo", now)
+		if err != nil || got.State != want {
+			t.Fatalf("availability = %q, error %v; want %q", got, err, want)
+		}
+	}
+	check(QuotaUnknown)
+	n := signedClaude(t, a, "account", "aaaaaaaa-bbbb-cccc-dddd-000000000001")
+	check(QuotaUnknown)
+	used := 10.0
+	setReading(t, a, n, &store.Observation{ObservedAt: now, Windows: []store.Window{{ID: "seven_day", UsedPercent: &used}}})
+	check(QuotaAvailable)
+	setReading(t, a, n, &store.Observation{ObservedAt: now.Add(-store.SavedUsageWindow - time.Second), Windows: []store.Window{{ID: "seven_day", UsedPercent: &used}}})
+	check(QuotaUnknown)
+	scopes, err := a.scopes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scopes.MarkLimited(n.ID, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	check(QuotaUnavailable)
+}
+
 // D-110: a quota-exhausted account keeps its harness out of automatic profile
 // ranking, because the saved limit outlasts the turn's own failure backoff.
 func TestQuotaHeldOut(t *testing.T) {

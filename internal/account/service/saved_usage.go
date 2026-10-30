@@ -21,7 +21,7 @@ const activeUsageTTL = 2 * time.Minute
 // reaches this age, so one window decides both what the page calls stale and
 // when the timer probes again. Two different windows left an inactive reading
 // shown as stale for most of every cycle (D-148).
-const inactiveUsageWindow = 10 * time.Minute
+const inactiveUsageWindow = accountstore.SavedUsageWindow
 
 func savedTTL(string) time.Duration {
 	return inactiveUsageWindow
