@@ -399,8 +399,7 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 		return nil, nil
 	}
 	if err != nil {
-		log.Printf("local CI %s: read started checks: %v", r.Node.Name, err)
-		return nil, nil
+		return nil, fmt.Errorf("read started checks on %s: %w", r.Node.Name, err)
 	}
 	giveBack := func() {
 		if e := store.releaseAttachment(context.WithoutCancel(ctx), repo, sha, r.Node.Name, att.RunID); e != nil {

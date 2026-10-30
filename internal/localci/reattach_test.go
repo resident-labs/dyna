@@ -520,3 +520,38 @@ func TestEarlyFailureLeavesTheRecordForTheNextRun(t *testing.T) {
 		t.Fatalf("records = %+v, %v, want the one record still free to take", rows, err)
 	}
 }
+
+// Recovery must not spend a long node-call timeout on every stale check.
+func TestStaleRecoveryBoundsTeardown(t *testing.T) {
+	f := newReattachFixture(t)
+	f.stopEngineDuringRun(t)
+	f.machine.VanishAll()
+	close(f.release)
+	command := f.runner.Command
+	saw := false
+	f.runner.Command = func(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "no_container()") {
+			saw = true
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) > 6*time.Minute {
+				t.Error("stale recovery has no bounded deadline")
+			}
+			return context.DeadlineExceeded
+		}
+		return command(ctx, dir, in, out, stderr, name, args...)
+	}
+	_, err := f.runner.Run(t.Context(), f.request)
+	if !saw || err == nil {
+		t.Fatalf("teardown attempted = %v, error = %v", saw, err)
+	}
+}
+
+func TestCancelledRecoveryDoesNotStartFresh(t *testing.T) {
+	f := newReattachFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := f.runner.resumeRun(ctx, Store{DataDir: f.runner.DataDir}, f.request.Repo, strings.Repeat("a", 40), "cache", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("recovery error = %v, want cancellation", err)
+	}
+}
