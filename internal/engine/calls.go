@@ -263,6 +263,13 @@ func bindings(s services) []websvc.Binding {
 			}
 			return s.hooks.Run(ctx, hooks.Event{Repo: repo, Session: by, Room: authority.Of(ctx).Room, Branch: "sample-branch", SHA: "0000000000000000000000000000000000000000", PR: "1"}, name)
 		}},
+		{Name: "RunService", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) (hooks.Run, error) {
+			by, err := actor(ctx)
+			if err != nil {
+				return hooks.Run{}, err
+			}
+			return s.hooks.RunBuiltin(ctx, hooks.Event{Session: by}, name)
+		}},
 		{Name: "RunGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) (hooks.Run, error) {
 			by, err := actor(ctx)
 			if err != nil {

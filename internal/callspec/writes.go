@@ -166,6 +166,7 @@ var WriteCalls = map[string]bool{
 	"RunGlobalHook":               true,
 	"RunHook":                     true,
 	"RunJob":                      true,
+	"RunService":                  true,
 	"RunnerClaimInput":            true,
 	"RunnerCompleteTurn":          true,
 	"RunnerFinish":                true,

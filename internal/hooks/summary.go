@@ -17,10 +17,26 @@ func (s Service) Summaries(ctx context.Context, repo string) ([]Summary, error) 
 	return s.summaries(ctx, r.ID)
 }
 
-// SummariesGlobal lists the global hooks: the built-ins the engine seeds and
-// the hooks the owner added for the whole machine.
+// SummariesGlobal lists the global hooks the owner added for the machine.
 func (s Service) SummariesGlobal(ctx context.Context) ([]Summary, error) {
-	return s.summaries(ctx, globalKey)
+	all, err := s.summaries(ctx, globalKey)
+	return keepSummaries(all, false), err
+}
+
+// SummariesBuiltin lists the built-in hooks that schedule the engine's services.
+func (s Service) SummariesBuiltin(ctx context.Context) ([]Summary, error) {
+	all, err := s.summaries(ctx, globalKey)
+	return keepSummaries(all, true), err
+}
+
+func keepSummaries(all []Summary, builtin bool) []Summary {
+	out := make([]Summary, 0, len(all))
+	for _, sum := range all {
+		if (sum.Hook.Builtin != "") == builtin {
+			out = append(out, sum)
+		}
+	}
+	return out
 }
 
 func (s Service) summaries(ctx context.Context, id string) ([]Summary, error) {

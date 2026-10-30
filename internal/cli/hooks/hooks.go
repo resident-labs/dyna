@@ -23,7 +23,7 @@ func NewCommand() *cobra.Command {
 		repo, err = filepath.Abs(repo)
 		return err
 	}
-	list := &cobra.Command{Use: "list", Short: "List hook settings and audit records", Long: "Print all hooks for this repository as JSON, including commands, events, and who added or edited them. --global prints the hooks that belong to the machine, including the built-in ones.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: "list", Short: "List hook settings and audit records", Long: "Print all hooks for this repository as JSON, including commands, events, and who added or edited them. --global prints the hooks you added for the whole machine. Built-in passes are services: see `dyna services list`.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		var h []hooks.Hook
 		method, args := "ListHooks", []any{repo}
 		if listGlobal {
@@ -35,7 +35,7 @@ func NewCommand() *cobra.Command {
 		}
 		return json.NewEncoder(c.OutOrStdout()).Encode(h)
 	}}
-	list.Flags().BoolVar(&listGlobal, "global", false, "list the hooks that belong to the machine, including built-ins")
+	list.Flags().BoolVar(&listGlobal, "global", false, "list the hooks you added for the whole machine")
 	var h hooks.Hook
 	var timeout time.Duration
 	var recipe string
@@ -96,7 +96,7 @@ func NewCommand() *cobra.Command {
 	for _, verb := range []string{"run", "test"} {
 		sample := verb == "test"
 		var runGlobal bool
-		command := &cobra.Command{Use: verb + " <name>", Short: map[bool]string{true: "Test a hook with sample event values", false: "Run a hook with current Git values"}[sample], Long: map[bool]string{true: "Run the real hook command with sample branch, SHA, and PR values. Keep the real caller identity. This command has real effects and waits for the result.", false: "Run the real hook command now with current Git values. Wait for the result and save its log. --global runs a hook that belongs to the machine, such as a built-in one."}[sample], Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		command := &cobra.Command{Use: verb + " <name>", Short: map[bool]string{true: "Test a hook with sample event values", false: "Run a hook with current Git values"}[sample], Long: map[bool]string{true: "Run the real hook command with sample branch, SHA, and PR values. Keep the real caller identity. This command has real effects and waits for the result.", false: "Run the real hook command now with current Git values. Wait for the result and save its log. --global runs a hook you added for the whole machine. Built-in passes are services: run them with `dyna services run`."}[sample], Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
 			if runGlobal {
 				var ev hooks.Run
 				err := engineclient.New("").Call(c.Context(), "RunGlobalHook", []any{a[0]}, &ev)
@@ -117,7 +117,7 @@ func NewCommand() *cobra.Command {
 			return err
 		}}
 		if !sample {
-			command.Flags().BoolVar(&runGlobal, "global", false, "run a hook that belongs to the machine, such as a built-in one")
+			command.Flags().BoolVar(&runGlobal, "global", false, "run a hook you added for the whole machine")
 		}
 		cmd.AddCommand(command)
 	}
@@ -156,7 +156,7 @@ func editCommand(repo *string) *cobra.Command {
 	var h hooks.Hook
 	var timeout time.Duration
 	var disabled, editGlobal bool
-	cmd := &cobra.Command{Use: "edit <name>", Short: "Change selected hook settings", Long: "Change only the supplied fields of an existing repository hook. Keep its creator and creation time, and record who edited it and when. --global edits a hook that belongs to the machine: a built-in keeps its action, so only its interval, timeout and switch can change. Agents must tell the owner about the change.", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "edit <name>", Short: "Change selected hook settings", Long: "Change only the supplied fields of an existing repository hook. Keep its creator and creation time, and record who edited it and when. --global edits a hook you added for the whole machine, or the interval of a built-in service pass. Agents must tell the owner about the change.", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		patch := hooks.Patch{}
 		changed := false
 		for _, field := range []struct {
