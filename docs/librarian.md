@@ -19,7 +19,8 @@ When a wake must wait for the librarian's interval, the engine keeps that
 wake itself. It runs one in-process timer per repository and fires the wake
 when the interval ends. No hook or schedule runs it. When the engine starts,
 it restores that wake for every enabled repository, so a restart keeps the
-pending pass.
+pending pass. A deferred wake that fails retries after ten minutes, up to five
+times, so a transient error does not drop the pass.
 
 When the engine starts, it removes the `librarian-merged` and `librarian-batch`
 hooks that earlier releases added. Each one ran `dyna library wake`.
