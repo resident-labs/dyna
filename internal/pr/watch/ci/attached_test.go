@@ -1,4 +1,4 @@
-package watch
+package ci
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 // attachedRegistry answers which machine holds a commit's checks.
 type attachedRegistry struct {
-	localCIRegistry
+	Registry
 	node string
 }
 
@@ -25,8 +25,8 @@ func TestRunIsPinnedToTheMachineThatHoldsItsChecks(t *testing.T) {
 		{Name: "hermeslab", Enabled: true},
 		{Name: "pve", Enabled: true},
 	}
-	pin := func(registry localCIRegistry, skip string, nodes []localci.Node) string {
-		node := pinnedCINode(t.Context(), registry, "/repo", "abc", nodes, "room", skip)
+	pin := func(registry Registry, skip string, nodes []localci.Node) string {
+		node := PinnedCINode(t.Context(), registry, "/repo", "abc", nodes, "room", skip)
 		if node == nil {
 			return ""
 		}
