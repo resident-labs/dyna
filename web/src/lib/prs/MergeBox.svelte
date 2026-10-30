@@ -31,6 +31,14 @@
   }
   let { change, box, onchecks = null, onread = null, onresume = null, ontrack = null, onreviewer = null, onauthor = null, onrules = null, onuntrack = null, actions = null }: Props = $props()
   const icons: Record<string, string> = { ok: '✓', bad: '✕', run: '●' }
+  let rows = $derived.by(() => {
+    const headline = box.rows.find((r) => r.id === 'merge')
+    const checks = box.rows.find((r) => r.id === 'checks')
+    if (!headline) return box.rows
+    const isCI = ['Waiting for CI', 'CI missing', 'Blocked: CI failed'].includes(headline.title)
+    const first = isCI && checks ? { ...headline, note: checks.note, link: 'checks' } : headline
+    return [first, ...box.rows.filter((r) => r.id !== 'merge' && (!isCI || r.id !== 'checks'))]
+  })
   let busy = $state(false)
   async function untrack() {
     busy = true
@@ -43,7 +51,7 @@
 </script>
 
 <section class="mbox" aria-label="Merge">
-  {#each box.rows as r (r.id)}
+  {#each rows as r (r.id)}
     {@const live = r.link === 'session' && !!onreviewer}
     {@const go = r.link === 'checks' ? onchecks : live ? onreviewer : r.link ? onread : null}
     <div class="r">
@@ -68,7 +76,7 @@
   .r:first-child { border-top: 0; }
   .ic { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: var(--t-sm); font-weight: 600; background: var(--raise); color: var(--muted); }
   .ic.ok { background: rgba(151, 201, 149, 0.15); color: var(--sage); }
-  .ic.run { background: rgba(230, 192, 123, 0.15); color: var(--gold); }
+  .ic.run { background: var(--raise); color: var(--muted); }
   .ic.bad { background: rgba(239, 138, 128, 0.15); color: var(--coral); }
   .what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .what b { font-size: var(--t-body); font-weight: 600; }
