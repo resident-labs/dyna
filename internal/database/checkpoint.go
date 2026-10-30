@@ -82,8 +82,8 @@ func logSlowCheckpoint(d time.Duration, c Checkpointed, dataDir string) {
 	if d < slowCheckpoint && !c.Busy {
 		return
 	}
-	logf("database: slow checkpoint took %s (busy %t, frames %d, moved %d, WAL %d bytes)",
-		d.Round(time.Millisecond), c.Busy, c.Frames, c.Moved, walBytes(dataDir))
+	logf("database: slow checkpoint took %s (busy %t, frames %d, moved %d, WAL %d bytes); %s",
+		d.Round(time.Millisecond), c.Busy, c.Frames, c.Moved, walBytes(dataDir), ioBlame())
 }
 
 // walBytes is the size of dyna.db-wal, or 0 when the file does not exist.
