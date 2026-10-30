@@ -51,7 +51,7 @@ func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, git 
 		if err == nil {
 			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Branch)
 		} else {
-			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, repo.Base)
+			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Base)
 		}
 		if err != nil {
 			return err
