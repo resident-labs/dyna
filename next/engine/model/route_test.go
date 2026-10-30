@@ -105,6 +105,11 @@ func TestProxyConfig(t *testing.T) {
 	if cfg.Host != "127.0.0.1" || cfg.Port == 0 || cfg.RequestRetry != 0 || cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || len(cfg.ClaudeKey) != 0 {
 		t.Fatal("proxy config violates the loopback, retry, management, or affinity policy")
 	}
+	for _, key := range cfg.ClaudeKey {
+		if key.Cloak != nil && key.Cloak.StrictMode {
+			t.Fatal("proxy config enables strict cloak mode")
+		}
+	}
 	if bcrypt.CompareHashAndPassword([]byte(cfg.RemoteManagement.SecretKey), []byte("management-key")) != nil {
 		t.Fatal("management key does not authenticate")
 	}
