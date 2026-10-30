@@ -39,7 +39,8 @@ func TestUpgradeAddsArchives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Archives(context.Background(), "session"); err != nil {
+	var count int
+	if err := s.Read().QueryRow("SELECT count(*) FROM archives").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
