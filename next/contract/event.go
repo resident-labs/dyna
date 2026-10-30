@@ -21,45 +21,68 @@ type EventBody interface {
 	isEventBody()
 }
 
-type Surface string
-
-const (
-	SurfaceFeed    Surface = "feed"    // a post in the room feed, by anyone
-	SurfaceDM      Surface = "dm"      // the owner, in this session's DM
-	SurfaceCard    Surface = "card"    // the owner, through an HTML card
-	SurfaceSession Surface = "session" // the engine, from another session's turn: a brief or a result
-	SurfaceService Surface = "service" // a reviewer or helper service (M3)
-	SurfaceEngine  Surface = "engine"  // a system event
-)
-
-type ConversationKind string // "feed" | "dm"
-
-type Conversation struct {
-	Kind    ConversationKind `json:"kind"`
-	Session SessionID        `json:"session,omitempty"` // dm only
+type PostCreated struct {
+	Text        string       `json:"text"`
+	Mentions    []Principal  `json:"mentions,omitempty"`
+	Home        Conversation `json:"home"` // feed or a DM
+	ReplyTo     EventID      `json:"replyTo,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
-type ReplyKind string
-
-const (
-	ReplyFinal ReplyKind = "final" // the engine delivers the final response to Target
-	ReplyPost  ReplyKind = "post"  // answer with dyna post, only if needed
-	ReplyNone  ReplyKind = "none"  // nothing is owed; end with one line
-)
-
-type ReplyChannel struct {
-	Kind    ReplyKind    `json:"kind"`
-	Target  Principal    `json:"target,omitempty"`
-	Home    Conversation `json:"home,omitempty"`
-	ReplyTo EventID      `json:"replyTo,omitempty"`
+type Attachment struct {
+	Name   string `json:"name"`
+	Media  string `json:"media"` // MIME type
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"` // the file is stored by hash
 }
 
-type Delivery struct {
-	Seq     int64        `json:"seq"` // the event
-	To      Principal    `json:"to"`  // a session or a member
-	Surface Surface      `json:"surface"`
-	Reply   ReplyChannel `json:"reply"`
-	Wake    bool         `json:"wake"` // starts or steers a turn; members never wake
+type SessionStarted struct {
+	Session SessionID   `json:"session"`
+	Name    string      `json:"name"`
+	Parent  SessionID   `json:"parent,omitempty"` // empty for root
+	Profile ProfileName `json:"profile"`
+	Goal    string      `json:"goal,omitempty"`
+}
+
+type SessionClosed struct {
+	Session SessionID `json:"session"`
+	Archive string    `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
+	Unheld  []GoalID  `json:"unheld,omitempty"`  // M3: open goals left with no holder, because the parent is root (7.4)
+}
+
+type TurnStarted struct {
+	Session SessionID `json:"session"`
+	Turn    TurnID    `json:"turn"`
+	Inputs  []EventID `json:"inputs"` // the deliveries this turn takes
+}
+
+type TurnOutcome string // "completed" | "failed" | "stopped"
+
+type TurnEnded struct {
+	Session SessionID      `json:"session"`
+	Turn    TurnID         `json:"turn"`
+	Outcome TurnOutcome    `json:"outcome"`
+	Final   string         `json:"final,omitempty"`   // the final response
+	Replies []ReplyChannel `json:"replies,omitempty"` // where Final was delivered
+	Usage   Usage          `json:"usage"`
+	Error   string         `json:"error,omitempty"` // failed only
+}
+
+type Usage struct {
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"inputTokens"`
+	OutputTokens     int64  `json:"outputTokens"`
+	CacheReadTokens  int64  `json:"cacheReadTokens"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens"`
+}
+
+type BoxChanged struct {
+	Box     BoxID     `json:"box"`
+	Session SessionID `json:"session"`
+	Host    HostName  `json:"host,omitempty"`
+	From    BoxState  `json:"from"`
+	To      BoxState  `json:"to"`
+	Reason  string    `json:"reason,omitempty"`
 }
 
 type BoxState string
