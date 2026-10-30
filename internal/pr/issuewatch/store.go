@@ -7,6 +7,7 @@ package issuewatch
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -59,6 +60,11 @@ type Watch struct {
 	Body      string
 	Events    string
 	Token     string
+}
+
+// URL returns the GitHub web address of the watched issue.
+func (w Watch) URL() string {
+	return fmt.Sprintf("https://%s/%s/issues/%d", w.Host, w.Repo, w.Number)
 }
 
 // Store keeps issue watches in dataDir's dyna.db.

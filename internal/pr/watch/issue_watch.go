@@ -71,17 +71,13 @@ func nextIssueEvents(w issuewatch.Watch, issue issueObject, comments []Comment, 
 			continue
 		}
 		events = append(events, room.IssueWatchEvent{
-			Type: typ, Repo: w.Repo, Number: w.Number, Title: issue.Title, URL: issueURL(w),
+			Type: typ, Repo: w.Repo, Number: w.Number, Title: issue.Title, URL: w.URL(),
 			Key: strconv.FormatInt(e.ID, 10), Summary: fmt.Sprintf("%s#%d was %s.", w.Repo, w.Number, verb),
 		})
 	}
 	next.State = issue.State
 	next.Updated = issue.Updated
 	return events, next
-}
-
-func issueURL(w issuewatch.Watch) string {
-	return fmt.Sprintf("https://%s/%s/issues/%d", w.Host, w.Repo, w.Number)
 }
 
 func issuePath(ref Ref) string {
@@ -167,19 +163,11 @@ func issueRepoAllowed(ctx context.Context, rec room.Record, host, repo string) b
 // repository of dir.
 func (s *Service) ResolveIssue(ctx context.Context, text, dir string) (Ref, error) {
 	if strings.Contains(text, "://") {
-		u, err := url.Parse(text)
-		if err != nil || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") {
-			return Ref{}, fmt.Errorf("use an issue URL or number")
-		}
-		p := strings.Split(strings.Trim(u.Path, "/"), "/")
-		if len(p) != 4 || p[2] != "issues" {
+		ref, ok := parseItemURL(text, "issues")
+		if !ok {
 			return Ref{}, fmt.Errorf("expected an issue URL")
 		}
-		n, err := strconv.Atoi(p[3])
-		if err != nil || n < 1 {
-			return Ref{}, fmt.Errorf("invalid issue number")
-		}
-		return Ref{u.Host, p[0] + "/" + p[1], n}, nil
+		return ref, nil
 	}
 	n, err := strconv.Atoi(text)
 	if err != nil || n < 1 {
