@@ -3,17 +3,42 @@ package engine
 import (
 	"testing"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/instructionqueue"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/state"
 	"dyna-agent/internal/store/storetest"
 )
 
 // A PR state change goes to the room service, which publishes its rows; the
 // raw change never reaches clients. Other changes go to the hub.
+func TestInstructionQueueCommitWakesWorker(t *testing.T) {
+	dir := t.TempDir()
+	if err := instructionqueue.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signals := newWorkerSignals(nil)
+	state.For(db).SetPublish(publishState(hub.New(1), roomsvc.New(nil), signals))
+	t.Cleanup(func() { state.For(db).SetPublish(nil) })
+	if err := instructionqueue.Insert(dir); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-signals.channels["instructions"]:
+	default:
+		t.Fatal("committed profile intent did not wake instruction worker")
+	}
+}
+
 func TestPublishStateRoutesPRChanges(t *testing.T) {
 	storetest.Isolate(t)
 	events := hub.New(1)
