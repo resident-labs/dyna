@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/processguard"
 
 	"dyna-agent/internal/callerid"
@@ -439,11 +440,26 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	}
 
 	copied := make(chan struct{})
+	activityDone := make(chan struct{})
 	var lines int
 	grew := &outputEvents{send: func() { s.Notify(id) }}
 	go func() {
 		defer close(copied)
-		r := bufio.NewReaderSize(pr, 64*1024)
+		publisher := &activityPublisher{updates: make(chan activity.Signal, 1)}
+		go func() {
+			defer close(activityDone)
+			db, err := s.db()
+			if err != nil {
+				return
+			}
+			ticker := time.NewTicker(activity.PublishInterval)
+			defer ticker.Stop()
+			publisher.run(ticker.C, func(signal activity.Signal) error { return s.publishActivity(db, id, signal) })
+		}()
+		observer := &activityReader{Reader: pr, now: time.Now, publish: publisher.send}
+		observer.start()
+		defer close(publisher.updates)
+		r := bufio.NewReaderSize(observer, 64*1024)
 		var written int64
 		capped := false
 		for {
@@ -460,6 +476,7 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 				}
 			}
 			if err != nil {
+				observer.end(err)
 				return
 			}
 		}
@@ -512,7 +529,14 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	if err := s.saveExit(m, ex); err != nil {
 		return err
 	}
-	return errors.Join(s.setOutputLines(id, lines), os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600))
+	result := errors.Join(s.setOutputLines(id, lines), os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600))
+	// Give the final observation a bounded chance to reach SQLite before the
+	// supervisor exits. A failed or delayed write leaves the old lease to expire.
+	select {
+	case <-activityDone:
+	case <-time.After(writeWait):
+	}
+	return result
 }
 
 // exitSaveTries and exitSaveWait bound how long a supervisor keeps trying to
