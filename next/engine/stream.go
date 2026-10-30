@@ -88,6 +88,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				return
 			}
 			if current.State == contract.BoxClosing {
+				if current.Reason != "" {
+					archiveSent = false
+				}
 				if !archiveSent && current.Reason == "" {
 					repos, err := s.store.RoomRepos(ctx, session.Room)
 					if err != nil {
@@ -103,9 +106,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					}
 				}
 				select {
-				case _, ok := <-sub:
+				case event, ok := <-sub:
 					if !ok {
 						return
+					}
+					if body, ok := event.Body.(contract.BoxChanged); ok && body.Box == session.Box && body.To == contract.BoxClosing && body.Reason != "" {
+						archiveSent = false
 					}
 				case <-ctx.Done():
 					return
