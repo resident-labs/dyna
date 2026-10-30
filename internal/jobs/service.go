@@ -810,7 +810,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	job.Dir = path.Join(NodeBase(machine.Name), "jobs", job.ID)
 	job.Unit = "dyna-job-" + job.ID + ".service"
-	resources := ClampResources(job.Host, job.CPUs, job.MemoryMiB, machineFacts(machine))
+	resources := ClampResources(job.Host, job.CPUs, job.MemoryMiB, MachineFacts(machine))
 	if job.Lane == LaneQuick {
 		resources = Resources{CPUs: 1, MemoryMiB: 1024}
 	}
@@ -1043,9 +1043,9 @@ func (s *Service) finish(job *Job, err error) {
 	}
 }
 
-// machineFacts reads a machine's clamp facts: its last probe. A machine with
+// MachineFacts reads a machine's clamp facts: its last probe. A machine with
 // no probe keeps the job's own request.
-func machineFacts(m machines.Machine) Facts {
+func MachineFacts(m machines.Machine) Facts {
 	probedMiB := int64(m.Capabilities.MemTotal / (1 << 20))
 	reserve := min(int64(m.QuickSlotLimit())*1024, max(0, probedMiB-DefaultHostMemoryMiB))
 	return Facts{CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, QuickReserveMiB: reserve}
