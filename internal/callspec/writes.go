@@ -119,6 +119,7 @@ var WriteCalls = map[string]bool{
 	"NoteGoal":                    true,
 	"ObserveClaudeUsage":          true,
 	"OpenChange":                  true,
+	"SetSenderMute":               true,
 	"PauseRoomSessions":           true,
 	"PauseRun":                    true,
 	"Pin":                         true,

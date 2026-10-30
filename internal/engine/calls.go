@@ -86,6 +86,7 @@ func SessionBindings(rooms *roomsvc.Service) []websvc.Binding {
 		{Name: "RenameSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policySession, Local: true, Method: rooms.RenameSession},
 		{Name: "DismissSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policySession, Method: rooms.DismissSession},
 		{Name: "DismissPendingPost", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policySession, Method: rooms.DismissPendingPost},
+		{Name: "SetSenderMute", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policySession, Local: true, Method: rooms.SetSenderMute},
 		{Name: "PauseRoomSessions", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policySession, Method: rooms.PauseRoomSessions},
 		{Name: "ResumeRoomSessions", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policySession, Method: rooms.ResumeRoomSessions},
 		{Name: "ClearDormantSessions", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policySession, Method: rooms.ClearDormantSessions},
