@@ -111,13 +111,21 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	done := make(chan error, 1)
 	go func() { done <- proxy.Run(ctx) }()
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("model proxy: %w", err)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := service.FailStaleStarts(ctx); err != nil {
+				return fmt.Errorf("hello timeout sweep: %w", err)
+			}
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("model proxy: %w", err)
+			}
+			return fmt.Errorf("model proxy stopped")
 		}
-		return fmt.Errorf("model proxy stopped")
 	}
 }
