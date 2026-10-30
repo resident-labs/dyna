@@ -37,6 +37,29 @@ func TestRunSkillAddressesMentionAndFramesInstruction(t *testing.T) {
 	}
 }
 
+func TestRunSkillExplicitTargetPreservesMentions(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	e.start(rec, "other", nil)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("Review code."), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := harnessconfig.NewConfigManager().AddSkill(e.ctx, harnessconfig.ManagedSkill{Name: "review", Source: dir, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"ask @other", "@other check this"} {
+		post, err := e.svc.RunCommand(e.ctx, rec.ID, "review", text, "lead")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(post.Message.To) != 1 || post.Message.To[0] != lead.Address() || post.Message.Text != text {
+			t.Fatalf("text %q: wrong message: %+v", text, post.Message)
+		}
+	}
+}
+
 type fakePrompts struct {
 	text string
 }
