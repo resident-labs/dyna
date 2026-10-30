@@ -12,12 +12,6 @@ import (
 const maxVisiblePaths = 100
 const maxBrowseCommits = 1000
 
-// GitLastCommitsResult omits paths with no commit in the bounded walk.
-type GitLastCommitsResult struct {
-	Commits   map[string]GitCommit `json:"commits"`
-	Truncated bool                 `json:"truncated"`
-}
-
 // GitLastCommits reads at most 1000 commits in one process for visible rows.
 // Truncated means a missing row can have older history beyond this bound.
 func (s *Service) GitLastCommits(roomRef, sessionRef string, paths []string) (GitLastCommitsResult, error) {
