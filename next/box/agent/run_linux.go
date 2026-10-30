@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	engineSocket = "/run/dyna/engine.sock"
+	engineSocket = "/run/dyna/engine/engine.sock"
 	piDir        = "/box/pi"
 )
 
