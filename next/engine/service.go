@@ -483,24 +483,32 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
 		return contract.SessionCloseResponse{}, e
 	}
+	s.admit.Lock()
 	tree, err := s.store.RoomTree(ctx, session.Room)
 	if err != nil {
+		s.admit.Unlock()
 		return contract.SessionCloseResponse{}, failure(err)
 	}
 	if !tree.CanManage(caller, session.ID) {
+		s.admit.Unlock()
 		return contract.SessionCloseResponse{}, forbidden()
 	}
-	if _, err := tree.CloseOrder(session.ID); err != nil {
+	order, err := tree.CloseOrder(session.ID)
+	if err != nil {
+		s.admit.Unlock()
 		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
 	}
-	if err := s.store.MarkClosing(ctx, session.ID); err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+	s.boxLockMu.Lock()
+	for _, id := range order {
+		if id != session.ID && s.boxRuns[id] != nil {
+			s.boxLockMu.Unlock()
+			s.admit.Unlock()
+			return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "child is starting"}
+		}
 	}
-	tree, err = s.store.RoomTree(ctx, session.Room)
-	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
-	}
-	order, err := tree.CloseOrder(session.ID)
+	s.boxLockMu.Unlock()
+	err = s.store.MarkClosing(ctx, session.ID)
+	s.admit.Unlock()
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
 	}
