@@ -8,6 +8,9 @@ export interface PaceWindow {
 
 export type PaceStatus = 'ahead' | 'on' | 'under'
 
+// paceWords names a pace for a tooltip or a screen reader.
+export const paceWords: Record<PaceStatus, string> = { ahead: 'ahead of pace', on: 'on pace', under: 'under pace' }
+
 export interface Pace {
   status: PaceStatus
   // expectedRemaining is the remaining share an even spend would leave, in percent.
