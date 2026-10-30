@@ -688,11 +688,10 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	health := engineHealth(status, connectNote, started, writer, events, callers, signals)
 	load := sysload.New()
 	if !readOnly {
-		record := doctor.Samples{DataDir: filepath.Dir(cstore.Dir())}.Recorder(log.Printf)
+		load.Record = doctor.Samples{DataDir: filepath.Dir(cstore.Dir())}.Recorder(log.Printf)
 		source := doctor.Detect()
 		var relieving atomic.Bool
-		load.Record = func(l sysload.Load) {
-			record(l)
+		load.EveryMinute = func() {
 			if source == nil || !relieving.CompareAndSwap(false, true) {
 				return
 			}
