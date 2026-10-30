@@ -192,3 +192,8 @@ func (s *Service) avatars(roomID string) avatarBook {
 	all, rev := s.snapshot()
 	return s.avatarBook(roomID, all, rev)
 }
+
+// MemberAvatar returns a session's identity from the shared avatar book.
+func (s *Service) MemberAvatar(id, roomID, roomName string) Avatar {
+	return s.avatars(roomID).member(id, roomName)
+}

@@ -8,7 +8,6 @@
   import { motion, BASE, FAST } from '../ui/motion.ts'
   import { sessionStatus } from '../sessions/status.ts'
   import { selectableSession } from '../sessions/consolidation.ts'
-  import { harnessIcons } from '../settings/harnesses/icons.ts'
   import Avatar from '../ui/Avatar.svelte'
   import RoomSessionStatus from './RoomSessionStatus.svelte'
   import { ago, clock, stamp } from '../ui/format.ts'
@@ -155,7 +154,7 @@
     {#if m.depth > 0}
       <span class="guide" aria-hidden="true"></span>
     {/if}
-    <Avatar emoji={m.avatar.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
+    <Avatar avatar={m.avatar} here={m.avatar.room} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} dotGap="var(--side)" />
     <span class="text">
       <span class="name hue-{m.hue}"><span class="fit"><span class="nm">{offSeat ? 'root (internal)' : m.name}</span>{#if pr}<span class="pr">{changeName(pr)}</span>{/if}</span>{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if m.ownerDisplay}<span class="display" title="This session's own shells use your display">uses your display</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}{#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}</span>
       <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}{#if status}<span class="now" class:working={status === 'working'}>{status}</span> · {/if}{#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
@@ -180,7 +179,7 @@
     <h2>Owner</h2>
     {#if owner}
       <div class="row owner">
-        <Avatar name="you" owner hue={owner.hue} size={32} ring="var(--side)" />
+        <Avatar avatar={owner.avatar} here={owner.avatar.room} name="you" hue={owner.hue} size={32} dotGap="var(--side)" />
         <span class="text">
           <span class="name hue-{owner.hue}">you</span>
           <span class="sub">{owner.children} top-level session{owner.children === 1 ? '' : 's'}</span>
@@ -188,7 +187,7 @@
       </div>
       {#if external}
         <button type="button" class="row" class:sel={selected === owner.address + ':root'} onclick={() => onselect({ rootSeat: true })} aria-label="Open root conversation">
-          <Avatar name="root" image={harnessIcons[seat.harness ?? '']} emoji="🖥️" hue={owner.hue} size={32} ring="var(--side)" />
+          {#if rootSession}<Avatar avatar={rootSession.avatar} here={rootSession.avatar.room} name="root" hue={owner.hue} size={32} dotGap="var(--side)" />{/if}
           <span class="text">
             <span class="name hue-{owner.hue}">{seat.harness ? 'root' : 'root (external)'}</span>
             <span class="sub" title={stamp(seat.since)}>{seat.harness || 'external'} · since {clock(seat.since)}</span>
