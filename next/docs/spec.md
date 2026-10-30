@@ -568,7 +568,7 @@ Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `
 
 - **`dyna-base`**: a small Debian image with git, CA certificates, tini, a non-root user, the usual shell tools, Node, and Pi from Dyna's fork (`next/third_party/pi`) at a pinned build. The fork's sign-in commands go unused, because Pi holds no credential in v2.
 - **The `dyna` binary is not in the image.** Each host keeps the binaries in `<hostdata>/bin/<version>/dyna`, with a `current` link. Every box mounts `<hostdata>/bin` read-only at `/opt/dyna/bin`. An engine release rebuilds no image.
-- **Toolchain layers** live in each repository at `.dyna/images/<name>/Containerfile` and start `FROM dyna-base`. A repository without that folder uses `dyna-base`.
+- **Toolchain layers** live in each repository at `.dyna/images/<name>/Containerfile` and start `FROM dyna-base`. The box uses its session's repository. A repository without that folder uses `dyna-base`.
 - **Tag**: `dyna-img-<name>:<hash>`, where the hash is SHA-256 over the base tag and the Git tree ID of the image folder. The tree ID covers the files, contents, modes and links. The same inputs give the same tag on every host.
 - **Builds** run over the master, one at a time per host, before box creation. The host reuses an existing tag. Each build check emits `image.built` or `image.failed`. M3 also checks at registration and when the default branch changes an image folder. No image table or registry is needed while there are at most two hosts.
 
@@ -697,7 +697,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 - In M1 the proxy keeps its sign-ins in its own file store, `<data>/cliproxy/auth` (mode 0700). In M3 the engine registers a token store on `store.db` through the SDK's `Store` interface (`List`, `Save`, `Delete`), so no JSON state is left. `store.db` and its backups then hold tokens and stay 0600.
 - Accepted costs: the binary grows by the proxy's dependencies (gin, a Redis client, zeroconf and others), which later patches may trim. A panic in a proxy goroutine stops the engine; systemd restarts it, and box agents buffer meanwhile (5.7).
 
-**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the session's repositories and proxies to GitHub with its own token. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
+**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the room's repositories and proxies to GitHub with its own token. Pushes are limited to the session's repository. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
 
 **Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
 
@@ -720,7 +720,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 Close ends the whole subtree, as the card decided: each child is closed and deleted, deepest first, with its own archive. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
 
 1. Stop the harness and every shell job.
-2. Archive each repository. Push HEAD and a snapshot of the dirty tree to `refs/dyna/archive/<session>`. The snapshot is a commit of the working tree, with untracked files that are not ignored, made through a temporary index and `commit-tree` (the v1 #1246 method), so the session branch and the index do not change. The ref points at the snapshot, whose first parent is HEAD. Skip this when the tree is clean and HEAD is already on the remote.
+2. Archive the session's repository, if it has one. Push HEAD and a snapshot of the dirty tree to `refs/dyna/archive/<session>`. The snapshot is a commit of the working tree, with untracked files that are not ignored, made through a temporary index and `commit-tree` (the v1 #1246 method), so the session branch and the index do not change. The ref points at the snapshot, whose first parent is HEAD. Skip this when the tree is clean and HEAD is already on the remote.
 3. `podman rm`, delete the volume, stop the slice, and remove the forward and the listener.
 4. Emit `box.changed` to `deleted`, then `session.closed`.
 
