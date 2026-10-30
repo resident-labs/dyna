@@ -48,9 +48,10 @@ export const api = {
   voiceStatus: () => Promise.resolve({ available: true, live: false }),
   hookSummary: () => Promise.resolve([
     { hook: { name: 'self-update', label: 'Update Dyna', event: 'schedule', everyMinutes: 60, disabled: false }, lastRun: { result: 'pass', startedAt: iso(6), finishedAt: iso(5.4) } },
-    { hook: { name: 'librarian-batch', label: 'Librarian', event: 'schedule', everyMinutes: 10, disabled: false }, lastRun: { result: 'pass', startedAt: iso(4), finishedAt: iso(3.9) } },
+    { hook: { name: 'librarian-main', label: 'Librarian', event: 'main-updated', disabled: false }, lastRun: { result: 'pass', startedAt: iso(4), finishedAt: iso(3.9) } },
   ]),
-  hookRuns: (repo, name) => Promise.resolve(name === 'librarian-batch'
+  librarianDeferred: () => Promise.resolve(iso(-6)),
+  hookRuns: (repo, name) => Promise.resolve(name === 'librarian-main'
     ? [4, 14, 24].map((m) => ({ id: 'librarian-' + m, result: 'pass', startedAt: iso(m), finishedAt: iso(m - 0.02) }))
     : [{ id: 'run3', result: 'pass', startedAt: iso(6), finishedAt: iso(5.4) }, { id: 'run1', result: 'fail', startedAt: iso(7), finishedAt: iso(7) }, { id: 'run2', result: 'error', startedAt: iso(9), finishedAt: iso(8.5) }]),
   hookRunLog: (repo, name, id) => Promise.resolve(id === 'run1' ? { exitCode: 1, tail: 'exit status 1' } : { exitCode: -1, tail: 'context deadline exceeded' }),

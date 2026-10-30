@@ -25,7 +25,7 @@ type write struct {
 // test asks for is a write, and is recorded instead of answered.
 var readMethods = map[string]bool{
 	"Rooms": true, "ListServices": true, "ReviewerStatus": true, "Settings": true,
-	"HookSummary": true, "VoiceStatus": true, "Transcript": true, "TranscriptTurn": true,
+	"HookSummary": true, "LibrarianDeferred": true, "VoiceStatus": true, "Transcript": true, "TranscriptTurn": true,
 }
 
 func (f *fakeCaller) Call(_ context.Context, method string, args []any, out any) error {
@@ -86,10 +86,11 @@ func TestListShowsEachServiceAndItsOwnState(t *testing.T) {
 			{"key": "library.profile", "value": "sonnet"},
 		},
 		"HookSummary": []map[string]any{{
-			"hook":    map[string]any{"name": "librarian-batch", "event": "schedule", "everyMinutes": 10},
+			"hook":    map[string]any{"name": "librarian-main", "event": "main-updated"},
 			"lastRun": map[string]any{"result": "pass", "startedAt": "2026-10-23T09:50:00Z"},
 		}},
-		"VoiceStatus": map[string]any{"available": true, "live": false},
+		"LibrarianDeferred": "2026-10-23T10:20:00Z",
+		"VoiceStatus":       map[string]any{"available": true, "live": false},
 	})
 	rows := Rows(factsFrom(t, refs{Room: "dyna", Repo: "/repo/dyna"}, reader))
 	if len(rows) != 3 {
@@ -111,6 +112,18 @@ func TestListShowsEachServiceAndItsOwnState(t *testing.T) {
 	}
 	if voice.ID != Voice || !voice.Enabled || voice.State != "idle" || voice.Switch != "" {
 		t.Fatalf("voice row = %+v", voice)
+	}
+}
+
+func TestLibrarianShowsNoNextRunWhenNothingIsDeferred(t *testing.T) {
+	reader := readerWith(t, map[string]any{
+		"Settings":          []map[string]any{{"key": "library.enabled", "value": []string{"/repo/dyna"}}},
+		"HookSummary":       []map[string]any{{"hook": map[string]any{"name": "librarian-main", "event": "main-updated"}}},
+		"LibrarianDeferred": nil,
+	})
+	library := Rows(factsFrom(t, refs{Room: "dyna", Repo: "/repo/dyna"}, reader))[0]
+	if library.NextRun != "" {
+		t.Fatalf("librarian next run = %q, want none", library.NextRun)
 	}
 }
 

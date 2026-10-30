@@ -183,11 +183,11 @@ export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
   const updateLine = updateRow ? [updateRow.detail, updateNext ? `next ${until(updateNext, now)}` : ''].filter(Boolean).join(' · ') : ''
 
   const librarian = row('librarian')
-  const batch = libraryHooks.find((h) => h.hook.name === 'librarian-batch') ?? libraryHooks[0] ?? null
-  const batchResult = i.runs[batch?.hook.name ?? '']?.[0]?.result ?? batch?.lastRun?.result ?? ''
-  const batchNext = librarian?.nextAt ? `next ${until(librarian.nextAt, now)}` : ''
+  const main = libraryHooks.find((h) => h.hook.name === 'librarian-main') ?? null
+  const mainResult = i.runs[main?.hook.name ?? '']?.[0]?.result ?? main?.lastRun?.result ?? ''
+  const nextText = librarian?.nextAt ? `next ${until(librarian.nextAt, now)}` : ''
   const librarianLine = !librarian ? '' : librarian.state === 'on'
-    ? [isFailure(batchResult) ? 'Failing' : batchResult === 'pending' ? 'Running' : 'On', batchResult && !isFailure(batchResult) && batchResult !== 'pending' ? `last ${resultWord(batchResult)}` : '', batchNext].filter(Boolean).join(' · ')
+    ? [isFailure(mainResult) ? 'Failing' : mainResult === 'pending' ? 'Running' : 'On', mainResult && !isFailure(mainResult) && mainResult !== 'pending' ? `last ${resultWord(mainResult)}` : '', nextText].filter(Boolean).join(' · ')
     : `${librarian.state === 'off' ? 'Off' : 'Unknown'} · ${librarian.detail}`
 
   const slow = testLine(i.testHealth)
@@ -197,7 +197,7 @@ export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
     { id: 'merges', name: 'Merges', tone: lastFailed ? 'error' : counts.running ? 'live' : merge?.tone ?? 'off', line: mergeLine, rows: pick('merges'), entries: merges },
     { id: 'reviews', name: 'Reviews', tone: rev?.tone ?? 'off', line: reviewLine, rows: pick('reviews'), entries: byNewest(reviewEntries(i, now)) },
     { id: 'updates', name: 'Updates and hooks', tone: updateRow?.tone === 'error' ? 'error' : hookTone(otherHooks, i.runs) === 'error' ? 'error' : updateRow?.tone ?? 'off', line: updateLine, rows: pick('updates'), entries: entriesOf(otherHooks) },
-    { id: 'librarian', name: 'Librarian', tone: isFailure(batchResult) ? 'error' : librarian?.tone ?? 'off', line: librarianLine, rows: pick('librarian'), entries: entriesOf(libraryHooks) },
+    { id: 'librarian', name: 'Librarian', tone: isFailure(mainResult) ? 'error' : librarian?.tone ?? 'off', line: librarianLine, rows: pick('librarian'), entries: entriesOf(libraryHooks) },
     { id: 'ci', name: 'CI health', tone: slow ? 'live' : 'on', line: slow || 'No test is over the limit', rows: pick('ci'), entries: [] },
     { id: 'more', name: 'More', tone: 'off', line: '', rows: moreIds.map(row).filter((r): r is Row => !!r), entries: [] },
   ]

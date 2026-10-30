@@ -72,6 +72,9 @@ export function readHookSummary(v: unknown): HookRow[] | null {
   })
 }
 
+// LibrarianDeferred: the time the engine's deferred librarian wake is due, or null when none is deferred.
+export const readDeferred = (v: unknown): string | null => (isString(v) && v !== '' ? v : null)
+
 // Notices: roomsvc notices, of which the page reads provider limits.
 export function readNotices(v: unknown): NoticeRow[] | null {
   if (!Array.isArray(v)) return null
