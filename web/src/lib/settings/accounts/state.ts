@@ -31,6 +31,17 @@ const PROVIDER_NAMES: Record<string, string> = {
   zai: 'Z.ai',
 }
 
+// Provider colors are presentation tokens. Unknown providers stay neutral.
+const PROVIDER_COLORS: Record<string, `--provider-${string}`> = {
+  anthropic: '--provider-anthropic', chatgpt: '--provider-chatgpt',
+  'kimi-code': '--provider-kimi-code', xai: '--provider-xai',
+  'meta-muse': '--provider-meta-muse', 'opencode-go': '--provider-opencode-go',
+  deepseek: '--provider-deepseek', zai: '--provider-zai',
+}
+export function providerColor(provider?: string | null): string {
+  return `var(${provider && Object.hasOwn(PROVIDER_COLORS, provider) ? PROVIDER_COLORS[provider] : '--provider-unknown'})`
+}
+
 // providerName words a provider for a heading. A row that names no provider
 // this release knows gets its own heading rather than a blank one.
 export function providerName(provider?: string | null): string {

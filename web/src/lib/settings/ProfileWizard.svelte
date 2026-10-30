@@ -267,7 +267,7 @@
             <div class="section"><h3>Capabilities</h3><dl>{#each [['Context window', model?.context], ['Maximum input', model?.input], ['Maximum output', model?.output]] as [label, value]}<div><dt>{label}</dt><dd>{typeof value === 'number' && value > 0 ? value.toLocaleString() + ' tokens' : 'Not reported'}</dd></div>{/each}<div><dt>Model ID</dt><dd class="mono">{manual ? manualId.trim() || 'Harness default' : model?.id}</dd></div></dl>{#if !manual && model?.source}<p class="source">Source: {model?.source}</p>{/if}</div>
           </div><aside><h3>Account limits</h3>
             {#if account && !accountError && !accountBusy}
-              {#if account.windows?.length}{#each account.windows as window (window.id)}<div class="meter"><UsageMeter {window} observedAt={account.observedAt} /></div>{/each}{:else}<p>Usage limits are not reported for this account.</p>{/if}
+              {#if account.windows?.length}{#each account.windows as window (window.id)}<div class="meter"><UsageMeter {window} provider={account.provider} observedAt={account.observedAt} /></div>{/each}{:else}<p>Usage limits are not reported for this account.</p>{/if}
               <small>{observation(account)}</small>
             {:else}<p>{accountBusy ? 'Loading account status…' : 'Account usage is not available for this route.'}</p>{/if}
             {#if model?.limits?.length}<div class="published"><h3>Published limits</h3>{#each model?.limits as limit}<div class="published-limit"><strong>{limit.label}</strong><p>{limit.value}</p>{#if limit.source}<small>Source: {limit.source}</small>{/if}</div>{/each}</div>{/if}
