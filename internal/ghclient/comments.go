@@ -2,10 +2,7 @@ package ghclient
 
 import (
 	"bytes"
-	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -26,7 +23,7 @@ var commentEndpoint = regexp.MustCompile(`^/?repos/([\w.-]+/[\w.-]+)/(issues|pul
 
 // ownCommentCall reports whether args are a gh api PATCH or DELETE on a comment
 // endpoint. Whether the comment is the room account's is checked later, with
-// one API lookup, by refuseForeignComment.
+// the policy decision.
 func ownCommentCall(args []string) (commentCall, bool) {
 	if len(args) == 0 || args[0] != "api" {
 		return commentCall{}, false
@@ -108,41 +105,4 @@ func readBodyFile(cmd *exec.Cmd, file string) ([]byte, error) {
 		file = filepath.Join(cmd.Dir, file)
 	}
 	return os.ReadFile(file)
-}
-
-// commentAuthor returns the login that wrote a comment. Tests replace it.
-var commentAuthor = func(ctx context.Context, cmd *exec.Cmd, r repository, token string, c commentCall) (string, error) {
-	raw, err := authOutput(ctx, cmd, token, "api", "--hostname", r.host, "repos/"+c.repo+"/"+c.kind+"/comments/"+c.id)
-	if err != nil {
-		return "", err
-	}
-	var comment struct {
-		User struct {
-			Login string `json:"login"`
-		} `json:"user"`
-	}
-	if err := json.Unmarshal(raw, &comment); err != nil {
-		return "", err
-	}
-	return comment.User.Login, nil
-}
-
-// refuseForeignComment lets an agent edit or delete only the comments that the
-// room's own GitHub account wrote. It does one lookup of the comment's author.
-func refuseForeignComment(ctx context.Context, cmd *exec.Cmd, r repository, token, login string) error {
-	if !IsAgentText(ctx) {
-		return nil
-	}
-	c, ok := ownCommentCall(cmd.Args[1:])
-	if !ok {
-		return nil
-	}
-	author, err := commentAuthor(ctx, cmd, r, token, c)
-	if err != nil {
-		return fmt.Errorf("could not read the author of comment %s: %w", c.id, err)
-	}
-	if login == "" || !strings.EqualFold(author, login) {
-		return fmt.Errorf("comment %s was not written by this room's GitHub account, so an agent cannot %s it", c.id, strings.ToLower(c.method))
-	}
-	return nil
 }
