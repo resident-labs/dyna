@@ -404,6 +404,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	var recovered room.Message
 	if in.WorkflowKey != "" {
 		if in.Sender.Kind != SenderScript || !workflowPostKey.MatchString(in.WorkflowKey) {
 			return Result{}, errors.New("invalid workflow post identity")
@@ -422,21 +423,19 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 			return Result{}, err
 		}
 		msg, err := s.Rooms.Message(reservation.RoomID, reservation.PostID)
-		if err == nil {
-			if err := s.Rooms.CompleteWorkflowPost(context.WithoutCancel(ctx), in.WorkflowKey); err != nil {
-				return Result{Message: msg}, err
-			}
-			return Result{Message: msg}, nil
-		}
-		if !errors.Is(err, room.ErrPostNotFound) {
+		if err != nil && !errors.Is(err, room.ErrPostNotFound) {
 			return Result{}, err
 		}
 		if reservation.Delivered {
-			return Result{}, errors.New("delivered workflow post is missing")
+			if err != nil {
+				return Result{}, errors.New("delivered workflow post is missing")
+			}
+			return Result{Message: msg}, nil
 		}
 		if reservation.RoomID != res.rec.ID {
 			return Result{}, errors.New("workflow post destination changed after reservation")
 		}
+		recovered = msg
 		in.ID = reservation.PostID
 	}
 	if err := s.servicePost(in, res); err != nil {
@@ -557,7 +556,12 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		senderRoomID = in.Sender.Session.RoomID
 	}
 	var msg room.Message
-	if in.Event != nil {
+	if recovered.ID != "" {
+		if !slices.Equal(recovered.To, res.addrs()) || !maps.Equal(recovered.SessionIDs, sessionIDs) {
+			return Result{Message: recovered}, errors.New("workflow post recipients changed after reservation")
+		}
+		msg = recovered
+	} else if in.Event != nil {
 		// A notice without a stable ID is a fresh post, as Store.Post makes it.
 		msg, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: res.rec.ID, Event: in.Event, ID: in.ID, FreshID: in.ID == "", To: res.addrs(), Via: res.via,
 			NeedsRoot: in.NeedsRoot, RoomService: in.Sender.Kind == SenderOwner && !in.Sender.Human, SessionIDs: sessionIDs, SenderRoomID: senderRoomID, NoWake: !wake})
@@ -601,12 +605,15 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		out.Deliveries = append(out.Deliveries, d)
 	}
 	out.EngineDown = s.engineDown(out)
+	if err := DeliveryError(out); err != nil {
+		return out, err
+	}
 	if in.WorkflowKey != "" {
 		if err := s.Rooms.CompleteWorkflowPost(context.WithoutCancel(ctx), in.WorkflowKey); err != nil {
 			return out, err
 		}
 	}
-	return out, DeliveryError(out)
+	return out, nil
 }
 
 // DeliveryError reports the deliveries a stored post did not reach. A caller
