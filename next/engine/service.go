@@ -514,14 +514,7 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	}(); e != nil {
 		return contract.SessionCloseResponse{}, e
 	}
-	for _, id := range order {
-		descendants, err := tree.CloseOrder(id)
-		if err != nil {
-			return contract.SessionCloseResponse{}, failure(err)
-		}
-		if len(descendants) != 1 {
-			continue
-		}
+	for _, id := range tree.Leaves(order) {
 		child, err := s.store.Session(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
