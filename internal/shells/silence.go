@@ -44,5 +44,11 @@ func quietPeriod(s activity.Signal, now time.Time, interval time.Duration) bool 
 	if s.LastOutput.After(quietSince) {
 		quietSince = s.LastOutput
 	}
-	return !quietSince.After(now.Add(-interval))
+	// The lease is based on the copier's last proof. Output after that proof
+	// may still be waiting for publication, so do not count that time.
+	proof := s.LeaseUntil.Add(-activity.Lease)
+	if proof.After(now) {
+		return false
+	}
+	return !quietSince.After(proof.Add(-interval))
 }
