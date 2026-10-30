@@ -158,6 +158,52 @@ func TestMachineEditResources(t *testing.T) {
 	}
 }
 
+func TestMachineEditContainerRegistrations(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	rec, err := room.DefaultStore().Create(room.CreateInput{Name: "dyna"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "add", "build", "--ssh", "pip@build"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "build", "--mount", "data=/srv/data:ro", "--room", "dyna"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "build", "--mount", "cache=/var/cache/dyna:rw", "--device", "/dev/dri", "--room", "dyna"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := (machines.Store{}).Get(context.Background(), "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMounts := []machines.NamedMount{
+		{Name: "data", Source: "/srv/data", Room: rec.ID, Mode: machines.MountRO},
+		{Name: "cache", Source: "/var/cache/dyna", Room: rec.ID, Mode: machines.MountRW},
+	}
+	wantDevices := []machines.DeviceGrant{{Path: "/dev/dri", Room: rec.ID}}
+	if !reflect.DeepEqual(stored.Mounts, wantMounts) || !reflect.DeepEqual(stored.Devices, wantDevices) {
+		t.Fatalf("container registrations = %#v, %#v", stored.Mounts, stored.Devices)
+	}
+	if out, err := run(t, "show", "build"); err != nil || !strings.Contains(out, "/srv/data:ro") || !strings.Contains(out, "/dev/dri") {
+		t.Fatalf("node show lacks container registrations: %q, %v", out, err)
+	}
+	if _, err := run(t, "edit", "build", "--unmount", "data", "--undevice", "/dev/dri", "--room", "dyna"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = (machines.Store{}).Get(context.Background(), "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Mounts) != 1 || stored.Mounts[0].Name != "cache" || len(stored.Devices) != 0 {
+		t.Fatalf("registrations after revocation = %#v, %#v", stored.Mounts, stored.Devices)
+	}
+	if _, err := run(t, "edit", "build", "--mount", "other=/srv/other:ro"); err == nil || !strings.Contains(err.Error(), "--room") {
+		t.Fatalf("a mount without its room = %v", err)
+	}
+}
+
 func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)

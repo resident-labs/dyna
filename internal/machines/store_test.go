@@ -249,6 +249,77 @@ func TestRegistryEditKeepsHostChecksGrants(t *testing.T) {
 	}
 }
 
+func TestUpdateReadsFreshMachine(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	pve, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A registration patch resolved the node here. The owner disables it before
+	// the patch's writer transaction starts.
+	if err := s.SetEnabled(ctx, pve.Name, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, pve.ID, func(m *Machine) error {
+		if m.Enabled {
+			t.Fatal("patch read the node before the concurrent disable")
+		}
+		m.Mounts = append(m.Mounts, NamedMount{Name: "data", Source: "/srv/data", Room: "room_a", Mode: MountRO})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.GetByID(ctx, pve.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Enabled || len(stored.Mounts) != 1 {
+		t.Fatalf("concurrent edit = enabled %v, mounts %#v", stored.Enabled, stored.Mounts)
+	}
+}
+
+func TestRegistryEditKeepsContainerRegistrations(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	pve, err := s.Save(ctx, Machine{Name: "pve", SSH: "pip@pve", Enabled: true,
+		Mounts:  []NamedMount{{Name: "data", Source: "/srv/data", Room: "room_a", Mode: MountRO}},
+		Devices: []DeviceGrant{{Path: "/dev/dri", Room: "room_a"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := pve
+	if _, err := s.Update(ctx, pve.ID, func(m *Machine) error {
+		m.Mounts, m.Devices = nil, nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, pve.ID, func(m *Machine) error {
+		if len(m.Mounts) != 0 || len(m.Devices) != 0 {
+			t.Fatalf("transaction read stale registrations: %#v, %#v", m.Mounts, m.Devices)
+		}
+		m.Mounts = []NamedMount{{Name: "other", Source: "/srv/other", Room: "room_b", Mode: MountRO}}
+		m.Devices = []DeviceGrant{{Path: "/dev/other", Room: "room_b"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// This save models an unrelated edit that read the node before revocation.
+	stale.MaxIOHeavy = 7
+	if _, err := s.Save(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := s.GetByID(ctx, pve.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.MaxIOHeavy != 7 || len(edited.Mounts) != 1 || edited.Mounts[0].Name != "other" || len(edited.Devices) != 1 || edited.Devices[0].Path != "/dev/other" {
+		t.Fatalf("stale edit restored registrations: %#v, %#v", edited.Mounts, edited.Devices)
+	}
+}
+
 // TestMigrateKeepsAnEarlierHostCheckGrant checks the version 4 data folder that
 // kept host checks as one switch: a machine that allows them becomes the
 // owner's grant for every room, and a machine that refuses them keeps none.
@@ -532,6 +603,7 @@ func TestMigrateImportsSuiteFiltersAsOwnerLabels(t *testing.T) {
 	if version14 == schema {
 		t.Fatal("the version 14 fixture could not add its suites column")
 	}
+	version14 = strings.Replace(version14, ",\n\tmounts TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(mounts)),\n\tdevices TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(devices))", "", 1)
 	_, err = db.Exec(version14 + `
 INSERT INTO machines(id,name,ssh,enabled,local,created_ms,updated_ms,labels,suites) VALUES
  ('m_limited','limited','pip@limited',1,0,1000,1000,'["ci","suite=go"]','["go","frontend"]'),

@@ -87,8 +87,9 @@ type Job struct {
 	SHA  string
 	// Host runs the command on the node itself; otherwise Image names the
 	// container the command runs in.
-	Host  bool
-	Image string
+	Host      bool
+	Image     string
+	Container ContainerOptions
 	// CPUs and MemoryMiB are what the submitter asked for, before the node
 	// clamped them. Timeout bounds the job; zero uses the default. Idle stops
 	// a running job after that long without output; zero disables it. Heavy
@@ -151,7 +152,7 @@ type WaitResult struct {
 // Topic is the hub topic a jobs-table write publishes under.
 const Topic = "jobs"
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 const schema = `CREATE TABLE jobs (
 	id TEXT PRIMARY KEY,
@@ -187,7 +188,8 @@ const schema = `CREATE TABLE jobs (
 	launched INTEGER NOT NULL DEFAULT 0,
 	artifacts TEXT NOT NULL DEFAULT '[]',
 	resources TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(resources)),
-	workspace TEXT NOT NULL DEFAULT ''
+	workspace TEXT NOT NULL DEFAULT '',
+	container TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(container))
 );
 CREATE INDEX jobs_open ON jobs(created_ms) WHERE state IN ('queued','running');
 CREATE UNIQUE INDEX jobs_idempotency ON jobs(idempotency_key) WHERE idempotency_key <> '';` + workspaceSchema
@@ -272,6 +274,12 @@ func (s Store) db() (*sql.DB, error) {
 		}
 		if old > 0 && old < 9 {
 			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+		}
+		if old > 0 && old < 10 {
+			// Jobs written before container access options used Docker defaults.
+			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN container TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(container))"); err != nil {
 				return err
 			}
 		}
@@ -549,23 +557,27 @@ func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exi
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,run,idempotency_key,request_hash,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,idle_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources,workspace)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, run=excluded.run, idempotency_key=excluded.idempotency_key, request_hash=excluded.request_hash, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, timeout_s=excluded.timeout_s, idle_s=excluded.idle_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, wait_reason=excluded.wait_reason, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched, artifacts=excluded.artifacts, resources=excluded.resources, workspace=excluded.workspace`,
-		job.ID, job.RoomID, job.Session, job.Run, job.IdempotencyKey, job.RequestHash, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, boolInt(job.Heavy), int64(job.Timeout/time.Second), int64(job.Idle/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, job.WaitReason, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched), string(artifacts), string(resources), job.Workspace)
+	container, err := json.Marshal(job.Container)
+	if err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,run,idempotency_key,request_hash,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,idle_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources,workspace,container)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, run=excluded.run, idempotency_key=excluded.idempotency_key, request_hash=excluded.request_hash, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, heavy=excluded.heavy, timeout_s=excluded.timeout_s, idle_s=excluded.idle_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, wait_reason=excluded.wait_reason, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched, artifacts=excluded.artifacts, resources=excluded.resources, workspace=excluded.workspace, container=excluded.container`,
+		job.ID, job.RoomID, job.Session, job.Run, job.IdempotencyKey, job.RequestHash, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, boolInt(job.Heavy), int64(job.Timeout/time.Second), int64(job.Idle/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, job.WaitReason, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched), string(artifacts), string(resources), job.Workspace, string(container))
 	return err
 }
 
-const columns = "id,room_id,session,run,idempotency_key,request_hash,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,idle_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources,workspace"
+const columns = "id,room_id,session,run,idempotency_key,request_hash,node,command,repo,sha,host,image,cpus,memory_mib,heavy,timeout_s,idle_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,wait_reason,cancel_requested,start_posted,launched,artifacts,resources,workspace,container"
 
 func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	var job Job
-	var command, artifacts, resources string
+	var command, artifacts, resources, container string
 	var exit sql.NullInt64
 	var requested, posted, launched, heavy int
 	var host, timeout, idle int64
 	var created, started, ended int64
-	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Run, &job.IdempotencyKey, &job.RequestHash, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &heavy, &timeout, &idle, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &job.WaitReason, &requested, &posted, &launched, &artifacts, &resources, &job.Workspace); err != nil {
+	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Run, &job.IdempotencyKey, &job.RequestHash, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &heavy, &timeout, &idle, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &job.WaitReason, &requested, &posted, &launched, &artifacts, &resources, &job.Workspace, &container); err != nil {
 		return job, err
 	}
 	job.Timeout = time.Duration(timeout) * time.Second
@@ -596,6 +608,9 @@ func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	}
 	if err := json.Unmarshal([]byte(resources), &job.Resources); err != nil {
 		return job, fmt.Errorf("job resources %q: %w", resources, err)
+	}
+	if err := json.Unmarshal([]byte(container), &job.Container); err != nil {
+		return job, fmt.Errorf("job container options %q: %w", container, err)
 	}
 	return job, nil
 }

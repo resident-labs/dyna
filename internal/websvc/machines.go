@@ -220,6 +220,13 @@ type MachinePatch struct {
 	MaxDiskPercent *int `json:"maxDiskPercent,omitempty"`
 	// Resources replaces the node's declared named resource counts.
 	Resources *map[machines.ResourceName]int `json:"resources,omitempty"`
+	// Mounts and Devices upsert room-scoped container registrations. Other
+	// registrations stay unchanged, so one room's edit cannot replace another's.
+	Mounts  *[]machines.NamedMount  `json:"mounts,omitempty"`
+	Devices *[]machines.DeviceGrant `json:"devices,omitempty"`
+	// RemoveMounts and RemoveDevices revoke only the matching room's access.
+	RemoveMounts  *[]machines.MountRef  `json:"removeMounts,omitempty"`
+	RemoveDevices *[]machines.DeviceRef `json:"removeDevices,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -345,33 +352,41 @@ func (a MachineAPI) SaveNode(ctx context.Context, ref string, patch MachinePatch
 	if found && patch.Create {
 		return MachineDetail{}, fmt.Errorf("node %s exists; use dyna node edit", m.Name)
 	}
-	if !found {
-		if !patch.Create {
-			return MachineDetail{}, fmt.Errorf("node %q: %w", ref, os.ErrNotExist)
+	apply := func(stored *machines.Machine) error {
+		if err := applyMachinePatch(stored, patch); err != nil {
+			return err
 		}
-		m = machines.Machine{Name: ref, Enabled: true}
+		if patch.AllowHostChecks != nil {
+			grants, err := hostChecksGrants(stored.HostChecksGrants, authority.Of(ctx), *patch.AllowHostChecks)
+			if err != nil {
+				return err
+			}
+			stored.HostChecksGrants = grants
+		}
+		return nil
 	}
-	if err := applyMachinePatch(&m, patch); err != nil {
+	if found {
+		// The complete patch reads, validates and writes one fresh row. A failed
+		// registration cannot commit another field, and a stale read cannot
+		// re-enable a node or restore revoked access.
+		saved, err := a.Store.Update(ctx, m.ID, apply)
+		if err != nil {
+			return MachineDetail{}, err
+		}
+		return a.machine(ctx, saved, a.ciRuns()), nil
+	}
+	if !patch.Create {
+		return MachineDetail{}, fmt.Errorf("node %q: %w", ref, os.ErrNotExist)
+	}
+	m = machines.Machine{Name: ref, Enabled: true}
+	if err := apply(&m); err != nil {
 		return MachineDetail{}, err
 	}
 	saved, err := a.Store.Save(ctx, m)
 	if err != nil {
 		return MachineDetail{}, err
 	}
-	if patch.AllowHostChecks != nil {
-		// The grant changes inside the store's writer transaction, so this
-		// answer cannot restore a grant that another caller refused meanwhile.
-		if _, err := a.Store.UpdateHostChecksGrants(ctx, saved.ID, func(stored machines.Machine) ([]machines.HostChecksGrant, error) {
-			return hostChecksGrants(stored.HostChecksGrants, authority.Of(ctx), *patch.AllowHostChecks)
-		}); err != nil {
-			return MachineDetail{}, err
-		}
-	}
-	stored, err := a.find(ctx, saved.ID)
-	if err != nil {
-		return MachineDetail{}, err
-	}
-	return a.machine(ctx, stored, a.ciRuns()), nil
+	return a.machine(ctx, saved, a.ciRuns()), nil
 }
 
 // applyMachinePatch writes the fields the patch names.
@@ -412,6 +427,50 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	}
 	if patch.Resources != nil {
 		m.Resources = *patch.Resources
+	}
+	if patch.Mounts != nil {
+		for _, update := range *patch.Mounts {
+			at := slices.IndexFunc(m.Mounts, func(stored machines.NamedMount) bool {
+				return stored.Name == update.Name && stored.Room == update.Room
+			})
+			if at >= 0 {
+				m.Mounts[at] = update
+			} else {
+				m.Mounts = append(m.Mounts, update)
+			}
+		}
+	}
+	if patch.Devices != nil {
+		for _, update := range *patch.Devices {
+			at := slices.IndexFunc(m.Devices, func(stored machines.DeviceGrant) bool {
+				return stored.Path == update.Path && stored.Room == update.Room
+			})
+			if at >= 0 {
+				m.Devices[at] = update
+			} else {
+				m.Devices = append(m.Devices, update)
+			}
+		}
+	}
+	if patch.RemoveMounts != nil {
+		for _, remove := range *patch.RemoveMounts {
+			if err := remove.Validate(); err != nil {
+				return err
+			}
+			m.Mounts = slices.DeleteFunc(m.Mounts, func(stored machines.NamedMount) bool {
+				return stored.Name == remove.Name && stored.Room == remove.Room
+			})
+		}
+	}
+	if patch.RemoveDevices != nil {
+		for _, remove := range *patch.RemoveDevices {
+			if err := remove.Validate(); err != nil {
+				return err
+			}
+			m.Devices = slices.DeleteFunc(m.Devices, func(stored machines.DeviceGrant) bool {
+				return stored.Path == remove.Path && stored.Room == remove.Room
+			})
+		}
 	}
 	return nil
 }

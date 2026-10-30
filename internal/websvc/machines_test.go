@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 )
 
@@ -107,6 +108,105 @@ func TestMachinesListAndPatch(t *testing.T) {
 	}
 	if _, err := api.Node(t.Context(), "m_missing"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unknown machine = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestContainerRegistrationPatchPreservesOtherRooms(t *testing.T) {
+	api := machineAPI(t)
+	node, err := api.Store.Save(t.Context(), machines.Machine{
+		Name: "pve", SSH: "pip@pve", Enabled: true,
+		Mounts:  []machines.NamedMount{{Name: "other", Source: "/srv/other", Room: "room_other", Mode: machines.MountRO}},
+		Devices: []machines.DeviceGrant{{Path: "/dev/other", Room: "room_other"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+	mounts := []machines.NamedMount{{Name: "data", Source: "/srv/data", Room: "room_dyna", Mode: machines.MountRO}}
+	devices := []machines.DeviceGrant{{Path: "/dev/dri", Room: "room_dyna"}}
+	if _, err := api.SaveNode(root, node.ID, MachinePatch{Mounts: &mounts, Devices: &devices}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := api.Store.GetByID(t.Context(), node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Mounts) != 2 || len(stored.Devices) != 2 {
+		t.Fatalf("an own-room patch replaced another room's registrations: %#v, %#v", stored.Mounts, stored.Devices)
+	}
+}
+
+func TestInvalidContainerRegistrationRollsBackNodePatch(t *testing.T) {
+	api := machineAPI(t)
+	node, err := api.Store.Save(t.Context(), machines.Machine{Name: "pve", SSH: "pip@pve", Enabled: true, MaxIOHeavy: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxIOHeavy := 9
+	mounts := []machines.NamedMount{{Name: "bad", Source: "relative", Room: "room_dyna", Mode: machines.MountRO}}
+	root := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+	if _, err := api.SaveNode(root, node.ID, MachinePatch{MaxIOHeavy: &maxIOHeavy, Mounts: &mounts}); err == nil {
+		t.Fatal("invalid registration patch succeeded")
+	}
+	stored, err := api.Store.GetByID(t.Context(), node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MaxIOHeavy != 2 || len(stored.Mounts) != 0 {
+		t.Fatalf("failed patch partially committed: max IO heavy %d, mounts %#v", stored.MaxIOHeavy, stored.Mounts)
+	}
+	ssh := "pip@new"
+	if _, err := api.SaveNode(root, "new", MachinePatch{Create: true, SSH: &ssh, Mounts: &mounts}); err == nil {
+		t.Fatal("invalid registration creation succeeded")
+	}
+	if _, err := api.Store.Get(t.Context(), "new"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed creation left a node: %v", err)
+	}
+}
+
+func TestContainerRegistrationRemovalRejectsNewJobs(t *testing.T) {
+	api := machineAPI(t)
+	node, err := api.Store.Save(t.Context(), machines.Machine{
+		Name: "pve", SSH: "pip@pve", Enabled: true,
+		Mounts: []machines.NamedMount{
+			{Name: "data", Source: "/srv/data", Room: "room_dyna", Mode: machines.MountRO},
+			{Name: "other", Source: "/srv/other", Room: "room_other", Mode: machines.MountRO},
+		},
+		Devices: []machines.DeviceGrant{
+			{Path: "/dev/dri", Room: "room_dyna"},
+			{Path: "/dev/other", Room: "room_other"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+	removeMounts := []machines.MountRef{{Name: "data", Room: "room_dyna"}}
+	removeDevices := []machines.DeviceRef{{Path: "/dev/dri", Room: "room_dyna"}}
+	if _, err := api.SaveNode(root, node.ID, MachinePatch{RemoveMounts: &removeMounts, RemoveDevices: &removeDevices}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := api.Store.GetByID(t.Context(), node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Mounts) != 1 || stored.Mounts[0].Room != "room_other" || len(stored.Devices) != 1 || stored.Devices[0].Room != "room_other" {
+		t.Fatalf("revocation changed another room's registrations: %#v, %#v", stored.Mounts, stored.Devices)
+	}
+	svc := &jobs.Service{Store: jobs.Store{DataDir: api.Store.DataDir}, Machines: api.Store, DataDir: api.Store.DataDir}
+	_, err = svc.Submit(t.Context(), jobs.Input{Node: node.Name, RoomID: "room_dyna", Command: []string{"true"}, Image: "alpine", Mounts: []jobs.MountRequest{{Name: "data", Target: "/data"}}})
+	if err == nil || !strings.Contains(err.Error(), "unknown mount") {
+		t.Fatalf("revoked mount submission = %v, want an unknown-mount refusal", err)
+	}
+	_, err = svc.Submit(t.Context(), jobs.Input{Node: node.Name, RoomID: "room_dyna", Command: []string{"true"}, Image: "alpine", Devices: []string{"/dev/dri"}})
+	if err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("revoked device submission = %v, want an allow-list refusal", err)
+	}
+	if _, err := svc.Submit(t.Context(), jobs.Input{
+		Node: node.Name, RoomID: "room_other", Command: []string{"true"}, Image: "alpine",
+		Mounts: []jobs.MountRequest{{Name: "other", Target: "/data"}}, Devices: []string{"/dev/other"},
+	}); err != nil {
+		t.Fatalf("another room lost its registration: %v", err)
 	}
 }
 
