@@ -18,7 +18,7 @@ type goalScan struct {
 	service *goalsvc.Service
 }
 
-func (g goalScan) run(now time.Time, signatures, work map[string]string, version *string, first bool, emit func(Event)) {
+func (g goalScan) run(now time.Time, signatures, work map[string]string, version *int64, first bool, emit func(Event)) {
 	service := g.service
 	service.Store.Now = func() time.Time { return now }
 	current, err := service.Store.Revision()
@@ -27,7 +27,7 @@ func (g goalScan) run(now time.Time, signatures, work map[string]string, version
 	const expiryPrefix = expiryKey + "\x00"
 	const revisionPrefix = "\x00roomRevision\x00"
 	expiry, _ := time.Parse(time.RFC3339Nano, work[expiryKey])
-	if err != nil || current == *version && (expiry.IsZero() || now.Before(expiry)) {
+	if err != nil || !first && current == *version && (expiry.IsZero() || now.Before(expiry)) {
 		return
 	}
 	revisions, err := service.Store.RoomRevisions()
@@ -35,7 +35,7 @@ func (g goalScan) run(now time.Time, signatures, work map[string]string, version
 		return
 	}
 	globalChanged := work[revisionPrefix+goals.Global] != revisions[goals.Global]
-	all := first || *version == "" || globalChanged
+	all := first || *version < 0 || globalChanged
 	selected := map[string]bool{}
 	for roomID, revision := range revisions {
 		if roomID != goals.Global && (all || work[revisionPrefix+roomID] != revision) {
