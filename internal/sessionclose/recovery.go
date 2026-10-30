@@ -5,13 +5,13 @@ package sessionclose
 type ResponsibilityKind string
 
 const (
-	ResponsibilityPR       ResponsibilityKind = "pr"
-	ResponsibilityGoal     ResponsibilityKind = "goal"
-	ResponsibilityItem     ResponsibilityKind = "item"
-	ResponsibilityQuestion ResponsibilityKind = "question"
-	ResponsibilityChild    ResponsibilityKind = "child"
-	ResponsibilityShell    ResponsibilityKind = "shell"
-	ResponsibilityWorkflow ResponsibilityKind = "workflow"
+	ResponsibilityKindPR       ResponsibilityKind = "pr"
+	ResponsibilityKindGoal     ResponsibilityKind = "goal"
+	ResponsibilityKindItem     ResponsibilityKind = "item"
+	ResponsibilityKindQuestion ResponsibilityKind = "question"
+	ResponsibilityKindChild    ResponsibilityKind = "child"
+	ResponsibilityKindShell    ResponsibilityKind = "shell"
+	ResponsibilityKindWorkflow ResponsibilityKind = "workflow"
 )
 
 // Responsibility is one thing a session owns.
@@ -43,6 +43,6 @@ const (
 // choose their controls.
 type Recovery struct {
 	Reason  Reason           `json:"reason"`
-	Actions []Action         `json:"actions"`
-	Items   []Responsibility `json:"items"`
+	Actions []Action         `json:"actions" tstype:"Action[] | null"`
+	Items   []Responsibility `json:"items" tstype:"Responsibility[] | null"`
 }

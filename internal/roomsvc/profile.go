@@ -7,18 +7,7 @@ import (
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/workeroutput"
 )
-
-// Profile is a member's card: identity and its newest posts. The web card
-// shows the goals the member holds from the room's goal list.
-type Profile struct {
-	Member Member             `json:"member"`
-	Parent string             `json:"parent,omitempty"` // the parent's name; empty for a top-level session
-	Dir    string             `json:"dir"`
-	Usage  workeroutput.Usage `json:"usage"`
-	Posts  []Post             `json:"posts"` // the member's newest posts, oldest first
-}
 
 // Profile reads a session's card with at most posts of its newest posts.
 func (s *Service) Profile(ref string, posts int) (Profile, error) {
