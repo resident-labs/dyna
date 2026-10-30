@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -37,6 +39,23 @@ func (w *gatedWriter) Write(p []byte) (int, error) {
 		<-w.open
 	})
 	return w.buf.Write(p)
+}
+
+func TestExecuteAppliesDrainTimeout(t *testing.T) {
+	var started *exec.Cmd
+	build := newCommand
+	t.Cleanup(func() { newCommand = build })
+	newCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
+		started = build(ctx, executable, args...)
+		return started
+	}
+	err := Execute(context.Background(), Process{Args: []string{"true"}, Env: MetadataEnv(), Timeout: time.Minute, DrainTimeout: 7 * time.Second, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.WaitDelay != 7*time.Second {
+		t.Fatalf("WaitDelay = %v, want the DrainTimeout 7s", started.WaitDelay)
+	}
 }
 
 func TestExecuteDrainTimeoutKeepsReleasedOutput(t *testing.T) {
