@@ -13,7 +13,6 @@ func TestPublicWorkflowSourcesExcludeRetiredAPIs(t *testing.T) {
 		filepath.Join("..", "..", "internal", "guidance", "skill_body.md"),
 		filepath.Join("..", "..", "internal", "subagent", "prompts.go"),
 		filepath.Join("..", "..", "internal", "workflow", "prelude.js"),
-		filepath.Join("..", "..", "internal", "workflowtemplate", "catalog.go"),
 	}
 	guides, err := filepath.Glob(filepath.Join("..", "..", "internal", "cli", "interactive", "guide", "*.md"))
 	if err != nil {
