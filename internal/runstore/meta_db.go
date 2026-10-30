@@ -114,6 +114,16 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	}); err != nil {
 		return db, err
 	}
+	if err := database.Migrate(db, "runs.step-records", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `CREATE TABLE workflow_step_records (
+ run_id TEXT NOT NULL, call_key TEXT NOT NULL, ordinal INTEGER NOT NULL, attempt INTEGER NOT NULL,
+ state TEXT NOT NULL, result TEXT, external_id TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY (run_id, call_key, ordinal, attempt)
+)`)
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 
@@ -662,6 +672,9 @@ func deleteMeta(db *sql.DB, id string) error {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM runs WHERE id=?", id); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_step_records WHERE run_id=?", id); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM run_directories WHERE run_id=?", id); err != nil {
