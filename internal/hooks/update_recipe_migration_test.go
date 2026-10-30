@@ -14,6 +14,7 @@ func TestMigrateUpdateRecipe(t *testing.T) {
 		count    int
 		disabled bool
 	}{
+		{"custom command only", 0, false},
 		{"single disabled", 1, true},
 		{"release install with source opt-in", 1, false},
 		{"multiple recipes", 2, false},
@@ -30,6 +31,9 @@ func TestMigrateUpdateRecipe(t *testing.T) {
 				t.Fatal(err)
 			}
 			list := []Hook{{Name: "update", Label: "Update Dyna", Command: "'/bin/dyna' git hooks _install --main '/source' --name 'update' --tool-path '/bin'", EveryMinutes: 17, Disabled: tc.disabled}, {Name: "custom", Label: "Update Dyna", Command: "echo custom"}}
+			if count == 0 {
+				list = list[1:]
+			}
 			if count == 2 {
 				list = append(list, Hook{Name: "other", Label: "Update Dyna", Command: "'/bin/dyna' git hooks _install --main '/other' --name 'other' --tool-path '/bin'"})
 			}
@@ -62,6 +66,9 @@ func TestMigrateUpdateRecipe(t *testing.T) {
 			}
 			if count == 1 && (source != "/source" || enabled != wantEnabled || every != 17 || multiple != 0 || tools != "/bin" || len(got.Hooks) != 1 || got.Hooks[0].Command != "echo custom") {
 				t.Fatalf("single: %q %d %d %d %#v", source, enabled, every, multiple, got.Hooks)
+			}
+			if count == 0 && (source != "" || enabled != 0 || multiple != 0 || len(got.Hooks) != 1 || got.Hooks[0].Command != "echo custom") {
+				t.Fatalf("custom: %q %d %d %#v", source, enabled, multiple, got.Hooks)
 			}
 			if count == 2 && (source != "" || multiple != 1 || len(got.Hooks) != 3) {
 				t.Fatalf("multiple: %q %d %#v", source, multiple, got.Hooks)
