@@ -14,7 +14,7 @@ export function diskTone(free: number | undefined, floor: number | undefined): U
 }
 
 export function freshness(machine: Pick<MachineDetail, 'local' | 'seenAt' | 'status'>): string {
-  if (machine.local) return 'Live · every 5 seconds'
+  if (machine.local) return 'CPU and memory live · every 5 seconds'
   if (!machine.seenAt) return 'Not probed yet'
   const age = ago(machine.seenAt)
   return machine.status === 'offline'
