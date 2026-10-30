@@ -169,6 +169,33 @@ func TestCloseBoxRetriesFailedSyncBeforeArchive(t *testing.T) {
 	}
 }
 
+func TestCloseRetriesFailedArchiveDone(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.jsonl")
+	writeSession(t, file, "abc")
+	var waits []time.Duration
+	fired := func(d time.Duration) <-chan time.Time {
+		waits = append(waits, d)
+		ticked := make(chan time.Time, 1)
+		ticked <- time.Time{}
+		return ticked
+	}
+	calls := 0
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(&transcriptEngine{}, dir), file, fired, func(context.Context) error {
+		calls++
+		if calls == 1 {
+			return errors.New("engine unavailable")
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("closeBox = %v after %d ArchiveDone calls, want nil after 2", err, calls)
+	}
+	if len(waits) != 1 || waits[0] != transcriptRetryMin {
+		t.Fatalf("waits = %v, want one wait of %v", waits, transcriptRetryMin)
+	}
+}
+
 func TestCloseKeepsRunAfterRunnerErrorAndRetriesSync(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.jsonl")
