@@ -34,14 +34,19 @@ type Service struct {
 	Expiry  time.Duration
 	ID      func(string) (string, error)
 	mu      sync.Mutex
-	waiters map[contract.OpID]chan contract.Operation
+	waiters map[contract.OpID]waiter
+}
+
+type waiter struct {
+	ctx  context.Context
+	done chan contract.Operation
 }
 
 func New(st *store.Store, ctx context.Context, kinds map[contract.OpKind]Entry, now func() time.Time, expiry time.Duration, id func(string) (string, error)) *Service {
 	if expiry <= 0 {
 		expiry = 24 * time.Hour
 	}
-	return &Service{Store: st, Context: ctx, Kinds: kinds, Now: now, Expiry: expiry, ID: id, waiters: make(map[contract.OpID]chan contract.Operation)}
+	return &Service{Store: st, Context: ctx, Kinds: kinds, Now: now, Expiry: expiry, ID: id, waiters: make(map[contract.OpID]waiter)}
 }
 
 func (s *Service) event(room contract.RoomID, from contract.Principal, body contract.EventBody) (contract.Event, error) {
@@ -147,17 +152,17 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 		return op, nil
 	}
 	s.mu.Lock()
-	waiter := make(chan contract.Operation, 1)
-	s.waiters[op.ID] = waiter
+	resultCh := make(chan contract.Operation, 1)
+	s.waiters[op.ID] = waiter{ctx: ctx, done: resultCh}
 	s.mu.Unlock()
 	go s.run(op, entry)
 	select {
-	case result := <-waiter:
+	case result := <-resultCh:
 		return result, nil
 	case <-ctx.Done():
 		s.mu.Lock()
 		select {
-		case result := <-waiter:
+		case result := <-resultCh:
 			s.mu.Unlock()
 			return result, nil
 		default:
@@ -283,9 +288,13 @@ func (s *Service) finish(op contract.Operation, result contract.OpResult) error 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	waiter := s.waiters[op.ID]
+	waiting, present := s.waiters[op.ID]
+	if present && waiting.ctx.Err() != nil {
+		delete(s.waiters, op.ID)
+		present = false
+	}
 	var notify []contract.Delivery
-	if waiter == nil {
+	if !present {
 		notify = delivery(op.By.Session)
 	}
 	err = s.Store.Write(context.WithoutCancel(s.Context), func(tx *sql.Tx) error {
@@ -301,11 +310,11 @@ func (s *Service) finish(op contract.Operation, result contract.OpResult) error 
 	if err != nil {
 		return err
 	}
-	if waiter != nil {
+	if present {
 		delete(s.waiters, op.ID)
 		op.State = state
 		op.Result = &result
-		waiter <- op
+		waiting.done <- op
 	}
 	return nil
 }
