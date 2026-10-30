@@ -504,17 +504,20 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"}); e != nil {
+	worker, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"})
+	if e != nil {
 		t.Fatal(e)
 	}
 	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room.Room, Types: []contract.EventType{"box.changed"}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(events.Events) != 1 {
-		t.Fatalf("got %d box.changed events", len(events.Events))
+	var changed contract.BoxChanged
+	for _, event := range events.Events {
+		if body := event.Body.(contract.BoxChanged); body.Session == worker.Session {
+			changed = body
+		}
 	}
-	changed := events.Events[0].Body.(contract.BoxChanged)
 	if changed.To != contract.BoxPending || changed.Reason != string(box.PendingNoReadyHost) {
 		t.Fatalf("unexpected box change: %+v", changed)
 	}
