@@ -150,6 +150,9 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 		return contract.RoomRepoAddResponse{}, invalid("repository must be owner/name")
 	}
 	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contract.RoomRepoAddResponse{}, invalid("unknown room")
+		}
 		return contract.RoomRepoAddResponse{}, failure(err)
 	}
 	return contract.RoomRepoAddResponse{}, nil
@@ -160,6 +163,9 @@ func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req 
 		return contract.RoomReposResponse{}, forbidden()
 	}
 	repos, err := s.store.RoomRepos(ctx, req.Room)
+	if errors.Is(err, sql.ErrNoRows) {
+		return contract.RoomReposResponse{}, invalid("unknown room")
+	}
 	if err != nil {
 		return contract.RoomReposResponse{}, failure(err)
 	}
