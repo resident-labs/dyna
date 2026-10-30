@@ -4,7 +4,7 @@ import { createTransport } from './lib/api/transport.ts'
 import { createTerminalTransport } from './lib/api/terminalTransport.ts'
 import { openStream } from './lib/api/stream.ts'
 import type { StreamSource } from './lib/api/stream.ts'
-import { isRecord, isString } from './lib/api/guards.ts'
+import { isPostResult, isRecord, isString } from './lib/api/guards.ts'
 import type { AttachmentRef, Engine, ProfileSave } from './lib/api/engine.ts'
 import type { MachinePatch } from './lib/api/machine.ts'
 import type { ApprovalDecision } from './lib/api/approvals.ts'
@@ -72,7 +72,29 @@ const app = new Proxy({} as Engine, callHandler)
 const { termWrite, termAttach } = createTerminalTransport(app, authenticatedFetch)
 export { termAttach }
 
+export interface SlashCommand {
+  name: string
+  source: 'workflow' | 'skill' | 'mcp-prompt'
+  description: string
+  args: { name: string; required: boolean; description: string }[]
+}
+
 export const api = {
+  commands: async (room: string): Promise<SlashCommand[]> => {
+    const response = await authenticatedFetch('/api/rooms/' + encodeURIComponent(room) + '/commands')
+    if (!response.ok) throw new Error('Commands could not be loaded.')
+    const value: unknown = await response.json()
+    if (!Array.isArray(value)) throw new Error('The command list is invalid.')
+    return value.filter((entry): entry is SlashCommand => isRecord(entry) && isString(entry.name) &&
+      (entry.source === 'workflow' || entry.source === 'skill' || entry.source === 'mcp-prompt') &&
+      isString(entry.description) && Array.isArray(entry.args) &&
+      entry.args.every((arg: unknown) => isRecord(arg) && isString(arg.name) && typeof arg.required === 'boolean' && isString(arg.description)))
+  },
+  runCommand: async (room: string, name: string, text: string) => {
+    const result = await post('/api/rooms/' + encodeURIComponent(room) + '/commands/run', { name, text, target: '' })
+    if (!isPostResult(result)) throw new Error('The command result is invalid.')
+    return result
+  },
 
   accountsView: (scope = '') => app.AccountsView(scope),
   accountsList: (scope = '', refresh = false) => app.AccountsList(scope, refresh),

@@ -167,6 +167,8 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Members", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Members},
 		{Name: "MentionChoices", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.MentionChoices},
 		{Name: "Preview", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Preview},
+		{Name: "Commands", Access: websvc.Read, Scope: websvc.ScopeRead, Policy: policyOwner, Method: s.rooms.Commands},
+		{Name: "RunCommand", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.rooms.RunCommand},
 		{Name: "MarkRead", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.rooms.MarkRead},
 		{Name: "MarkReadMany", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.rooms.MarkReadMany},
 		{Name: "MarkRoomRead", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.rooms.MarkRoomRead},

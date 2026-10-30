@@ -167,7 +167,30 @@
   onDestroy(() => { attachments.destroy(); onpending(false) })
 
   // App commands a profile does not shadow, and the one the draft names.
+  let roomCommands = $state<import('../../api.ts').SlashCommand[]>([])
+  let commandLoad: Promise<boolean> | null = null
+  let commandRoom = ''
+  $effect(() => { room.id; roomCommands = []; commandLoad = null; commandRoom = '' })
+  function loadCommands(): Promise<boolean> {
+    const roomID = room.id
+    if (commandLoad && commandRoom === roomID) return commandLoad
+    commandRoom = roomID
+    commandLoad = api.commands(roomID).then((list) => {
+      if (room.id === roomID && active) roomCommands = list
+      return true
+    }).catch((e) => {
+      if (room.id === roomID && active) { error = errorText(e); commandLoad = null }
+      return false
+    })
+    return commandLoad
+  }
   let appCommands = $derived(commands.filter((c) => !profiles.some((p) => p.name === c.name)))
+  let skillCommands = $derived(roomCommands.filter((c) => c.source === 'skill' && !profiles.some((p) => p.name === c.name) && !appCommands.some((a) => a.name === c.name)))
+  let skillCommand = $derived.by(() => {
+    const match = draft.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/)
+    const skill = match && skillCommands.find((item) => item.name === match[1])
+    return skill ? { skill, text: (match[2] ?? '').trim() } : null
+  })
   let command = $derived.by(() => {
     const m = draft.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/)
     const c = m && appCommands.find((x) => x.name === m[1])
@@ -186,6 +209,7 @@
     token?.slash ? [
       ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: profileHint(p) })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
+      ...skillCommands.map((c) => ({ value: '/' + c.name, group: 'Skills', arg: 'message', hint: c.description })),
     ] :
     [...mentionOptions(choices).map((option) => ({ ...option, group: 'Sessions' })), ...fileMentionOptions(fileEntries, token?.text || '@')]
   )
@@ -287,7 +311,11 @@
     const withArg = lead ? appCommands.find((c) => c.name === lead[1] && c.options) : undefined
     const argStart = lead ? lead[0].length : 0
     if (start === 0 && text.startsWith('/') && !text.startsWith('//')) {
-      if (!token?.slash) onslash?.() // the list may have changed since launch
+      if (!token?.slash) {
+        onslash?.()
+        commandLoad = null
+        void loadCommands()
+      }
       token = { start, end: pos, text, slash: true }
     }
     else if (withArg && pos >= argStart && !draft.slice(argStart, pos).includes(' ')) token = { start: argStart, end: pos, text: draft.slice(argStart, pos), arg: withArg }
@@ -357,6 +385,32 @@
   }
 
   async function send() {
+    if (busy) return
+    if (draft.startsWith('/') && !draft.startsWith('//') && !command && !selectedProfile) {
+      const original = draft
+      busy = true
+      const loaded = await loadCommands()
+      await tick()
+      busy = false
+      if (!loaded || !active || draft !== original) return
+    }
+    if (skillCommand && !forwarding) {
+      if (!skillCommand.text) { error = 'Type a message for the skill.'; return }
+      if (references.length || $attachments.items.length || reply) { error = 'Send the skill message without files, references, or a reply.'; return }
+      error = ''
+      busy = true
+      try {
+        const text = await prepareText(skillCommand.text)
+        if (!active) return
+        const result = await api.runCommand(room.id, skillCommand.skill.name, text)
+        if (result.failed?.length) error = result.failed.map((f) => `${short(f.to, room.name)}: ${f.error || 'delivery failed'}`).join(' · ')
+        else { note = result.deliveries?.length ? `Delivered to ${result.deliveries.length} recipient${result.deliveries.length === 1 ? '' : 's'}` : 'Posted'; setTimeout(() => (note = ''), 2400) }
+        if (result.message.id) draft = ''
+      }
+      catch (e) { error = errorText(e) }
+      finally { busy = false; await tick(); field?.focus() }
+      return
+    }
     if (command && !forwarding) {
       if (references.length) { error = 'Remove references before running a command.'; return }
       return runCommand(command.c, command.arg)
@@ -459,7 +513,7 @@
   {#if fileDirectory !== null && (fileLoading || fileError)}
     <div class="file-status" role="status">{fileLoading ? 'Loading files…' : 'Files unavailable: ' + fileError}</div>
   {/if}
-  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message ${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
+  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message ${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command && !skillCommand))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
     {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
     {#snippet tools()}
       <button class="command-chip" type="button" aria-label="Browse commands" title="Type / for sessions and commands" disabled={busy} onclick={openCommands}>/</button>
@@ -473,6 +527,8 @@
       <span class="err">A file did not save. Retry it or remove it before you send.</span>
     {:else if command}
       <span class="go">{commandLine} · <kbd>Enter</kbd> to run</span>
+    {:else if skillCommand}
+      <span class="go">/{skillCommand.skill.name} · {skillCommand.skill.description} · <kbd>Enter</kbd> to send</span>
     {:else if spawn?.error}
       <span class="err">{spawn.error}</span>
     {:else if spawn}
