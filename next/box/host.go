@@ -1,0 +1,45 @@
+package box
+
+import (
+	"context"
+	"github.com/resident-labs/dyna/contract"
+)
+
+type Slice struct {
+	Name            string
+	CPUs            int
+	MemHigh, MemMax int64
+	Pids            int
+}
+type Mount struct {
+	HostPath, BoxPath string
+	ReadOnly          bool
+}
+type EnvVar struct{ Name, Value string }
+type Label struct{ Key, Value string }
+type ContainerSpec struct {
+	Box          contract.BoxID
+	Image, Slice string
+	Mounts       []Mount
+	Env          []EnvVar
+	Labels       []Label
+}
+type ContainerStatus struct {
+	Box     contract.BoxID
+	Running bool
+}
+type Forward struct {
+	Box                  contract.BoxID
+	HostPath, EnginePath string
+}
+type HostDriver interface {
+	EnsureSlice(context.Context, Slice) error
+	RemoveSlice(context.Context, string) error
+	CreateContainer(context.Context, ContainerSpec) error
+	StartContainer(context.Context, contract.BoxID) error
+	StopContainer(context.Context, contract.BoxID) error
+	RemoveContainer(context.Context, contract.BoxID) error
+	ListContainers(context.Context) ([]ContainerStatus, error)
+	AddForward(context.Context, Forward) error
+	RemoveForward(context.Context, Forward) error
+}

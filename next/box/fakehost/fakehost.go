@@ -1,0 +1,113 @@
+// Package fakehost provides an in-memory host driver for unit tests.
+package fakehost
+
+import (
+	"context"
+	"sort"
+
+	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
+)
+
+type Call string
+
+const (
+	EnsureSlice     Call = "ensure-slice"
+	RemoveSlice     Call = "remove-slice"
+	CreateContainer Call = "create-container"
+	StartContainer  Call = "start-container"
+	StopContainer   Call = "stop-container"
+	RemoveContainer Call = "remove-container"
+	ListContainers  Call = "list-containers"
+	AddForward      Call = "add-forward"
+	RemoveForward   Call = "remove-forward"
+)
+
+type Host struct {
+	Calls      []Call
+	FailNext   error
+	Slices     map[string]box.Slice
+	Containers map[contract.BoxID]box.ContainerSpec
+	Running    map[contract.BoxID]bool
+	Forwards   map[box.Forward]bool
+}
+
+func New() *Host {
+	return &Host{Slices: map[string]box.Slice{}, Containers: map[contract.BoxID]box.ContainerSpec{}, Running: map[contract.BoxID]bool{}, Forwards: map[box.Forward]bool{}}
+}
+func (h *Host) call(c Call) error {
+	h.Calls = append(h.Calls, c)
+	err := h.FailNext
+	h.FailNext = nil
+	return err
+}
+func (h *Host) EnsureSlice(_ context.Context, s box.Slice) error {
+	if err := h.call(EnsureSlice); err != nil {
+		return err
+	}
+	h.Slices[s.Name] = s
+	return nil
+}
+func (h *Host) RemoveSlice(_ context.Context, name string) error {
+	if err := h.call(RemoveSlice); err != nil {
+		return err
+	}
+	delete(h.Slices, name)
+	return nil
+}
+func (h *Host) CreateContainer(_ context.Context, c box.ContainerSpec) error {
+	if err := h.call(CreateContainer); err != nil {
+		return err
+	}
+	h.Containers[c.Box] = c
+	return nil
+}
+func (h *Host) StartContainer(_ context.Context, id contract.BoxID) error {
+	if err := h.call(StartContainer); err != nil {
+		return err
+	}
+	h.Running[id] = true
+	return nil
+}
+func (h *Host) StopContainer(_ context.Context, id contract.BoxID) error {
+	if err := h.call(StopContainer); err != nil {
+		return err
+	}
+	h.Running[id] = false
+	return nil
+}
+func (h *Host) RemoveContainer(_ context.Context, id contract.BoxID) error {
+	if err := h.call(RemoveContainer); err != nil {
+		return err
+	}
+	delete(h.Containers, id)
+	delete(h.Running, id)
+	return nil
+}
+func (h *Host) ListContainers(_ context.Context) ([]box.ContainerStatus, error) {
+	if err := h.call(ListContainers); err != nil {
+		return nil, err
+	}
+	out := make([]box.ContainerStatus, 0, len(h.Containers))
+	for id := range h.Containers {
+		out = append(out, box.ContainerStatus{Box: id, Running: h.Running[id]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Box < out[j].Box })
+	return out, nil
+}
+func (h *Host) AddForward(_ context.Context, f box.Forward) error {
+	if err := h.call(AddForward); err != nil {
+		return err
+	}
+	h.Forwards[f] = true
+	return nil
+}
+func (h *Host) RemoveForward(_ context.Context, f box.Forward) error {
+	if err := h.call(RemoveForward); err != nil {
+		return err
+	}
+	delete(h.Forwards, f)
+	return nil
+}
+
+var _ box.HostDriver = (*Host)(nil)
