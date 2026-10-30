@@ -205,6 +205,55 @@ func (s Service) pinnedWait(ctx context.Context, roomID, pin string, choice role
 	return Result{Action: "waiting", Reason: choice.Reason}, true
 }
 
+// wakePass points at one pass's fields in a librarianstate.State. The feature
+// map and smell passes keep separate fields, so one lifecycle works over either.
+type wakePass struct {
+	session, head, pending *string
+	pendingTurn            *int
+	lastRun                *time.Time
+	failed                 *map[string]time.Time
+	// uncapped is nil for the feature map pass, which has no daily smell cap.
+	uncapped *bool
+}
+
+func mapPass(st *librarianstate.State) wakePass {
+	return wakePass{session: &st.Session, head: &st.Head, pending: &st.Pending, pendingTurn: &st.PendingTurn, lastRun: &st.LastRun, failed: &st.FailedProfiles}
+}
+
+func smellPass(st *librarianstate.State) wakePass {
+	return wakePass{session: &st.SmellSession, head: &st.SmellHead, pending: &st.SmellPending, pendingTurn: &st.SmellPendingTurn, lastRun: &st.SmellLastRun, failed: &st.SmellFailedProfiles, uncapped: &st.SmellUncapped}
+}
+
+// settlePending ends the assigned turn of one pass. The assigned commit becomes
+// the checkpoint only when its turn succeeds, so a failed, stopped or lost turn
+// is retried from the old one. It reports false while the turn still runs.
+func (s Service) settlePending(states librarianstate.Store, repo string, st librarianstate.State, pass func(*librarianstate.State) wakePass) (librarianstate.State, bool, error) {
+	p := pass(&st)
+	if *p.pending == "" {
+		return st, true, nil
+	}
+	turn, turnErr := s.Sessions.Turn(*p.session, *p.pendingTurn)
+	if turnErr == nil && !turn.Done() {
+		return st, false, nil
+	}
+	ok := turnErr == nil && turn.Status == subagent.TurnOK
+	st, err := states.Update(repo, false, func(st *librarianstate.State) error {
+		w := pass(st)
+		if w.uncapped != nil {
+			*w.uncapped = false
+		}
+		if ok {
+			*w.head = *w.pending
+		} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn) {
+			info, _, _ := s.Sessions.Inspect(*w.session)
+			*w.failed = rolesession.RecordFailure(*w.failed, info, turn, s.now())
+		}
+		*w.pending, *w.pendingTurn = "", 0
+		return nil
+	})
+	return st, true, err
+}
+
 func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	r, err := repoid.Resolve(ctx, repoDir)
 	if err != nil {
@@ -230,27 +279,12 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	if st, err = states.Get(r.ID); err != nil {
 		return Result{}, err
 	}
-
-	// The assigned commit becomes the checkpoint only when its turn
-	// succeeds. A failed, stopped or lost turn is retried from the old one.
-	if st.Pending != "" {
-		turn, err := s.Sessions.Turn(st.Session, st.PendingTurn)
-		if err == nil && !turn.Done() {
-			return Result{Action: "busy", Reason: "the librarian is still on its last turn", Head: st.Head}, nil
-		}
-		ok := err == nil && turn.Status == subagent.TurnOK
-		if st, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
-			if ok {
-				st.Head = st.Pending
-			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn) {
-				info, _, _ := s.Sessions.Inspect(st.Session)
-				st.FailedProfiles = rolesession.RecordFailure(st.FailedProfiles, info, turn, s.now())
-			}
-			st.Pending, st.PendingTurn = "", 0
-			return nil
-		}); err != nil {
-			return Result{}, err
-		}
+	st, settled, err := s.settlePending(states, r.ID, st, mapPass)
+	if err != nil {
+		return Result{}, err
+	}
+	if !settled {
+		return Result{Action: "busy", Reason: "the librarian is still on its last turn", Head: st.Head}, nil
 	}
 
 	target, err := MainHead(ctx, r.Main)
@@ -361,25 +395,12 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string, now bool) (Resu
 	if st, err = states.Get(r.ID); err != nil {
 		return Result{}, err
 	}
-	if st.SmellPending != "" {
-		turn, turnErr := s.Sessions.Turn(st.SmellSession, st.SmellPendingTurn)
-		if turnErr == nil && !turn.Done() {
-			return Result{Action: "busy", Reason: "the librarian smell pass is still on its last turn", Head: st.SmellHead}, nil
-		}
-		ok := turnErr == nil && turn.Status == subagent.TurnOK
-		if st, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
-			st.SmellUncapped = false
-			if ok {
-				st.SmellHead = st.SmellPending
-			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn) {
-				info, _, _ := s.Sessions.Inspect(st.SmellSession)
-				st.SmellFailedProfiles = rolesession.RecordFailure(st.SmellFailedProfiles, info, turn, s.now())
-			}
-			st.SmellPending, st.SmellPendingTurn = "", 0
-			return nil
-		}); err != nil {
-			return Result{}, err
-		}
+	st, settled, err := s.settlePending(states, r.ID, st, smellPass)
+	if err != nil {
+		return Result{}, err
+	}
+	if !settled {
+		return Result{Action: "busy", Reason: "the librarian smell pass is still on its last turn", Head: st.SmellHead}, nil
 	}
 	target, err := MainHead(ctx, r.Main)
 	if err != nil {
