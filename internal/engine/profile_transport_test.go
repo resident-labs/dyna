@@ -27,6 +27,7 @@ func TestProfileCLIShapesRejectUnverifiedClaims(t *testing.T) {
 	}{
 		{"UpsertProfile", cliArgs(t, p)},
 		{"SetProfileUses", cliArgs(t, "new", []string{profile.UseAgents})},
+		{"EditProfileField", cliArgs(t, "new", "cost", "3")},
 		// These browser argument shapes remain valid and use the same policy.
 		{"SaveProfile", cliArgs(t, configsvc.ProfileEdit{})},
 		{"RemoveProfile", cliArgs(t, "new")},
