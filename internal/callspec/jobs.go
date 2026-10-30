@@ -20,6 +20,7 @@ type RunJobInput struct {
 	Lane        string   `json:"lane,omitempty"`
 	Repo        string   `json:"repo"`
 	Ref         string   `json:"ref"`
+	Subdir      string   `json:"subdir,omitempty"`
 	Host        bool     `json:"host"`
 	Image       string   `json:"image"`
 	// Network supports none for an isolated container. Mounts select named
