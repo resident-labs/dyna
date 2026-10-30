@@ -6,4 +6,4 @@
   let { short = false }: { short?: boolean } = $props()
 </script>
 
-<Chip tone="gold" title="Expedited: this work goes first in review and merge">{short ? '⚡' : '⚡ Expedited'}</Chip>
+<Chip tone="warning" title="Expedited: this work goes first in review and merge">{short ? '⚡' : '⚡ Expedited'}</Chip>

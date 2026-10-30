@@ -103,7 +103,7 @@
     {@const cm = checkMeta(c)}
     {@const link = checkLink(c)}
     <section class="fail">
-      <header><b>{c.name}</b><Chip tone="coral">{cm.word}</Chip>{#if c.node}<span class="count">Node: {c.node}</span>{/if}{#if checkTime(c)}<span class="count">{checkTime(c)}</span>{/if}</header>
+      <header><b>{c.name}</b><Chip tone="danger">{cm.word}</Chip>{#if c.node}<span class="count">Node: {c.node}</span>{/if}{#if checkTime(c)}<span class="count">{checkTime(c)}</span>{/if}</header>
       {#if c.failureExcerpt}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (The output region scrolls with the keyboard.) -->
         <pre tabindex="0" role="region" aria-label="Saved failure output: {c.name}">{c.failureExcerpt}</pre>
