@@ -113,6 +113,40 @@ func TestCancelledWriteDoesNotFailClose(t *testing.T) {
 	}
 }
 
+// A commit that loses the race with the caller's cancel is the caller's error.
+// The write function rolls back before it returns, so Commit sees a finished
+// transaction without waiting on database/sql's asynchronous rollback.
+func TestCommitLostToCancelIsNotWriterError(t *testing.T) {
+	s, err := Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		cancel()
+		// database/sql may already have rolled back after seeing the cancel. Either way
+		// the transaction is finished here, so Commit reaches ErrTxDone every time.
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			return err
+		}
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled write returned %v, want context.Canceled", err)
+	}
+	err = s.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO meta VALUES ('after-cancel','value')")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("write after the cancelled commit: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close reported the caller's cancel: %v", err)
+	}
+}
+
 func TestCheckpointDoesNotBlockWrite(t *testing.T) {
 	started, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	s, err := open(t.TempDir(), time.Now, floorVersion, floorCommit, func() error { close(started); <-release; return nil })
