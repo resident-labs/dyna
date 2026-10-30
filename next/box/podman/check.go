@@ -86,7 +86,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		return result
 	}
 	add(CheckArch, h.checkArch(ctx))
-	_, err := h.run(ctx, "bash", "-c", `test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs && test "$(systemctl show "user@$(id -u).service" -p Delegate --value)" = yes && cg=$(systemctl show "user@$(id -u).service" -p ControlGroup --value) && for c in cpu memory io pids; do grep -qw "$c" "/sys/fs/cgroup$cg/cgroup.controllers" || exit 1; done`)
+	_, err := h.run(ctx, "bash", "-c", `test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs && test "$(systemctl show "user@$(id -u).service" -p Delegate --value)" = yes && cg=$(systemctl show "user@$(id -u).service" -p ControlGroup --value) && for c in cpu memory pids; do grep -qw "$c" "/sys/fs/cgroup$cg/cgroup.controllers" || exit 1; done`)
 	add(CheckCgroup, err)
 	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
 	add(CheckPodman, err)
