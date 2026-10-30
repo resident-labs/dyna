@@ -11,7 +11,7 @@ func (m Message) SenderKindFor(roomName string) SenderKind {
 	switch {
 	case m.EngineEvent():
 		return SenderEngine
-	case m.From == roomName:
+	case m.Human || m.From == roomName:
 		return SenderOwner
 	case strings.HasPrefix(m.From, "run:"):
 		return SenderWorkflow
