@@ -36,7 +36,6 @@ type Writer struct {
 	Now func() time.Time
 
 	appendMu sync.Mutex // orders appends and their events
-	mirrorMu sync.Mutex // orders rollback copies, stamps and imports
 
 	events     sync.Mutex    // guards pending, publishing, closed and idle
 	pending    []hub.Event   // committed changes waiting to publish, oldest first
