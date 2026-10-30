@@ -157,6 +157,47 @@ func TestRoomRepoAPI(t *testing.T) {
 	}
 }
 
+func TestSessionRepositorySelection(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	for _, repo := range []contract.RepoName{"owner/a", "owner/b"} {
+		if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: repo}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	for _, tt := range []struct {
+		name            string
+		requested, want contract.RepoName
+		invalid         bool
+	}{
+		{"default", "", "owner/a", false}, {"explicit", "owner/b", "owner/b", false}, {"unknown", "owner/c", "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: tt.name, Profile: "test", Parent: parent, Repo: tt.requested})
+			if tt.invalid {
+				if e == nil || e.Code != contract.ErrInvalid {
+					t.Fatalf("got %v", e)
+				}
+				return
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			got, err := s.store.Session(ctx, child.Session)
+			if err != nil || got.Repo != tt.want {
+				t.Fatalf("repo %s: %v", got.Repo, err)
+			}
+			grandchild, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: tt.name + "-child", Profile: "test", Parent: child.Session})
+			if e != nil {
+				t.Fatal(e)
+			}
+			inherited, err := s.store.Session(ctx, grandchild.Session)
+			if err != nil || inherited.Repo != tt.want {
+				t.Fatalf("inherited %s: %v", inherited.Repo, err)
+			}
+		})
+	}
+}
 func TestSessionStartCreatesWake(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	events, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Limit: 100})

@@ -220,9 +220,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(room)
 
 	session := &cobra.Command{Use: "session"}
-	var roomID, name, profile, goal, brief string
+	var roomID, name, profile, goal, brief, sessionRepo, parent string
 	start := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Profile: contract.ProfileName(profile), Goal: goal, Brief: brief})
+		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, Brief: brief})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Session)
 		}
@@ -231,6 +231,8 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&roomID, "room", "", "Room ID")
 	start.Flags().StringVar(&name, "name", "", "Session name")
 	start.Flags().StringVar(&profile, "profile", "", "Profile")
+	start.Flags().StringVar(&sessionRepo, "repo", "", "Session repository")
+	start.Flags().StringVar(&parent, "parent", "", "Parent session ID")
 	start.Flags().StringVar(&goal, "goal", "", "Goal")
 	start.Flags().StringVar(&brief, "brief", "", "Brief")
 	closeCmd := &cobra.Command{Use: "close SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
