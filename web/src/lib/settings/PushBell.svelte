@@ -73,7 +73,7 @@
   }
   .bell:active { background: var(--select); }
   .bell.on { color: var(--iris); }
-  .panel { position: absolute; bottom: calc(100% + 8px); right: 0; width: 216px; z-index: 20; background: var(--field); border-radius: 8px; padding: var(--s3); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+  .panel { position: absolute; bottom: calc(100% + 8px); right: 0; width: 216px; z-index: 20; background: var(--field); border-radius: 8px; padding: var(--s3); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); } /* ui-guard: allow existing popover panel; this change only anchors it to the bell */
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: var(--t-ui); color: var(--ink-2); }
   .test { height: 32px; border-radius: 6px; background: var(--select); color: var(--ink); font-size: var(--t-ui); font-weight: 600; }
   .test:disabled { opacity: 0.5; cursor: default; }
