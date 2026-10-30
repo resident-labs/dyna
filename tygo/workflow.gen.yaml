@@ -1,0 +1,28 @@
+packages:
+  - path: dyna-agent/internal/plan
+    output_path: web/src/lib/api/workflow.gen.ts
+    include_files: [workflow_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      import type { Doing } from './room.ts'
+
+  - path: dyna-agent/internal/workflowcatalog
+    output_path: web/src/lib/api/workflow.gen.ts
+    include_files: [workflow_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      plan.WorkflowArg: WorkflowArg
+
+  - path: dyna-agent/internal/roomsvc
+    output_path: web/src/lib/api/workflow.gen.ts
+    include_files: [workflow_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      workeroutput.Activity: Doing
+      json.RawMessage: unknown

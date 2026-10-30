@@ -1,0 +1,23 @@
+packages:
+  - path: dyna-agent/internal/filesvc
+    output_path: web/src/lib/api/file.gen.ts
+    include_files: [file_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      export type GitCommitsMap = { [key: string]: GitCommit } | null
+
+  - path: dyna-agent/internal/gitsvc
+    output_path: web/src/lib/api/file.gen.ts
+    include_files: [file_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/roomsvc
+    output_path: web/src/lib/api/file.gen.ts
+    include_files: [file_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

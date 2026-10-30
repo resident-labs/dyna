@@ -1,0 +1,46 @@
+packages:
+  - path: dyna-agent/internal/changepolicy
+    output_path: web/src/lib/api/change.gen.ts
+    include_files: [change_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      export type StringMapOrNull = { [key: string]: string } | null
+      export type LocalCIChecks = { [key: string]: CheckSummary[] | null }
+
+  - path: dyna-agent/internal/pr/state
+    output_path: web/src/lib/api/change.gen.ts
+    include_files: [change_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/pr/watch
+    output_path: web/src/lib/api/change.gen.ts
+    include_files: [change_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      rolesession.Cause: string
+      state.RecentReview: RecentReview
+      state.Overlap: Overlap
+      state.MergeTrialPhase: string
+      state.MergeTrialStack: MergeTrialStack
+
+  - path: dyna-agent/internal/pr/view
+    output_path: web/src/lib/api/change.gen.ts
+    include_files: [change_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    type_mappings:
+      state.BotReview: BotReview
+      state.Overlap: Overlap
+      state.IssueRef: IssueRef
+      state.ReviewVerdict: string
+      state.LocalCIConfigState: LocalCIConfigState
+      state.HeldComment: HeldComment
+      watch.CheckSummary: CheckSummary
+      watch.NoiseRule: NoiseRule

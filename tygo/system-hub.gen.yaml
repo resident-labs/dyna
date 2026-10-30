@@ -1,0 +1,7 @@
+packages:
+  - path: dyna-agent/internal/hub
+    output_path: web/src/lib/api/system-hub.gen.ts
+    include_files: [system_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
