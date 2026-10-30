@@ -401,6 +401,39 @@ type cancelOnRemove struct{ cancel context.CancelFunc }
 func (cancelOnRemove) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
 func (b cancelOnRemove) Remove(context.Context, contract.BoxID) error  { b.cancel(); return nil }
 
+func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
+	now := func() time.Time { return time.Unix(1000, 0) }
+	st, err := store.Open(t.TempDir(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	ctx := context.Background()
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"}); e != nil {
+		t.Fatal(e)
+	}
+	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room.Room, Types: []contract.EventType{"box.changed"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(events.Events) != 1 {
+		t.Fatalf("got %d box.changed events", len(events.Events))
+	}
+	changed := events.Events[0].Body.(contract.BoxChanged)
+	if changed.To != contract.BoxPending || changed.Reason != string(box.PendingNoReadyHost) {
+		t.Fatalf("unexpected box change: %+v", changed)
+	}
+}
 func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
