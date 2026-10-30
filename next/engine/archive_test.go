@@ -136,6 +136,28 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	}
 }
 
+func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
+	s, _, session, ctx := setup(t)
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResumeClosures(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, err = s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxDeleted {
+		t.Fatalf("box %+v, error %v", current, err)
+	}
+}
+
 func TestDiscardSkipsArchive(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	record, err := s.store.Session(ctx, session)
