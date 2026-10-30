@@ -177,9 +177,6 @@ func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req 
 }
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.SessionStartResponse{}, forbidden()
-	}
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.SessionStartResponse{}, e
 	}
@@ -189,8 +186,16 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if req.Parent != "" {
-		return contract.SessionStartResponse{}, invalid("child sessions are not supported in M1")
+	tree, err := s.store.RoomTree(ctx, req.Room)
+	if err != nil {
+		return contract.SessionStartResponse{}, failure(err)
+	}
+	parent := contract.SessionID("")
+	if tree.Root() != "" || caller.Kind != contract.PrincipalOwner || req.Parent != "" {
+		parent, err = tree.ParentFor(caller, req.Parent)
+		if err != nil {
+			return contract.SessionStartResponse{}, invalid(err.Error())
+		}
 	}
 	now := s.now()
 	sid, err := id("ses_", now)
@@ -202,7 +207,7 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Profile: req.Profile, Box: contract.BoxID(bid)}
-	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: req.Parent, Profile: req.Profile, Goal: req.Goal, Brief: req.Brief})
+	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, Brief: req.Brief})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
@@ -233,13 +238,36 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	}
 	size, _ := box.Size(contract.BoxSizeSmall)
 	current := box.Box{ID: session.Box, Session: session.ID, Size: size, State: contract.BoxPending, PlacedAt: event.Time}
+	var ancestry []contract.BoxID
+	if parent != "" && parent != tree.Root() {
+		p, err := s.store.Session(ctx, parent)
+		if err != nil {
+			s.admit.Unlock()
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		current.BudgetParent = p.Box
+		for id := p.Box; id != ""; {
+			ancestry = append([]contract.BoxID{id}, ancestry...)
+			var found bool
+			for _, b := range boxes {
+				if b.ID == id {
+					id = b.BudgetParent
+					found = true
+					break
+				}
+			}
+			if !found {
+				break
+			}
+		}
+	}
 	placement := box.Admit(hosts, boxes, current, 20*box.GiB)
 	initial, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending, Reason: string(placement.Reason)})
 	if err != nil {
 		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err = s.store.StartSession(ctx, session, req.Parent, req.Goal, event, initial, string(placement.Reason)); err != nil {
+	if err = s.store.StartSession(ctx, session, parent, current.BudgetParent, req.Goal, event, initial, string(placement.Reason)); err != nil {
 		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}
@@ -248,7 +276,7 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 		s.admit.Unlock()
 		return response, nil
 	}
-	slice, err := box.SliceName([]contract.BoxID{session.Box})
+	slice, err := box.SliceName(append(ancestry, session.Box))
 	if err != nil {
 		s.admit.Unlock()
 		return response, failure(err)
