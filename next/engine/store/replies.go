@@ -3,15 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"math"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/room"
 )
 
-// turnReplies reads the inputs and posts made in this turn's transaction window.
-func turnReplies(ctx context.Context, tx *sql.Tx, session contract.SessionID, turn contract.TurnID) ([]contract.Delivery, map[room.Destination]contract.EventID, error) {
+func (s *Store) turnReplies(ctx context.Context, tx *sql.Tx, room contract.RoomID, session contract.SessionID, turn contract.TurnID) ([]contract.Delivery, []contract.Event, error) {
 	rows, err := tx.QueryContext(ctx, "SELECT reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to FROM deliveries WHERE to_id=? AND turn=? ORDER BY seq", session, turn)
 	if err != nil {
 		return nil, nil, err
@@ -33,37 +31,11 @@ func turnReplies(ctx context.Context, tx *sql.Tx, session contract.SessionID, tu
 	if err != nil {
 		return nil, nil, err
 	}
-	rows, err = tx.QueryContext(ctx, "SELECT id,body FROM events WHERE from_kind=? AND from_id=? AND type='post.created' AND seq>(SELECT seq FROM events WHERE type='turn.started' AND json_extract(body,'$.turn')=?) ORDER BY seq", contract.PrincipalSession, session, turn)
-	if err != nil {
+	var start int64
+	if err := tx.QueryRowContext(ctx, "SELECT seq FROM events WHERE type='turn.started' AND json_extract(body,'$.turn')=?", turn).Scan(&start); err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
-	posts := make(map[room.Destination]contract.EventID)
-	for rows.Next() {
-		var id contract.EventID
-		var raw []byte
-		var post contract.PostCreated
-		if err := rows.Scan(&id, &raw); err != nil {
-			return nil, nil, err
-		}
-		if err := json.Unmarshal(raw, &post); err != nil {
-			return nil, nil, err
-		}
-		for _, input := range inputs {
-			channel := input.Reply
-			if channel.Kind != contract.ReplyFinal {
-				continue
-			}
-			matched := channel.Target.Kind == contract.PrincipalOwner && channel.Home == post.Home
-			for _, mentioned := range post.Mentions {
-				if mentioned == channel.Target {
-					matched = true
-				}
-			}
-			if matched {
-				posts[room.Destination{Target: channel.Target, Home: channel.Home}] = id
-			}
-		}
-	}
-	return inputs, posts, rows.Err()
+	// The single writer prevents a post from committing during this read.
+	posts, err := s.Events(ctx, room, start, math.MaxInt, []contract.EventType{"post.created"})
+	return inputs, posts, err
 }
