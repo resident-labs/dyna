@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	statewriter "dyna-agent/internal/state"
 )
 
 // Migrate installs the service availability table at engine startup.
@@ -37,7 +39,9 @@ func Observe(dir, scope, state string) (string, error) {
 		return "", err
 	}
 	var token string
-	err = db.QueryRow(`INSERT INTO service_wait(scope,state,token) VALUES(?,?,?)
+	err = statewriter.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		return conn.QueryRowContext(context.Background(), `INSERT INTO service_wait(scope,state,token) VALUES(?,?,?)
  ON CONFLICT(scope) DO UPDATE SET token=CASE WHEN state != excluded.state THEN excluded.token ELSE token END, state=excluded.state RETURNING token`, scope, state, hex.EncodeToString(b[:])).Scan(&token)
+	})
 	return token, err
 }
