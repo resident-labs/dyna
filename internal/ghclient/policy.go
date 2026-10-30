@@ -382,8 +382,7 @@ var pullURL = regexp.MustCompile(`^https://([^/]+)/([\w.-]+/[\w.-]+)/pull/([0-9]
 
 // editsForkPull reports whether gh pr edit names a pull request on r whose head
 // branch lives in the room's own fork. The pull request is named by its number,
-// or by its URL on r. The fork is the origin of the room's checkout, so a
-// command from any directory gets the same answer.
+// or by its URL on r. The fork is the origin of the checkout that cmdDir uses.
 func editsForkPull(ctx context.Context, rec room.Record, cmdDir string, r repository, command []string) bool {
 	positional := parseArgs(command[:2], command[2:]).positional
 	if len(positional) != 1 {
@@ -398,7 +397,7 @@ func editsForkPull(ctx context.Context, rec room.Record, cmdDir string, r reposi
 	} else if !pullNumber.MatchString(number) {
 		return false
 	}
-	origin, ok := checkoutOrigin(ctx, rec, rec.Repo)
+	origin, ok := checkoutOrigin(ctx, rec, cmdDir)
 	if !ok || !strings.EqualFold(origin.host, r.host) {
 		return false
 	}
