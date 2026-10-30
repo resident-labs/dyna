@@ -29,6 +29,20 @@ func (f *fakeClient) Call(_ context.Context, method string, args []any, out any)
 	return nil
 }
 
+func TestHelpFirstLineNamesTheDecidingCommands(t *testing.T) {
+	cmd := Command(Options{Client: &fakeClient{}})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first, _, _ := strings.Cut(out.String(), "\n")
+	if first != "Pending approvals are decided with dyna request approve or deny." {
+		t.Fatalf("help first line = %q", first)
+	}
+}
+
 func TestSettingsShowsAndUpdatesOneValue(t *testing.T) {
 	client := &fakeClient{settings: core.Settings{Wait: core.DefaultWait, Expiry: core.DefaultExpiry}}
 	run := func(args ...string) string {
