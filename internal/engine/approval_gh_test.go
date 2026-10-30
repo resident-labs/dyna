@@ -192,8 +192,11 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.State != approvals.StatePending || req.At != approvals.Owner {
-		t.Fatalf("root media: state %s at %s; want pending at owner", req.State, req.At)
+	if req.State != approvals.StateApproved {
+		t.Fatalf("root media: state %s; want approved", req.State)
+	}
+	if !strings.Contains(req.Body, "Media destination:") {
+		t.Fatal("missing root media destination")
 	}
 
 }
