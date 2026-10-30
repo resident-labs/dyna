@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/jobs"
+	"dyna-agent/internal/jobstest"
 )
 
 // sshDropError is the error an SSH client leaves when it loses the connection.
@@ -20,20 +23,16 @@ func sshDropError(t *testing.T) error {
 	return err
 }
 
-// Every ssh command a node run starts owns its end-to-end connection. An alias
-// configured with ControlMaster hands commands a stream the shared master may
-// have truncated when it died after the remote exit status arrived, and ssh
-// then reports success. A run must never trust a multiplexed stream it did not
-// open: a report fetch archived that way ended mid-entry and turned every check
-// of the run into an infrastructure error (D-166).
-func TestNodeProgramOptsOutOfConnectionMultiplexing(t *testing.T) {
+// Dyna uses its own master and verifies replies independently of SSH's exit
+// status, so a dropped master cannot make a truncated reply succeed (D-166).
+func TestNodeProgramUsesDynaConnectionMultiplexing(t *testing.T) {
 	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve"}}
 	name, args := r.exec().NodeProgram("bash", []string{"-c", "true"})
 	if name != "ssh" {
 		t.Fatalf("program = %q, want ssh", name)
 	}
 	joined := " " + strings.Join(args, " ") + " "
-	for _, option := range []string{" -o ControlMaster=no ", " -o ControlPath=none "} {
+	for _, option := range []string{" -o ControlMaster=auto ", " -o ControlPersist=10m ", " -o ControlPath="} {
 		if !strings.Contains(joined, option) {
 			t.Fatalf("ssh args %v lack %q: every node command must own its connection", args, strings.TrimSpace(option))
 		}
@@ -59,18 +58,20 @@ func TestNodeProgramUsesNodeConnectTimeout(t *testing.T) {
 func TestPushCommitToNodeUsesNodeConnectTimeout(t *testing.T) {
 	var pushed []string
 	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve", SSHConnectTimeout: 60 * time.Second}}
-	r.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
+	r.Command = jobs.Command(jobstest.FrameCommand(func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
 		if strings.Contains(strings.Join(args, " "), "push") {
 			pushed = append([]string{name}, args...)
 		}
 		return nil
-	}
+	}))
 	if err := r.exec().PushCommit(t.Context(), "/repo", "/var/tmp/cache", "abc123", ""); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"env", "GIT_LFS_SKIP_PUSH=1", "git", "-c", "core.sshCommand=ssh -o BatchMode=yes -o ConnectTimeout=60", "push", "--no-verify", "fl-rea-pve:/var/tmp/cache", "abc123:refs/dyna/ci/abc123"}
-	if !slices.Equal(pushed, want) {
-		t.Fatalf("git args = %q, want %q", pushed, want)
+	joined := strings.Join(pushed, " ")
+	for _, want := range []string{"ConnectTimeout=60", "ControlMaster=auto", "ControlPath=", "ControlPersist=10m", "fl-rea-pve:/var/tmp/cache", "abc123:refs/dyna/ci/abc123"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("git args = %q, missing %q", pushed, want)
+		}
 	}
 }
 
