@@ -67,6 +67,32 @@ func awaitAccountCondition(t *testing.T, fn func() bool) {
 	}
 }
 
+func TestRemoveIgnoresTurnsOnOtherAccounts(t *testing.T) {
+	a := testAccounts(t)
+	idle, err := a.Create("claude-code", "idle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy, err := a.Create("claude-code", "busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.setActive("claude-code", busy.ID); err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.TurnLease(context.Background(), "claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if err = a.Remove(busy.ID, true); err == nil {
+		t.Fatal("removed the account that a running turn uses")
+	}
+	if err = a.Remove(idle.ID, true); err != nil {
+		t.Fatal("a turn on another account blocked removal:", err)
+	}
+}
+
 func TestTurnLeaseModesAndSwitchCancellation(t *testing.T) {
 	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
