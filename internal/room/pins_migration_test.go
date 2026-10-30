@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +14,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 // The fixture comes from a real pins.json captured on 2026-10-21.
@@ -129,14 +129,11 @@ func TestPinsMigrationRollsBackInvalidRecord(t *testing.T) {
 func TestPinsMigrationPreservesRowsOverRollbackCopy(t *testing.T) {
 	s, db, path, raw, _ := pinsMigrationFixture(t)
 	roomID := filepath.Base(filepath.Dir(path))
-	// Create an authentic stamped rollback copy, then commit a newer row.
-	if err := os.Remove(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := state.For(db).Mirror(context.Background(), roomKey(roomID)+"/pins", path, func(out io.Writer) error {
-		_, err := out.Write(raw)
-		return err
-	}); err != nil {
+	if _, err := db.Exec("INSERT INTO state_mirrors(key, version) VALUES (?, ?)", roomKey(roomID)+"/pins", store.VersionOf(info).Key()); err != nil {
 		t.Fatal(err)
 	}
 	want := []Pin{{ID: "msg_current", By: "fixture", At: 3}}
