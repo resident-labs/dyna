@@ -15,6 +15,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -60,6 +62,8 @@ type boxes struct {
 	st      *store.Store
 	sockets *api.Sockets
 	dir     string
+	mu      sync.Mutex
+	cancel  map[contract.BoxID]context.CancelFunc
 }
 
 func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error) {
@@ -70,19 +74,31 @@ func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 	if err = b.sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", err
 	}
-	go b.run(spec.Box)
+	boxCtx, cancel := context.WithCancel(b.ctx)
+	b.mu.Lock()
+	b.cancel[spec.Box] = cancel
+	b.mu.Unlock()
+	go b.run(boxCtx, spec.Box)
 	return "fake", nil
 }
-func (b *boxes) Remove(_ context.Context, id contract.BoxID) error { return b.sockets.RemoveBox(id) }
-func (b *boxes) run(id contract.BoxID) {
+func (b *boxes) Remove(_ context.Context, id contract.BoxID) error {
+	b.mu.Lock()
+	if cancel := b.cancel[id]; cancel != nil {
+		cancel()
+		delete(b.cancel, id)
+	}
+	b.mu.Unlock()
+	return b.sockets.RemoveBox(id)
+}
+func (b *boxes) run(ctx context.Context, id contract.BoxID) {
 	c := agent.NewClient(filepath.Join(b.dir, "boxes", string(id)+".sock"))
-	go c.Run(b.ctx)
+	go c.Run(ctx)
 	// Creation returns before the engine moves the box to starting.
-	for _, err := c.Hello(b.ctx, "dev"); err != nil && b.ctx.Err() == nil; _, err = c.Hello(b.ctx, "dev") {
+	for _, err := c.Hello(ctx, "dev"); err != nil && ctx.Err() == nil; _, err = c.Hello(ctx, "dev") {
 		time.Sleep(50 * time.Millisecond)
 	}
 	runner := &agent.Runner{Harness: &scripted{}, Sink: c}
-	if err := c.Channel(b.ctx, func(m contract.BoxMessage) error { return runner.Handle(b.ctx, m) }); err != nil && b.ctx.Err() == nil {
+	if err := c.Channel(ctx, func(m contract.BoxMessage) error { return runner.Handle(ctx, m) }); err != nil && ctx.Err() == nil {
 		log.Printf("box channel: %v", err)
 	}
 }
@@ -95,7 +111,7 @@ func main() {
 	listen := flag.String("web.listen", "127.0.0.1:7790", "web listen address")
 	seed := flag.Bool("seed", false, "create example room")
 	flag.Parse()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// The data folder is always temporary, so no box outlives a run.
 	data, err := os.MkdirTemp("", "dyna-webdev-")
@@ -105,18 +121,18 @@ func main() {
 	fatal(err)
 	defer st.Close()
 	runtime := filepath.Join(data, "runtime")
-	b := &boxes{ctx: ctx, st: st, dir: runtime}
+	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{}, time.Now)
 	fatal(svc.ConfigureOperations(ctx, nil, 0))
 	svc.SetFilesDir(filepath.Join(data, "files"))
 	svc.SetTranscriptDir(filepath.Join(data, "transcripts"))
 	a := api.New(devService{svc}, nil)
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
-	_, port, err := net.SplitHostPort(*listen)
-	fatal(err)
 	app, err := fs.Sub(web.Dist, "dist")
 	fatal(err)
-	listener, err := api.NewWeb(a, port, app, time.Now).Listen(*listen)
+	webServer, err := api.NewWeb(a, *listen, app, time.Now)
+	fatal(err)
+	listener, err := webServer.Listen()
 	fatal(err)
 	defer listener.Close()
 	b.sockets = api.NewSockets(a, runtime, uint32(os.Getuid()), nil)
