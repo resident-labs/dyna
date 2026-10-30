@@ -689,6 +689,21 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	load := sysload.New()
 	if !readOnly {
 		load.Record = doctor.Samples{DataDir: filepath.Dir(cstore.Dir())}.Recorder(log.Printf)
+		source := doctor.Detect()
+		var relieving atomic.Bool
+		load.EveryMinute = func() {
+			if source == nil || !relieving.CompareAndSwap(false, true) {
+				return
+			}
+			go func() {
+				defer relieving.Store(false)
+				bound, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				if err := idleRelief(rooms.Notify.Sessions).Check(bound, source); err != nil && bound.Err() == nil {
+					log.Printf("memory relief: sample: %v", err)
+				}
+			}()
+		}
 	}
 	// The built-in hooks are seeded before any schedule or caller can run one.
 	hookService := hooks.New(automations.Hooks(rooms.Notify, accounts)...)

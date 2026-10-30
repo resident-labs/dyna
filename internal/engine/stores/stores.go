@@ -9,7 +9,6 @@ import (
 	"dyna-agent/internal/account/reposcope"
 	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/activity"
-	"dyna-agent/internal/admission"
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/callrequests"
@@ -71,8 +70,7 @@ var migrations = []func(dataDir string) error{
 	callerid.Migrate,
 	callrequests.Migrate,
 	computers.Migrate,
-	admission.MigrateObserved,
-	admission.MigrateState,
+	migrateRemovedObserver,
 	approvals.Migrate,
 	doctor.Migrate,
 	doctoralert.Migrate,

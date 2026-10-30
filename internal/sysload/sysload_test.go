@@ -539,3 +539,20 @@ func TestDynaSliceDirFindsTheUserManagerTree(t *testing.T) {
 		t.Fatal("a process in no user manager has no DynaSliceDir")
 	}
 }
+
+func TestMinuteCallbackRunsWhenLoadSamplingFails(t *testing.T) {
+	s := &Sampler{procRoot: t.TempDir(), logf: func(string, ...any) {}}
+	calls := 0
+	s.EveryMinute = func() { calls++ }
+	start := time.Unix(1000, 0)
+	s.tick(start)
+	s.tick(start.Add(59 * time.Second))
+	if calls != 0 {
+		t.Fatalf("called before a minute: %d", calls)
+	}
+	s.tick(start.Add(time.Minute))
+	s.tick(start.Add(2 * time.Minute))
+	if calls != 2 {
+		t.Fatalf("minute callback ran %d times despite failed reads; want 2", calls)
+	}
+}
