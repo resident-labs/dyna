@@ -43,6 +43,11 @@ func TestMergeControlWaitsForPublisherAndKeepsAutomaticTickNonblocking(t *testin
 	ctx := store.WithFlockContentionHook(guard, func(string) {
 		contended = true
 		release()
+		// The waiting control must get the next pass, even after publication
+		// releases the lock and before the control retries it.
+		if _, err := e.s.MergeTick(t.Context()); err == nil {
+			t.Error("automatic worker overtook a waiting control")
+		}
 	})
 	if err := e.s.MergeControl(ctx, id, "resume", nil, nil, nil); err != nil {
 		t.Fatalf("resume did not wait for the short publisher: %v", err)
