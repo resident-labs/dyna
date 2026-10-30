@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -17,6 +18,8 @@ type runner struct {
 	dead         bool
 	fail         bool
 	missingFrame bool
+	body         string
+	status       int
 }
 
 func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
@@ -39,7 +42,7 @@ func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error
 	if r.missingFrame {
 		return []byte("partial"), nil
 	}
-	return []byte("DYNA-END 00000000000000000000 000\n"), nil
+	return []byte(fmt.Sprintf("%sDYNA-END %020d %03d\n", r.body, len(r.body), r.status)), nil
 }
 func newTestHost(t *testing.T, r *runner) *Host {
 	t.Helper()
@@ -56,6 +59,20 @@ func TestCapacityReservesFloorWithoutCountingBoxesTwice(t *testing.T) {
 	}
 	if _, _, _, err := parseCapacity([]byte("8 16000 3999 90000"), 4000, 20000); err == nil {
 		t.Fatal("accepted memory below floor")
+	}
+}
+
+func TestCapacityCreatesHostDataBeforeDiskProbe(t *testing.T) {
+	r := &runner{body: "8 16000 5000 90000"}
+	h := newTestHost(t, r)
+	_, _, _, err := h.capacity(context.Background(), CheckOptions{HostData: "/host/data", MemoryFloor: 4000, DiskFloor: 20000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := r.calls[1]
+	cmd := args[len(args)-1]
+	if !strings.Contains(cmd, `mkdir -p -m 0700 -- "$1"; getconf`) || !strings.HasSuffix(cmd, "'probe' '/host/data'") {
+		t.Fatalf("capacity command %q", cmd)
 	}
 }
 
@@ -97,23 +114,25 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		}
 	}
 }
-func TestRemoveContainerRemovesItsVolume(t *testing.T) {
+func TestRemoveContainerLeavesVolumeForMove(t *testing.T) {
 	r := &runner{}
 	h := newTestHost(t, r)
 	if err := h.RemoveContainer(context.Background(), "a"); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		call   int
-		suffix string
-	}{
-		{1, "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' 'a'"},
-		{3, "'podman' '--cgroup-manager=systemd' 'volume' 'rm' '-f' 'dyna-box-a'"},
-	} {
-		args := r.calls[tc.call]
-		if !strings.HasSuffix(args[len(args)-1], tc.suffix) {
-			t.Fatalf("command %q", args[len(args)-1])
-		}
+	if len(r.calls) != 2 || !strings.HasSuffix(r.calls[1][len(r.calls[1])-1], "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' 'a'") {
+		t.Fatalf("commands %v", r.calls)
+	}
+}
+func TestRemoveVolumeAcceptsMissingVolume(t *testing.T) {
+	r := &runner{status: 1}
+	h := newTestHost(t, r)
+	if err := h.RemoveVolume(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	args := r.calls[1]
+	if !strings.HasSuffix(args[len(args)-1], "'podman' '--cgroup-manager=systemd' 'volume' 'rm' 'dyna-box-a'") {
+		t.Fatalf("command %v", args)
 	}
 }
 

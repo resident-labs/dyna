@@ -18,6 +18,7 @@ const (
 	StartContainer  Call = "start-container"
 	StopContainer   Call = "stop-container"
 	RemoveContainer Call = "remove-container"
+	RemoveVolume    Call = "remove-volume"
 	ListContainers  Call = "list-containers"
 	AddForward      Call = "add-forward"
 	RemoveForward   Call = "remove-forward"
@@ -28,12 +29,13 @@ type Host struct {
 	FailNext   error
 	Slices     map[string]box.Slice
 	Containers map[contract.BoxID]box.ContainerSpec
+	Volumes    map[contract.BoxID]bool
 	Running    map[contract.BoxID]bool
 	Forwards   map[box.Forward]bool
 }
 
 func New() *Host {
-	return &Host{Slices: map[string]box.Slice{}, Containers: map[contract.BoxID]box.ContainerSpec{}, Running: map[contract.BoxID]bool{}, Forwards: map[box.Forward]bool{}}
+	return &Host{Slices: map[string]box.Slice{}, Containers: map[contract.BoxID]box.ContainerSpec{}, Volumes: map[contract.BoxID]bool{}, Running: map[contract.BoxID]bool{}, Forwards: map[box.Forward]bool{}}
 }
 func (h *Host) call(c Call) error {
 	h.Calls = append(h.Calls, c)
@@ -60,6 +62,7 @@ func (h *Host) CreateContainer(_ context.Context, c box.ContainerSpec) error {
 		return err
 	}
 	h.Containers[c.Box] = c
+	h.Volumes[c.Box] = true
 	return nil
 }
 func (h *Host) StartContainer(_ context.Context, id contract.BoxID) error {
@@ -82,6 +85,13 @@ func (h *Host) RemoveContainer(_ context.Context, id contract.BoxID) error {
 	}
 	delete(h.Containers, id)
 	delete(h.Running, id)
+	return nil
+}
+func (h *Host) RemoveVolume(_ context.Context, id contract.BoxID) error {
+	if err := h.call(RemoveVolume); err != nil {
+		return err
+	}
+	delete(h.Volumes, id)
 	return nil
 }
 func (h *Host) ListContainers(_ context.Context) ([]box.ContainerStatus, error) {

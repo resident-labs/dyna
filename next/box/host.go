@@ -39,6 +39,7 @@ type HostDriver interface {
 	StartContainer(context.Context, contract.BoxID) error
 	StopContainer(context.Context, contract.BoxID) error
 	RemoveContainer(context.Context, contract.BoxID) error
+	RemoveVolume(context.Context, contract.BoxID) error
 	ListContainers(context.Context) ([]ContainerStatus, error)
 	AddForward(context.Context, Forward) error
 	RemoveForward(context.Context, Forward) error
