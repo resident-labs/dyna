@@ -17,31 +17,17 @@ type Archive struct {
 	ExpiresAt time.Time
 }
 
-func (s *Store) SaveArchive(ctx context.Context, archive Archive) error {
+// SaveArchives stores a complete set of verified reports atomically.
+func (s *Store) SaveArchives(ctx context.Context, archives []Archive) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session,repo) DO UPDATE SET ref=excluded.ref,commit_sha=excluded.commit_sha,created_at=excluded.created_at,expires_at=excluded.expires_at", archive.Session, archive.Repo, archive.Ref, archive.Commit, archive.CreatedAt.UnixMilli(), archive.ExpiresAt.UnixMilli())
-		return err
-	})
-}
-
-func (s *Store) Archives(ctx context.Context, session contract.SessionID) ([]Archive, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT repo,ref,commit_sha,created_at,expires_at FROM archives WHERE session=? ORDER BY repo", session)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var archives []Archive
-	for rows.Next() {
-		var a Archive
-		var created, expires int64
-		a.Session = session
-		if err := rows.Scan(&a.Repo, &a.Ref, &a.Commit, &created, &expires); err != nil {
-			return nil, err
+		for _, a := range archives {
+			_, err := tx.ExecContext(ctx, "INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session,repo) DO UPDATE SET ref=excluded.ref,commit_sha=excluded.commit_sha,created_at=excluded.created_at,expires_at=excluded.expires_at", a.Session, a.Repo, a.Ref, a.Commit, a.CreatedAt.UnixMilli(), a.ExpiresAt.UnixMilli())
+			if err != nil {
+				return err
+			}
 		}
-		a.CreatedAt, a.ExpiresAt = time.UnixMilli(created), time.UnixMilli(expires)
-		archives = append(archives, a)
-	}
-	return archives, rows.Err()
+		return nil
+	})
 }
 
 // SetClosingReason records an archive failure without deleting the box.
