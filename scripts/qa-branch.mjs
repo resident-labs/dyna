@@ -29,6 +29,17 @@ const blockedSummary = () => {
   const full = blockedDropped ? ', and further kinds' : '';
   return 'QA blocked kinds: ' + kinds.join(', ') + full;
 };
+// Page errors and failed assets, as kinds with counts. The kinds form a short
+// fixed set, so the list needs no limit, and it never holds a URL or a message.
+const failed = new Map();
+const noteFailure = kind => failed.set(kind, (failed.get(kind) || 0) + 1);
+const failureSummary = () => {
+  if (failed.size === 0) return 'QA page errors and failed assets: none recorded.';
+  const kinds = [...failed].map(([kind, count]) => count > 1 ? kind + ' x' + count : kind);
+  return 'QA page errors and failed assets: ' + kinds.join(', ');
+};
+const requestKind = url => url.origin !== origin ? 'external request' :
+  url.pathname.startsWith('/api/') ? 'API request' : 'asset request';
 const source = browser.contexts()[0];
 // The QA tab starts as a copy of the agent's paired tab: the same cookies and
 // the same stored device state. A tab without that state is unpaired, and the
@@ -41,13 +52,11 @@ const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript',
   '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json',
   '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm',
-  '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
+  '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.mjs': 'text/javascript',
 };
 const deny = route => {
   const request = route.request();
-  const url = new URL(request.url());
-  const kind = url.origin !== origin ? 'external request' :
-    url.pathname.startsWith('/api/') ? 'API request' : 'asset request';
+  const kind = requestKind(new URL(request.url()));
   // Do not print URLs, arguments, headers, or cookies: they may hold credentials.
   noteBlocked(request.method() + ' ' + kind);
   console.log('QA restriction: blocked ' + request.method() + ' ' + kind);
@@ -86,8 +95,8 @@ await context.route('**/*', async route => {
     return method === 'GET' ? route.continue() : deny(route);
   }
   if (method !== 'GET' && method !== 'HEAD') return deny(route);
+  const isIndex = ['/', '/index.html', '/connect'].includes(url.pathname);
   try {
-    const isIndex = ['/', '/index.html', '/connect'].includes(url.pathname);
     const relative = isIndex ? 'index.html' : decodeURIComponent(url.pathname).slice(1);
     const file = await realpath(resolve(web, relative));
     if (!file.startsWith(web + sep)) return deny(route);
@@ -107,11 +116,22 @@ await context.route('**/*', async route => {
     }
     await route.fulfill({ status: 200, headers, body: method === 'HEAD' ? Buffer.alloc(0) : body });
   } catch {
+    // The reason stays in the report, so a blank tab names its failed load.
+    noteFailure(isIndex ? 'engine index unavailable' : 'asset unavailable');
     await route.fulfill({ status: 404, body: 'QA asset unavailable' });
   }
 });
 const page = await context.newPage();
 await page.addInitScript(() => { globalThis.__dynaReadOnlyQA = true; });
+page.on('pageerror', () => noteFailure('page error'));
+page.on('console', message => {
+  if (message.type() === 'error') noteFailure('console error');
+});
+page.on('requestfailed', request => noteFailure(request.resourceType() + ' request failed'));
+page.on('response', response => {
+  const status = response.status();
+  if (status >= 400) noteFailure('HTTP ' + status + ' ' + requestKind(new URL(response.url())));
+});
 // A timed-out step has no other way to learn why. The page exposes one call
 // that names every blocked kind and saves a picture, so an agent can tell a
 // restriction from a branch bug. It holds kinds only: no URL, header or
@@ -121,6 +141,7 @@ const reportPage = join(reportDir, 'page.png');
 await mkdir(reportDir, { recursive: true, mode: 0o700 });
 const report = async () => {
   console.log(blockedSummary());
+  console.log(failureSummary());
   let screenshot = null;
   try {
     await page.screenshot({ path: reportPage });
@@ -129,7 +150,11 @@ const report = async () => {
   } catch {
     console.log('QA page screenshot unavailable: the tab did not draw.');
   }
-  return { blocked: [...blocked].map(([kind, count]) => ({ kind, count })), screenshot };
+  return {
+    blocked: [...blocked].map(([kind, count]) => ({ kind, count })),
+    failed: [...failed].map(([kind, count]) => ({ kind, count })),
+    screenshot,
+  };
 };
 await page.exposeFunction('dynaQAReport', report);
 let stopped;
@@ -151,7 +176,7 @@ try {
   console.log('Read-only QA tab ready at ' + origin + '.');
   console.log('Read-only QA cannot show settings writes, live streams that need a WebSocket (the computer viewer and voice calls), or server fields newer than the installed engine.');
   console.log('The computer stream stays closed in this tab: its socket relays desktop input, so QA is not read-only with it open. Check the viewer with dyna browser against the app the engine serves.');
-  console.log('When a step times out, call globalThis.dynaQAReport() in the QA page: it lists every blocked request kind with its count and saves a screenshot to the path it returns.');
+  console.log('When a step times out, call globalThis.dynaQAReport() in the QA page: it lists every blocked request kind and every page error or failed asset with its count, and saves a screenshot to the path it returns.');
   if (config.Steps) {
     for (const [index, step] of config.Steps.entries()) {
       try {
