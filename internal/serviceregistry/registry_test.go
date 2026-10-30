@@ -12,6 +12,7 @@ func TestBuildListsEveryServiceWithGroupAndSwitch(t *testing.T) {
 		Merge:    &MergeFacts{},
 		Library:  &LibraryFacts{Enabled: true},
 		Voice:    &VoiceFacts{Available: true},
+		Updates:  &UpdateFacts{Source: "/source", Enabled: true, EveryMinutes: 60},
 		Hooks:    map[ID]HookFacts{IDUpdates: hook, IDLoadDoctor: hook, IDMaintenance: hook, IDAccountUsage: hook, IDHarnessVersions: hook, IDParentCheckIns: hook},
 	})
 	want := []struct {
@@ -53,8 +54,8 @@ func TestHookStatusUsesNewestRun(t *testing.T) {
 		{Result: "pass", StartedAt: at.Add(time.Hour)},
 		{Result: "error", StartedAt: at},
 	}}
-	got := Build(Facts{Hooks: map[ID]HookFacts{IDUpdates: hook}})[9]
-	if got.ID != IDUpdates || got.State != StateOn || got.Detail != DetailNone || got.Hook != UpdatesHook {
+	got := Build(Facts{Updates: &UpdateFacts{Source: "/source", Enabled: true, Runs: hook.Runs}})[9]
+	if got.ID != IDUpdates || got.State != StateOn || got.Detail != DetailNone {
 		t.Fatalf("updates = %s %s %q, want on with no detail", got.ID, got.State, got.Detail)
 	}
 	if got.LastRun == nil || !got.LastRun.Equal(at.Add(time.Hour)) {
@@ -62,8 +63,15 @@ func TestHookStatusUsesNewestRun(t *testing.T) {
 	}
 	hook.Runs[0].Result = "error"
 	hook.Runs[1].Result = "pass"
-	if got := Build(Facts{Hooks: map[ID]HookFacts{IDUpdates: hook}})[9]; got.State != StateError {
+	if got := Build(Facts{Updates: &UpdateFacts{Source: "/source", Enabled: true, Runs: hook.Runs}})[9]; got.State != StateError {
 		t.Fatalf("newest failed run gave %s, want error", got.State)
+	}
+}
+
+func TestUpdatesReportsMissingCheckout(t *testing.T) {
+	got := Build(Facts{Updates: &UpdateFacts{Source: "/missing", Enabled: true, SourceInvalid: true}})[9]
+	if got.State != StateError || got.Detail != DetailUpdateSourceInvalid {
+		t.Fatalf("updates = %s %s", got.State, got.Detail)
 	}
 }
 

@@ -56,6 +56,16 @@ type LibraryFacts struct {
 	Session        string
 }
 
+// UpdateFacts describes the source updater and its latest installer run.
+type UpdateFacts struct {
+	Source        string
+	Enabled       bool
+	SourceInvalid bool
+	MultipleHooks bool
+	EveryMinutes  int
+	Runs          []HookRun
+}
+
 // VoiceFacts are the voice service's facts.
 type VoiceFacts struct {
 	Available bool
@@ -76,6 +86,7 @@ type Facts struct {
 	IssueWatches int
 	Library      *LibraryFacts
 	Voice        *VoiceFacts
+	Updates      *UpdateFacts
 	// Hooks holds the hook behind each hook-backed service.
 	Hooks map[ID]HookFacts
 }
@@ -154,14 +165,32 @@ func Build(f Facts) []Service {
 		case IDVoice:
 			voice(&s, f.Voice)
 		case IDUpdates:
-			s.Hook = UpdatesHook
-			hookService(&s, f.Hooks[d.id])
+			updates(&s, f.Updates)
 		default:
 			hookService(&s, f.Hooks[d.id])
 		}
 		out = append(out, s)
 	}
 	return out
+}
+
+func updates(s *Service, u *UpdateFacts) {
+	if u == nil {
+		s.State, s.Detail = StateOff, DetailUnreadable
+		return
+	}
+	if u.MultipleHooks {
+		s.State, s.Detail = StateError, DetailMultipleUpdateHooks
+		return
+	}
+	if u.Source == "" {
+		s.State = StateNotSetUp
+		return
+	}
+	hookService(s, HookFacts{Found: true, Disabled: !u.Enabled, Schedule: &Schedule{EveryMinutes: u.EveryMinutes}, Runs: u.Runs})
+	if u.SourceInvalid {
+		s.State, s.Detail = StateError, DetailUpdateSourceInvalid
+	}
 }
 
 func reviews(s *Service, r *ReviewerFacts) {
