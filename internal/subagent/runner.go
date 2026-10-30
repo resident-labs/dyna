@@ -428,13 +428,6 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		if r.AccountSwitch != nil {
 			writes.note(TurnNote{AccountSwitch: r.AccountSwitch})
 		}
-		if turn.CompactOnly && err == nil && (r.Compaction == nil || r.Compaction.State != "completed") {
-			reason := "the compact command did not run"
-			if r.Compaction != nil {
-				reason = r.Compaction.Reason
-			}
-			err = fmt.Errorf("idle compaction did not complete: %s", reason)
-		}
 		return r, err
 	}
 
