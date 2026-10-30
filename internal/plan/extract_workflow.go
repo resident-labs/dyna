@@ -57,16 +57,18 @@ func (ex *extractor) hookAgent(call *ast.CallExpression, ctx walkCtx, sc *scope)
 	}
 	ex.edge(ctx.parentID, id, EdgeContains)
 	if ctx.groupID != "" {
-		kind := EdgeParallel
-		if strings.HasPrefix(ctx.groupID, "g") {
-			// distinguish via parent kind
-			if parentKind(ex, ctx.parentID) == KindPipeline {
-				kind = EdgePipeline
-			}
-		}
-		ex.edge(ctx.groupID, id, kind)
+		ex.edge(ctx.groupID, id, groupEdge(ex, ctx.parentID))
 	}
 	ex.flow(ctx, id)
+}
+
+// groupEdge picks how a node joins its group: a pipeline stage when the
+// parent is a pipeline, otherwise a parallel arm.
+func groupEdge(ex *extractor, parentID string) string {
+	if parentKind(ex, parentID) == KindPipeline {
+		return EdgePipeline
+	}
+	return EdgeParallel
 }
 
 func jobContextReplayUnsafe(ctx walkCtx) bool {
@@ -92,11 +94,7 @@ func (ex *extractor) hookJob(call *ast.CallExpression, ctx walkCtx, sc *scope) {
 	id := ex.addNode(node)
 	ex.edge(ctx.parentID, id, EdgeContains)
 	if ctx.groupID != "" {
-		kind := EdgeParallel
-		if parentKind(ex, ctx.parentID) == KindPipeline {
-			kind = EdgePipeline
-		}
-		ex.edge(ctx.groupID, id, kind)
+		ex.edge(ctx.groupID, id, groupEdge(ex, ctx.parentID))
 	}
 	ex.flow(ctx, id)
 }
