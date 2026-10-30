@@ -2,7 +2,7 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload } from './events.gen.ts'
-import { hookEvent, issueEvent, mergeEvent, prEvent, sessionEvent, shellEvent } from './eventPayloads.ts'
+import { checkinEvent, hookEvent, issueEvent, mergeEvent, prEvent, sessionEvent, shellEvent } from './eventPayloads.ts'
 import { eventSpecs } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
@@ -143,7 +143,9 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
     const legacyMerge = post.notice?.thread ? undefined : mergeEvent(post)
     const legacySession = post.notice?.thread ? undefined : sessionEvent(post)
     const legacyHook = post.notice?.thread ? undefined : hookEvent(post)
-    const thread = post.notice?.thread || (legacyMerge?.trialId ? `merge:${legacyMerge.trialId}` : legacySession?.type === 'instructions' && legacySession.session ? `instructions:${legacySession.session}` : legacyHook?.runId ? `hook:${legacyHook.runId}` : '')
+    const checkin = checkinEvent(post)
+    const checkinThread = checkin?.attention === 'none' && !post.replyTo && !post.forward && !post.attachments?.length ? `checkin:${checkin.parent}` : ''
+    const thread = checkinThread || post.notice?.thread || (legacyMerge?.trialId ? `merge:${legacyMerge.trialId}` : legacySession?.type === 'instructions' && legacySession.session ? `instructions:${legacySession.session}` : legacyHook?.runId ? `hook:${legacyHook.runId}` : '')
     if (!thread) continue
     const group = openThreads.get(thread) ?? []
     group.push(post)

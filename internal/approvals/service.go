@@ -351,6 +351,19 @@ func (s *Service) List(actor authority.Actor, roomRef string) ([]Summary, error)
 	return out, nil
 }
 
+// WaitingOnOwner returns session IDs whose pending approvals need the owner.
+func (s *Service) WaitingOnOwner(roomID string) ([]string, error) {
+	requests, err := s.held(roomID, Owner)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(requests))
+	for _, request := range requests {
+		ids = append(ids, request.Requester)
+	}
+	return ids, nil
+}
+
 // Held returns the pending approvals that wait on the caller as holder.
 func (s *Service) Held(actor authority.Actor, roomRef string) ([]HeldRequest, error) {
 	rec, err := s.roomFor(actor, roomRef)
