@@ -10,7 +10,7 @@ const row = (fields: Partial<ScopeAccount> & Pick<ScopeAccount, 'id'>): ScopeAcc
 test('working accounts with a usage reading are cards of their provider; login and quota problems are alert rows', () => {
   const { cards, alerts } = accountRows({ providers: [
     { provider: 'anthropic', accounts: [
-      row({ id: 'c', provider: 'anthropic', label: 'Claude work', windows: [{ id: 'five_hour', label: '5h', remainingPercent: 40 }] }),
+      row({ id: 'c', provider: 'anthropic', label: 'Claude work', windows: [{ id: 'five_hour', label: '5h', usedPercent: 60 }] }),
       row({ id: 'q', provider: 'anthropic', label: 'Claude home', windows: [] }),
     ] },
     { provider: 'xai', accounts: [
@@ -23,7 +23,7 @@ test('working accounts with a usage reading are cards of their provider; login a
       row({ id: 'x', provider: 'chatgpt', label: 'Spare', activeHere: false, needsLogin: true }),
     ] },
   ] })
-  assert.deepEqual(cards.map((group) => [group.provider, group.accounts.map((a) => a.id)]), [['anthropic', ['c']]])
+  assert.deepEqual(cards.map((group) => [group.provider, (group.accounts ?? []).map((a) => a.id)]), [['anthropic', ['c']]])
   assert.deepEqual(alerts.map((a) => [a.id, a.text, a.action]), [
     ['o', 'Muse: Weekly limit reached', 'Details'],
   ])
@@ -75,7 +75,7 @@ test('home keeps a provider card for a known plan that reports a period without 
       row({ id: 'inactive', provider: 'xai', activeHere: false, plan: { id: 'x-subscription', label: 'X Subscription (weekly)' } }),
     ] },
   ] })
-  assert.deepEqual(cards.map((group) => [group.provider, group.accounts.map((a) => a.id)]), [['xai', ['weekly', 'legacy']]])
+  assert.deepEqual(cards.map((group) => [group.provider, (group.accounts ?? []).map((a) => a.id)]), [['xai', ['weekly', 'legacy']]])
 })
 
 test('home says all clear only after every source loaded and none needs the owner', () => {

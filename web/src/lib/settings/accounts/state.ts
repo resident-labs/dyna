@@ -195,7 +195,7 @@ export function windowReset(window?: Partial<UsageWindow> | null): string {
 }
 
 // accountsOf flattens every provider group into one list.
-export function accountsOf(snapshot?: { providers?: { provider?: Provider; accounts?: ScopeAccount[] }[] | null } | null): ScopeAccount[] {
+export function accountsOf(snapshot?: { providers?: { provider?: Provider | ''; accounts?: ScopeAccount[] | null }[] | null } | null): ScopeAccount[] {
   return (snapshot?.providers ?? []).flatMap((group) => group.accounts ?? [])
 }
 
