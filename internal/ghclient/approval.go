@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,31 +30,72 @@ func ClassifyForSession(ctx context.Context, binary, dir string, args []string, 
 func classifyForApproval(ctx context.Context, binary, dir string, args []string, owns func(context.Context, ItemRef) bool) (approvals.Class, []string, error) {
 	cmd := Command(ctx, binary, dir, args...)
 	r := repositoryFor(ctx, cmd)
-	if err := checkPolicy(ctx, dir, r, args); err != nil {
+	if isReadCommand(commandArgs(args)) {
+		if err := checkPolicy(ctx, dir, r, args); err != nil {
+			return approvals.ClassOwner, nil, err
+		}
+		return approvals.ClassRead, args, nil
+	}
+	w, decision, err := decideCommand(ctx, cmd, r, "", owns)
+	if err != nil {
 		return approvals.ClassOwner, nil, err
 	}
-	rec, err := roomFor(ctx, dir, r)
-	// checkPolicy already admitted a write to the room's recorded upstream, which
-	// roomFor reports as errNotInRoom. That write still needs its class.
-	if err != nil && !(errors.Is(err, errNotInRoom) && (matchesUpstream(rec, r) || matchesForkParent(ctx, rec, dir, r))) {
-		return approvals.ClassOwner, nil, err
-	}
-	login, _ := AccountFor(ctx, cmd.Path, r.host, r.name)
-	class := Classify(ctx, args, ClassifyInput{
-		RoomRepository: owns != nil && matchesRepository(ctx, rec, r), OwnPR: owns,
-		Host: r.host, Repo: r.name, Upstream: rec.UpstreamOf(dir), Login: login, APIHost: r.host,
-		AuthorOf: func(ctx context.Context, ref ItemRef) (string, error) {
-			return approvalAuthor(ctx, cmd.Path, dir, ref)
-		},
-	})
-	if class == approvals.ClassAuto && len(commandArgs(args)) >= 2 && commandArgs(args)[1] == "create" {
-		// A delimiter can end flag parsing. Leave such unusual commands held.
+	if decision.Class == approvals.ClassAuto && w.Verb == "pr.create" && commandArgs(args)[0] != "api" {
 		if slices.Contains(args, "--") {
 			return approvals.ClassAgent, args, nil
 		}
 		args = append(slices.Clone(args), "--repo", r.host+"/"+r.name)
 	}
-	return class, args, nil
+	return decision.Class, args, nil
+}
+
+// decideCommand binds repository and account state to the common write policy.
+func decideCommand(ctx context.Context, cmd *exec.Cmd, r repository, login string, owns func(context.Context, ItemRef) bool) (Write, Decision, error) {
+	rec, err := roomFor(ctx, cmd.Dir, r)
+	target := TargetRoom
+	if errors.Is(err, errNotInRoom) {
+		target = TargetOther
+		if matchesUpstream(rec, r) || matchesForkParent(ctx, rec, cmd.Dir, r) {
+			target = TargetUpstream
+		}
+	} else if err != nil {
+		return Write{}, Decision{}, err
+	}
+	w := ParseWrite(cmd.Args[1:], r.host, r.name, target)
+	if login == "" && w.ValidItem && slices.Contains([]Verb{"issue.close", "issue.reopen", "pr.close", "pr.reopen", "comment.edit", "comment.delete", "run.rerun", "run.rerun.failed", "run.cancel"}, w.Verb) {
+		write := target == TargetRoom
+		if target == TargetUpstream {
+			_, comment := ownCommentCall(cmd.Args[1:])
+			write = isRepoFork(cmd.Args[1:]) || comment
+		}
+		login, _, _ = selectAccountForRoom(ctx, cmd, r, rec, write)
+	}
+	lookups := WriteLookups{Login: login, OwnPR: owns,
+		AuthorOf: func(ctx context.Context, ref ItemRef) (string, error) {
+			return approvalAuthor(ctx, cmd.Path, cmd.Dir, ref)
+		},
+		ForkHead: func(ctx context.Context, w Write) bool {
+			args := commandArgs(w.Argv)
+			if len(args) > 0 && args[0] == "api" {
+				args = []string{"pr", "edit", w.Ref.Target}
+			}
+			return editsForkPull(ctx, rec, cmd.Dir, r, args)
+		},
+	}
+	d, err := Decide(ctx, rec, w, lookups)
+	if err != nil {
+		return w, d, err
+	}
+	if d.Refusal != "" {
+		return w, d, &RefusalError{Write: w, Decision: d}
+	}
+	if err := refuseImplicitForkPR(rec, cmd.Dir, r, w.Argv); err != nil {
+		return w, d, err
+	}
+	if err := refuseHeldReady(ctx, rec, cmd.Dir, r, w.Argv); err != nil {
+		return w, d, err
+	}
+	return w, d, nil
 }
 
 // approvalAuthor reads only the item needed for an authorship decision. A

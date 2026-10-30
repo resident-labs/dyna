@@ -303,7 +303,7 @@ func TestPublicReadOutsideTheRoomRunsAnonymouslyAndNothingElseDoes(t *testing.T)
 		args []string
 		want string
 	}{
-		{[]string{"api", "repos/ludovic111/horizon/issues", "-X", "POST"}, "does not belong to the acting room"},
+		{[]string{"api", "repos/ludovic111/horizon/issues", "-X", "POST"}, "read-only-room"},
 		{[]string{"issue", "create", "--repo", "ludovic111/horizon"}, "read-only"},
 	} {
 		if err := run(tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {

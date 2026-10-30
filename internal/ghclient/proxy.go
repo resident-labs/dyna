@@ -71,7 +71,7 @@ func SessionCommand(ctx context.Context, args []string) error {
 	}
 	ctx = WithAgentText(ctx)
 	cmd := Command(ctx, binary, dir, args...)
-	if mode == GuardWorker && Classify(ctx, args, ClassifyInput{}) != approvals.ClassRead {
+	if mode == GuardWorker && !isReadCommand(commandArgs(args)) {
 		return sessionApproval(ctx, cmd, roomID, args)
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
