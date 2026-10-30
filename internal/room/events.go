@@ -785,13 +785,13 @@ func (m Message) ServiceFailed() (ServiceFailedEvent, bool) {
 	return ev, true
 }
 
-// ServiceWait returns the payload of a pinned service that is waiting.
+// ServiceWait returns the payload of a service that is waiting.
 func (m Message) ServiceWait() (ServiceWaitEvent, bool) {
 	if m.Kind != string(FamilyService) || m.Notice.Kind != string(TypeWaiting) || len(m.Payload.raw) == 0 {
 		return ServiceWaitEvent{}, false
 	}
 	var ev ServiceWaitEvent
-	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Service == "" || ev.Profile == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Service == "" || ev.Reason == "" {
 		return ServiceWaitEvent{}, false
 	}
 	return ev, true
