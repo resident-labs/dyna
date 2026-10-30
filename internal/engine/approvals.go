@@ -128,7 +128,11 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 			if resolveErr != nil {
 				return approvals.Request{}, resolveErr
 			}
-			event := room.GitHubWriteRefusedEvent{Requester: actor.Session, Verb: room.GitHubWriteVerb(refusal.Write.Verb), Repository: refusal.Write.Host + "/" + refusal.Write.Repo, Reason: room.GitHubWriteReason(refusal.Decision.Refusal), Rule: room.GitHubWriteRule(refusal.Decision.Rule)}
+			sender, senderErr := s.rooms.Notify.SenderOf(notify.Claim{Session: actor.Session, Room: actor.Room})
+			if senderErr != nil {
+				return approvals.Request{}, senderErr
+			}
+			event := room.GitHubWriteRefusedEvent{Requester: sender.Session.Address(), Verb: room.GitHubWriteVerb(refusal.Write.Verb), Repository: refusal.Write.Host + "/" + refusal.Write.Repo, Reason: room.GitHubWriteReason(refusal.Decision.Refusal), Rule: room.GitHubWriteRule(refusal.Decision.Rule)}
 			if _, postErr := s.rooms.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: actor.Room, Event: event, FreshID: true, Producer: room.ProducerEngine, To: []string{rec.Name}}); postErr != nil {
 				return approvals.Request{}, postErr
 			}

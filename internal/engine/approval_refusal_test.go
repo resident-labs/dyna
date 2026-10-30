@@ -9,7 +9,9 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/room"
 	roomfixture "dyna-agent/internal/room/testfixture"
+	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store/storetest"
+	"dyna-agent/internal/subagent"
 )
 
 func TestApprovalRefusalPostsTypedEvent(t *testing.T) {
@@ -21,6 +23,10 @@ func TestApprovalRefusalPostsTypedEvent(t *testing.T) {
 	}
 	rec = roomfixture.Repository(t, s.rooms.Notify.Rooms, rec.ID, "github.com", "o/r", "read-only")
 	actor := authority.Actor{Role: authority.Session, Session: "ses_20261020-000000-abcde111", Room: rec.ID}
+	meta := subagent.Meta{ID: actor.Session, Name: "worker", Room: rec.Name, RoomID: rec.ID, Role: "worker"}
+	if err := sessionlife.Save(s.rooms.Notify.Sessions.Store.Root, meta.ID, meta); err != nil {
+		t.Fatal(err)
+	}
 	_, err = s.approvalRequest(authority.WithActor(t.Context(), actor), approvals.RequestInput{Argv: []string{"issue", "create", "--repo", "o/r"}, Cwd: rec.Repo})
 	if err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("error = %v", err)
@@ -41,7 +47,7 @@ func TestApprovalRefusalPostsTypedEvent(t *testing.T) {
 		if err := json.Unmarshal(raw, &ev); err != nil {
 			t.Fatal(err)
 		}
-		if ev.Requester != actor.Session || ev.Reason != room.GitHubWriteReadOnly || ev.Rule != "read-only" || ev.Repository != "github.com/o/r" || ev.Verb != "issue.create" {
+		if ev.Requester != "refusal-test:worker" || ev.Reason != room.GitHubWriteReadOnly || ev.Rule != "read-only" || ev.Repository != "github.com/o/r" || ev.Verb != "issue.create" {
 			t.Fatalf("event = %+v", ev)
 		}
 		return
