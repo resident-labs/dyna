@@ -39,7 +39,7 @@ func noteOutsideWrite(db *sql.DB) {
 	if dir == "" {
 		return
 	}
-	site := caller()
+	site := writerCaller()
 	outside.Lock()
 	defer outside.Unlock()
 	if outside.seen == nil {
