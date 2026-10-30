@@ -64,11 +64,37 @@ type Decision struct {
 	At       time.Time `json:"at"`
 }
 
+type PrOpenArgs struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Base  string `json:"base"`
+	Draft bool   `json:"draft"`
+}
+
+func (PrOpenArgs) OpKind() OpKind { return "pr.open" }
+func (PrOpenArgs) isOpArgs()      {}
+
+type PrOpened struct {
+	Repo    RepoName  `json:"repo"`
+	Number  int       `json:"number"`
+	Session SessionID `json:"session"`
+	URL     string    `json:"url"`
+}
+
+func (PrOpened) EventType() EventType { return "pr.opened" }
+func (PrOpened) isEventBody()         {}
+
+type PrOpenResult struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+}
+
 type OpResult struct {
-	ExitCode   int    `json:"exitCode"`
-	Error      string `json:"error,omitempty"`
-	Output     string `json:"output,omitempty"`     // up to 64 KiB inline
-	OutputFile string `json:"outputFile,omitempty"` // the rest, by hash
+	PR         *PrOpenResult `json:"pr,omitempty"`
+	ExitCode   int           `json:"exitCode"`
+	Error      string        `json:"error,omitempty"`
+	Output     string        `json:"output,omitempty"`     // up to 64 KiB inline
+	OutputFile string        `json:"outputFile,omitempty"` // the rest, by hash
 }
 
 const (
