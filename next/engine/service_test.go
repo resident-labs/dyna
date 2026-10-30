@@ -501,7 +501,7 @@ func (b blockingBoxes) Create(ctx context.Context, spec BoxSpec) (string, error)
 func (blockingBoxes) Remove(context.Context, contract.BoxID) error { return nil }
 
 func TestCloseCancelsCreatingBox(t *testing.T) {
-	s, room, _, ctx := setup(t)
+	s, room, root, ctx := setup(t)
 	adapter := blockingBoxes{started: make(chan BoxSpec)}
 	s.boxes = adapter
 	done := make(chan *contract.Error, 1)
@@ -510,6 +510,12 @@ func TestCloseCancelsCreatingBox(t *testing.T) {
 		done <- e
 	}()
 	spec := <-adapter.started
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE sessions SET parent=? WHERE id=?", root, spec.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: spec.Session}); e != nil {
 		t.Fatal(e)
 	}
