@@ -438,6 +438,7 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 		}
 	}
 	stdout := newObservedBuffer(observeLine, liveOutput)
+	stdout.onBytes = execution.OutputActivity
 
 	state.beginProcess()
 

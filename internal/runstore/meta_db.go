@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/plan/ancestry"
@@ -672,6 +673,9 @@ func deleteMeta(db *sql.DB, id string) error {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM runs WHERE id=?", id); err != nil {
+			return err
+		}
+		if err := activity.DeleteOwner(ctx, conn, activity.CommandStep, id); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_step_records WHERE run_id=?", id); err != nil {

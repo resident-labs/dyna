@@ -173,6 +173,7 @@ func runClaudeTurn(ctx context.Context, p profile.Profile, cwd string, spec comm
 			boundary = true
 		}
 	}, liveOutput)
+	stdout.onBytes = execution.OutputActivity
 
 	turn := &streamTurn{
 		p: p, stream: stream, steering: steering, journal: journal,

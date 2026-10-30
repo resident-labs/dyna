@@ -14,6 +14,7 @@ type observedBuffer struct {
 	buf     bytes.Buffer
 	pending string
 	onLine  func(string)
+	onBytes func()
 	live    io.Writer
 }
 
@@ -22,6 +23,9 @@ func newObservedBuffer(onLine func(string), live io.Writer) *observedBuffer {
 }
 
 func (b *observedBuffer) Write(p []byte) (int, error) {
+	if len(p) > 0 && b.onBytes != nil {
+		b.onBytes()
+	}
 	if b.live != nil {
 		_, _ = b.live.Write(p)
 	}
@@ -57,4 +61,17 @@ func (b *observedBuffer) FlushPending(onPending func(string)) {
 	if line != "" && onPending != nil {
 		onPending(line)
 	}
+}
+
+// activityWriter forwards stderr without buffering or changing its contents.
+type activityWriter struct {
+	out    io.Writer
+	notify func()
+}
+
+func (w activityWriter) Write(p []byte) (int, error) {
+	if len(p) > 0 && w.notify != nil {
+		w.notify()
+	}
+	return w.out.Write(p)
 }
