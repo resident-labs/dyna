@@ -9,7 +9,6 @@
   import SettingRow from '../ui/SettingRow.svelte'
   import CIHealth from '../cihealth/CIHealth.svelte'
   import EntryList from './EntryList.svelte'
-  import HookList from './HookList.svelte'
   import ScheduleControls from './ScheduleControls.svelte'
   import SettingControl from './SettingControl.svelte'
   import { settingLabel, setupHint, switchHint } from './model.ts'
@@ -18,15 +17,12 @@
   import { readHistory, readHookLog, readHookRuns } from './read.ts'
   import type { RegistryService, ServicePatch } from '../api/service.ts'
   import type { SettingItem } from '../api/settings.ts'
-  import type { HookLogTarget } from '../settings/hookLog.ts'
 
   interface Props {
     service: RegistryService
     host: ControlHost
     settings: SettingItem[] | null
     changes: ChangeRow[]
-    // focus is a run of the service's hook that a feed card asked to open.
-    focus?: HookLogTarget | null
     // canOpen says whether a session address opens in this room.
     canOpen: (session: string) => boolean
     onopen: (session: string) => void
@@ -36,7 +32,7 @@
     // onsetting saves one settings key and reads the settings again.
     onsetting: (key: string, value: string) => Promise<void>
   }
-  let { service, host, settings, changes, focus = null, canOpen, onopen, onpr, onchanged, onsetting }: Props = $props()
+  let { service, host, settings, changes, canOpen, onopen, onpr, onchanged, onsetting }: Props = $props()
 
   // A built-in pass keeps its runs on the machine under its own name; a
   // service run by a repository hook shows that hook's own list instead.
@@ -103,7 +99,7 @@
   {#if service.schedule || items.length}
     <Card flush divided>
       {#if service.schedule}
-        <ScheduleControls schedule={service.schedule} {busy}
+        <ScheduleControls schedule={service.schedule} {busy} fixedLimit={service.id === 'updates'}
           onsave={(patch: ServicePatch) => write(() => api.editService(service.id, patch), 'Saved.')}
           onreset={() => write(() => api.resetService(service.id), 'Back to the defaults.')} />
       {/if}
@@ -116,6 +112,8 @@
       {/each}
     </Card>
   {/if}
+  {#if service.detail === 'update-source-invalid'}<p class="err" role="alert">The source checkout is missing or is not a Git repository. Choose a valid checkout path.</p>{/if}
+  {#if service.detail === 'multiple-update-hooks'}<p class="err" role="alert">Several update hooks were found. Choose a source checkout to continue.</p>{/if}
   {#if service.state === 'not-set-up' && setupHint[service.id]}<p class="hint">{setupHint[service.id]}</p>{/if}
   {#if switchHint[service.id]}<p class="hint">{switchHint[service.id]}</p>{/if}
   {#if hook || canOpen(service.session)}
@@ -128,9 +126,6 @@
   {#if error}<p class="err" role="alert">{error}</p>{/if}
   {#if service.id === 'local-ci'}
     <CIHealth roomId={host.room} {changes} {onpr} />
-  {:else if service.hook && service.state !== 'not-set-up'}
-    <!-- Each feed card's request is a new focus, so the list opens that run again. -->
-    {#key focus}<HookList title={service.label} repo={host.repo} only={service.hook} {focus} />{/key}
   {:else if entries === null || entries.length || hook}
     <h4 class="micro-label">Recent runs</h4>
     {#if entries === null}
