@@ -45,14 +45,19 @@ func Migrate(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "room_mcp.schema", 2, func(conn *sql.Conn, old int) error {
+	return database.Migrate(db, "room_mcp.schema", 3, func(conn *sql.Conn, old int) error {
 		if old < 1 {
 			if _, err := conn.ExecContext(context.Background(), schema); err != nil {
 				return err
 			}
 		}
 		if old < 2 {
-			_, err := conn.ExecContext(context.Background(), schemaScanner)
+			if _, err := conn.ExecContext(context.Background(), schemaScanner); err != nil {
+				return err
+			}
+		}
+		if old < 3 {
+			_, err := conn.ExecContext(context.Background(), `CREATE TABLE room_mcp_prompts (room TEXT NOT NULL, server TEXT NOT NULL, name TEXT NOT NULL, definition TEXT NOT NULL, PRIMARY KEY(room,server,name), FOREIGN KEY(room,server) REFERENCES room_mcp_servers(room,name) ON DELETE CASCADE)`)
 			return err
 		}
 		return nil
