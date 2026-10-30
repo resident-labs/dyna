@@ -759,6 +759,9 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 			r.CIReason = "No CI ran for this change within 5 minutes."
 		}
 	}
+	if ci == "pending" && r.CIReason == "" && slices.ContainsFunc(currentRuns(snap.Runs), func(run Run) bool { return run.Conclusion == "action_required" }) {
+		r.CIReason = "Waiting for maintainer approval to run this fork pull request's workflows."
+	}
 	if ci == "pending" && snap.localCIConfig == state.LocalCIConfigHeadMissing && r.CIReason == "" {
 		r.CIReason = "This head removed the local CI definition; checks required by the base definition still apply."
 	}
