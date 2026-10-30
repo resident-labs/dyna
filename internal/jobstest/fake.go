@@ -7,6 +7,8 @@
 package jobstest
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -120,7 +122,43 @@ func (m *Fake) StartCalls() []Start {
 	return append([]Start(nil), m.starts...)
 }
 
+// FrameCommand adapts a command fake to the SSH input and reply protocol.
+func FrameCommand(next RunFunc) RunFunc {
+	return func(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) (err error) {
+		if name == "ssh" {
+			words := UnquoteWords(args[len(args)-1])
+			if len(words) > 6 && words[5] == "dyna-frame" {
+				reader := bufio.NewReader(in)
+				if _, err := reader.ReadString('\n'); err != nil {
+					return err
+				}
+				in = reader
+				words = append([]string{"bash", "-o", "pipefail", "-c", words[6], "dyna-ci"}, words[7:]...)
+				quoted := make([]string, len(words))
+				for i, word := range words {
+					quoted[i] = "'" + strings.ReplaceAll(word, "'", "'\\''") + "'"
+				}
+				args = append([]string(nil), args...)
+				args[len(args)-1] = strings.Join(quoted, " ")
+				dest := out
+				var body bytes.Buffer
+				out = &body
+				defer func() {
+					if err == nil {
+						_, err = fmt.Fprintf(dest, "%sDYNA-END %020d 000\n", body.String(), body.Len())
+					}
+				}()
+			}
+		}
+		return next(ctx, dir, in, out, stderr, name, args...)
+	}
+}
+
 func (m *Fake) command(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
+	return FrameCommand(m.commandUnframed)(ctx, dir, in, out, stderr, name, args...)
+}
+
+func (m *Fake) commandUnframed(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
 	script, positional, ok := DecodeNodeScript(name, args)
 	if !ok {
 		return m.legacy(ctx, dir, in, out, stderr, name, args...)
@@ -389,6 +427,9 @@ func DecodeNodeScript(name string, args []string) (script string, positional []s
 	// bash -o pipefail -c SCRIPT [dyna-ci ARG...]
 	if len(words) < 4 {
 		return "", nil, false
+	}
+	if len(words) > 6 && words[4] == "dyna-frame" {
+		return words[5], words[6:], true
 	}
 	if len(words) > 5 {
 		positional = words[5:]

@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/jobs"
+	"dyna-agent/internal/jobstest"
 )
 
 // A push to a CI node must not run the repository's Git LFS pre-push hook.
@@ -18,13 +21,13 @@ func TestPushSkipsLFSUploadAndRepoHooks(t *testing.T) {
 	var name string
 	var args []string
 	r := Runner{Node: &Node{Name: "hermeslab", SSH: "pip@hermeslab", SSHConnectTimeout: 60 * time.Second}}
-	r.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, command string, commandArgs ...string) error {
+	r.Command = jobs.Command(jobstest.FrameCommand(func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, command string, commandArgs ...string) error {
 		joined := strings.Join(commandArgs, " ")
 		if strings.Contains(joined, "push") {
 			name, args = command, commandArgs
 		}
 		return nil
-	}
+	}))
 	if err := r.exec().PushCommit(t.Context(), "/repo", "/var/tmp/cache", "abc123", ""); err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,6 @@ import (
 	"path"
 	"strings"
 
-	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -46,7 +45,11 @@ func (x Executor) PushCommit(ctx context.Context, repo, cache, sha, base string)
 		dest = x.Node.SSH + ":" + cache
 		// The push dials like every other node command, so it waits as long as
 		// the machine's connect timeout allows, for this one command only.
-		args = []string{"-c", "core.sshCommand=ssh -o BatchMode=yes -o " + machines.SSHConnectTimeoutOption(x.Node.SSHConnectTimeout)}
+		var opts []string
+		for _, opt := range x.sshOptions() {
+			opts = append(opts, shellquote.Quote(opt))
+		}
+		args = []string{"-c", "core.sshCommand=ssh " + strings.Join(opts, " ")}
 	}
 	// --no-verify skips the repository's own pre-push hooks. A Git LFS hook
 	// would upload to this bare remote and fail the push. GIT_LFS_SKIP_PUSH is
