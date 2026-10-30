@@ -89,6 +89,8 @@ func failure(err error) *contract.Error {
 	code := contract.ErrUnavailable
 	if errors.Is(err, sql.ErrNoRows) {
 		code = contract.ErrNotFound
+	} else if errors.Is(err, store.ErrParentClosing) {
+		code = contract.ErrParentClosing
 	} else if errors.Is(err, store.ErrTurnConflict) {
 		code = contract.ErrConflict
 	}
@@ -439,6 +441,7 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if tree.Root() == session.ID {
 		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "root cannot be closed"}
 	}
+	// Interim backstop until room step 5 marks the subtree closing in one transaction.
 	s.admit.Lock()
 	if e := s.closeGuard(ctx, session.Box); e != nil {
 		s.admit.Unlock()
