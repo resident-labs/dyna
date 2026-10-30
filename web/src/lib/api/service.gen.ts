@@ -11,6 +11,12 @@
  * Group is the section of the Services page that holds a service.
  */
 /**
+ * Scope says where a service belongs in the app.
+ */
+export const ScopeRoom = "room";
+export const ScopeGlobal = "global";
+export type Scope = typeof ScopeRoom | typeof ScopeGlobal;
+/**
  * State is what a service is doing now. It is data: the page shows a colored
  * chip only for the states that need attention.
  */
@@ -138,6 +144,7 @@ export interface Schedule {
 export interface Service {
   id: ID;
   group: Group;
+  scope: Scope;
   label: string;
   description: string;
   state: State;
