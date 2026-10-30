@@ -175,8 +175,8 @@ esac
 		if err != nil {
 			t.Fatal(err)
 		}
-		if req.Class != approvals.ClassAgent || req.State != approvals.StatePending {
-			t.Fatalf("%v: class %s state %s; want agent and pending", args, req.Class, req.State)
+		if req.Class != approvals.ClassAgent || req.State != approvals.StatePending || req.At != root.Name {
+			t.Fatalf("%v: class %s state %s at %s; want agent pending at root", args, req.Class, req.State, req.At)
 		}
 		if !strings.Contains(req.Body, "Media destination:") {
 			t.Fatal("missing media destination")
