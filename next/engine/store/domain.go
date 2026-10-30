@@ -12,6 +12,8 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
+var ErrParentClosing = errors.New("parent session is closing")
+
 // Session describes the stored session and its box.
 type Session struct {
 	ID      contract.SessionID
@@ -30,6 +32,15 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 
 func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, budgetParent contract.BoxID, goal string, event, boxEvent contract.Event, reason string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if parent != "" {
+			var state string
+			if err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND room=?", parent, session.Room).Scan(&state); err != nil {
+				return err
+			}
+			if state == "closing" || state == "closed" {
+				return ErrParentClosing
+			}
+		}
 		var parentID *contract.SessionID
 		if parent != "" {
 			parentID = &parent

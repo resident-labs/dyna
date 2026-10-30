@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -551,5 +552,20 @@ func TestCloseRootIsForbidden(t *testing.T) {
 	s, _, root, ctx := setup(t)
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: root}); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("close root: %v", e)
+	}
+}
+
+func TestStartRejectsClosingParent(t *testing.T) {
+	s, room, root, ctx := setup(t)
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closing' WHERE id=?", root)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: root})
+	if e == nil || e.Code != contract.ErrParentClosing {
+		t.Fatalf("start: %v", e)
 	}
 }
