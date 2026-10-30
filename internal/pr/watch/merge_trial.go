@@ -22,21 +22,50 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// MergeTick uses the existing PR facts and publication lock. Every automatic
+// MergeTick uses the existing PR facts and locks each room pass separately. Every automatic
 // publication now advances main to a CI-tested batch commit. It returns when
 // it is next due: one poll later while a merge trial runs or the merge queue
 // has a PR, or zero. A PR change wakes it by its store event.
 func (s *Service) MergeTick(ctx context.Context) (time.Time, error) {
-	unlock, err := s.mergeLock()
+	st, err := s.Store.Read()
 	if err != nil {
 		return s.now().Add(pollEvery), err
 	}
-	defer unlock()
-	ctx = context.WithValue(ctx, tickReadKey{}, tickReadScope{s, s.tickView()})
-	return s.mergeTickLocked(locallane.WithCommonDirs(ctx), "", nil)
+	rooms := map[string]bool{}
+	for _, r := range st.Records {
+		if r.RoomID != "" {
+			rooms[r.RoomID] = true
+		}
+	}
+	ids := make([]string, 0, len(rooms))
+	for id := range rooms {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var next time.Time
+	var failures []error
+	for _, id := range ids {
+		unlock, err := s.mergeWorkerLock()
+		if err != nil {
+			return s.now().Add(pollEvery), errors.Join(append(failures, err)...)
+		}
+		roomCtx := context.WithValue(locallane.WithCommonDirs(ctx), tickReadKey{}, tickReadScope{s, s.tickView()})
+		roomCtx = context.WithValue(roomCtx, automaticMergeRoom{}, true)
+		due, err := s.mergeTickLocked(roomCtx, id, nil)
+		unlock()
+		if !due.IsZero() && (next.IsZero() || due.Before(next)) {
+			next = due
+		}
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return next, errors.Join(failures...)
 }
 
-// Root retries use the worker's queue and batch builder under the same lock.
+type automaticMergeRoom struct{}
+
+// Each room pass and root retry use the queue and batch builder under the publication lock.
 // It returns its next due time, as MergeTick does.
 func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without map[string]bool) (time.Time, error) {
 	retry := func(err error) (time.Time, error) { return s.now().Add(pollEvery), err }
@@ -58,7 +87,8 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	}
 	// An explicit retry refreshes this room's full PR facts before using the
 	// same queue builder. The background worker keeps its normal poll schedule.
-	if roomID != "" {
+	automatic, _ := ctx.Value(automaticMergeRoom{}).(bool)
+	if roomID != "" && !automatic {
 		for key, probe := range probes {
 			r := st.Records[key]
 			if r == nil || r.RoomID != roomID || without[key] || probe.Err != nil || !currentTrialMember(r, state.MergeTrialChange{Key: key, Head: probe.Pull.Head.SHA}) {
@@ -93,10 +123,10 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	var next time.Time
 	for _, repo := range repos {
 		next = s.now().Add(pollEvery)
+		seen[repo] = true
 		if roomID != "" && !trialHasRoom(st, *st.MergeTrials[repo], roomID) {
 			continue
 		}
-		seen[repo] = true
 		if err := s.confirmTrialProbes(st, probes, *st.MergeTrials[repo]); err != nil {
 			failures = append(failures, err)
 			continue
@@ -116,7 +146,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	repos = nil
 	// An explicit retry may select a replacement while the durable pause
 	// remains in place. Only saving that replacement clears the pause.
-	if roomID != "" {
+	if roomID != "" && !automatic {
 		delete(st.MergePauses, roomID)
 	}
 	where := s.LocalTrialRooms(ctx)
@@ -230,7 +260,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				batch.Changes = append(batch.Changes, trialChange(r))
 			}
 			st.MergeTrials[repo] = &batch
-			if roomID != "" {
+			if roomID != "" && !automatic {
 				delete(st.MergePauses, roomID)
 			}
 			return nil

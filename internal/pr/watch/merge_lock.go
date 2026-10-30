@@ -26,6 +26,22 @@ func (s *Service) mergeLock() (func(), error) {
 	return unlock, nil
 }
 
+// mergeWorkerLock yields to a control that is waiting for publication.
+func (s *Service) mergeWorkerLock() (func(), error) {
+	if err := os.MkdirAll(s.Store.Root, 0700); err != nil {
+		return nil, err
+	}
+	release, owned, err := store.TryLock(filepath.Join(s.Store.Root, "merge-control-intent.lock"))
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return nil, fmt.Errorf("another merge publisher is active or a control is waiting")
+	}
+	defer release()
+	return s.mergeLock()
+}
+
 // requirementLockWait bounds a requirement write's wait for a publication's
 // final step. Tests shorten it to keep a refused write fast.
 var requirementLockWait = 30 * time.Second
@@ -53,15 +69,21 @@ func (s *Service) requirementLock(ctx context.Context) (func(), error) {
 // Manual controls can arrive during a short automatic publication. Wait on the
 // same lock, but bound this wait separately from the control's remaining work.
 func (s *Service) mergeControlLock(ctx context.Context) (func(), error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	if err := os.MkdirAll(s.Store.Root, 0700); err != nil {
 		return nil, err
 	}
+	intent := filepath.Join(s.Store.Root, "merge-control-intent.lock")
+	release, err := store.LockContext(ctx, intent)
+	if err != nil {
+		return nil, fmt.Errorf("waiting for merge control at %s: %w", intent, err)
+	}
 	path := filepath.Join(s.Store.Root, "merge-publish.lock")
 	unlock, err := store.LockContext(ctx, path)
 	if err != nil {
+		release()
 		return nil, fmt.Errorf("waiting for merge publisher at %s: %w", path, err)
 	}
-	return unlock, nil
+	return func() { unlock(); release() }, nil
 }
