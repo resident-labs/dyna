@@ -27,48 +27,6 @@ type Service struct {
 	MaxBytes      int
 }
 
-type GitFileStatus struct {
-	Path           string `json:"path"`
-	OriginalPath   string `json:"originalPath"`
-	Status         string `json:"status"`
-	IndexStatus    string `json:"indexStatus"`
-	WorktreeStatus string `json:"worktreeStatus"`
-	Staged         bool   `json:"staged"`
-	Unstaged       bool   `json:"unstaged"`
-	Untracked      bool   `json:"untracked"`
-	Conflicted     bool   `json:"conflicted"`
-}
-
-type GitCommit struct {
-	PRNumber  int       `json:"prNumber,omitempty"`
-	Hash      string    `json:"hash"`
-	ShortHash string    `json:"shortHash"`
-	Subject   string    `json:"subject"`
-	Author    string    `json:"author"`
-	Time      time.Time `json:"time"`
-}
-
-type GitStatusResult struct {
-	CommitCount  int             `json:"commitCount"`
-	ChangedFiles int             `json:"changedFiles"`
-	Root         string          `json:"root"`
-	Branch       string          `json:"branch"`
-	OID          string          `json:"oid"`
-	Upstream     string          `json:"upstream"`
-	Ahead        int             `json:"ahead"`
-	Behind       int             `json:"behind"`
-	Files        []GitFileStatus `json:"files"`
-	Commits      []GitCommit     `json:"commits"`
-	Truncated    bool            `json:"truncated"`
-	// Worktree is true for a linked git worktree, false for a main checkout.
-	Worktree bool `json:"worktree"`
-}
-
-type GitDiffResult struct {
-	Text      string `json:"text"`
-	Truncated bool   `json:"truncated"`
-}
-
 // CappedBuffer keeps draining the child after the limit to avoid broken
 // pipes and unbounded allocation. CommandContext still bounds runtime.
 type CappedBuffer struct {

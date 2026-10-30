@@ -27,27 +27,6 @@ var (
 	ErrBadPath    = errors.New("not a usable folder path")
 )
 
-// BrowseEntry is one folder in a listing. It carries no size, time or mode.
-type BrowseEntry struct {
-	Name  string `json:"name"`
-	IsGit bool   `json:"isGit"`
-}
-
-// Browse is one level of folders.
-type Browse struct {
-	// Parent is the folder that was listed, with ~ expanded.
-	Parent    string        `json:"parent"`
-	Entries   []BrowseEntry `json:"entries"`
-	Truncated bool          `json:"truncated,omitempty"`
-}
-
-// BrowseInfo tells the picker where to start.
-type BrowseInfo struct {
-	// Home is the user's home folder. The picker starts there and shows it
-	// as ~/.
-	Home string `json:"home"`
-}
-
 // BrowseInfo returns the home folder.
 func (s *Service) BrowseInfo() (BrowseInfo, error) {
 	home, err := os.UserHomeDir()
