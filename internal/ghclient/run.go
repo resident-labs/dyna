@@ -50,6 +50,10 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 		}
 		return outsideReadError(r, cmd.Args[1:], err)
 	}
+	media, err := stripMedia(ctx, cmd)
+	if err != nil {
+		return err
+	}
 	if err := refuseOwnerIdentity(ctx, cmd); err != nil {
 		return err
 	}
@@ -77,7 +81,16 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 			return err
 		}
 	}
-	return runWithToken(cmd, token)
+	mediaCleanup, err := uploadMedia(ctx, cmd, r, token, media)
+	if err != nil {
+		return err
+	}
+	defer mediaCleanup()
+	err = runWithToken(cmd, token)
+	if err != nil && len(media) > 0 {
+		return fmt.Errorf("PR write failed after media assets were uploaded or reused: %w", err)
+	}
+	return err
 }
 
 // runAnonymously runs gh with no token and an empty configuration directory, so

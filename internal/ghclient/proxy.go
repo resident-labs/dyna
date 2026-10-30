@@ -2,6 +2,9 @@ package ghclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"path/filepath"
+
 	"errors"
 	"fmt"
 	"io"
@@ -108,7 +111,45 @@ func sessionApproval(ctx context.Context, cmd *exec.Cmd, roomID string, args []s
 	if err != nil {
 		return err
 	}
-	request, err := requestApproval(ctx, approvals.RequestInput{Argv: args, Cwd: cmd.Dir, Repo: repository.name, Files: files})
+	paths, err := MediaPaths(args)
+	if err != nil {
+		return err
+	}
+	var media []approvals.Media
+	for _, path := range paths {
+		full := path
+		if !filepath.IsAbs(full) {
+			full = filepath.Join(cmd.Dir, full)
+		}
+		f, err := os.Open(full)
+		if err != nil {
+			return err
+		}
+		data, err := io.ReadAll(io.LimitReader(f, maxMediaSize+1))
+		closeErr := f.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		data, err = sanitizeMedia(path, data)
+		if err != nil {
+			return err
+		}
+		name := filepath.Base(path)
+		req := mediaPostRequest{Quiet: true, Mentions: []string{"@root"}, Text: "Media for a GitHub approval.", Claim: mediaPostClaim{Room: roomID}, Files: []mediaPostFile{{Name: name, Data: data}}}
+		var result mediaPostResult
+		if err := engineclient.New("", engineclient.Notices(nil)).Call(ctx, "Post", []any{req}, &result); err != nil {
+			return err
+		}
+		if len(result.Message.Attachments) != 1 {
+			return errors.New("media post did not return an attachment")
+		}
+		sum := sha256.Sum256(data)
+		media = append(media, approvals.Media{Path: path, Name: name, PostID: result.Message.ID, AttachmentID: result.Message.Attachments[0].ID, SHA256: fmt.Sprintf("%x", sum)})
+	}
+	request, err := requestApproval(ctx, approvals.RequestInput{Argv: args, Cwd: cmd.Dir, Repo: repository.name, Files: files, Media: media})
 	if err != nil {
 		return err
 	}
@@ -150,3 +191,23 @@ func approvalResult(request approvals.Request, stdout, stderr io.Writer) error {
 	}
 	return &sessionExitError{code: 75, message: fmt.Sprintf("GitHub write held for approval as %s (waiting on %s). You will be woken with the result; do not retry.", request.ID, request.At)}
 }
+
+// These structs mirror the Post RPC fields without importing notify, which depends on ghclient.
+type mediaPostClaim struct{ Room string }
+type mediaPostFile struct {
+	Name string
+	Data []byte
+}
+type mediaPostRequest struct {
+	Quiet    bool
+	Mentions []string
+	Text     string
+	Claim    mediaPostClaim
+	Files    []mediaPostFile
+}
+type mediaPostAttachment struct{ ID string }
+type mediaPostMessage struct {
+	ID          string
+	Attachments []mediaPostAttachment
+}
+type mediaPostResult struct{ Message mediaPostMessage }
