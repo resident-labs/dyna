@@ -76,12 +76,16 @@ func Execute(ctx context.Context, d *DevTools, action Action, args []string, siz
 		}
 		var navigation struct {
 			ErrorText string `json:"errorText"`
+			LoaderID  string `json:"loaderId"`
 		}
 		if err = json.Unmarshal(data, &navigation); err != nil {
 			return err
 		}
 		if navigation.ErrorText != "" {
 			return fmt.Errorf("navigate: %s", navigation.ErrorText)
+		}
+		if navigation.LoaderID == "" {
+			return nil // Same-document navigation does not fire a load event.
 		}
 		return d.WaitLoad(ctx)
 	case Click, Type, Text:

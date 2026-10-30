@@ -14,6 +14,43 @@ import (
 	"github.com/coder/websocket"
 )
 
+func TestSameDocumentNavigationDoesNotWaitForLoad(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	mux.HandleFunc("/json/list", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `[{"type":"page","webSocketDebuggerUrl":%q}]`, "ws"+strings.TrimPrefix(server.URL, "http")+"/page")
+	})
+	mux.HandleFunc("/page", func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+		for i := 0; i < 2; i++ {
+			_, data, err := ws.Read(r.Context())
+			if err != nil {
+				return
+			}
+			var req struct {
+				ID int `json:"id"`
+			}
+			if json.Unmarshal(data, &req) != nil {
+				return
+			}
+			_ = ws.Write(r.Context(), websocket.MessageText, []byte(fmt.Sprintf(`{"id":%d,"result":{"frameId":"main"}}`, req.ID)))
+		}
+	})
+	d, err := Connect(context.Background(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := Execute(context.Background(), d, Open, []string{"https://example.test/#section"}, "", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFullScreenshotUsesContentSize(t *testing.T) {
 	mux := http.NewServeMux()
 	server := httptest.NewServer(mux)
