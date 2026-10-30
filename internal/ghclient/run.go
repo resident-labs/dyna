@@ -3,15 +3,13 @@ package ghclient
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"slices"
 	"strings"
 
+	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/boundedio"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/processguard"
@@ -37,6 +35,13 @@ func Command(ctx context.Context, binary, dir string, args ...string) *exec.Cmd 
 // Run executes a configured command.
 func Run(ctx context.Context, cmd *exec.Cmd) error {
 	return RunWithAccount(ctx, cmd, nil)
+}
+
+type approvedClassKey struct{}
+
+// WithApprovedClass limits execution to the class that approved the write.
+func WithApprovedClass(ctx context.Context, class approvals.Class) context.Context {
+	return context.WithValue(ctx, approvedClassKey{}, class)
 }
 
 // RunWithAccount checks the selected identity before executing the API request.
@@ -67,11 +72,14 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 		if err != nil {
 			return err
 		}
-		if err := refuseUpstreamAuthor(ctx, cmd, r, token, login); err != nil {
-			return err
-		}
-		if err := refuseForeignComment(ctx, cmd, r, token, login); err != nil {
-			return err
+		if !isRead(cmd.Args[1:]) {
+			_, decision, err := decideCommand(ctx, cmd, r, login, nil)
+			if err != nil {
+				return err
+			}
+			if approved, ok := ctx.Value(approvedClassKey{}).(approvals.Class); ok && approved != approvals.ClassOwner && decision.Class == approvals.ClassOwner {
+				return fmt.Errorf("GitHub write now requires owner approval under rule %s; submit it again", decision.Rule)
+			}
 		}
 	}
 	if before != nil {
@@ -116,46 +124,4 @@ func runWithToken(cmd *exec.Cmd, token string) error {
 	err := cmd.Run()
 	_, _ = io.WriteString(destination, strings.ReplaceAll(string(stderr.Bytes()), token, "[redacted]"))
 	return err
-}
-
-// refuseUpstreamAuthor binds an upstream close or reopen of a PR or issue to the
-// selected account's item. The item's author must be that account.
-func refuseUpstreamAuthor(ctx context.Context, cmd *exec.Cmd, r repository, token, login string) error {
-	args := commandArgs(cmd.Args[1:])
-	if len(args) < 2 || !slices.Contains([]string{"pr close", "issue close", "issue reopen"}, args[0]+" "+args[1]) {
-		return nil
-	}
-	_, err := roomFor(ctx, cmd.Dir, r)
-	if !errors.Is(err, errNotInRoom) {
-		return err
-	}
-	noun := "PR"
-	if args[0] == "issue" {
-		noun = "issue"
-	}
-	p := parseArgs(args[:2], args[2:])
-	if len(p.positional) > 1 {
-		return fmt.Errorf("upstream %s %s requires one target", noun, args[1])
-	}
-	view := []string{args[0], "view"}
-	if len(p.positional) == 1 {
-		view = append(view, p.positional[0])
-	}
-	view = append(view, "--repo", r.host+"/"+r.name, "--json", "author")
-	raw, err := authOutput(ctx, cmd, token, view...)
-	if err != nil {
-		return fmt.Errorf("could not read upstream %s author: %w", noun, err)
-	}
-	var result struct {
-		Author struct {
-			Login string `json:"login"`
-		} `json:"author"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return fmt.Errorf("could not read upstream %s author: %w", noun, err)
-	}
-	if login == "" || !strings.EqualFold(login, result.Author.Login) {
-		return fmt.Errorf("upstream %s was not written by this room's GitHub account", noun)
-	}
-	return nil
 }
