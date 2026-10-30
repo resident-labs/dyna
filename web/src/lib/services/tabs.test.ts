@@ -48,6 +48,6 @@ test('each tab gets its own one-line state and results', () => {
   assert.deepEqual(by('reviews')?.entries.map((e) => e.text), ['approve #3 · Fix it'])
   assert.deepEqual(by('librarian')?.entries.map((e) => e.text), ['Librarian · 2 runs passed today'])
   assert.deepEqual(by('updates')?.entries.map((e) => e.text), ['Update Dyna · passed in 1 s'])
-  assert.match(by('librarian')?.line ?? '', /^On · last passed · next in \d+ m$/)
+  assert.match(by('librarian')?.line ?? '', /^On · next in \d+ m$/)
   assert.equal(by('ci')?.line, '2 tests over 2 s')
 })

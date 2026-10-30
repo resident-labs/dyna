@@ -54,6 +54,7 @@ per due check, without replaying missed intervals. Main hooks fetch origin/main
 at most once every five minutes. The first observation sets the baseline.
 Later SHA changes emit `main-updated`, including changes made outside Dyna.
 The maintenance loop finds configured hooks even when no session remains.
+It also wakes the librarian on main updates for each enabled library, without a hook.
 
 The self-update recipe below is opt-in. It changes no existing timer.
 

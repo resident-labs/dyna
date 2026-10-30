@@ -142,23 +142,6 @@ type settingRow struct {
 	Display string `json:"display"`
 }
 
-type hookRow struct {
-	Name         string `json:"name"`
-	Event        string `json:"event"`
-	EveryMinutes int    `json:"everyMinutes"`
-	Disabled     bool   `json:"disabled"`
-}
-
-type hookRunRow struct {
-	Result    string    `json:"result"`
-	StartedAt time.Time `json:"startedAt"`
-}
-
-type hookSummaryRow struct {
-	Hook    hookRow     `json:"hook"`
-	LastRun *hookRunRow `json:"lastRun"`
-}
-
 type voiceStatus struct {
 	Available   bool   `json:"available"`
 	Unavailable string `json:"unavailable"`
@@ -220,11 +203,11 @@ type facts struct {
 	services []serviceRow
 	reviewer reviewerStatus
 	settings []settingRow
-	hooks    []hookSummaryRow
 	// deferred is when the librarian's deferred wake is due; nil when none is deferred.
-	deferred *time.Time
-	voice    voiceStatus
-	errs     map[string]string
+	deferred       *time.Time
+	libraryLastRun *time.Time
+	voice          voiceStatus
+	errs           map[string]string
 }
 
 func (f facts) err(method string) string {
@@ -253,9 +236,7 @@ func readFacts(ctx context.Context, call engineCaller, r refs) facts {
 		out.errs["Settings"] = err.Error()
 	}
 	if out.refs.Repo != "" {
-		if err := call.Call(ctx, "HookSummary", []any{out.refs.Repo}, &out.hooks); err != nil {
-			out.errs["HookSummary"] = err.Error()
-		}
+		_ = call.Call(ctx, "LibrarianLastRun", []any{out.refs.Repo}, &out.libraryLastRun)
 		if err := call.Call(ctx, "LibrarianDeferred", []any{out.refs.Repo}, &out.deferred); err != nil {
 			out.errs["LibrarianDeferred"] = err.Error()
 		}
@@ -393,18 +374,13 @@ func libraryRow(f facts) Row {
 	if f.refs.Room != "" {
 		row.Session = f.refs.Room + ":" + subagent.LibrarianName
 	}
-	// The librarian's own hook runs every wake. Its newest run is the last pass.
-	main := f.hookNamed("librarian-main")
-	switch {
-	case !row.Enabled:
-		row.State, row.Detail = "off", "Off for "+f.refs.Repo
-	case main.LastRun != nil && main.LastRun.Result == "pending":
-		row.State, row.Detail = "running", "Keeps the feature map current"
-	default:
+	if row.Enabled {
 		row.State, row.Detail = "idle", "Keeps the feature map current"
+	} else {
+		row.State, row.Detail = "off", "Off for "+f.refs.Repo
 	}
-	if main.LastRun != nil {
-		row.LastRun = stamp(main.LastRun.StartedAt)
+	if f.libraryLastRun != nil {
+		row.LastRun = stamp(*f.libraryLastRun)
 	}
 	// The next pass is the engine's deferred wake. It is empty when none is deferred.
 	if row.Enabled && f.deferred != nil {
@@ -492,17 +468,6 @@ func (f facts) errOr(method, fallback string) string {
 		return err
 	}
 	return fallback
-}
-
-// hookNamed finds one repository hook summary. A hook the repository does not
-// have reports as an empty summary.
-func (f facts) hookNamed(name string) hookSummaryRow {
-	for _, row := range f.hooks {
-		if row.Hook.Name == name {
-			return row
-		}
-	}
-	return hookSummaryRow{}
 }
 
 // stamp is a stored time as the local clock reads it. A zero time is empty.

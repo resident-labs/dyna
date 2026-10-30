@@ -13,7 +13,6 @@ import (
 
 	"dyna-agent/internal/authority"
 	harnessruntime "dyna-agent/internal/harness/runtime"
-	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/repoid"
@@ -40,15 +39,11 @@ const MaxWakeRetries = 5
 
 // Service runs librarian wakes. Tests replace Sessions, Settings, Now and Defer.
 type Service struct {
-	// Hook functions are supplied by the engine's existing hook handlers.
-	ListHooks  func(context.Context, string) ([]hooks.Hook, error)
-	AddHook    func(context.Context, string, hooks.Hook) error
-	RemoveHook func(context.Context, string, string) error
-	DataDir    string
-	Sessions   Sessions
-	Issues     Issues
-	Settings   func() (settings.Values, error)
-	Now        func() time.Time
+	DataDir  string
+	Sessions Sessions
+	Issues   Issues
+	Settings func() (settings.Values, error)
+	Now      func() time.Time
 	// Defer runs wake at the given time, in place of any earlier deferral for
 	// the repository. Nil skips deferral; a pass then waits for the next merge.
 	Defer func(repo string, at time.Time, wake func())
