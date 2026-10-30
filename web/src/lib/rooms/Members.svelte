@@ -297,7 +297,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 5px 8px 5px calc(30px + var(--depth, 0) * 18px);
+    padding: 5px 8px 5px calc(18px + var(--depth, 0) * 18px);
     border-radius: 5px;
     text-align: left;
     margin: 1px 0;
@@ -316,7 +316,7 @@
   .row.finished { opacity: 0.72; }
   .row.off { opacity: 0.6; }
   .row.finished .name { color: var(--muted); }
-  .row-actions { display: flex; align-items: center; gap: var(--s3); margin: -2px 28px var(--s2) 64px; }
+  .row-actions { display: flex; align-items: center; gap: var(--s3); margin: -2px 28px var(--s2) 52px; }
   .row-action { font-size: var(--t-cap); color: var(--muted); padding: 1px 0; }
   .row-action:not(:disabled) { transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
@@ -339,21 +339,21 @@
   button.mark-icon:active {
     background: var(--select);
 }
-  /* The chevron, and on a folded row its subagent count, sit in the gutter
-     left of the avatar. The gutter fits two digits. */
+  /* The chevron sits in the gutter left of the avatar. On a folded row its
+     subagent count stacks under it, so the gutter keeps its width. */
   .fold {
     position: absolute;
     z-index: 1;
     left: calc(var(--depth, 0) * 18px + 2px);
     top: 50%;
     transform: translateY(-50%);
-    min-width: 16px;
-    height: 24px;
+    width: 16px;
+    min-height: 24px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1px;
-    padding: 0 2px 0 0;
+    padding: 2px 0;
     border-radius: 4px;
     color: var(--faint);
     transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease);
@@ -392,7 +392,7 @@
     .row.tailed { padding-right: calc(46px + var(--marks) * 40px); }
     /* The chevron keeps its 12 px glyph and takes a taller target in the
        gutter left of the avatar. */
-    .fold { min-width: 24px; height: 44px; }
+    .fold { width: 24px; min-height: 44px; }
     .select-mode, .room-actions { min-width: 44px; min-height: 44px; }
     .group-toggle, .group-clear, .toggle { min-height: 44px; }
     .row { -webkit-touch-callout: none; user-select: none; }
@@ -405,7 +405,7 @@
   @keyframes fresh { from { background: color-mix(in srgb, var(--sage) 28%, transparent); } }
   .guide {
     position: absolute;
-    left: calc(var(--depth) * 18px + 20px);
+    left: calc(var(--depth) * 18px + 8px);
     top: -4px;
     width: 10px;
     height: 24px;
@@ -430,7 +430,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .kids { font-size: var(--t-cap); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .kids { font-size: var(--t-micro); font-weight: 600; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
   .sub { font-size: var(--t-sm); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* The owner-display grant is quiet plain text: it names a capability, not a state. */
   /* The PR number sits on the status line, so the name keeps the first line. */
