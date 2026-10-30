@@ -422,7 +422,6 @@
   const settingsPanel = createSettingsPanel({
     hasRoom: () => !!room,
     closeNav: () => { navOpen = false },
-    roomRequired: () => say({ tone: 'info', subject: 'Open a room first', text: 'Hooks live on a room’s Services page.' }),
     openServices: () => openView('services'),
   })
   const { openSettings, openHooks, createProfile } = settingsPanel
