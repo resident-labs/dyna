@@ -187,10 +187,22 @@ checks:
 - `matrix` selects one configuration of a matrix job, as `key:value`. Each
   configuration is its own check.
 
+Every host, container and workflow job check receives these variables:
+
+- `DYNA_CI_RUN` is `pr` for a pull request head and `trial` for a merge
+  trial. It is empty for other runs, including manual and cache-warming runs.
+- `DYNA_CI_BASE` is the comparison base commit SHA when the run has one.
+  It is empty when no base is known. A trial uses its frozen batch base.
+
+Dyna sets these values even when a check's `env` declares the same names.
+A check can use the base to select affected work, when that commit is available
+in its checkout.
+
 The job runs as a `pull_request` event for the revision, with the pull
 request's base commit in the event payload. Dyna's own environment does not
 reach the job containers: `act` runs with a fixed `PATH`, its own home and an
-empty environment file, and jobs cannot use the node's container socket.
+environment file containing only these two variables, and jobs cannot use
+the node's container socket.
 Each job container runs as the node user's numeric UID and GID, so files it
 writes on mounted folders belong to that user on the node.
 
