@@ -50,6 +50,18 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "image.built":
+		var v ImageBuilt
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "image.failed":
+		var v ImageFailed
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "post.created":
 		var v PostCreated
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -117,7 +129,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"box.changed", "post.created", "session.closed", "session.started", "turn.ended", "turn.started"}
+var eventBodyTypes = []EventType{"box.changed", "image.built", "image.failed", "post.created", "session.closed", "session.started", "turn.ended", "turn.started"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
@@ -137,6 +149,13 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch w.Type {
+	case "archive":
+		var v Archive
+		if err := json.Unmarshal(w.Body, &v); err != nil {
+			return err
+		}
+		m.Body = v
+		return nil
 	case "turn.start":
 		var v TurnStart
 		if err := json.Unmarshal(w.Body, &v); err != nil {
@@ -170,4 +189,4 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 	}
 }
 
-var boxMessageTypes = []BoxMessageType{"turn.start", "turn.steer", "turn.stop", "upgrade"}
+var boxMessageTypes = []BoxMessageType{"archive", "turn.start", "turn.steer", "turn.stop", "upgrade"}

@@ -86,6 +86,23 @@ type BoxChanged struct {
 	Reason  string    `json:"reason,omitempty"`
 }
 
+type ImageBuilt struct {
+	Host    HostName `json:"host"`
+	Repo    RepoName `json:"repo"`
+	Name    string   `json:"name"`
+	Tag     string   `json:"tag"`
+	Seconds float64  `json:"seconds"`
+}
+
+type ImageFailed struct {
+	Host    HostName `json:"host"`
+	Repo    RepoName `json:"repo"`
+	Name    string   `json:"name"`
+	Tag     string   `json:"tag"`
+	Reason  string   `json:"reason"`
+	LogTail string   `json:"logTail"`
+}
+
 type BoxState string
 
 const (
@@ -129,6 +146,12 @@ func (TurnStarted) isEventBody()         {}
 
 func (TurnEnded) EventType() EventType { return "turn.ended" }
 func (TurnEnded) isEventBody()         {}
+
+func (ImageBuilt) EventType() EventType { return "image.built" }
+func (ImageBuilt) isEventBody()         {}
+
+func (ImageFailed) EventType() EventType { return "image.failed" }
+func (ImageFailed) isEventBody()         {}
 
 func (BoxChanged) EventType() EventType { return "box.changed" }
 func (BoxChanged) isEventBody()         {}
