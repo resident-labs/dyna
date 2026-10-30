@@ -46,7 +46,7 @@
 {:else if item.kind === 'enum' && !usesSelect(item)}
   <Segmented options={(item.options ?? []).map((o) => [o, o])} value={String(item.value)} {label} onchange={(o: string) => choose(o)} />
 {:else if usesSelect(item)}
-  <select class="field" aria-label={label} disabled={fixed} value={String(item.value)} onchange={(e) => choose(e.currentTarget.value)}>
+  <select class="field" aria-label={label} disabled={fixed} value={String(item.value)} onchange={(e) => { const s = e.currentTarget; onsave(s.value).catch(() => { s.value = String(item.value) }) }}>
     {#each item.options ?? [] as value, i}<option {value}>{item.optionLabels?.[i] ?? value}</option>{/each}
   </select>
 {:else}

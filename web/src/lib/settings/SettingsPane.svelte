@@ -197,7 +197,7 @@
               {#if it.kind === 'bool'}
                 <Switch on={!!it.value} label={titles[key]} disabled={it.source === 'env'} onchange={(v: boolean) => set(key, v)} />
               {:else if usesSelect(it)}
-                <select class="field profile" aria-label={titles[key]} value={it.value} onchange={(e) => set(key, e.currentTarget.value)}>{#if !it.options?.some((o) => o === it.value)}<option value={it.value} disabled>{missingLabel(it)}</option>{/if}{#each it.options ?? [] as value, i}<option {value}>{it.optionLabels?.[i] ?? value}</option>{/each}</select>
+                <select class="field profile" aria-label={titles[key]} value={it.value} onchange={async (e) => { const s = e.currentTarget; await set(key, s.value); if (errors[key]) s.value = String(it.value) }}>{#if !it.options?.some((o) => o === it.value)}<option value={it.value} disabled>{missingLabel(it)}</option>{/if}{#each it.options ?? [] as value, i}<option {value}>{it.optionLabels?.[i] ?? value}</option>{/each}</select>
               {:else if it.kind === 'enum'}
                 <Segmented options={(it.options ?? []).map((o) => [o, o])} value={String(it.value)} label={titles[key]} onchange={(o: string) => set(key, o)} />
               {:else}
