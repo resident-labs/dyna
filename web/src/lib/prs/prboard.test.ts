@@ -111,7 +111,7 @@ test('a PR link opens that PR on its tab beside the list', async () => {
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('the PR page has a state chip under the title and a merge box after the conversation', async () => {
+test('the PR page puts the merge box after the conversation', async () => {
   const { dir, component, render } = await load('PRDetail')
   try {
     const change = open({ changeId: 'c', key: 'c', number: 772, title: 'Use event waits', ci: 'pending', verdict: 'approve', reviewState: 'approved', reviewRound: 1,
@@ -120,11 +120,11 @@ test('the PR page has a state chip under the title and a merge box after the con
     const html = render(component, { props: { change, roomId: 'r', merge: { state: 'ci' }, standing: state, detail: { author: { login: 'a' }, createdAt: '2026-10-19T00:00:00Z', body: 'Body' } } }).body
     const t = text(html)
     assert.match(t, /Use event waits #772/)
-    assert.match(t, /Open .*Waiting for CI/)
+    assert.match(t, /Waiting for CI/)
     assert.match(html, /class="mbox[ "]/)
-    assert.match(t, /Some checks are still running 1 of 2 checks passed · go-test running/)
+    assert.match(t, /Waiting for CI 1 of 2 checks passed · go-test running/)
     assert.match(t, /Approved by the reviewer/)
-    assert.ok(t.indexOf('Body') < t.indexOf('Some checks are still running'), 'the merge box follows the conversation')
+    assert.ok(t.indexOf('Body') < t.indexOf('Waiting for CI'), 'the merge box follows the conversation')
     assert.doesNotMatch(html, /class="nums"/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
