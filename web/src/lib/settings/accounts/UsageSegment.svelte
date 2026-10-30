@@ -26,7 +26,6 @@
   const pace = $derived(remaining === null ? null : paceOf(window, now()))
   const until = $derived(resetsIn(window.resetsAt, now()))
   const low = $derived(remaining !== null && remaining < 20)
-  // hover names the account in full, since a narrow segment cuts the name.
   const hover = $derived([`${name} · ${window.label}`, notice || (remaining === null ? 'Not reported' : `${percent(remaining)} left`), dateTime(window.resetsAt) ? `Resets ${dateTime(window.resetsAt)}` : ''].filter(Boolean).join(' · '))
   const words = $derived([name, active ? 'in use' : '', notice || (remaining === null ? 'not reported' : `${percent(remaining)} left${low ? ', low' : ''}`)].filter(Boolean).join(', '))
 </script>
@@ -45,13 +44,13 @@
 </div>
 
 <style>
-  .segment { position: relative; min-width: 0; height: 28px; border-radius: var(--r-xs); background: var(--meter-track); overflow: hidden; }
+  .segment { position: relative; min-width: 0; min-height: 28px; border-radius: var(--r-xs); background: var(--meter-track); overflow: hidden; }
   .active { box-shadow: inset 0 0 0 1px var(--hair-strong); }
   .muted { opacity: 0.5; }
   .fill { position: absolute; inset: 0 auto 0 0; opacity: 0.38; }
   .tick { position: absolute; bottom: 0; height: 7px; width: 2px; margin-left: -1px; border-radius: 2px 2px 0 0; background: var(--ink); }
-  .label { position: absolute; inset: 0; display: flex; align-items: center; gap: 6px; padding: 0 var(--s2); font-size: var(--t-sm); color: var(--ink); }
-  .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-medium); }
+  .label { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-height: 28px; padding: 3px var(--s2); font-size: var(--t-sm); color: var(--ink); }
+  .name { min-width: 0; overflow-wrap: anywhere; font-weight: var(--w-medium); }
   .value { flex: none; }
   .value.low { color: var(--tone-warning-fg); }
   .quiet { flex: none; color: var(--muted); }
