@@ -323,3 +323,17 @@ func TestApprovalListUsesDisplayHolder(t *testing.T) {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
 }
+
+func TestHeldListsOnlyApprovalsWaitingOnTheCaller(t *testing.T) {
+	f := newFixture(t)
+	r := f.create(t, ClassAgent)
+	held, err := f.service.Held(f.actor(f.parent), f.rec.ID)
+	if err != nil || len(held) != 1 || held[0].ID != r.ID || held[0].Title != r.Title {
+		t.Fatalf("parent held = %+v, %v", held, err)
+	}
+	for _, actor := range []authority.Actor{f.actor(f.sibling), f.owner()} {
+		if held, err := f.service.Held(actor, f.rec.ID); err != nil || len(held) != 0 {
+			t.Fatalf("held for %+v = %+v, %v", actor, held, err)
+		}
+	}
+}
