@@ -16,7 +16,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 const schema = `CREATE TABLE shell_jobs (
 	id TEXT PRIMARY KEY,
@@ -108,6 +108,11 @@ func (s *Store) db() (*sql.DB, error) {
 		}
 		if old < 8 {
 			if _, err := conn.ExecContext(ctx, `ALTER TABLE shell_jobs ADD COLUMN activity_cpu TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+		}
+		if old < 9 {
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE shell_jobs ADD COLUMN activity_since INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return err
 			}
 		}

@@ -17,6 +17,7 @@ type Publisher struct {
 }
 
 func NewPublisher(dataDir string, key Key, initial Record) *Publisher {
+	initial.Started = time.Now()
 	p := &Publisher{record: initial, pending: make(chan struct{}, 1), done: make(chan struct{})}
 	go p.run(dataDir, key)
 	p.wake()
@@ -44,6 +45,7 @@ func (p *Publisher) Output() {
 func (p *Publisher) Update(r Record) {
 	p.mu.Lock()
 	if !p.closed {
+		r.Started = p.record.Started
 		r.Signal.LastOutput = p.record.Signal.LastOutput
 		p.record = r
 		p.wake()
@@ -111,8 +113,7 @@ func (p *Publisher) Coverage(raw bool) {
 		p.record.Reason = ReasonPartialFrameUnobserved
 		p.record.Signal.Copier = CopierUnknown
 		if raw {
-			p.record.Reason = ReasonNone
-			p.record.Signal.Copier = CopierRunning
+			p.record.Reason = ReasonObserverLivenessUnproven
 		}
 		p.wake()
 	}
