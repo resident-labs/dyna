@@ -156,6 +156,8 @@ export interface Inputs {
   changes: ChangeRow[]
   testHealth: TestHealth | null
   laneSync: SyncInfoByRepo | null
+  // deferred is when the engine's librarian wake is due; null when none is deferred.
+  deferred: string | null
   repo: string
 }
 
@@ -413,7 +415,7 @@ export function buildRows(i: Inputs): Row[] {
   // Librarian activation stays local; the browser shows status and profile.
   const repos = libraryRepos(i.settings)
   const libraryOn = repos === null || !i.repo ? null : repos.includes(i.repo)
-  const batch = hook(i.hooks, 'librarian-batch')
+  const main = hook(i.hooks, 'librarian-main')
   const library = svc('librarian')
   const libraryWait = library?.reason
   const libraryWaiting = libraryWait?.startsWith('waiting:') ? libraryWait : ''
@@ -430,8 +432,9 @@ export function buildRows(i: Inputs): Row[] {
       ? { id: 'library.profile', value: library.pinned, options: ['', ...library.profiles] }
       : i.settings ? { id: 'library.profile', value: i.settings['library.profile'] ?? '', options: [] } : null,
     value: turnsOf(i.usage, 'librarian'),
-    last: batch?.lastRun?.startedAt ?? '',
-    nextAt: libraryOn ? nextAt(batch) : '',
+    last: main?.lastRun?.startedAt ?? '',
+    // The next pass is the engine's deferred wake; nothing shows when no pass is deferred.
+    nextAt: libraryOn ? i.deferred ?? '' : '',
   })
 
   // Update Dyna follows its configured trigger, usually main-updated.

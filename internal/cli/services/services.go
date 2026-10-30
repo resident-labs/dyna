@@ -221,6 +221,8 @@ type facts struct {
 	reviewer reviewerStatus
 	settings []settingRow
 	hooks    []hookSummaryRow
+	// deferred is when the librarian's deferred wake is due; nil when none is deferred.
+	deferred *time.Time
 	voice    voiceStatus
 	errs     map[string]string
 }
@@ -253,6 +255,9 @@ func readFacts(ctx context.Context, call engineCaller, r refs) facts {
 	if out.refs.Repo != "" {
 		if err := call.Call(ctx, "HookSummary", []any{out.refs.Repo}, &out.hooks); err != nil {
 			out.errs["HookSummary"] = err.Error()
+		}
+		if err := call.Call(ctx, "LibrarianDeferred", []any{out.refs.Repo}, &out.deferred); err != nil {
+			out.errs["LibrarianDeferred"] = err.Error()
 		}
 	}
 	if err := call.Call(ctx, "VoiceStatus", nil, &out.voice); err != nil {
@@ -388,20 +393,22 @@ func libraryRow(f facts) Row {
 	if f.refs.Room != "" {
 		row.Session = f.refs.Room + ":" + subagent.LibrarianName
 	}
-	batch := f.hookNamed("librarian-batch")
+	// The librarian's own hook runs every wake. Its newest run is the last pass.
+	main := f.hookNamed("librarian-main")
 	switch {
 	case !row.Enabled:
 		row.State, row.Detail = "off", "Off for "+f.refs.Repo
-	case batch.LastRun != nil && batch.LastRun.Result == "pending":
+	case main.LastRun != nil && main.LastRun.Result == "pending":
 		row.State, row.Detail = "running", "Keeps the feature map current"
 	default:
 		row.State, row.Detail = "idle", "Keeps the feature map current"
 	}
-	if batch.LastRun != nil {
-		row.LastRun = stamp(batch.LastRun.StartedAt)
-		if row.Enabled {
-			row.NextRun = nextScheduled(batch)
-		}
+	if main.LastRun != nil {
+		row.LastRun = stamp(main.LastRun.StartedAt)
+	}
+	// The next pass is the engine's deferred wake. It is empty when none is deferred.
+	if row.Enabled && f.deferred != nil {
+		row.NextRun = stamp(*f.deferred)
 	}
 	if listed, ok := f.service(Library); ok && strings.HasPrefix(listed.Reason, "waiting:") {
 		row.State, row.Detail = "waiting", listed.Reason
@@ -496,15 +503,6 @@ func (f facts) hookNamed(name string) hookSummaryRow {
 		}
 	}
 	return hookSummaryRow{}
-}
-
-// nextScheduled is when a scheduled hook runs next: its last start plus its
-// interval. A hook with no schedule or no last run has no next time.
-func nextScheduled(row hookSummaryRow) string {
-	if row.Hook.Event != "schedule" || row.Hook.EveryMinutes <= 0 || row.Hook.Disabled || row.LastRun == nil {
-		return ""
-	}
-	return stamp(row.LastRun.StartedAt.Add(time.Duration(row.Hook.EveryMinutes) * time.Minute))
 }
 
 // stamp is a stored time as the local clock reads it. A zero time is empty.
