@@ -20,22 +20,6 @@ import (
 const maxHistoryPage = 200
 const maxBlameLines = 20000
 
-type GitHistoryCommit struct {
-	GitCommit
-	Added   int    `json:"added"`
-	Deleted int    `json:"deleted"`
-	Moved   bool   `json:"moved"`
-	Path    string `json:"path,omitempty"`
-	oldPath string
-}
-
-type GitHistoryResult struct {
-	Commits   []GitHistoryCommit `json:"commits"`
-	Earlier   bool               `json:"earlier"`
-	Cursor    string             `json:"cursor"`
-	Truncated bool               `json:"truncated"`
-}
-
 type historyCursor struct {
 	Head     string `json:"head"`
 	Offset   int    `json:"offset"`
@@ -209,17 +193,6 @@ func parseHistory(data []byte, cut bool) []GitHistoryCommit {
 		out = append(out, *current)
 	}
 	return out
-}
-
-type GitBlameRange struct {
-	StartLine int       `json:"startLine"`
-	EndLine   int       `json:"endLine"`
-	Commit    GitCommit `json:"commit"`
-}
-
-type GitBlameResult struct {
-	Ranges    []GitBlameRange `json:"ranges"`
-	Truncated bool            `json:"truncated"`
 }
 
 // GitBlame runs only for the explicitly requested file. Output bytes and line
