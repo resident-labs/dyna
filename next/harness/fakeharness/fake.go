@@ -33,7 +33,7 @@ type Harness struct {
 
 var _ harness.Harness = (*Harness)(nil)
 
-func (h *Harness) Start(ctx context.Context, id contract.TurnID, input contract.TurnInput) (contract.TurnEnded, error) {
+func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, error) {
 	h.mu.Lock()
 	if len(h.Turns) == 0 {
 		h.mu.Unlock()
@@ -41,11 +41,13 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, input contract.
 	}
 	turn := h.Turns[0]
 	h.Turns = h.Turns[1:]
-	h.Inputs = append(h.Inputs, Input{TurnInput: input})
 	if h.delivered == nil {
 		h.delivered = make(map[contract.DeliverySeq]bool)
 	}
-	h.delivered[input.Delivery] = true
+	for _, input := range inputs {
+		h.Inputs = append(h.Inputs, Input{TurnInput: input})
+		h.delivered[input.Delivery] = true
+	}
 	stop := make(chan struct{})
 	h.stopped = stop
 	h.mu.Unlock()
@@ -61,6 +63,10 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, input contract.
 	result := turn.Result
 	result.Turn = id
 	return result, turn.Err
+}
+
+func (h *Harness) Continue(ctx context.Context, id contract.TurnID) (contract.TurnEnded, error) {
+	return h.Start(ctx, id, nil)
 }
 
 func (h *Harness) Steer(_ context.Context, input contract.TurnInput) error {
