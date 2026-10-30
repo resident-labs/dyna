@@ -336,9 +336,10 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 					return err
 				}
 				wanted = active
+			case orphan.Source.Kind == jobs.CheckKindLocalChange:
+				// A standalone command with no live owner cannot resume its checks.
 			default:
-				// Standalone commands and legacy rows may still have a caller that
-				// resumes them. Their keepers retain the existing three-hour bound.
+				// Legacy rows may still have a caller that resumes them.
 				continue
 			}
 			if !wanted {

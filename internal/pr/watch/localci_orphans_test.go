@@ -69,8 +69,12 @@ func TestScheduleRegisteredCIAbandonsOnlyUnwantedOrphans(t *testing.T) {
 	if err := s.scheduleRegisteredCI(t.Context(), st); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-abandoned; got != unwanted {
-		t.Fatalf("abandoned %+v, want only %+v", got, unwanted)
+	got := map[string]bool{}
+	for range 2 {
+		got[(<-abandoned).RunID] = true
+	}
+	if !got[unwanted.RunID] || !got[standalone.RunID] {
+		t.Fatalf("abandoned %v, want unwanted and standalone runs", got)
 	}
 	select {
 	case got := <-abandoned:
