@@ -16,9 +16,9 @@ const hostChecksCommand = "dyna node edit <name> --allow-host-checks"
 
 // checkMachineWrite is the machine policy's check: the owner changes any
 // machine field and a room root changes its operating settings — host checks,
-// the SSH connect timeout and the container socket. A root speaks for its room
-// and operates its machines as the owner does. The other fields decide where
-// the engine sends work, so they stay the owner's, and a repository file, a
+// the SSH connect timeout, the container socket, and room-scoped container
+// registrations. A root speaks for its room and operates its machines as the
+// owner does. The other fields decide where the engine sends work, so they stay the owner's, and a repository file, a
 // session or a workflow worker passes neither.
 func checkMachineWrite(ctx context.Context, _ string, args []json.RawMessage) error {
 	actor := authority.Of(ctx)
@@ -31,9 +31,12 @@ func checkMachineWrite(ctx context.Context, _ string, args []json.RawMessage) er
 	}
 	if actor.Role == authority.Root {
 		if rootMayPatch(patch) {
-			return nil
+			if containerAccessForRoom(patch, actor.Room) {
+				return nil
+			}
+			return fmt.Errorf("SaveNode: a room root registers mounts and devices for its own room only")
 		}
-		return fmt.Errorf("SaveNode is owner only for a node's creation, name, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, node queue limits and named resources (for example %s)", hostChecksCommand)
+		return fmt.Errorf("SaveNode is owner only for a node's creation, name, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket, node queue limits, named resources, and its own room's mounts and devices (for example %s)", hostChecksCommand)
 	}
 	return fmt.Errorf("SaveNode is owner only; the owner allows host checks with %s", hostChecksCommand)
 }
@@ -54,14 +57,47 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 // rootMayPatch reports whether a room root may apply the patch. A root changes
 // the operating settings of a machine: host checks, the SSH connect timeout,
 // the check temporary folder, a local container runtime socket, the node
-// queue's limits (IO-heavy work and disk) and named resources. Those set
-// capacity and route no work. The creation, name, switch, route, host, room
-// list, labels stay the owner's: they decide which machine the
+// queue's limits (IO-heavy work and disk), named resources, and room-scoped
+// container registrations. Those set capacity and route no work. The creation,
+// name, switch, route, host, room list, labels stay the owner's: they decide which machine the
 // engine reaches and which rooms' code runs on it, and the ci label routes
 // local CI, so a root could send another room's work, or its own SSH
 // credentials, to a host the owner never chose.
 func rootMayPatch(patch websvc.MachinePatch) bool {
 	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Labels == nil && patch.Enabled == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
+}
+
+// containerAccessForRoom limits a root's registrations to the room it speaks for.
+func containerAccessForRoom(patch websvc.MachinePatch, room string) bool {
+	if patch.Mounts != nil {
+		for _, mount := range *patch.Mounts {
+			if mount.Room != room {
+				return false
+			}
+		}
+	}
+	if patch.Devices != nil {
+		for _, device := range *patch.Devices {
+			if device.Room != room {
+				return false
+			}
+		}
+	}
+	if patch.RemoveMounts != nil {
+		for _, mount := range *patch.RemoveMounts {
+			if mount.Room != room {
+				return false
+			}
+		}
+	}
+	if patch.RemoveDevices != nil {
+		for _, device := range *patch.RemoveDevices {
+			if device.Room != room {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // localSocket reports whether a patch leaves the container socket alone, restores
