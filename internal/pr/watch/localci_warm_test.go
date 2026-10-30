@@ -70,7 +70,7 @@ func (warmNodes) SaveHostedRuns(context.Context, string, string, localci.HostedR
 // its head.
 func warmState(t *testing.T, repo, room, base string) State {
 	t.Helper()
-	return warmStateIn(t, repo, []roomCheckout{{room: room, path: t.TempDir()}}, base)
+	return warmStateIn(t, repo, []roomCheckout{{room: room, path: matchingRepoDir(t, repo)}}, base)
 }
 
 // roomCheckout is one room's change of a repository and the checkout it keeps.
@@ -200,7 +200,7 @@ func TestWarmTakesTheRoomEachMachineServes(t *testing.T) {
 		return nil
 	})
 	base := strings.Repeat("a", 40)
-	state := warmStateIn(t, "owner/repo", []roomCheckout{{room: "room_one", path: t.TempDir()}, {room: "room_two", path: t.TempDir()}}, base)
+	state := warmStateIn(t, "owner/repo", []roomCheckout{{room: "room_one", path: matchingRepoDir(t, "owner/repo")}, {room: "room_two", path: matchingRepoDir(t, "owner/repo")}}, base)
 	s.scheduleCacheWarm(context.Background(), state)
 	if got := s.warmRuns().count(); got != 2 {
 		t.Fatalf("%d warm runs started, want one per room", got)
