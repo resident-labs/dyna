@@ -282,7 +282,7 @@ func TestUnknownClaudeCostIsUnknownAndStepCostIsKept(t *testing.T) {
 	}
 }
 
-func cachedTurn(in, cached int64, input, cachedState string) Turn {
+func cachedTurn(in, cached int64, input, cachedState workeroutput.Coverage) Turn {
 	t := knownTurn(in, 1, 0)
 	t.Usage.CachedTokens = cached
 	t.UsageNormalization.Input, t.UsageNormalization.CachedInput = input, cachedState
