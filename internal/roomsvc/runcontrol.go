@@ -54,14 +54,14 @@ func (s *Service) StartNamedRun(ctx context.Context, req StartNamedRunRequest) (
 	if !workflowresolve.ValidName(req.Name) {
 		return StartedRun{}, fmt.Errorf("invalid workflow name %q", req.Name)
 	}
-	return s.startRun(ctx, req.Room, RunSource{Script: req.Name}, req.Input, req.ResultTo)
+	return s.startRun(ctx, req.Room, RunSource{Script: req.Name}, req.Input, req.ResultTo, true)
 }
 
 func (s *Service) StartRun(ctx context.Context, ref string, source RunSource, input any) (StartedRun, error) {
-	return s.startRun(ctx, ref, source, input, "")
+	return s.startRun(ctx, ref, source, input, "", false)
 }
 
-func (s *Service) startRun(ctx context.Context, ref string, source RunSource, input any, resultTo string) (StartedRun, error) {
+func (s *Service) startRun(ctx context.Context, ref string, source RunSource, input any, resultTo string, named bool) (StartedRun, error) {
 	if err := authority.Check("workflow run", authority.Of(ctx), nil); err != nil {
 		return StartedRun{}, err
 	}
@@ -88,7 +88,12 @@ func (s *Service) startRun(ctx context.Context, ref string, source RunSource, in
 		}
 		script = info.Path
 	}
-	script, src, err := workflowresolve.Resolve(script, "", dir, "")
+	var src string
+	if named {
+		script, src, err = workflowresolve.ResolveName(script, dir, "")
+	} else {
+		script, src, err = workflowresolve.Resolve(script, "", dir, "")
+	}
 	if err != nil {
 		return StartedRun{}, err
 	}

@@ -80,7 +80,12 @@ func Resolve(ref, scriptPath, workDir, workflowDir string) (string, string, erro
 	if filepath.Base(ref) != ref || strings.ContainsAny(ref, `/\\`) {
 		return "", "", &Error{Ref: ref}
 	}
-	name := strings.TrimSuffix(ref, ".js")
+	return ResolveName(strings.TrimSuffix(ref, ".js"), workDir, workflowDir)
+}
+
+// ResolveName searches only named workflow scopes, never arbitrary paths.
+func ResolveName(name, workDir, workflowDir string) (string, string, error) {
+	ref := name
 	if !ValidName(name) {
 		return "", "", &Error{Ref: ref}
 	}
