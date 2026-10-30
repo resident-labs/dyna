@@ -11,6 +11,10 @@ import (
 
 // RoomRepos returns the repositories listed by a room.
 func (s *Store) RoomRepos(ctx context.Context, id contract.RoomID) ([]contract.RoomRepo, error) {
+	var exists int
+	if err := s.Read().QueryRowContext(ctx, "SELECT 1 FROM rooms WHERE id=?", id).Scan(&exists); err != nil {
+		return nil, err
+	}
 	rows, err := s.Read().QueryContext(ctx, "SELECT repo,is_default FROM room_repos WHERE room=? ORDER BY repo", id)
 	if err != nil {
 		return nil, err
