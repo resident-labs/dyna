@@ -12,13 +12,6 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-type GitHubLinkedPR struct {
-	Number  int    `json:"number"`
-	State   string `json:"state"`
-	IsDraft bool   `json:"isDraft"`
-	URL     string `json:"url"`
-}
-
 // IssueRepository uses the issue URL so facts also distinguish GitHub hosts.
 func IssueRepository(issueURL string) (string, error) {
 	u, err := url.Parse(issueURL)
@@ -30,14 +23,6 @@ func IssueRepository(issueURL string) (string, error) {
 		return "", fmt.Errorf("invalid issue URL %q", issueURL)
 	}
 	return strings.ToLower(u.Host + "/" + parts[0] + "/" + parts[1]), nil
-}
-
-// TrackedIssues is the GitHub half of the Issues tab's Tracked view.
-type TrackedIssues struct {
-	Items []GitHubItem `json:"items"`
-	// Unread counts issues with live room work that GitHub could not describe;
-	// the view offers Retry for them.
-	Unread int `json:"unread"`
 }
 
 // TrackedIssues lists the issues the room watches (dyna git issue watch), with
