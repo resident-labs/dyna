@@ -33,6 +33,8 @@ export const api = {
   globalHookRuns: () => Promise.resolve([]),
   hookRuns: () => Promise.resolve([]),
   runService: (name) => { record('run ' + name); return Promise.resolve({ result: 'pass' }) },
+  runHook: (repo, name) => { record('hook ' + repo + ' ' + name); return Promise.resolve({ result: 'pass' }) },
+  hookRunLog: () => Promise.resolve(null),
 }
 export const openExternal = () => {}
 `
@@ -63,6 +65,33 @@ test('the page shows the registry groups in order with Not set up last; only the
     run.click()
     await settle()
     assert.deepEqual(globalThis.__writes, ['run maintenance'])
+    // Updates runs its repository hook.
+    need(rowOf('updates').querySelector<HTMLElement>('button.toggle')).click()
+    flushSync()
+    need([...rowOf('updates').querySelectorAll<HTMLElement>('button')].find((b) => b.textContent === 'Run now')).click()
+    await settle()
+    assert.deepEqual(globalThis.__writes, ['run maintenance', 'hook /repo self-update'])
+  } finally {
+    unmount(need(app))
+    dom.window.close()
+    for (const n of domNames) Reflect.deleteProperty(globalThis, n)
+  }
+})
+
+test('a refused setting keeps the typed text so the owner can correct it', async () => {
+  const dom = installDom()
+  const { default: C, mount, unmount, flushSync }: Harness = await importBundle(await bundle({ component: '../services/SettingControl', api, format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') }), '../services/SettingControl')
+  const root = need(document.getElementById('app'))
+  let app: Mounted | undefined
+  const item = { key: 'runs.retention', value: '336h0m0s', display: '14d', kind: 'duration', source: 'file', liveVsRestart: '', help: '' }
+  flushSync(() => { app = mount(C, { target: root, props: { item, label: 'Keep finished runs', onsave: () => Promise.reject(new Error('bad')) } }) })
+  try {
+    const input = need(root.querySelector('input'))
+    input.value = '2 weeks'
+    input.dispatchEvent(new window.Event('input'))
+    input.dispatchEvent(new window.Event('blur'))
+    for (let i = 0; i < 3; i++) { await new Promise((r) => setTimeout(r, 0)); flushSync() }
+    assert.equal(input.value, '2 weeks')
   } finally {
     unmount(need(app))
     dom.window.close()
