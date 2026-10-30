@@ -21,6 +21,11 @@ export interface Item {
   kind: string;
   options?: string[];
   optionLabels?: string[];
+  /**
+   * OptionNotes is a short line for each option, in Options order, shown
+   * under the control when that option is chosen. Empty means no note.
+   */
+  optionNotes?: string[];
   help: string;
 }
 /**
