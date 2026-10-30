@@ -433,14 +433,14 @@ func TestRunPushesACommitWhoseRefAPreviousRunLeft(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := Runner{Node: &Node{Name: "local", Enabled: true}}
-	if err := runner.exec().PushCommit(t.Context(), repo, cache, sha); err != nil {
+	if err := runner.exec().PushCommit(t.Context(), repo, cache, sha, ""); err != nil {
 		t.Fatalf("a second run of the commit could not push: %v", err)
 	}
 	if got := gitRun(cache, "rev-parse", "refs/dyna/ci/"+sha); got != sha {
 		t.Fatalf("node ref = %s, want %s", got, sha)
 	}
 	// A third run, now over the run's own ref, is a no-op rather than an error.
-	if err := runner.exec().PushCommit(t.Context(), repo, cache, sha); err != nil {
+	if err := runner.exec().PushCommit(t.Context(), repo, cache, sha, ""); err != nil {
 		t.Fatalf("a repeated run of the same commit failed: %v", err)
 	}
 }
