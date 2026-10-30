@@ -52,7 +52,7 @@ func migratePiLabels(ctx context.Context, conn *sql.Conn, dataDir string) error 
 		source := LabelOwner
 		next := m.Label
 		id := strings.TrimPrefix(m.Identity, "pi:")
-		generic := m.Harness == "pi" && (m.Label == "pi native login" || (id != m.Identity && id != "" && m.Label == id+" login"))
+		generic := m.Harness == "pi" && (m.Label == "pi native login" || (id != m.Identity && id != "" && m.Label == id+" login") || (m.Kind == KindAPIKey && m.Provider != "" && m.Label == string(m.Provider)+" key"))
 		if generic {
 			source = LabelDefault
 			// Account IDs are random 16-byte hex strings. Construct the path
@@ -66,6 +66,9 @@ func migratePiLabels(ctx context.Context, conn *sql.Conn, dataDir string) error 
 					var entries map[string]json.RawMessage
 					if e == nil && json.Unmarshal(raw, &entries) == nil && len(entries) == 1 {
 						for provider, entry := range entries {
+							if m.Kind == KindAPIKey && m.Provider != "" {
+								provider = string(m.Provider)
+							}
 							next = accountlabel.PiDefaultLabel(provider, entry)
 						}
 					}
