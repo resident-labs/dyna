@@ -348,9 +348,11 @@ old history and tracked PR ownership. See [README.md](README.md#transfer-to-a-ne
 
 ## PR review publishing
 
-Agent reviews stay in Dyna, even when the room retains a GitHub publishing
-setting. Only the owner can publish GitHub comments or reviews and change
-the publishing setting. Local Markdown reviews appear in both tracked PR
+Reviewer assignments always stay in Dyna. From the CLI, root and session PR
+comments and comment-only reviews go through the approval path, with an
+explicit publish choice required when the room keeps feedback local; the
+room's publishing setting, which only the owner changes, is the default for
+that choice. Local Markdown reviews appear in both tracked PR
 views. Existing public reviews stay public.
 See [Review publishing](README.md#review-publishing).
 
