@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -196,6 +197,9 @@ func compareSchema(db *sql.DB) error {
 			var t, n, s string
 			if err := rows.Scan(&t, &n, &s); err != nil {
 				return nil, err
+			}
+			if n == "deliveries" {
+				s = strings.Replace(s, `"deliveries"`, "deliveries", 1)
 			}
 			out = append(out, t+"\x00"+n+"\x00"+s)
 		}
