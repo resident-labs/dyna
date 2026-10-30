@@ -66,6 +66,13 @@ func TestWorkspaceCheckoutKeepsIgnoredBuildOutput(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(work, "tracked")); err != nil || string(data) != "two\n" {
 		t.Fatalf("tracked file = %q, %v; want the second commit", data, err)
 	}
+	if err := os.RemoveAll(work); err != nil {
+		t.Fatal(err)
+	}
+	runCheckout(second)
+	if got := gitTest(t, work, "rev-parse", "HEAD"); got != second {
+		t.Fatalf("recreated HEAD = %s, want %s", got, second)
+	}
 }
 
 func gitTest(t *testing.T, dir string, args ...string) string {
