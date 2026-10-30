@@ -79,6 +79,8 @@ func TestClassify(t *testing.T) {
 		{"run cancel other author", "run cancel 98", owner},
 		{"run rerun failed jobs of other author", "run rerun 98 --failed", agent},
 		{"run rerun all jobs of other author", "run rerun 98", owner},
+		{"run rerun with failed false of other author", "run rerun 98 --failed=false", owner},
+		{"run rerun with failed true of other author", "run rerun 98 --failed=true", agent},
 		{"repo fork upstream", "repo fork org/project", agent},
 		{"repo fork upstream by URL", "repo fork https://github.com/org/project.git --clone=false", agent},
 		{"repo fork upstream with host", "repo fork github.com/org/project", agent},
