@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 // upgrade applies each future numbered step in the same transaction as its version.
 func upgrade(db *sql.DB, floor int, commit string) error {
@@ -92,6 +92,25 @@ func upgrade(db *sql.DB, floor int, commit string) error {
 			return err
 		}
 		version = 4
+	}
+	if version == 4 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		for _, statement := range []string{
+			"CREATE TABLE archives (session TEXT NOT NULL REFERENCES sessions(id), repo TEXT NOT NULL REFERENCES repos(repo), ref TEXT NOT NULL, commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(session, repo))",
+			"UPDATE meta SET value='5' WHERE key='schema_version'",
+		} {
+			if _, err = tx.Exec(statement); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		version = 5
 	}
 	if version != schemaVersion {
 		return fmt.Errorf("unsupported schema version %d", version)

@@ -79,6 +79,7 @@ type SessionStartResponse struct {
 }
 type SessionCloseRequest struct {
 	Session SessionID `json:"session"`
+	Discard bool      `json:"discard,omitempty"`
 }
 type SessionCloseResponse struct{}
 type PostRequest struct {

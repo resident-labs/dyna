@@ -25,6 +25,7 @@ type Profiles interface {
 // Repositories reads room repositories and prepares their host caches.
 type Repositories interface {
 	Get(context.Context, contract.RoomID, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
+	Ref(context.Context, contract.RepoName, string) (string, error)
 }
 
 type Service struct {
@@ -32,6 +33,7 @@ type Service struct {
 	boxes     BoxAdapter
 	profiles  Profiles
 	repos     Repositories
+	archives  map[contract.SessionID]map[contract.RepoName]store.Archive
 	now       func() time.Time
 	mu        sync.Mutex
 	channels  map[contract.SessionID]*boxChannel
@@ -47,7 +49,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
+	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), archives: make(map[contract.SessionID]map[contract.RepoName]store.Archive), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -527,26 +529,47 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
 	}
+	if !req.Discard && current.State != contract.BoxDeleted {
+		repos, err := s.store.RoomRepos(ctx, session.Room)
+		if err != nil {
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+		if len(repos) != 0 {
+			if current.Reason != "" {
+				if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
+					return contract.SessionCloseResponse{}, failure(err)
+				}
+			}
+			return contract.SessionCloseResponse{}, nil
+		}
+	}
+	return contract.SessionCloseResponse{}, s.finishClose(ctx, session, current, caller)
+}
+
+func (s *Service) finishClose(ctx context.Context, session store.Session, current box.Box, caller contract.Principal) *contract.Error {
 	if current.State != contract.BoxDeleted {
-		if err = s.boxes.Remove(ctx, session.Box); err != nil {
+		if err := s.boxes.Remove(ctx, session.Box); err != nil {
 			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
 			if transitionErr != nil {
-				return contract.SessionCloseResponse{}, failure(transitionErr)
+				return failure(transitionErr)
 			}
-			return contract.SessionCloseResponse{}, failure(err)
+			return failure(err)
 		}
-		if _, err = s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
-			return contract.SessionCloseResponse{}, failure(err)
+		if _, err := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
+			return failure(err)
 		}
 	}
+	s.mu.Lock()
+	delete(s.archives, session.ID)
+	s.mu.Unlock()
 	event, err := s.event(session.Room, caller, contract.SessionClosed{Session: session.ID})
 	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+		return failure(err)
 	}
-	if err = s.store.CloseSession(ctx, session.ID, event); err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+	if err := s.store.CloseSession(ctx, session.ID, event); err != nil {
+		return failure(err)
 	}
-	return contract.SessionCloseResponse{}, nil
+	return nil
 }
 
 func (s *Service) Post(ctx context.Context, caller contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
