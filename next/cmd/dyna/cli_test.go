@@ -147,7 +147,10 @@ func TestRoomLogFollowsInOrder(t *testing.T) {
 func TestOpListPrintsOperationsAsJSON(t *testing.T) {
 	f := &fakeClient{ops: []contract.Operation{{ID: "op_1", Room: "r", State: contract.OpState("pending")}}}
 	out := runCLI(t, f, "op", "list", "r")
-	var got []contract.Operation
+	var got []struct {
+		ID    contract.OpID    `json:"id"`
+		State contract.OpState `json:"state"`
+	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("output is not JSON: %v: %s", err, out)
 	}
