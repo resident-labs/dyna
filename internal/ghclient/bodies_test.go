@@ -255,7 +255,7 @@ func TestComposeBodyPlacements(t *testing.T) {
 	records := setupRooms(t, "fork/project")
 	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
 	repo := repository{"github.com", "fork/project"}
-	verbs := [][]string{{"issue", "create"}, {"pr", "create"}, {"issue", "edit", "1"}, {"pr", "edit", "1"}, {"issue", "comment", "1"}, {"pr", "comment", "1"}, {"issue", "close", "1"}, {"issue", "reopen", "1"}, {"pr", "review", "1", "--comment"}, {"api", "-X", "PATCH", "repos/fork/project/issues/comments/9"}}
+	verbs := [][]string{{"issue", "create"}, {"pr", "create"}, {"issue", "edit", "1"}, {"pr", "edit", "1"}, {"issue", "comment", "1"}, {"pr", "comment", "1"}, {"issue", "close", "1"}, {"issue", "reopen", "1"}, {"pr", "review", "1", "--comment"}, {"api", "-X", "PATCH", "repos/fork/project/issues/comments/9"}, {"api", "-X", "POST", "repos/fork/project/pulls/1/reviews"}}
 	for _, placement := range []room.AttributionPlacement{room.AttributionLine, room.AttributionPrefix} {
 		if err := room.DefaultStore().SetAttribution(records[0].ID, "🤖 Agent:", placement); err != nil {
 			t.Fatal(err)

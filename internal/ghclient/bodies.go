@@ -124,6 +124,7 @@ func attributionMarker(line string) string {
 }
 
 var nonSpace = regexp.MustCompile(`\S+`)
+var apiReviewEndpoint = regexp.MustCompile(`^/?repos/[\w.-]+/[\w.-]+/pulls/[0-9]+/reviews$`)
 
 // ComposeBody inspects agent text and applies the room attribution before publication.
 func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), error) {
@@ -131,9 +132,19 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 	if !IsAgentText(ctx) {
 		return none, nil
 	}
+	args := cmd.Args[1:]
+	command := commandArgs(args)
+	_, apiText := ownCommentCall(command)
+	if len(command) > 0 && command[0] == "api" {
+		call := parseAPICall(command)
+		positional := parseArgs(command[:1], command[1:]).positional
+		if len(positional) == 1 && apiReviewEndpoint.MatchString(positional[0]) && (call.method == "POST" || call.method == "" && call.fields) {
+			apiText = true
+		}
+	}
 	inspect := func() (string, error) {
-		args := commandArgs(cmd.Args[1:])
-		if _, ok := ownCommentCall(args); ok {
+		args := command
+		if apiText {
 			_, body, _, err := apiBody(cmd, args)
 			return body, err
 		}
@@ -209,14 +220,11 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 			}
 		}
 	}
-	args := cmd.Args[1:]
-	command := commandArgs(args)
-	_, comment := ownCommentCall(command)
 	publishesAlone, isText := false, false
 	if len(command) >= 2 {
 		publishesAlone, isText = bodyCommands[command[0]+" "+command[1]]
 	}
-	if !isText && !comment {
+	if !isText && !apiText {
 		return none, nil
 	}
 	rec, err := roomFor(ctx, cmd.Dir, r)
@@ -264,7 +272,7 @@ func ComposeBody(ctx context.Context, cmd *exec.Cmd, r repository) (func(), erro
 		return line + "\n\n" + body
 	}
 
-	if comment {
+	if apiText {
 		// A comment edit changes only its body field; a DELETE has none.
 		rest, body, found, err := apiBody(cmd, command)
 		if err != nil || !found {
