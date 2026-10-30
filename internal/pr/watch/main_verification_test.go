@@ -458,6 +458,27 @@ func TestMainCIUsesTheLatestCompletedRunForEachCheck(t *testing.T) {
 	}
 }
 
+func TestMainCIFailedReadIsSharedOnlyWithinBatch(t *testing.T) {
+	e, _ := mainCIEnv(t, mainCIFixture{numbers: []int{1, 2}})
+	base := e.s.GH.run
+	var reads int
+	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		if strings.Contains(strings.Join(cmd.Args, " "), "/check-runs?") {
+			reads++
+			return fmt.Errorf("commit CI unavailable")
+		}
+		return base(ctx, cmd)
+	}
+	for batch := 1; batch <= 2; batch++ {
+		if err := e.s.ConfirmHeads(t.Context()); err == nil {
+			t.Fatal("expected a commit CI read error")
+		}
+		if reads != batch {
+			t.Fatalf("after batch %d: commit CI reads = %d, want %d", batch, reads, batch)
+		}
+	}
+}
+
 // A cancelled run whose replacement is queued has not created its job checks
 // yet. The run itself is the evidence, so another workflow passing cannot make
 // main green while the replacement is unfinished.
