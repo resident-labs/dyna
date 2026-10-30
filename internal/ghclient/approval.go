@@ -19,7 +19,9 @@ func ClassifyForApproval(ctx context.Context, binary, dir string, args []string)
 		return approvals.ClassOwner, err
 	}
 	rec, err := roomFor(ctx, dir, r)
-	if err != nil {
+	// checkPolicy already admitted a write to the room's recorded upstream, which
+	// roomFor reports as errNotInRoom. That write still needs its class.
+	if err != nil && !(errors.Is(err, errNotInRoom) && matchesUpstream(rec, r)) {
 		return approvals.ClassOwner, err
 	}
 	login, _ := AccountFor(ctx, cmd.Path, r.host, r.name)

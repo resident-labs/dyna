@@ -183,6 +183,9 @@ func checkState(status, conclusion string) string {
 	switch conclusion {
 	case "cancelled", "skipped":
 		return conclusion
+	case "action_required":
+		// Waiting for a maintainer to approve the run is not a failure.
+		return "pending"
 	}
 	if success(conclusion) {
 		return "success"
@@ -733,6 +736,9 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 		// Over-budget cancels fail through budgetFailure; other cancels fail
 		// without a failed run.
 		if r.Status != "completed" || r.Conclusion == "" {
+			pending = true
+		} else if r.Conclusion == "action_required" {
+			// A fork pull request waits for a maintainer to approve its workflows.
 			pending = true
 		} else if r.Conclusion == "cancelled" {
 			failed = true
