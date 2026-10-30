@@ -110,6 +110,29 @@ func TestCloseParentWithChildIsRejected(t *testing.T) {
 		t.Fatalf("close: %v", e)
 	}
 }
+func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent})
+	if e != nil {
+		t.Fatal(e)
+	}
+	closeCtx, cancel := context.WithCancel(ctx)
+	s.boxes = cancelOnRemove{cancel: cancel}
+	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: child.Session}); e == nil {
+		t.Fatal("expected canceled child close")
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e == nil || e.Code != contract.ErrHasChildren {
+		t.Fatalf("parent close: %v", e)
+	}
+	s.boxes = fakeBoxes{}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: child.Session}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
+		t.Fatal(e)
+	}
+}
 func TestRoomRepoAPI(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}

@@ -467,15 +467,22 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
 		return contract.SessionCloseResponse{}, e
 	}
-	tree, err := s.store.RoomTree(ctx, session.Room)
-	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
-	}
-	if tree.Root() == session.ID {
-		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "root cannot be closed"}
-	}
 	// Interim backstop until room step 5 marks the subtree closing in one transaction.
 	s.admit.Lock()
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		s.admit.Unlock()
+		return contract.SessionCloseResponse{}, failure(err)
+	}
+	order, err := tree.CloseOrder(session.ID)
+	if err != nil {
+		s.admit.Unlock()
+		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
+	}
+	if len(order) > 1 {
+		s.admit.Unlock()
+		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrHasChildren, Message: "session has child sessions"}
+	}
 	if e := s.closeGuard(ctx, session.Box); e != nil {
 		s.admit.Unlock()
 		return contract.SessionCloseResponse{}, e
