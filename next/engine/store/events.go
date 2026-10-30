@@ -48,9 +48,16 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 
 // Events returns matching events in sequence order.
 func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64, limit int, types []contract.EventType) ([]contract.Event, error) {
-	query := "SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE room=? AND seq>?"
+	query := "SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE "
 	// database/sql requires a heterogeneous variadic slice for query arguments.
-	args := []interface{}{room, afterSeq}
+	var args []interface{}
+	if room == "" {
+		query += "room IS NULL AND seq>?"
+		args = append(args, afterSeq)
+	} else {
+		query += "room=? AND seq>?"
+		args = append(args, room, afterSeq)
+	}
 	if len(types) > 0 {
 		query += " AND type IN (" + strings.TrimRight(strings.Repeat("?,", len(types)), ",") + ")"
 		for _, kind := range types {
