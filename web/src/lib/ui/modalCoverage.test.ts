@@ -72,5 +72,5 @@ test('every settings pane that reports a modal clears it when it unmounts', () =
     count++
     assert.match(source, /onmodal\??\.?\(false\)/, `${path}: a pane that unmounts with a modal open leaves the settings modal busy`)
   }
-  assert.ok(count >= 5, `Expected the settings panes; found ${count}`)
+  assert.ok(count >= 4, `Expected the settings panes; found ${count}`)
 })

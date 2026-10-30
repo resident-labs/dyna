@@ -14,21 +14,24 @@ const built = await build({
 const source = need(built.outputFiles[0]).text
 const module: { createSettingsPanel: typeof createSettingsPanel } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 
-test('hook logs remount for each request and require a room', () => {
+test('hooks open on the Services page once per request and require a room', () => {
   let room = true
   let notices = 0
-  const panel = module.createSettingsPanel({ hasRoom: () => room, closeNav() {}, roomRequired: () => { notices++ } })
-  const first = { repo: '/one', hook: 'build', runId: 'one' }
-  const second = { repo: '/two', hook: 'test', runId: 'two' }
-  panel.openHookLog(first)
-  const key = panel.roomSettingsKey
-  panel.openHookLog(second)
-  assert.equal(panel.roomSettingsKey, key + 1)
-  assert.deepEqual(panel.roomSettingsAt.hookRun, second)
-  panel.closeRoomSettings()
+  let services = 0
+  const panel = module.createSettingsPanel({ hasRoom: () => room, closeNav() {}, roomRequired: () => { notices++ }, openServices: () => { services++ } })
+  const run = { repo: '/one', hook: 'build', runId: 'one' }
+  // A getter call, so an assertion does not narrow the next read.
+  const at = () => panel.hooksAt
+  panel.openSettings('profiles')
+  panel.openHooks(run)
+  assert.equal(panel.showSettings, false)
+  assert.deepEqual(at(), { request: 1, run })
+  panel.openHooks()
+  assert.deepEqual(at(), { request: 2, run: null })
+  assert.equal(services, 2)
   room = false
-  panel.openHookLog(first)
-  assert.equal(panel.showRoomSettings, false)
-  assert.equal(panel.roomSettingsKey, key + 1)
+  panel.openHooks(run)
+  assert.equal(at().request, 2)
+  assert.equal(services, 2)
   assert.equal(notices, 1)
 })

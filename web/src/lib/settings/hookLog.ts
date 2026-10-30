@@ -1,8 +1,7 @@
-// A hook log opens in Room settings, on the Hooks section, with the run that
-// posted the card already open. A feed card asks for it with one window event,
-// so the card needs no route state and the session DM row can ask for it too.
-// Hooks belong to a repository, and Room settings is the one place that
-// manages them, so every room on the repository leads there.
+// A hook log opens on the room's Services page, in the Hooks section, with the
+// run that posted the card already open. A feed card asks for it with one
+// window event, so the card needs no route state and the session DM row can
+// ask for it too.
 export interface HookLogTarget {
   repo: string
   hook: string
