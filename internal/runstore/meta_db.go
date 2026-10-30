@@ -125,6 +125,13 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	}); err != nil {
 		return db, err
 	}
+	if err := database.Migrate(db, "runs.workflow-manifest", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `CREATE TABLE workflow_manifests (run_id TEXT PRIMARY KEY, complete INTEGER NOT NULL DEFAULT 0, unsafe_reason TEXT NOT NULL DEFAULT '');
+CREATE TABLE workflow_manifest_calls (run_id TEXT NOT NULL, kind TEXT NOT NULL, identity TEXT NOT NULL, ordinal INTEGER NOT NULL, result TEXT, error TEXT NOT NULL DEFAULT '', external_id TEXT NOT NULL DEFAULT '', PRIMARY KEY(run_id,kind,identity,ordinal));`)
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 
@@ -676,6 +683,12 @@ func deleteMeta(db *sql.DB, id string) error {
 			return err
 		}
 		if err := activity.DeleteOwner(ctx, conn, activity.CommandStep, id); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_manifest_calls WHERE run_id=?", id); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_manifests WHERE run_id=?", id); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_step_records WHERE run_id=?", id); err != nil {

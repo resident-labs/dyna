@@ -321,6 +321,16 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		reject(werr)
 		return vm.ToValue(promise)
 	}
+	if e.opts.RecordManifest {
+		if err := runstore.RegisterWorkflowCall(e.ctx, e.runID(), runstore.WorkflowCallCommand, key, id); err != nil {
+			e.manifestWriteFailed()
+			e.workers.Done()
+			recordErr := fmt.Errorf("record command manifest intent: %w", err)
+			emit(runstore.Event{T: "exec_end", Status: "error", Error: recordErr.Error()})
+			reject(recordErr)
+			return vm.ToValue(promise)
+		}
+	}
 	var prior execRecord
 	var hasPrior bool
 	if e.opts.Cache != nil {
@@ -378,9 +388,11 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		var res map[string]any
 		var runErr error
 		var shell, stderrPath string
+		recordFailed := false
 		for attempt := 1; ; attempt++ {
 			if e.opts.Run != nil {
 				if err := runstore.StepIntent(e.ctx, e.runID(), key, id, attempt); err != nil {
+					recordFailed = true
 					res = nil
 					runErr = fmt.Errorf("record command intent: %w", err)
 					break
@@ -389,6 +401,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			res, shell, stderrPath, runErr = e.execAttempt(argv, o, id, label, line, attempt, attach, attachStderr, journal)
 			if e.opts.Run != nil {
 				if err := runstore.StepResult(context.WithoutCancel(e.ctx), e.runID(), key, id, attempt, shell, res, runErr); err != nil {
+					recordFailed = true
 					res = nil
 					runErr = fmt.Errorf("record command result: %w", err)
 					break
@@ -411,6 +424,17 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			tail = tailText(fmt.Sprint(res["stdout"]) + fmt.Sprint(res["stderr"]))
 			c := res["code"].(int)
 			exitCode = &c
+		}
+		if e.opts.RecordManifest && !recordFailed && e.ctx.Err() == nil && res != nil {
+			resultErr := runErr
+			if !o.check && res != nil {
+				resultErr = nil
+			}
+			if err := runstore.CompleteWorkflowCall(context.WithoutCancel(e.ctx), e.runID(), runstore.WorkflowCallCommand, key, id, shell, res, resultErr); err != nil {
+				e.manifestWriteFailed()
+				res = nil
+				runErr = fmt.Errorf("record command manifest result: %w", err)
+			}
 		}
 		if runErr != nil && o.check || runErr != nil && res == nil {
 			journal("error", shell, stderrPath, nil, runErr.Error())
@@ -479,12 +503,13 @@ func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, lin
 	if err != nil {
 		timedOut = errors.Is(wctx.Err(), context.DeadlineExceeded) && e.ctx.Err() == nil
 		// The command must not outlive the call that wanted it.
-		_ = e.opts.Commands.Stop(shell)
+		stopErr := e.opts.Commands.Stop(shell)
 		sctx, scancel := context.WithTimeout(context.WithoutCancel(e.ctx), commandStopWait)
-		exit, _ = e.opts.Commands.Wait(sctx, shell)
+		var waitErr error
+		exit, waitErr = e.opts.Commands.Wait(sctx, shell)
 		scancel()
-		if !timedOut {
-			return nil, shell, stderrPath, err
+		if !timedOut || stopErr != nil || waitErr != nil {
+			return nil, shell, stderrPath, errors.Join(err, stopErr, waitErr)
 		}
 	}
 	stdout, rerr := e.opts.Commands.Output(shell, commandParseLimit)
