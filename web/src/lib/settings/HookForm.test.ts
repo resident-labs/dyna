@@ -9,7 +9,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
-import { hookForm, hookOf, hookPatch, isBuiltin, listedHooks, newHook, timeoutLabel, type HookFields } from './hooks.ts'
+import { hookForm, hookOf, hookPatch, newHook, type HookFields } from './hooks.ts'
 import { errorText } from '../errorText.ts'
 import type { Hook } from '../api/settings.ts'
 
@@ -43,8 +43,8 @@ test('the hook form shows the fields each event needs', () => {
   assert.match(edit, /value="5m"/)
 })
 
-// Run the pane's real save handler with a fake api.
-const pane = readFileSync(new URL('./HooksPane.svelte', import.meta.url), 'utf8')
+// Run the hook list's real save handler with a fake api.
+const pane = readFileSync(new URL('../services/HookList.svelte', import.meta.url), 'utf8')
 interface Editor {
   hook: Partial<Hook> | null
   form: HookFields
@@ -59,7 +59,7 @@ interface SaveContext {
   [name: string]: unknown
 }
 function paneWith(api: Record<string, unknown>, editor: Editor): SaveContext {
-  const context: SaveContext = { api, errorText, repo: '/repo', isGlobal: () => false, isBuiltin, timeoutLabel, editor, hookOf, hookPatch, notes: [], loads: 0 }
+  const context: SaveContext = { api, errorText, repo: '/repo', isGlobal: () => false, editor, hookOf, hookPatch, notes: [], loads: 0 }
   context.say = (t: string) => context.notes.push(t)
   context.load = async () => { context.loads++ }
   runFunctions(pane, ['saveHook'], context)
@@ -91,7 +91,7 @@ test('saving adds a new hook, sends only changed fields, and keeps the form on a
   assert.equal(failing.loads, 0)
 })
 
-// The pane state that the remove handler reads and writes.
+// The list state that the remove handler reads and writes.
 interface RemoveContext {
   repo: string
   hooks: Pick<Hook, 'name'>[] | null
@@ -101,7 +101,7 @@ interface RemoveContext {
 }
 const removeNames = ['load', 'loadRuns', 'loadLog', 'remove', 'say']
 function removeContext(api: Record<string, unknown>, fields: Pick<RemoveContext, 'repo' | 'hooks' | 'editor' | 'removing'>): RemoveContext {
-  const context: RemoveContext = { api, errorText, listedHooks, isGlobal: () => false, runs: {}, logs: {}, open: '', openRun: '', error: '', note: '', newestFirst: (x: unknown) => x, setTimeout, ...fields }
+  const context: RemoveContext = { api, errorText, isGlobal: () => false, runs: {}, logs: {}, open: '', openRun: '', error: '', note: '', newestFirst: (x: unknown) => x, setTimeout, ...fields }
   runFunctions(pane, removeNames, context)
   return context
 }
