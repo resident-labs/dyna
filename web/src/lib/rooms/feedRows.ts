@@ -2,7 +2,7 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload, HookEvent } from './events.gen.ts'
-import { hookEvent, issueEvent, mergeEvent, prEvent, reviewEvent, shellEvent } from './eventPayloads.ts'
+import { hookEvent, issueEvent, mergeEvent, prEvent, shellEvent } from './eventPayloads.ts'
 import { eventSpecs } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
@@ -151,22 +151,11 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
 function foldKey(post: FeedInput): string {
   const hook = hookEvent(post)
   if (hook) return hookRowKey(hook)
-  // One result card per PR head: a new head starts a new card.
-  const review = reviewEvent(post)
-  if (review) return `review:${review.changeId}:${review.head}`
-  const pr = prEvent(post)
-  if (pr) return pr.type === 'held-comment' ? '' : `pr:${pr.changeId || pr.url || ''}`
   // One card per issue: filed, changed and closed fold together. A filing has
   // no issue ID yet, so it folds on its own post ID, which is the issue's ID.
   const issue = issueEvent(post)
   // A note carries its own evidence, so each note keeps its own card.
   if (issue) return issue.type === 'noted' ? '' : `issue:${issue.issueId || post.id}`
-  // TODO: legacy/shim remove later — a PR post stored before the typed events
-  // names its change in text only; remove when that history ages out.
-  if (post.kind === 'pr' && post.notice?.kind !== 'held-comment') {
-    const url = parsePRPost(post.text, post.notice).url
-    if (url) return `pr:${url}`
-  }
   return ''
 }
 
