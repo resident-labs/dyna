@@ -56,6 +56,7 @@ export function newestFirst<R extends Pick<HookRun, 'startedAt'>>(runs: R[] | nu
 export function runTone(result: string): 'ok' | 'bad' | 'idle' {
   if (result === 'pass') return 'ok'
   if (result === 'fail' || result === 'error') return 'bad'
+  // Pending, installing and cancelled runs are plain facts: muted, not colored.
   return 'idle'
 }
 
