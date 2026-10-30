@@ -166,15 +166,30 @@ while [ "$#" -ge 3 ]; do
 done
 `
 
-// StopScript runs on the node. It takes the check's folder and its unit
-// name, asks the check to stop, and kills what is left. Its answer comes only
-// after the log writer's session has ended: the writer runs outside the
-// unit's reach and can still be draining the output the unit buffered, so a
-// stop that skipped it would let the next poll see a final log that is not.
+// ContainerStopFunction defines dyna_stop_container for a node script. It stops
+// a job's container and removes it, through docker or passwordless sudo docker.
+// It succeeds only when docker no longer lists the container. The timeout
+// client kills only the docker run client, so the container needs this stop.
+const ContainerStopFunction = `dyna_stop_container() {
+  local -a docker=(docker)
+  if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi
+  "${docker[@]}" stop -t 10 "$1" >/dev/null 2>&1 || true
+  "${docker[@]}" rm -f "$1" >/dev/null 2>&1 || true
+  if "${docker[@]}" container inspect "$1" >/dev/null 2>&1; then return 1; fi
+}
+`
+
+// StopScript runs on the node. It takes the check's folder, its unit name and
+// its container name when it runs one. It stops the container, asks the check
+// to stop, and kills what is left. Its answer comes only after the log
+// writer's session has ended: the writer runs outside the unit's reach and can
+// still be draining the output the unit buffered, so a stop that skipped it
+// would let the next poll see a final log that is not.
 // A check that recorded its own exit, with the user manager confirming its
 // unit down, is left alone: the wrapper already waited for the writer, and
 // the forced calls would only restate what the manager already answered.
-const StopScript = UnitStoppedFunction + `d=$1; unit=$2
+const StopScript = ContainerStopFunction + UnitStoppedFunction + `d=$1; unit=$2; container=${3:-}
+if [ -n "$container" ]; then dyna_stop_container "$container" || { echo "container $container is still present" >&2; exit 1; }; fi
 if [ -s "$d/pid" ]; then
   pid=$(cat "$d/pid")
   kill -TERM -- "-$pid" 2>/dev/null || true
@@ -232,6 +247,8 @@ type RunSpec struct {
 	Dir string
 	// Unit is the name of the job's systemd unit.
 	Unit string
+	// Container is the name of the job's Docker container, empty without an image.
+	Container string
 	// Script is the job's script.
 	Script string
 	// Limits bound the unit. A job that bounds its own command passes nil.
@@ -374,7 +391,7 @@ func (x Executor) StopDetached(ctx context.Context, spec RunSpec) error {
 	defer cancel()
 	return x.Retry(stop, CallTimeout, func(ctx context.Context) error {
 		var stderr TailBuffer
-		if err := x.NodeExec(ctx, nil, io.Discard, &stderr, StopScript, spec.Dir, spec.Unit); err != nil {
+		if err := x.NodeExec(ctx, nil, io.Discard, &stderr, StopScript, spec.Dir, spec.Unit, spec.Container); err != nil {
 			return fmt.Errorf("%w: %s", err, stderr.String())
 		}
 		return nil
