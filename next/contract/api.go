@@ -21,14 +21,16 @@ const (
 type ErrorCode string
 
 const (
-	ErrInvalid     ErrorCode = "invalid"
-	ErrNotFound    ErrorCode = "not_found"
-	ErrForbidden   ErrorCode = "forbidden"
-	ErrConflict    ErrorCode = "conflict"
-	ErrStale       ErrorCode = "stale"
-	ErrUnavailable ErrorCode = "unavailable"
-	ErrStoreFromV1 ErrorCode = "store_from_v1"
-	ErrStoreTooOld ErrorCode = "store_too_old"
+	ErrInvalid       ErrorCode = "invalid"
+	ErrNotFound      ErrorCode = "not_found"
+	ErrForbidden     ErrorCode = "forbidden"
+	ErrConflict      ErrorCode = "conflict"
+	ErrHasChildren   ErrorCode = "has_children"
+	ErrParentClosing ErrorCode = "parent_closing"
+	ErrStale         ErrorCode = "stale"
+	ErrUnavailable   ErrorCode = "unavailable"
+	ErrStoreFromV1   ErrorCode = "store_from_v1"
+	ErrStoreTooOld   ErrorCode = "store_too_old"
 )
 
 type Error struct {
