@@ -20,6 +20,7 @@
 
   interface Props {
     service: RegistryService
+    flushRows?: boolean
     host: ControlHost
     settings: SettingItem[] | null
     changes: ChangeRow[]
@@ -32,7 +33,7 @@
     // onsetting saves one settings key and reads the settings again.
     onsetting: (key: string, value: string) => Promise<void>
   }
-  let { service, host, settings, changes, canOpen, onopen, onpr, onchanged, onsetting }: Props = $props()
+  let { service, flushRows = false, host, settings, changes, canOpen, onopen, onpr, onchanged, onsetting }: Props = $props()
 
   // A built-in pass keeps its runs on the machine under its own name; a
   // service run by a repository hook shows that hook's own list instead.
@@ -95,7 +96,7 @@
   }
 </script>
 
-<div class="detail">
+<div class="detail" class:flush-rows={flushRows}>
   {#if service.schedule || items.length}
     <Card flush divided>
       {#if service.schedule}
@@ -125,19 +126,19 @@
   {#if error}<p class="err" role="alert">{error}</p>{/if}
   {#if service.id === 'local-ci'}
     <CIHealth roomId={host.room} {changes} {onpr} />
-  {:else if entries === null || entries.length || hook}
+  {:else if entries === null || entries.length || hook || service.id === 'merge-queue'}
     <h4 class="micro-label">Recent runs</h4>
     {#if entries === null}
       <p class="hint">Reading…</p>
     {:else}
-      <EntryList {entries} empty="No runs yet." onOpen={onopen} onRun={toggleLog} />
+      <EntryList {entries} empty={service.id === 'merge-queue' ? 'No merges yet.' : 'No runs yet.'} onOpen={onopen} onRun={toggleLog} />
       {#if shown}<pre class="log mono">{logs[shown] ?? 'Reading the log…'}</pre>{/if}
     {/if}
   {/if}
 </div>
 
 <style>
-  .detail :global(.setting) { padding-inline: 0; }
+  .flush-rows :global(.setting) { padding-inline: 0; }
   .detail { display: flex; flex-direction: column; gap: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border-soft); }
   .micro-label { margin: var(--s1) 0 0; }
   .acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
