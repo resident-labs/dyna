@@ -43,7 +43,6 @@ function fakeRoute(url, method, outcomes) {
     request: () => ({ url: () => url, method: () => method }),
     abort: reason => outcomes.push('abort ' + reason),
     continue: () => outcomes.push('continue'),
-    fulfill: ({ status }) => outcomes.push('fulfill ' + status),
   };
 }
 
@@ -70,7 +69,7 @@ test('runQA launches headless Chromium and adds the device cookie without loggin
   assert.equal(fake.seen.closed, true);
 });
 
-test('runQA lets only read requests reach Origin', async () => {
+test('runQA lets Origin requests through, including its API, and aborts the rest', async () => {
   const fake = fakeChromium();
   await runQA(parseConfig(config()), fake.chromium, () => {});
   const [restrict] = fake.seen.handlers;
@@ -78,7 +77,7 @@ test('runQA lets only read requests reach Origin', async () => {
   await restrict(fakeRoute('https://example.com/app.js', 'GET', outcomes));
   await restrict(fakeRoute(origin + '/api/devices', 'POST', outcomes));
   await restrict(fakeRoute(origin + '/app.js', 'GET', outcomes));
-  assert.deepEqual(outcomes, ['abort blockedbyclient', 'fulfill 403', 'continue']);
+  assert.deepEqual(outcomes, ['abort blockedbyclient', 'continue', 'continue']);
 });
 
 test('runQA closes the browser when a goto leaves Origin', async () => {
