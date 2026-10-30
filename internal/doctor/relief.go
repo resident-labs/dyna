@@ -1,4 +1,4 @@
-package admission
+package doctor
 
 import (
 	"context"
@@ -45,7 +45,7 @@ type Relief[H any] struct {
 func (r Relief[H]) Run(ctx context.Context) int {
 	idle, err := r.List(ctx)
 	if err != nil {
-		log.Printf("admission: list idle agent processes: %v", err)
+		log.Printf("memory relief: list idle agent processes: %v", err)
 	}
 	slices.SortFunc(idle, func(a, b Idle[H]) int { return int(b.Idle - a.Idle) })
 	stopped := 0
@@ -58,7 +58,7 @@ func (r Relief[H]) Run(ctx context.Context) int {
 		}
 		done, err := r.Unload(ctx, p, MinUnloadIdle)
 		if err != nil {
-			log.Printf("admission: unload idle agent process of %s: %v", p.Session, err)
+			log.Printf("memory relief: unload idle agent process of %s: %v", p.Session, err)
 			continue
 		}
 		if done {
@@ -66,4 +66,23 @@ func (r Relief[H]) Run(ctx context.Context) int {
 		}
 	}
 	return stopped
+}
+
+// MemoryShort reports memory pressure or available memory below the reserve.
+func MemoryShort(r Readings) bool {
+	return r.PressureMem >= 10 || r.MemTotal > 0 && r.MemAvail < max(r.MemTotal/10, 2<<30)
+}
+
+// Check reads memory and stops idle processes only under pressure.
+func (r Relief[H]) Check(ctx context.Context, source Source) error {
+	reading, err := source.Read(ctx)
+	if err != nil {
+		return err
+	}
+	if MemoryShort(reading) {
+		if n := r.Run(ctx); n > 0 {
+			log.Printf("memory relief: stopped %d idle agent processes", n)
+		}
+	}
+	return nil
 }

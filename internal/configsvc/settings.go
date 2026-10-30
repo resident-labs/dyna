@@ -11,14 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"dyna-agent/internal/admission"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/browserconfig"
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/settings"
-	"dyna-agent/internal/store"
 )
 
 var help = map[string]string{
@@ -32,7 +30,6 @@ var help = map[string]string{
 	settings.KeyComputersReminder:      "Minutes between reminders to a session whose computer is open: look at the screen with dyna computer shot, and stop the computer when done. A computer with keep on, one with a viewer, and a root computer get none. 0 turns reminders off. Applies to the next reminder.",
 	settings.KeyComputersRenderNode:    "GPU that Dyna computers render on: auto, or a /dev/dri/renderD* path. auto keeps computers off the GPU that drives the owner's display when another GPU exists. Applies to the next computer start; a running computer keeps its GPU until it stops.",
 	settings.KeySessionCheckInInterval: "Parent check-in interval (default 15m). Zero disables check-ins.",
-	settings.KeyAdmissionMode:          "Watch the machine and record when a limit on concurrent agent turns would have held new turns (observe, the default), or turn the watcher off. Nothing is ever held. While memory is short, the watcher also stops up to 3 agent processes per sample that have sat idle for 5 minutes or more, longest first, and never one with a turn running, queued or waiting for input; the session resumes in a new process on its next turn. The engine samples about every 45 seconds. Applies to the next sample.",
 	settings.KeyDoctorCondition:        "When the doctor hook examines a machine, such as \"load>2/core for 5m or memory>85%\". Empty uses the default. Applies to the next doctor run.",
 	settings.KeyLibraryEnabled:         "JSON list of main checkout paths whose librarian runs. Use dyna library enable and disable, which also add and remove the librarian hooks.",
 	settings.KeyLibraryProfile:         "Default librarian profile when a room has no pin. Auto ranks enabled service profiles. A room pin is dyna services profile library.",
@@ -93,7 +90,6 @@ func Items() ([]Item, error) {
 		{Key: settings.KeyComputersReminder, Value: v.ComputersReminderMinutes, Source: v.Source(settings.KeyComputersReminder), LiveVsRestart: settings.LiveNextOperation, Kind: "int"},
 		{Key: settings.KeyComputersRenderNode, Value: v.ComputersRenderNode, Source: v.Source(settings.KeyComputersRenderNode), LiveVsRestart: settings.LiveNextOpen, Kind: "string"},
 		{Key: settings.KeySessionCheckInInterval, Value: v.SessionCheckInInterval.String(), Source: v.Source(settings.KeySessionCheckInInterval), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
-		{Key: settings.KeyAdmissionMode, Value: v.AdmissionMode, Source: v.Source(settings.KeyAdmissionMode), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: []string{string(settings.AdmissionOff), string(settings.AdmissionObserve)}, Display: admissionSummary(v)},
 		{Key: settings.KeyDoctorCondition, Value: v.DoctorCondition, Source: v.Source(settings.KeyDoctorCondition), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyLibraryEnabled, Value: v.LibraryEnabled, Source: v.Source(settings.KeyLibraryEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyLibraryProfile, Value: v.LibraryProfile, Source: v.Source(settings.KeyLibraryProfile), LiveVsRestart: settings.LiveNextOperation, Kind: "select", Options: options, OptionLabels: labels},
@@ -212,22 +208,4 @@ func browserItems(v settings.Values, copyMine bool, profiles []browserconfig.Pro
 		mode, owner,
 		item(settings.KeyBrowserSaveBack, v.BrowserSaveBack, "bool", "Save login state to the shared Dyna profile when a computer stops. The last computer to save wins."),
 	}
-}
-
-// admissionSummary tells the owner what the turn limit did in the last day, so
-// the choice to enforce rests on a count and not a guess.
-func admissionSummary(v settings.Values) string {
-	mode := string(v.AdmissionMode)
-	if v.AdmissionMode == settings.AdmissionOff {
-		return mode
-	}
-	sum, err := admission.Observed{DataDir: store.DataDir()}.Summarize(time.Now().Add(-24 * time.Hour))
-	if err != nil {
-		return mode
-	}
-	text := fmt.Sprintf("%s · a turn limit would have held new turns for about %d min in the last 24 h", mode, int(sum.Held().Minutes()))
-	if sum.MostOver > 0 {
-		text += fmt.Sprintf(", up to %d over the limit", sum.MostOver)
-	}
-	return text
 }
