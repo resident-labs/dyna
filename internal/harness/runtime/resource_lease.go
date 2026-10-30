@@ -82,6 +82,16 @@ func (l *ResourceLease) Bind(reference json.RawMessage) error {
 	l.record.Reference = append(json.RawMessage(nil), reference...)
 	return store.WriteJSON(l.path+".json", l.record, 0600)
 }
+// SetData replaces the lease data that removal and other scans read.
+func (l *ResourceLease) SetData(data json.RawMessage) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed || !json.Valid(data) {
+		return errors.New("Native process protection could not be bound.")
+	}
+	l.record.Data = append(json.RawMessage(nil), data...)
+	return store.WriteJSON(l.path+".json", l.record, 0600)
+}
 func (l *ResourceLease) Close() error {
 	if l == nil {
 		return nil
