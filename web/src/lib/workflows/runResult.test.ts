@@ -6,7 +6,7 @@ import { createResultLoader, createWorkerResults, type LoadedResult, type Worker
 const tick = async () => { await Promise.resolve(); await Promise.resolve() }
 const result = (extra: Partial<RunResultView> = {}): RunResultView => ({ result: '', bytes: 0, ...extra })
 const detailOf = (id: string, resultBytes?: number): Pick<RunDetail, 'run' | 'resultBytes'> => ({
-  run: { id, name: id, status: 'ok', startedAt: '', roomId: 'r', agents: 0, done: 0, failed: 0, working: 0 },
+  run: { id, name: id, status: 'ok', startedAt: '', endedAt: '', roomId: 'r', agents: 0, done: 0, failed: 0, working: 0 },
   resultBytes,
 })
 // rowOf is the open row for one agent, or a failed assertion.

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/nodehistory"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/sysload"
 )
 
@@ -18,7 +20,7 @@ const machineProbeEvery = 5 * time.Minute
 // probe needs no shell sample. A node whose disk starts to block new work
 // alerts root once, through the alerter.
 func probeMachines(ctx context.Context, load *sysload.Sampler, alerter machines.Alerter) (time.Time, error) {
-	prober := machines.Prober{Alerter: alerter}
+	prober := machines.Prober{Alerter: alerter, Record: nodehistory.Recorder(store.DataDir())}
 	if load != nil {
 		prober.Load = load.Load
 	}
