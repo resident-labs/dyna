@@ -58,7 +58,7 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	var ids atomic.Int32
-	f.s = New(st, ctx, nil, func() time.Time { return f.now }, 0, func(prefix string) (string, error) { return fmt.Sprintf("%s%d", prefix, ids.Add(1)), nil })
+	f.s = New(st, ctx, nil, func() time.Time { return f.now }, 24*time.Hour, func(prefix string) (string, error) { return fmt.Sprintf("%s%d", prefix, ids.Add(1)), nil })
 	f.s.Kinds = map[contract.OpKind]Entry{"test.run": {
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return f.class },
 		Card:  func(contract.OpArgs, contract.Principal) contract.Card { return contract.Card{Title: "Run"} },
