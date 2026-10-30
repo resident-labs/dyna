@@ -268,19 +268,23 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
 	}
-	current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
-	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
-	}
-	if err = s.boxes.Remove(ctx, session.Box); err != nil {
-		_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
-		if transitionErr != nil {
-			return contract.SessionCloseResponse{}, failure(transitionErr)
+	if current.State != contract.BoxDeleted {
+		if current.State != contract.BoxClosing {
+			current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+			if err != nil {
+				return contract.SessionCloseResponse{}, failure(err)
+			}
 		}
-		return contract.SessionCloseResponse{}, failure(err)
-	}
-	if _, err = s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+		if err = s.boxes.Remove(ctx, session.Box); err != nil {
+			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
+			if transitionErr != nil {
+				return contract.SessionCloseResponse{}, failure(transitionErr)
+			}
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+		if _, err = s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
+			return contract.SessionCloseResponse{}, failure(err)
+		}
 	}
 	event, err := s.event(session.Room, caller, contract.SessionClosed{Session: session.ID})
 	if err != nil {
