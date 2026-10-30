@@ -542,6 +542,7 @@ func (*heldParentBox) Remove(context.Context, contract.BoxID) error { return nil
 
 func TestPendingChildrenRetryIndependently(t *testing.T) {
 	s, room, root, ctx := setup(t)
+	s.SetRepositories(placementRepos{})
 	adapter := &heldParentBox{started: make(chan BoxSpec), release: make(chan struct{}), children: make(chan BoxSpec, 2), unblock: make(chan struct{})}
 	s.boxes = adapter
 	result := make(chan *contract.Error, 1)
@@ -567,7 +568,7 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		spec := <-adapter.children
 		want, err := box.SliceName([]contract.BoxID{parent.Box, spec.Box})
-		if err != nil || spec.Slice != want || spec.Host != parent.Host {
+		if err != nil || spec.Slice != want || spec.Host != parent.Host || len(spec.Repos) != 1 || spec.Repos[0].Name != "owner/repo" {
 			t.Fatalf("placement: %+v", spec)
 		}
 	}
