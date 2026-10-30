@@ -811,6 +811,8 @@ func TestVerdictsPushesAndMerge(t *testing.T) {
 	if err := e.s.Verdict(ctx, r.Key, r.Reviewer, oldHead, "approve", "stale", 10); err == nil {
 		t.Fatal("stale approval accepted")
 	}
+	// This completed review has ended its turn and can be retired.
+	e.endReviewerTurn(r.Reviewer)
 	e.tick()
 	r = e.record()
 	if r.Verdict != "" || r.Head == oldHead || len(e.launches) != 2 {
@@ -1176,7 +1178,7 @@ func TestCIRerunKeepsUnfinishedReview(t *testing.T) {
 			if got.Round != assigned.Round+1 || got.RoundHead == assigned.RoundHead || got.ReviewerName != assigned.ReviewerName {
 				t.Fatalf("new head did not start a round: %+v", got)
 			}
-			if len(e.sent) != notices || len(e.launches) != launches+1 {
+			if got.Reviewer != assigned.Reviewer || len(e.sent) != notices+1 || e.sent[notices].Target != assigned.Reviewer || len(e.launches) != launches {
 				t.Fatalf("new head assignment: launches=%d notices=%d", len(e.launches), len(e.sent))
 			}
 			if err := e.s.Verdict(context.Background(), r.Key, got.Reviewer, got.Head, "approve", "Ready", 0); err != nil {

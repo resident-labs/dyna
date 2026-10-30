@@ -19,6 +19,14 @@ func staleNotice(st State, r Record, n Notice) string {
 		}
 		return ""
 	}
+	if n.Kind == "review-assignment" {
+		_, rest, hasHead := strings.Cut(n.Text, "\nHead: ")
+		head, _, _ := strings.Cut(rest, "\n\n")
+		if !r.Watching || r.State != state.PROpen || r.IsDraft || r.Reviewer != n.Target || !hasHead || head != r.Head || r.RoundHead != head {
+			return "assignment-ended"
+		}
+		return ""
+	}
 	// A required-review re-assignment is live only while its head is current,
 	// the change is open and the requirement still waits for this reviewer.
 	if n.Kind == "required-review" {
