@@ -174,6 +174,7 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	}
 	duration := time.Since(start)
 	err = errors.Join(err, run.Finish(status, value, err))
+	defer run.FlushActivity()
 	finished := runstore.IsFinishedStatus(run.Meta.Status) && !run.Meta.EndedAt.IsZero()
 	if finished {
 		status = run.Meta.Status

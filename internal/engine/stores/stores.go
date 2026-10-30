@@ -8,6 +8,7 @@ import (
 	"dyna-agent/internal/account/attempts"
 	"dyna-agent/internal/account/reposcope"
 	accountstore "dyna-agent/internal/account/store"
+	"dyna-agent/internal/activity"
 	"dyna-agent/internal/admission"
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/callerid"
@@ -63,6 +64,7 @@ var migrations = []func(dataDir string) error{
 	// First: a moved store's startup import reads its stamps through
 	// state.ImportIfForeign.
 	state.MigrateMirrors,
+	activity.Migrate,
 	reposcope.Migrate,
 	accountstore.Migrate,
 	devicegrant.Migrate,
