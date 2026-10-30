@@ -127,6 +127,14 @@ export interface TemplateInfo {
   path: string
 }
 
+// StartNamedRunRequest is roomsvc.StartNamedRunRequest.
+export interface StartNamedRunRequest {
+  room: string
+  name: string
+  input: unknown
+  resultTo?: string
+}
+
 // StartedRun is roomsvc.StartedRun.
 export interface StartedRun {
   id: string
