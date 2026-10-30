@@ -52,7 +52,8 @@ type MachineAPI struct {
 	SessionName func(sessionID string) string
 	// Prober reads a machine when the owner asks for a probe. A nil Prober
 	// reads it through this registry with no load sampler of this engine.
-	Prober *machines.Prober
+	Prober      *machines.Prober
+	RecordProbe func(machines.Machine, machines.ProbeResult) error
 	// RoomName names a room from its ID, so the page says which room allows
 	// host checks and not only its ID. A nil RoomName shows the ID.
 	RoomName func(roomID string) string
@@ -317,7 +318,7 @@ func (a MachineAPI) ProbeNode(ctx context.Context, id string) (MachineDetail, er
 	if err != nil {
 		return MachineDetail{}, err
 	}
-	prober := machines.Prober{Store: a.Store, Alerter: a.Alerter}
+	prober := machines.Prober{Store: a.Store, Alerter: a.Alerter, Record: a.RecordProbe}
 	if a.Prober != nil {
 		prober = *a.Prober
 	}

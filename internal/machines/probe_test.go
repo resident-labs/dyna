@@ -105,7 +105,9 @@ func TestFailedProbeKeepsCapabilities(t *testing.T) {
 		}
 	}
 
-	stored, err := Prober{Store: s, Command: prints(probeText)}.ProbeAndSave(ctx, hermes)
+	var recorded []ProbeResult
+	record := func(_ Machine, result ProbeResult) error { recorded = append(recorded, result); return nil }
+	stored, err := Prober{Store: s, Command: prints(probeText), Record: record}.ProbeAndSave(ctx, hermes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,10 +124,13 @@ func TestFailedProbeKeepsCapabilities(t *testing.T) {
 
 	// A probe that cannot reach the machine keeps what the last good probe
 	// read, so the owner still sees what the machine has.
-	down := Prober{Store: s, Command: fails(errors.New("ssh: connect to host pip@hermeslab port 22: Connection refused"))}
+	down := Prober{Store: s, Record: record, Command: fails(errors.New("ssh: connect to host pip@hermeslab port 22: Connection refused"))}
 	stored, err = down.ProbeAndSave(ctx, stored)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(recorded) != 1 || recorded[0].Load.CPUPercent == nil || *recorded[0].Load.CPUPercent != 30 {
+		t.Fatalf("recorded probes = %+v, want only the successful reading", recorded)
 	}
 	if stored.Status() != HealthOffline {
 		t.Fatalf("status after a failed probe = %s", stored.Status())

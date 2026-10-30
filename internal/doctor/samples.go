@@ -35,6 +35,7 @@ type Sample struct {
 	Group       sysload.Group
 	Load        float64
 	MemoryTotal uint64
+	CPUPercent  *float64
 	Kind        GroupKind
 	SessionID   string
 }
@@ -63,8 +64,13 @@ func (s Samples) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, database.Migrate(db, "doctor_samples.version", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), samplesSchema)
+	return db, database.Migrate(db, "doctor_samples.version", 2, func(conn *sql.Conn, from int) error {
+		if from < 1 {
+			if _, err := conn.ExecContext(context.Background(), samplesSchema); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(context.Background(), `ALTER TABLE doctor_samples ADD COLUMN cpu_percent REAL`)
 		return err
 	})
 }
@@ -83,8 +89,12 @@ func (s Samples) Record(machine string, l sysload.Load) error {
 			if g.Name == "machine" && l.CPUs > 0 {
 				load, total = l.Load[0]/float64(l.CPUs), l.Memory.Total
 			}
-			if _, err := conn.ExecContext(ctx, `INSERT OR REPLACE INTO doctor_samples VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-				machine, at, g.Name, g.Cores, g.Memory, g.IO, g.Pressure.CPU, g.Pressure.Memory, g.Pressure.IO, load, total); err != nil {
+			var cpu *float64
+			if g.Name == "machine" {
+				cpu = l.CPUPercent
+			}
+			if _, err := conn.ExecContext(ctx, `INSERT OR REPLACE INTO doctor_samples (machine, at, grp, cores, memory, io, psi_cpu, psi_memory, psi_io, load, memory_total, cpu_percent) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+				machine, at, g.Name, g.Cores, g.Memory, g.IO, g.Pressure.CPU, g.Pressure.Memory, g.Pressure.IO, load, total, cpu); err != nil {
 				return err
 			}
 		}
@@ -110,7 +120,7 @@ func (s Samples) Recorder(logf func(format string, args ...any)) func(sysload.Lo
 	}
 }
 
-const sampleColumns = `at, grp, cores, memory, io, psi_cpu, psi_memory, psi_io, COALESCE(load,0), COALESCE(memory_total,0)`
+const sampleColumns = `at, grp, cores, memory, io, psi_cpu, psi_memory, psi_io, COALESCE(load,0), COALESCE(memory_total,0), cpu_percent`
 
 // Window returns one group's samples of machine from since on, oldest first.
 func (s Samples) Window(machine, group string, since time.Time) ([]Sample, error) {
@@ -138,7 +148,7 @@ func (s Samples) query(q string, args ...any) ([]Sample, error) {
 		var at int64
 		var x Sample
 		g := &x.Group
-		if err := rows.Scan(&at, &g.Name, &g.Cores, &g.Memory, &g.IO, &g.Pressure.CPU, &g.Pressure.Memory, &g.Pressure.IO, &x.Load, &x.MemoryTotal); err != nil {
+		if err := rows.Scan(&at, &g.Name, &g.Cores, &g.Memory, &g.IO, &g.Pressure.CPU, &g.Pressure.Memory, &g.Pressure.IO, &x.Load, &x.MemoryTotal, &x.CPUPercent); err != nil {
 			return nil, err
 		}
 		x.At = time.Unix(at, 0).UTC()
