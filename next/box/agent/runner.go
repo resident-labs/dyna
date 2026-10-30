@@ -64,9 +64,12 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		return fmt.Errorf("turn has no inputs")
 	}
 	r.mu.Lock()
-	active := r.active
+	active, settling := r.active, r.settling
 	r.mu.Unlock()
 	if active != "" && active != start.Turn {
+		if settling {
+			return errTurnSettling
+		}
 		return fmt.Errorf("turn already active")
 	}
 	var pending []contract.TurnInput
