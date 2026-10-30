@@ -4,11 +4,13 @@ import (
 	"context"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // RoomRepositories is implemented by the room store.
 type RoomRepositories interface {
 	RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error)
+	Session(context.Context, contract.SessionID) (store.Session, error)
 }
 
 // Hosts supplies the cache connection and its host data folder.
@@ -26,25 +28,21 @@ func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref stri
 	return r.Mirror.Ref(ctx, repo, ref)
 }
 
-func (r *Repositories) Get(ctx context.Context, room contract.RoomID, session contract.SessionID, host contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
-	repos, err := r.Rooms.RoomRepos(ctx, room)
+func (r *Repositories) Get(ctx context.Context, session contract.SessionID, host contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
+	selected, err := r.Rooms.Session(ctx, session)
 	if err != nil {
 		return nil, err
 	}
-	if len(repos) == 0 {
+	if selected.Repo == "" {
 		return nil, nil
 	}
 	cache, hostData, err := r.Hosts.CacheHost(ctx, host)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]contract.BoxRepo, 0, len(repos))
-	for _, repo := range repos {
-		item, err := r.Mirror.Prepare(ctx, cache, hostData, repo.Repo, session, fetch)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
+	item, err := r.Mirror.Prepare(ctx, cache, hostData, selected.Repo, session, fetch)
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+	return []contract.BoxRepo{item}, nil
 }
