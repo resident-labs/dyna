@@ -9,14 +9,12 @@ import (
 	"slices"
 
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/repoid"
 )
 
 // Enable lists the repository in library.enabled, records the room that
-// holds its librarian, and installs the librarian hooks that run exe.
-// It is idempotent; a second call refreshes the hooks and the room.
+// holds its librarian. It is idempotent; a second call refreshes the room.
 func (s Service) Enable(ctx context.Context, actor authority.Actor, repoDir, roomID, exe string) (repoid.Repo, error) {
 	if err := authority.Check("library enable", actor, nil); err != nil {
 		return repoid.Repo{}, err
@@ -68,28 +66,11 @@ func (s Service) Enable(ctx context.Context, actor authority.Actor, repoDir, roo
 	}); err != nil {
 		return r, err
 	}
-	have, err := s.installed(ctx, r.Main)
-	if err != nil {
-		return r, err
-	}
-	for _, hook := range hooks.LibrarianHooks(exe, r.Main) {
-		if old, ok := have[hook.Name]; ok {
-			if old.Command == hook.Command && old.Event == hook.Event && old.EveryMinutes == hook.EveryMinutes {
-				continue
-			}
-			if err := s.RemoveHook(ctx, r.Main, hook.Name); err != nil {
-				return r, err
-			}
-		}
-		if err := s.AddHook(ctx, r.Main, hook); err != nil {
-			return r, err
-		}
-	}
 	return r, nil
 }
 
-// Disable removes the repository from library.enabled, removes the hooks
-// and closes the librarian session. The map stays.
+// Disable removes the repository from library.enabled and closes the librarian
+// session. The map stays.
 func (s Service) Disable(ctx context.Context, actor authority.Actor, repoDir string) (repoid.Repo, error) {
 	if err := authority.Check("library disable", actor, nil); err != nil {
 		return repoid.Repo{}, err
@@ -108,17 +89,6 @@ func (s Service) Disable(ctx context.Context, actor authority.Actor, repoDir str
 			return r, err
 		}
 	}
-	have, err := s.installed(ctx, r.Main)
-	if err != nil {
-		return r, err
-	}
-	for _, hook := range hooks.LibrarianHooks("", r.Main) {
-		if _, ok := have[hook.Name]; ok {
-			if err := s.RemoveHook(ctx, r.Main, hook.Name); err != nil {
-				return r, err
-			}
-		}
-	}
 	st, err := librarianstate.Store{DataDir: s.DataDir}.Get(r.ID)
 	if errors.Is(err, os.ErrNotExist) {
 		return r, nil
@@ -135,20 +105,6 @@ func (s Service) Disable(ctx context.Context, actor authority.Actor, repoDir str
 	}
 	_, err = librarianstate.Store{DataDir: s.DataDir}.Update(r.ID, false, func(st *librarianstate.State) error { st.Session, st.SmellSession = "", ""; return nil })
 	return r, err
-}
-
-// installed returns the repository's hooks by name, so enable and disable
-// change only the librarian hooks that differ.
-func (s Service) installed(ctx context.Context, main string) (map[string]hooks.Hook, error) {
-	list, err := s.ListHooks(ctx, main)
-	if err != nil {
-		return nil, err
-	}
-	have := make(map[string]hooks.Hook, len(list))
-	for _, hk := range list {
-		have[hk.Name] = hk
-	}
-	return have, nil
 }
 
 // Enabled is the repository and room used by a successful enable call.

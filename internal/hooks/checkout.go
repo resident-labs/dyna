@@ -17,15 +17,20 @@ import (
 func (s Service) TickRepositories(ctx context.Context) ([]string, error) {
 	repos, err := s.Repositories(ctx)
 	checkouts, checkoutErr := s.roomCheckouts(ctx)
+	var extra []string
+	var extraErr error
+	if s.ExtraRepositories != nil {
+		extra, extraErr = s.ExtraRepositories(ctx)
+	}
 	seen := map[string]bool{}
 	var out []string
-	for _, repo := range append(repos, checkouts...) {
+	for _, repo := range append(append(repos, checkouts...), extra...) {
 		if !seen[repo] {
 			seen[repo] = true
 			out = append(out, repo)
 		}
 	}
-	return out, errors.Join(err, checkoutErr)
+	return out, errors.Join(err, checkoutErr, extraErr)
 }
 
 // roomCheckouts lists the repository and extra repositories of each room, once.
