@@ -54,6 +54,7 @@ func loadPi(executable string) ([]byte, error) {
 
 type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
+	ApprovalsExpiry                            time.Duration
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -89,6 +90,9 @@ func Run(ctx context.Context, cfg Config) error {
 	defer proxy.Shutdown(context.Background())
 	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi}
 	service := engine.New(st, boxes, profiles, time.Now)
+	if err := service.ConfigureOperations(ctx, nil, cfg.ApprovalsExpiry); err != nil {
+		return err
+	}
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	boxes.Mirror = mirror
@@ -135,6 +139,9 @@ func Run(ctx context.Context, cfg Config) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if err := service.ExpireOperations(ctx); err != nil {
+				return fmt.Errorf("operation expiry sweep: %w", err)
+			}
 			if err := service.FailStaleStarts(ctx); err != nil {
 				return fmt.Errorf("hello timeout sweep: %w", err)
 			}
