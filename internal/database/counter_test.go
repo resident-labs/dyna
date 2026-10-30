@@ -24,14 +24,14 @@ func TestCounterCommitsAndRollsBackWithWrite(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	const c Counter = "test"
+	c := NewCounter("test")
 	stop := errors.New("rollback")
 	write := func(fail bool) error {
 		return Immediate(ctx, db, func(conn *sql.Conn) error {
 			if _, err := conn.ExecContext(ctx, "INSERT INTO entries VALUES(1)"); err != nil {
 				return err
 			}
-			if _, err := c.Bump(ctx, conn); err != nil {
+			if err := c.Bump(ctx, conn); err != nil {
 				return err
 			}
 			if fail {
