@@ -11,13 +11,15 @@ import (
 )
 
 type fakeClient struct {
-	host   contract.HostAddRequest
-	room   contract.RoomCreateRequest
-	start  contract.SessionStartRequest
-	close  contract.SessionCloseRequest
-	post   contract.PostRequest
-	events []contract.Event
-	after  int64
+	host     contract.HostAddRequest
+	room     contract.RoomCreateRequest
+	repoAdd  contract.RoomRepoAddRequest
+	repoList contract.RoomReposRequest
+	start    contract.SessionStartRequest
+	close    contract.SessionCloseRequest
+	post     contract.PostRequest
+	events   []contract.Event
+	after    int64
 }
 
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
@@ -27,6 +29,14 @@ func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (cont
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q
 	return contract.RoomCreateResponse{Room: "room_1"}, nil
+}
+func (f *fakeClient) RoomRepoAdd(_ context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
+	f.repoAdd = q
+	return contract.RoomRepoAddResponse{}, nil
+}
+func (f *fakeClient) RoomRepos(_ context.Context, q contract.RoomReposRequest) (contract.RoomReposResponse, error) {
+	f.repoList = q
+	return contract.RoomReposResponse{Repos: []contract.RoomRepo{{Repo: "owner/a", Default: true}, {Repo: "owner/b"}}}, nil
 }
 func (f *fakeClient) SessionStart(_ context.Context, q contract.SessionStartRequest) (contract.SessionStartResponse, error) {
 	f.start = q
@@ -73,6 +83,17 @@ func TestRoomCreateMapsName(t *testing.T) {
 	runCLI(t, f, "room", "create", "work")
 	if f.room.Name != "work" {
 		t.Fatalf("%+v", f.room)
+	}
+}
+func TestRoomRepos(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--default")
+	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default {
+		t.Fatalf("%+v", f.repoAdd)
+	}
+	out := runCLI(t, f, "room", "repo", "list", "r")
+	if f.repoList.Room != "r" || out != "owner/a (default)\nowner/b\n" {
+		t.Fatalf("%+v: %q", f.repoList, out)
 	}
 }
 func TestSessionStartMapsFlags(t *testing.T) {
