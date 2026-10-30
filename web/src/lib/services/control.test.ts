@@ -19,7 +19,7 @@ test('each switch writes through the call that owns it, and the librarian has no
   assert.deepEqual(calls, [
     'review room_1 false',
     'merge-paused room_1 true',
-    'hook-edit /repo self-update {"disabled":true}',
+    'service-edit updates {"disabled":true}',
     'service-edit doctor {"disabled":true}',
   ])
   assert.equal(switchWrite(api, host, service('library')), null)
