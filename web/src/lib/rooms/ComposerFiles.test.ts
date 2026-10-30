@@ -9,6 +9,7 @@ const code = await bundle({ component: '../rooms/Composer',
   format: `export const short = x => x; export const roomLabel = r => r.name; export const ago = () => ''; export const markdown = x => x; export const stamp = () => '';`,
   api: `export const api = {
     preview: async () => ({mentions: [], wakes: []}),
+    commands: async () => [],
     listEntries: async (_room, _session, path) => ({entries: path === 'web' ? [{path: 'web/main.ts', name: 'main.ts', kind: 'file'}] : path === 'web docs' ? [{path: 'web docs/odd\`file.txt', name: 'odd\`file.txt', kind: 'file'}] : [{path: 'web', name: 'web', kind: 'dir'}, {path: 'lead', name: 'lead', kind: 'file'}, {path: 'web docs', name: 'web docs', kind: 'dir'}]}),
     settings: async () => [{key: 'content.maxFileBytes', value: 100000}],
     attach: async (_room, name) => ({id: 'attachment-1', name}),
