@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -9,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"dyna-agent/internal/database"
+	_ "dyna-agent/internal/database" // Registers the shared SQLite driver.
 )
 
 // floorRequirement names an eagerly completed import and the last release
@@ -101,18 +100,56 @@ func checkFloor(dir string, floor []floorRequirement) (bool, error) {
 	return false, nil
 }
 
-// markNewFloor records requirements only for a truly new store.
+// initializeFloorHook lets the test interrupt new-store initialization.
+var initializeFloorHook = func() error { return nil }
+
+// markNewFloor builds the complete database beside its final path. Linking the
+// closed file publishes it atomically without replacing a concurrent store.
+// An interruption before the link leaves no dyna.db to misclassify on restart.
 func markNewFloor(dir string, floor []floorRequirement) error {
-	db, err := database.Open(dir)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(dir, ".dyna-floor-*")
 	if err != nil {
 		return err
 	}
-	return database.Immediate(context.Background(), db, func(conn *sql.Conn) error {
-		for _, requirement := range floor {
-			if _, err := conn.ExecContext(context.Background(), "INSERT OR IGNORE INTO meta(key,value) VALUES (?, '1')", requirement.key); err != nil {
-				return err
-			}
+	path := file.Name()
+	defer os.Remove(path)
+	if err := file.Close(); err != nil {
+		return err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	u := url.URL{Scheme: "file", Path: abs}
+	db, err := sql.Open("dyna-sqlite", u.String())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta(key,value) VALUES ('schema.version','1')"); err != nil {
+		return err
+	}
+	if err := initializeFloorHook(); err != nil {
+		return err
+	}
+	for _, requirement := range floor {
+		if _, err := tx.Exec("INSERT INTO meta(key,value) VALUES (?, '1')", requirement.key); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if err := db.Close(); err != nil {
+		return err
+	}
+	return os.Link(path, filepath.Join(dir, "dyna.db"))
 }
