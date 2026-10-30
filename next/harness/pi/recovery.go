@@ -29,6 +29,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 	first := strconv.FormatInt(int64(inputs[0].Delivery), 10)
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 4096), 16<<20)
+	scanner.Split(completeLines)
 	found := false
 	settled := false
 	for scanner.Scan() {
