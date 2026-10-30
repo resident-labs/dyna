@@ -26,45 +26,32 @@ func (s *Service) ReconcileDormancy(ctx context.Context, startup bool) {
 		log.Printf("dormancy: %v", err)
 		return
 	}
-	if startup {
-		for _, b := range boxes {
-			switch b.State {
-			case contract.BoxStopped:
-				s.dormancy.unconfirmed[b.ID] = true
-			case contract.BoxStarting:
-				unlock := s.lockBox(b.Session)
-				current, err := s.store.Box(ctx, b.ID)
-				if err == nil && current.State == contract.BoxStarting {
-					if err = s.boxes.Start(ctx, b.ID); err != nil {
-						if session, e := s.store.Session(ctx, b.Session); e == nil {
-							_, e = s.dormancyTransition(ctx, session.Room, current, contract.BoxStopped, "")
-							if e != nil {
-								log.Printf("dormancy: %v", e)
-							}
-						}
-					}
-				}
-				unlock()
-				if err != nil {
-					log.Printf("dormancy start: %v", err)
-				}
+	for _, b := range boxes {
+		if startup && b.State == contract.BoxStopped {
+			s.dormancy.unconfirmed[b.ID] = true
+		}
+		if startup && b.State == contract.BoxStarting {
+			unlock := s.lockBox(b.Session)
+			current, err := s.store.Box(ctx, b.ID)
+			if err == nil && current.State == contract.BoxStarting {
+				err = s.startBox(ctx, current)
+			}
+			unlock()
+			if err != nil {
+				log.Printf("dormancy start: %v", err)
 			}
 		}
-	}
-	for _, b := range boxes {
 		if !s.dormancy.unconfirmed[b.ID] {
 			continue
 		}
 		unlock := s.lockBox(b.Session)
 		current, err := s.store.Box(ctx, b.ID)
 		if err == nil && current.State == contract.BoxStopped {
-			err = s.boxes.Stop(ctx, b.ID)
+			err = s.stopBox(ctx, b.ID)
 		}
 		unlock()
 		if err != nil {
 			log.Printf("dormancy stop: %v", err)
-		} else {
-			delete(s.dormancy.unconfirmed, b.ID)
 		}
 	}
 	ids, err := s.store.DormancyCandidates(ctx, s.now().Add(-quietPeriod))
@@ -100,10 +87,7 @@ func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID) error
 		}
 		if changed {
 			s.dormancy.unconfirmed[current.ID] = true
-			if err := s.boxes.Stop(ctx, current.ID); err != nil {
-				return err
-			}
-			delete(s.dormancy.unconfirmed, current.ID)
+			return s.stopBox(ctx, current.ID)
 		}
 		return nil
 	}
@@ -130,10 +114,26 @@ func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID) error
 	if err != nil || !changed {
 		return err
 	}
+	current.State = contract.BoxStarting
+	return s.startBox(ctx, current)
+}
+
+func (s *Service) stopBox(ctx context.Context, id contract.BoxID) error {
+	if err := s.boxes.Stop(ctx, id); err != nil {
+		return err
+	}
+	delete(s.dormancy.unconfirmed, id)
+	return nil
+}
+
+func (s *Service) startBox(ctx context.Context, current box.Box) error {
 	if err := s.boxes.Start(ctx, current.ID); err != nil {
-		current.State = contract.BoxStarting
-		if _, rollback := s.dormancyTransition(ctx, session.Room, current, contract.BoxStopped, ""); rollback != nil {
-			return rollback
+		session, e := s.store.Session(ctx, current.Session)
+		if e != nil {
+			return e
+		}
+		if _, e = s.dormancyTransition(ctx, session.Room, current, contract.BoxStopped, ""); e != nil {
+			return e
 		}
 		return err
 	}
