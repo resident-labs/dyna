@@ -102,7 +102,7 @@ func upstreamOrOff(upstream string) string {
 
 // setCmd is `dyna room set`: one room setting, shown without a value.
 func setCmd() *cobra.Command {
-	var placement string
+	var placement, kind string
 	cmd := &cobra.Command{
 		Use:   "set <room> <setting> [<value>]",
 		Short: "Change a room setting",
@@ -125,14 +125,19 @@ func setCmd() *cobra.Command {
 			}
 			if args[1] == "attribution" {
 				if len(args) == 2 {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s\n", upstreamOrOff(rec.Attribution))
+					fmt.Fprintf(cmd.OutOrStdout(), "default (%s): %s\n", rec.AttributionPlacement, upstreamOrOff(rec.Attribution))
+					for _, k := range []room.AttributionKind{room.AttributionPR, room.AttributionIssue, room.AttributionReview, room.AttributionComment} {
+						if a, ok := rec.AttributionKinds[k]; ok {
+							fmt.Fprintf(cmd.OutOrStdout(), "%s (%s): %s\n", k, a.Placement, a.Text)
+						}
+					}
 					return nil
 				}
 				line, err := room.ParseAttribution(args[2])
 				if err != nil {
 					return err
 				}
-				if err := engineClient().Call(cmd.Context(), "SetRoomAttribution", []any{rec.Name, args[2], placement}, nil); err != nil {
+				if err := engineClient().Call(cmd.Context(), "SetRoomAttribution", []any{rec.Name, args[2], placement, kind}, nil); err != nil {
 					return fmt.Errorf("the room was not updated: %w", err)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s attribution: %s\n", rec.Name, upstreamOrOff(line))
@@ -191,7 +196,8 @@ func setCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&placement, "placement", "line", "attribution placement: line or prefix")
+	cmd.Flags().StringVar(&placement, "placement", "line", "attribution placement: line, end or prefix")
+	cmd.Flags().StringVar(&kind, "kind", "", "attribution kind: pr, issue, review or comment")
 	return cmd
 }
 

@@ -75,7 +75,7 @@ func TestApprovalResultOutputAndExitCodes(t *testing.T) {
 func TestWorkerSnapshotUsesFinalAttributedBody(t *testing.T) {
 	records := setupRooms(t, "owner/project")
 	const line = "Opened by an agent."
-	if err := room.DefaultStore().SetAttribution(records[0].ID, line); err != nil {
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "", room.Attribution{Text: line}); err != nil {
 		t.Fatal(err)
 	}
 	body := filepath.Join(records[0].Repo, "body.md")
