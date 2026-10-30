@@ -136,7 +136,7 @@ dyna git pr verdict <pr> changes --body-file review.md --head <assigned-sha>
 
 Include findings, paths, lines, and fixes. `--body-file -` reads stdin.
 Reviews must be at most 12000 bytes. Local verdicts require no GitHub review ID.
-The owner can publish with `dyna git pr comment` or `dyna git pr review`.
+The owner can publish with `dyna git pr comment` or `dyna git pr review`. Agents can pass repeatable `--attach PATH` with `dyna git pr comment --publish` or `gh pr create`; the write goes through approval. For create, give `--head`; use `OWNER:branch` for a fork. Files must be PNG, JPEG, GIF, MP4, or WebM and at most 25 MiB. Dyna removes image metadata, but does not remove video metadata. The room stores the media, and GitHub stores it in a prerelease on the PR head repository. Repository access and release write permission are required.
 Only the owner can select `publishing github`; agent assignments still stay local.
 Keep comments free of HTML markers and agent attribution.
 Comments from the owner, repository owners, members, collaborators, and
