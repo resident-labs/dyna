@@ -37,10 +37,13 @@ func ownStores(dataDir string, readOnly bool, ownerDataDir string) error {
 	if err := checkLiveMigration(dataDir, ownerDataDir); err != nil {
 		return err
 	}
+	database.OwnSchema()
+	if err := stores.CheckFloor(dataDir); err != nil {
+		return err
+	}
 	if err := profile.Migrate(profile.DefaultPath()); err != nil {
 		return err
 	}
-	database.OwnSchema()
 	return MigrateStores(dataDir)
 }
 
