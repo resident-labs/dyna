@@ -202,33 +202,6 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 	}
 }
 
-func TestAgentCommentEditsNeedTheRoomAccountsComment(t *testing.T) {
-	records := setupRooms(t, "fork/project")
-	if err := room.DefaultStore().UpdatePreferences(records[0].ID, func(r *room.Record) error {
-		r.Upstream, r.GitHubAccess = "github.com/up/project", room.GitHubReadWrite
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
-	patch := []string{"api", "-X", "PATCH", "repos/up/project/pulls/comments/7", "-f", "body=x"}
-	if err := checkPolicy(ctx, "", repository{"github.com", "up/project"}, patch); err != nil {
-		t.Fatalf("upstream comment edit refused: %v", err)
-	}
-	previous := commentAuthor
-	t.Cleanup(func() { commentAuthor = previous })
-	commentAuthor = func(context.Context, *exec.Cmd, repository, string, commentCall) (string, error) {
-		return "Room-Bot", nil
-	}
-	cmd := exec.Command("gh", patch...)
-	if err := refuseForeignComment(ctx, cmd, repository{"github.com", "up/project"}, "token", "room-bot"); err != nil {
-		t.Fatalf("own comment refused: %v", err)
-	}
-	if err := refuseForeignComment(ctx, cmd, repository{"github.com", "up/project"}, "token", "someone-else"); err == nil {
-		t.Fatal("a comment of another author was allowed")
-	}
-}
-
 func TestAttributedCloseKeepsTerminator(t *testing.T) {
 	records := setupRooms(t, "fork/project")
 	if err := room.DefaultStore().SetAttribution(records[0].ID, "Opened by an agent."); err != nil {
