@@ -64,3 +64,20 @@ func TestRewriteFileArgsCoversEveryFileBackedArgument(t *testing.T) {
 		})
 	}
 }
+
+func TestMediaApprovalArguments(t *testing.T) {
+	args := []string{"pr", "comment", "7", "--attach", "one.png", "--attach=two.jpg"}
+	paths, err := MediaPaths(args)
+	if err != nil || len(paths) != 2 || paths[0] != "one.png" || paths[1] != "two.jpg" {
+		t.Fatalf("paths = %v, %v", paths, err)
+	}
+	rewritten, err := RewriteFileArgs(args, map[string]string{"one.png": "/tmp/one.png", "two.jpg": "/tmp/two.jpg"})
+	if err != nil || rewritten[4] != "/tmp/one.png" || rewritten[5] != "--attach=/tmp/two.jpg" {
+		t.Fatalf("rewritten = %v, %v", rewritten, err)
+	}
+	for _, bad := range [][]string{{"pr", "comment", "--attach"}, {"pr", "comment", "--attach=--body"}, {"issue", "create", "--attach=x.png"}} {
+		if _, err := MediaPaths(bad); err == nil {
+			t.Fatalf("accepted %v", bad)
+		}
+	}
+}
