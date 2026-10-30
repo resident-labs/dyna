@@ -1,6 +1,6 @@
 <script lang="ts">
   import { refreshHeldComments } from './lib/prs/heldComments.ts'
-  import { createReloadGate, listVisible, reconcileRows } from './lib/ui/reloadGate.ts'
+  import { createReloadGate, listVisible } from './lib/ui/reloadGate.ts'
   import Skeleton from './lib/ui/Skeleton.svelte'
   import { untrack } from 'svelte'
   import { fade } from 'svelte/transition'
@@ -24,7 +24,7 @@
   import { bindSync, syncView } from './lib/app/sync.svelte.ts'
   import { createSettingsPanel } from './lib/app/settingsPanel.svelte.ts'
   import { closeToastDetail, hideToast, runToastAction, say, sayDetails, sayLine, toasts, toggleToastDetail } from './lib/app/toasts.svelte.ts'
-  import { mergeListPage } from './lib/ui/listPages.ts'
+  import { bindLists, listView, applyListPage, applyListItem, loadOlderLists } from './lib/app/lists.svelte.ts'
   import { patchListRows } from './lib/ui/listChanges.ts'
   import { reloadsUnread } from './lib/ui/unreadReload.ts'
   import { createWorkflowData } from './lib/workflows/workflowData.ts'
@@ -140,7 +140,6 @@
   import type { StreamEvent, ListChange } from './lib/api/event.ts'
   import type { UpdateNotice } from './lib/api/settings.ts'
   import type { RowChange } from './lib/ui/listChanges.ts'
-  import type { Page } from './lib/api/wire.ts'
   import type { FeedMember } from './lib/rooms/feedViews.ts'
   import type { Receipt } from './lib/sessions/dm.ts'
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
@@ -152,21 +151,6 @@
 
   // A member the open view drills into. The root conversation is one made from the seat.
 
-  // A page of one list, with its continuation cursor.
-  interface ListPage<T> {
-    items: T[] | null
-    older?: boolean
-    cursor?: string
-    limit?: number
-    loadedOlder?: boolean
-  }
-  interface ListKinds {
-    goals: Goal
-    changes: ChangeRow
-    jobs: ShellJob
-  }
-  type ListKind = keyof ListKinds
-  type ListPages = { [K in ListKind]?: ListPage<ListKinds[K]> }
   interface DetailTarget {
     kind: string
     id: string
@@ -237,9 +221,6 @@
   const layout = loadLayout({ side: true, members: true, threads: true })
   let threadsOpen = $state(layout.threads)
   let selectedThread = $state('')
-  let listPages = $state<ListPages>({})
-  let olderLoading = $state(false)
-  let olderFailed = $state(false) // the last older-page load failed
   let jobs = $state<ShellJob[] | null>(null) // the room's shell jobs, newest first: one list for every view
   let jobsError = $state('')
   // The shell is exactly as tall as the screen shows, so a phone's browser bar or
@@ -761,6 +742,16 @@
     listError: (error) => (runsError = error),
     detailError: (error) => (runError = error),
   })
+  bindLists({
+    current: () => ({ room: roomId, visit: roomRequest }),
+    patch: (kind, load) => reload.patch(kind, load),
+    goals: (id, cursor) => api.goals(id, cursor),
+    changes: (id, cursor) => api.changes(id, cursor),
+    jobs: (cursor) => workflowData.loadJobs(cursor),
+    setGoals: (rows) => goalView.setGoals(rows),
+    setChanges: (rows) => changeView.setChanges(rows),
+    error: (message) => (loadError = message),
+  })
   function loadRuns() { return workflowData.loadList() }
   function loadRun() { return workflowData.loadDetail() }
 
@@ -827,55 +818,6 @@
     })
   })
 
-  function applyListPage<K extends ListKind>(kind: K, page: ListPage<ListKinds[K]>, append = false): ListKinds[K][] {
-    const previous = listPages[kind]
-    const merged = mergeListPage(previous as import('./lib/ui/listPages.ts').ListPageView<ListKinds[K]> | undefined, { ...page, items: page.items ?? [], older: page.older ?? false, cursor: page.cursor ?? '' }, append)
-    if (kind === 'jobs') merged.items.sort((a, b) => (String('started' in b ? b.started : '')).localeCompare(String('started' in a ? a.started : '')))
-    merged.items = reconcileRows(previous?.items ?? [], merged.items, kind === 'changes' ? 'key' : 'id')
-    listPages = { ...listPages, [kind]: merged }
-    return merged.items
-  }
-
-  function applyListItem<K extends ListKind>(kind: K, change: ListChange, rows: ListKinds[K][] | null): ListKinds[K][] {
-    const previous = listPages[kind] ?? { items: rows ?? [] }
-    const items = patchListRows(previous.items ?? [], change as RowChange<ListKinds[K]>, kind === 'changes' ? 'key' : 'id')
-    if (kind === 'jobs') items.sort((a, b) => (String('started' in b ? b.started : '')).localeCompare(String('started' in a ? a.started : '')))
-    listPages = { ...listPages, [kind]: { ...previous, items } }
-    return items
-  }
-
-  async function loadOlderLists(kinds: ListKind[]) {
-    if (olderLoading) return
-    const id = roomId, visit = roomRequest
-    olderLoading = true
-    olderFailed = false
-    const methods = { goals: api.goals, changes: api.changes }
-    try {
-      for (const kind of kinds) {
-        const page = listPages[kind]
-        if (!page?.older) continue
-        if (kind === 'jobs') {
-          await workflowData.loadJobs(page.cursor)
-          continue
-        }
-        await reload.patch(kind, async (current: () => boolean) => {
-          const selected = listPages[kind]
-          if (!current() || id !== roomId || visit !== roomRequest || !selected?.older) return
-          if (kind === 'goals') {
-            const next = await api.goals(id, selected.cursor)
-            if (!current() || id !== roomId || visit !== roomRequest) return
-            goalView.setGoals(applyListPage('goals', next, true))
-          } else if (kind === 'changes') {
-            const next = await api.changes(id, selected.cursor)
-            if (!current() || id !== roomId || visit !== roomRequest) return
-            changeView.setChanges(applyListPage('changes', next, true))
-          }
-        })
-      }
-    } catch (e) { if (id === roomId && visit === roomRequest) { loadError = String(e); olderFailed = true } }
-    finally { olderLoading = false }
-  }
-
   let canLoadControls = $derived(visibleList('roomControls'))
   let canLoadComputers = $derived(visibleList('computers'))
   let canLoadMentions = $derived(visibleList('mentions'))
@@ -932,7 +874,7 @@
     router.view = ['all', 'owner', 'turns', 'files', 'github'].includes(start.view) ? GENERAL : start.view
     roomData.clearMembers()
     runs = null
-    listPages = {}
+    listView.clear()
     jobs = null
     jobsError = ''
     router.openRun = ''
@@ -1630,7 +1572,7 @@
             {#if sessionTab === 'computer' && computers}
               <ComputerPane c={computerOf(drill.computer) ?? { session: drill.computer ?? '', name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.computer ?? ''] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, onpending: (pending: boolean) => noteComposerWork('computer:' + drill.id, pending), session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
             {:else if sessionTab === 'shell'}
-              <Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} jobs={shellTabJobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />
+              <Jobs older={listView.pages.jobs?.older} loadingOlder={listView.olderLoading} onolder={() => loadOlderLists(['jobs'])} jobs={shellTabJobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />
             {:else if sessionTab === 'media'}
               <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else}
@@ -1653,7 +1595,7 @@
         {:else if view === 'computers' && computers}
           {#key room.id}<Computers list={computers} error={computerError} onopen={(c: ComputerInfo) => { const m = hierarchy.find((x) => x.id === c.session); if (m) { openSession(m); sessionTab = 'computer' } else popOut(room.id, c.session) }} />{/key}
         {:else if view === 'goals'}
-          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))} />{/key}
+          {#key room.id}<Goals roomId={room.id} older={listView.pages.goals?.older} loadingOlder={listView.olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
             {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => askConfirm({ kind: 'cancelrun', run })} onpause={pauseRun} onopen={openRunAgent} />{/key}
@@ -1674,10 +1616,10 @@
         {#key room.id + ':' + (drill?.rootSeat ? '' : drill?.id ?? '')}
           <ReviewWorkspace roomId={room.id} session={drill?.rootSeat ? '' : drill?.id ?? ''} sessionName={drill?.name ?? ''} members={hierarchy} bind:tab={router.reviewTab} {reveal} folder={revealFolder} version={reviewVersion} onpr={openPR} onclose={closeReview} onselect={(id) => { const member = hierarchy.find((m) => m.id === id); if (member) openSession(member); else { router.drill = null; router.view = GENERAL } }}>
             {#snippet prs()}
-              <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="pr" active={reviewTab === 'prs'} session={routeSession(drill)} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m) => openSession(m)} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
+              <GitHub {mergeVersion} older={listView.pages.changes?.older} loadingOlder={listView.olderLoading} failedOlder={listView.olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="pr" active={reviewTab === 'prs'} session={routeSession(drill)} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m) => openSession(m)} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
             {/snippet}
             {#snippet issuesTab()}
-              <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="issue" {issuesVersion} active={reviewTab === 'issues'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab === 'prs') openReview('prs'); else if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
+              <GitHub {mergeVersion} older={listView.pages.changes?.older} loadingOlder={listView.olderLoading} failedOlder={listView.olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="issue" {issuesVersion} active={reviewTab === 'issues'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab === 'prs') openReview('prs'); else if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
             {/snippet}
           </ReviewWorkspace>
         {/key}
@@ -1777,7 +1719,7 @@
   </div>
 {/if}
 {#if card && room}
-  <ProfileModal {goals} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} ongoal={(id) => { card = null; openGoal(id) }} onpost={jumpTo} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {profile} error={profileError} {room} ondetail={openDetail} onclose={() => (card = null)} onmessage={openSession} onmention={mentionMember} />
+  <ProfileModal {goals} older={listView.pages.goals?.older} loadingOlder={listView.olderLoading} onolder={() => loadOlderLists(['goals'])} ongoal={(id) => { card = null; openGoal(id) }} onpost={jumpTo} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {profile} error={profileError} {room} ondetail={openDetail} onclose={() => (card = null)} onmessage={openSession} onmention={mentionMember} />
 {/if}
 
 <style>
