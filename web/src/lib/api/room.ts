@@ -91,6 +91,7 @@ export interface Message {
   from: string
   to: string[] | null
   text: string
+  skill?: { name: string; path: string }
   sessionIds?: Record<string, string>
   kind?: string
   notice?: EventNotice
