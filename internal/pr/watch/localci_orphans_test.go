@@ -49,8 +49,9 @@ func TestScheduleRegisteredCIAbandonsOnlyUnwantedOrphans(t *testing.T) {
 	syncRun := localci.OrphanedAttachment{Repo: "/repo", SHA: strings.Repeat("c", 40), Node: "node", RunID: "sync", Source: jobs.CheckSource{Kind: jobs.CheckKindSync}}
 	standalone := localci.OrphanedAttachment{Repo: "/repo", SHA: strings.Repeat("d", 40), Node: "node", RunID: "standalone", Source: jobs.CheckSource{Kind: jobs.CheckKindLocalChange}}
 	legacy := localci.OrphanedAttachment{Repo: "/repo", SHA: strings.Repeat("e", 40), Node: "node", RunID: "legacy"}
-	abandoned := make(chan localci.OrphanedAttachment, 5)
-	registry := &orphanedRunRegistry{orphans: []localci.OrphanedAttachment{wanted, unwanted, syncRun, standalone, legacy}, abandoned: abandoned}
+	expired := localci.OrphanedAttachment{Repo: "/repo", SHA: strings.Repeat("f", 40), Node: "node", RunID: "expired", Expired: true}
+	abandoned := make(chan localci.OrphanedAttachment, 6)
+	registry := &orphanedRunRegistry{orphans: []localci.OrphanedAttachment{wanted, unwanted, syncRun, standalone, legacy, expired}, abandoned: abandoned}
 	s := &Service{
 		LocalCIRegistry: registry,
 		registeredRuns:  &registeredCIRuns{Runs: map[string]*registeredCIRun{}},
@@ -70,11 +71,11 @@ func TestScheduleRegisteredCIAbandonsOnlyUnwantedOrphans(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[string]bool{}
-	for range 2 {
+	for range 3 {
 		got[(<-abandoned).RunID] = true
 	}
-	if !got[unwanted.RunID] || !got[standalone.RunID] {
-		t.Fatalf("abandoned %v, want unwanted and standalone runs", got)
+	if !got[unwanted.RunID] || !got[standalone.RunID] || !got[expired.RunID] {
+		t.Fatalf("abandoned %v, want unwanted, standalone and expired legacy runs", got)
 	}
 	select {
 	case got := <-abandoned:
