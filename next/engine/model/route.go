@@ -29,6 +29,16 @@ func Handler(upstream *url.URL, clientKey, sessionID string, allowedModels []str
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	proxy.FlushInterval = -1
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/model/v1/messages", "/model/v1/chat/completions", "/model/v1/responses":
+			if r.Method != http.MethodPost {
+				refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST is supported.")
+				return
+			}
+		default:
+			refuse(w, http.StatusNotFound, "unsupported_route", "The model endpoint is not supported.")
+			return
+		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
 		if err != nil {
 			refuse(w, http.StatusBadRequest, "invalid_request", "Could not read request.")
