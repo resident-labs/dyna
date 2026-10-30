@@ -59,7 +59,7 @@ func (s *Service) TrackedIssues(roomRef string) (TrackedIssues, error) {
 		// A watch saved before its first read has no update time yet.
 		updated, _ := time.Parse(time.RFC3339, w.Updated)
 		out.Items = append(out.Items, GitHubItem{Number: w.Number, Title: w.Title, State: strings.ToUpper(w.State), Labels: []GitHubLabel{},
-			UpdatedAt: updated, URL: fmt.Sprintf("https://%s/%s/issues/%d", w.Host, w.Repo, w.Number)})
+			UpdatedAt: updated, URL: w.URL()})
 		watched[state.IssueWorkKey(rec.ID, w.Host+"/"+w.Repo, w.Number)] = true
 	}
 	st, err := s.Watcher().Store.Read()
