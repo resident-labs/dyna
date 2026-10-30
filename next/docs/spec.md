@@ -745,7 +745,12 @@ Every PR that adds or changes a view has one required step (owner rule):
 
 - The builder attaches one side-by-side image to the PR. The left half is the new or changed view in the v2 app. The right half is the T3 Code page that is most similar to it. Both use the same window size and theme.
 - The reviewer checks the PR against that image and requests changes when the view is louder or less dense than the T3 Code page, or when the image is missing.
-- Each UI builder's brief repeats this step.
+- Each UI builder's brief repeats these steps.
+
+dyna:lead-rewrite is the design and taste reviewer for all v2 frontend work (owner rule):
+
+- Before frontend work starts, the builder sends its design, with the T3 Code side-by-side, to dyna:lead-rewrite. Work starts only after that approval.
+- dyna:lead-rewrite approves each frontend PR on design and taste. The normal reviewers check correctness and everything else.
 
 ## 6. Host exec
 
@@ -1244,7 +1249,7 @@ Acceptance:
 | Spec, contract, engine core (store, API, approvals, model route), integration | dyna:lead-rewrite | opus-rewrite (r20) | `docs/`, `contract/`, `engine/` |
 | Boxes, hosts, images, box agent, harness adapters, host exec | dyna:node-shell | opus | `box/`, `harness/`, `engine/hostexec` |
 | Room rules, identity, migration, exporter, feature map | dyna:code-architectural | opus | `room/`, `migrate/`, old `cmd/dyna-export` |
-| Web port | a web lead, from M2 | sonnet | `web/` |
+| Web port | a web lead, from M2; design and taste approval by dyna:lead-rewrite (5.13) | sonnet | `web/` |
 
 - **Builders** are terra (r13), started by the area owner after the owner approves this spec. Small work goes to haiku. When terra is out of quota, kimi-max or glm. Each folder has one writer at a time.
 - **Design check first.** For each milestone, each area owner writes a one-page plan. The lead checks it before builders start (r13).
