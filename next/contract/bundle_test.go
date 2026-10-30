@@ -32,7 +32,7 @@ func filledGlobalBundle() GlobalBundle {
 			Name: "phone", TokenSHA256: "beef", Created: bundleTime, Expires: bundleTime.Add(time.Hour), Scopes: []DeviceScope{"rooms.read"},
 		}},
 		Repos: []RepoBundle{{
-			Repo: "resident-labs/dyna", DefaultRoom: "dyna", MergePolicy: MergeQueue, CIMode: CIBox, ReviewerProfile: "terra",
+			Repo: "resident-labs/dyna", DefaultRoom: "dyna", MergePolicy: MergeQueue, CIMode: CIBox,
 			Attribution: []AttributionLine{{Kind: AttributionPR, Line: "Made with Dyna"}},
 			Library: []LibraryEntry{{
 				ID: "rooms", Name: "rooms", Kind: LibraryFeature, Parent: "", Summary: "feeds", Differs: "typed",
