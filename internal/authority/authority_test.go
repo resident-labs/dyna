@@ -92,6 +92,7 @@ func TestRoleLimits(t *testing.T) {
 		{"call withdraw", []Role{Root}},
 		{"request question", []Role{Root}},
 		{"request withdraw", []Role{Root, Session, Worker}},
+		{"run", []Role{Owner, Root}},
 		{"room create", []Role{Owner, Root}},
 		{"room edit", []Role{Owner, Root}},
 		{"room delete", []Role{Owner, Root}},
@@ -114,7 +115,7 @@ func TestRoleLimits(t *testing.T) {
 		}
 	}
 	for _, rule := range Rules {
-		if (strings.HasPrefix(rule.Action, "subagent ") && rule.Action != "subagent dismiss-pending" && rule.Action != "subagent close" && rule.Action != "subagent promote" && rule.Action != "subagent adopt" && rule.Action != "subagent rename") || rule.Action == "room pause" || rule.Action == "room resume" || rule.Action == "run" || rule.Action == "demo" {
+		if (strings.HasPrefix(rule.Action, "subagent ") && rule.Action != "subagent dismiss-pending" && rule.Action != "subagent close" && rule.Action != "subagent promote" && rule.Action != "subagent adopt" && rule.Action != "subagent rename") || rule.Action == "room pause" || rule.Action == "room resume" || rule.Action == "demo" {
 			for _, role := range []Role{Owner, Root, Session, Worker} {
 				if err := Check(rule.Action, Actor{Role: role}, nil); (err == nil) != (role != Worker) {
 					t.Errorf("%s as %s: %v", rule.Action, role, err)
@@ -185,5 +186,12 @@ func TestActorInUsesTheCallersRoom(t *testing.T) {
 				t.Fatalf("actor changed: %+v", actor)
 			}
 		})
+	}
+}
+
+func TestSessionCannotRunWorkflow(t *testing.T) {
+	err := Check("run", Actor{Role: Session}, nil)
+	if err == nil || !strings.Contains(err.Error(), "dyna run is for room roots. Start a child with dyna subagent start, or post the job to @root.") {
+		t.Fatalf("unexpected refusal: %v", err)
 	}
 }
