@@ -19,9 +19,10 @@ import type { SourceInfo } from "../../core/source-info.ts";
 
 export type RpcCommand =
 	// Prompting
-	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
-	| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
-	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
+	| { id?: string; type: "prompt"; message?: string; inputs?: { message: string; deliveryId: string }[]; images?: ImageContent[]; deliveryId?: string; streamingBehavior?: "steer" | "followUp" }
+	| { id?: string; type: "steer"; message: string; images?: ImageContent[]; deliveryId?: string }
+	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[]; deliveryId?: string }
+	| { id?: string; type: "continue" }
 	| { id?: string; type: "abort" }
 	| { id?: string; type: "clear_queue" }
 	| { id?: string; type: "new_session"; parentSession?: string }
@@ -124,6 +125,7 @@ export type RpcResponse =
 			success: true;
 			data: { disposition: QueuedInputDisposition };
 	  }
+	| { id?: string; type: "response"; command: "continue"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| {
 			id?: string;

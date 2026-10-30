@@ -678,6 +678,7 @@ export async function processResponsesStream<TApi extends Api>(
 		await options?.onProviderStreamEvent?.(event, model);
 		if (event.type === "response.created") {
 			output.responseId = event.response.id;
+			if (event.response.model !== model.id) output.responseModel = event.response.model;
 		} else if (event.type === "response.output_item.added") {
 			createSlot(event.output_index, event.item);
 		} else if (event.type === "response.reasoning_summary_text.delta") {
