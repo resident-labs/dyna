@@ -280,6 +280,15 @@ export interface MachineCIRun {
   started: string;
 }
 /**
+ * MachineAvatar is the sender identity attached to a machine row.
+ */
+export interface MachineAvatar {
+  kind: unknown /* room.SenderKind */;
+  emoji?: string;
+  room: string;
+  color: unknown /* room.RoomColor */;
+}
+/**
  * MachineAgent is a session that runs on this engine's machine now.
  */
 export interface MachineAgent {
