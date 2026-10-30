@@ -57,12 +57,10 @@ var (
 	computerBrowserVars = []string{"DYNA_COMPUTER_PROCESS"}
 )
 
-// CommandEnv builds the environment of a managed shell's command, and reports
-// whether the shell has no display, so the job needs a hint where GUI programs
-// can run.
-func CommandEnv(ctx context.Context, dir string, m shells.Meta, base []string) ([]string, bool) {
+// CommandEnv builds the environment of a managed shell's command.
+func CommandEnv(ctx context.Context, dir string, m shells.Meta, base []string) []string {
 	if ownerDisplayStays(m, base) {
-		return ownerDisplayEnv(base, m.Owner), false
+		return ownerDisplayEnv(base, m.Owner)
 	}
 	if env, ok := runningComputerEnv(ctx, m, base); ok {
 		// computers.Environment keeps the owner bus and owner displays. A
@@ -77,9 +75,9 @@ func CommandEnv(ctx context.Context, dir string, m shells.Meta, base []string) (
 		// that already runs, before it looks for a display. The computer's own
 		// profile is already private, so the shell joins that browser instead.
 		env = envSet(env, chromeUserDataEnv, computers.BrowserProfileDir(m.Owner))
-		return envSet(env, chromeConfigEnv, computers.BrowserConfigDir(m.Owner)), false
+		return envSet(env, chromeConfigEnv, computers.BrowserConfigDir(m.Owner))
 	}
-	return isolatedDisplay(dir, base, m.Owner), true
+	return isolatedDisplay(dir, base, m.Owner)
 }
 
 // ownerDisplayStays reports whether a shell runs on the owner's own display.

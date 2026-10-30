@@ -54,18 +54,6 @@ const (
 
 var idPattern = regexp.MustCompile(`^sh_[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$`)
 
-// NoDisplayHint is the one stderr line a shell without a display prints.
-const NoDisplayHint = "no computer is running, so this shell has no display; " +
-	"run dyna computer run, or dyna computer open -- <app>, to start a GUI app on your own computer"
-
-// hintShell and hintScript put the hint on stderr before the command. The hint
-// is one argument, and exec hands the remaining arguments to the command
-// unchanged, so its PID and exit status are the command's own.
-const (
-	hintShell  = "/bin/sh"
-	hintScript = `printf '%s\n' "$1" >&2; shift; exec "$@"`
-)
-
 // ValidID reports whether id has the shell id shape.
 func ValidID(id string) bool { return idPattern.MatchString(id) }
 
@@ -140,7 +128,7 @@ type Store struct {
 	// CommandEnv prepares the environment of a new command. The shell CLI sets
 	// it to the display policy of managed shells; nil keeps the supervisor's
 	// launch environment, which is the owner display.
-	CommandEnv func(ctx context.Context, dir string, m Meta, base []string) (env []string, noDisplay bool)
+	CommandEnv func(ctx context.Context, dir string, m Meta, base []string) []string
 	// OnStarted, when set, observes a job that started its command and
 	// recorded the process. A test waits on it instead of sampling the
 	// job's status, so no timer decides when the job is running.
@@ -421,13 +409,9 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	cmd := exec.Command(m.Cmd[0], m.Cmd[1:]...)
 	cmd.Dir = m.Cwd
 	// LaunchEnv was captured before awaitLaunch consumed the gate marker.
-	env, noDisplay := processguard.WithoutEngineSecrets(slices.DeleteFunc(home.LaunchEnv(), func(kv string) bool { return strings.HasPrefix(kv, launchGateEnv+"=") })), false
+	env := processguard.WithoutEngineSecrets(slices.DeleteFunc(home.LaunchEnv(), func(kv string) bool { return strings.HasPrefix(kv, launchGateEnv+"=") }))
 	if s.CommandEnv != nil {
-		env, noDisplay = s.CommandEnv(ctx, dir, m, env)
-	}
-	if noDisplay {
-		cmd = exec.Command(hintShell, append([]string{"-c", hintScript, hintShell, NoDisplayHint}, m.Cmd...)...)
-		cmd.Dir = m.Cwd
+		env = s.CommandEnv(ctx, dir, m, env)
 	}
 	// Without a terminal, a pager or color codes only get in the way.
 	cmd.Env = append(env, "PAGER=cat", "GIT_PAGER=cat", "NO_COLOR=1", JobEnv+"="+m.ID)
