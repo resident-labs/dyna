@@ -197,19 +197,20 @@ func (h *Harness) readerError() error {
 	return errors.New("pi RPC stream closed")
 }
 
-func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, error) {
-	return h.run(ctx, id, "prompt", inputs)
+func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
+	return h.run(ctx, id, "prompt", inputs, started)
 }
 
-func (h *Harness) Continue(ctx context.Context, id contract.TurnID) (contract.TurnEnded, error) {
-	return h.run(ctx, id, "continue", nil)
+func (h *Harness) Continue(ctx context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
+	return h.run(ctx, id, "continue", nil, started)
 }
 
-func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, inputs []contract.TurnInput) (contract.TurnEnded, error) {
+func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	result := contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed")}
 	if err := h.send(ctx, typ, nil, inputs); err != nil {
 		return result, err
 	}
+	started()
 	for {
 		select {
 		case e := <-h.events:
