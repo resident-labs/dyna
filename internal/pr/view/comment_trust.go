@@ -34,13 +34,6 @@ func (s *Service) DismissPRComment(ctx context.Context, roomRef, key, id string)
 	return p.DismissComment(key, id)
 }
 
-type HeldPRComment struct {
-	Key    string `json:"key"`
-	RoomID string `json:"roomId"`
-	Number int    `json:"number"`
-	state.HeldComment
-}
-
 func (s *Service) HeldPRComments(ctx context.Context, roomRef string) ([]HeldPRComment, error) {
 	if authority.Of(ctx).Role != authority.Owner {
 		return nil, fmt.Errorf("only the owner can read held PR comments")
