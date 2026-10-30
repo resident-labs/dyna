@@ -20,10 +20,15 @@ type Tree struct {
 func NewTree(nodes []Node) Tree {
 	t := Tree{nodes: make(map[contract.SessionID]Node, len(nodes))}
 	for _, n := range nodes {
-		t.nodes[n.ID] = n
+		// M1 trial stores can have several parentless sessions; attach later ones to root.
 		if n.Parent == "" {
-			t.root = n.ID
+			if t.root == "" {
+				t.root = n.ID
+			} else {
+				n.Parent = t.root
+			}
 		}
+		t.nodes[n.ID] = n
 	}
 	return t
 }
