@@ -114,6 +114,16 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	}); err != nil {
 		return db, err
 	}
+	if err := database.Migrate(db, "runs.step-records", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `CREATE TABLE workflow_step_records (
+ run_id TEXT NOT NULL, call_key TEXT NOT NULL, ordinal INTEGER NOT NULL, attempt INTEGER NOT NULL,
+ state TEXT NOT NULL, result TEXT, external_id TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY (run_id, call_key, ordinal, attempt)
+)`)
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 
