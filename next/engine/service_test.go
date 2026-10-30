@@ -870,3 +870,36 @@ func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
 		t.Fatalf("removed %d times", n)
 	}
 }
+
+func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
+	s, _, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := s.BoxChannel(ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := (<-channel).Body.(contract.TurnStart); !ok {
+		t.Fatal("expected start")
+	}
+	ended := contract.ShellJobEndedRequest{Job: "job_1", ExitCode: 2, Tail: "boom"}
+	for range 2 { // the box agent retries after a lost reply
+		if _, e = s.ShellJobEnded(ctx, caller, ended); e != nil {
+			t.Fatal(e)
+		}
+	}
+	steer, ok := (<-channel).Body.(contract.TurnSteer)
+	if !ok || steer.Queue != contract.QueueSteer || steer.Input.Text != "Shell job job_1 ended with exit code 2. Last output:\nboom" {
+		t.Fatalf("unexpected steer: %+v", steer)
+	}
+	var wakes int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT COUNT(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='shell.job.ended'").Scan(&wakes); err != nil {
+		t.Fatal(err)
+	}
+	var jobs int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT COUNT(*) FROM shell_jobs").Scan(&jobs); err != nil {
+		t.Fatal(err)
+	}
+	if wakes != 1 || jobs != 1 {
+		t.Fatalf("wakes = %d, jobs = %d, want 1 each", wakes, jobs)
+	}
+}

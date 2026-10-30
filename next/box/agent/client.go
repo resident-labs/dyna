@@ -166,6 +166,15 @@ func (c *Client) ArchiveDone(ctx context.Context, result contract.ArchiveDoneReq
 	return err
 }
 
+func (c *Client) ShellJobEnded(ctx context.Context, req contract.ShellJobEndedRequest) error {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	_, err = c.call(ctx, contract.MethodShellJobEnded, body)
+	return err
+}
+
 func (c *Client) DeliveryDone(ctx context.Context, id contract.DeliverySeq) error {
 	body, err := json.Marshal(contract.DeliveryDoneRequest{Delivery: id})
 	if err != nil {
