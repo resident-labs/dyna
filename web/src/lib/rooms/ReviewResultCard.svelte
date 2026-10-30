@@ -4,7 +4,7 @@
   // typed payload, never the review text, and keeps no feed-only state. The
   // feed and a session DM draw the same card.
   import { openExternal } from '../../api.ts'
-  import Chip from '../ui/Chip.svelte'
+  import StatusPill from '../ui/StatusPill.svelte'
   import EventRow from './EventRow.svelte'
   import ReviewIcon from '../ui/ReviewIcon.svelte'
   import EventDetails from './EventDetails.svelte'
@@ -33,7 +33,6 @@
   let fast = $derived(kind === 'approve-fast' && payload?.fastLand === true)
   let counts = $derived(payload ? [payload.blocking ?? 0, payload.shouldFix ?? 0, payload.nits ?? 0] : [0, 0, 0])
   let findings = $derived(payload?.findings ?? [])
-  let tone = $derived(kind === 'approve-fast' || kind === 'approve' ? 'sage' : kind === 'stop-early' ? '' : (counts[0] ?? 0) > 0 ? 'coral' : 'gold')
   let title = $derived(payload?.label ?? 'Reviewer result')
   let reason = $derived(payload?.stopReason ? (stopWords[payload.stopReason] ?? payload.stopReason) : '')
   let reviewerReason = $derived(payload?.summary?.trim() ?? '')
@@ -47,7 +46,7 @@
   ts={post.ts}
   {surface}
   {title}
-  chips={[{ label: kind === 'approve-fast' ? (fast ? 'approved for a fast landing' : 'approved') : stateWords[kind], tone, outline: tone === '' }]}
+  chips={[{ label: kind === 'approve-fast' ? (fast ? 'approved for a fast landing' : 'approved') : stateWords[kind] }]}
   summary={[kind === 'stop-early' && reason ? `Stopped early: ${reason}.` : '', findings.length ? `${findings.length} finding${findings.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
 >
   {#snippet icon()}<ReviewIcon size={15} />{/snippet}
@@ -58,14 +57,14 @@
       {#if nextStep}<p class="reason">{nextStep}</p>{/if}
       {#if findings.length}
         <div class="counts">
-          {#if counts[0]}<Chip tone="danger">{counts[0]} blocking</Chip>{/if}
-          {#if counts[1]}<Chip tone="warning">{counts[1]} should fix</Chip>{/if}
-          {#if counts[2]}<Chip>{counts[2]} nit{counts[2] === 1 ? '' : 's'}</Chip>{/if}
+          {#if counts[0]}<StatusPill tone="danger" label={`${counts[0]} blocking`} />{/if}
+          {#if counts[1]}<StatusPill tone="warning" label={`${counts[1]} should fix`} />{/if}
+          {#if counts[2]}<span class="quiet">{counts[2]} nit{counts[2] === 1 ? '' : 's'}</span>{/if}
         </div>
         <ul class="findings">
           {#each shown as finding (finding.id)}
             <li>
-              <span class="where"><Chip tone={finding.severity === 'blocking' ? 'danger' : finding.severity === 'should-fix' ? 'warning' : 'neutral'}>{severityWords[finding.severity]}</Chip> <b class="mono">{finding.file}{finding.line ? `:${finding.line}` : ''}</b></span>
+              <span class="where"><span class="quiet">{severityWords[finding.severity]}</span> <b class="mono">{finding.file}{finding.line ? `:${finding.line}` : ''}</b></span>
               <span class="why">{finding.why}</span>
             </li>
           {/each}
@@ -84,6 +83,7 @@
 </EventRow>
 
 <style>
+  .quiet { color: var(--muted); font-size: var(--t-sm); }
   .reason { margin: 0 0 var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s2); }
   .findings { list-style: none; margin: 0 0 var(--s2); padding: 0; display: grid; gap: 6px; }

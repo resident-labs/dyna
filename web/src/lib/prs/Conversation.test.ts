@@ -152,3 +152,11 @@ test('ownerReview keeps only owner comments, with replies enabled, whatever the 
   assert.deepEqual(ownerReview(null, 'room').change.findings, [])
   assert.deepEqual((roundReview(c, first, first, 'room').change.findings ?? []).map((f) => f.id), ['f1'])
 })
+
+ test('CI failure alone uses a danger pill', async () => {
+  const render = await load()
+  const passed = render({ checks: [{ name: 'test', state: 'success' }] })
+  const failed = render({ checks: [{ name: 'test', state: 'failure' }] })
+  assert.doesNotMatch(passed, /class="status pill danger/)
+  assert.match(failed, /class="status pill danger/)
+ })

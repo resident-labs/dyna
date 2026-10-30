@@ -906,6 +906,8 @@ test('a review result card shows all four results on feed and DM', () => {
       web.flushSync()
       const text = (target.textContent ?? '').trim()
       for (const want of c.wants) assert.match(text, want, `${c.payload.kind} on ${surface}: ${text}`)
+      if (c.payload.kind === 'approve') assert.equal(target.querySelector('.status.pill.success'), null)
+      if (c.payload.kind === 'changes') assert.ok(target.querySelector('.status.pill.danger'))
       // The glyph is a drawn icon, never an emoji.
       assert.ok(target.querySelector('svg'), `${c.payload.kind} lost its icon`)
       if (surface === 'dm') assert.match(text, /Details/, `${c.payload.kind} DM lost its details toggle`)
