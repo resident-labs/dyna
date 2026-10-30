@@ -114,7 +114,8 @@ func (r Record) Archived(now time.Time, hasLiveWork bool) bool {
 // Message.Worktree). Older stored posts carry the same field name with the
 // extra facts that now live in the payload; a reader ignores those.
 type EventNotice struct {
-	Kind string `json:"kind"`
+	Kind   string `json:"kind"`
+	Thread string `json:"thread,omitempty"`
 	// Producer names the engine service that observed the event, such as the
 	// parent check-in scheduler. It is data, never a sender: the post's sender
 	// is the engine.
