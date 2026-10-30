@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/resident-labs/dyna/box/computer"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
 )
@@ -43,7 +44,12 @@ func Run(ctx context.Context, version string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	client := NewClient(engineSocket)
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
+	closeComputer, err := computer.Serve(ctx, "/run/dyna/agent.sock", errs)
+	if err != nil {
+		return err
+	}
+	defer closeComputer()
 	go client.Run(ctx)
 	hello, err := client.Hello(ctx, version)
 	if err != nil {
