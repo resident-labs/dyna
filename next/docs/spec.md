@@ -767,6 +767,24 @@ Every PR that adds or changes a view has one required step (owner rule):
 - The reviewer checks the PR against that image and requests changes when the view is louder or less dense than the T3 Code page, or when the image is missing.
 - Each UI builder's brief repeats these steps.
 
+Every PR that changes what the owner sees has one more required step (owner rule):
+
+- After the PR is up, the builder posts screenshots to the room. It takes them in a computer or a browser, with data that looks real, not only empty states. It attaches PNG files, light and dark when the view has both, with one line per image that says what the image shows.
+- The merge does not wait for the owner. When the owner replies to the images, the reply is a change request for the next PR.
+
+Opus builders write the code under `next/web`, and an opus reviewer reviews it (owner rule). Terra may write and review the Go side of web features.
+
+Builders and reviewers design for the user first (owner rule). T3 Code guides the approach: restraint, polish and folded agent work. It does not set the layout. The base layout is Discord's: a room is a project and shows as a channel in the left list, each room has one shared feed with the composer under it, and the session tree sits in the right panel like Discord's member list. A reviewer requests changes when a PR breaks one of these rules:
+
+- **The feed is the product.** Every post is left-aligned under a muted line with the sender's name and the time, and posts in a row from one sender share that line, as in Discord. Posts have no bubbles and no borders.
+- **Agent work is folded.** Turn, box, shell job and operation events between two posts fold into one muted line that expands in place. A failed turn stays visible as its own row.
+- **Color only for attention.** A session shows at most one status: Working (the only animation), Pending approval, or Failed. Other facts are muted text.
+- **Decisions in place.** An approval shows in the feed and in the approvals panel, with one shared component. The app has no modal dialogs, and the card send confirm is its only confirm step.
+- **Keyboard first.** Enter sends, and Shift+Enter makes a new line. F6 and mod+F6 move focus between the tree, the feed and the composer. Every control that can take focus shows a visible focus ring in light and dark. The Working pulse stops when the browser asks for reduced motion.
+- **Long lists are virtual** (owner rule). One shared virtual list renders only the visible rows of every long list: the feed, a long session tree, approvals, file lists and transcripts. It measures each row, keeps the reader's place when older rows load above, and stays at the bottom only while the reader is there. The feed keeps at most 1,000 events in memory and pages with `beforeSeq`. While the reader is away from the newest page, new events update the session tree and the approvals, and one line offers to jump to the present. The session tree and the approvals come from `session.list` and `op.list`, never from the feed history.
+- **Small and fast.** The app has no avatars, reactions, toasts for events that the feed shows, count badges, onboarding screens or empty-state pictures.
+- **No raw text.** The app shows no IDs, raw logs or markdown labels.
+
 dyna:lead-rewrite is the design and taste reviewer for all v2 frontend work (owner rule):
 
 - Before frontend work starts, the builder sends its design, with the T3 Code side-by-side, to dyna:lead-rewrite. Work starts only after that approval.
@@ -1307,11 +1325,11 @@ Acceptance:
 | Spec, contract, engine core (store, API, approvals, model route), integration | dyna:lead-rewrite | opus-rewrite (r20) | `docs/`, `contract/`, `engine/` |
 | Boxes, hosts, images, box agent, harness adapters, host exec | dyna:node-shell | opus | `box/`, `harness/`, `engine/hostexec` |
 | Room rules, identity, migration, exporter, feature map | dyna:code-architectural | opus | `room/`, `migrate/`, old `cmd/dyna-export` |
-| Web port | a web lead, from M2; design and taste approval by dyna:lead-rewrite (5.13) | sonnet | `web/` |
+| Web port | dyna:next-web-lead, from M2; design and taste approval by dyna:lead-rewrite (5.13) | opus | `web/` |
 
-- **Builders** are terra (r13), started by the area owner after the owner approves this spec. Small work goes to haiku. When terra is out of quota, kimi-max or glm. Each folder has one writer at a time.
+- **Builders** are terra (r13), started by the area owner after the owner approves this spec. Small work goes to haiku. When terra is out of quota, kimi-max or glm. Each folder has one writer at a time. **Exception (owner rule, 5.13):** UI code in `web/` is written only by opus builders, before and after the cutover. Terra may still build the Go side of web features.
 - **Design check first.** For each milestone, each area owner writes a one-page plan. The lead checks it before builders start (r13).
-- **Reviews** use the v1 review service with terra reviewers until the cutover. After it, a lead approves with `dyna pr approve`, or starts a reviewer session that approves (decision 13).
+- **Reviews** use the v1 review service with terra reviewers until the cutover. After it, a lead approves with `dyna pr approve`, or starts a reviewer session that approves (decision 13). UI code in `web/` gets an opus reviewer instead, before and after the cutover (5.13).
 - **Manual checks** are run by one terra agent per milestone, in a sandbox box.
 - **v1 is frozen.** Only blocking bugs are fixed there. The old side gets only `cmd/dyna-export`.
 - **Reporting.** Area owners report to the lead. The lead reports to @root for decisions, blockers and milestone results.
