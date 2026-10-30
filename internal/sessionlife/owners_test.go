@@ -193,3 +193,52 @@ func TestOwnerColumnsImport(t *testing.T) {
 		t.Fatal("expected the ID-mismatched row to fail Owners")
 	}
 }
+
+// Raw edits must invalidate warm ownership evidence, and a reused revision
+// after a raw delete must not reuse the old owner's directory.
+func TestOwnersDetectsRawEditsAfterCacheWarm(t *testing.T) {
+	sessions := ownersStore(t)
+	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/tree"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(sessions, "other", map[string]any{"id": "other"}); err != nil {
+		t.Fatal(err)
+	}
+	visit := func(OwnerRow) error { return nil }
+	if err := Owners(sessions, visit); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(filepath.Dir(sessions))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE session_records SET meta = ? WHERE id = 'owner'", `{"id":"owner","dir":"/other"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Owners(sessions, visit); err == nil {
+		t.Fatal("raw edit of warm metadata must fail closed")
+	}
+	if _, err := db.Exec("DELETE FROM session_records"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Owners(sessions, visit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DELETE FROM session_records WHERE id = 'owner'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(sessions, "owner", map[string]any{"id": "owner", "dir": "/new"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Owners(sessions, func(row OwnerRow) error {
+		if row.Dir != "/new" {
+			t.Fatalf("recreated owner has stale directory %q", row.Dir)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

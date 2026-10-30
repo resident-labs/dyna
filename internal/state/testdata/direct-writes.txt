@@ -262,3 +262,4 @@ not-state internal/scratch/scratch.go Sweep 1 # removes a closed session's tempo
 not-state internal/cli/voice/voice.go writeAudio 3 # writes the audio file the user asked for with --out, not Dyna state
 
 not-state internal/workflowcatalog/catalog.go Save 1 # workflow source files are user-authored project or personal files, not runtime state
+not-state internal/sessionlife/owners.go ownerCache.read 1 # commits a read-only SQLite snapshot; it writes no state
