@@ -171,9 +171,10 @@ type Message struct {
 	// for the desktop. See RootContext.
 	OwnerReport bool `json:"ownerReport,omitempty"`
 	// NeedsRoot marks a post that requires the root seat to act.
-	NeedsRoot bool      `json:"needsRoot,omitempty"`
-	Text      string    `json:"text"`
-	Skill     *SkillRef `json:"skill,omitempty"`
+	NeedsRoot bool       `json:"needsRoot,omitempty"`
+	Text      string     `json:"text"`
+	Skill     *SkillRef  `json:"skill,omitempty"`
+	Prompt    *PromptRef `json:"mcpPrompt,omitempty"`
 	// Attachments are files saved with the room before this post.
 	Attachments []Attachment `json:"attachments,omitempty"`
 	References  []Reference  `json:"references,omitempty"`
@@ -183,6 +184,12 @@ type Message struct {
 type SkillRef struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
+}
+
+// PromptRef identifies the MCP server and prompt chosen for a message.
+type PromptRef struct {
+	Server string `json:"server"`
+	Prompt string `json:"prompt"`
 }
 
 // ScriptRef is the workflow run behind a script's post, stored on the post so
@@ -979,6 +986,7 @@ type PostInput struct {
 	NeedsRoot    bool
 	Text         string
 	Skill        *SkillRef
+	Prompt       *PromptRef
 	Source       string
 	Spoken       bool
 	RelayOf      string
@@ -1045,7 +1053,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 // so it only counts when the retry names one itself: a retry of a post stored
 // before the field existed names none and matches the home it resolves to.
 func postConflicts(m Message, in PostInput, supplied Conversation) bool {
-	if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.SenderRoomID != in.SenderRoomID || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
+	if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.SenderRoomID != in.SenderRoomID || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.Prompt, in.Prompt) || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
 		return true
 	}
 	return supplied != "" && m.Conversation.Home() != supplied.Home()
@@ -1059,7 +1067,9 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 	}
 	in.From = strings.TrimSpace(in.From)
 	in.Kind = strings.TrimSpace(in.Kind)
-	in.Text = strings.TrimSpace(in.Text)
+	if in.Prompt == nil {
+		in.Text = strings.TrimSpace(in.Text)
+	}
 	if in.From == "" || len(in.To) == 0 {
 		return Message{}, errors.New("a post needs a sender and at least one recipient")
 	}
@@ -1083,7 +1093,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 			return Message{}, fmt.Errorf("post kind %q is not registered in internal/room/events.go", in.Kind)
 		}
 	}
-	if in.Kind == "message" {
+	if in.Kind == "message" && in.Prompt == nil {
 		in.Text = stripSelfLabel(in.From, in.Text)
 	}
 	if err := in.Conversation.Validate(); err != nil {
@@ -1166,7 +1176,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		now := s.now()
 		out = Message{
 			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs, SenderRoomID: in.SenderRoomID,
-			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Script: in.Script, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text, Skill: in.Skill,
+			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Script: in.Script, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text, Skill: in.Skill, Prompt: in.Prompt,
 			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}
 		if in.ID != "" {

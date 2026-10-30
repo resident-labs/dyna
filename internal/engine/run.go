@@ -685,6 +685,9 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 			return err
 		}
 	}
+	if mcpRooms != nil {
+		rooms.Prompts = mcpRooms
+	}
 	svc := services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, roommcp: mcpRooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, timers: engineTimers, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc, events: events}
 	if !readOnly {
 		svc.restoreLibrarianWakes(ctx)

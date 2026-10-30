@@ -24,10 +24,13 @@ const fixtureToken = "fixture-secret-token"
 // fakeServer is an httptest MCP server. It records every request it gets.
 type fakeServer struct {
 	*httptest.Server
-	mu       sync.Mutex
-	methods  []string
-	auth     []string
-	callBody func(w http.ResponseWriter, params json.RawMessage)
+	mu            sync.Mutex
+	methods       []string
+	auth          []string
+	callBody      func(w http.ResponseWriter, params json.RawMessage)
+	promptList    func(w http.ResponseWriter)
+	promptGet     func(w http.ResponseWriter, params json.RawMessage)
+	promptEnabled bool
 	// failInitialize is how many initialize requests still answer HTTP 500.
 	failInitialize int
 }
@@ -60,6 +63,16 @@ func newFakeServer(t *testing.T) *fakeServer {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch req.Method {
+		case "initialize":
+			if f.promptEnabled {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"prompts":{}}}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+			}
+		case "prompts/list":
+			f.promptList(w)
+		case "prompts/get":
+			f.promptGet(w, req.Params)
 		case "tools/list":
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"list_issues","inputSchema":{}},{"name":"claim_issue","inputSchema":{}}]}}`))
 		case "tools/call":
@@ -68,6 +81,12 @@ func newFakeServer(t *testing.T) *fakeServer {
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 		}
 	}))
+	f.promptList = func(w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"prompts":[{"name":"review","arguments":[{"name":"subject","required":true}]}]}}`))
+	}
+	f.promptGet = func(w http.ResponseWriter, _ json.RawMessage) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"description":"fixture-secret-token","messages":[{"role":"user","content":{"type":"text","text":"hello"}}]}}`))
+	}
 	f.callBody = func(w http.ResponseWriter, _ json.RawMessage) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"issue 1"}]}}`))
 	}
@@ -671,5 +690,112 @@ func TestRemoveTokenDeletesTheCurrentCredential(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPromptPolicyAndResult(t *testing.T) {
+	f := newFixture(t)
+	f.server.promptEnabled = true
+	f.ready(t)
+	commands, err := f.svc.Prompts(owner, f.room.ID)
+	if err != nil || len(commands) != 1 || commands[0].Name != "board:review" {
+		t.Fatalf("prompts: %#v, %v", commands, err)
+	}
+	if _, err := f.svc.RunPrompt(f.as(authority.Session, "ses_a", f.room), f.room.ID, "board:review", "hello"); err == nil {
+		t.Fatal("session ran owner prompt")
+	}
+	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", ""); err == nil {
+		t.Fatal("missing required argument accepted")
+	}
+	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "subject=value wrong=value"); err == nil {
+		t.Fatal("unknown argument accepted")
+	}
+	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "subject=ghp_abcdefghijklmnopqrstuvwxyz0123456789"); err == nil {
+		t.Fatal("token accepted")
+	}
+	if f.server.count("prompts/get") != 0 {
+		t.Fatal("invalid arguments reached server")
+	}
+	result, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "hello world")
+	if err != nil || !strings.Contains(result, "external_data") || !strings.Contains(result, "user: hello") || strings.Contains(result, `"messages"`) || strings.Contains(result, fixtureToken) {
+		t.Fatalf("result %q: %v", result, err)
+	}
+	for _, event := range f.events(t) {
+		if event.Arguments != "" {
+			t.Fatal("prompt audit contains arguments")
+		}
+	}
+	if err := f.svc.Detach(owner, f.room.ID, "board"); err != nil {
+		t.Fatal(err)
+	}
+	commands, err = f.svc.Prompts(owner, f.room.ID)
+	if err != nil || len(commands) != 0 {
+		t.Fatalf("detached prompts: %#v, %v", commands, err)
+	}
+	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "hello"); err == nil {
+		t.Fatal("detached prompt ran")
+	}
+}
+
+func TestPromptArgumentsAndServerError(t *testing.T) {
+	f := newFixture(t)
+	f.server.promptEnabled = true
+	var received map[string]string
+	f.server.promptGet = func(w http.ResponseWriter, raw json.RawMessage) {
+		var params struct {
+			Arguments map[string]string `json:"arguments"`
+		}
+		_ = json.Unmarshal(raw, &params)
+		received = params.Arguments
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"message":"bad fixture-secret-token"}}`))
+	}
+	f.ready(t)
+	for _, tc := range []struct{ input, want string }{{`subject="hello world=2"`, "hello world=2"}, {"plain text x=y", "plain text x=y"}} {
+		result, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", tc.input)
+		if result != "" || err == nil || !strings.Contains(err.Error(), "[redacted]") || strings.Contains(err.Error(), fixtureToken) || received["subject"] != tc.want {
+			t.Fatalf("input %q: result %q, error %v, arguments %#v", tc.input, result, err, received)
+		}
+	}
+	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", `subject="unfinished`); err == nil {
+		t.Fatal("unclosed quote accepted")
+	}
+}
+
+func TestPromptMetadataRejectsToken(t *testing.T) {
+	f := newFixture(t)
+	f.server.promptEnabled = true
+	f.server.promptList = func(w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"prompts":[{"name":"review","arguments":[{"name":"subject","description":"fixture-secret-token"}]}]}}`))
+	}
+	if err := f.svc.SetToken(owner, f.room.ID, "board", f.server.URL, fixtureToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Attach(owner, f.room.ID, "board"); err == nil || strings.Contains(err.Error(), fixtureToken) {
+		t.Fatalf("attach error: %v", err)
+	}
+	commands, err := f.svc.Prompts(owner, f.room.ID)
+	if err != nil || len(commands) != 0 {
+		t.Fatalf("prompts: %#v, %v", commands, err)
+	}
+}
+
+func TestPromptRejectsDetachReattachDuringScan(t *testing.T) {
+	f := newFixture(t)
+	f.server.promptEnabled = true
+	f.ready(t)
+	f.svc.identities = func(context.Context, room.Record) (Identities, error) {
+		if err := f.svc.Detach(owner, f.room.ID, "board"); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.svc.Attach(owner, f.room.ID, "board"); err != nil {
+			t.Fatal(err)
+		}
+		return Identities{}, nil
+	}
+	if _, err := f.svc.RunPrompt(owner, f.room.ID, "board:review", "hello"); err == nil {
+		t.Fatal("stale prompt ran")
+	}
+	if f.server.count("prompts/get") != 0 {
+		t.Fatal("stale prompt reached server")
 	}
 }
