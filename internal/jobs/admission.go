@@ -542,7 +542,7 @@ func (q nodeQueue) waiters(limits machines.Machine) []waiter {
 		out = append(out, waiter{demand: row.Demand, created: row.Created, id: row.ID, reason: row.Reason})
 	}
 	for _, job := range q.queued {
-		out = append(out, waiter{demand: jobDemand(job, limits), resources: job.Resources, created: job.Created, id: job.ID, isJob: true})
+		out = append(out, waiter{demand: jobDemand(job, limits), resources: job.Resources, created: job.Created, id: job.ID, isJob: true, lane: job.Lane})
 	}
 	return out
 }
@@ -562,6 +562,7 @@ type heldWork struct {
 	cpus      int
 	memMiB    int64
 	heavy     int
+	quick     int
 	portsUsed []bool
 	resources map[machines.ResourceName][]holder
 }
@@ -572,8 +573,12 @@ func (q nodeQueue) hold(limits machines.Machine) heldWork {
 	held := heldWork{portsUsed: make([]bool, maxPortsPerNode), resources: map[machines.ResourceName][]holder{}}
 	for _, job := range q.running {
 		demand := jobDemand(job, limits)
-		held.cpus += demand.CPUs
-		held.memMiB += demand.MemoryMiB
+		if job.Lane == LaneQuick {
+			held.quick++
+		} else {
+			held.cpus += demand.CPUs
+			held.memMiB += demand.MemoryMiB
+		}
 		if demand.Heavy {
 			held.heavy++
 		}
@@ -655,6 +660,7 @@ type waiter struct {
 	id        string
 	reason    string
 	isJob     bool
+	lane      Lane
 }
 
 // Pass decides from a read snapshot, then repeats any needed decision under
@@ -924,18 +930,24 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			why = diskBlock
 		case resourceBlock != "":
 			why = resourceBlock
+		case unit.lane == LaneQuick && held.quick >= limits.QuickSlotLimit():
+			why = fmt.Sprintf("%d of %d quick slots in use", held.quick, limits.QuickSlotLimit())
 		case d.Heavy && held.heavy >= limits.IOHeavyLimit():
 			why = fmt.Sprintf("%d of %d IO-heavy jobs running", held.heavy, limits.IOHeavyLimit())
-		case capacityCPUs > 0 && d.CPUs > freeCPUs:
+		case unit.lane != LaneQuick && capacityCPUs > 0 && d.CPUs > freeCPUs:
 			why = fmt.Sprintf("asks %d CPUs, %d free", d.CPUs, max(freeCPUs, 0))
-		case capacityMemMiB > 0 && d.MemoryMiB > freeMemMiB:
+		case unit.lane != LaneQuick && capacityMemMiB > 0 && d.MemoryMiB > freeMemMiB:
 			why = fmt.Sprintf("asks %s, %s free", MemoryLabel(d.MemoryMiB), MemoryLabel(max(freeMemMiB, 0)))
 		case !unit.isJob && port < 0:
 			why = "all check ports in use"
 		}
 		if why == "" {
-			held.cpus += d.CPUs
-			held.memMiB += d.MemoryMiB
+			if unit.lane == LaneQuick {
+				held.quick++
+			} else {
+				held.cpus += d.CPUs
+				held.memMiB += d.MemoryMiB
+			}
 			if d.Heavy {
 				held.heavy++
 			}

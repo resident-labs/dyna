@@ -187,6 +187,7 @@ type Input struct {
 	Node    string
 	Labels  []string
 	Command []string
+	Lane    Lane
 	// Repo is a local repository path and Ref the commit to check out. Both
 	// empty runs the command with no source.
 	Repo string
@@ -232,6 +233,15 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 		if !errors.Is(err, os.ErrNotExist) {
 			return Job{}, err
 		}
+	}
+	if in.Lane == "" {
+		in.Lane = LaneDeclared
+	}
+	if in.Lane != LaneDeclared && in.Lane != LaneQuick {
+		return Job{}, fmt.Errorf("unknown job lane %q", in.Lane)
+	}
+	if in.Lane == LaneQuick && (in.CPUs != 0 || in.Memory != "" || in.Heavy) {
+		return Job{}, errors.New("quick jobs cannot declare CPU, memory, or heavy IO")
 	}
 	if len(in.Command) == 0 {
 		return Job{}, errors.New("a job needs a command")
@@ -285,7 +295,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	job := Job{
 		ID: id, RoomID: in.RoomID, Session: in.Session, Run: in.Run, IdempotencyKey: in.IdempotencyKey, RequestHash: in.RequestHash, Node: machine.Name,
-		Command: in.Command, Host: host, Image: in.Image, Container: container,
+		Command: in.Command, Lane: in.Lane, Host: host, Image: in.Image, Container: container,
 		CPUs: in.CPUs, Timeout: in.Timeout, Heavy: in.Heavy, Artifacts: in.Artifacts,
 		Resources: in.Resources, State: StateQueued, Created: s.Store.now(),
 		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
@@ -299,6 +309,9 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	if job.Timeout <= 0 {
 		job.Timeout = DefaultTimeout
+		if job.Lane == LaneQuick {
+			job.Timeout = 10 * time.Minute
+		}
 	}
 	if in.Idle != nil {
 		if *in.Idle <= 0 {
@@ -798,6 +811,9 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	job.Dir = path.Join(NodeBase(machine.Name), "jobs", job.ID)
 	job.Unit = "dyna-job-" + job.ID + ".service"
 	resources := ClampResources(job.Host, job.CPUs, job.MemoryMiB, machineFacts(machine))
+	if job.Lane == LaneQuick {
+		resources = Resources{CPUs: 1, MemoryMiB: 1024}
+	}
 	job.Note = resources.Note
 
 	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
@@ -836,7 +852,10 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if job.Image != "" {
 		spec.Container = containerName(job.ID)
 	}
-	if !job.Host {
+	if job.Lane == LaneQuick {
+		limits := Limits{CPUs: 1, MemoryMiB: 1024, TasksMax: HostTasksMax, IOWeight: 10}
+		spec.Limits = &limits
+	} else if !job.Host {
 		limits := resources.Scope(false)
 		spec.Limits = &limits
 	}
@@ -1141,7 +1160,11 @@ func jobScript(machine machines.Machine, job Job, resources Resources, scratchDi
 		// container running. The trap stops it when this script exits.
 		name := containerName(job.ID)
 		inner += ContainerStopFunction + "trap " + q("dyna_stop_container "+name) + " EXIT; trap 'exit 143' TERM; "
-		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --name " + q(name) + " --cpus=" + strconv.Itoa(resources.CPUs) +
+		ioWeight := ""
+		if job.Lane == LaneQuick {
+			ioWeight = " --blkio-weight=10"
+		}
+		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --name " + q(name) + ioWeight + " --cpus=" + strconv.Itoa(resources.CPUs) +
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
 			" --pids-limit=512" + network + mount + " -e " + strings.Join(childenv.NoEditor(), " -e ") + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
 	} else {

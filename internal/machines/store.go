@@ -97,6 +97,7 @@ type Machine struct {
 	// MaxIOHeavy caps how many IO-heavy jobs and checks the node runs at once.
 	// Zero reads the default of one per sixteen probed CPUs, at least one.
 	MaxIOHeavy int `json:"maxIOHeavy"`
+	QuickSlots int `json:"quickSlots"`
 	// MaxDiskPercent is the used-disk percent above which the node admits no
 	// new work. Zero keeps a free-space floor instead; see DiskBlock.
 	MaxDiskPercent int `json:"maxDiskPercent"`
@@ -230,6 +231,14 @@ func HostChecksAllowed(grants []HostChecksGrant, room string) bool {
 // work of a room.
 func (m Machine) HostChecksAllowed(room string) bool {
 	return HostChecksAllowed(m.HostChecksGrants, room)
+}
+
+// QuickSlotLimit bounds jobs in the quick lane.
+func (m Machine) QuickSlotLimit() int {
+	if m.QuickSlots > 0 {
+		return m.QuickSlots
+	}
+	return max(4, m.Capabilities.CPUs/4)
 }
 
 // IOHeavyLimit is how many IO-heavy jobs and checks this node runs at once.
@@ -427,6 +436,9 @@ func (m Machine) Validate() error {
 	if m.CheckTmp != "" && (!path.IsAbs(m.CheckTmp) || path.Clean(m.CheckTmp) != m.CheckTmp || m.CheckTmp == "/" || strings.ContainsRune(m.CheckTmp, 0)) {
 		return errors.New("the check temporary folder must be a clean absolute path other than /")
 	}
+	if m.QuickSlots < 0 || m.QuickSlots > 1024 {
+		return fmt.Errorf("quick slots must be between 0 and 1024")
+	}
 	if m.MaxIOHeavy < 0 || m.MaxIOHeavy > 1024 {
 		return errors.New("the IO-heavy limit must be between 0, the default, and 1024")
 	}
@@ -498,7 +510,7 @@ func validateGrants(grants []HostChecksGrant) error {
 	return nil
 }
 
-const schemaVersion = 17
+const schemaVersion = 18
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -521,6 +533,7 @@ const schema = `CREATE TABLE machines (
 	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
 	check_tmp TEXT NOT NULL DEFAULT '',
 	max_io_heavy INTEGER NOT NULL DEFAULT 0 CHECK(max_io_heavy >= 0),
+	quick_slots INTEGER NOT NULL DEFAULT 0 CHECK(quick_slots >= 0),
 	max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100),
 	resources TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resources)),
 	mounts TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(mounts)),
@@ -563,7 +576,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,ssh,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices`
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices,quick_slots`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -615,6 +628,11 @@ func prepare(conn *sql.Conn, old int) error {
 			return err
 		}
 		return importLocalCINodes(ctx, conn)
+	}
+	if old < 18 {
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN quick_slots INTEGER NOT NULL DEFAULT 0 CHECK(quick_slots >= 0)`); err != nil {
+			return err
+		}
 	}
 	if old == 1 {
 		if err := addProbeColumns(ctx, conn); err != nil {
@@ -1051,7 +1069,7 @@ func scan(row scanner) (Machine, error) {
 	var capabilities, health, load, probeError, grants, rooms, labels, resources, mounts, devices string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &m.SSH, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources, &mounts, &devices); err != nil {
+		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources, &mounts, &devices, &m.QuickSlots); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -1256,9 +1274,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices,quick_slots) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices, m.QuickSlots)
 		if err != nil {
 			return err
 		}
@@ -1388,7 +1406,7 @@ func recordMachineChanges(ctx context.Context, conn *sql.Conn, before, after Mac
 		{"enabled", before.Enabled != after.Enabled}, {"rooms", before.ID == "" || !slices.Equal(before.Rooms, after.Rooms)},
 		{"labels", !slices.Equal(before.Labels, after.Labels)}, {"host checks", !slices.Equal(before.HostChecksGrants, after.HostChecksGrants)},
 		{"container socket", before.ContainerSocket != after.ContainerSocket}, {"SSH timeout", before.SSHConnectTimeout != after.SSHConnectTimeout},
-		{"check temporary folder", before.CheckTmp != after.CheckTmp}, {"IO limit", before.MaxIOHeavy != after.MaxIOHeavy},
+		{"check temporary folder", before.CheckTmp != after.CheckTmp}, {"IO limit", before.MaxIOHeavy != after.MaxIOHeavy}, {"quick slots", before.QuickSlots != after.QuickSlots},
 		{"disk limit", before.MaxDiskPercent != after.MaxDiskPercent}, {"resources", !maps.Equal(before.Resources, after.Resources)},
 		{"mounts", !slices.Equal(before.Mounts, after.Mounts)}, {"devices", !slices.Equal(before.Devices, after.Devices)},
 	}
@@ -1430,8 +1448,8 @@ func (s Store) LatestFieldChanges(ctx context.Context, id string) ([]FieldChange
 }
 
 func updateMachine(ctx context.Context, conn *sql.Conn, m Machine) error {
-	_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=?, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=?, devices=? WHERE id=?`,
-		m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Labels), m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, marshalResources(m.Resources), marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices), m.ID)
+	_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=?, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=?, devices=?, quick_slots=? WHERE id=?`,
+		m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Labels), m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, marshalResources(m.Resources), marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices), m.QuickSlots, m.ID)
 	return err
 }
 

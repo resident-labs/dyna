@@ -74,7 +74,7 @@ type fakeProc struct {
 
 // Start records one launch the machine received.
 type Start struct {
-	Dir, Unit, CPU, Memory, Tasks, Script string
+	Dir, Unit, CPU, Memory, Tasks, IO, Script string
 }
 
 // NewFake makes a fake node whose jobs run legacy.
@@ -164,7 +164,7 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 	}
 	dir := pos[0]
 	m.mu.Lock()
-	m.starts = append(m.starts, Start{Dir: dir, Unit: pos[1], CPU: pos[2], Memory: pos[3], Tasks: pos[4], Script: string(body)})
+	m.starts = append(m.starts, Start{Dir: dir, Unit: pos[1], CPU: pos[2], Memory: pos[3], Tasks: pos[4], IO: pos[5], Script: string(body)})
 	if _, started := m.procs[dir]; started {
 		m.mu.Unlock()
 		return nil

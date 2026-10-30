@@ -18,7 +18,7 @@
     {#snippet lead()}<StatusPill label={workKindText(unit.kind)} />{/snippet}
     {#snippet meta()}
       {#if workWhoText(unit)}<span>{workWhoText(unit)}</span>{/if}
-      <span>{workHoldsText(unit)}</span>
+      {#if unit.lane === 'quick'}<span>Quick lane</span>{:else}<span>{workHoldsText(unit)}</span>{/if}
       {#if unit.heavy}<span>IO-heavy</span>{/if}
       {#each unit.resources ?? [] as name (name)}<span>{name}</span>{/each}
     {/snippet}
