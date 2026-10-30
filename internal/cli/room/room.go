@@ -102,6 +102,7 @@ func upstreamOrOff(upstream string) string {
 
 // setCmd is `dyna room set`: one room setting, shown without a value.
 func setCmd() *cobra.Command {
+	var placement string
 	cmd := &cobra.Command{
 		Use:   "set <room> <setting> [<value>]",
 		Short: "Change a room setting",
@@ -131,7 +132,7 @@ func setCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := engineClient().Call(cmd.Context(), "SetRoomAttribution", []any{rec.Name, args[2]}, nil); err != nil {
+				if err := engineClient().Call(cmd.Context(), "SetRoomAttribution", []any{rec.Name, args[2], placement}, nil); err != nil {
 					return fmt.Errorf("the room was not updated: %w", err)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s attribution: %s\n", rec.Name, upstreamOrOff(line))
@@ -190,6 +191,7 @@ func setCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&placement, "placement", "line", "attribution placement: line or prefix")
 	return cmd
 }
 
