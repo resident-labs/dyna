@@ -316,6 +316,13 @@ func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.Room
 	}
 	current.Image = image
 	s.admit.Lock()
+	s.boxLockMu.Lock()
+	closing := run.closing
+	s.boxLockMu.Unlock()
+	if closing {
+		s.admit.Unlock()
+		return nil
+	}
 	_, err := s.transition(writeCtx, room, current, contract.BoxStarting, "")
 	s.admit.Unlock()
 	if err != nil {
@@ -447,6 +454,18 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 		s.admit.Unlock()
 		return contract.SessionCloseResponse{}, e
 	}
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		s.admit.Unlock()
+		return contract.SessionCloseResponse{}, failure(err)
+	}
+	if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
+		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+		if err != nil {
+			s.admit.Unlock()
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+	}
 	s.boxLockMu.Lock()
 	if run := s.boxRuns[session.ID]; run != nil {
 		run.closing = true
@@ -456,25 +475,7 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	s.admit.Unlock()
 	unlock := s.lockBox(session.ID)
 	defer unlock()
-	s.admit.Lock()
-	if e := s.closeGuard(ctx, session.Box); e != nil {
-		s.admit.Unlock()
-		return contract.SessionCloseResponse{}, e
-	}
-	current, err := s.store.Box(ctx, session.Box)
-	if err != nil {
-		s.admit.Unlock()
-		return contract.SessionCloseResponse{}, failure(err)
-	}
 	if current.State != contract.BoxDeleted {
-		if current.State != contract.BoxClosing {
-			current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
-			if err != nil {
-				s.admit.Unlock()
-				return contract.SessionCloseResponse{}, failure(err)
-			}
-		}
-		s.admit.Unlock()
 		if err = s.boxes.Remove(ctx, session.Box); err != nil {
 			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
 			if transitionErr != nil {
@@ -485,8 +486,6 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 		if _, err = s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
 			return contract.SessionCloseResponse{}, failure(err)
 		}
-	} else {
-		s.admit.Unlock()
 	}
 	event, err := s.event(session.Room, caller, contract.SessionClosed{Session: session.ID})
 	if err != nil {

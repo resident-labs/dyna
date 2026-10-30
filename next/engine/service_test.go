@@ -569,3 +569,47 @@ func TestStartRejectsClosingParent(t *testing.T) {
 		t.Fatalf("start: %v", e)
 	}
 }
+
+type closingInterleaveBox struct {
+	started   chan BoxSpec
+	cancelled chan struct{}
+	release   chan struct{}
+}
+
+func (b closingInterleaveBox) Create(ctx context.Context, spec BoxSpec) (string, error) {
+	b.started <- spec
+	<-ctx.Done()
+	close(b.cancelled)
+	<-b.release
+	return "", ctx.Err()
+}
+func (closingInterleaveBox) Remove(context.Context, contract.BoxID) error { return nil }
+
+func TestClosingCreatingParentRejectsConcurrentChild(t *testing.T) {
+	s, room, root, ctx := setup(t)
+	adapter := closingInterleaveBox{started: make(chan BoxSpec), cancelled: make(chan struct{}), release: make(chan struct{})}
+	s.boxes = adapter
+	started := make(chan *contract.Error, 1)
+	go func() {
+		_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
+		started <- e
+	}()
+	parent := <-adapter.started
+	closed := make(chan *contract.Error, 1)
+	go func() {
+		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: parent.Session})
+		closed <- e
+	}()
+	<-adapter.cancelled
+	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent.Session})
+	if e == nil {
+		t.Error("child started while parent was closing")
+	}
+	close(adapter.release)
+	if e := <-started; e != nil {
+		t.Fatal(e)
+	}
+	if e := <-closed; e != nil {
+		t.Fatal(e)
+	}
+}
