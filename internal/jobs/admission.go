@@ -867,7 +867,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		capacityCPUs, capacityMemMiB = machine.Capabilities.CPUs, int64(machine.Capabilities.MemTotal/(1<<20))
 		memoryKnown = machine.Capabilities.MemTotal > 0
 		if memoryKnown {
-			capacityMemMiB = max(0, capacityMemMiB-int64(machine.QuickSlotLimit())*1024)
+			capacityMemMiB = max(0, capacityMemMiB-machineFacts(machine).QuickReserveMiB)
 		}
 		limits = machine
 	}
@@ -1030,7 +1030,7 @@ func waitingText(why string, position, total int) string {
 // jobDemand reads a job's clamped demand. A machine with no probe keeps the
 // job's own request, so an unprobed node still takes work.
 func jobDemand(job Job, machine machines.Machine) Demand {
-	resources := ClampResources(job.Host, job.CPUs, job.MemoryMiB, Facts{CPUs: machine.Capabilities.CPUs, MemoryBytes: machine.Capabilities.MemTotal})
+	resources := ClampResources(job.Host, job.CPUs, job.MemoryMiB, machineFacts(machine))
 	return Demand{Node: job.Node, ID: job.ID, Room: job.RoomID, Heavy: job.Heavy, CPUs: resources.CPUs, MemoryMiB: resources.MemoryMiB}
 }
 

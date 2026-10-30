@@ -38,8 +38,9 @@ func TestQuickLaneReservesMemory(t *testing.T) {
 	if err := passNode(context.Background(), nil, time.Time{}, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
 		t.Fatal(err)
 	}
-	if admitted["build"] || !admitted["quick"] || !strings.Contains(reasons["build"], "7 GiB free") {
-		t.Fatalf("admitted %v, reasons %v", admitted, reasons)
+	resources := ClampResources(false, 4, 8192, machineFacts(machine))
+	if !admitted["build"] || !admitted["quick"] || resources.MemoryMiB != 7168 || !strings.Contains(resources.Note, "memory from 8 GiB to 7 GiB (quick lane reserve)") {
+		t.Fatalf("admitted %v, reasons %v, resources %+v", admitted, reasons, resources)
 	}
 }
 
