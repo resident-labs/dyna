@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
@@ -38,11 +37,6 @@ func modelArgs(model contract.ModelChoice) ([]string, error) {
 	return []string{"--provider", string(model.Provider), "--model", model.ID, "--thinking", string(model.Thinking)}, nil
 }
 
-func upgrade() error {
-	path := "/opt/dyna/bin/current/dyna"
-	return syscall.Exec(path, []string{path, "box-agent"}, os.Environ())
-}
-
 // Run connects the box, serves its model route, and runs the Pi session.
 func Run(ctx context.Context, version string) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -53,9 +47,6 @@ func Run(ctx context.Context, version string) error {
 	hello, err := client.Hello(ctx, version)
 	if err != nil {
 		return err
-	}
-	if hello.Upgrade != "" {
-		return upgrade()
 	}
 	args, err := modelArgs(hello.Model)
 	if err != nil {
@@ -86,12 +77,7 @@ func Run(ctx context.Context, version string) error {
 		return err
 	}
 	defer h.Close()
-	runner := &Runner{Harness: h, Sink: client, Upgrade: func() error {
-		if err := h.Close(); err != nil {
-			return err
-		}
-		return upgrade()
-	}}
+	runner := &Runner{Harness: h, Sink: client}
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error { return runner.Handle(ctx, message) })
 	}()
