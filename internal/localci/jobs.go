@@ -43,7 +43,7 @@ var defaultScopeLimits = jobs.DefaultLimits
 // clampCheckResources bounds a check's request by the machine, as the jobs
 // executor's clamp does for every job.
 func clampCheckResources(check nodeCheck, node Node) checkResources {
-	return jobs.ClampResources(check.host, check.cpus, check.memoryMiB, jobs.Facts{CPUs: node.CPUs, MemoryBytes: node.MemoryBytes})
+	return jobs.ClampResources(check.host, check.cpus, check.memoryMiB, jobs.MachineFacts(nodeSource{node: &node}.machine()))
 }
 
 // checkUnit is the name of the systemd unit that holds a check's script. The
@@ -112,7 +112,7 @@ func (s nodeSource) current(ctx context.Context) (machines.Machine, error) {
 // may ask for, and the admission queue reads the disk through this record, so
 // it holds new work while the node's disk blocks.
 func (s nodeSource) machine() machines.Machine {
-	return machines.Machine{Name: s.node.Name, Enabled: true, MaxDiskPercent: s.node.MaxDiskPercent, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes, Disk: s.node.Disk}}
+	return machines.Machine{Name: s.node.Name, Enabled: true, MaxDiskPercent: s.node.MaxDiskPercent, QuickSlots: s.node.QuickSlots, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes, Disk: s.node.Disk}}
 }
 
 // exec builds the node executor of this runner.
