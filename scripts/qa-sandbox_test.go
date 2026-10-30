@@ -37,8 +37,8 @@ s=socket.socket()
 try: s.connect(('127.0.0.1',int(sys.argv[2])))
 except OSError: pass
 else: raise Exception('host listener reachable')
-assert os.environ['DYNA_DATA_DIR']==os.path.join(sys.argv[3], 'data')
-assert os.environ['HOME']==os.path.join(sys.argv[3], 'home')
+assert os.environ['DYNA_DATA_DIR']=='/qa/data'
+assert os.environ['HOME']=='/qa/home'
 open(os.path.join(sys.argv[3], 'result'), 'w').write('ok')
 `
 	cmd := exec.Command("bash", "qa-sandbox.sh", root, "/usr/bin/true", "/usr/share", "/usr/bin/true", "/usr/bin/true", "/usr/bin/true", "--", "/usr/bin/python3", "-c", script, secret, port, root)
