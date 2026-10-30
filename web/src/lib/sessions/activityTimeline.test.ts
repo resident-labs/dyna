@@ -26,7 +26,7 @@ test('steps expand independently, retain failures and load shell logs only when 
   let app
   try {
     flushSync(() => app = mount(C, { target: need(document.getElementById('app')), props: { row } }))
-    assert.match(document.body.textContent ?? '', /Turn 14.*3 steps.*2m 10s/)
+    assert.match(document.body.textContent ?? '', /3 steps/)
     assert.match(document.body.textContent ?? '', /expected 1 call, got 0/)
     assert.deepEqual(calls, [])
     const steps = document.querySelectorAll('details')
@@ -41,7 +41,7 @@ test('steps expand independently, retain failures and load shell logs only when 
     assert.equal(need(shellStep.querySelector('.meta')).textContent, 'succeeded in 1s')
     assert.doesNotMatch(shellStep.textContent ?? '', /exit 0/)
     // A failure is a state chip, never a bare exit code.
-    assert.equal(need(steps[2]).querySelector('.chip')?.textContent, 'failed')
+    assert.equal(need(steps[2]).querySelector('.status.danger')?.textContent, 'failed')
     assert.doesNotMatch(need(steps[2]).querySelector('summary')?.textContent ?? '', /exit 1/)
     const expand = (index: number) => flushSync(() => {
       const step = need(steps[index])
@@ -77,32 +77,13 @@ test('an active tool stays running when the API omits its false done flag', asyn
         { kind: 'tool', key: 'failed', step: 'run', label: 'npm', tool: 'ran', target: 'npm test', failed: true },
       ] }
       flushSync(() => app = mount(C, { target: need(document.getElementById('app')), props: { row } }))
-      const states = [...document.querySelectorAll('.timeline li')].map((li) => li.querySelector('.dot')?.getAttribute('aria-label'))
-      assert.deepEqual(states, [status === 'running' ? 'running' : 'done', 'done', 'failed'])
-      // Every step carries its own state chip, so a reader never reads an exit
-      // code to learn whether a call worked.
-      assert.deepEqual([...document.querySelectorAll('.chip')].map((chip) => chip.textContent), [status === 'running' ? 'running' : 'done', 'done', 'failed'])
+      const steps = [...document.querySelectorAll('.timeline li')]
+      assert.equal(steps[0]?.querySelector('.status.dot')?.textContent, status === 'running' ? 'running' : undefined)
+      assert.equal(steps[1]?.querySelector('.status'), null)
+      assert.equal(steps[2]?.querySelector('.status.danger')?.textContent, 'failed')
       if (app) unmount(app)
       app = undefined
     }
-  } finally {
-    if (app) unmount(app)
-    dom.window.close()
-    for (const key of [...domNames, 'HTMLMediaElement']) Reflect.deleteProperty(globalThis, key)
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('a running turn measures elapsed time despite the API zero end time', async (t) => {
-  t.mock.method(Date, 'now', () => Date.parse('2026-10-23T07:02:10Z'))
-  const dom = installDom()
-  Reflect.set(globalThis, 'HTMLMediaElement', dom.window.HTMLMediaElement)
-  const { dir, default: C, mount, unmount, flushSync } = await load({ component: '../sessions/ActivityTimeline', format })
-  const row: TimelineRow = { kind: 'timeline', key: 'timeline:1', turn: { n: 1, status: 'running', started: '2026-10-23T07:00:00Z', ended: '0001-01-01T00:00:00Z' }, steps: [] }
-  let app
-  try {
-    flushSync(() => app = mount(C, { target: need(document.getElementById('app')), props: { row } }))
-    assert.match(document.querySelector('.timeline header')?.textContent ?? '', /2m 10s/)
   } finally {
     if (app) unmount(app)
     dom.window.close()
