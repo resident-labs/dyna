@@ -320,6 +320,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ReleasePRReviewers", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyPR, Method: s.rooms.PRs.ReleasePRReviewers},
 		{Name: "GitHubList", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.GitHubList},
 		{Name: "GitHubView", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.GitHubView},
+		{Name: "IssueWatches", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.IssueWatches},
 		{Name: "StartIssueWork", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.rooms.StartIssueWork},
 		{Name: "GitHubDiff", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.GitHubDiff},
 		{Name: "StampPlanAncestry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.stampPlanAncestry, Local: true},
