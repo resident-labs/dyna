@@ -20,8 +20,8 @@
 
 <div class="tile {tone}" aria-busy={loading || undefined}>
   <span class="micro-label">{#if icon}{@render icon()}{/if}{label}</span>
-  <strong class="num" class:dimmed={loading}>{value}</strong>
-  {#if fill !== null}<span class="meter" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fill)}><span style:width="{fill}%"></span></span>{/if}
+  <strong class="ui-num" class:dimmed={loading}>{value}</strong>
+  {#if fill !== null}<span class="ui-meter" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fill)}><span style:width="{fill}%"></span></span>{/if}
   {#if detail}<span class="detail">{detail}</span>{/if}
 </div>
 
@@ -29,16 +29,16 @@
   .tile { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; padding: var(--s4) 20px; }
   .micro-label { display: inline-flex; align-items: center; gap: 6px; }
   strong { margin-top: var(--s1); font-size: var(--t-stat); font-weight: var(--w-strong); line-height: var(--leading-tight); letter-spacing: -0.02em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .meter { margin-top: var(--s1); }
+  .ui-meter { margin-top: var(--s1); }
   .detail { font-size: var(--t-cap); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .success strong { color: var(--tone-success-fg); }
   .warning strong { color: var(--tone-warning-fg); }
   .danger strong { color: var(--tone-danger-fg); }
   .info strong { color: var(--tone-info-fg); }
   .live strong { color: var(--tone-live-fg); }
-  .success .meter > span { background: var(--tone-success); }
-  .warning .meter > span { background: var(--tone-warning); }
-  .danger .meter > span { background: var(--tone-danger); }
-  .info .meter > span { background: var(--tone-info); }
-  .live .meter > span { background: var(--tone-live); }
+  .success .ui-meter > span { background: var(--tone-success); }
+  .warning .ui-meter > span { background: var(--tone-warning); }
+  .danger .ui-meter > span { background: var(--tone-danger); }
+  .info .ui-meter > span { background: var(--tone-info); }
+  .live .ui-meter > span { background: var(--tone-live); }
 </style>
