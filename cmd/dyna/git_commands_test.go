@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
 func TestGitCommandsRejectRetiredTopLevelNames(t *testing.T) {
@@ -37,8 +35,6 @@ func TestRenamedCommandPathsResolveToTheSameCommand(t *testing.T) {
 	}{
 		{[]string{"subagent", "start"}, []string{"session", "start"}, true},
 		{[]string{"subagent", "list"}, []string{"session", "list"}, true},
-		{[]string{"git", "issue", "list"}, []string{"issue", "list"}, false},
-		{[]string{"git", "export"}, []string{"git", "pr", "export"}, false},
 	} {
 		oldCmd, oldRest, err := root.Find(tc.old)
 		if err != nil || len(oldRest) != 0 {
@@ -54,20 +50,8 @@ func TestRenamedCommandPathsResolveToTheSameCommand(t *testing.T) {
 		if oldCmd.Name() != newCmd.Name() || oldCmd.Short != newCmd.Short {
 			t.Errorf("%v and %v reach different commands: %q %q", tc.old, tc.new, oldCmd.Name(), newCmd.Name())
 		}
-		if !tc.alias && (!hiddenFromHelp(oldCmd) || hiddenFromHelp(newCmd)) {
-			t.Errorf("%v must stay hidden and %v must stay visible", tc.old, tc.new)
-		}
-	}
-}
 
-// hiddenFromHelp reports whether cmd or a parent hides cmd from help.
-func hiddenFromHelp(cmd *cobra.Command) bool {
-	for c := cmd; c != nil; c = c.Parent() {
-		if c.Hidden {
-			return true
-		}
 	}
-	return false
 }
 
 func TestGitCIReportCheck(t *testing.T) {

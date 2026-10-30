@@ -16,8 +16,8 @@ func TestGroup(t *testing.T) {
 	}
 }
 
-func TestRefreshAndExportCommands(t *testing.T) {
-	for _, args := range [][]string{{"sync", "refresh"}, {"export"}} {
+func TestRefreshAndPRExportCommands(t *testing.T) {
+	for _, args := range [][]string{{"sync", "refresh"}, {"pr", "export"}} {
 		cmd, _, err := NewCommand().Find(args)
 		if err != nil || cmd == nil || cmd.Flags().Lookup("wait") == nil {
 			t.Fatalf("%v command=%v error=%v", args, cmd, err)
