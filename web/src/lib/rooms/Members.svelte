@@ -155,7 +155,7 @@
     {#if m.depth > 0}
       <span class="guide" aria-hidden="true"></span>
     {/if}
-    <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
+    <Avatar emoji={m.avatar.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
     <span class="text">
       <span class="name hue-{m.hue}"><span class="fit"><span class="nm">{offSeat ? 'root (internal)' : m.name}</span>{#if pr}<span class="pr">{changeName(pr)}</span>{/if}</span>{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if m.ownerDisplay}<span class="display" title="This session's own shells use your display">uses your display</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}{#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}</span>
       <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}{#if status}<span class="now" class:working={status === 'working'}>{status}</span> · {/if}{#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>

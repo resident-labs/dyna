@@ -12,7 +12,7 @@ const code = await bundle({
   format: FORMAT + ` export const roomLabel = (r) => r.name; export const stamp = () => '12:00';`,
 })
 
-const post = (id: string, text: string) => ({ wake: false, id, ts: 1, roomId: 'room_x', from: 'repo:lead', to: ['repo'], text, owner: false, completion: false, fromHue: 2, speaker: 'lead' })
+const post = (id: string, text: string) => ({ avatar: { kind: 'session', room: 'repo', color: 'crimson' }, wake: false, id, ts: 1, roomId: 'room_x', from: 'repo:lead', to: ['repo'], text, owner: false, completion: false, fromHue: 2, speaker: 'lead' })
 const targets = [{ kind: 'session', key: 'ses_deploy', label: 'deploy-fix', hint: 'working', terms: '', session: { id: 'ses_deploy', name: 'deploy-fix' } }]
 function need<T>(value: T | null | undefined): T {
   assert.ok(value !== null && value !== undefined)

@@ -124,7 +124,7 @@
           {#if g.shared}<span class="holder">Room</span>{/if}
           {#each g.holders ?? [] as id}
             {@const m = member(id)}
-            <span class="holder"><Avatar name={name(id)} hue={m?.hue ?? 0} emoji={m?.emoji} size={18} /><span class="hue-{m?.hue ?? 0}">{name(id)}</span><button class="remove" aria-label="Remove {name(id)}" onclick={() => remove(id)}>✕</button></span>
+            <span class="holder"><Avatar name={name(id)} hue={m?.hue ?? 0} emoji={m?.avatar.emoji} size={18} /><span class="hue-{m?.hue ?? 0}">{name(id)}</span><button class="remove" aria-label="Remove {name(id)}" onclick={() => remove(id)}>✕</button></span>
           {/each}
           <button class="link" onclick={editHolders}>Add</button>
         {/if}

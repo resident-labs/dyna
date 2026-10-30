@@ -18,14 +18,14 @@
     {#if shared}<span class="chip">Room</span>{/if}
     {#each holders as id}
       {@const m = members.find((m) => m.id === id)}
-      <span class="chip"><Avatar name={m?.name ?? id} hue={m?.hue ?? 0} emoji={m?.emoji} size={18} /><span>{m?.name ?? id}</span><button type="button" class="remove" aria-label="Remove {m?.name ?? id}" onclick={() => remove(id)}>✕</button></span>
+      <span class="chip"><Avatar name={m?.name ?? id} hue={m?.hue ?? 0} emoji={m?.avatar.emoji} size={18} /><span>{m?.name ?? id}</span><button type="button" class="remove" aria-label="Remove {m?.name ?? id}" onclick={() => remove(id)}>✕</button></span>
     {/each}
     <input aria-label="Add goal holder" placeholder={holders.length ? 'Add' : '@ Add member'} bind:value={query} onfocus={() => (open = true)} onkeydown={(e) => { if (e.key === 'Escape') { open = false; e.stopPropagation() } if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (choices[0]) add(choices[0]) } }} />
   </div>
   {#if open}
     <div class="choices">
       <button type="button" onclick={() => { holders = []; shared = true; query = ''; open = false }}>Room</button>
-      {#each choices as m}<button type="button" onclick={() => add(m)}><Avatar name={m.name} hue={m.hue} emoji={m.emoji} size={18} /><span class="hue-{m.hue}">{m.name}</span></button>{/each}
+      {#each choices as m}<button type="button" onclick={() => add(m)}><Avatar name={m.name} hue={m.hue} emoji={m.avatar.emoji} size={18} /><span class="hue-{m.hue}">{m.name}</span></button>{/each}
       <button type="button" class="close" onclick={() => (open = false)}>Close</button>
     </div>
   {/if}
