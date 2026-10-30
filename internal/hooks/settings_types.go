@@ -41,6 +41,9 @@ const (
 	ResultError RunResult = "error"
 	// ResultFail is a run whose hook exited with a failure status.
 	ResultFail RunResult = "fail"
+	// ResultInstalling is a run that found the install unit for its commit
+	// already active. That unit records the result, so this run is not an error.
+	ResultInstalling RunResult = "installing"
 )
 
 // Run records one repository hook attempt independently of test evidence.
