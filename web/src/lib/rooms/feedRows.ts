@@ -149,7 +149,9 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
     group.push(post)
     openThreads.set(thread, group)
     const spec = eventSpecs.find((entry) => entry.family === post.kind && entry.type === post.notice?.kind)
-    if (spec?.threadEnd) {
+    const pr = prEvent(post)
+    const ends = pr?.type === 'update' ? !pr.outcome || pr.outcome === 'failed' : spec?.threadEnd
+    if (ends) {
       closeThread(group)
       openThreads.delete(thread)
     }
