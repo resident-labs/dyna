@@ -301,11 +301,20 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		conclusiveLocal = result.Node != "" && (result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError)
 	}
 	if mode == localci.ModeLocal || mode == localci.ModeBoth {
-		if !conclusiveLocal {
+		if !conclusiveLocal || !job.trial {
 			plan, err = s.planRegisteredCI(ctx, job)
-			if err != nil {
+			if err != nil && !conclusiveLocal {
 				return snap, err
 			}
+		}
+		if mode == localci.ModeLocal && !job.trial && plan.runnable() {
+			if suites, set := plan.required.ExplicitPRSuites(); set && len(suites) == 0 {
+				result = localci.Result{}
+				conclusiveLocal = false
+			}
+		}
+		if conclusiveLocal {
+			plan = localCIPlan{}
 		}
 		if plan.bootstrapErr != nil && !hostedFallback {
 			return snap, plan.bootstrapErr
