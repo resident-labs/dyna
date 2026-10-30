@@ -1057,7 +1057,7 @@ func reviewTask(r Record) string {
 	input, _ := json.Marshal(assignment(r))
 	base += "Assignment input: " + string(input) + "\n"
 	base += "You may start at most 3 live helper sessions, one level deep, using your own profile or a cheaper profile (higher cost-efficiency). Helpers report findings to you. Only you may record this assignment's verdict. Keep this reviewer session open between reviews.\n"
-	return base + fmt.Sprintf(`This assignment is Dyna-only. Read GitHub and record your review in Dyna.
+	return base + fmt.Sprintf(`This assignment is Dyna-only. Use GitHub for reading only; publish reviews and comments only in Dyna.
 Record exactly one typed result in Dyna before your turn ends: %s approve|changes|approve-fast|stop-early --body-file <file> --findings-file <json-file> --head %s. A turn that ends without a typed result is an error. Use changes when fixes are needed, with structured findings. approve-fast is for test code or low-risk changes of any kind, at the reviewer's own discretion. It lands without a merge trial when required CI passed at exactly the approved head. Use stop-early with --reason superseded|duplicate|empty|too-large when you stop before judging the change. Reviews over 12000 bytes are rejected. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. The stored result is visible in Dyna and a changes result is delivered to the author.`, command, r.Head)
 }
 func (s *Service) launch(ctx context.Context, r Record, profile, task string) (string, error) {
