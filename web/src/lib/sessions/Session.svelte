@@ -16,6 +16,9 @@
   import { api } from '../../api.ts'
   import { short, ago } from '../ui/format.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
+  import { commandOptions, matchCommand } from '../rooms/slashCompletion.ts'
+  import { matchMentions } from '../rooms/mentions.ts'
+  import type { SlashCommand } from '../../api.ts'
   import { unreadableOutput, unreadableNotice } from '../settings/support.ts'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
@@ -213,8 +216,64 @@
     return loaded
   }
 
+  let commands = $state<SlashCommand[]>([])
+  let commandLoad: Promise<boolean> | null = null
+  let menu = $state(false)
+  let pick = $state(0)
+  const completionID = $props.id()
+  let matches = $derived(menu ? matchMentions(commandOptions(commands), draft.slice(0, field?.selectionStart ?? draft.length), 20) : [])
+  $effect(() => { room.id; commands = []; commandLoad = null; menu = false })
+  function loadCommands() {
+    const id = room.id
+    if (!commandLoad) commandLoad = api.commands(id).then((list) => {
+      if (room.id === id) commands = list
+      return true
+    }).catch((e) => {
+      if (room.id === id) { sendError = errorText(e); commandLoad = null }
+      return false
+    })
+    return commandLoad
+  }
+  function findCommand() {
+    const text = draft.slice(0, field?.selectionStart ?? draft.length)
+    const open = /^\/[^\s]*$/.test(text) && !text.startsWith('//')
+    if (open && !menu) { commandLoad = null; void loadCommands() }
+    menu = open
+    pick = 0
+  }
+  async function complete(value: string) {
+    draft = value + ' ' + draft.slice(field?.selectionStart ?? draft.length)
+    menu = false
+    await tick()
+    field?.focus()
+    field?.setSelectionRange(value.length + 1, value.length + 1)
+  }
+
   async function send() {
     if (!canSend) return
+    if (draft.startsWith('/') && !draft.startsWith('//') && !forwarding) {
+      const original = draft
+      const target = dm.address
+      busy = true
+      const loaded = await loadCommands()
+      await tick()
+      busy = false
+      if (!loaded || draft !== original || dm.address !== target) return
+      const command = matchCommand(commands, draft)
+      if (command) {
+        if (command.item.source === 'skill' && !command.text) { sendError = 'Type a message for the skill.'; return }
+        if ($attachments.items.length) { sendError = 'Send the command without files.'; return }
+        busy = true
+        sendError = ''
+        try {
+          const result = await api.runCommand(room.id, command.item.name, command.text, target)
+          if (result.failed?.length) sendError = result.failed.map((f) => f.error || 'delivery failed').join(' · ')
+          if (result.message.id) { draft = ''; stuck = true }
+        } catch (e) { sendError = errorText(e) }
+        finally { busy = false; await tick(); field?.focus() }
+        return
+      }
+    }
     busy = true
     sendError = ''
     try {
@@ -238,6 +297,12 @@
   }
 
   function keydown(e: KeyboardEvent) {
+    if (menu && e.key === 'Escape') { e.preventDefault(); menu = false; return }
+    if (matches.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); pick = (pick + 1) % matches.length; return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); pick = (pick - 1 + matches.length) % matches.length; return }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); const selected = matches[pick]; if (selected) void complete(selected.value); return }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
@@ -288,7 +353,17 @@
         <p class="notice"><span>Reopen this session to send another message.</span> <button onclick={reopen} disabled={!!reopening || !!dismissing}>{reopening === m.id ? 'Reopening…' : 'Reopen'}</button></p>
       {/if}
       {#if reopenError}<p class="err" role="alert">{reopenError}</p>{/if}
-      <ComposerBox model={m.profile || m.model || ''} mode="Direct message" {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={m.closed ? `${m.name} is closed` : `Message @${m.name}`} {busy} {canSend} bad={!!sendError} closed={!!m.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
+      {#if menu && matches.length}
+        <div class="command-menu" id={completionID} role="listbox" aria-label="Composer suggestions">
+          {#each matches as option, i}
+            {#if option.group !== matches[i - 1]?.group}<div class="command-group">{option.group}</div>{/if}
+            <button id={completionID + '-' + i} role="option" aria-selected={i === pick} title={option.hint} onmousedown={(e) => e.preventDefault()} onclick={() => complete(option.value)}>
+              <span>{option.value}{#if option.arg} ‹{option.arg}›{/if}</span><span>{option.hint}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      <ComposerBox {completionID} expanded={!!matches.length} activeOption={matches.length ? completionID + '-' + pick : undefined} model={m.profile || m.model || ''} mode="Direct message" {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={m.closed ? `${m.name} is closed` : `Message @${m.name}`} {busy} {canSend} bad={!!sendError} closed={!!m.closed} oninput={() => { sendError = ''; findCommand() }} onclick={findCommand} onkeydown={keydown} onsend={send} />
       <div class="foot">
         {#if sendError}
           <span class="err-t">{sendError}</span>
@@ -389,7 +464,12 @@
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: 0.35; } }
 
-  .composer { padding: 0 var(--s4) 6px; flex: none; }
+  .composer { position: relative; padding: 0 var(--s4) 6px; flex: none; }
+  .command-menu { position: absolute; left: 16px; right: 16px; bottom: calc(100% - 4px); background: var(--side); border: 1px solid var(--line); border-radius: 8px; padding: 6px; box-shadow: 0 8px 24px #0006; z-index: 10; max-height: min(420px, 60dvh); overflow-y: auto; }
+  .command-group { padding: 6px 8px; color: var(--faint); font-size: var(--t-cap); }
+  .command-menu button { display: flex; width: 100%; justify-content: space-between; gap: var(--s2); padding: 8px; text-align: left; color: var(--ink); }
+  .command-menu button[aria-selected="true"] { background: var(--select); }
+  .command-menu button span:last-child { color: var(--muted); }
   .foot { min-height: 22px; padding: 3px var(--s1) 0; font-size: var(--t-sm); color: var(--faint); }
   .err-t { color: var(--coral); }
   kbd { font-family: var(--sans); font-size: var(--t-cap); font-weight: 600; color: var(--muted); }

@@ -18,7 +18,7 @@ export function mentionOptions(choices: readonly string[]): MentionOption[] {
   return choices.map((c) => ({ value: c, hint: c === '@root' ? 'external orchestrators watching this room' : c === '@team' ? 'your top-level sessions' : c.includes(':') ? 'another room' : 'member' }))
 }
 
-export function matchMentions(options: readonly MentionOption[], text: string, limit = 8): MentionOption[] {
+export function matchMentions<T extends MentionOption>(options: readonly T[], text: string, limit = 8): T[] {
   const q = text.toLowerCase()
   return options.filter((o) => o.value.toLowerCase().startsWith(q)).slice(0, limit)
 }
