@@ -132,7 +132,14 @@ func NewCommand() *cobra.Command {
 	return cmd
 }
 
-// listMine prints the requests the caller filed and the ones it holds.
+// listing is the JSON shape of dyna request list.
+type listing struct {
+	Questions []questions.Question    `json:"questions"`
+	Approvals []approvals.HeldRequest `json:"approvals"`
+}
+
+// listMine prints the requests the caller filed, the ones it holds, and the
+// pending approvals that wait on it.
 func listMine(c *cobra.Command, s *notify.Service, snd notify.Sender, roomRef string, jsonOut bool) error {
 	rec, err := s.QuestionRoom(snd, roomRef)
 	if err != nil {
@@ -152,8 +159,12 @@ func listMine(c *cobra.Command, s *notify.Service, snd notify.Sender, roomRef st
 			out = append(out, q)
 		}
 	}
+	held := []approvals.HeldRequest{}
+	if err := engineClient().Call(c.Context(), "ApprovalHeld", []any{rec.ID}, &held); err != nil {
+		return err
+	}
 	if jsonOut {
-		return json.NewEncoder(c.OutOrStdout()).Encode(out)
+		return json.NewEncoder(c.OutOrStdout()).Encode(listing{Questions: out, Approvals: held})
 	}
 	for _, q := range out {
 		role := "yours"
@@ -165,6 +176,9 @@ func listMine(c *cobra.Command, s *notify.Service, snd notify.Sender, roomRef st
 			fmt.Fprintf(c.OutOrStdout(), " — %s %s", q.Answer.Choice, q.Answer.Text)
 		}
 		fmt.Fprintln(c.OutOrStdout())
+	}
+	for _, h := range held {
+		fmt.Fprintf(c.OutOrStdout(), "%s  held by you, filed by %s  approval %s  waiting %s  %s\n", h.ID, h.Requester, h.Class, time.Since(h.CreatedAt).Truncate(time.Second), h.Title)
 	}
 	return nil
 }
