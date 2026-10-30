@@ -44,14 +44,14 @@ func (s *Service) handoff(w http.ResponseWriter, rt websvc.Route, p websvc.Princ
 	s.handoffs[hashToken(code)] = handoff{session: x.ID, target: target, exp: s.now().Add(HandoffLife)}
 	s.mu.Unlock()
 	s.o.Store.Audit("session.handoff", fmt.Sprintf("%s to %s", x.ID, target))
-	websvc.JSONReply(w, http.StatusOK, map[string]string{"code": code})
+	websvc.JSONReply(w, http.StatusOK, Handoff{Code: code})
 }
 
 func (s *Service) whoami(w http.ResponseWriter, p websvc.Principal) {
-	out := map[string]any{"kind": p.Kind, "id": p.ID, "name": p.Name}
+	out := Whoami{Kind: p.Kind, ID: p.ID, Name: p.Name}
 	if p.Kind == "connect" {
 		if x, ok := s.session(p.ID); ok {
-			out["user"], out["expires"], out["grantEnd"] = x.UserName, x.Access, x.End
+			out.User, out.Expires, out.GrantEnd = &x.UserName, &x.Access, &x.End
 		}
 	}
 	websvc.JSONReply(w, http.StatusOK, out)
@@ -63,5 +63,5 @@ func (s *Service) routes(w http.ResponseWriter, rt websvc.Route) {
 	if routes == nil {
 		routes = []Route{}
 	}
-	websvc.JSONReply(w, http.StatusOK, map[string]any{"machine": l.Machine, "key": s.PublicKey(), "current": rt.App, "routes": routes})
+	websvc.JSONReply(w, http.StatusOK, RouteList{Machine: l.Machine, Key: s.PublicKey(), Current: rt.App, Routes: routes})
 }

@@ -28,10 +28,6 @@ var errExportMoved = errors.New("export branch moved outside the operation; refu
 
 const maxExportPublicationAttempts = 5
 
-type SyncStarted struct {
-	Started bool `json:"started"`
-}
-
 func (s *Service) SyncRefresh(ctx context.Context, roomID, repo string) (SyncStarted, error) {
 	return s.startSyncOperation(ctx, roomID, repo, "refresh")
 }
