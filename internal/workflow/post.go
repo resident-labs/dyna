@@ -2,6 +2,9 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -106,7 +109,18 @@ func (e *engine) post(call goja.FunctionCall) goja.Value {
 	if e.opts.Poster == nil {
 		panic(vm.NewGoError(fmt.Errorf("post() is unavailable in this execution")))
 	}
-	res, err := e.opts.Poster(context.Background(), e.opts.Run.Meta.ID, mentions, text)
+	identity, _ := json.Marshal(struct {
+		Namespace, Workflow, Text string
+		Mentions                  []string
+	}{e.shared.jobNamespace, e.workflowID, text, mentions})
+	sum := sha256.Sum256(identity)
+	identityKey := hex.EncodeToString(sum[:])
+	e.shared.mu.Lock()
+	ordinal := e.shared.postOccurrences[identityKey]
+	e.shared.postOccurrences[identityKey] = ordinal + 1
+	e.shared.mu.Unlock()
+	key := fmt.Sprintf("%s-%d", identityKey, ordinal)
+	res, err := e.opts.Poster(context.Background(), e.opts.Run.Meta.ID, key, mentions, text)
 	if err != nil && res.ID == "" {
 		panic(vm.NewGoError(err))
 	}
