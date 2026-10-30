@@ -118,6 +118,19 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 				args = append(args, claudeExtraArgs...)
 				return commandSpec{argv: args, stdinPrompt: true, prompt: nudge, parseOutput: parseClaude, streamInput: streamJSON}
 			}
+			// /compact on the resumed session, as plain print mode: the
+			// command prints its summary and exits, so no stream is needed.
+			inv.compact = func(id string) commandSpec {
+				args := []string{definition.Binary, "-p", definition.Resume, id}
+				if !p.SafeMode && !explicitClaudePermissions {
+					args = append(args, "--dangerously-skip-permissions")
+				}
+				if p.Model != "" {
+					args = append(args, "--model", p.Model)
+				}
+				args = append(args, claudeExtraArgs...)
+				return commandSpec{argv: args, stdinPrompt: true, prompt: "/compact"}
+			}
 		}
 		return inv, nil
 

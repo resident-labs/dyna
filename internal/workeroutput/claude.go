@@ -50,8 +50,13 @@ type claudeRecord struct {
 			ResetsAt    int64   `json:"resetsAt"`
 		} `json:"unifiedWindows"`
 	} `json:"rate_limit_info"`
-	Message struct {
-		Role    string `json:"role"`
+	// ParentToolUseID is set on messages of a subagent's own conversation,
+	// whose prompt size says nothing about this session's context.
+	ParentToolUseID string `json:"parent_tool_use_id"`
+	Message         struct {
+		Role string `json:"role"`
+		// Usage is the one model call's token counts on an assistant message.
+		Usage   map[string]json.RawMessage `json:"usage"`
 		Content []struct {
 			Type      string          `json:"type"`
 			Text      string          `json:"text"`
