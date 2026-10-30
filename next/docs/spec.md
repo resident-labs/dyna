@@ -1102,7 +1102,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | local-ci | M3 as GitHub Actions with self-hosted runners in boxes; act dropped | merges need a CI result |
 | local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
-| maintenance | M3, only the daily backups (5.2) | boxes are deleted on close, so nothing else needs pruning |
+| maintenance | M3, only the daily backups (5.2) and the 14-day expiry of archive refs (5.9) | boxes are deleted on close, so nothing else needs pruning |
 | remote-access, connect, device-scopes | M3 | phone access must work on cutover day |
 | settings-accounts, settings-devices | M3 | sign in again and pair devices after the cutover |
 | skills | M3 | small catalog; fl-rea uses it |
