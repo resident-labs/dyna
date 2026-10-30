@@ -133,8 +133,9 @@ func (s *Service) RunPrompt(ctx context.Context, roomRef, name, text string) (st
 		}
 	}
 	text = strings.TrimSpace(text)
-	first, _, _ := strings.Cut(text, "=")
-	if text != "" && len(required) == 1 && !valid[first] {
+	first := strings.Fields(text)
+	named := len(first) > 0 && strings.Contains(first[0], "=")
+	if text != "" && len(required) == 1 && !named {
 		args[required[0]] = text
 	} else if text != "" {
 		fields, parseErr := splitPromptArgs(text)
@@ -217,7 +218,8 @@ func (s *Service) RunPrompt(ctx context.Context, roomRef, name, text string) (st
 			if message.Content.Type == "text" {
 				output.Content = append(output.Content, Content{Type: "text", Text: message.Role + ": " + message.Content.Text})
 			} else {
-				output.Content = append(output.Content, message.Content)
+				finish(room.MCPServerError, 0)
+				return "", errors.New("MCP prompt contains unsupported non-text content")
 			}
 		}
 	}
