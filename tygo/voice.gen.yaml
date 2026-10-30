@@ -1,0 +1,14 @@
+packages:
+  - path: dyna-agent/internal/voice
+    output_path: web/src/lib/api/voice.gen.ts
+    include_files: [wire_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/voice/realtime
+    output_path: web/src/lib/api/voice.gen.ts
+    include_files: [wire_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

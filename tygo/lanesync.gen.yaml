@@ -1,0 +1,16 @@
+packages:
+  - path: dyna-agent/internal/lanesync
+    output_path: web/src/lib/api/lanesync.gen.ts
+    include_files: [wire_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      type RemoteMapOrNull = Record<string, Remote> | null
+
+  - path: dyna-agent/internal/pr/watch
+    output_path: web/src/lib/api/lanesync.gen.ts
+    include_files: [lanesync_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
