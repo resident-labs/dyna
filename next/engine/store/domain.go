@@ -28,7 +28,7 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, goal string, event, boxEvent contract.Event, reason string) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, budgetParent contract.BoxID, goal string, event, boxEvent contract.Event, reason string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var parentID *contract.SessionID
 		if parent != "" {
@@ -38,7 +38,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,parent,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, nullableBox(budgetParent), "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -57,6 +57,13 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		_, err = s.AppendEvent(tx, boxEvent)
 		return err
 	})
+}
+
+func nullableBox(id contract.BoxID) *contract.BoxID {
+	if id == "" {
+		return nil
+	}
+	return &id
 }
 
 func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {
