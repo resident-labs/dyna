@@ -74,7 +74,7 @@
       {#if groups.healthy.length}
         <Row dense text={healthyLine(groups.healthy.length, groups.failing.length)} onclick={() => (folded = !folded)}>
           {#snippet lead()}<span class="dot ok" aria-hidden="true"></span>{/snippet}
-          {#snippet trail()}<span class="go" aria-hidden="true">{folded ? '▸' : '▾'}</span>{/snippet}
+          {#snippet trail()}<span class="chevron" class:expanded={!folded} aria-hidden="true">›</span>{/snippet}
         </Row>
         {#if !folded}{#each groups.healthy as row (row.id)}{@render line(row)}{/each}{/if}
       {/if}
@@ -91,6 +91,8 @@
   .dot.bad { background: var(--coral); }
   .err { color: var(--coral); }
   .small { font-size: var(--t-sm); margin: var(--s2); }
+  .chevron { color: var(--faint); font-size: var(--t-title); flex: none; }
+  .chevron.expanded { transform: rotate(90deg); }
   .go { color: var(--faint); font-size: var(--t-sm); flex: none; }
   .log { margin: 0 var(--s2) var(--s2); padding: var(--s2) var(--s3); background: var(--rail); border-radius: 6px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all; color: var(--muted); font-size: var(--t-sm); }
 </style>
