@@ -648,3 +648,29 @@ func TestBrowserSQLiteStopsWhenTheCallerCancels(t *testing.T) {
 		t.Fatal("sqlite3 kept running after the caller cancelled")
 	}
 }
+
+// A save-back whose context has already ended keeps its lease and profile, so
+// a later cleanup can retry the save.
+func TestBrowserSaveBackKeepsProfileWhenBudgetEnds(t *testing.T) {
+	browserTestEnvironment(t)
+	ctx := context.Background()
+	browserTestSQL(t, filepath.Join(browserMaster(), "Default/Cookies"), browserCookieSchema+"INSERT INTO cookies VALUES ('site', 'session', 'master', 1);")
+	if err := prepareBrowserProfile(ctx, "stuck", settings.Defaults()); err != nil {
+		t.Fatal(err)
+	}
+	browserTestSQL(t, filepath.Join(computerBrowserProfile("stuck"), "Default/Cookies"), "UPDATE cookies SET value='new', last_update_utc=2;")
+	cut, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := saveBackBrowserProfile(cut, "stuck"); err == nil {
+		t.Fatal("a save-back with an ended context reported success")
+	}
+	if _, err := os.Stat(browserLeasePath("stuck")); err != nil {
+		t.Fatal("a cut-off save-back dropped its lease")
+	}
+	if _, err := os.Stat(computerBrowserProfile("stuck")); err != nil {
+		t.Fatal("a cut-off save-back removed the profile")
+	}
+	if browserCookieValue(t, browserMaster()) != "master" {
+		t.Fatal("a cut-off save-back wrote the master profile")
+	}
+}
