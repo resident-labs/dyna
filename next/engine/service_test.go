@@ -602,6 +602,47 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 		t.Fatalf("unexpected box change: %+v", changed)
 	}
 }
+func TestClosePendingRepositoryFreeChildWithoutArchiveAck(t *testing.T) {
+	now := func() time.Time { return time.Unix(1000, 0) }
+	st, err := store.Open(t.TempDir(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	ctx := context.Background()
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	worker, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	record, err := st.Session(ctx, worker.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current, err := st.Box(ctx, record.Box); err != nil || current.State != contract.BoxPending {
+		t.Fatalf("box %+v, error %v, want pending before close", current, err)
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker.Session}); e != nil {
+		t.Fatal(e)
+	}
+	current, err := st.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxDeleted {
+		t.Fatalf("box %+v, error %v, want deleted without an archive ack", current, err)
+	}
+	if _, err := st.Session(ctx, worker.Session); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("session remains open: %v", err)
+	}
+}
+
 func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
@@ -613,13 +654,11 @@ func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	if _, e := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); e != nil {
 		t.Fatal(e)
 	}
-	closeCtx, cancel := context.WithCancel(ctx)
-	s.boxes = cancelOnRemove{cancel: cancel}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	if _, e := s.SessionClose(closeCtx, owner, contract.SessionCloseRequest{Session: session}); e == nil {
-		t.Fatal("expected canceled close")
-	}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
@@ -760,6 +799,16 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e != nil {
 		t.Fatal(e)
 	}
+	for _, id := range []contract.SessionID{a.Session, b.Session} {
+		ack := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+		if _, e := s.ArchiveDone(ctx, ack, contract.ArchiveDoneRequest{}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent.Session}
+	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	for _, id := range []contract.SessionID{a.Session, b.Session, parent.Session} {
 		if _, err := s.store.Session(ctx, id); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("session remains open: %v", err)
@@ -855,14 +904,19 @@ func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
 	}
 	adapter := heldRemoveBox{started: make(chan struct{}, 2), release: make(chan struct{}), removed: make(chan struct{}, 2)}
 	s.boxes = adapter
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: lead.Session}); e != nil {
+		t.Fatal(e)
+	}
+	ack := contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}
 	result := make(chan *contract.Error, 2)
-	closeLead := func() {
-		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: lead.Session})
+	ackLead := func() {
+		_, e := s.ArchiveDone(ctx, ack, contract.ArchiveDoneRequest{})
 		result <- e
 	}
-	go closeLead()
+	go ackLead()
 	<-adapter.started
-	go closeLead()
+	go ackLead()
 	close(adapter.release)
 	<-result
 	<-result
