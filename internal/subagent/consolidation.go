@@ -21,46 +21,6 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// ConsolidationState stays with the kept session. Source transcripts and task
-// directories remain independent archives; consolidation never changes git.
-type ConsolidationState struct {
-	PausedFor     time.Duration         `json:"pausedFor,omitempty"`
-	ID            string                `json:"id"`
-	RoomID        string                `json:"roomId"`
-	Target        string                `json:"target"`
-	Sessions      []string              `json:"sessions"`
-	Profile       string                `json:"profile"`
-	Model         string                `json:"model"`
-	Phase         string                `json:"phase"`
-	Requested     time.Time             `json:"requested"`
-	Deadline      time.Time             `json:"deadline"`
-	Ended         time.Time             `json:"ended,omitempty"`
-	Error         string                `json:"error,omitempty"`
-	CancelPending bool                  `json:"cancelPending,omitempty"`
-	Sources       []ConsolidationSource `json:"sources"`
-	Charter       string                `json:"charter,omitempty"`
-}
-type ConsolidationSource struct {
-	PendingIDs  []string       `json:"pendingIds,omitempty"`
-	Reservation *TransferState `json:"reservation,omitempty"`
-	Session     string         `json:"session"`
-	Address     string         `json:"address"`
-	Phase       string         `json:"phase"`
-	Source      string         `json:"source,omitempty"`
-	Error       string         `json:"error,omitempty"`
-	Context     string         `json:"context,omitempty"`
-	Dir         string         `json:"dir,omitempty"`
-	// Inbox uses the original cursor, queue and delivery records. It is never
-	// copied onto the target's cursor or claim map.
-	Cursor int64 `json:"cursor"`
-}
-type ConsolidationOptions struct {
-	Sessions []string `json:"sessions"`
-	Target   string   `json:"target"`
-	Profile  string   `json:"profile,omitempty"`
-	Model    string   `json:"model,omitempty"`
-}
-
 func (c *ConsolidationState) Active() bool {
 	return c != nil && c.Phase != "completed" && (c.Phase != "cancelled" || c.CancelPending)
 }

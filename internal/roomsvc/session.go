@@ -23,127 +23,13 @@ import (
 	"dyna-agent/internal/terminalsvc"
 	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/transcript"
-	"dyna-agent/internal/workeroutput"
 )
 
-// Session is a member's drill-down: identity plus transcript.
-type Session struct {
-	Cursor  string `json:"cursor,omitempty"`
-	Earlier bool   `json:"earlier"`
-	Newer   bool   `json:"newer"`
-	Member  Member `json:"member"`
-	Address string `json:"address"`
-	Posts   []Post `json:"posts"`
-	// References are the compact rows of the posts of other conversations that
-	// this one received or wrote. Each row names its post, its sender and its
-	// home, so a reader jumps to the post where it lives instead of drawing a
-	// second copy.
-	References []ReferenceRow     `json:"references,omitempty"`
-	Media      []Post             `json:"media"`
-	Dir        string             `json:"dir"`
-	Usage      workeroutput.Usage `json:"usage"`
-	Turns      []Turn             `json:"turns"`
-}
-
-// ReferenceRow is one post of another conversation, as a session's DM shows it:
-// who wrote it, which conversation it is in, its typed event facts or text
-// preview, and how many files it carries. TS is unix milliseconds.
-type ReferenceRow struct {
-	PostID string           `json:"postId"`
-	From   string           `json:"from"`
-	Kind   string           `json:"kind,omitempty"`
-	Notice room.EventNotice `json:"notice,omitzero"`
-	// Payload keeps a typed event's facts so the DM can use the same card as
-	// the feed instead of reading the agent-facing text as a preview.
-	Payload room.EventPayload `json:"payload,omitzero"`
-	// Speaker is the sender's label (see SpeakerLabel).
-	Speaker string `json:"speaker"`
-	// FromHue is the sender's stable name color index (see NameHue).
-	FromHue int `json:"fromHue"`
-	// Conversation is the home of the post, such as "room" or "voice".
-	Conversation string `json:"conversation"`
-	TS           int64  `json:"ts"`
-	Preview      string `json:"preview"`
-	Attachments  int    `json:"attachments"`
-}
-
-// Turn is one transcript turn.
-type Turn struct {
-	WrapUp             bool                            `json:"wrapUp,omitempty"`
-	Harness            string                          `json:"harness,omitempty"`
-	OutputDialect      string                          `json:"outputDialect,omitempty"`
-	UsageNormalization workeroutput.UsageNormalization `json:"usageNormalization,omitempty"`
-	Profile            string                          `json:"profile,omitempty"`
-	Model              string                          `json:"model,omitempty"`
-	HarnessSession     string                          `json:"harnessSession,omitempty"`
-	N                  int                             `json:"n"`
-	Status             string                          `json:"status"`
-	Started            time.Time                       `json:"started"`
-	Ended              time.Time                       `json:"ended"`
-	Usage              workeroutput.Usage              `json:"usage"`
-	FirstCall          *workeroutput.CallUsage         `json:"firstCall,omitempty"`
-	Items              []Item                          `json:"items"`
-	Omitted            bool                            `json:"omitted,omitempty"`
-	Wake               *wakeView                       `json:"wake,omitempty"`
-}
-
-// wakeView is the typed wake cause the session view draws. Line is the short
-// sentence; the other fields are the facts, so the view does not parse text.
-type wakeView struct {
-	Kind   string `json:"kind"`
-	PostID string `json:"postId,omitempty"`
-	Sender string `json:"sender,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Line   string `json:"line"`
-}
-
-func wakeViewOf(c subagent.WakeCause) *wakeView {
+func wakeViewOf(c subagent.WakeCause) *WakeView {
 	if c.Kind == "" {
 		return nil
 	}
-	return &wakeView{Kind: string(c.Kind), PostID: c.PostID, Sender: c.Sender, Name: c.Name, Line: c.Line()}
-}
-
-// Item is one transcript entry. Kind is prompt, steering, reply, tool,
-// thought, error, or note.
-type Item struct {
-	PostID    string    `json:"postId,omitempty"`
-	Delivered bool      `json:"delivered,omitempty"`
-	Kind      string    `json:"kind"`
-	TS        time.Time `json:"ts"`
-	Text      string    `json:"text,omitempty"`
-	From      string    `json:"from,omitempty"`
-	// Step is what a tool call did, in the session view's own words: read,
-	// edit, search, run and so on. Label is the call's short name, a file name
-	// or a command's first word, and ToolName the harness's own tool ID. The
-	// row shows Step, Label and a state; ToolName, the full target and the exit
-	// code stay in its details.
-	Step       string `json:"step,omitempty"`
-	Label      string `json:"label,omitempty"`
-	ToolName   string `json:"toolName,omitempty"`
-	DurationMS int    `json:"durationMs,omitempty"`
-	Tool       string `json:"tool,omitempty"`
-	Target     string `json:"target,omitempty"`
-	Aside      string `json:"aside,omitempty"`
-	Failed     bool   `json:"failed,omitempty"`
-	Done       bool   `json:"done,omitempty"`
-	// JobID and JobOp link a call of Dyna's shell tools to its job: JobOp is
-	// run, output or stop. Job is the snapshot of the job a run started.
-	// Command, Output and Exit explain a failed call: its input, the tail of
-	// what it printed, and its exit code. Other calls carry none of them.
-	Command string                `json:"command,omitempty"`
-	Output  string                `json:"output,omitempty"`
-	Exit    *int                  `json:"exit,omitempty"`
-	JobID   string                `json:"jobId,omitempty"`
-	JobOp   string                `json:"jobOp,omitempty"`
-	Job     *terminalsvc.ShellJob `json:"job,omitempty"`
-	// A compaction item carries its state, its trigger (auto, manual or dyna),
-	// the context size on each side when reported, and the reason it failed.
-	State        string `json:"state,omitempty"`
-	Trigger      string `json:"trigger,omitempty"`
-	TokensBefore int64  `json:"tokensBefore,omitempty"`
-	TokensAfter  int64  `json:"tokensAfter,omitempty"`
-	Reason       string `json:"reason,omitempty"`
+	return &WakeView{Kind: string(c.Kind), PostID: c.PostID, Sender: c.Sender, Name: c.Name, Line: c.Line()}
 }
 
 var kindNames = map[transcript.Kind]string{

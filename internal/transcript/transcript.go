@@ -82,23 +82,19 @@ type Tool struct {
 	JobOp              shellop.Operation
 }
 
-// StepKind is the kind of work one tool call did. It is a closed set, so the
-// session view draws a designed row for each kind instead of showing a tool ID.
-type StepKind string
-
-// Step kinds. StepTool covers every tool the view names, such as an MCP tool.
+// Existing names stay as aliases; the prefixed names let tygo emit a closed union.
 const (
-	StepRead     StepKind = "read"
-	StepEdit     StepKind = "edit"
-	StepWrite    StepKind = "write"
-	StepSearch   StepKind = "search"
-	StepList     StepKind = "list"
-	StepRun      StepKind = "run"
-	StepFetch    StepKind = "fetch"
-	StepDelegate StepKind = "delegate"
-	StepPlan     StepKind = "plan"
-	StepMonitor  StepKind = "monitor"
-	StepTool     StepKind = "tool"
+	StepRead     = StepKindRead
+	StepEdit     = StepKindEdit
+	StepWrite    = StepKindWrite
+	StepSearch   = StepKindSearch
+	StepList     = StepKindList
+	StepRun      = StepKindRun
+	StepFetch    = StepKindFetch
+	StepDelegate = StepKindDelegate
+	StepPlan     = StepKindPlan
+	StepMonitor  = StepKindMonitor
+	StepTool     = StepKindTool
 )
 
 // Item is one entry of the conversation.
