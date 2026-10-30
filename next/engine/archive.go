@@ -37,7 +37,7 @@ func (s *Service) ResumeClosures(ctx context.Context) *contract.Error {
 			}
 		}
 		session, err := s.store.Session(ctx, current.Session)
-		if current.State == contract.BoxDeleted && errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {
