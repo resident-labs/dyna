@@ -28,8 +28,9 @@
   const until = $derived(resetsIn(window.resetsAt, now()))
   const low = $derived(remaining !== null && remaining < 20)
   const hover = $derived([`${name} · ${window.label}`, notice || (remaining === null ? 'Not reported' : `${percent(remaining)} left`), dateTime(window.resetsAt) ? `Resets ${dateTime(window.resetsAt)}` : ''].filter(Boolean).join(' · '))
-  const valueTip = $derived([`${percent(remaining)} left`, pace ? paceWords[pace.status] : ''].filter(Boolean).join(', '))
-  const words = $derived([name, active ? 'in use' : '', notice || (remaining === null ? 'not reported' : `${percent(remaining)} left${low ? ', low' : ''}`)].filter(Boolean).join(', '))
+  const paceWord = $derived(pace ? paceWords[pace.status] : '')
+  const valueTip = $derived([`${percent(remaining)} left`, paceWord].filter(Boolean).join(', '))
+  const words = $derived([name, active ? 'in use' : '', notice || (remaining === null ? 'not reported' : [`${percent(remaining)} left${low ? ', low' : ''}`, paceWord].filter(Boolean).join(', '))].filter(Boolean).join(', '))
 </script>
 
 <div class="segment" class:active class:muted title={hover}>
@@ -39,7 +40,7 @@
   {/if}
   <div class="label" role={remaining === null ? undefined : 'meter'} aria-label={words} aria-valuenow={remaining ?? undefined} aria-valuemin={remaining === null ? undefined : 0} aria-valuemax={remaining === null ? undefined : 100}>
     {#if remaining === null}<span class="chip quiet">{notice ? 'Probably reset' : 'Not reported'}</span>
-    {:else}<span class="chip ui-num value" class:low title={valueTip}>{percent(remaining)}</span>{/if}
+    {:else}<span class="chip ui-num value" class:low title={valueTip}>{percent(remaining)}{#if paceWord}<span class="pace" class:ahead={pace?.status === 'ahead'}> · {paceWord}</span>{/if}</span>{/if}
     {#if showAccount}<span class="name">{name}</span>{/if}
     {#if until}<span class="chip reset" title={dateTime(window.resetsAt)}>↻ {until}</span>{/if}
   </div>
@@ -56,6 +57,8 @@
   .chip { flex: none; padding: 0 6px; border-radius: var(--r-badge); background: rgba(var(--glass-ink), var(--glass-pill)); font-size: var(--t-cap); font-variant-numeric: tabular-nums; color: var(--ink-2); }
   .value { color: var(--ink); }
   .value.low { color: var(--tone-warning-fg); }
+  .pace { color: var(--muted); }
+  .pace.ahead { color: var(--tone-warning-fg); }
   .quiet { color: var(--muted); }
   .reset { margin-left: auto; }
 </style>

@@ -57,15 +57,21 @@ func qaSeedFixtures(dataDir string) error {
 	accounts := &accountstore.Store{Root: filepath.Join(dataDir, "accounts")}
 	providers := []accountstore.Provider{accountstore.ProviderAnthropic, accountstore.ProviderChatGPT, accountstore.ProviderKimiCode, accountstore.ProviderXAI, accountstore.ProviderDeepSeek, accountstore.ProviderZAI}
 	used := 35.0
+	fiveHour := 40.0
 	now := time.Now().UTC()
 	if err := accounts.Update(func(state *accountstore.State) error {
 		for i, provider := range providers {
 			id := fmt.Sprintf("%032x", i+1)
+			windows := []accountstore.Window{{ID: "weekly", Label: "Weekly", UsedPercent: &used, ResetsAt: now.Add(72 * time.Hour).Format(time.RFC3339)}}
+			// Anthropic also reports a five-hour window, so one card shows several rows.
+			if provider == accountstore.ProviderAnthropic {
+				windows = []accountstore.Window{{ID: "five_hour", Label: "5-hour", UsedPercent: &fiveHour, ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339)}, windows[0]}
+			}
 			state.Entries = append(state.Entries, accountstore.Entry{Metadata: accountstore.Metadata{
 				ID: id, Harness: "pi", Provider: provider, Kind: accountstore.KindAPIKey,
 				Identity: "qa:" + string(provider), Label: string(provider),
 				NativeHome:  filepath.Join(accounts.Root, "pi", id),
-				Observation: &accountstore.Observation{ObservedAt: now, Windows: []accountstore.Window{{ID: "weekly", Label: "Weekly", UsedPercent: &used}}},
+				Observation: &accountstore.Observation{ObservedAt: now, Windows: windows},
 			}})
 		}
 		return nil
