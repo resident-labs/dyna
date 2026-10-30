@@ -34,7 +34,7 @@ func ghApprovalExecutor(rooms *room.Store, claim claimComment) approvals.Execute
 			return approvals.Result{}, err
 		}
 		defer cleanup()
-		ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, r.Room), rooms)
+		ctx = ghclient.WithApprovedClass(ghclient.WithRooms(ghclient.WithRoom(ctx, r.Room), rooms), r.Class)
 		if len(payload.Media) > 0 {
 			ctx = ghclient.WithApprovedMedia(ctx, payload.MediaDestination)
 		}
