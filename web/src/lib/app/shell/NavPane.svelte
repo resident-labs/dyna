@@ -1,9 +1,11 @@
 <script lang="ts">
   import RoomRail from '../../rooms/RoomRail.svelte'
   import Sidebar from '../../rooms/Sidebar.svelte'
+  import OwnerBar from '../../rooms/OwnerBar.svelte'
   import { dialog } from '../../ui/dialog.ts'
   import type { ComponentProps } from 'svelte'
   import type { Room } from '../../api/room.ts'
+  import type { RouteNotice } from '../../settings/link.ts'
   // The room rail and the sidebar beside it. On a wide screen this wrapper adds
   // no box; on a narrow one it is the drawer that slides in from the left.
   // App keeps the open room and the drawer state, and builds the sidebar's own
@@ -26,18 +28,31 @@
     update: boolean
     onsettings: () => void
     onlogout: () => void
+    /** The owner's name color in the open room. */
+    ownerHue: number
+    route: RouteNotice | null
     sidebar: ComponentProps<typeof Sidebar>
   }
-  let { open, narrow, suspended = false, showSide, rooms, selected, onselect, onclose, onmenu, update, onsettings, onlogout, sidebar }: Props = $props()
+  let { open, narrow, suspended = false, showSide, rooms, selected, onselect, onclose, onmenu, update, onsettings, onlogout, ownerHue, route, sidebar }: Props = $props()
   let modal = $derived(narrow && open && !suspended)
+  // The owner bar sits at the foot of the sidebar, or on the rail while the
+  // sidebar is hidden.
+  let inSidebar = $derived(showSide || narrow)
 </script>
+
+{#snippet sideBar()}
+  <OwnerBar hue={ownerHue} {route} {update} {onsettings} {onlogout} />
+{/snippet}
+{#snippet railBar()}
+  <OwnerBar vertical hue={ownerHue} {route} {update} {onsettings} {onlogout} />
+{/snippet}
 
 <!-- The wrapper is a dialog only while the phone drawer owns focus. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div class="nav" class:open={open && !suspended} inert={narrow && !modal} use:dialog={{ active: modal, close: onclose }} role={modal ? 'dialog' : undefined} aria-modal={modal ? 'true' : undefined} aria-label={modal ? 'Rooms and views' : undefined} tabindex={modal ? -1 : undefined}>
-  <RoomRail {narrow} {rooms} {selected} {onselect} {onmenu} {update} {onsettings} {onlogout} />
-  {#if showSide || narrow}
-    <Sidebar {...sidebar} />
+  <RoomRail {narrow} {rooms} {selected} {onselect} {onmenu} footer={inSidebar ? undefined : railBar} />
+  {#if inSidebar}
+    <Sidebar {...sidebar} bar={sideBar} />
   {/if}
 </div>
 
