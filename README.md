@@ -165,6 +165,10 @@ notifications (`docs/desktop/CONNECT.md`).
 Agents talk in rooms with `dyna post`, `dyna room log`, `dyna room search`,
 `dyna room read`, `dyna room members` and, for an external root,
 `dyna room watch`.
+A root can mute cross-room wakes with `dyna room sender-mute session other:agent --for 30m`
+or `dyna room sender-mute room other --for 30m`. Use `--for 0` to remove a mute.
+Posts remain as quiet context. Dyna also quiets cross-room session posts after
+three root wakes from the same sender in two minutes. Owner and root posts are exempt.
 Start with `dyna guide`. It lists the topics and when to read each one:
 `sessions`, `delegation`, `workflows`, `steering`, `posting`, `git`,
 `computers` and `recovery`. Root reads `external-orchestration`.
