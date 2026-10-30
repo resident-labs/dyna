@@ -192,3 +192,10 @@ export function elapsed(ms: number): string {
 
 // isLongCall marks a tool call or compaction that has run over 30 seconds.
 export const isLongCall = (ms: number): boolean => ms > 30000
+
+// minutesText writes minutes the way the settings show a time: 10m, 1h, 1h30m, 14d.
+export function minutesText(n: number): string {
+  if (n > 0 && n % 1440 === 0) return `${n / 1440}d`
+  const h = Math.floor(n / 60)
+  return h ? `${h}h${n % 60 ? `${n % 60}m` : ''}` : `${n}m`
+}

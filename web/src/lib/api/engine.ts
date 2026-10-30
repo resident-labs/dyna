@@ -283,6 +283,7 @@ export interface Engine {
   AddGlobalHook(hook: HookInput): Promise<null>
   EditGlobalHook(name: string, patch: Partial<HookInput>): Promise<null>
   RemoveGlobalHook(name: string): Promise<null>
+  RunService(name: string): Promise<HookRun>
   EditService(name: string, patch: ServicePatch): Promise<null>
   ResetService(name: string): Promise<null>
 
