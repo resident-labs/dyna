@@ -43,11 +43,13 @@ func TestOtherRoomRepositoryAllowsFetchButRejectsPush(t *testing.T) {
 	handler := Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true})
 	fetch := httptest.NewRecorder()
 	handler.ServeHTTP(fetch, httptest.NewRequest("GET", "/git/owner/other.git/info/refs?service=git-upload-pack", nil))
+	advertise := httptest.NewRecorder()
+	handler.ServeHTTP(advertise, httptest.NewRequest("GET", "/git/owner/other.git/info/refs?service=git-receive-pack", nil))
 	body := &packReader{header: "pack"}
 	push := httptest.NewRecorder()
 	handler.ServeHTTP(push, httptest.NewRequest("POST", "/git/owner/other.git/git-receive-pack", body))
-	if fetch.Code != 200 || push.Code != http.StatusForbidden || !body.drained || called != 1 {
-		t.Fatalf("fetch %d, push %d, drained %v, calls %d", fetch.Code, push.Code, body.drained, called)
+	if fetch.Code != 200 || advertise.Code != http.StatusForbidden || push.Code != http.StatusForbidden || !body.drained || called != 1 {
+		t.Fatalf("fetch %d, advertisement %d, push %d, drained %v, calls %d", fetch.Code, advertise.Code, push.Code, body.drained, called)
 	}
 }
 

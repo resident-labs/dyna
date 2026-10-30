@@ -28,7 +28,7 @@ func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref stri
 	return r.Mirror.Ref(ctx, repo, ref)
 }
 
-func (r *Repositories) Get(ctx context.Context, _ contract.RoomID, session contract.SessionID, host contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
+func (r *Repositories) Get(ctx context.Context, session contract.SessionID, host contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
 	selected, err := r.Rooms.Session(ctx, session)
 	if err != nil {
 		return nil, err
