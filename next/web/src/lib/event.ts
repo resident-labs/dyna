@@ -43,16 +43,22 @@ const bodies: Record<string, Check> = {
   "image.failed": object({ host: string, repo: string, name: string, tag: string, reason: string, logTail: string }),
 };
 
-// Every event from events.list and the stream passes here once.
-export function decodeEvent(value: unknown): Event {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid event");
+// Every event from events.list and the stream passes here once. An event that does not
+// match the contract is skipped with a console warning, so one bad event cannot block a room.
+export function decodeEvent(value: unknown): Event | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return skip(value);
   // JSON objects have string keys; the checks below validate the generated event shape.
   const record = value as Record<string, unknown>;
   const body = typeof record.type === "string" && Object.hasOwn(bodies, record.type) ? bodies[record.type] : undefined;
   if (!Number.isSafeInteger(record.seq) || Number(record.seq) < 1 || !string(record.id) ||
       !string(record.at) || !optional(string)(record.room) || !principal(record.from) || !body?.(record.body)) {
-    throw new Error("Invalid event");
+    return skip(value);
   }
   // The validators above cover every member of the generated Event union.
   return value as Event;
+}
+
+function skip(value: unknown): undefined {
+  console.warn("Skipped an event that does not match the contract", value);
+  return undefined;
 }

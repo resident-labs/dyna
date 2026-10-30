@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { stream, type EventConnection } from "./stream.ts";
 import { decodeEvent } from "./event.ts";
 
-test("rejects malformed event bodies at the stream boundary", () => {
-  assert.throws(() => decodeEvent({
+test("skips malformed event bodies at the stream boundary", () => {
+  assert.equal(decodeEvent({
     seq: 1, id: "e", at: "", from: { kind: "owner" },
     type: "session.started", body: { session: "s" },
-  }));
+  }), undefined);
 });
 
 test("reconnects after the last applied event", () => {
