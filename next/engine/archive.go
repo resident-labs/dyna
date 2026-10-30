@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -27,19 +29,29 @@ func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, curre
 	return s.store.SetClosingReason(ctx, current.ID, reason, event)
 }
 
-// ResumeClosures finishes interrupted closes that have nothing to archive.
+// ResumeClosures finishes interrupted closes that no longer need an archive.
 func (s *Service) ResumeClosures(ctx context.Context) *contract.Error {
 	boxes, err := s.store.Boxes(ctx)
 	if err != nil {
 		return failure(err)
 	}
 	for _, current := range boxes {
-		if current.State != contract.BoxClosing {
+		if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
 			continue
 		}
 		session, err := s.store.Session(ctx, current.Session)
+		if current.State == contract.BoxDeleted && errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
 		if err != nil {
 			return failure(err)
+		}
+		if current.State == contract.BoxDeleted {
+			_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session.ID})
+			if e != nil {
+				return e
+			}
+			continue
 		}
 		repos, err := s.store.RoomRepos(ctx, session.Room)
 		if err != nil {
@@ -105,6 +117,7 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 			return contract.ArchiveDoneResponse{}, failure(err)
 		}
 		s.mu.Lock()
+		delete(s.archives, session.ID)
 		if channel := s.channels[session.ID]; channel != nil {
 			channel.stop()
 		}
