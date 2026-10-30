@@ -18,14 +18,14 @@ func TestApprovedMediaChecksDestinationBeforeUpload(t *testing.T) {
 	code := `#!/bin/sh
 case "$1 $2" in
  "pr view") printf '%s' '{"number":1,"headRepository":{"name":"fork"},"headRepositoryOwner":{"login":"alice"}}';;
- "api --hostname") printf '%s' '{"full_name":"alice/fork","private":false}';;
+ "api --hostname") printf '%s' '{"full_name":"alice/fork","private":false,"visibility":"public"}';;
  *) echo unexpected >&2; exit 1;;
 esac
 `
 	if err := os.WriteFile(script, []byte(code), 0700); err != nil {
 		t.Fatal(err)
 	}
-	ctx := WithApprovedMedia(context.Background(), approvals.MediaDestination{Host: "github.com", Base: "alice/fork", Head: "bob/fork", Number: 1})
+	ctx := WithApprovedMedia(context.Background(), approvals.MediaDestination{Host: "github.com", Base: "alice/fork", Head: "bob/fork", Number: 1, Visibility: approvals.MediaVisibilityPublic})
 	cmd := Command(ctx, script, dir, "pr", "comment", "1", "--body", "hello", "--attach", "file.png")
 	paths, err := stripMedia(ctx, cmd)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestApprovedMediaUploadsAndAppendsBody(t *testing.T) {
 	code := fmt.Sprintf(`#!/bin/sh
 case "$1 $2" in
  "pr view") echo '{"number":1,"headRepository":{"name":"repo"},"headRepositoryOwner":{"login":"alice"}}';;
- "api --hostname") case "$4" in */releases/tags/*) if test -f '%s/uploaded'; then echo '{"assets":[{"name":"%s","digest":"sha256:%s"}]}'; else echo '{"assets":[]}'; fi;; *) echo '{"full_name":"alice/repo","private":false}';; esac;;
+ "api --hostname") case "$4" in */releases/tags/*) if test -f '%s/uploaded'; then echo '{"assets":[{"name":"%s","digest":"sha256:%s"}]}'; else echo '{"assets":[]}'; fi;; *) echo '{"full_name":"alice/repo","private":false,"visibility":"public"}';; esac;;
  "release upload") touch '%s/uploaded';;
  *) exit 1;;
 esac
@@ -58,7 +58,7 @@ esac
 	if err := os.WriteFile(script, []byte(code), 0700); err != nil {
 		t.Fatal(err)
 	}
-	ctx := WithApprovedMedia(context.Background(), approvals.MediaDestination{Host: "github.com", Base: "alice/repo", Head: "alice/repo", Number: 1})
+	ctx := WithApprovedMedia(context.Background(), approvals.MediaDestination{Host: "github.com", Base: "alice/repo", Head: "alice/repo", Number: 1, Visibility: approvals.MediaVisibilityPublic})
 	cmd := Command(ctx, script, dir, "pr", "comment", "1", "--body", "hello", "--attach", path)
 	paths, err := stripMedia(ctx, cmd)
 	if err != nil {
@@ -115,7 +115,7 @@ case "$1 $2" in
  "api --hostname") case "$4" in
   */releases/tags/*) if test "%s" = create && ! test -f '%s/created'; then echo 'HTTP 404' >&2; exit 1; fi
    if test -f '%s/uploaded' || test "%s" = create; then echo '{"assets":[{"name":"%s","digest":"sha256:%s"}]}'; else echo '{"assets":[]}'; fi;;
-  *) echo '{"full_name":"alice/repo","private":false}';; esac;;
+  *) echo '{"full_name":"alice/repo","private":false,"visibility":"public"}';; esac;;
  "release create") touch '%s/created'; exit 1;;
  "release upload") if test "%s" != denied; then touch '%s/uploaded'; fi; exit 1;;
  *) exit 1;;
@@ -124,7 +124,7 @@ esac
 			if err := os.WriteFile(script, []byte(code), 0700); err != nil {
 				t.Fatal(err)
 			}
-			ctx := WithApprovedMedia(context.Background(), approvals.MediaDestination{Host: "github.com", Base: "alice/repo", Head: "alice/repo", Number: 1})
+			ctx := WithApprovedMedia(context.Background(), approvals.MediaDestination{Host: "github.com", Base: "alice/repo", Head: "alice/repo", Number: 1, Visibility: approvals.MediaVisibilityPublic})
 			cmd := Command(ctx, script, dir, "pr", "comment", "1", "--body", "hello", "--attach", path)
 			paths, err := stripMedia(ctx, cmd)
 			if err != nil {
@@ -139,5 +139,30 @@ esac
 			}
 			cleanup()
 		})
+	}
+}
+
+func TestMediaRejectsVisibilityChange(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "gh")
+	code := `#!/bin/sh
+case "$1 $2" in
+ "pr view") echo '{"number":1,"headRepository":{"name":"repo"},"headRepositoryOwner":{"login":"alice"}}';;
+ "api --hostname") echo '{"full_name":"alice/repo","private":false,"visibility":"public"}';;
+ *) echo "unexpected write" >&2; exit 1;;
+esac
+`
+	if err := os.WriteFile(script, []byte(code), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithApprovedMedia(context.Background(), approvals.MediaDestination{Host: "github.com", Base: "alice/repo", Head: "alice/repo", Number: 1, Visibility: approvals.MediaVisibilityPrivate})
+	cmd := Command(ctx, script, dir, "pr", "comment", "1", "--body", "hello", "--attach", "file.png")
+	paths, err := stripMedia(ctx, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = uploadMedia(ctx, cmd, repository{"github.com", "alice/repo"}, "token", paths)
+	if err == nil || !strings.Contains(err.Error(), "destination changed") {
+		t.Fatalf("expected visibility change refusal, got %v", err)
 	}
 }
