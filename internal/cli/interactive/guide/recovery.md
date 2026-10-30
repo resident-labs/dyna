@@ -53,6 +53,13 @@ Turn runners, shells and CLI commands still write `dyna.db` directly. First paus
 each room with `dyna room pause <room>`, and wait until `dyna subagent list`
 shows no running turn. Otherwise their writes go to the moved file.
 
+Stopping the engine is not enough for any move, copy-over or rewrite of
+`dyna.db`. Each session's `dyna mcp` shell server and each `dyna shell _run`
+supervisor opens the file itself and keeps writing to the old file after a swap;
+new shell records then vanish and shell calls fail with `no such shell`. Before
+the swap, list every holder with `lsof ~/.local/share/dyna/dyna.db*` and stop
+them all.
+
 ```sh
 systemctl --user stop dyna-engine.service
 cd ~/.local/share/dyna
