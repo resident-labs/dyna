@@ -46,7 +46,7 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 	if tag != want {
 		t.Fatalf("tag %s", tag)
 	}
-	if len(r.commands) != 2 || !strings.HasSuffix(r.commands[0], "'podman' 'image' 'exists' '"+tag+"'") || !strings.HasSuffix(r.commands[1], "'podman' 'build' '--tag' '"+tag+"' '-'") {
+	if len(r.commands) != 2 || !strings.HasSuffix(r.commands[0], "'podman' 'image' 'exists' '"+tag+"'") || !strings.HasSuffix(r.commands[1], "'podman' 'build' '-t' '"+tag+"' '-'") {
 		t.Fatalf("commands %v", r.commands)
 	}
 	i := bytes.IndexByte(r.input, '\n')
@@ -63,6 +63,23 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 		if err != nil || string(data) != file.content {
 			t.Fatalf("content %q: %v", data, err)
 		}
+	}
+}
+
+func TestBuildPassesBaseTag(t *testing.T) {
+	r := &imageRunner{missing: true}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.commands) != 2 || !strings.HasSuffix(r.commands[1], "'podman' 'build' '-t' 'toolchain:hash' '--build-arg' 'DYNA_BASE=dyna-base:hash' '-'") {
+		t.Fatalf("commands %v", r.commands)
+	}
+	if !bytes.HasSuffix(r.input, []byte("tar")) {
+		t.Fatal("missing tar input")
 	}
 }
 
