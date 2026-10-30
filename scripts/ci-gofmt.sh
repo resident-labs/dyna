@@ -3,7 +3,8 @@
 # module and the desktop module.
 set -euo pipefail
 cd "${1:-$(dirname "$0")/..}"
-mapfile -d '' files < <(git ls-files -z -- '*.go')
+# The vendored CLIProxyAPI keeps upstream formatting (next/third_party/cliproxyapi, DYNA.md).
+mapfile -d '' files < <(git ls-files -z -- '*.go' ':(exclude)next/third_party/cliproxyapi')
 if ((${#files[@]} == 0)); then exit 0; fi
 unformatted=$(gofmt -l "${files[@]}")
 if [[ -n $unformatted ]]; then
