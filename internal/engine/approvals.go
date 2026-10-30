@@ -41,13 +41,14 @@ func (s services) approvalRequest(ctx context.Context, in approvals.RequestInput
 			return false
 		}
 	}
-	class, err := ghclient.ClassifyForSession(ctx, "", in.Cwd, in.Argv, owns)
+	class, pinnedArgs, err := ghclient.ClassifyForSession(ctx, "", in.Cwd, in.Argv, owns)
 	if err != nil {
 		return approvals.Request{}, err
 	}
 	if class == approvals.ClassRead {
 		return approvals.Request{}, errors.New("read commands do not need approval")
 	}
+	in.Argv = pinnedArgs
 	if class == approvals.ClassAuto && checkedNumber != 0 {
 		in.Argv = ghclient.PinRoutinePR(in.Argv, checkedRef, checkedNumber)
 	}

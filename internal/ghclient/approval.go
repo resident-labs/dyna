@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -16,25 +17,26 @@ import (
 // ClassifyForApproval validates the repository policy and derives the class
 // inside the engine. The caller never supplies the class it wants.
 func ClassifyForApproval(ctx context.Context, binary, dir string, args []string) (approvals.Class, error) {
-	return classifyForApproval(ctx, binary, dir, args, nil)
+	class, _, err := classifyForApproval(ctx, binary, dir, args, nil)
+	return class, err
 }
 
 // ClassifyForSession adds engine-verified session PR ownership.
-func ClassifyForSession(ctx context.Context, binary, dir string, args []string, owns func(context.Context, ItemRef) bool) (approvals.Class, error) {
+func ClassifyForSession(ctx context.Context, binary, dir string, args []string, owns func(context.Context, ItemRef) bool) (approvals.Class, []string, error) {
 	return classifyForApproval(ctx, binary, dir, args, owns)
 }
 
-func classifyForApproval(ctx context.Context, binary, dir string, args []string, owns func(context.Context, ItemRef) bool) (approvals.Class, error) {
+func classifyForApproval(ctx context.Context, binary, dir string, args []string, owns func(context.Context, ItemRef) bool) (approvals.Class, []string, error) {
 	cmd := Command(ctx, binary, dir, args...)
 	r := repositoryFor(ctx, cmd)
 	if err := checkPolicy(ctx, dir, r, args); err != nil {
-		return approvals.ClassOwner, err
+		return approvals.ClassOwner, nil, err
 	}
 	rec, err := roomFor(ctx, dir, r)
 	// checkPolicy already admitted a write to the room's recorded upstream, which
 	// roomFor reports as errNotInRoom. That write still needs its class.
 	if err != nil && !(errors.Is(err, errNotInRoom) && (matchesUpstream(rec, r) || matchesForkParent(ctx, rec, dir, r))) {
-		return approvals.ClassOwner, err
+		return approvals.ClassOwner, nil, err
 	}
 	login, _ := AccountFor(ctx, cmd.Path, r.host, r.name)
 	class := Classify(ctx, args, ClassifyInput{
@@ -44,7 +46,14 @@ func classifyForApproval(ctx context.Context, binary, dir string, args []string,
 			return approvalAuthor(ctx, cmd.Path, dir, ref)
 		},
 	})
-	return class, nil
+	if class == approvals.ClassAuto && len(commandArgs(args)) >= 2 && commandArgs(args)[1] == "create" {
+		// A delimiter can end flag parsing. Leave such unusual commands held.
+		if slices.Contains(args, "--") {
+			return approvals.ClassAgent, args, nil
+		}
+		args = append(slices.Clone(args), "--repo", r.host+"/"+r.name)
+	}
+	return class, args, nil
 }
 
 // approvalAuthor reads only the item needed for an authorship decision. A
