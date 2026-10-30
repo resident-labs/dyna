@@ -31,6 +31,14 @@ type Observation struct {
 	Unavailable      bool        `json:"unavailable,omitempty"`
 }
 
+// LabelSource records whether the owner chose an account label.
+type LabelSource string
+
+const (
+	LabelDefault LabelSource = "default"
+	LabelOwner   LabelSource = "owner"
+)
+
 type Metadata struct {
 	NativeHome     string       `json:"nativeHome,omitempty"`
 	Observation    *Observation `json:"observation,omitempty"`
@@ -42,6 +50,7 @@ type Metadata struct {
 	RoomID         string       `json:"roomId,omitempty"`
 	Identity       string       `json:"identity"`
 	Label          string       `json:"label"`
+	LabelSource    LabelSource  `json:"labelSource,omitempty"`
 	NeedsLogin     bool         `json:"needsLogin,omitempty"`
 	RefreshPending bool         `json:"refreshPending,omitempty"`
 	CreatedAt      time.Time    `json:"createdAt"`
@@ -259,7 +268,7 @@ func (state *State) Save(harness, integration, identity, label string, credentia
 		return Metadata{}, errors.New("A saved account ID could not be created.")
 	}
 	provider, kind := ProviderFor(harness, integration)
-	meta := Metadata{ID: hex.EncodeToString(id), Provider: provider, Kind: kind, Harness: harness, Integration: integration, Identity: identity, Label: label, CreatedAt: now, UpdatedAt: now}
+	meta := Metadata{ID: hex.EncodeToString(id), Provider: provider, Kind: kind, Harness: harness, Integration: integration, Identity: identity, Label: label, LabelSource: LabelOwner, CreatedAt: now, UpdatedAt: now}
 	state.Entries = append(state.Entries, Entry{Metadata: meta, Credential: credential})
 	return meta, nil
 }
