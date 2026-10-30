@@ -89,15 +89,14 @@ func Run(ctx context.Context, version string) error {
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
 			if _, ok := message.Body.(contract.Archive); ok {
-				if err := h.Close(); err != nil {
-					return err
-				}
-				for _, repo := range hello.Repos {
-					if err := client.ArchiveDone(ctx, archiveRepo(ctx, "/box/work", hello.Session, repo, runGit)); err != nil {
-						return err
+				return closeBox(ctx, h, transcript, h.SessionFile(), func(ctx context.Context) error {
+					for _, repo := range hello.Repos {
+						if err := client.ArchiveDone(ctx, archiveRepo(ctx, "/box/work", hello.Session, repo, runGit)); err != nil {
+							return err
+						}
 					}
-				}
-				return nil
+					return nil
+				})
 			}
 			return runner.Handle(ctx, message)
 		})

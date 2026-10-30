@@ -103,3 +103,14 @@ func (s endedSink) TurnOutput(ctx context.Context, result contract.TurnEnded) er
 	s.transcript.syncLogged(ctx, s.file())
 	return err
 }
+
+// closeBox stops Pi and sends the rest of the transcript. Only then does it report the box archived, so the engine cannot delete the box with unsent bytes.
+func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, file string, archived func(context.Context) error) error {
+	if err := h.Close(); err != nil {
+		return err
+	}
+	if err := transcript.Sync(ctx, file); err != nil {
+		return err
+	}
+	return archived(ctx)
+}
