@@ -108,6 +108,8 @@ type Info struct {
 // Store addresses the shells directory.
 type Store struct {
 	Root string
+	// removeDir injects filesystem errors in pruning tests.
+	removeDir func(string) error
 	// startTime reads a process start time; nil uses procident.StartTime. A
 	// test sets it to act as a system without /proc.
 	startTime func(int) (uint64, error)
