@@ -74,7 +74,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(cfg.Data, time.Now)
+	st, err := store.Open(cfg.Data)
 	if err != nil {
 		return err
 	}
@@ -92,8 +92,11 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer proxy.Shutdown(context.Background())
-	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi}
+	boxCtx, stopBoxes := context.WithCancel(ctx)
+	defer stopBoxes()
+	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
+	boxes.Pressure = service
 	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
 	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
