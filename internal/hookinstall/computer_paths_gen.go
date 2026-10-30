@@ -26,6 +26,7 @@ var computerCodePaths = []string{
 	"internal/gpu",
 	"internal/harness/home",
 	"internal/hub",
+	"internal/isolation",
 	"internal/jobs",
 	"internal/listpage",
 	"internal/localci",
