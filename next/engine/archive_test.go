@@ -251,6 +251,24 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 	}
 }
 
+func TestRestoreStartsMarkedLeaf(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if err := s.store.MarkClosing(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if e := s.ResumeClosures(ctx); e != nil {
+		t.Fatal(e)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
+	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
+		t.Fatalf("close order: %+v, %v", events, err)
+	}
+}
+
 func TestRestoreFinishesCloseWithoutRepositories(t *testing.T) {
 	s, _, session, ctx := setup(t)
 	record, err := s.store.Session(ctx, session)
