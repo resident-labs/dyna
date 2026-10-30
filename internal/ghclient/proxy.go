@@ -75,6 +75,16 @@ func SessionCommand(ctx context.Context, args []string) error {
 	return Run(ctx, cmd)
 }
 
+// PublishThroughApproval sends one agent-class GitHub write, such as a PR
+// comment, through the approval path that gh writes in a session use. The
+// room's root approves it at once; a child waits for its parent.
+func PublishThroughApproval(ctx context.Context, roomID, dir string, args []string) error {
+	ctx = WithRoom(ctx, roomID)
+	ctx = WithAgentText(ctx)
+	cmd := Command(ctx, "", dir, args...)
+	return sessionApproval(ctx, cmd, roomID, args)
+}
+
 func sessionApproval(ctx context.Context, cmd *exec.Cmd, roomID string, args []string) error {
 	cmd.Stdin = os.Stdin
 	if err := refuseOwnerIdentity(ctx, cmd); err != nil {

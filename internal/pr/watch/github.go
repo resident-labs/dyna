@@ -721,6 +721,9 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 		// until a push or rerun, but the check names no failed job.
 		if c.Status != "completed" || c.Conclusion == "" {
 			pending = true
+		} else if c.Conclusion == "action_required" {
+			// A fork pull request waits for a maintainer to approve its workflows.
+			pending = true
 		} else if c.Conclusion == "cancelled" {
 			failed = true
 		} else if !success(c.Conclusion) {

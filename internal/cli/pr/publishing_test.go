@@ -139,8 +139,7 @@ esac
 	for _, agentMode := range []string{mode.Subagent, mode.Root} {
 		t.Setenv(mode.EnvMode, agentMode)
 		for _, args := range [][]string{
-			{"comment", url, "explicit public post", "--publish"},
-			{"review", url, "--body-file", file, "--head", head, "--publish"},
+			{"review", url, "--body-file", file, "--head", head, "--publish", "--comments-file", file},
 			{"publishing", "github", "--room", rec.Name},
 		} {
 			if _, err := call(args...); err == nil {
