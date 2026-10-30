@@ -811,6 +811,8 @@ func TestVerdictsPushesAndMerge(t *testing.T) {
 	if err := e.s.Verdict(ctx, r.Key, r.Reviewer, oldHead, "approve", "stale", 10); err == nil {
 		t.Fatal("stale approval accepted")
 	}
+	// This completed review has ended its turn and can be retired.
+	e.endReviewerTurn(r.Reviewer)
 	e.tick()
 	r = e.record()
 	if r.Verdict != "" || r.Head == oldHead || len(e.launches) != 2 {

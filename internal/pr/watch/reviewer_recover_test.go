@@ -3,10 +3,43 @@ package watch
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/subagent"
 )
+
+func TestLiveReviewerReassignedAfterHeadChange(t *testing.T) {
+	e, keys := readyReviewPool(t, 1)
+	st := dispatchReviewPool(t, e)
+	old := *st.Records[keys[0]]
+	head := strings.Repeat("b", 40)
+	if err := e.s.Store.update(func(st *State) error {
+		resetReview(st.Records[old.Key], head)
+		st.Records[old.Key].Polling.PullHead = head
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.setPullHead(old.Number, head)
+	st = dispatchReviewPool(t, e)
+	got := st.Records[old.Key]
+	if got.Reviewer != old.Reviewer || got.RoundHead != head || len(e.launches) != 1 {
+		t.Fatalf("reassignment: reviewer=%s head=%s launches=%d", got.Reviewer, got.RoundHead, len(e.launches))
+	}
+	woke := false
+	for _, n := range e.sent {
+		if n.Target == old.Reviewer && strings.Contains(n.Text, head) && strings.Contains(n.Text, "Assignment input:") {
+			woke = true
+		}
+	}
+	if !woke {
+		t.Fatal("reassigned reviewer was not woken")
+	}
+	if err := e.s.Verdict(context.Background(), old.Key, old.Reviewer, head, "approve", "looks good", 0); err != nil {
+		t.Fatalf("new head verdict: %v", err)
+	}
+}
 
 // A watcher shutdown is not a reviewer failure. After SIGTERM a cancelled
 // launch stored "context canceled", left the slot blocked, paused the
