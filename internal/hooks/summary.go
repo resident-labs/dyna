@@ -2,21 +2,9 @@ package hooks
 
 import (
 	"context"
-	"time"
 
 	"dyna-agent/internal/repoid"
 )
-
-// Summary is one hook with the newest run recorded for it, so a page can show
-// each hook's state without reading every run. LastRun is nil when the hook
-// has never run.
-type Summary struct {
-	Hook    Hook `json:"hook"`
-	LastRun *Run `json:"lastRun,omitempty"`
-	// NextRun is when the schedule next runs this hook. It is nil for a hook
-	// that does not run on a schedule.
-	NextRun *time.Time `json:"nextRun,omitempty"`
-}
 
 // Summaries lists a repository's hooks in their saved order, each with its
 // newest run and its next scheduled run. It reads the runs once, not once per

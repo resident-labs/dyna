@@ -10,13 +10,6 @@ import (
 	"strconv"
 )
 
-// HookRunLog is the end of one stored hook run's log, with its exit code
-// when the log records one (-1 if not).
-type HookRunLog struct {
-	Tail     string `json:"tail"`
-	ExitCode int    `json:"exitCode"`
-}
-
 var hookExit = regexp.MustCompile(`exit status (\d+)\s*$`)
 
 // HookRunLog reads the log of a run found through HookRuns. It never opens
