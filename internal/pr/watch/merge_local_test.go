@@ -202,7 +202,7 @@ func admittedRun(s *Service, job registeredCIJob) bool {
 	runs := s.nodeRuns()
 	runs.Lock()
 	defer runs.Unlock()
-	return runs.runs[registeredJobKey(job)] != nil
+	return runs.Runs[registeredJobKey(job)] != nil
 }
 
 // runningLocalCIHead names the head of a run in flight, or "" when the run set
@@ -211,8 +211,8 @@ func runningLocalCIHead(s *Service) string {
 	runs := s.nodeRuns()
 	runs.Lock()
 	defer runs.Unlock()
-	for _, run := range runs.runs {
-		return run.head
+	for _, run := range runs.Runs {
+		return run.Head
 	}
 	return ""
 }

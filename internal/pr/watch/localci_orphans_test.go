@@ -53,7 +53,7 @@ func TestScheduleRegisteredCIAbandonsOnlyUnwantedOrphans(t *testing.T) {
 	registry := &orphanedRunRegistry{orphans: []localci.OrphanedAttachment{wanted, unwanted, syncRun, standalone, legacy}, abandoned: abandoned}
 	s := &Service{
 		LocalCIRegistry: registry,
-		registeredRuns:  &registeredCIRuns{runs: map[string]*registeredCIRun{}},
+		registeredRuns:  &registeredCIRuns{Runs: map[string]*registeredCIRun{}},
 		SyncRunActive: func(repo, sha string) (bool, error) {
 			return repo == syncRun.Repo && sha == syncRun.SHA, nil
 		},

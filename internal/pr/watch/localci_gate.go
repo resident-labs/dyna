@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
+	cisched "dyna-agent/internal/pr/watch/ci"
 	"dyna-agent/internal/textutil"
 )
 
@@ -68,17 +69,6 @@ type registeredCIObservation struct {
 	Checks     []CheckSummary
 }
 
-func localInfrastructureError(result localci.Result) bool {
-	if result.Status == localci.OutcomeError {
-		return true
-	}
-	for _, check := range result.Checks {
-		if check.Status == localci.OutcomeError {
-			return true
-		}
-	}
-	return false
-}
 func registeredResultStatus(result localci.Result) (CIVerdict, []string, string) {
 	var jobs, logs []string
 	for _, check := range result.Checks {
@@ -92,7 +82,7 @@ func registeredResultStatus(result localci.Result) (CIVerdict, []string, string)
 	if len(jobs) > 0 {
 		return VerdictFailed, jobs, strings.Join(logs, "\n")
 	}
-	if !result.Complete() || localInfrastructureError(result) {
+	if !result.Complete() || cisched.LocalInfrastructureError(result) {
 		return VerdictPending, nil, ""
 	}
 	for _, check := range result.Checks {
@@ -134,7 +124,7 @@ func registeredTestFailure(result localci.Result, check localci.SuiteResult) boo
 	if check.Status != localci.OutcomeFailed {
 		return false
 	}
-	if !localAggregate(result, check) || !localInfrastructureError(result) {
+	if !localAggregate(result, check) || !cisched.LocalInfrastructureError(result) {
 		return true
 	}
 	for _, other := range result.Checks {
@@ -432,7 +422,7 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	// here would never end. The trial fails and names the cause instead. A run
 	// Dyna stopped is retried first, and its replacement is the one that decides.
 	localFailure := ""
-	if trial && !hostedFallback && localInfrastructureError(result) && savedResultActionFor(result) == settleSavedResult {
+	if trial && !hostedFallback && cisched.LocalInfrastructureError(result) && cisched.SavedResultActionFor(result) == cisched.SettleSavedResult {
 		localState, localJobs, logs = VerdictFailed, localFailedChecks(result), localFailureNote(result)
 		localFailure = localFailureNote(result)
 	}
@@ -452,13 +442,13 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		live := s.liveLocalCIRun(r)
 		switch {
 		case live != nil:
-			observation.Reason = "running local CI on " + live.node
+			observation.Reason = "running local CI on " + live.Node
 		case trial && !hostedFallback && result.Node == "" && !s.roomServedByCI(r.RoomID):
 			// No run will ever start: the scheduler only uses machines that serve
 			// the room. The trial fails with the cause and the fix.
 			observation.Status = VerdictFailed
 			observation.Reason = localci.RoomNotServedError{RoomID: r.RoomID}.Error()
-		case localInfrastructureError(result):
+		case cisched.LocalInfrastructureError(result):
 			// No hosted provider is coming in a local-only room: name the retry
 			// that really is, instead of a fallback that never arrives.
 			observation.Reason = hostedFallbackReason(snap)
@@ -638,7 +628,7 @@ func (s *Service) liveLocalCIRun(r Record) *registeredCIRun {
 	runs := s.nodeRuns()
 	runs.Lock()
 	defer runs.Unlock()
-	return runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]
+	return runs.Runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]
 }
 
 func (s *Service) localCIRunning(r Record) bool { return s.liveLocalCIRun(r) != nil }
@@ -718,7 +708,7 @@ func chooseRegisteredCI(head string, hostedState CIVerdict, hostedKey string, ho
 }
 
 func (s *Service) registeredJobResultComplete(ctx context.Context, job registeredCIJob, result localci.Result) bool {
-	if result.Status == localci.OutcomeError && result.Node != "" && stoppedLocalResult(result) {
+	if result.Status == localci.OutcomeError && result.Node != "" && cisched.StoppedLocalResult(result) {
 		// Dyna stopped this run itself, so it tested nothing. savedResultActionFor
 		// admits the head again, and Result.Resumed bounds that to one retry.
 		return true
