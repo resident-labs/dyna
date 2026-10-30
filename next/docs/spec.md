@@ -569,10 +569,8 @@ Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `
 - **`dyna-base`**: a small Debian image with git, CA certificates, tini, a non-root user, the usual shell tools, Node, and Pi from Dyna's fork (`next/third_party/pi`) at a pinned build. The fork's sign-in commands go unused, because Pi holds no credential in v2.
 - **The `dyna` binary is not in the image.** Each host keeps the binaries in `<hostdata>/bin/<version>/dyna`, with a `current` link. Every box mounts `<hostdata>/bin` read-only at `/opt/dyna/bin`. An engine release rebuilds no image.
 - **Toolchain layers** live in each repository at `.dyna/images/<name>/Containerfile` and start `FROM dyna-base`. A repository without that folder uses `dyna-base`.
-- **Tag**: `dyna-img-<name>:<hash>`, where the hash is SHA-256 over the base digest, the Containerfile and the sorted context files with their contents. The same inputs give the same tag on every host.
-- **Builds** run over the master, one at a time per host: at registration, when the default branch changes a file under `.dyna/images/`, and before the first box that needs a missing tag. Each build emits `image.built` or `image.failed`. No registry is needed while there are at most two hosts.
-
-Table: `images` ((`host`, `tag`) PK, `repo`, `name`, `state`, `built_at`).
+- **Tag**: `dyna-img-<name>:<hash>`, where the hash is SHA-256 over the base tag and the Git tree ID of the image folder. The tree ID covers the files, contents, modes and links. The same inputs give the same tag on every host.
+- **Builds** run over the master, one at a time per host, before box creation. The host reuses an existing tag. Each build check emits `image.built` or `image.failed`. M3 also checks at registration and when the default branch changes an image folder. No image table or registry is needed while there are at most two hosts.
 
 ### 5.3 Box states
 
@@ -580,8 +578,8 @@ Table: `images` ((`host`, `tag`) PK, `repo`, `name`, `state`, `built_at`).
 type BoxState string
 
 const (
-	BoxPending  BoxState = "pending"  // waiting for a host or an image
-	BoxCreating BoxState = "creating" // host chosen; volume, repository copy, slice
+	BoxPending  BoxState = "pending"  // waiting for a host
+	BoxCreating BoxState = "creating" // host chosen; image, volume, repository copy, slice
 	BoxStarting BoxState = "starting" // container started; waiting for the box agent's hello
 	BoxReady    BoxState = "ready"    // the box agent is connected
 	BoxStopped  BoxState = "stopped"  // the session is dormant; volume and slice kept
@@ -614,7 +612,7 @@ type Box struct {
 
 | From | To | Cause |
 |---|---|---|
-| pending | creating | admission placed it, and the image exists |
+| pending | creating | admission placed it |
 | creating | starting | volume, repository copy and slice are ready, and `podman run` succeeded |
 | starting | ready | the box agent sent `hello` on the box socket within 60 s |
 | ready | stopped | the session went dormant: no running turn, shell job or wake |
