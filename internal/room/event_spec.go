@@ -82,14 +82,15 @@ var eventSpecs = []EventSpec{
 		Text:     "Hook {hook} started for {event} (run {runId}).",
 	},
 	{
-		Family:   FamilyHook,
-		Type:     TypeResult,
-		Renderer: "HookCard",
-		Payload:  reflect.TypeOf(HookEvent{}),
-		Quiet:    true,
-		Wake:     WakeNever,
-		Once:     true,
-		Text:     "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
+		Family:    FamilyHook,
+		Type:      TypeResult,
+		ThreadEnd: true,
+		Renderer:  "HookCard",
+		Payload:   reflect.TypeOf(HookEvent{}),
+		Quiet:     true,
+		Wake:      WakeNever,
+		Once:      true,
+		Text:      "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
 	},
 	// Issue events are a backlog: they never wake anyone, root included. The
 	// owner feed keeps them, and the assignee reads a quiet notice there.
