@@ -75,9 +75,8 @@
   <!-- A row is the name, one muted fact and at most one dot. The profile says why. -->
   <button class="chan person" class:sel style="--depth: 0" {onclick}>
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
-    <span class="label hue-{m.hue}">{m.name}</span>
+    <span class="fit"><span class="label hue-{m.hue}">{m.name}</span><span class="turn">{pr ? changeName(pr) : m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span></span>
     {#if agentExpedited($expedite, m)}<ExpediteBadge short />{/if}
-    <span class="turn">{pr ? changeName(pr) : m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span>
     {#if attention}<StatusPill variant="mark" tone={attention.tone} label={attention.label} />{/if}
   </button>
 {/snippet}
@@ -233,7 +232,12 @@
   .chan.unread .label { color: var(--ink); font-weight: 600; }
   .lv { font-size: var(--t-sm); color: var(--gold); white-space: nowrap; }
   .person { padding: 4px 8px 4px calc(8px + var(--depth) * 14px); }
+  /* The name gets the width first; the muted fact takes what is left. A
+     max-content grid track fills before the 1fr track, where flex shrink
+     would cut both. */
+  .fit { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); align-items: baseline; gap: var(--s2); }
   .person .label { font-weight: 600; }
+  .person .turn { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { margin: 3px 0 0; font-size: var(--t-cap); color: var(--faint); }
   .empty { margin: var(--s2); font-size: var(--t-ui); color: var(--faint); }
   .turn { flex: none; font-size: var(--t-sm); color: var(--faint); }
