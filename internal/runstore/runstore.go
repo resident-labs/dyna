@@ -1,5 +1,5 @@
 // Package runstore persists workflow runs: metadata, an append-only event
-// journal (tailed live by `dyna runs` and the desktop app), a journal of full agent results, and the
+// journal (tailed live by `dyna workflow runs` and the desktop app), a journal of full agent results, and the
 // final result.
 package runstore
 
@@ -343,7 +343,7 @@ func NewID() string {
 }
 
 // Create makes a new run directory and copies the script into it. A preset
-// id via DYNA_RUN_ID (set by `dyna run --detach`) is honored.
+// id via DYNA_RUN_ID (set by `dyna workflow run --detach`) is honored.
 func Create(name, scriptSrc string, args any) (out *Run, err error) {
 	err = sessionlife.WithPublication(context.Background(), RunsDir(), "publication.lock", func() error {
 		if e := sessionlife.Activate(SessionsDir(), OwnerFromEnv()); e != nil {

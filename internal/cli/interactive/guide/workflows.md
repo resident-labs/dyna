@@ -14,7 +14,7 @@ const results = await parallel([
 return { results }
 ```
 
-Run `dyna run check.js` in the foreground to join the results. Handle `null` results before using them.
+Run `dyna workflow run check.js` in the foreground to join the results. Handle `null` results before using them.
 
 ## Profiles
 
@@ -33,7 +33,7 @@ Workers are leaf sessions. Dyna closes each when its call resolves. Open a worke
 ```bash
 dyna templates list --json
 dyna templates copy adversarial-review --to /tmp/my-review.js --json
-dyna run /tmp/my-review.js --args '{"target":"src/"}'
+dyna workflow run /tmp/my-review.js --args '{"target":"src/"}'
 ```
 
 Run `dyna templates --help` for save, show, seed, and overwrite options. Templates live under `--templates-dir` (default `$XDG_CONFIG_HOME/dyna/templates`). Install and update seed missing starters and update unchanged seeded copies; they preserve user edits. `dyna templates` reads the registry without executing source.
