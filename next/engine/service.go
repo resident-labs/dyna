@@ -142,19 +142,13 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 	if strings.TrimSpace(req.Name) == "" || req.RootProfile == "" {
 		return contract.RoomCreateResponse{}, invalid("room name and root profile are required")
 	}
-	if _, _, err := s.profiles.Model(req.RootProfile); err != nil {
-		return contract.RoomCreateResponse{}, failure(err)
-	}
 	now := s.now()
 	value, err := id("room_", now)
 	if err != nil {
 		return contract.RoomCreateResponse{}, failure(err)
 	}
 	room := contract.RoomID(value)
-	if err := s.store.CreateRoom(ctx, room, req.Name, now); err != nil {
-		return contract.RoomCreateResponse{}, failure(err)
-	}
-	if _, e := s.startSession(ctx, caller, contract.SessionStartRequest{Room: room, Name: "root", Profile: req.RootProfile}, true); e != nil {
+	if _, e := s.startSession(ctx, caller, contract.SessionStartRequest{Room: room, Name: "root", Profile: req.RootProfile}, req.Name); e != nil {
 		return contract.RoomCreateResponse{}, e
 	}
 	return contract.RoomCreateResponse{Room: room}, nil
@@ -194,23 +188,30 @@ func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req 
 }
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
-	return s.startSession(ctx, caller, req, false)
+	return s.startSession(ctx, caller, req, "")
 }
 
-func (s *Service) startSession(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest, root bool) (contract.SessionStartResponse, *contract.Error) {
-	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
-		return contract.SessionStartResponse{}, e
+func (s *Service) startSession(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest, roomName string) (contract.SessionStartResponse, *contract.Error) {
+	if roomName == "" {
+		if e := s.roomAccess(ctx, caller, req.Room); e != nil {
+			return contract.SessionStartResponse{}, e
+		}
 	}
 	if req.Name == "" || req.Profile == "" {
 		return contract.SessionStartResponse{}, invalid("name and profile are required")
 	}
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
+		if roomName != "" {
+			return contract.SessionStartResponse{}, invalid("unknown profile")
+		}
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	tree, err := s.store.RoomTree(ctx, req.Room)
-	if err != nil { return contract.SessionStartResponse{}, failure(err) }
+	if err != nil {
+		return contract.SessionStartResponse{}, failure(err)
+	}
 	parent := contract.SessionID("")
-	if !root {
+	if roomName == "" {
 		parent, err = tree.ParentFor(caller, req.Parent)
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())
@@ -225,7 +226,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Profile: req.Profile, Box: contract.BoxID(bid)}
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, Brief: req.Brief})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -470,8 +471,8 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
 	}
-	if tree.Root() == session.ID {
-		return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "root cannot be closed"}
+	if _, err := tree.CloseOrder(session.ID); err != nil {
+		return contract.SessionCloseResponse{}, invalid(err.Error())
 	}
 	// Interim backstop until room step 5 marks the subtree closing in one transaction.
 	s.admit.Lock()
