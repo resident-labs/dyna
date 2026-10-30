@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/resident-labs/dyna/box/computer"
@@ -102,9 +103,11 @@ func Run(ctx context.Context, version string) error {
 	defer ticks.Stop()
 	go transcript.Run(ctx, ticks.C, h.SessionFile)
 	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
+	var closing atomic.Bool
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
 			if _, ok := message.Body.(contract.Archive); ok {
+				closing.Store(true)
 				return closeBox(ctx, h, transcript, h.SessionFile(), time.After, func(ctx context.Context) error {
 					if len(hello.Repos) == 0 {
 						return client.ArchiveDone(ctx, contract.ArchiveDoneRequest{})
@@ -120,12 +123,5 @@ func Run(ctx context.Context, version string) error {
 			return runner.Handle(ctx, message)
 		})
 	}()
-	select {
-	case err := <-errs:
-		return err
-	case err := <-runner.Errors():
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return waitRun(ctx, errs, runner.Errors(), &closing)
 }
