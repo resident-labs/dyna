@@ -61,7 +61,8 @@ func chatgptUsageObservation(raw []byte, now time.Time) (store.Observation, erro
 		case 604800:
 			id, label = "seven_day", "Weekly"
 		}
-		observation.Windows = append(observation.Windows, store.Window{ID: id, Label: label, UsedPercent: window.UsedPercent, Unit: "percent", ResetsAt: time.Unix(window.Reset, 0).UTC().Format(time.RFC3339)})
+		reset := time.Unix(window.Reset, 0).UTC().Format(time.RFC3339)
+		observation.Windows = append(observation.Windows, store.Window{ID: id, Label: label, UsedPercent: window.UsedPercent, Unit: "percent", ResetsAt: reset, PeriodStart: windowStart(reset, time.Duration(window.Duration)*time.Second)})
 	}
 	if len(observation.Windows) == 0 {
 		return store.Observation{}, schemaErr
