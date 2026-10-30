@@ -2,8 +2,10 @@ package engine
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -71,27 +73,31 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 			http.NotFound(w, r)
 			return
 		}
-		query := "SELECT EXISTS(SELECT 1 FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?"
+		query := "SELECT f.media FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?"
 		args := []string{hash}
 		if caller.Kind != contract.PrincipalOwner {
 			query += " AND e.room=?"
 			args = append(args, string(room))
 		}
-		query += ")"
-		var indexed bool
+		query += " ORDER BY f.seq DESC LIMIT 1"
+		var media string
 		var err error
 		if len(args) == 1 {
-			err = s.store.Read().QueryRowContext(r.Context(), query, args[0]).Scan(&indexed)
+			err = s.store.Read().QueryRowContext(r.Context(), query, args[0]).Scan(&media)
 		} else {
-			err = s.store.Read().QueryRowContext(r.Context(), query, args[0], args[1]).Scan(&indexed)
+			err = s.store.Read().QueryRowContext(r.Context(), query, args[0], args[1]).Scan(&media)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
 		}
 		if err != nil {
 			http.Error(w, "unavailable", 500)
 			return
 		}
-		if !indexed {
-			http.NotFound(w, r)
-			return
+		w.Header().Set("Content-Type", media)
+		if media == "text/html" {
+			w.Header().Set("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:")
 		}
 		f, err := os.Open(filepath.Join(s.filesDir, hash))
 		if err != nil {

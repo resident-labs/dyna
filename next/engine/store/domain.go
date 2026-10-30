@@ -211,7 +211,7 @@ func (s *Store) Post(ctx context.Context, event contract.Event, deliveries []con
 		}
 		if post, ok := event.Body.(contract.PostCreated); ok {
 			for _, file := range post.Attachments {
-				if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO event_files(seq,sha256) VALUES(?,?)", seq, file.SHA256); err != nil {
+				if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO event_files(seq,sha256,media) VALUES(?,?,?)", seq, file.SHA256, file.Media); err != nil {
 					return err
 				}
 			}
