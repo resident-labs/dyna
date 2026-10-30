@@ -100,16 +100,20 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		r.sent[input.Delivery] = struct{}{}
 	}
 	r.mu.Unlock()
+	ready := make(chan struct{})
+	var readyOnce sync.Once
+	started := func() { readyOnce.Do(func() { close(ready) }) }
 	go func() {
+		defer started()
 		var result contract.TurnEnded
 		var err error
 		if len(pending) > 0 {
-			result, err = r.Harness.Start(ctx, start.Turn, pending)
+			result, err = r.Harness.Start(ctx, start.Turn, pending, started)
 		} else {
 			var settled bool
 			result, settled, err = r.Harness.Recover(start.Turn, start.Inputs)
 			if err == nil && !settled {
-				result, err = r.Harness.Continue(ctx, start.Turn)
+				result, err = r.Harness.Continue(ctx, start.Turn, started)
 			}
 		}
 		if err != nil {
@@ -125,7 +129,12 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			}
 		}
 	}()
-	return nil
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (r *Runner) steer(ctx context.Context, input contract.TurnSteer) error {
