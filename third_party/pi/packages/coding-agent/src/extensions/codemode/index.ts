@@ -18,6 +18,8 @@ export interface CodemodeExtensionOptions {
 	inlineBudget?: number;
 	/** Expose the model catalog and classifiers to scripts as `models`. Default: `true`. */
 	models?: boolean;
+	/** Heap limit of each script's VM in bytes. Default: 256 MiB. */
+	memoryLimitBytes?: number;
 }
 
 function readMode(pi: ExtensionAPI): CodemodeMode {
@@ -40,6 +42,7 @@ export function createCodemodeExtension(options: CodemodeExtensionOptions = {}):
 					new Map(pi.getAllTools().map((tool) => [tool.name, tool.promptGuidelines ?? []] as const)),
 				getMode: () => options.mode ?? readMode(pi),
 				getInlineBudget: () => options.inlineBudget ?? readInlineBudget(pi),
+				memoryLimitBytes: options.memoryLimitBytes,
 			}),
 			defaultActive: false,
 		});

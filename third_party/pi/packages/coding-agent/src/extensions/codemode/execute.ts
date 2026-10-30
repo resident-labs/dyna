@@ -626,7 +626,7 @@ export async function executeCodemode(
 					: []),
 			],
 			timeoutMs: Math.max(1, Math.round(deadline - waitedMs)),
-			memoryLimitBytes: CODEMODE_MEMORY_LIMIT_BYTES,
+			memoryLimitBytes: options.memoryLimitBytes ?? CODEMODE_MEMORY_LIMIT_BYTES,
 			wasm: loadQuickJSWasm(getQuickJSWasmPath()),
 			workerUrl: getCodemodeWorkerSpecifier(),
 			acquireWorker: () => {
