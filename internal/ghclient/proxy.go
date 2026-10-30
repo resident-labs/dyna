@@ -72,7 +72,7 @@ func SessionCommand(ctx context.Context, args []string) error {
 	ctx = WithAgentText(ctx)
 	cmd := Command(ctx, binary, dir, args...)
 	if mode == GuardWorker && !isReadCommand(commandArgs(args)) {
-		return sessionApproval(ctx, cmd, roomID, args)
+		return Submit(ctx, roomID, dir, args)
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return Run(ctx, cmd)
@@ -85,17 +85,17 @@ func PinnedReviewArgs(host, repo string, number int, head, body string) []string
 	return []string{"api", "--hostname", host, fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number), "--method", "POST", "--raw-field", "commit_id=" + head, "--raw-field", "event=COMMENT", "--raw-field", "body=" + body}
 }
 
-// PublishThroughApproval sends one agent-class GitHub write, such as a PR
-// comment, through the approval path that gh writes in a session use. The
-// room's root approves it at once; a child waits for its parent.
-func PublishThroughApproval(ctx context.Context, roomID, dir string, args []string) error {
-	ctx = WithRoom(ctx, roomID)
-	ctx = WithAgentText(ctx)
+// Submit sends an agent GitHub write through the shared approval path.
+func Submit(ctx context.Context, roomID, dir string, args []string) error {
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return err
+		}
+	}
+	ctx = WithAgentText(WithRoom(ctx, roomID))
 	cmd := Command(ctx, "", dir, args...)
-	return sessionApproval(ctx, cmd, roomID, args)
-}
-
-func sessionApproval(ctx context.Context, cmd *exec.Cmd, roomID string, args []string) error {
 	cmd.Stdin = os.Stdin
 	repository := repositoryFor(ctx, cmd)
 	cleanup, err := ComposeBody(ctx, cmd, repository)
