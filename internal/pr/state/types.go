@@ -189,6 +189,14 @@ type Hold struct {
 	At     time.Time `json:"at"`
 }
 
+type AuthorSource string
+
+const (
+	AuthorSourceExplicit  AuthorSource = "explicit"
+	AuthorSourceDiscovery AuthorSource = "discovery"
+	AuthorSourceTransfer  AuthorSource = "transfer"
+)
+
 type Record struct {
 	PendingVerdict *PendingVerdict `json:"pendingVerdict,omitempty"`
 	// ReleaseReviewersAfterReplay holds closed reviewers until their saved verdicts replay.
@@ -243,18 +251,19 @@ type Record struct {
 
 	CIStaleCleanupHead string `json:"ciStaleCleanupHead,omitempty"`
 
-	Polling       Polling   `json:"polling"`
-	RateLimit     RateLimit `json:"rateLimit"`
-	QuotaAccount  string    `json:"quotaAccount,omitempty"`
-	Key           string    `json:"key"`
-	Host          string    `json:"host"`
-	Repo          string    `json:"repo"`
-	Number        int       `json:"number"`
-	URL           string    `json:"url"`
-	Title         string    `json:"title"`
-	RoomID        string    `json:"roomId"`
-	Author        string    `json:"authorSession"`
-	FormerAuthors []string  `json:"formerAuthors,omitempty"`
+	Polling       Polling      `json:"polling"`
+	RateLimit     RateLimit    `json:"rateLimit"`
+	QuotaAccount  string       `json:"quotaAccount,omitempty"`
+	Key           string       `json:"key"`
+	Host          string       `json:"host"`
+	Repo          string       `json:"repo"`
+	Number        int          `json:"number"`
+	URL           string       `json:"url"`
+	Title         string       `json:"title"`
+	RoomID        string       `json:"roomId"`
+	Author        string       `json:"authorSession"`
+	AuthorSource  AuthorSource `json:"authorSource,omitempty"`
+	FormerAuthors []string     `json:"formerAuthors,omitempty"`
 	// Controller is the controller of the run whose agent opened this change:
 	// the session that started that run, or ControllerRoot. Records stored
 	// before controllers were recorded, and changes no run opened, have none,

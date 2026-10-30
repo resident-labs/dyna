@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/notify"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
@@ -150,7 +151,7 @@ func TestRepoPollAutoTracksOwnedWorktreePR(t *testing.T) {
 	}
 }
 
-func TestAutoTrackUsesSessionWorkingInInheritedWorktree(t *testing.T) {
+func TestAutoTrackPrefersRegisteredWorktreeOwner(t *testing.T) {
 	e, tree := autoTrackEnv(t)
 	child := subagent.Meta{
 		ID: "ses_20261026-000001-cccccccc", Name: "child", RoomID: e.author.RoomID, Room: e.author.Room,
@@ -159,8 +160,8 @@ func TestAutoTrackUsesSessionWorkingInInheritedWorktree(t *testing.T) {
 	recordtest.Write(t, e.s.Notify.Sessions.Store.Root, child.ID, child)
 	e.tick()
 	got, err := e.s.Store.Get("github.com/owner/repo#18")
-	if err != nil || got.Author != child.ID || got.Dir != tree {
-		t.Fatalf("inherited worktree PR author = %q, dir = %q, err = %v; want child %q", got.Author, got.Dir, err, child.ID)
+	if err != nil || got.Author != e.author.ID {
+		t.Fatalf("worktree PR author = %q, err = %v; want registered owner %q", got.Author, err, e.author.ID)
 	}
 }
 
@@ -379,5 +380,33 @@ func TestDiscoverySkipsHistoricalOwnersAndMainTrees(t *testing.T) {
 	calls, _ := os.ReadFile(e.calls)
 	if strings.Count(string(calls), "headRefName:") != 1 || !strings.Contains(string(calls), `headRefName:"feature/auto"`) {
 		t.Fatalf("excluded trees reached the query: %s", calls)
+	}
+}
+
+func TestExplicitOwnerTrackReplacesOnlyDiscoveryAuthor(t *testing.T) {
+	e, tree := autoTrackEnv(t)
+	e.tick()
+	ref := Ref{"github.com", "owner/repo", 18}
+	actor := authority.Actor{Role: authority.Owner, Session: e.author.ID}
+	for _, source := range []prstate.AuthorSource{prstate.AuthorSourceDiscovery, prstate.AuthorSourceExplicit, prstate.AuthorSourceTransfer} {
+		if err := e.s.Store.update(func(st *State) error {
+			r := st.Records[ref.Key()]
+			r.Author = "other"
+			r.AuthorSource = source
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, _, err := e.s.Track(t.Context(), actor, ref, e.author, tree)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "other"
+		if source == prstate.AuthorSourceDiscovery {
+			want = e.author.ID
+		}
+		if got.Author != want {
+			t.Fatalf("source %s: author %s, want %s", source, got.Author, want)
+		}
 	}
 }
