@@ -85,6 +85,9 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	if failed.Session != "" && envValue(childEnv, mode.EnvMode) == mode.Subagent {
 		failed.ParentSession = failed.Session
 	}
+	if target := envValue(childEnv, mode.EnvRunResultTo); runstore.IsSessionDirID(target) {
+		failed.ParentSession = target
+	}
 	rowCommitted := false
 	if err := sessionlife.WithPublication(ctx, runstore.RunsDir(), "publication.lock", func() error {
 		if err := runstore.RecordStartingRun(failed); err != nil {

@@ -220,6 +220,7 @@ var WriteCalls = map[string]bool{
 	"StampPlanAncestry":           true,
 	"StartIssueWork":              true,
 	"StartRun":                    true,
+	"StartNamedRun":               true,
 	"StartRunAgent":               true,
 	"StartSubagent":               true,
 	"StopSession":                 true,

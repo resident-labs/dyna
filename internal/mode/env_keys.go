@@ -23,6 +23,7 @@ var stampKeys = [...]stampKey{
 	{name: EnvRoomID},
 	{name: EnvRoom},
 	{name: EnvRunDetached},
+	{name: EnvRunResultTo},
 }
 
 // A test binary never inherits its caller's stamp, such as the session of

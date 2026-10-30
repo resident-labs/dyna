@@ -213,7 +213,7 @@ func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFini
 				from = unknownBuild
 			}
 			in.Status = runstore.StatusInterrupted
-			in.Error = fmt.Sprintf("interrupted by update from %s to %s; resume it with dyna run <script.js> --resume %s", from, engineBuild, in.Run)
+			in.Error = fmt.Sprintf("interrupted by update from %s to %s; resume it with dyna workflow run <script.js> --resume %s", from, engineBuild, in.Run)
 			break
 		}
 	}

@@ -112,12 +112,27 @@ export interface RunResultView {
   journal?: RunJournalEntry[]
 }
 
+// WorkflowInfo is workflowcatalog.Info.
+export interface WorkflowInfo {
+  name: string
+  scope: 'project' | 'personal' | 'bundled'
+  description: string
+}
+
 // TemplateInfo is workflowtemplate.Info.
 export interface TemplateInfo {
   name: string
   description?: string
   source: string
   path: string
+}
+
+// StartNamedRunRequest is roomsvc.StartNamedRunRequest.
+export interface StartNamedRunRequest {
+  room: string
+  name: string
+  input: unknown
+  resultTo?: string
 }
 
 // StartedRun is roomsvc.StartedRun.

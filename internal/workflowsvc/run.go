@@ -68,7 +68,7 @@ func Execute(ctx context.Context, opts Options, store *profile.Store, observer O
 
 func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, observer Observer, factory func(string) coordinatorOutbox) (Result, error) {
 	actor := authority.Current()
-	if err := authority.Check("run", actor, nil); err != nil {
+	if err := authority.Check("workflow run", actor, nil); err != nil {
 		return Result{}, err
 	}
 	// Every run path funnels here with its caller's stamps (a session's shell,

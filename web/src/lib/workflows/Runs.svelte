@@ -41,7 +41,7 @@
   {:else if !list}
     <p class="quiet">Loading runs…</p>
   {:else if list.runs.length === 0}
-    <EmptyState title="No workflows yet">Start one with <strong>Run workflow</strong>. Agents in this room start them with <span class="mono">dyna run</span>.</EmptyState>
+    <EmptyState title="No workflows yet">Start one with <strong>Run workflow</strong>. Room roots start them with <span class="mono">dyna workflow run</span>.</EmptyState>
   {:else}
     {#if running.length}
       <h2>Running now</h2>
@@ -90,7 +90,7 @@
       </div>
     {/if}
     {#if list.total > list.runs.length}
-      <p class="quiet">Showing the newest {list.runs.length} of {list.total} runs. <span class="mono">dyna runs list</span> shows all of them.</p>
+      <p class="quiet">Showing the newest {list.runs.length} of {list.total} runs. <span class="mono">dyna workflow runs list</span> shows all of them.</p>
     {/if}
   {/if}
   </div>

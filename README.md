@@ -58,7 +58,7 @@ end of its turn; a post addressed to it starts a new turn.
 
 ### Workflows
 
-`dyna run <file.js>` runs a JavaScript workflow. The script owns the control
+`dyna workflow run <file.js>` runs a JavaScript workflow. The script owns the control
 flow; each `agent()` call gives one bounded task to a worker and returns its
 answer or schema-checked JSON.
 

@@ -13,17 +13,18 @@ import (
 
 // Environment contract injected into workers.
 const (
-	EnvMode        = "DYNA_MODE"         // subagent | root
-	EnvWorkerRun   = "DYNA_WORKER_RUN"   // a run agent's session: owning run id
-	EnvSession     = "DYNA_SESSION"      // subagent mode: session id
-	EnvDepth       = "DYNA_DEPTH"        // subagent mode: this session's depth (top level = 1)
-	EnvRoomID      = "DYNA_ROOM_ID"      // stamped work: canonical room id
-	EnvRoom        = "DYNA_ROOM"         // stamped work: readable room name
-	EnvRoomSlice   = "DYNA_ROOM_SLICE"   // stamped work: the room's systemd slice unit
-	EnvAddress     = "DYNA_ADDRESS"      // stamped session: <room>:<name> address
-	EnvRunID       = "DYNA_RUN_ID"       // workflow script: owning run
-	EnvRunDetached = "DYNA_RUN_DETACHED" // workflow script: detached runner
-	EnvAgentID     = "DYNA_AGENT_ID"     // workflow agent attribution
+	EnvMode        = "DYNA_MODE"          // subagent | root
+	EnvWorkerRun   = "DYNA_WORKER_RUN"    // a run agent's session: owning run id
+	EnvSession     = "DYNA_SESSION"       // subagent mode: session id
+	EnvDepth       = "DYNA_DEPTH"         // subagent mode: this session's depth (top level = 1)
+	EnvRoomID      = "DYNA_ROOM_ID"       // stamped work: canonical room id
+	EnvRoom        = "DYNA_ROOM"          // stamped work: readable room name
+	EnvRoomSlice   = "DYNA_ROOM_SLICE"    // stamped work: the room's systemd slice unit
+	EnvAddress     = "DYNA_ADDRESS"       // stamped session: <room>:<name> address
+	EnvRunID       = "DYNA_RUN_ID"        // workflow script: owning run
+	EnvRunResultTo = "DYNA_RUN_RESULT_TO" // detached workflow completion recipient
+	EnvRunDetached = "DYNA_RUN_DETACHED"  // workflow script: detached runner
+	EnvAgentID     = "DYNA_AGENT_ID"      // workflow agent attribution
 
 	Subagent = "subagent"
 	Root     = "root"
