@@ -33,7 +33,7 @@
 
 {#if item.key === 'updater.source'}
   <div class="source">
-    <Segmented options={[["release", "Release"], ["checkout", "Source checkout"]]} value={sourceMode} {label} onchange={(value: string) => { sourceChoice = value === 'checkout' ? 'checkout' : 'release'; if (value === 'release') choose('') }} />
+    <Segmented options={[["release", "Release"], ["checkout", "Source checkout"]]} value={sourceMode} {label} onchange={(value: string) => { if (value === 'checkout') sourceChoice = 'checkout'; else onsave('').then(() => { sourceChoice = 'release' }, () => { sourceChoice = null }) }} />
     {#if sourceMode === 'checkout'}
       <input class="field mono" aria-label="Source checkout path" placeholder="/path/to/checkout" disabled={fixed} value={draft ?? String(item.value)}
         oninput={(e) => (draft = e.currentTarget.value)} onkeydown={key} onblur={commit} />
