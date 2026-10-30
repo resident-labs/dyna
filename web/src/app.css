@@ -4,15 +4,16 @@
    is type weight, size, and spacing. */
 :root {
   --rail: #151416;
-  --side: #1c1b1e;
-  --main: #232225;
+  --side: var(--bg-sunk);
+  --main: var(--bg);
   --raise: #2b2a2d;
-  --hover: #29282b;
-  --select: #323035;
+  --hover: var(--overlay-hover);
+  --select: var(--overlay-select);
+  /* Raised controls replace their background on hover, so this stays opaque. */
   --raise-hover: #343236;
   --field: #2e2d31;
-  --line: #34322f;
-  --line-soft: #2c2b2d;
+  --line: var(--border);
+  --line-soft: var(--border-soft);
 
   --ink: #ece9e4;
   --ink-2: #cfcbc4;
