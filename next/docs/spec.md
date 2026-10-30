@@ -610,7 +610,7 @@ type Box struct {
 | stopped | starting | a delivery wakes the session, and admission fits it again |
 | stopped | pending | a delivery wakes the session, but the host has no room now |
 | pending | starting | admission fits a box that already has its container |
-| ready, stopped | closing | the session closes, or its parent closes |
+| ready, stopped, pending, failed | closing | the session closes, or its parent closes |
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
 | creating, starting | failed | a step failed, or `hello` timed out |
 | ready, stopped, closing | lost | the host is unreachable (5.10) |
