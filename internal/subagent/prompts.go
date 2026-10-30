@@ -51,7 +51,7 @@ Give a full, self-contained final result. Follow later instructions.
 
 ` + clearEnglishPrompt + `
 
-Use your assigned room; children inherit it. Use the inherited room and its existing watches; omit --room. All members can read posts; mentions choose who wakes. Services are not sessions: manage them with dyna services.
+Use your assigned room; children inherit it. Use the inherited room and watches; omit --room. All members can read posts; mentions choose who wakes. Services are not sessions: manage them with dyna services.
 
 Put temporary files in $DYNA_SCRATCH. Edit code only in dyna git worktrees new trees. Never edit the owner’s main checkout.
 
