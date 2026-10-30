@@ -31,6 +31,7 @@ type Service interface {
 	TurnOutput(context.Context, contract.Principal, contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error)
 	DeliveryDone(context.Context, contract.Principal, contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error)
 	ArchiveDone(context.Context, contract.Principal, contract.ArchiveDoneRequest) (contract.ArchiveDoneResponse, *contract.Error)
+	TranscriptAppend(context.Context, contract.Principal, contract.TranscriptAppendRequest) (contract.TranscriptAppendResponse, *contract.Error)
 	// Events atomically subscribes after seq, including committed events not yet
 	// delivered. The producer closes the channel when ctx ends.
 	Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error)

@@ -93,6 +93,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := service.ConfigureOperations(ctx, nil, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
+	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	boxes.Mirror = mirror
