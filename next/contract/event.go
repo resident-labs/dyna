@@ -131,3 +131,9 @@ func (TurnEnded) isEventBody()         {}
 
 func (BoxChanged) EventType() EventType { return "box.changed" }
 func (BoxChanged) isEventBody()         {}
+
+const (
+	TurnCompleted TurnOutcome = "completed"
+	TurnFailed    TurnOutcome = "failed"
+	TurnStopped   TurnOutcome = "stopped"
+)

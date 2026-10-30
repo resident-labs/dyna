@@ -40,3 +40,8 @@ type Delivery struct {
 	Reply   ReplyChannel `json:"reply"`
 	Wake    bool         `json:"wake"` // starts or steers a turn; members never wake
 }
+
+const (
+	ConversationFeed ConversationKind = "feed"
+	ConversationDM   ConversationKind = "dm"
+)

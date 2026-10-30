@@ -70,3 +70,20 @@ type OpResult struct {
 	Output     string `json:"output,omitempty"`     // up to 64 KiB inline
 	OutputFile string `json:"outputFile,omitempty"` // the rest, by hash
 }
+
+const (
+	OpPending   OpState = "pending"
+	OpApproved  OpState = "approved"
+	OpDenied    OpState = "denied"
+	OpExpired   OpState = "expired"
+	OpWithdrawn OpState = "withdrawn"
+	OpDone      OpState = "done"
+	OpFailed    OpState = "failed"
+)
+const (
+	TargetRepo    TargetKind = "repo"
+	TargetRoom    TargetKind = "room"
+	TargetHost    TargetKind = "host"
+	TargetSession TargetKind = "session"
+	TargetAccount TargetKind = "account"
+)
