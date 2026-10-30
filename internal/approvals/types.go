@@ -104,19 +104,17 @@ type GHPayload struct {
 // CreateInput is the typed input to the kind-independent core.
 type CreateInput struct {
 	// Auto is set only by the engine after it verifies a routine write.
-	Auto bool
-	// RequireReview prevents implicit root approval for writes that need review.
-	RequireReview bool
-	Room          string
-	Kind          Kind
-	Class         Class
-	Payload       json.RawMessage
-	Repository    string
-	Server        string
-	Command       string
-	Tool          string
-	Title         string
-	Body          string
+	Auto       bool
+	Room       string
+	Kind       Kind
+	Class      Class
+	Payload    json.RawMessage
+	Repository string
+	Server     string
+	Command    string
+	Tool       string
+	Title      string
+	Body       string
 }
 
 // Result is the outcome that the requester receives.
