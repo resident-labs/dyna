@@ -1,16 +1,22 @@
 <script lang="ts">
-  import Chip from '../ui/Chip.svelte'
-  import { toneOf } from '../ui/tone.ts'
+  import StatusPill from '../ui/StatusPill.svelte'
   import type { MergeControlStatus } from '../api/change.ts'
-  import { shortSha } from './pr.ts'
+  import { changeTitle, shortSha } from './pr.ts'
+  import type { Row } from './prlist.ts'
   import { trialProgress, waitingReason, waitingWords } from './roomPRs.ts'
   // failed says the merge status call failed; onretry asks again. The raw error stays off the screen (rule r8).
-  let { status, failed = false, onretry = () => {}, onpick, onresume, resuming = false, resumeError = '' }: { status: MergeControlStatus | null; failed?: boolean; onretry?: () => void; onpick: (id: string) => void; onresume: () => void; resuming?: boolean; resumeError?: string } = $props()
+  let { status, rows = [], failed = false, onretry = () => {}, onpick, onresume, resuming = false, resumeError = '' }: { status: MergeControlStatus | null; rows?: Row[]; failed?: boolean; onretry?: () => void; onpick: (id: string) => void; onresume: () => void; resuming?: boolean; resumeError?: string } = $props()
   let ready = $derived(status?.queue?.filter((q) => q.state === 'ready' && !q.trial) ?? [])
   let reason = $derived(status ? waitingReason(status) : null)
+  let active = $derived(status?.queue?.filter((q) => q.trial || q.state.startsWith('trial-')) ?? [])
+  function name(id: string): string {
+    const row = rows.find((r) => r.changeId === id)
+    const number = row?.number ?? Number(id.match(/#(\d+)$/)?.[1])
+    return `${number ? `#${number}` : 'Pull request'}${row ? ` ${changeTitle(row)}` : ''}`
+  }
 </script>
 <section class="merging" aria-label="Merging">
-  <div class="heading"><h2>Merging</h2>{#if status?.paused}<Chip tone="warning">Paused</Chip>{/if}</div>
+  {#if failed || !status || status.paused || status.trials?.length || active.length || ready.length || reason}<div class="heading"><h2>Merging</h2>{#if status?.paused}<StatusPill tone="warning" label="Paused" />{/if}</div>{/if}
   {#if status?.paused}
     <div class="pause" role="status">
       <div><strong>Merging is paused</strong><p>{status.reason || 'No reason was recorded.'}</p></div>
@@ -24,22 +30,23 @@
       <button class="resume" onclick={onretry}>Retry</button>
     </div>
   {:else if !status}<p class="muted">Loading merge status…</p>
+  {:else if !status.paused && !status.trials?.length && !active.length && !ready.length && !reason}<p class="muted">No merge running.</p>
   {:else}
     <div class="line now"><b>Now</b><div>
     {#each status.trials ?? [] as trial (trial.branch)}
       {@const progress = trialProgress(trial, status)}
       <div class="trial">
-        <div class="trial-head"><strong>{progress.label}</strong><Chip tone={toneOf(progress.tone)}>{trial.branch.split('/').at(-1) ? `Trial ${trial.branch.split('/').at(-1)}` : 'Trial'}</Chip></div>
-        <div class="batch">{#each trial.batch ?? [] as id}<button onclick={() => onpick(id)}>{id.includes('#') ? `#${id.split('#').at(-1)}` : id}</button>{/each}</div>
+        <div class="trial-head"><strong>{progress.label}</strong></div>
+        <div class="batch">{#each trial.batch ?? [] as id}<button onclick={() => onpick(id)}>{name(id)}</button>{/each}</div>
         {#if progress.total}
           <p class="checks">{progress.nodes ? `${progress.nodes} · ` : ''}{progress.completed}/{progress.total} checks complete · {progress.passed} passed{#if progress.failed} · <span class="error">{progress.failed} failed</span>{/if}</p>
           <progress max={progress.total} value={progress.completed} aria-label="Trial checks complete"></progress>
         {/if}
         {#if trial.reason}<p class="muted">{trial.reason}</p>{/if}
       </div>
-    {:else}<p class="muted">No merge running.</p>{/each}
+    {:else}{#if active.length}<p class="muted">In merge trial: {#each active as q}<button onclick={() => onpick(q.changeId)}>{name(q.changeId)}</button>{/each}</p>{:else}<p class="muted">No merge running.</p>{/if}{/each}
     </div></div>
-    <div class="line"><b>Next</b><span>{#if ready.length}{#each ready as q}<button class="next" onclick={() => onpick(q.changeId)}>#{q.changeId.split('#').at(-1)}</button>{/each}{:else}No other PR is ready.{/if}</span></div>
+    <div class="line"><b>Next</b><span>{#if ready.length}{#each ready as q}<button class="next" onclick={() => onpick(q.changeId)}>{name(q.changeId)}</button>{/each}{:else}No other PR is ready.{/if}</span></div>
     {#if reason}
       <div class="line"><b class="gold">Waiting</b><span class="wait">
         <span>{waitingWords(reason)}{#if reason.base}{' '}on {reason.base}{/if}{#if reason.sha}{' '}at <code>{shortSha(reason.sha)}</code>{/if}</span>
