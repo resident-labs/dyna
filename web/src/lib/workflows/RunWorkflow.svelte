@@ -32,7 +32,7 @@
     migrate: '{"instruction": "", "glob": ""}',
   }
   let hint = $derived(selected?.scope === 'bundled' ? hints[selected.name] : undefined)
-  let ready = $derived(!busy && !!selected)
+  let ready = $derived(!busy && shown.some((w) => w.name === pick))
 
   onMount(async () => {
     try {
