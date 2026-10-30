@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/runstore"
 )
 
 // EngineCaller is the engine connection a coordinator uses. *engineclient.Client
@@ -91,9 +92,24 @@ func transient(ctx context.Context, err error) bool {
 // while the caller's context lives: starting twice is safe (the engine derives
 // the session from the run and agent and returns the one it started), and so
 // is waiting twice.
-func runAgentSession(ctx context.Context, engine EngineCaller, start callspec.RunAgentStart) (callspec.RunAgentState, error) {
-	if err := retryEngine(ctx, recoveryBudget, func() error { return engine.Call(ctx, "StartRunAgent", []any{start}, nil) }); err != nil {
-		return callspec.RunAgentState{}, err
+func runAgentSession(ctx context.Context, engine EngineCaller, start callspec.RunAgentStart, key string) (callspec.RunAgentState, error) {
+	if key != "" {
+		if err := runstore.StepIntent(ctx, start.Run, key, start.Agent, 1); err != nil {
+			return callspec.RunAgentState{}, fmt.Errorf("record agent start intent: %w", err)
+		}
+	}
+	startErr := retryEngine(ctx, recoveryBudget, func() error { return engine.Call(ctx, "StartRunAgent", []any{start}, nil) })
+	if key != "" {
+		sessionID := ""
+		if startErr == nil {
+			sessionID = runstore.AgentSessionID(start.Run, start.Agent)
+		}
+		if err := runstore.StepResult(context.WithoutCancel(ctx), start.Run, key, start.Agent, 1, sessionID, nil, startErr); err != nil {
+			return callspec.RunAgentState{}, fmt.Errorf("record agent start result: %w", err)
+		}
+	}
+	if startErr != nil {
+		return callspec.RunAgentState{}, startErr
 	}
 	ref := callspec.RunAgentRef{Run: start.Run, Agent: start.Agent}
 	for {

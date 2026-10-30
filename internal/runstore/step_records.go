@@ -10,7 +10,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-// StepIntent records the planned effect before a command starts.
+// StepIntent records the planned effect before a step effect starts.
 func StepIntent(ctx context.Context, runID, key string, ordinal, attempt int) error {
 	db, err := runsDB()
 	if err != nil {
@@ -22,7 +22,7 @@ func StepIntent(ctx context.Context, runID, key string, ordinal, attempt int) er
 	})
 }
 
-// StepResult records the observed result of an attempted command.
+// StepResult records the observed result of an attempted step effect.
 func StepResult(ctx context.Context, runID, key string, ordinal, attempt int, externalID string, result any, runErr error) error {
 	var errText string
 	if runErr != nil {
