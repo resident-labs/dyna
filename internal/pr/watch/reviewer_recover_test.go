@@ -22,6 +22,19 @@ func TestLiveReviewerReassignedAfterHeadChange(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	before, err := e.s.Store.Get(old.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := false
+	for _, n := range before.Notices {
+		if n.Kind == "required-review" && n.Target == old.Reviewer && !n.Done && n.SupersededBy == "" {
+			pending = true
+		}
+	}
+	if !pending {
+		t.Fatal("head reset did not queue the required-review notice")
+	}
 	e.f.Pull.Head.SHA = head
 	e.setPullHead(old.Number, head)
 	st = dispatchReviewPool(t, e)
