@@ -32,7 +32,9 @@ func (d driver) run(ctx context.Context, dir string, args ...string) (string, er
 	fmt.Fprintln(d.output, "$ "+strings.Join(args, " "))
 	var output bytes.Buffer
 	env := d.environment()
-	err := d.service.Exec(ctx, processguard.Process{Dir: dir, Args: args, Env: env, Timeout: 15 * time.Minute, Output: io.MultiWriter(d.output, &output)})
+	// A slow install log must not fail a command that already succeeded. The
+	// minute bounds a leaked descendant that keeps the pipe open.
+	err := d.service.Exec(ctx, processguard.Process{Dir: dir, Args: args, Env: env, Timeout: 15 * time.Minute, DrainTimeout: time.Minute, Output: io.MultiWriter(d.output, &output)})
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", strings.Join(args, " "), err)
 	}
