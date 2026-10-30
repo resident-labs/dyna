@@ -35,8 +35,8 @@
   import PageHeader from './lib/app/shell/PageHeader.svelte'
   import PageNotices from './lib/app/shell/PageNotices.svelte'
   import CallButton from './lib/voice/CallButton.svelte'
-  import VoiceWidget from './lib/voice/VoiceWidget.svelte'
-  import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
+  import VoiceHost from './lib/app/shell/VoiceHost.svelte'
+  import { voiceCall } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
   import { GENERAL, VOICE, isFeedView, inView, homeView, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
   import { seatDMConversation } from './lib/rooms/conversations.ts'
@@ -194,15 +194,8 @@
   const detailRequest = $derived(router.detailRequest) // the newest detail request
   // The router's navigation functions, called as they were when they lived here.
   const { openView, openReview, closeReview, routeHere, showRun, openPR, syncRoute, hashChanged, clearItemLink } = router
-  let voiceWidget = $state<ReturnType<typeof VoiceWidget>>()
-  let callPush = $state<ReturnType<typeof callLink>>(null) // the call request a push tap opened
-  let roomCalls = $derived($callRequests.filter((r) => r.room === roomId))
-  // The room's whole history of call requests, for its feed rows.
-  $effect(() => {
-    if (roomId) callRequests.load(roomId).catch(() => {})
-  })
-  const acceptCall = (req: CallRequest) => voiceWidget?.accept(req)
-  const declineCall = (req: CallRequest) => voiceWidget?.decline(req)
+  let voiceHost = $state<ReturnType<typeof VoiceHost>>()
+  let roomCalls = $state<CallRequest[]>([])
   let pageVisible = $state(document.visibilityState === 'visible')
   // machinesNav: the rail's machines tile is open, so the sidebar lists the
   // machines of this engine. Picking one opens its page in the main area. A
@@ -1182,7 +1175,7 @@
     if (h.has('pair') && !needPair) history.replaceState(null, '', location.pathname)
     const id = h.get('room')
     if (!id) return false
-    callPush = callTarget(location.hash) ?? callPush
+    voiceHost?.openLink(callTarget(location.hash))
     const pr = parsePRHash(location.hash)
     const issue = parseIssueHash(location.hash)
     const file = parseFileHash(location.hash)
@@ -1466,11 +1459,11 @@
     const link = watch((r) => (route = r))
     // The call widget lives outside every view; it takes the same events.
     const engine = engineWatch((s) => (engineStatus = s), browserEngine(engineCheck))
-    const off = (onEvent as (event: (ev: StreamEvent) => void, state: (up: boolean) => void) => () => void)((ev) => { handle(ev); if (ev.kind !== 'build') voiceWidget?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
+    const off = (onEvent as (event: (ev: StreamEvent) => void, state: (up: boolean) => void) => () => void)((ev) => { handle(ev); if (ev.kind !== 'build') voiceHost?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
     registerWorker()
     const fromWorker = (e: MessageEvent) => {
       if (e.data?.type !== 'open') return
-      callPush = callLink(e.data.room, e.data.call ?? null) ?? callPush
+      voiceHost?.openLink(callLink(e.data.room, e.data.call ?? null))
       openTarget(e.data.room, e.data.post)
     }
     navigator.serviceWorker?.addEventListener('message', fromWorker)
@@ -1683,7 +1676,7 @@
             <Runs {room} list={runs} error={runsError} onopen={showRun} onstart={() => (starting = true)} />
           {/if}
         {:else}
-          <Feed {goals} {profiles} onnewprofile={() => openSettings('profiles')} bind:this={feedView} bind:stuck={feedAtBottom} label={viewLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} onreviewrequest={runTerminalRequest} ondeclinerequest={declineTerminalRequest} {approvals} ondecideapproval={decideApproval} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
+          <Feed {goals} {profiles} onnewprofile={() => openSettings('profiles')} bind:this={feedView} bind:stuck={feedAtBottom} label={viewLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={(req) => voiceHost?.accept(req)} ondeclinecall={(req) => voiceHost?.decline(req)} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} onreviewrequest={runTerminalRequest} ondeclinerequest={declineTerminalRequest} {approvals} ondecideapproval={decideApproval} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
           <!-- Keyed: staged files belong to one room and never follow a switch. -->
           {#key room.id + view}
             <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={viewLabel} prepareText={(text: string) => prepareFeedText(text, viewLead ?? null, feedViews, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={loadProfiles} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} onpending={(pending) => noteComposerWork('feed:' + room.id + ':' + view, pending)} />
@@ -1724,9 +1717,9 @@
       {#key room.id}<TermDock roomId={room.id} session={drill && !drill.rootSeat ? drill.id : ''} owner={room.repo ? base(room.repo) : room.name} noRepo={!room.repo} {narrow} request={dockRequest} review={dockReview} requests={ownerRequests(questions)} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
     {/if}
   </main>
-  <VoiceWidget bind:this={voiceWidget} bind:link={callPush} {narrow} {rooms} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
 </div>
 {/if}
+<VoiceHost bind:this={voiceHost} bind:calls={roomCalls} {roomId} {narrow} {rooms} enabled={!halt && !needPair && !pop} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
 {#if showPalette}
   <Palette {rooms} commands={paletteCommands} {targets} {roomId} roomName={room?.name ?? ''} initial={searchText} onmessage={jumpTo} path={palettePath} onroom={paletteRoom} ontarget={openPaletteTarget} onclose={closeSearch} />
 {/if}
