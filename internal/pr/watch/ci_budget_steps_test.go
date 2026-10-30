@@ -16,6 +16,7 @@ func TestCIBudgetIgnoresGitHubReportingStalls(t *testing.T) {
 		"gap between steps":              `{"name":"Setup","status":"completed","started_at":"2026-01-01T00:00:00Z","completed_at":"2026-01-01T00:00:02Z"},{"name":"Test","status":"completed","started_at":"2026-01-01T00:09:00Z","completed_at":"2026-01-01T00:09:03Z"}`,
 		"pending step with timestamp":    `{"name":"Test","status":"pending","started_at":"2026-01-01T00:00:00Z"}`,
 		"finished step without end":      `{"name":"Test","status":"completed","started_at":"2026-01-01T00:00:00Z"}`,
+		"stale running step":             `{"name":"Setup","status":"in_progress","started_at":"2026-01-01T00:00:00Z"},{"name":"Test","status":"completed","started_at":"2026-01-01T00:00:03Z","completed_at":"2026-01-01T00:00:05Z"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
