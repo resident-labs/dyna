@@ -103,6 +103,7 @@ type (
 	TurnID         string // "turn_<ulid>"
 	DeviceID       string // "dev_<ulid>", a paired device
 	SubscriptionID string // "sub_<ulid>"
+	GoalID         string // "g<n>"; v1 numbers are kept at import (M3)
 	HostName       string // a registered host, such as "hermeslab"
 	RepoName       string // "owner/name" on GitHub
 	ProfileName    string // a registered profile, such as "terra"
@@ -201,6 +202,7 @@ type SessionStarted struct {
 type SessionClosed struct {
 	Session SessionID `json:"session"`
 	Archive string    `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
+	Unheld  []GoalID  `json:"unheld,omitempty"`  // M3: open goals left with no holder, because the parent is root (7.4)
 }
 
 type TurnStarted struct {
@@ -793,7 +795,7 @@ Root is the session with no parent. Four things replace the 89 root checks in 12
 | Start, move, stop or close sessions | The tree: any session above another may do this. Root is above every session. |
 | Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). The owner can narrow or revoke them. |
 | Engine notices and unowned repository events | A default room subscription that wakes root (8.5). |
-| Hold no goals; stop close handoff | One rule: the session with no parent holds no goals. |
+| Hold no goals | One rule: the session with no parent holds no goals. Goals that a close would hand to root stay with no holder (7.4). |
 
 Root has its own prompt template, chosen at room creation. These v1 cases have no v2 form: the dual address (`dyna` and `dyna:root`), the root seat with attach and detach, the service flag on root, `NeedsRoot` wake routing, and the engine acting as root.
 
@@ -812,11 +814,11 @@ An external member is a message channel. It has no box, no wake, no quota and no
 
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
-- **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The open goals, tracked PRs and archive refs of every closed session go to the closing session's parent. Root cannot be closed. It can be restarted in a new box with the same session ID, grants and history.
-- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle or a move to another room. A child's box sits in its parent's budget slice, so a move changes the box's budget:
-  - The move waits until the session's turn ends. The engine then stops the container and creates it again from the same volume under the new parent's slice. A moved session that becomes a lead gets a top-level slice (5.5).
-  - The move needs the same host as the new parent. In M2, a move to a parent on another host is refused. From M3, such a move archives the box and starts a new one from the archive ref on the new parent's host.
-  - The moved session's own children move with it, and their boxes are created again under the new slices, deepest last.
+- **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. It can be restarted in a new box with the same session ID, grants and history.
+- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle, a move to another room, and a move to a parent on another host. A box's volume holds its repository and its harness state, and the engine never copies volumes between hosts; to change hosts, close the session and start a new one. A child's box sits in its parent's budget slice, so a move re-creates every box in the moved subtree:
+  - The engine refuses the move while any session in the subtree has a running shell job, and names the job; the mover stops it or waits. Otherwise the engine holds new wakes for the subtree and waits until every running turn in it ends.
+  - When the subtree is idle, the engine stops its containers deepest first. It then creates each again from the same volume, the moved session first and its children after it, because a child's slice lives in its parent's. A moved session that becomes a lead gets a top-level slice (5.5).
+  - The held wakes then run as usual. Each session resumes from the harness conversation in its volume, as after dormancy (5.3), and `session.moved` records the new parent.
 
 ### 7.5 Reply channels (D-579)
 
@@ -1152,7 +1154,7 @@ Scope: the ported web room view (feed, DMs, composer, cards and files, session t
 Acceptance:
 
 1. unit: each decision rule in 3.5, including expiry on the injected clock and the stale check. A session above the caller can approve, a session beside it cannot, and no test uses a root flag.
-2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move re-creates the box under the new parent's slice, and a move to another host is refused. Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. Close of root fails.
+2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move to another host, or of a subtree with a running shell job, is refused. A move holds the subtree's wakes until its turns end, then re-creates the boxes under the new slices, parent before child, and delivers the held wakes. Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. When that parent is root, the goals have no holder, and `session.closed` lists them. Close of root fails.
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
 5. unit: `box.grow` is auto within the parent's remainder, agent beyond it, and owner for root. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
