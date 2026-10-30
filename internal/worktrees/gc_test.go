@@ -924,6 +924,13 @@ func TestGCKeepsWorktreeUsedByOpenTrackedPR(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	rec, err := Get(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(rec, true); err == nil {
+		t.Fatal("forced removal deleted a tracked PR worktree")
+	}
 	opts := GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }}
 	trees, err := GC(t.Context(), repo, opts)
 	if err != nil {
