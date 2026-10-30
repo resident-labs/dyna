@@ -125,7 +125,11 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	}
 	for _, rule := range slotSettings.TestSlots.Commands {
 		if target, err := resolve(rule.Command, path); err == nil {
-			files["bin/"+rule.Command] = []byte(testSlotBridge(resolved["dyna"], target, rule.Arg))
+			var restore map[string]string
+			if _, bridged := resolved[rule.Command]; bridged {
+				restore = owner
+			}
+			files["bin/"+rule.Command] = []byte(testSlotBridge(resolved["dyna"], target, rule.Arg, restore))
 		}
 	}
 	// The systemd-run shim is always installed when the owner PATH names a
@@ -428,23 +432,30 @@ func bridge(owner map[string]string, target string, isDyna bool) string {
 	script.WriteString("#!/bin/sh\n")
 	// dyna restores the owner roots itself (RestoreOwner), however it starts.
 	if !isDyna {
-		// Restore PATH too, so nested Prepare calls resolve owner tools, not bridges.
-		for _, key := range append([]string{"HOME", "PATH"}, xdgNames...) {
-			if value, ok := owner[key]; ok {
-				fmt.Fprintf(&script, "export %s=%s\n", key, shellquote.Quote(value))
-			} else {
-				fmt.Fprintf(&script, "unset %s\n", key)
-			}
-		}
+		writeOwnerRoots(&script, owner)
 	}
 	fmt.Fprintf(&script, "exec %s \"$@\"\n", shellquote.Quote(target))
 	return script.String()
 }
 
-// testSlotBridge only intercepts the test argument before a positional argument.
-func testSlotBridge(dyna, target, arg string) string {
+// writeOwnerRoots restores PATH too, so nested Prepare resolves owner tools.
+func writeOwnerRoots(script *strings.Builder, owner map[string]string) {
+	for _, key := range append([]string{"HOME", "PATH"}, xdgNames...) {
+		if value, ok := owner[key]; ok {
+			fmt.Fprintf(script, "export %s=%s\n", key, shellquote.Quote(value))
+		} else {
+			fmt.Fprintf(script, "unset %s\n", key)
+		}
+	}
+}
+
+// testSlotBridge composes an optional owner bridge with test interception.
+func testSlotBridge(dyna, target, arg string, restore map[string]string) string {
 	var script strings.Builder
 	script.WriteString("#!/bin/sh\n")
+	if restore != nil {
+		writeOwnerRoots(&script, restore)
+	}
 	if arg == "" {
 		fmt.Fprintf(&script, "exec %s slot run -- %s \"$@\"\n", shellquote.Quote(dyna), shellquote.Quote(target))
 	} else {
