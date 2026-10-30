@@ -36,6 +36,41 @@ func TestEventPublishedAfterCommit(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+func TestEventsPublishInCommitOrder(t *testing.T) {
+	s, err := Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ch, cancel := s.Subscribe()
+	defer cancel()
+	from := contract.Principal{Kind: contract.PrincipalEngine}
+	commits := [][]contract.EventID{{"ev_1"}, {"ev_2", "ev_3"}, {"ev_4"}}
+	for _, ids := range commits {
+		err := s.Write(context.Background(), func(tx *sql.Tx) error {
+			for _, id := range ids {
+				if _, err := s.AppendEvent(tx, contract.Event{ID: id, Time: time.UnixMilli(10), From: from, Body: contract.PostCreated{Text: string(id)}}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []contract.EventID{"ev_1", "ev_2", "ev_3", "ev_4"}
+	for i, id := range want {
+		select {
+		case got := <-ch:
+			if got.Seq != int64(i+1) || got.ID != id {
+				t.Fatalf("event %d: got seq %d id %s", i, got.Seq, got.ID)
+			}
+		default:
+			t.Fatalf("event %s was not published", id)
+		}
+	}
+}
 func TestRolledBackEventIsNotPublished(t *testing.T) {
 	s, err := Open(t.TempDir(), time.Now)
 	if err != nil {
