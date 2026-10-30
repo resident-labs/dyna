@@ -44,11 +44,11 @@ export function createSettingsPanel(host: SettingsPanelHost) {
     },
     // openHooks closes the settings panels and shows Services > Hooks, with
     // one hook run open when a feed card asked for it. With no room open,
-    // Settings shows this computer's hooks instead.
+    // Settings opens its Services pane instead.
     openHooks(run: HookLogTarget | null = null) {
       host.closeNav()
       if (!host.hasRoom()) {
-        settingsAt = { start: 'hooks', pairNow: false }
+        settingsAt = { start: 'services', pairNow: false }
         settingsKey++
         showSettings = true
         return

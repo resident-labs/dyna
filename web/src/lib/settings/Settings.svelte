@@ -12,7 +12,7 @@
   import AccountsPane from './accounts/AccountsPane.svelte'
   import SettingsPane from './SettingsPane.svelte'
   import DevicesPane from './DevicesPane.svelte'
-  import HooksSection from '../services/HooksSection.svelte'
+  import Services from '../services/Services.svelte'
   import type { ModelSelection } from './profiles/state.ts'
   import type { UpdateNotice } from '../api/settings.ts'
 
@@ -26,12 +26,11 @@
     profile?: string
     initialSelection?: ModelSelection | null
     oncreateprofile?: (selection: ModelSelection) => void
-    // onhooks shows Services > Hooks, where hooks now live. With no room open
-    // there is no Services page, so the pane shows this computer's hooks.
-    onhooks?: () => void
+    // repo is the open room's repository, which the Services pane uses.
+    repo?: string
     onclose: () => void
   }
-  let { update = null, dataDir = '', start = 'profiles', pairNow = false, roomId = '', accountId = '', profile = '', initialSelection = null, oncreateprofile = () => {}, onhooks = () => {}, onclose }: Props = $props()
+  let { update = null, dataDir = '', start = 'profiles', pairNow = false, roomId = '', repo = '', accountId = '', profile = '', initialSelection = null, oncreateprofile = () => {}, onclose }: Props = $props()
 
   let pane = $state(untrack(() => start)) // the pane to open first
   let accountToOpen = $state(untrack(() => accountId))
@@ -45,14 +44,13 @@
     { id: 'skills', label: 'Skills', hint: 'Skills every session can read' },
     { id: 'mcp', label: 'MCP', hint: 'MCP servers Dyna manages' },
     { id: 'accounts', label: 'Accounts', hint: 'Sign-ins, usage and active account' },
-    { id: 'hooks', label: 'Hooks', hint: roomId ? 'On the Services page' : 'Commands on this computer' },
+    { id: 'services', label: 'Services', hint: 'What Dyna runs by itself, and hooks' },
     { id: 'settings', label: 'Settings', hint: 'How Dyna behaves' },
     { id: 'devices', label: 'Devices', hint: 'Phones and browsers' },
     { id: 'about', label: 'Updates', hint: 'Version and data' },
   ]
 
   function selectPane(next: string) {
-    if (next === 'hooks' && roomId) { onhooks(); return }
     if (next !== pane) { profileSelection = null; profileToOpen = '' }
     pane = next
   }
@@ -75,8 +73,8 @@
     <AccountsPane accountId={accountToOpen} {roomId} {oncreateprofile} onprofile={viewProfile} onmodal={(open) => (busy = open)} />
   {:else if pane === 'settings'}
     <SettingsPane {roomId} />
-  {:else if pane === 'hooks'}
-    <HooksSection />
+  {:else if pane === 'services'}
+    <Services scope="global" {roomId} {repo} />
   {:else if pane === 'devices'}
     <DevicesPane {pairNow} onmodal={(open) => (busy = open)} />
   {:else}

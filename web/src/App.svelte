@@ -1562,7 +1562,7 @@
 {/if}
 {#if settingsPanel.showSettings}
   {#key settingsPanel.settingsKey}
-    <Settings {update} {dataDir} onhooks={() => openHooks()} start={settingsPanel.settingsAt.start} pairNow={settingsPanel.settingsAt.pairNow} profile={settingsPanel.settingsAt.profile ?? ''} accountId={settingsPanel.settingsAt.accountId ?? ''} initialSelection={settingsPanel.settingsAt.initialSelection} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { settingsPanel.closeSettings(); loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
+    <Settings {update} {dataDir} start={settingsPanel.settingsAt.start} pairNow={settingsPanel.settingsAt.pairNow} profile={settingsPanel.settingsAt.profile ?? ''} accountId={settingsPanel.settingsAt.accountId ?? ''} initialSelection={settingsPanel.settingsAt.initialSelection} roomId={room?.id ?? ''} repo={room?.repo ?? ''} oncreateprofile={createProfile} onclose={() => { settingsPanel.closeSettings(); loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
   {/key}
 {/if}
 {#if settingsPanel.showRoomSettings && room}
