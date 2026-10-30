@@ -20,7 +20,7 @@ const (
 
 type Address struct {
 	Kind AddressKind
-	Room string
+	Room contract.RoomName
 	Name string
 }
 
@@ -36,7 +36,7 @@ func ParseAddress(s string) (Address, error) {
 		if room == "" || name == "" || strings.Contains(name, ":") {
 			return Address{}, errors.New("invalid address")
 		}
-		return Address{Kind: AddressName, Room: room, Name: name}, nil
+		return Address{Kind: AddressName, Room: contract.RoomName(room), Name: name}, nil
 	}
 	switch s {
 	case "parent":
