@@ -1,10 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"io/fs"
@@ -20,6 +20,8 @@ import (
 type Web struct {
 	mu      sync.Mutex
 	host    string
+	address string
+	handler http.Handler
 	now     func() time.Time
 	tokens  map[[32]byte]time.Time
 	cookies map[[32]byte]struct{}
@@ -27,10 +29,14 @@ type Web struct {
 	api     *API
 }
 
-func NewWeb(a *API, port string, app fs.FS, now func() time.Time) *Web {
-	w := &Web{host: "dyna.localhost:" + port, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), cookies: make(map[[32]byte]struct{})}
+func NewWeb(a *API, address string, app fs.FS, now func() time.Time) (*Web, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host != "127.0.0.1" || port == "" {
+		return nil, fmt.Errorf("web listener must bind 127.0.0.1 with a port")
+	}
+	w := &Web{address: address, host: "dyna.localhost:" + port, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), cookies: make(map[[32]byte]struct{})}
 	a.web = w
-	return w
+	return w, nil
 }
 
 func secret() (string, error) {
@@ -67,18 +73,10 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/login" && r.Method == http.MethodGet {
 		hash := sha256.Sum256([]byte(r.URL.Query().Get("t")))
 		w.mu.Lock()
-		valid := 0
-		for candidate, expiry := range w.tokens {
-			match := subtle.ConstantTimeCompare(hash[:], candidate[:])
-			if match == 1 {
-				delete(w.tokens, candidate)
-				if w.now().Before(expiry) {
-					valid = 1
-				}
-			}
-		}
+		expiry, ok := w.tokens[hash]
+		delete(w.tokens, hash)
 		w.mu.Unlock()
-		if valid != 1 {
+		if !ok || !w.now().Before(expiry) {
 			http.Error(out, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -94,26 +92,20 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		http.Redirect(out, r, "/", http.StatusSeeOther)
 		return
 	}
-	if r.URL.Path == "/v1/web.login" {
-		http.NotFound(out, r)
-		return
-	}
 	if strings.HasPrefix(r.URL.Path, "/v1/") {
 		cookie, err := r.Cookie("dyna_web")
-		valid := 0
+		valid := false
 		if err == nil {
 			hash := sha256.Sum256([]byte(cookie.Value))
 			w.mu.Lock()
-			for candidate := range w.cookies {
-				valid |= subtle.ConstantTimeCompare(hash[:], candidate[:])
-			}
+			_, valid = w.cookies[hash]
 			w.mu.Unlock()
 		}
-		if valid != 1 {
+		if !valid {
 			http.Error(out, "forbidden", http.StatusForbidden)
 			return
 		}
-		w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}).ServeHTTP(out, r)
+		w.handler.ServeHTTP(out, r)
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -132,15 +124,12 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		http.NotFound(out, r)
 		return
 	}
-	http.ServeContent(out, r, path, time.Time{}, strings.NewReader(string(data)))
+	http.ServeContent(out, r, path, time.Time{}, bytes.NewReader(data))
 }
 
-func (w *Web) Listen(address string) (net.Listener, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil || host != "127.0.0.1" || "dyna.localhost:"+port != w.host {
-		return nil, fmt.Errorf("web listener must bind 127.0.0.1 and its configured port")
-	}
-	l, err := net.Listen("tcp", address)
+func (w *Web) Listen() (net.Listener, error) {
+	w.handler = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
+	l, err := net.Listen("tcp", w.address)
 	if err != nil {
 		return nil, err
 	}

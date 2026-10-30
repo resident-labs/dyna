@@ -10,6 +10,7 @@ type Caller struct {
 	Principal contract.Principal
 	Box       contract.BoxID
 	Room      contract.RoomID
+	Web       bool
 }
 
 // Service implements the engine operations. It must authorize resource targets
