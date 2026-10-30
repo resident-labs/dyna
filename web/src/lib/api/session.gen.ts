@@ -40,16 +40,23 @@ export interface Usage {
   costUsd?: number /* float64 */;
 }
 /**
+ * Coverage says how fully a usage metric was observed in one turn.
+ */
+export const CoverageComplete = "complete";
+export const CoveragePartial = "partial";
+export const CoverageUnknown = "unknown";
+export type Coverage = typeof CoverageComplete | typeof CoveragePartial | typeof CoverageUnknown;
+/**
  * UsageNormalization describes observed coverage, not billing verification.
  * Absent metadata identifies legacy records whose counters have not been normalized.
  */
 export interface UsageNormalization {
   version: number /* int */;
   source: string;
-  input: string;
-  cachedInput: string;
-  output: string;
-  cost: string;
+  input: Coverage;
+  cachedInput: Coverage;
+  output: Coverage;
+  cost: Coverage;
   /**
    * CostBasis is CostBasisTurn when Cost holds this turn's own spend. Claude
    * turns saved before it was set hold the session's cumulative total.
