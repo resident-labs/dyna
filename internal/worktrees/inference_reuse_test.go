@@ -48,9 +48,8 @@ func TestRecheckSeesNewOpenOwner(t *testing.T) {
 	}
 }
 
-// Session record versions identify immutable metadata. A recheck reuses the
-// decoded ownership projection while those versions stay unchanged.
-func TestRecheckReusesUnchangedSessionHistory(t *testing.T) {
+// A raw metadata edit invalidates the cached history and fails closed.
+func TestRecheckDetectsRawSessionEdit(t *testing.T) {
 	tree := inferenceTestStore(t)
 	id := "ses_closed"
 	recordtest.Write(t, runstore.SessionsDir(), id, map[string]any{
@@ -61,8 +60,7 @@ func TestRecheckReusesUnchangedSessionHistory(t *testing.T) {
 	if err != nil || len(first[tree].Sessions) != 1 || !first[tree].Sessions[0].Closed {
 		t.Fatalf("first inference = %#v, %v", first, err)
 	}
-	// Change only the bytes, not the version, to make another decode fail.
-	// Canonical writers always change the version with the metadata.
+	// The database trigger advances the revision even for an unversioned edit.
 	db, err := database.Open(filepath.Dir(runstore.SessionsDir()))
 	if err != nil {
 		t.Fatal(err)
@@ -70,9 +68,8 @@ func TestRecheckReusesUnchangedSessionHistory(t *testing.T) {
 	if _, err := db.Exec("UPDATE session_records SET meta = '{' WHERE id = ?", id); err != nil {
 		t.Fatal(err)
 	}
-	again, err := inferOwners(context.Background(), []string{tree}, history)
-	if err != nil || len(again[tree].Sessions) != 1 || again[tree].Sessions[0].ID != id {
-		t.Fatalf("recheck decoded an unchanged session record: %#v, %v", again, err)
+	if _, err := inferOwners(context.Background(), []string{tree}, history); err == nil {
+		t.Fatal("recheck ignored a raw metadata edit")
 	}
 }
 
