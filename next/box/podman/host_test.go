@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -176,25 +175,26 @@ func TestHeartbeatRunsDuringHostCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { defer close(done); _, _ = h.run(context.Background(), "long") }()
+	go func() { defer close(done); _, _ = h.run(ctx, "long") }()
 	<-r.entered
-	launched := make(chan struct{})
-	probeDone := make(chan struct{})
-	go func() { close(launched); defer close(probeDone); _, _ = h.run(context.Background(), "true") }()
-	<-launched
-	runtime.Gosched()
+	// The first command is paused at the SSH boundary. Verify that host state
+	// is available before starting a probe, and cancel to unblock a regression.
 	select {
-	case <-r.second:
+	case h.gate <- struct{}{}:
+		<-h.gate
 	default:
-		close(r.release)
+		cancel()
 		<-done
-		<-probeDone
 		t.Fatal("heartbeat blocked by host command")
 	}
-	close(r.release)
-	<-done
+	probeDone := make(chan struct{})
+	go func() { defer close(probeDone); _, _ = h.run(context.Background(), "true") }()
+	<-r.second
 	<-probeDone
+	cancel()
+	<-done
 }
 func TestCancelledHeartbeatDoesNotWaitForHostState(t *testing.T) {
 	r := &runner{}
