@@ -17,7 +17,7 @@ import (
 
 func TestFileRoomAccess(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(dir, time.Now)
+	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
