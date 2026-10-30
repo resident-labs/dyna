@@ -31,7 +31,7 @@ api.profileModels = async () => {
  if (scenario === 'error') throw new Error('Fixture discovery error')
  return { models: scenario === 'empty' ? [] : models, compact: { window: true }, source: 'Isolated UI fixture', observedAt: '2026-10-17T17:30:00Z' }
 }
-api.accountsList = async () => ({ checkedAt: '2026-10-17T17:30:00Z', problems: [], providers: [{ provider: 'opencode-go', accounts: [{ ...account({ id: 'fixture-account', harness: 'pi', provider: 'opencode-go', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] }), activeHere: true }] }] })
+api.accountsList = async () => ({ checkedAt: '2026-10-17T17:30:00Z', problems: [], providers: [{ provider: 'opencode-go', accounts: [{ ...account({ id: 'fixture-account', harness: 'pi', provider: 'opencode-go', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] }), activeHere: true, servesHere: true }] }] })
 // What the last save asked for.
 const sent: { saved?: ProfileSave } = {}
 api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedModel = data.profile.model; return savedView(data) }
