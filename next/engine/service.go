@@ -7,6 +7,9 @@ import (
 	"database/sql"
 	"errors"
 	"math/big"
+	"mime"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -45,6 +48,7 @@ type Service struct {
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu  sync.Mutex
 	transcriptDir string
+	filesDir      string
 }
 
 type boxRun struct {
@@ -630,6 +634,22 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if strings.TrimSpace(req.Text) == "" {
 		return contract.PostResponse{}, invalid("post text is required")
 	}
+	if len(req.Attachments) > 16 {
+		return contract.PostResponse{}, invalid("too many attachments")
+	}
+	for i := range req.Attachments {
+		file := &req.Attachments[i]
+		media, _, mediaErr := mime.ParseMediaType(file.Media)
+		if !validHash(file.SHA256) || file.Name == "" || len(file.Name) > 255 || mediaErr != nil {
+			return contract.PostResponse{}, invalid("invalid attachment")
+		}
+		info, err := os.Stat(filepath.Join(s.filesDir, file.SHA256))
+		if err != nil || !info.Mode().IsRegular() {
+			return contract.PostResponse{}, invalid("attachment not found")
+		}
+		file.Bytes = info.Size()
+		file.Media = media
+	}
 	if req.Home.Kind == "" {
 		req.Home.Kind = contract.ConversationFeed
 	}
@@ -697,7 +717,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if surface == contract.SurfaceDM {
 		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo})
+	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments})
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
@@ -716,10 +736,16 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	if req.Limit == 0 {
 		req.Limit = 100
 	}
-	if req.Limit < 0 || req.AfterSeq < 0 {
+	if req.Limit < 0 || req.AfterSeq < 0 || req.BeforeSeq < 0 || (req.BeforeSeq > 0 && req.AfterSeq > 0) {
 		return contract.EventsListResponse{}, invalid("invalid event range")
 	}
-	events, err := s.store.Events(ctx, req.Room, req.AfterSeq, req.Limit, req.Types)
+	var events []contract.Event
+	var err error
+	if req.BeforeSeq > 0 {
+		events, err = s.store.EventsBefore(ctx, req.Room, req.BeforeSeq, req.Limit, req.Types)
+	} else {
+		events, err = s.store.Events(ctx, req.Room, req.AfterSeq, req.Limit, req.Types)
+	}
 	if err != nil {
 		return contract.EventsListResponse{}, failure(err)
 	}

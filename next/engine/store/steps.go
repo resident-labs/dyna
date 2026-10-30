@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -16,6 +16,7 @@ var steps = map[int][]string{
 	},
 	6: {"CREATE TABLE transcript_offsets (session TEXT NOT NULL REFERENCES sessions(id), path TEXT NOT NULL, acked INTEGER NOT NULL, PRIMARY KEY(session, path))"},
 	7: {"CREATE TABLE shell_jobs (session TEXT NOT NULL REFERENCES sessions(id), job TEXT NOT NULL, PRIMARY KEY(session, job))"},
+	8: {"CREATE TABLE event_files (seq INTEGER NOT NULL REFERENCES events(seq), sha256 TEXT NOT NULL, media TEXT NOT NULL, PRIMARY KEY(sha256, seq))"},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.
