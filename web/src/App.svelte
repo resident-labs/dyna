@@ -422,9 +422,9 @@
   const settingsPanel = createSettingsPanel({
     hasRoom: () => !!room,
     closeNav: () => { navOpen = false },
-    roomRequired: () => say({ tone: 'info', subject: 'Open a room first', text: 'Hook runs belong to a room repository.' }),
+    openServices: () => openView('services'),
   })
-  const { openSettings, openHookLog, createProfile } = settingsPanel
+  const { openSettings, openHooks, createProfile } = settingsPanel
   let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
   let sessionTab = $state('chat') // the open tab of a session view
@@ -1378,7 +1378,7 @@
     hashChanged, openDetail, tickRooms: () => { rooms = [...rooms] },
     startData: () => { transcripts.start(); workflowData.start() },
     popped: () => { if (sessionTab === 'computer') sessionTab = 'chat' },
-    openHookLog, setVisible: (value) => { pageVisible = value }, visible: () => pageVisible,
+    openHookLog: openHooks, setVisible: (value) => { pageVisible = value }, visible: () => pageVisible,
     started: () => started, refreshVisible: refreshVisibleRoom,
     syncRoom: () => roomId, syncOperation: () => syncRepo?.operation, loadSync,
     computerVisible: () => !!drill || view === 'computers', loadComputers,
@@ -1495,7 +1495,7 @@
         {:else if view === 'requests'}
           {#key room.id}<Requests roomId={room.id} {questions} focusId={questionView.focus} focusRequest={questionView.focusRequest} onanswer={answerQuestion} onrun={reviewTerminalRequest} ondecline={declineTerminalRequest} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
-          {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} onpr={openPR} />{/key}
+          {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} hooks={settingsPanel.hooksAt} onopen={(m: Member) => openSession(m, 0, null, true)} onpr={openPR} />{/key}
         {:else if view === 'visuals'}
           {#key room.id}<Visuals roomId={room.id} {visuals} onopen={(v: Visual) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
         {:else if view === 'computers' && computers}
@@ -1562,13 +1562,13 @@
 {/if}
 {#if settingsPanel.showSettings}
   {#key settingsPanel.settingsKey}
-    <Settings {update} {dataDir} start={settingsPanel.settingsAt.start} pairNow={settingsPanel.settingsAt.pairNow} profile={settingsPanel.settingsAt.profile ?? ''} accountId={settingsPanel.settingsAt.accountId ?? ''} initialSelection={settingsPanel.settingsAt.initialSelection} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { settingsPanel.closeSettings(); loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
+    <Settings {update} {dataDir} onhooks={() => openHooks()} start={settingsPanel.settingsAt.start} pairNow={settingsPanel.settingsAt.pairNow} profile={settingsPanel.settingsAt.profile ?? ''} accountId={settingsPanel.settingsAt.accountId ?? ''} initialSelection={settingsPanel.settingsAt.initialSelection} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { settingsPanel.closeSettings(); loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
   {/key}
 {/if}
 {#if settingsPanel.showRoomSettings && room}
   {#key settingsPanel.roomSettingsKey}
   {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} start={settingsPanel.roomSettingsAt.start} hookRun={settingsPanel.roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => palette.registry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { settingsPanel.closeRoomSettings(); openSettings('hooks') }} onclose={() => (settingsPanel.closeRoomSettings())} />
+  <RoomSettings {room} {profiles} onrootprofile={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.rootProfile = value }} oncheckin={(id: string, value: string) => { if (roomData.feed?.room.id === id) roomData.feed.room.checkIn = value || undefined }} onlimit={(id: string, field: RoomLimitField, value: string) => { if (roomData.feed?.room.id === id) { const limits = { ...roomData.feed.room.limits }; if (value) limits[field] = value; else delete limits[field]; roomData.feed.room.limits = limits } }} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => controls.run(action)} onaction={(id: string) => palette.registry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onhooks={() => openHooks()} onclose={() => (settingsPanel.closeRoomSettings())} />
   {/key}
 {/if}
 {#if roomMenu}

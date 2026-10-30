@@ -12,14 +12,12 @@
   import { roomLabel } from '../ui/format.ts'
   import Switch from '../ui/Switch.svelte'
   import SettingsShell from '../ui/SettingsShell.svelte'
-  import HooksPane from '../settings/HooksPane.svelte'
   import CIBudgetFields from '../prs/CIBudgetFields.svelte'
   import PRNoiseRules from '../prs/PRNoiseRules.svelte'
   import { normalizePolicy, parseChecks, checksText, saveRoomPolicy, budgetForm, parseTestAllow } from '../prs/pr.ts'
   import type { BudgetForm, PolicyForm, NormalizedPolicy } from '../prs/pr.ts'
   import type { Room, RoomLimits, ProfileChoice, RoomLimitField } from '../api/room.ts'
   import type { ChangePolicy, PRConfig, ReviewerStatus } from '../api/change.ts'
-  import type { HookLogTarget } from '../settings/hookLog.ts'
   import type { RoomControlValue } from './roomSessionControls.ts'
   import Section from './RoomSettingsSection.svelte'
   import Group from './RoomSettingsGroup.svelte'
@@ -40,15 +38,13 @@
     // state); onsessions runs 'pause' or 'resume'. onaction runs a room action
     // by id: rename, room-pin, room-archive or delete. rules draws the Rules
     // section; busy is true while a rule edit is open, so Esc cancels the edit.
-    // hookRun is the hook run a feed card asked to open, or null. onopenglobal
-    // opens Settings > Hooks, which holds the built-in and machine-wide hooks.
+    // onhooks shows Services > Hooks, where the repository's hooks live.
     room: Room
     profiles?: ProfileChoice[]
     onrootprofile?: (roomId: string, profile: string) => void
     oncheckin?: (roomId: string, value: string) => void
     onlimit?: (roomId: string, field: RoomLimitField, value: string) => void
     start?: string
-    hookRun?: HookLogTarget | null
     reviewer?: ReviewerStatus | null
     onreviewer?: () => unknown
     controls?: Controls | null
@@ -56,10 +52,10 @@
     onaction?: (id: string) => void
     rules: Snippet
     busy?: boolean
-    onopenglobal?: () => unknown
+    onhooks?: () => unknown
     onclose: () => void
   }
-  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, onlimit = () => {}, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
+  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, onlimit = () => {}, start = 'general', reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onhooks = () => {}, onclose }: Props = $props()
   let rootProfile = $state(untrack(() => room.rootProfile || ''))
   let rootProfileBusy = $state(false)
   let rootProfileError = $state('')
@@ -150,7 +146,6 @@
     { id: 'noise', label: 'Bot noise rules' },
   ]
   let section = $state(untrack(() => start))
-  let hooksBusy = $state(false) // a hooks dialog owns Esc while open
   let roomId = $derived(room.id)
   let reviewEnabled = $derived(reviewer?.enabled ?? null)
 
@@ -321,7 +316,7 @@
   {/if}
 {/snippet}
 
-<SettingsShell label="{roomLabel(room)} settings" title="{roomLabel(room)} settings" {nav} pane={section} onselect={(id) => (section = id)} busy={rulesBusy || hooksBusy} {onclose}>
+<SettingsShell label="{roomLabel(room)} settings" title="{roomLabel(room)} settings" {nav} pane={section} onselect={(id) => (id === 'hooks' ? onhooks() : (section = id))} busy={rulesBusy} {onclose}>
 {#if section === 'general'}
   <Section title="General" lede="The room itself.">
     <Group>
@@ -424,10 +419,6 @@
   </Section>
 {:else if section === 'rules'}
   {@render rules()}
-{:else if section === 'hooks'}
-  <Section title="Hooks" lede="Shell commands that Dyna runs on repository events, such as after a pull request merges.">
-    {#if room.repo}<p class="quiet">Shared by every room on this repository.</p><HooksPane repo={room.repo} scope="repository" focus={hookRun} onmodal={(open) => (hooksBusy = open)} /><button class="btn quiet link" onclick={onopenglobal}>Built-in and machine-wide hooks are in Settings › Hooks</button>{:else}<p class="quiet">This room has no repository.</p>{/if}
-  </Section>
 {:else if section === 'noise'}
   <Section title="Bot noise rules">
     {#if room.repo}<PRNoiseRules {roomId} />{:else}<p class="quiet">This room has no repository.</p>{/if}
