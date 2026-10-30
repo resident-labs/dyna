@@ -1,0 +1,176 @@
+package podman
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/resident-labs/dyna/box"
+)
+
+type CheckName string
+
+const (
+	CheckAdmin     CheckName = "owner-only administration"
+	CheckPaths     CheckName = "paths"
+	CheckCgroup    CheckName = "cgroup v2 and delegated controllers"
+	CheckPodman    CheckName = "rootless Podman 5 with systemd"
+	CheckCapacity  CheckName = "capacity"
+	CheckHostSlice CheckName = "host slice"
+	CheckForward   CheckName = "stream-local forwarding"
+)
+
+type CheckItem struct {
+	Name   CheckName
+	OK     bool
+	Reason string
+}
+type CheckResult struct {
+	Items               []CheckItem
+	CPUs                int
+	MemBytes, DiskBytes int64
+}
+
+func (r CheckResult) Ready() bool {
+	if len(r.Items) == 0 {
+		return false
+	}
+	for _, i := range r.Items {
+		if !i.OK {
+			return false
+		}
+	}
+	return true
+}
+
+// Check performs the registration probes. AdminOnly is the owner's assertion,
+// not a claim that SSH can verify.
+type CheckOptions struct {
+	HostData, Runtime      string
+	AdminOnly              bool
+	MemoryFloor, DiskFloor int64
+}
+
+func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
+	var result CheckResult
+	if o.MemoryFloor == 0 {
+		o.MemoryFloor = 4 << 30
+	}
+	if o.DiskFloor == 0 {
+		o.DiskFloor = 20 << 30
+	}
+	add := func(name CheckName, err error) {
+		item := CheckItem{Name: name, OK: err == nil}
+		if err != nil {
+			item.Reason = err.Error()
+		}
+		result.Items = append(result.Items, item)
+	}
+	if !o.AdminOnly {
+		add(CheckAdmin, fmt.Errorf("owner did not confirm exclusive administration"))
+	} else {
+		add(CheckAdmin, nil)
+	}
+	if !filepath.IsAbs(o.HostData) || !filepath.IsAbs(o.Runtime) {
+		add(CheckPaths, fmt.Errorf("host data and runtime paths must be absolute"))
+		return result
+	}
+	_, err := h.run(ctx, "bash", "-c", `test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs && test "$(systemctl show "user@$(id -u).service" -p Delegate --value)" = yes && cg=$(systemctl show "user@$(id -u).service" -p ControlGroup --value) && for c in cpu memory io pids; do grep -qw "$c" "/sys/fs/cgroup$cg/cgroup.controllers" || exit 1; done`)
+	add(CheckCgroup, err)
+	_, err = h.run(ctx, "bash", "-c", `test "$(podman info --format '{{.Host.Security.Rootless}}')" = true && test "$(podman info --format '{{.Host.CgroupManager}}')" = systemd && test "$(podman version --format '{{.Client.Version}}' | cut -d. -f1)" -ge 5`)
+	add(CheckPodman, err)
+	output, err := h.run(ctx, "bash", "-c", `getconf _NPROCESSORS_ONLN; awk '/MemTotal:|MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
+	if err == nil {
+		result.CPUs, result.MemBytes, result.DiskBytes, err = parseCapacity(output, o.MemoryFloor, o.DiskFloor)
+	}
+	add(CheckCapacity, err)
+	if err == nil {
+		_, err = h.run(ctx, "systemctl", "--user", "set-property", "--runtime", "dyna.slice", fmt.Sprintf("MemoryMax=%d", result.MemBytes))
+		add(CheckHostSlice, err)
+	}
+	add(CheckForward, h.checkForward(ctx, o))
+	return result
+}
+
+// parseCapacity validates the host probe and reserves the host floor once.
+func parseCapacity(output []byte, memoryFloor, diskFloor int64) (int, int64, int64, error) {
+	fields := strings.Fields(string(output))
+	if len(fields) != 4 {
+		return 0, 0, 0, fmt.Errorf("invalid capacity probe")
+	}
+	cpus, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	total, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	available, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	disk, err := strconv.ParseInt(fields[3], 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if cpus < 1 || total <= memoryFloor || available < memoryFloor || disk < diskFloor {
+		return 0, 0, 0, fmt.Errorf("host capacity below floor")
+	}
+	return max(1, cpus-1), total - memoryFloor, disk, nil
+}
+
+func (h *Host) checkForward(ctx context.Context, o CheckOptions) error {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return err
+	}
+	token := hex.EncodeToString(raw[:])
+	dir, err := os.MkdirTemp(filepath.Dir(h.socket), "p-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	local := filepath.Join(dir, "s")
+	listener, err := net.Listen("unix", local)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/probe" {
+			fmt.Fprint(w, token)
+			return
+		}
+		http.NotFound(w, r)
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+	remote := filepath.Join(o.HostData, "sock", "probe-"+token+".sock")
+	if _, err = h.run(ctx, "mkdir", "-p", filepath.Dir(remote)); err != nil {
+		return err
+	}
+	f := box.Forward{HostPath: remote, EnginePath: local}
+	if err = h.AddForward(ctx, f); err != nil {
+		return err
+	}
+	output, err := h.run(ctx, "curl", "--fail", "--silent", "--unix-socket", remote, "http://probe/probe")
+	cancelErr := h.RemoveForward(ctx, f)
+	if err != nil {
+		return fmt.Errorf("curl 7.40 or later and stream-local forwarding are required: %w", err)
+	}
+	if cancelErr != nil {
+		return fmt.Errorf("cancel probe forward: %w", cancelErr)
+	}
+	if string(output) != token {
+		return fmt.Errorf("forward returned the wrong token")
+	}
+	return nil
+}
