@@ -126,7 +126,7 @@ func (s *Service) SetToken(ctx context.Context, roomRef, name, serverURL, token 
 		}
 		return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 			// A new URL is a new server: its tools start off and nobody holds a grant.
-			for _, table := range []string{"room_mcp_tools", "room_mcp_grants"} {
+			for _, table := range []string{"room_mcp_tools", "room_mcp_grants", "room_mcp_prompts"} {
 				if _, err := conn.ExecContext(ctx, "DELETE FROM "+table+" WHERE room=? AND server=? AND EXISTS (SELECT 1 FROM room_mcp_servers WHERE room=? AND name=? AND url<>?)", rec.ID, name, rec.ID, name, serverURL); err != nil {
 					return err
 				}
@@ -289,6 +289,10 @@ func (s *Service) open(ctx context.Context, roomID, name string) (serverRuntime,
 		rt.cancel()
 		return serverRuntime{}, errChanged
 	}
+	// A fresh attach also starts a new generation, even without a detach.
+	// Calls must not combine an older pinned definition with this connection.
+	s.gen[key]++
+	rt.gen = s.gen[key]
 	if previous, ok := s.active[key]; ok {
 		previous.cancel()
 	}
@@ -362,6 +366,14 @@ func (s *Service) pin(ctx context.Context, rec room.Record, name string, rt serv
 		s.forget(serverKey{rec.ID, name}, rt)
 		return err
 	}
+	var prompts []Prompt
+	if rt.client.prompts {
+		prompts, err = rt.client.ListPrompts(callCtx)
+		if err != nil {
+			s.forget(serverKey{rec.ID, name}, rt)
+			return err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if rt.lifetime.Err() != nil {
@@ -373,6 +385,31 @@ func (s *Service) pin(ctx context.Context, rec room.Record, name string, rt serv
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		if attach {
 			if _, err := conn.ExecContext(ctx, "UPDATE room_mcp_servers SET attached=1 WHERE room=? AND name=?", rec.ID, name); err != nil {
+				return err
+			}
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM room_mcp_prompts WHERE room=? AND server=?", rec.ID, name); err != nil {
+			return err
+		}
+		for _, prompt := range prompts {
+			if prompt.Name == "" || strings.ContainsAny(prompt.Name, ": \t\r\n") {
+				return errors.New("invalid MCP prompt name")
+			}
+			arguments := make(map[string]bool, len(prompt.Arguments))
+			for _, arg := range prompt.Arguments {
+				if arg.Name == "" || strings.ContainsAny(arg.Name, "= \t\r\n") || arguments[arg.Name] {
+					return errors.New("invalid MCP prompt argument name")
+				}
+				arguments[arg.Name] = true
+			}
+			definition, err := json.Marshal(prompt)
+			if err != nil {
+				return err
+			}
+			if Scrub(string(definition), []string{rt.client.token}) != string(definition) {
+				return errors.New("MCP prompt metadata contains the server token")
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO room_mcp_prompts(room,server,name,definition) VALUES(?,?,?,?)", rec.ID, name, prompt.Name, string(definition)); err != nil {
 				return err
 			}
 		}
@@ -723,49 +760,9 @@ func (s *Service) Call(ctx context.Context, name, tool string, arguments json.Ra
 	}
 	// Nothing leaves the engine until the arguments pass. The scan runs before a
 	// connection is opened, so a blocked call sends no request.
-	in := scanInput{}
-	if in.Identities, err = s.identities(ctx, rec); err != nil {
+	if err := s.scanCall(ctx, rec, name, arguments); err != nil {
 		finish(room.MCPFlagged, 0, nil)
-		return "", errors.New("the arguments could not be checked, so nothing was sent")
-	}
-	logins, err := s.db.QueryContext(ctx, "SELECT login FROM room_mcp_logins WHERE room=? AND server=?", rec.ID, name)
-	if err != nil {
 		return "", err
-	}
-	for logins.Next() {
-		var login string
-		if err := logins.Scan(&login); err != nil {
-			logins.Close()
-			return "", err
-		}
-		in.AllowedLogins = append(in.AllowedLogins, login)
-	}
-	if err := logins.Close(); err != nil {
-		return "", err
-	}
-	terms, err := s.db.QueryContext(ctx, "SELECT hash,words FROM room_mcp_block_terms WHERE room=? AND server=?", rec.ID, name)
-	if err != nil {
-		return "", err
-	}
-	for terms.Next() {
-		var term blockTerm
-		if err := terms.Scan(&term.Hash, &term.Words); err != nil {
-			terms.Close()
-			return "", err
-		}
-		in.BlockTerms = append(in.BlockTerms, term)
-	}
-	if err := terms.Close(); err != nil {
-		return "", err
-	}
-	rule, flagged, err := scanArguments(arguments, in)
-	if err != nil {
-		finish(room.MCPFlagged, 0, nil)
-		return "", errors.New("the arguments are not valid JSON, so nothing was sent")
-	}
-	if flagged {
-		finish(room.MCPFlagged, 0, nil)
-		return "", fmt.Errorf("nothing was sent: the arguments contain %s. Remove it and call again.", rule)
 	}
 	rt, err := s.connection(ctx, actor.Room, name)
 	if err != nil {
@@ -811,6 +808,53 @@ func (s *Service) Call(ctx context.Context, name, tool string, arguments json.Ra
 	}
 	finish(outcome, len(wrapped), secrets)
 	return wrapped, nil
+}
+
+// scanCall applies the same outbound policy to tools and prompts.
+func (s *Service) scanCall(ctx context.Context, rec room.Record, name string, arguments json.RawMessage) error {
+	in := scanInput{}
+	var err error
+	if in.Identities, err = s.identities(ctx, rec); err != nil {
+		return errors.New("the arguments could not be checked, so nothing was sent")
+	}
+	logins, err := s.db.QueryContext(ctx, "SELECT login FROM room_mcp_logins WHERE room=? AND server=?", rec.ID, name)
+	if err != nil {
+		return err
+	}
+	for logins.Next() {
+		var login string
+		if err := logins.Scan(&login); err != nil {
+			logins.Close()
+			return err
+		}
+		in.AllowedLogins = append(in.AllowedLogins, login)
+	}
+	if err := logins.Close(); err != nil {
+		return err
+	}
+	terms, err := s.db.QueryContext(ctx, "SELECT hash,words FROM room_mcp_block_terms WHERE room=? AND server=?", rec.ID, name)
+	if err != nil {
+		return err
+	}
+	for terms.Next() {
+		var term blockTerm
+		if err := terms.Scan(&term.Hash, &term.Words); err != nil {
+			terms.Close()
+			return err
+		}
+		in.BlockTerms = append(in.BlockTerms, term)
+	}
+	if err := terms.Close(); err != nil {
+		return err
+	}
+	rule, flagged, err := scanArguments(arguments, in)
+	if err != nil {
+		return errors.New("the arguments are not valid JSON, so nothing was sent")
+	}
+	if flagged {
+		return fmt.Errorf("nothing was sent: the arguments contain %s. Remove it and call again.", rule)
+	}
+	return nil
 }
 
 // capText cuts text to at most n bytes without splitting a character.
