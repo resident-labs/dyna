@@ -37,8 +37,11 @@ func TestQASeedFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	posts, err := rooms.Messages(rec.ID)
-	if err != nil || len(posts) != 2 {
+	if err != nil || len(posts) != 3 {
 		t.Fatalf("posts = %v, %v", posts, err)
+	}
+	if posts[0].SenderKind != room.SenderOwner || posts[2].From != "qa-lab:root" {
+		t.Fatalf("sender fixtures = %+v", posts)
 	}
 	gs := &goals.Store{Root: filepath.Join(dir, "goals")}
 	list, err := gs.List(rec.ID)
