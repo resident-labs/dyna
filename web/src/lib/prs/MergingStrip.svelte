@@ -3,7 +3,8 @@
   import type { MergeControlStatus } from '../api/change.ts'
   import { shortSha } from './pr.ts'
   import { trialProgress, waitingReason, waitingWords } from './roomPRs.ts'
-  let { status, error = '', onpick, onresume, resuming = false, resumeError = '' }: { status: MergeControlStatus | null; error?: string; onpick: (id: string) => void; onresume: () => void; resuming?: boolean; resumeError?: string } = $props()
+  // failed says the merge status call failed; onretry asks again. The raw error stays off the screen (rule r8).
+  let { status, failed = false, onretry = () => {}, onpick, onresume, resuming = false, resumeError = '' }: { status: MergeControlStatus | null; failed?: boolean; onretry?: () => void; onpick: (id: string) => void; onresume: () => void; resuming?: boolean; resumeError?: string } = $props()
   let ready = $derived(status?.queue?.filter((q) => q.state === 'ready' && !q.trial) ?? [])
   let reason = $derived(status ? waitingReason(status) : null)
 </script>
@@ -16,7 +17,11 @@
     </div>
     {#if resumeError}<p class="error" role="alert">Could not resume merging: {resumeError}</p>{/if}
   {/if}
-  {#if error}<p class="error">Merge status unavailable: {error}</p>
+  {#if failed}
+    <div class="pause" role="alert">
+      <div><strong>Merge status did not load</strong><p>The merge queue and trials are missing.</p></div>
+      <button class="resume" onclick={onretry}>Retry</button>
+    </div>
   {:else if !status}<p class="muted">Loading merge status…</p>
   {:else}
     <div class="line now"><b>Now</b><div>

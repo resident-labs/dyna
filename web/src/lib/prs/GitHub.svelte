@@ -1,6 +1,7 @@
 <script lang="ts">
   import Segmented from '../ui/Segmented.svelte'
   import LoadOlder from '../ui/LoadOlder.svelte'
+  import LoadFailed from '../ui/LoadFailed.svelte'
   // The room's pull requests and issues, as a list and one open item. What
   // Dyna tracks and untracked PRs share one open-only list. On a wide screen the list stays beside the open item; on a
   // narrow one the open item takes the screen and a back link returns.
@@ -29,7 +30,7 @@
   import MentionInChat from './MentionInChat.svelte'
   import RowActions from './RowActions.svelte'
   import type { RowAction } from './props.ts'
-  import { issueWork, roomIssueLabel, trackedIssueItems, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
+  import { issueWork, roomIssueLabel, trackedIssueItems, unifiedIssues, urlKey, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
   import { location as issueLocation } from '../issues/localIssues.ts'
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
@@ -105,7 +106,7 @@
   let scope = $state<ListScope>(untrack(() => loadScope(roomId, listKind)))
   let tracked = $derived(scope === 'tracked')
   let watched = $state<GitHubItem[]>([]) // the issues the room watches, from dyna.db
-  let watchError = $state('')
+  let watchFailed = $state(false)
   let listState = $state(kind === 'issue' ? 'unhandled' : saved.state)
   let source = $state('all')
   let localSelected = $state<RoomIssue | null>(null)
@@ -118,7 +119,7 @@
   let search = $state('')
   let query = $state('') // the search the list was loaded with
   let list = $state<GitHubListResult | null>(null)
-  let error = $state('')
+  let failed = $state(false) // the GitHub list call failed
   let sel = $state(kind === 'issue' ? link?.issue ?? 0 : 0) // the open PR or issue number, for its GitHub thread
   let detail = $state<GitHubDetail | null>(null)
   let detailError = $state('')
@@ -129,7 +130,7 @@
   // and a two-column guess would squeeze the list in a small panel.
   let width = $state(0) // this screen's own width, from its box
   let mergeStatus = $state<MergeControlStatus | null>(null)
-  let mergeError = $state('')
+  let mergeFailed = $state(false)
   let resuming = $state(false)
   let resumeError = $state('')
   let merge = $state<MergeQueueItem[] | null>(null) // the room's RoomMergeStatus answer
@@ -168,9 +169,11 @@
   let nothingTracked = $derived(tracked && !localIssues.length && !issueItems.length)
   let issueRows = $derived(listState === 'unhandled' || listState === 'in-progress' ? allIssueRows.filter((it) => issueWork(it) === listState) : allIssueRows)
   async function pickIssue(it: IssueRow) {
-    // The panel reads issues of the room's repository; a watched issue of
-    // another repository, such as an upstream, opens on GitHub.
-    if (it.number && list?.repo && !it.url.toLowerCase().includes(`/${list.repo.toLowerCase()}/issues/`)) { openExternal(it.url); return }
+    // The panel reads issues of the room's repository by number. A watched
+    // issue can belong to another repository, such as an upstream, so it opens
+    // on GitHub unless the GitHub list names the room repository as its own.
+    const watch = watched.some((w) => urlKey(w.url) === urlKey(it.url))
+    if (watch && !(list?.repo && it.url.toLowerCase().includes(`/${list.repo.toLowerCase()}/issues/`))) { openExternal(it.url); return }
     localSelected = it.number ? null : it.local || null
     localBody = ''; localBodyError = ''
     const n = ++localSequence
@@ -199,9 +202,9 @@
       const res = await api.githubList(roomId, kind, kind === 'pr' ? 'open' : issueAPIState, tracked ? '' : query)
       if (n !== seq) return
       list = res
-      error = ''
-    } catch (e) {
-      if (n === seq) error = errorText(e)
+      failed = false
+    } catch {
+      if (n === seq) failed = true
     }
   }
 
@@ -210,9 +213,9 @@
     const n = ++wseq
     try {
       const res = await api.issueWatches(roomId)
-      if (n === wseq) { watched = res; watchError = '' }
-    } catch (e) {
-      if (n === wseq) watchError = errorText(e)
+      if (n === wseq) { watched = res; watchFailed = false }
+    } catch {
+      if (n === wseq) watchFailed = true
     }
   }
   function setScope(next: ListScope) {
@@ -238,9 +241,9 @@
     const n = ++mseq
     try {
       const res = await api.mergeControlStatus(roomId) as MergeControlStatus
-      if (n === mseq) { mergeStatus = res; merge = res.queue ?? []; mergeError = '' }
-    } catch (e) {
-      if (n === mseq) { mergeStatus = null; merge = null; mergeError = errorText(e) }
+      if (n === mseq) { mergeStatus = res; merge = res.queue ?? []; mergeFailed = false }
+    } catch {
+      if (n === mseq) { mergeStatus = null; merge = null; mergeFailed = true }
     }
   }
   async function resumeMerging() {
@@ -484,9 +487,9 @@
   {#if inPRs}
       <div class="list prlist" hidden={narrow && !!chg}>
         <TabHeader title="Pull requests" usage={`${listRows.length} ${tracked ? 'tracked' : 'open'}`} />
-        <MergingStrip status={mergeStatus} error={mergeError} onpick={openMerge} onresume={resumeMerging} {resuming} {resumeError} />
+        <MergingStrip status={mergeStatus} failed={mergeFailed} onretry={loadMerge} onpick={openMerge} onresume={resumeMerging} {resuming} {resumeError} />
         {@render filters()}
-        {#if !tracked && error}<p class="more err">GitHub did not answer: {error}</p>{:else if !tracked && list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
+        {#if !tracked && failed}<LoadFailed title="GitHub did not answer" hint="The open pull requests on GitHub could not be listed." onretry={load} />{:else if !tracked && list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {#if anyRows}
           <div class="rows">
             {#each listRows as row (row.changeId)}
@@ -535,14 +538,14 @@
       <div class="list" role="presentation">
         <TabHeader title="Issues" usage={`${issueRows.length} ${listState === 'all' ? 'total' : listState}`} />
         {@render filters()}
-        {#if error && source !== 'dyna'}<p class="quiet err">GitHub did not answer: {error}</p>{/if}
-        {#if tracked && watchError && source !== 'dyna'}<p class="quiet err">Dyna could not read the watched issues: {watchError}</p>{/if}
-        {#if !list && !error && source !== 'dyna'}<p class="quiet">Asking GitHub…</p>{/if}
+        {#if failed && source !== 'dyna'}<LoadFailed title="GitHub did not answer" hint="GitHub issues are missing from this list." onretry={load} />{/if}
+        {#if tracked && watchFailed && source !== 'dyna'}<LoadFailed title="Watched issues did not load" hint="The issues this room watches are missing from this list." onretry={loadWatched} />{/if}
+        {#if !list && !failed && source !== 'dyna'}<p class="quiet">Asking GitHub…</p>{/if}
         {#if issueRows.length}
           <IssueList groups={['open', 'closed'].map((id) => ({ id, label: id, rows: issueRows.filter((i) => (i.state === 'OPEN') === (id === 'open')) }))} {sel} {onmention} onpick={pickIssue}
             oncloseissue={oncloseissue ? (it) => it.local && oncloseissue(it.local) : undefined} onexport={onexportissue ? (it) => it.local && onexportissue(it.local) : undefined} ondismiss={ondismississue ? (it) => it.local && ondismississue(it.local) : undefined} />
           {#if !tracked && list?.more && source !== 'dyna'}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
-        {:else if list || error || source === 'dyna' || tracked}
+        {:else if list || failed || source === 'dyna' || tracked}
           <div class="empty">
             {#if nothingTracked}
               <strong>No tracked issues</strong>
