@@ -21,9 +21,13 @@ import (
 	"unicode/utf8"
 
 	"dyna-agent/internal/engineclient"
+	runtime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/parentoutput"
+	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/questions"
+	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/settings"
@@ -1370,6 +1374,33 @@ func (s *Service) turnEvent(meta subagent.Meta, turn subagent.Turn) (room.TurnEv
 		ev.WorkerStderr = strings.TrimSpace(turn.WorkerStderr)
 	}
 	ev.Detail = s.turnReportDetail(meta, turn, state)
+	if state == room.TurnFailed && turn.FailureReason == providerfailure.Quota && !s.sessionStore().TransferFallbackFollows(meta, turn) {
+		registry, err := profile.ReadConfig(profile.DefaultPath())
+		if err != nil {
+			ev.CandidatesError = true
+		} else {
+			repo := runtime.RepoIdentity(context.Background(), meta.Dir)
+			failed, _ := effectiveTurnProfile(meta, turn)
+			for _, candidate := range rolesession.SessionAvailability(registry.Store.Profiles, repo, s.sessionStore(), time.Now()) {
+				if candidate.Profile == failed {
+					continue
+				}
+				state := room.CandidateState(candidate.State)
+				if repo == "" {
+					state = room.CandidateUnknown
+				}
+				if candidate.Error != nil {
+					ev.CandidatesError = true
+				}
+				item := room.TransferCandidate{Profile: candidate.Profile, State: state}
+				if !candidate.EvidenceAt.IsZero() {
+					item.EvidenceAt = candidate.EvidenceAt.Format(time.RFC3339)
+				}
+				ev.Candidates = append(ev.Candidates, item)
+				ev.Detail += fmt.Sprintf("\nTransfer candidate: %s (%s)", item.Profile, item.State)
+			}
+		}
+	}
 	return ev, nil
 }
 
