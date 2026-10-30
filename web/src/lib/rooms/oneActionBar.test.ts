@@ -144,7 +144,7 @@ test('tapping DM message A and then B leaves only B with a bar', async () => {
     const target = dom.window.document.getElementById('app')
     assert.ok(target)
     const dm = { address: 'work:lead', threads: [], rows: [message('A'), message('B')] }
-    mount(DmRows, { target, props: { dm, room: { id: 'r', name: 'work' }, member: { name: 'lead', address: 'work:lead' }, members: [], onforward: () => {}, onthread: () => {} } })
+    mount(DmRows, { target, props: { dm, room: { id: 'r', name: 'work' }, member: { avatar: { kind: 'session', room: 'repo', color: 'crimson' }, name: 'lead', address: 'work:lead' }, members: [], onforward: () => {}, onthread: () => {} } })
     flushSync()
     const article = (id: string): Element => {
       const el = target.querySelector(`article[data-select-id="${id}"]`)

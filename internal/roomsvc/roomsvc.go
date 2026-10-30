@@ -246,13 +246,14 @@ func (s *Service) sessions() *subagent.Store { return s.Notify.Sessions.Store }
 
 // Room is one row of the room rail.
 type Room struct {
-	DisplayName string `json:"displayName,omitempty"`
-	Pinned      bool   `json:"pinned"`
-	PinOrder    int    `json:"pinOrder"`
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Repo        string `json:"repo,omitempty"`
-	RootProfile string `json:"rootProfile,omitempty"`
+	Color       room.RoomColor `json:"color"`
+	DisplayName string         `json:"displayName,omitempty"`
+	Pinned      bool           `json:"pinned"`
+	PinOrder    int            `json:"pinOrder"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Repo        string         `json:"repo,omitempty"`
+	RootProfile string         `json:"rootProfile,omitempty"`
 	// CheckIn is the room's own parent check-in cadence, as typed: a duration
 	// such as 30m, or off. Empty uses the hook's global interval.
 	CheckIn string `json:"checkIn,omitempty"`
@@ -319,7 +320,7 @@ func (s *Service) Rooms() ([]Room, error) {
 	live := s.Notify.ActiveRoomIDs()
 	var out []Room
 	for _, rec := range records {
-		r := Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
+		r := Room{Color: rec.Color, DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
 		version, err := store.MessageLogVersion(rec.ID)
 		if err != nil {
 			return nil, err
@@ -536,8 +537,8 @@ type Post struct {
 	Unread bool `json:"unread,omitempty"`
 	// FromHue is the sender's stable name color index (see NameHue).
 	FromHue int `json:"fromHue"`
-	// FromEmoji is the sending session's avatar; empty for the owner.
-	FromEmoji string `json:"fromEmoji,omitempty"`
+	// Avatar identifies the sender.
+	Avatar Avatar `json:"avatar"`
 	// Speaker is the sender's label (see SpeakerLabel).
 	Speaker string `json:"speaker"`
 	// FromRoom names the room the owner wrote this post from, set only on a
@@ -805,7 +806,7 @@ func (s *Service) feedOf(rec room.Record, msgs []room.Message, offset int64, boo
 	if err != nil {
 		return Feed{}, err
 	}
-	return Feed{Room: Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
+	return Feed{Room: Room{Color: rec.Color, DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), Limits: roomLimitsView(rec), LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
 }
 
 // postsOf decorates messages as posts. full replaces a completion's stored
@@ -843,19 +844,16 @@ func (s *Service) postsOf(rec room.Record, msgs []room.Message, book avatarBook,
 func decorate(m room.Message, roomName string, reads map[string]bool, book avatarBook) Post {
 	name := m.From
 	var turnSessionID string
-	turn := false
 	if ev, ok := m.TurnResult(); ok {
-		turn = true
 		// The engine posts a turn end on the session's behalf.
 		name = ev.Session
 		turnSessionID = ev.SessionID
 	}
-	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName), Reply: replyTarget(m, roomName, book)}
+	p := Post{Message: m, Owner: m.SenderKindFor(roomName) == room.SenderOwner, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName), Reply: replyTarget(m, roomName, book)}
 	if turnSessionID != "" {
-		p.FromEmoji = book.byID[turnSessionID]
-	}
-	if p.FromEmoji == "" && (!p.Owner || turn) {
-		p.FromEmoji = book.forPost(name, m.TS)
+		p.Avatar = book.member(turnSessionID, roomName)
+	} else {
+		p.Avatar = book.resolve(m, roomName)
 	}
 	p.Unread = countsUnread(m, roomName) && !reads[m.ID]
 	if !p.Owner {
@@ -1010,7 +1008,7 @@ type Member struct {
 	CloseSummary     []sessionclose.Outcome `json:"closeSummary,omitempty"`
 	Closed           bool                   `json:"closed,omitempty"`
 	Hue              int                    `json:"hue"`
-	Emoji            string                 `json:"emoji,omitempty"` // avatar; empty for the owner
+	Avatar           Avatar                 `json:"avatar"`
 	// Computer is the ID of the computer this row uses (computers.ActorID), so
 	// the Computer tab reads the right computer without guessing from the row.
 	Computer string `json:"computer,omitempty"`
@@ -1124,7 +1122,7 @@ func (s *Service) buildMembers(rec room.Record, all []subagent.Info, rev string,
 	walk(membership.Roots, 0)
 	book := s.avatarBook(rec.ID, all, rev)
 	for i := range out {
-		out[i].Emoji = book.byID[out[i].ID]
+		out[i].Avatar = book.member(out[i].ID, rec.Name)
 	}
 	return out
 }

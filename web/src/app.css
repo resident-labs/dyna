@@ -228,3 +228,8 @@ code, pre, .mono { font-family: var(--mono); font-size: 0.86em; font-variant-lig
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+:root {
+  --room-crimson: #e0525e; --room-blue: #5b8def; --room-violet: #b07cf0; --room-teal: #2fb5a8;
+  --room-orange: #e88a3a; --room-magenta: #d061b0; --room-sky: #4fb3e0; --room-olive: #a3a83c;
+}

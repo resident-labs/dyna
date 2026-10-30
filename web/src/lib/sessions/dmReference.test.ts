@@ -39,6 +39,7 @@ await writeFile(app, need(built.outputFiles?.[0]).contents)
 const web = await import(pathToFileURL(app).href)
 
 const reference: SessionReference = {
+  avatar: { kind: 'session', emoji: '🦊', room: 'room_1', color: 'crimson' },
   postId: 'msg_0123456789abcdef', from: 'room_1:lead', speaker: 'lead', fromHue: 2,
   conversation: 'room', ts: Date.UTC(2026, 9, 23, 8, 0), preview: 'The parser test failed on the new input.', attachments: 2,
 }

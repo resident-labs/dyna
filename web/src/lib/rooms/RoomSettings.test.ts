@@ -50,7 +50,7 @@ test('each section shows its moved controls in one shared layout', async () => {
   try {
     const show = (start: string, props: Record<string, unknown> = {}) => render(component, { props: { room, start, onclose() {}, ...props } }).body
     const general = show('general', { controls: { state: { paused: true }, busy: false } })
-    assert.match(text(general), /General .*Name Agents still address the room as #dyna-agent\. Dyna Rename… Pin to rail .*Pause agents Paused\./)
+    assert.match(text(general), /General .*Name Agents still address the room as #dyna-agent\. Dyna Rename… Room color .*Pin to rail .*Pause agents Paused\./)
     assert.match(text(general), /Danger zone Archive .*Archive room Delete .*Delete room…/)
     assert.equal((general.match(/role="switch" aria-checked="true"/g) || []).length, 2)
     // No pause state yet: the switch waits for the host.

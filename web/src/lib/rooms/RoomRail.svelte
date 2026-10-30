@@ -42,7 +42,7 @@
 {#snippet tile(r: Room)}
   <div class="slot" class:sel={selected === r.id} class:unread={r.unread > 0}>
     <span class="pill"></span>
-    <button class="tile" onclick={() => onselect(r.id)} oncontextmenu={(e) => menu(e, r)} onkeydown={(e) => key(e, r)} aria-label={roomLabel(r)}>
+    <button class="tile room-tile" style="--room:var(--room-{r.color})" onclick={() => onselect(r.id)} oncontextmenu={(e) => menu(e, r)} onkeydown={(e) => key(e, r)} aria-label={roomLabel(r)}>
       <span class="ini">{initials(roomLabel(r))}</span>
       {#if narrow}<span class="room-name">{roomLabel(r)}</span>{/if}
       {#if r.unread > 0}<span class="badge">{r.unread > 99 ? '99+' : r.unread}</span>{/if}
@@ -101,6 +101,7 @@
 </nav>
 
 <style>
+  .room-tile { box-shadow: inset 0 0 0 2px var(--room); }
   .rail {
     width: 72px;
     flex: none;

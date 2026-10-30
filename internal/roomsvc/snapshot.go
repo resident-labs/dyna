@@ -243,12 +243,21 @@ func (s *Service) avatarBook(roomID string, all []subagent.Info, rev string) ava
 	defer c.mu.Unlock()
 	if rev != "" && rev == c.rev {
 		if book, ok := c.books[roomID]; ok {
-			return book
+			return s.avatarRooms(book)
 		}
 	}
 	book := newAvatarBook(all, roomID)
 	if rev != "" && rev == c.rev {
 		c.books[roomID] = book
+	}
+	return s.avatarRooms(book)
+}
+
+func (s *Service) avatarRooms(book avatarBook) avatarBook {
+	records, _ := s.rooms().List(true)
+	book.rooms = make(map[string]room.Record, len(records))
+	for _, rec := range records {
+		book.rooms[rec.Name] = rec
 	}
 	return book
 }

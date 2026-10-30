@@ -31,7 +31,7 @@
 </script>
 
 <article class="reference-row" class:enter>
-  <div class="gutter"><Avatar name={ref.speaker} hue={ref.fromHue} size={28} /></div>
+  <div class="gutter"><Avatar avatar={ref.avatar} here={room.name} name={ref.speaker} hue={ref.fromHue} size={28} /></div>
   <div class="body">
     {#if typed}
       <div class="reference typed">
