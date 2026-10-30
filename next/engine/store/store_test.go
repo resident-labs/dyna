@@ -67,7 +67,7 @@ func TestFloor(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = open(dir, time.Now, 2, "fake-commit", nil)
+	_, err = open(dir, time.Now, schemaVersion+1, "fake-commit", nil)
 	var e *Error
 	if !errors.As(err, &e) || e.Code != StoreTooOld || !strings.Contains(e.Message, "fake-commit") {
 		t.Fatalf("got %v", err)
