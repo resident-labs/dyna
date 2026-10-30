@@ -219,6 +219,7 @@ var WriteCalls = map[string]bool{
 	"SetRoomUpstream":             true,
 	"SetServiceProfile":           true,
 	"SetServiceProfileAll":        true,
+	"SetOwnerProfile":             true,
 	"SetSetting":                  true,
 	"StampPlanAncestry":           true,
 	"StartIssueWork":              true,

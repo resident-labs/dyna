@@ -25,7 +25,7 @@ import type { ProfileCheck, ProfileEdit, ProfileList, ProfileUsageSnapshot, Prof
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SetRoomLimitResult, SpawnResult, TerminalVerdict, Visual } from './room.ts'
 import type { RegistryService, ServicePatch, ServiceView } from './service.ts'
 import type { BulkSessionOptions, BulkSessionResult, ConsolidationOptions, ConsolidationState, MemberProfile, QueueItem, RoomSessionMutation, RoomSessionState, Session, TransferOptions, TransferState } from './session.ts'
-import type { Device, Hook, HookRun, HookRunLog, HookSummary, Notice, Pairing, SettingItem, UpdateNotice } from './settings.ts'
+import type { Device, Hook, HookRun, HookRunLog, HookSummary, Notice, Owner, Pairing, SettingItem, UpdateNotice } from './settings.ts'
 import type { ShellJob, ShellLog, ShellLogChunk, TermEvent, TermInfo } from './terminal.ts'
 import type { Health, SystemLoad } from './system.ts'
 import type { CallStatus } from './voice.ts'
@@ -322,6 +322,8 @@ export interface Engine {
   HarnessConfig(): Promise<HarnessConfig>
   Settings(): Promise<SettingItem[] | null>
   SetSetting(key: string, value: string): Promise<SettingItem>
+  OwnerProfile(): Promise<Owner>
+  SetOwnerProfile(owner: Owner): Promise<Owner>
   UpdateNotice(): Promise<UpdateNotice>
   UpdateDyna(): Promise<null>
   Notices(): Promise<Notice[] | null>
