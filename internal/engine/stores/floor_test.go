@@ -55,6 +55,23 @@ func TestUpgradeFloor(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("interrupted new store", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Cleanup(func() { database.Close(dir) })
+		cause := errors.New("interrupted")
+		initializeFloorHook = func() error { return cause }
+		t.Cleanup(func() { initializeFloorHook = func() error { return nil } })
+		if err := Migrate(dir); !errors.Is(err, cause) {
+			t.Fatalf("initial start = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "dyna.db")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("incomplete database was published: %v", err)
+		}
+		initializeFloorHook = func() error { return nil }
+		if err := Migrate(dir); err != nil {
+			t.Fatalf("restart = %v", err)
+		}
+	})
 	t.Run("new", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Cleanup(func() { database.Close(dir) })
