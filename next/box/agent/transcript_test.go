@@ -114,6 +114,42 @@ func TestTranscriptTurnOutputIgnoresSyncError(t *testing.T) {
 	}
 }
 
+type fakeCloser struct{}
+
+func (fakeCloser) Close() error { return nil }
+
+func TestCloseBoxSendsUnsentBytesBeforeArchive(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.jsonl")
+	writeSession(t, file, "abc")
+	engine := &transcriptEngine{}
+	archived := false
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, func(context.Context) error {
+		archived = true
+		if len(engine.requests) != 1 || string(engine.requests[0].Bytes) != "abc" {
+			t.Fatalf("archived before the transcript reached the engine: %+v", engine.requests)
+		}
+		return nil
+	})
+	if err != nil || !archived {
+		t.Fatalf("closeBox = %v, archived = %v, want nil and true", err, archived)
+	}
+}
+
+func TestCloseBoxKeepsBoxWhenTranscriptFails(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.jsonl")
+	writeSession(t, file, "abc")
+	archived := false
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(&transcriptEngine{lose: true}, dir), file, func(context.Context) error {
+		archived = true
+		return nil
+	})
+	if err == nil || archived {
+		t.Fatalf("closeBox = %v, archived = %v, want an error and no archive", err, archived)
+	}
+}
+
 func TestTranscriptTickSendsNewBytes(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.jsonl")
