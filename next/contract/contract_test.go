@@ -12,9 +12,16 @@ import (
 
 func TestEventRegistry(t *testing.T) {
 	bodies := []EventBody{PostCreated{Text: "hello"}, SessionStarted{Name: "agent"}, SessionClosed{Session: "ses_a"}, TurnStarted{Turn: "turn_a"}, TurnEnded{Final: "done"}, BoxChanged{To: BoxReady}}
+	want := []EventType{"post.created", "session.started", "session.closed", "turn.started", "turn.ended", "box.changed"}
+	if len(eventBodyTypes) != len(bodies) {
+		t.Fatalf("registry has %d entries, want %d", len(eventBodyTypes), len(bodies))
+	}
 	seen := make(map[EventType]bool)
-	for _, body := range bodies {
+	for i, body := range bodies {
 		kind := body.EventType()
+		if kind != want[i] {
+			t.Fatalf("type = %q, want %q", kind, want[i])
+		}
 		if seen[kind] {
 			t.Fatalf("duplicate type %q", kind)
 		}
@@ -58,5 +65,12 @@ func TestGeneratedContractCurrent(t *testing.T) {
 		if string(actual) != string(expected) {
 			t.Fatalf("%s is stale; run go generate ./contract", file)
 		}
+	}
+}
+
+func TestUnknownOperationKind(t *testing.T) {
+	var op Operation
+	if err := json.Unmarshal([]byte(`{"kind":"unknown.kind","args":{}}`), &op); err == nil {
+		t.Fatal("unknown operation accepted")
 	}
 }
