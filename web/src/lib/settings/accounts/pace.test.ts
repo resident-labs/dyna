@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { paceOf, resetsIn } from './pace.ts'
+import { meterWake, paceOf, resetsIn } from './pace.ts'
 
 const now = Date.parse('2026-10-20T12:00:00Z')
 const weekStart = '2026-10-17T12:00:00Z'
@@ -27,4 +27,11 @@ test('resets in words the time left and passed resets have no text', () => {
   assert.equal(resetsIn('2026-10-20T12:00:30Z', now), '1m', 'a part minute counts as a minute')
   assert.equal(resetsIn('2026-10-20T11:00:00Z', now), '')
   assert.equal(resetsIn(undefined, now), '')
+})
+
+test('a meter wakes at the next minute or the reset, whichever comes first', () => {
+  assert.equal(meterWake('2026-10-20T13:40:00Z', now), Date.parse('2026-10-20T12:01:00Z'))
+  assert.equal(meterWake('2026-10-20T12:00:30Z', now), Date.parse('2026-10-20T12:00:30Z'))
+  assert.ok(Number.isNaN(meterWake('2026-10-20T12:00:30Z', Date.parse('2026-10-20T12:00:30Z'))), 'a passed reset needs no wake')
+  assert.ok(Number.isNaN(meterWake(undefined, now)), 'no reset, no wake')
 })
