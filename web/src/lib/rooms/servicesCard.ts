@@ -3,14 +3,15 @@
 // fold into one line. The functions are pure; ServicesCard.svelte loads the
 // data and draws the result.
 import type { HookRunLog, HookSummary } from '../api/settings.ts'
-import type { ServiceView } from '../api/service.ts'
+import type { RegistryService } from '../api/service.ts'
+import { factsOf, pillOf } from '../services/model.ts'
 import { listedHooks, runTone } from '../settings/hooks.ts'
 
 // Where a row's log opens: a hook run shows its tail in the card, and a
-// service opens the room's Services page.
+// service opens the Services pane in Settings.
 export type LogTarget =
   | { kind: 'hook'; hook: string; runId: string }
-  | { kind: 'room'; room: string }
+  | { kind: 'settings' }
 
 export interface ServiceCardRow {
   id: string
@@ -39,46 +40,17 @@ export function hookRows(summaries: readonly HookSummary[]): ServiceCardRow[] {
   })
 }
 
-// RoomRead is one room's service list, or null when the read failed and no
-// earlier read of that room exists. stale marks a list kept from an earlier
-// read because the newest read failed.
-export interface RoomRead { room: string; services: readonly ServiceView[] | null; stale?: boolean }
-
-// settleReads keeps a room's last good list when a new read of it fails, so a
-// failed read neither drops that room's failing service nor lets another room
-// report it healthy. The kept list is marked stale, so the card still warns
-// that it could not refresh. A room with no good read yet stays null.
-export function settleReads(kept: Readonly<Record<string, readonly ServiceView[]>>, reads: readonly RoomRead[]): { byRoom: RoomRead[]; kept: Record<string, readonly ServiceView[]> } {
-  const next: Record<string, readonly ServiceView[]> = {}
-  const byRoom = reads.map(({ room, services }): RoomRead => {
-    const settled = services ?? kept[room] ?? null
-    if (settled) next[room] = settled
-    return { room, services: settled, stale: services === null && settled !== null }
+// Only machine-wide registry services belong on Home. Room services remain in their room.
+export function serviceRows(services: readonly RegistryService[]): ServiceCardRow[] {
+  return services.filter((s) => s.scope === 'global').map((s) => {
+    const pill = pillOf(s)
+    return {
+      id: `service:${s.id}`, name: s.label,
+      tone: pill ? 'bad' : s.state === 'on' || s.state === 'running' ? 'ok' : 'idle',
+      state: pill?.label || factsOf(s, Date.now(), !!s.switch).join(' · ') || 'Idle',
+      at: s.lastRun ?? '', log: { kind: 'settings' },
+    }
   })
-  return { byRoom, kept: next }
-}
-
-// serviceRows turns each room's service list into one row per service. A
-// service the engine cannot run (no usable profile) is failing in any room; the
-// log opens the first room that has the problem, else the first room. A room
-// that could not be read, or only shows its last read, is its own failing row.
-export function serviceRows(byRoom: readonly RoomRead[]): ServiceCardRow[] {
-  const rows = new Map<string, ServiceCardRow>()
-  for (const { room, services, stale } of byRoom) {
-    if (stale) rows.set(`stale:${room}`, { id: `service:stale:${room}`, name: 'Services', tone: 'bad', state: 'Could not refresh; showing the last read', at: '', log: { kind: 'room', room } })
-    if (!services) {
-      rows.set(`unreadable:${room}`, { id: `service:unreadable:${room}`, name: 'Services', tone: 'bad', state: 'Could not be read', at: '', log: { kind: 'room', room } })
-      continue
-    }
-    for (const s of services) {
-      const bad = !s.profile
-      const old = rows.get(s.role)
-      if (old && (old.tone === 'bad' || !bad)) continue
-      const state = bad ? s.reason || 'No enabled profile' : [s.profile, s.sessions ? `${s.sessions} open` : ''].filter(Boolean).join(' · ')
-      rows.set(s.role, { id: `service:${s.role}`, name: s.name, tone: bad ? 'bad' : 'ok', state, at: '', log: { kind: 'room', room } })
-    }
-  }
-  return [...rows.values()]
 }
 
 // logKey names one run's log, so a newer run of the same hook never shows the
@@ -94,7 +66,7 @@ export function groupRows(rows: readonly ServiceCardRow[]): { failing: ServiceCa
 
 // healthyLine is the folded line over the healthy rows.
 export function healthyLine(count: number, failing: number): string {
-  return `${count} ${failing ? 'others ' : ''}running normally`
+  return `${count} ${failing ? 'other ' : ''}${count === 1 ? 'service' : 'services'}`
 }
 
 // readLog is the text of a hook row's log: the tail of the run it names, or the
