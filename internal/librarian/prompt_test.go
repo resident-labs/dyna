@@ -32,16 +32,16 @@ func TestSmellTaskReadsCodeWithAChecklist(t *testing.T) {
 func TestTaskStatesMaintainModeAndTheReadmeGate(t *testing.T) {
 	task := Task("/src/app", "github.com/fork/app", "/data/tree", "aaa", "bbbbbbbbbbbbbbbb", "owned file x.go changed", 120)
 	for _, want := range []string{
-		"Correct only statements that are now false. Leave true statements, wording and structure alone",
+		"Correct only statements that are now false. Preserve true statements, wording and structure",
 		"dyna library check-readme",
 		"(120 lines)",
-		"do not open a pull request",
-		"Never push to a branch that already exists on the remote",
+		"leave the pull request unopened",
+		"Never push to an existing remote branch",
 		"gh pr create --repo github.com/fork/app --body-file FILE",
 		"dyna git pr track",
-		"Never merge",
+		"Leave merging to the merge process",
 		"dyna library changed --since aaa",
-		"Re-verify every stale entry, not only the ones this change touched",
+		"Re-verify every stale entry, including entries outside this change",
 		"ask whether it adds a sub-feature",
 	} {
 		if !strings.Contains(task, want) {
