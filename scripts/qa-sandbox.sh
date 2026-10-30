@@ -22,7 +22,7 @@ module=$(realpath -e -- "$3")
 node=$(realpath -e -- "$4")
 chromium=$(realpath -e -- "$5")
 binds=()
-for artifact in "$binary" "$web" "$module" "$node" "$chromium"; do
+for artifact in "$binary" "$web" "$(dirname "$module")" "$node" "$chromium"; do
   path=$(realpath -e -- "$artifact")
   # Bind only the requested artifact, not its owner-controlled parent.
   binds+=(--ro-bind "$path" "$path")
@@ -37,11 +37,11 @@ exec bwrap --die-with-parent --new-session --unshare-user --unshare-pid --unshar
   --clearenv --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib /lib64 \
   --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run \
   --ro-bind /etc/fonts /etc/fonts --ro-bind /etc/ssl /etc/ssl \
-  --bind "$root" "$root" "${binds[@]}" \
-  --setenv HOME "$root/home" --setenv XDG_CONFIG_HOME "$root/config" \
-  --setenv XDG_DATA_HOME "$root/data" --setenv XDG_CACHE_HOME "$root/cache" \
-  --setenv XDG_RUNTIME_DIR "$root/runtime" --setenv DYNA_DATA_DIR "$root/data" \
-  --setenv DYNA_SCRATCH "$root" --setenv TMPDIR "$root/tmp" \
+  --bind "$root" "$root" --bind "$root" /qa "${binds[@]}" \
+  --setenv HOME /qa/home --setenv XDG_CONFIG_HOME /qa/config \
+  --setenv XDG_DATA_HOME /qa/data --setenv XDG_CACHE_HOME /qa/cache \
+  --setenv XDG_RUNTIME_DIR /qa/runtime --setenv DYNA_DATA_DIR /qa/data \
+  --setenv DYNA_SCRATCH /qa --setenv TMPDIR /qa/tmp \
   --setenv DYNA_QA_ENGINE "$binary" --setenv DYNA_QA_WEB "$web" --setenv DYNA_QA_MODULE "$module" \
   --setenv DYNA_QA_NODE "$node" --setenv DYNA_QA_CHROMIUM "$chromium" \
   --setenv PATH /usr/bin:/bin --setenv DYNA_NO_AUTO_UPDATE 1 --chdir "$root" -- "$command_path" "$@"
