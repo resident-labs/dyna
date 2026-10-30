@@ -6,6 +6,7 @@ import { issueReference, issueWork, roomIssueLabel, trackedIssueItems, unifiedIs
 import { issueGroups, issueChip, loadScope, saveScope, type ListScope } from './github.ts'
 import type { GitHubItem } from '../api/github.ts'
 import { element, elements, need } from '../../../test/need.ts'
+import { compileModule } from 'svelte/compiler'
 
 const settle = () => new Promise((r) => setTimeout(r, 0))
 // A new test settles Svelte updates and API promises without a timer, as r2
@@ -21,7 +22,10 @@ test('issueGroups orders the groups and puts older closed issues in Closed', () 
   assert.deepEqual(issueGroups([issue(2, 'needs-owner')]).map((g) => g.id), ['needs-owner'])
 })
 
-const API = `export const api = {
+// memberState holds the room's members as Svelte state, so a test can change them on a mounted view.
+const MEMBERS = compileModule('export const memberState = $state({ list: [] }); globalThis.memberState = memberState;', { filename: 'members.svelte.js', dev: false }).js.code
+const API = MEMBERS + `
+export const api = {
   feedAround: () => Promise.resolve({ posts: [{ id: 'msg_local', text: 'Local body text' }] }),
   trackedIssues: () => globalThis.issueWatchFails ? Promise.reject(new Error('the web client has no method TrackedIssues')) : Promise.resolve({ items: globalThis.issueWatched ?? [], unread: 0 }),
   githubList: () => globalThis.issueListFails ? Promise.reject(new Error('No repository')) : Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
@@ -42,7 +46,8 @@ async function render(items: GitHubItem[], props: object = {}, wait = settle, sc
   Object.assign(globalThis, { history: dom.window.history, location: dom.window.location, localStorage: dom.window.localStorage })
   const { dir, default: GitHub, mount } = await importBundle(listCode, 'GitHub')
   const target = need(document.getElementById('app'), '#app')
-  mount(GitHub, { target, props: { roomId: 'r', kind: 'issue', ...props } })
+  // defineProperties keeps a getter prop live; a spread would read it once.
+  mount(GitHub, { target, props: Object.defineProperties({ roomId: 'r', kind: 'issue' }, Object.getOwnPropertyDescriptors(props)) })
   await wait()
   await wait()
   return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'localStorage', 'issueMergeCalls', 'issueItems', 'issueWatched', 'issueWatchFails', 'issueOpened', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
@@ -362,4 +367,18 @@ test('a failed tracked issues call shows Retry instead of the raw error', async 
     assert.equal(r.target.querySelector('[role=alert]'), null)
     assert.deepEqual(elements(r.target, '.row .title').map((t) => t.textContent), ['Upstream crash'])
   } finally { await r.done() }
+})
+
+// Work that starts while the tab is open shows up: a new live session reloads
+// the tracked issues, so the issue it works on joins the list.
+test('a session that starts work refreshes the tracked issues', async () => {
+  Object.assign(globalThis, { issueWatched: [] })
+  const r = await render([], { get members() { return Reflect.get(globalThis, 'memberState').list } }, microtasks, 'tracked')
+  try {
+    assert.match(element(r.target, '.empty').textContent, /No tracked issues/)
+    Object.assign(globalThis, { issueWatched: [issue(77, 'needs-owner', { title: 'Worked issue' })] })
+    Reflect.get(globalThis, 'memberState').list = [{ id: 's1', name: 'builder', status: 'running' }]
+    await microtasks()
+    assert.deepEqual(elements(r.target, '.row .title').map((t) => t.textContent), ['Worked issue'])
+  } finally { await r.done(); Reflect.deleteProperty(globalThis, 'memberState') }
 })
