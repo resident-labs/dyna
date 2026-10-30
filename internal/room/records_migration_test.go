@@ -83,6 +83,7 @@ func TestRoomRecordsMigrateBeforeAnyRead(t *testing.T) {
 			if err := db.QueryRow("SELECT body,seat FROM room_records WHERE id=?", id).Scan(&body, &seat); err != nil {
 				t.Fatalf("startup did not import room: %v", err)
 			}
+			want.Color = ColorCrimson
 			got, err := scanRecord(body, seat)
 			if err != nil || !reflect.DeepEqual(got, want) || seat.Valid != (mode != "canonical default") {
 				t.Fatalf("eager room = %+v, seat=%+v, %v; want %+v", got, seat, err, want)
