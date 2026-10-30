@@ -612,7 +612,7 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 }
 func TestClosePendingRepositoryFreeChildWithoutArchiveAck(t *testing.T) {
 	now := func() time.Time { return time.Unix(1000, 0) }
-	st, err := store.Open(t.TempDir(), now)
+	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,7 +653,7 @@ func TestClosePendingRepositoryFreeChildWithoutArchiveAck(t *testing.T) {
 
 func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
 	now := func() time.Time { return time.Unix(1000, 0) }
-	st, err := store.Open(t.TempDir(), now)
+	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
