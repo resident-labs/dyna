@@ -195,7 +195,7 @@
     {#if snapshot}<div class="groups" aria-busy={loading} aria-label="Accounts by provider">
       {#if count}<p class="muted count">{count} {count === 1 ? 'account' : 'accounts'}{roomScope && roomId ? ' · this room' : ''}</p>{/if}
       {#each groups as group (group.provider)}
-        <SubscriptionCard {group} {roomScope} {busy} onopen={open} onuse={use} onsignin={startSignIn} onsaverepos={saveRepos} onremove={(account) => (removing = account)} />
+        <SubscriptionCard {group} {roomScope} {busy} onopen={open} onuse={use} onsignin={startSignIn} onsaverepos={saveRepos} />
       {:else}<EmptyState title="No accounts yet">Choose Add account, then sign in to a provider or paste an API key. Dyna saves one account for each provider you sign in to.</EmptyState>{/each}
       {#if problems.length}
         <Card title="Saved accounts Dyna skipped" count={problems.length}>
@@ -209,7 +209,7 @@
 </section>
 
 {#if detail}{#key detail.key}
-  <AccountDetails account={detail.account} onclose={closeDetails} onsignin={startSignIn} oncreateprofile={createProfile} onprofile={viewProfile} />
+  <AccountDetails account={detail.account} onclose={closeDetails} onsignin={startSignIn} oncreateprofile={createProfile} onprofile={viewProfile} onremove={(account) => { detail = null; removing = account }} />
 {/key}{/if}
 
 {#if adding || signInFor}
