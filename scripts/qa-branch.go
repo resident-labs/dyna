@@ -49,7 +49,11 @@ func qaUsage() {
 	fmt.Fprint(out, `Usage: bash ./scripts/qa-branch.sh --web DIR --status INTENT [--steps FILE]
 
 Build and open DIR in a dedicated read-only QA browser context.
-The ready output prints the page's CDP target id and websocket URL.
+Use --isolated for a disposable branch engine and synthetic data (Linux, bubblewrap).
+It requires --web web/dist and --steps. Network services cannot reach GitHub;
+Reviews may show Last run failed and Library may show Could not be read.
+Example: printf '[{"click":"text=services"},{"waitFor":"text=Updates"},{"screenshot":"/tmp/qa.png"}]' > /tmp/qa-steps.json; bash scripts/qa-branch.sh --isolated --web web/dist --status 'Check branch' --steps /tmp/qa-steps.json
+In proxy mode the ready output prints the page's CDP target id and websocket URL.
 Another script can use them to drive the page while this command runs.
 
 With --steps, FILE holds a JSON list and the command exits after running it.
@@ -63,7 +67,7 @@ Each list item has exactly one action:
 
 A goto is a path or URL on http://127.0.0.1:7457. waitFor waits for a visible
 selector. Screenshot paths are relative to the repository root when not absolute.
-Without --steps, the command stays running until Ctrl+C or the QA tab closes.
+Without --steps, proxy mode stays running until Ctrl+C or the QA tab closes.
 `)
 }
 

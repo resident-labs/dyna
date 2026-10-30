@@ -8,6 +8,10 @@ if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   exec env DYNA_QA_READY=1 go run ./scripts/qa-branch.go "$@"
 fi
 child= build_dir= qa_started=false
+isolated=false
+for arg in "$@"; do
+  if [[ $arg == --isolated ]]; then isolated=true; fi
+done
 cleanup() {
   local result=$?
   trap - EXIT HUP INT TERM
@@ -71,8 +75,37 @@ exec 8>&-
 
 build_dir=$(mktemp -d "$DYNA_SCRATCH/qa-build.XXXXXXXX")
 run nice -n 10 env GOMAXPROCS=4 npm run build --prefix web
-run nice -n 10 env GOMAXPROCS=4 go build -p 4 -o "$build_dir/qa-branch" ./scripts/qa-branch.go
+if [[ $isolated == true ]]; then
+  if ! command -v bwrap >/dev/null; then echo 'isolated QA needs bubblewrap (bwrap); use proxy mode without --isolated on this host' >&2; exit 1; fi
+  chromium=$(command -v chromium || command -v chromium-browser || :)
+  node=$(command -v node)
+  if [[ -z $chromium ]]; then echo 'isolated QA needs Chromium' >&2; exit 1; fi
+  mkdir -p "$build_dir/deps" "$build_dir/root" "$build_dir/npm-home"
+  cp internal/cli/computer/browserdeps/package*.json "$build_dir/deps/"
+  run env HOME="$build_dir/npm-home" npm_config_userconfig="$build_dir/npm-home/.npmrc" npm_config_cache="$build_dir/npm-home/cache" npm ci --prefix "$build_dir/deps" --ignore-scripts --no-audit --no-fund
+  run nice -n 10 env GOMAXPROCS=4 go build -p 4 -o "$build_dir/dyna" ./cmd/dyna
+  run nice -n 10 env GOMAXPROCS=4 go build -p 4 -o "$build_dir/qa-isolated" ./scripts/qa-isolated.go ./scripts/qa-fixtures.go
+else
+  run nice -n 10 env GOMAXPROCS=4 go build -p 4 -o "$build_dir/qa-branch" ./scripts/qa-branch.go
+fi
 flock -u 9
 exec 9>&-
-qa_started=true
-run env DYNA_QA_READY=1 "$build_dir/qa-branch" "$@"
+if [[ $isolated == true ]]; then
+  args=() steps=
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --steps) [[ $# -ge 2 ]] || { echo '--steps needs a file' >&2; exit 2; }; steps=$2; shift 2 ;;
+      --steps=*) steps=${1#--steps=}; shift ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  if [[ -n $steps ]]; then
+    run "$node" scripts/qa-isolated-steps.mjs prepare "$build_dir/root" "$steps"
+    args+=(--steps "$build_dir/root/steps.json")
+  fi
+  run scripts/qa-sandbox.sh "$build_dir/root" "$build_dir/dyna" "$PWD/web/dist" "$build_dir/deps/node_modules/playwright-core/index.mjs" "$node" "$chromium" -- "$build_dir/qa-isolated" "${args[@]}"
+  if [[ -n $steps ]]; then run "$node" scripts/qa-isolated-steps.mjs finish "$build_dir/root"; fi
+else
+  qa_started=true
+  run env DYNA_QA_READY=1 "$build_dir/qa-branch" "$@"
+fi

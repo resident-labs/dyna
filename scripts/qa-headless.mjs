@@ -88,7 +88,7 @@ const runStep = async (page, step, origin, log) => {
     case 'waitFor':
       return page.locator(step.value).waitFor();
     case 'screenshot':
-      await page.screenshot({ path: step.value });
+      await page.screenshot({ path: step.value, animations: 'disabled' });
       log('QA page screenshot: ' + step.value);
       return undefined;
   }
@@ -110,7 +110,7 @@ export async function runQA(config, chromium, log = console.log) {
     await context.routeWebSocket('**/*', socket => socket.close());
     const page = await context.newPage();
     await page.goto(config.origin, { waitUntil: 'domcontentloaded' });
-    log('Read-only QA tab ready at ' + config.origin + '.');
+    log('Isolated QA tab ready at ' + config.origin + '.');
     for (const [index, step] of config.steps.entries()) {
       try {
         await runStep(page, step, config.origin, log);
