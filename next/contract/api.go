@@ -21,14 +21,16 @@ const (
 type ErrorCode string
 
 const (
-	ErrInvalid     ErrorCode = "invalid"
-	ErrNotFound    ErrorCode = "not_found"
-	ErrForbidden   ErrorCode = "forbidden"
-	ErrConflict    ErrorCode = "conflict"
-	ErrStale       ErrorCode = "stale"
-	ErrUnavailable ErrorCode = "unavailable"
-	ErrStoreFromV1 ErrorCode = "store_from_v1"
-	ErrStoreTooOld ErrorCode = "store_too_old"
+	ErrInvalid       ErrorCode = "invalid"
+	ErrNotFound      ErrorCode = "not_found"
+	ErrForbidden     ErrorCode = "forbidden"
+	ErrConflict      ErrorCode = "conflict"
+	ErrHasChildren   ErrorCode = "has_children"
+	ErrParentClosing ErrorCode = "parent_closing"
+	ErrStale         ErrorCode = "stale"
+	ErrUnavailable   ErrorCode = "unavailable"
+	ErrStoreFromV1   ErrorCode = "store_from_v1"
+	ErrStoreTooOld   ErrorCode = "store_too_old"
 )
 
 type Error struct {
@@ -44,7 +46,8 @@ type HostAddRequest struct {
 type HostAddResponse struct{}
 
 type RoomCreateRequest struct {
-	Name string `json:"name"`
+	Name        string      `json:"name"`
+	RootProfile ProfileName `json:"rootProfile"`
 }
 type RoomCreateResponse struct {
 	Room RoomID `json:"room"`
@@ -65,6 +68,7 @@ type SessionStartRequest struct {
 	Room    RoomID      `json:"room"`
 	Name    string      `json:"name"`
 	Parent  SessionID   `json:"parent,omitempty"`
+	Repo    RepoName    `json:"repo,omitempty"`
 	Profile ProfileName `json:"profile"`
 	Goal    string      `json:"goal,omitempty"`
 	Brief   string      `json:"brief,omitempty"`

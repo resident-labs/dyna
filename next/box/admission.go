@@ -53,7 +53,7 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 	var parentHost contract.HostName
 	if request.BudgetParent != "" {
 		for _, b := range boxes {
-			if b.ID == request.BudgetParent {
+			if b.ID == request.BudgetParent && (b.State == contract.BoxStarting || b.State == contract.BoxReady) {
 				parentHost = b.Host
 				break
 			}

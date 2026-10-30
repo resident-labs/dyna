@@ -12,13 +12,17 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
+var ErrParentClosing = errors.New("parent session is closing")
+
 // Session describes the stored session and its box.
 type Session struct {
-	ID      contract.SessionID
-	Room    contract.RoomID
-	Name    string
-	Profile contract.ProfileName
-	Box     contract.BoxID
+	ID          contract.SessionID
+	Room        contract.RoomID
+	Name        string
+	Repo        contract.RepoName
+	Profile     contract.ProfileName
+	Box         contract.BoxID
+	NewRoomName string // nonempty only for a new room root
 }
 
 func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string, at time.Time) error {
@@ -28,17 +32,31 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, goal string, event, boxEvent contract.Event, reason string) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, budgetParent contract.BoxID, goal string, event, boxEvent contract.Event, reason string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if parent != "" {
+			var state string
+			if err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND room=?", parent, session.Room).Scan(&state); err != nil {
+				return err
+			}
+			if state == "closing" || state == "closed" {
+				return ErrParentClosing
+			}
+		}
+		if session.NewRoomName != "" {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES(?,?,?,?,?)", session.Room, session.NewRoomName, event.Time.UnixMilli(), 0, 0); err != nil {
+				return err
+			}
+		}
 		var parentID *contract.SessionID
 		if parent != "" {
 			parentID = &parent
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES(?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Profile, "pending", goal, event.Time.UnixMilli())
+		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,repo,profile,state,goal,created_at) VALUES(?,?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Repo, session.Profile, "pending", goal, event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,parent,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, nullableBox(budgetParent), "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -57,6 +75,13 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		_, err = s.AppendEvent(tx, boxEvent)
 		return err
 	})
+}
+
+func nullableBox(id contract.BoxID) *contract.BoxID {
+	if id == "" {
+		return nil
+	}
+	return &id
 }
 
 func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {
@@ -148,7 +173,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Profile, &session.Box)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box)
 	return session, err
 }
 
@@ -160,7 +185,7 @@ func (s *Store) RoomByName(ctx context.Context, name contract.RoomName) (contrac
 
 func (s *Store) SessionByName(ctx context.Context, room contract.RoomID, name string) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.name=? AND s.closed_at IS NULL", room, name).Scan(&session.ID, &session.Room, &session.Name, &session.Profile, &session.Box)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.name=? AND s.closed_at IS NULL", room, name).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box)
 	return session, err
 }
 
