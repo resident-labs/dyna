@@ -453,7 +453,8 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 				return err
 			}
 			if agentPublish {
-				// gh pr review cannot pin a commit, so an agent review must name the tracked head.
+				// gh pr review cannot pin a commit, so an agent review posts through the REST
+				// reviews API with commit_id. The approved request then carries the reviewed head.
 				rec, err := s.Store.Get(r.Key())
 				if err != nil {
 					return err
@@ -461,7 +462,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 				if *reviewHead != "" && *reviewHead != rec.Head {
 					return fmt.Errorf("the review head %s is not the tracked head %s; review the tracked head before publishing", *reviewHead, rec.Head)
 				}
-				return ghclient.PublishThroughApproval(c.Context(), roomID, "", []string{"pr", "review", r.URL(), "--comment", "--body", body})
+				return ghclient.PublishThroughApproval(c.Context(), roomID, "", []string{"api", "--hostname", r.Host, fmt.Sprintf("repos/%s/pulls/%d/reviews", r.Repo, r.Number), "--method", "POST", "--raw-field", "commit_id=" + rec.Head, "--raw-field", "event=COMMENT", "--raw-field", "body=" + body})
 			}
 			var id int64
 			err = engineclient.New("").Call(c.Context(), "PostPRReview", []any{roomID, r, body, *reviewHead, comments, *reviewPublish}, &id)

@@ -280,6 +280,11 @@ func classifyAPI(args []string, host string, authored func(ItemRef, []string) bo
 		return approvals.ClassAgent
 	case method == "POST" && len(rest) == 1 && (rest[0] == "issues" || rest[0] == "pulls"):
 		return approvals.ClassAgent
+	case method == "POST" && len(rest) == 3 && rest[0] == "pulls" && rest[2] == "reviews" && call.event == "COMMENT" && !call.input && !slices.Contains(call.keys, "comments"):
+		// A comment-only review with no inline comments. Its commit_id pins the reviewed head.
+		if _, err := strconv.Atoi(rest[1]); err == nil {
+			return approvals.ClassAgent
+		}
 	case method == "PATCH" && len(rest) == 2 && number == nil && (rest[0] == "issues" || rest[0] == "pulls"):
 		ref.Kind = ItemIssue
 		if rest[0] == "pulls" {
