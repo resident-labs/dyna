@@ -10,10 +10,10 @@ import (
 	"dyna-agent/internal/shells"
 )
 
-// checkShellSilence reports output log silence, not CPU activity or deadlock.
+// checkShellSilence reports continuously observed local output inactivity.
 func checkShellSilence(ctx context.Context, n *notify.Service) error {
 	v, err := settings.Load(settings.DefaultPath())
-	if err != nil || v.ShellSilenceMinutes == 0 {
+	if err != nil || v.ShellSilenceMinutes == 0 || int64(v.ShellSilenceMinutes) > int64((1<<63-1)/time.Minute) {
 		return err
 	}
 	jobs, err := shells.DefaultStore().Silent(time.Now(), time.Duration(v.ShellSilenceMinutes)*time.Minute)
@@ -26,7 +26,7 @@ func checkShellSilence(ctx context.Context, n *notify.Service) error {
 		if label == "" {
 			label = "shell"
 		}
-		_, err := n.ShellSilence(ctx, job.RoomID, job.ID, label, job.Owner, v.ShellSilenceMinutes)
+		_, err := n.ShellInactivity(ctx, job.RoomID, job.ID, label, job.Owner, v.ShellSilenceMinutes, job.LastOutput)
 		if err != nil {
 			errs = append(errs, err)
 		}
