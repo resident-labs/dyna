@@ -11,7 +11,7 @@ import { createWorkflowData } from '../workflows/workflowData.ts'
 import type { WorkflowApi, WorkflowHooks } from '../workflows/workflowData.ts'
 import { mergeListPage } from './listPages.ts'
 import { reloadsUnread } from './unreadReload.ts'
-import { topLevelFunctions } from '../../../test/svelte-source.ts'
+import { topLevelFunctions, moduleFunctions } from '../../../test/svelte-source.ts'
 import { installGoals } from '../../../test/appModules.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
@@ -149,7 +149,9 @@ type AppSandbox = AppState & AppFunctions & {
 }
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const functions = topLevelFunctions(source, ['applyListItem', 'applyListPage', 'applyItemEvent', 'handle', 'loadOlderLists'])
+const functions = topLevelFunctions(source, ['applyItemEvent', 'handle'])
+const listSource = readFileSync(new URL('../app/lists.svelte.ts', import.meta.url), 'utf8')
+const listFunctions = moduleFunctions(listSource, ['applyListItem', 'applyListPage', 'loadOlderLists'])
 function app(rows: AppRow[]): AppSandbox {
   const c: AppState = {
     mergeVersion: 0, olderLoading: false, roomId: 'room', roomRequest: 1, home: null, fetchedGoal: null, fetchedGoalVersion: 0,
@@ -169,7 +171,7 @@ function app(rows: AppRow[]): AppSandbox {
     loadJobs: () => { c.jobFetches++ },
   }
   vm.createContext(c)
-  for (const code of functions.values()) vm.runInContext(code, c)
+  for (const code of [...functions.values(), ...listFunctions.values()]) vm.runInContext(code, c)
   // The room's goals live in lib/app/goals.svelte.ts now; their functions run
   // here over the same state. The tests count the loads themselves.
   installGoals(c)
@@ -192,6 +194,17 @@ function app(rows: AppRow[]): AppSandbox {
     jobs: (page, append) => { c.jobs = installed.applyListPage('jobs', page, append) },
     patchJobs: (change) => { c.jobs = installed.applyListItem('jobs', change, c.jobs) },
   })
+  Object.assign(c, installed, { api, roomData, workflowData: data })
+  vm.runInContext(`listHost = {
+    current: () => ({ room: roomId, visit: roomRequest }),
+    patch: (kind, load) => reload.patch(kind, load),
+    goals: (room, cursor) => api.goals(room, cursor),
+    changes: (room, cursor) => api.changes(room, cursor),
+    jobs: (cursor) => workflowData.loadJobs(cursor),
+    setGoals: (rows) => goalView.setGoals(rows),
+    setChanges: (rows) => changeView.setChanges(rows),
+    error: (message) => { loadError = message },
+  }`, c)
   return Object.assign(c, installed, { api, roomData, workflowData: data })
 }
 
