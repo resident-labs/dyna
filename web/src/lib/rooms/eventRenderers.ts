@@ -12,6 +12,7 @@ import WorktreeCard from './WorktreeCard.svelte'
 import HookCard from './HookCard.svelte'
 import ShellResultRow from './ShellResultRow.svelte'
 import ShellSilenceCard from './ShellSilenceCard.svelte'
+import ShellInactivityCard from './ShellInactivityCard.svelte'
 import RunResultCard from './RunResultCard.svelte'
 import JobCard from './JobCard.svelte'
 import TurnCompletionRow from './TurnCompletionRow.svelte'
@@ -129,7 +130,7 @@ export const eventComponents: Record<string, EventRenderer> = {
   WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, IssueWatchCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineCacheCleanCard, MachineScratchCard, MachineLimitsCard, RoomCapCard, WorktreePortsCard,
   CallCard, VoiceSessionCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, ServiceWaitCard, HelperOutcomeRow, MCPCallRow, EngineNoticeCard, QuestionNoteCard, TerminalRequestCard, ReviewResultCard,
   ApprovalRequestCard, ApprovalDecisionRow, ApprovalResultCard,
-  ShellResultRow, ShellSilenceCard, RunResultCard, JobCard, TurnCompletionRow,
+  ShellResultRow, ShellSilenceCard, ShellInactivityCard, RunResultCard, JobCard, TurnCompletionRow,
 }
 
 // The post key of a registered event: its family and its event type.

@@ -1727,6 +1727,36 @@ func (s *Service) ShellSilence(ctx context.Context, roomID, id, label, owner str
 	return s.appendCompletion(ctx, *plan)
 }
 
+// ShellInactivity sends a typed notice for one continuously observed quiet period.
+func (s *Service) ShellInactivity(ctx context.Context, roomID, id, label, owner string, minutes int, lastOutput time.Time) (Result, error) {
+	rec, err := s.Rooms.Resolve(roomID)
+	if err != nil {
+		return Result{}, err
+	}
+	var output string
+	if !lastOutput.IsZero() {
+		output = lastOutput.UTC().Format(time.RFC3339Nano)
+	}
+	ev := room.ShellInactivityEvent{ShellID: id, Label: label, Session: s.shellSilenceSession(owner), Minutes: minutes, LastOutput: output}
+	_, err = s.Rooms.Message(roomID, room.EventID(ev))
+	if err == nil {
+		return Result{}, nil
+	}
+	if !errors.Is(err, room.ErrPostNotFound) {
+		return Result{}, err
+	}
+	target := rec.Name
+	if owner != "" {
+		target = owner
+	}
+	plan, err := s.prepareEventCompletionWithFallback(roomID, ev, []string{target}, 0, false, true)
+	if err != nil || plan == nil {
+		return Result{}, err
+	}
+	plan.Producer = room.ProducerShell
+	return s.appendCompletion(ctx, *plan)
+}
+
 // shellSilenceSession names the session that started a quiet job. A job that
 // no known session started reads as the owner.
 func (s *Service) shellSilenceSession(owner string) string {
