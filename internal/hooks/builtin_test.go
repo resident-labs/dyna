@@ -24,7 +24,7 @@ func autoCheck(seen *[]Builtin) BuiltinSpec {
 }
 
 // A built-in table entry runs through the same run path that
-// `dyna git hooks run <name> --global` calls, and stores a run and a log.
+// `dyna services run <name>` calls, and stores a run and a log.
 func TestEveryBuiltinRunsThroughTheRunCommand(t *testing.T) {
 	s, _ := setup(t)
 	var seen []Builtin
@@ -33,7 +33,7 @@ func TestEveryBuiltinRunsThroughTheRunCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, spec := range s.Builtins {
-		run, err := s.RunGlobal(t.Context(), Event{Event: Schedule}, string(spec.Builtin))
+		run, err := s.RunBuiltin(t.Context(), Event{Event: Schedule}, string(spec.Builtin))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,19 +85,19 @@ func TestBuiltinRowCannotBeRemovedOrRetargeted(t *testing.T) {
 	if err := s.Edit(ctx, "", "auto-check", "owner", Patch{EveryMinutes: &minutes, Disabled: &off}); err != nil {
 		t.Fatal(err)
 	}
-	hooks, err := s.ListGlobal(ctx)
+	hooks, err := s.BuiltinHooks(ctx)
 	if err != nil || len(hooks) != 1 || hooks[0].EveryMinutes != 90 || !hooks[0].Disabled {
 		t.Fatalf("edited row = %+v, %v", hooks, err)
 	}
 	if err := s.Reset(ctx, "auto-check", "owner"); err != nil {
 		t.Fatal(err)
 	}
-	hooks, err = s.ListGlobal(ctx)
+	hooks, err = s.BuiltinHooks(ctx)
 	if err != nil || len(hooks) != 1 {
 		t.Fatalf("reset rows = %+v, %v", hooks, err)
 	}
 	h := hooks[0]
-	if h.EveryMinutes != 15 || h.Timeout != "30s" || h.Disabled || h.Command != "dyna git hooks run auto-check --global" {
+	if h.EveryMinutes != 15 || h.Timeout != "30s" || h.Disabled || h.Command != "dyna services run auto-check" {
 		t.Fatalf("reset row = %+v", h)
 	}
 }
@@ -120,7 +120,7 @@ func TestSeedKeepsOwnerSettingsAndRetiresUnknownBuiltin(t *testing.T) {
 	if err := s.Seed(ctx); err != nil {
 		t.Fatal(err)
 	}
-	hooks, err := s.ListGlobal(ctx)
+	hooks, err := s.BuiltinHooks(ctx)
 	if err != nil || len(hooks) != 1 {
 		t.Fatalf("seeded twice = %+v, %v", hooks, err)
 	}
@@ -134,7 +134,7 @@ func TestSeedKeepsOwnerSettingsAndRetiresUnknownBuiltin(t *testing.T) {
 	if err := s.Seed(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if hooks, err := s.ListGlobal(ctx); err != nil || len(hooks) != 0 {
+	if hooks, err := s.BuiltinHooks(ctx); err != nil || len(hooks) != 0 {
 		t.Fatalf("retired row = %+v, %v", hooks, err)
 	}
 }
@@ -210,7 +210,7 @@ func TestBuiltinIntervalCannotGoBelowOneMinute(t *testing.T) {
 			t.Fatalf("everyMinutes=%d = %v", minutes, err)
 		}
 	}
-	hooks, err := s.ListGlobal(t.Context())
+	hooks, err := s.BuiltinHooks(t.Context())
 	if err != nil || len(hooks) != 1 || hooks[0].EveryMinutes != 15 {
 		t.Fatalf("row after a refused edit = %+v, %v", hooks, err)
 	}
@@ -237,7 +237,7 @@ func TestSeedRenamesAnOwnerHookThatHoldsABuiltinName(t *testing.T) {
 	if err := s.Seed(ctx); err != nil {
 		t.Fatal(err)
 	}
-	hooks, err := s.ListGlobal(ctx)
+	hooks, err := s.load(ctx, globalKey)
 	if err != nil || len(hooks) != 2 {
 		t.Fatalf("rows after seed = %+v, %v", hooks, err)
 	}
@@ -265,4 +265,39 @@ func TestSeedRenamesAnOwnerHookThatHoldsABuiltinName(t *testing.T) {
 func (h Hook) withEvery(minutes int) Hook {
 	h.Event, h.EveryMinutes = Schedule, minutes
 	return h
+}
+
+// A built-in is a service: the hook list and the by-hand hook run leave it
+// out, while the service list and `dyna services run` keep it.
+func TestBuiltinLeavesTheHookList(t *testing.T) {
+	s, _ := setup(t)
+	var seen []Builtin
+	s.Builtins = []BuiltinSpec{autoCheck(&seen)}
+	ctx := t.Context()
+	if err := s.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	owned := hook("mine", Schedule).withEvery(15)
+	owned.Cwd = t.TempDir()
+	if err := s.AddGlobal(ctx, owned); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := s.ListGlobal(ctx); err != nil || len(listed) != 1 || listed[0].Name != "mine" {
+		t.Fatalf("global hooks = %+v, %v", listed, err)
+	}
+	if summaries, err := s.SummariesGlobal(ctx); err != nil || len(summaries) != 1 || summaries[0].Hook.Name != "mine" {
+		t.Fatalf("global summaries = %+v, %v", summaries, err)
+	}
+	if summaries, err := s.SummariesBuiltin(ctx); err != nil || len(summaries) != 1 || summaries[0].Hook.Name != "auto-check" {
+		t.Fatalf("service summaries = %+v, %v", summaries, err)
+	}
+	if _, err := s.RunGlobal(ctx, Event{}, "auto-check"); err == nil || !strings.Contains(err.Error(), "dyna services run auto-check") {
+		t.Fatalf("hook run of a service = %v", err)
+	}
+	if _, err := s.RunBuiltin(ctx, Event{}, "mine"); err == nil {
+		t.Fatal("service run of an owner hook succeeded")
+	}
+	if len(seen) != 0 {
+		t.Fatalf("a refused run still ran the pass: %v", seen)
+	}
 }

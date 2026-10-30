@@ -46,7 +46,7 @@ func RunParentCheckIns(ctx context.Context, rooms *roomsvc.Service, ended []stri
 // checkInInterval reads the interval of the parent check-ins hook. Zero means
 // the hook is switched off or not seeded, so no pass runs.
 func checkInInterval(ctx context.Context) (time.Duration, error) {
-	rows, err := hooks.New().ListGlobal(ctx)
+	rows, err := hooks.New().BuiltinHooks(ctx)
 	if err != nil {
 		return 0, err
 	}

@@ -224,7 +224,7 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 // TickGlobal claims the due runs of the global hooks. They belong to no
 // repository, so the engine ticks them once, apart from each repository.
 func (s Service) TickGlobal(ctx context.Context, now time.Time) error {
-	hooks, err := s.ListGlobal(ctx)
+	hooks, err := s.load(ctx, globalKey)
 	if err != nil || len(hooks) == 0 {
 		return err
 	}

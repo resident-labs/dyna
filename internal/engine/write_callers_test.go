@@ -62,6 +62,7 @@ var handlerCallerChecks = map[string]string{
 	"ReturnSeat":                  "Checks root detach with authority.Of(ctx).",
 	"RunHook":                     "actor(ctx) applies recordedCaller before running the hook.",
 	"RunGlobalHook":               "actor(ctx) applies recordedCaller before running the hook.",
+	"RunService":                  "actor(ctx) applies recordedCaller before running the service pass.",
 	"RunnerClaimInput":            "runnerSession requires the caller session and uses only that session ID.",
 	"RunnerInstructions":          "runnerSession requires the caller session and uses only that session ID.",
 	"RunnerReturnDormant":         "runnerSession requires the caller session and uses only that session ID.",
