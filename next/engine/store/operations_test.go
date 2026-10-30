@@ -14,7 +14,7 @@ import (
 func TestOperationAtomicDedupAndTransition(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1000, 0)
-	s, err := Open(t.TempDir(), func() time.Time { return now })
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
