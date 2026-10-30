@@ -355,210 +355,223 @@ func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, sn
 		}
 	}
 	for _, run := range current {
-		if run.Event != "pull_request" || run.Status != "completed" {
-			continue
+		stop, err := s.inspectBudgetRun(ctx, gh, r, snap, policy, run, max, allowed, policyKey)
+		if err != nil {
+			return err
 		}
-		token := runToken(run)
-		if r.CITestHead == snap.Pull.Head.SHA && r.CITestPolicy == policyKey && r.CITestRuns[token] != "" {
-			continue
+		if stop {
+			return nil
 		}
-		report, junit, problems, earlierReports, inspectErr := inspectTestRun(ctx, gh, r, run)
-		if inspectErr != nil {
-			// Shutdown cancellation leaves work pending; timeouts consume a retry.
-			canceled := errors.Is(ctx.Err(), context.Canceled) || errors.Is(inspectErr, context.Canceled)
-			retry := true
-			if err := s.Store.update(func(st *State) error {
-				live := st.Records[r.Key]
-				if live == nil || live.Head != r.Head {
-					return nil
-				}
-				resetTestReports(live, snap.Pull.Head.SHA, policyKey)
-				if live.CITestRetries == nil {
-					live.CITestRetries = map[string]int{}
-				}
-				attempts := live.CITestRetries[token]
-				if !canceled {
-					attempts++
-				}
-				live.CITestRetries[token] = attempts
-				retry = canceled || attempts < 3
-				return nil
-			}); err != nil {
-				return err
-			}
-			if canceled {
-				return nil
-			}
-			if retry {
-				continue
-			}
-			problems = append(problems, "report unreadable: stopped after 3 failed inspection attempts")
-		}
-		report.Tests = report.BudgetTests()
-		var allowWarnings []string
-		if junit {
-			allowWarnings = report.AllowWarnings(allowed)
-		}
-		sort.SliceStable(report.Tests, func(i, j int) bool {
-			if report.Tests[i].Duration == report.Tests[j].Duration {
-				return report.Tests[i].ID() < report.Tests[j].ID()
-			}
-			return report.Tests[i].Duration > report.Tests[j].Duration
-		})
-		var slow []cibudget.Test
-		seen := map[string]bool{}
-		for _, test := range report.Tests {
-			if test.Duration > max && !test.Allowed(allowed) && !seen[test.ID()] {
-				slow = append(slow, test)
-				seen[test.ID()] = true
-			}
-		}
-		// Every inspected run fills the CI health rows, so the view never reads
-		// a report itself. The breached names drive the quiet crossing line.
-		breached := s.recordTestHealth(ctx, r, run, report.Tests, max)
-		// Only tests the PR adds or changes fail it. Other slow tests are warnings.
-		var names, warned []string
-		var files []prFile
-		var filesErr error
-		if len(slow) > 0 && r.Number > 0 {
-			files, filesErr = gh.prTestFiles(ctx, r, snap.Pull.Head.SHA)
-		}
-		// A failed file-list read retries on later ticks. After the retry
-		// limit, the slow tests are warnings: a failed read proves nothing.
-		if filesErr != nil {
-			retry := true
-			if err := s.Store.update(func(st *State) error {
-				live := st.Records[r.Key]
-				if live == nil || live.Head != r.Head {
-					return nil
-				}
-				resetTestReports(live, snap.Pull.Head.SHA, policyKey)
-				if live.CITestRetries == nil {
-					live.CITestRetries = map[string]int{}
-				}
-				live.CITestRetries[token]++
-				retry = live.CITestRetries[token] < 3
-				return nil
-			}); err != nil {
-				return err
-			}
-			if retry && !testInspectionCanceled(ctx, filesErr) {
-				continue
-			}
-			if testInspectionCanceled(ctx, filesErr) {
-				return nil
-			}
-		}
-		for _, test := range slow {
-			if r.Number == 0 || (filesErr == nil && changedByPR(test, files)) {
-				names = append(names, boundedTestName(test.ID()))
-			} else {
-				warned = append(warned, boundedTestName(test.ID()))
-			}
-		}
-		reason := "checked"
-		if len(problems) > 0 {
-			reason = clip(strings.Join(problems, "; "), 3000)
-		}
-		if len(names) == 0 && len(warned) > 0 {
-			reason = "warning: tests over " + compactDuration(max) + " outside this PR: " + strings.Join(boundedNames(warned), ", ")
-		}
-		var text string
-		if len(names) > 0 {
-			// Keep PR state and wake payloads bounded even for large reports.
-			names = boundedNames(names)
-			reason = fmt.Sprintf("tests over %s: %s", compactDuration(max), strings.Join(names, ", "))
-			if len(warned) > 0 {
-				reason += "; warning, outside this PR: " + strings.Join(boundedNames(warned), ", ")
-			}
-			output := boundedio.New(10000)
-			report.Write(output, max, allowed)
-			outcome := "failed"
-			if !policy.EnforceCITimeBudget() {
-				outcome = "warning"
-				reason = "warning: " + reason
-			}
-			text = fmt.Sprintf("CI for %s %s: %s.\n%s", r.URL, outcome, reason, output.Bytes())
-			if len(text) > 12000 {
-				text = strings.ToValidUTF8(text[:12000], "")
-			}
-		}
+	}
+	return nil
+}
+
+// inspectBudgetRun evaluates and records one completed CI run. It stops the
+// enclosing scan on cancellation and leaves retryable work for a later tick.
+func (s *Service) inspectBudgetRun(ctx context.Context, gh GitHub, r Record, snap Snapshot, policy ChangePolicy, run Run, max time.Duration, allowed map[string]bool, policyKey string) (bool, error) {
+	if run.Event != "pull_request" || run.Status != "completed" {
+		return false, nil
+	}
+	token := runToken(run)
+	if r.CITestHead == snap.Pull.Head.SHA && r.CITestPolicy == policyKey && r.CITestRuns[token] != "" {
+		return false, nil
+	}
+	report, junit, problems, earlierReports, inspectErr := inspectTestRun(ctx, gh, r, run)
+	if inspectErr != nil {
+		// Shutdown cancellation leaves work pending; timeouts consume a retry.
+		canceled := errors.Is(ctx.Err(), context.Canceled) || errors.Is(inspectErr, context.Canceled)
+		retry := true
 		if err := s.Store.update(func(st *State) error {
 			live := st.Records[r.Key]
 			if live == nil || live.Head != r.Head {
 				return nil
 			}
 			resetTestReports(live, snap.Pull.Head.SHA, policyKey)
-			delete(live.CITestRetries, token)
-			if live.CITestRuns == nil {
-				live.CITestRuns = map[string]string{}
+			if live.CITestRetries == nil {
+				live.CITestRetries = map[string]int{}
 			}
-			live.CITestRuns[token] = reason
-			if live.CITestFailures == nil {
-				live.CITestFailures = map[string]string{}
+			attempts := live.CITestRetries[token]
+			if !canceled {
+				attempts++
 			}
-			var failures []string
-			for _, failure := range report.Failures {
-				lines := strings.Split(failure, "\n")
-				failures = append(failures, strings.Join(lines[:min(len(lines), 6)], "\n"))
-			}
-			live.CITestFailures[token] = failureExcerpt(strings.Join(failures, "\n\n"), false)
-			if len(problems) > 0 {
-				detail := clip(strings.Join(problems, "; "), 3000)
-				if live.CITestErrors == nil {
-					live.CITestErrors = map[string]string{}
-				}
-				live.CITestErrors[token] = detail
-				view := *live
-				view.Head = snap.Pull.Head.SHA
-				notice(&view, live.Author, detail, "test-report-error:"+snap.Pull.Head.SHA+":"+token)
-				live.Notices = view.Notices
-			}
-			warnNoJUnit := policy.WarnNoJUnit() && run.Conclusion != "cancelled" && !onlySkippedOrCancelledJobs(snap.Checks)
-			if len(problems) == 0 && (junit || earlierReports || !warnNoJUnit) {
-				live.CITestReportNote = ""
-			}
-			// A rerun of only the failed jobs keeps the reports of the jobs that passed
-			// in the first attempt. They are not read again, but the head does have
-			// JUnit reports, so the author must not be told to upload one.
-			if !junit && !earlierReports && len(problems) == 0 && warnNoJUnit && !live.CINoJUnitWarned {
-				note := fmt.Sprintf("CI uploaded no JUnit XML test report, so per-test timing (%s budget) is not enforced. Upload a JUnit report as an artifact.", strconv.FormatFloat(max.Seconds(), 'f', -1, 64)+" s")
-				live.CINoJUnitWarned = true
-				live.CITestReportNote = note
-				view := *live
-				view.Head = snap.Pull.Head.SHA
-				notice(&view, live.Author, note, "no-junit-report")
-				live.Notices = view.Notices
-			}
-			var unreadable []string
-			for _, current := range currentPRRuns(snap) {
-				if detail := live.CITestErrors[runToken(current)]; detail != "" {
-					unreadable = append(unreadable, fmt.Sprintf("Run %s: %s", runToken(current), detail))
-				}
-			}
-			if len(unreadable) > 0 {
-				live.CITestReportNote = clip(strings.Join(unreadable, "; "), 5000)
-			}
-			if len(allowWarnings) > 0 {
-				live.CITestReportNote = clip(strings.TrimSpace(live.CITestReportNote+"\n"+strings.Join(allowWarnings, "\n")), 5000)
-			}
-			if text != "" {
-				view := *live
-				view.Head = snap.Pull.Head.SHA
-				prefix := "test-budget:"
-				if !policy.EnforceCITimeBudget() {
-					prefix = "informational:" + prefix
-				}
-				notice(&view, live.Author, text, prefix+snap.Pull.Head.SHA+":"+token)
-				live.Notices = view.Notices
-			}
+			live.CITestRetries[token] = attempts
+			retry = canceled || attempts < 3
 			return nil
 		}); err != nil {
-			return err
+			return false, err
 		}
-		s.postSlowTestCrossings(ctx, r, run, breached)
+		if canceled {
+			return true, nil
+		}
+		if retry {
+			return false, nil
+		}
+		problems = append(problems, "report unreadable: stopped after 3 failed inspection attempts")
 	}
-	return nil
+	report.Tests = report.BudgetTests()
+	var allowWarnings []string
+	if junit {
+		allowWarnings = report.AllowWarnings(allowed)
+	}
+	sort.SliceStable(report.Tests, func(i, j int) bool {
+		if report.Tests[i].Duration == report.Tests[j].Duration {
+			return report.Tests[i].ID() < report.Tests[j].ID()
+		}
+		return report.Tests[i].Duration > report.Tests[j].Duration
+	})
+	var slow []cibudget.Test
+	seen := map[string]bool{}
+	for _, test := range report.Tests {
+		if test.Duration > max && !test.Allowed(allowed) && !seen[test.ID()] {
+			slow = append(slow, test)
+			seen[test.ID()] = true
+		}
+	}
+	// Every inspected run fills the CI health rows, so the view never reads
+	// a report itself. The breached names drive the quiet crossing line.
+	breached := s.recordTestHealth(ctx, r, run, report.Tests, max)
+	// Only tests the PR adds or changes fail it. Other slow tests are warnings.
+	var names, warned []string
+	var files []prFile
+	var filesErr error
+	if len(slow) > 0 && r.Number > 0 {
+		files, filesErr = gh.prTestFiles(ctx, r, snap.Pull.Head.SHA)
+	}
+	// A failed file-list read retries on later ticks. After the retry
+	// limit, the slow tests are warnings: a failed read proves nothing.
+	if filesErr != nil {
+		retry := true
+		if err := s.Store.update(func(st *State) error {
+			live := st.Records[r.Key]
+			if live == nil || live.Head != r.Head {
+				return nil
+			}
+			resetTestReports(live, snap.Pull.Head.SHA, policyKey)
+			if live.CITestRetries == nil {
+				live.CITestRetries = map[string]int{}
+			}
+			live.CITestRetries[token]++
+			retry = live.CITestRetries[token] < 3
+			return nil
+		}); err != nil {
+			return false, err
+		}
+		if retry && !testInspectionCanceled(ctx, filesErr) {
+			return false, nil
+		}
+		if testInspectionCanceled(ctx, filesErr) {
+			return true, nil
+		}
+	}
+	for _, test := range slow {
+		if r.Number == 0 || (filesErr == nil && changedByPR(test, files)) {
+			names = append(names, boundedTestName(test.ID()))
+		} else {
+			warned = append(warned, boundedTestName(test.ID()))
+		}
+	}
+	reason := "checked"
+	if len(problems) > 0 {
+		reason = clip(strings.Join(problems, "; "), 3000)
+	}
+	if len(names) == 0 && len(warned) > 0 {
+		reason = "warning: tests over " + compactDuration(max) + " outside this PR: " + strings.Join(boundedNames(warned), ", ")
+	}
+	var text string
+	if len(names) > 0 {
+		// Keep PR state and wake payloads bounded even for large reports.
+		names = boundedNames(names)
+		reason = fmt.Sprintf("tests over %s: %s", compactDuration(max), strings.Join(names, ", "))
+		if len(warned) > 0 {
+			reason += "; warning, outside this PR: " + strings.Join(boundedNames(warned), ", ")
+		}
+		output := boundedio.New(10000)
+		report.Write(output, max, allowed)
+		outcome := "failed"
+		if !policy.EnforceCITimeBudget() {
+			outcome = "warning"
+			reason = "warning: " + reason
+		}
+		text = fmt.Sprintf("CI for %s %s: %s.\n%s", r.URL, outcome, reason, output.Bytes())
+		if len(text) > 12000 {
+			text = strings.ToValidUTF8(text[:12000], "")
+		}
+	}
+	if err := s.Store.update(func(st *State) error {
+		live := st.Records[r.Key]
+		if live == nil || live.Head != r.Head {
+			return nil
+		}
+		resetTestReports(live, snap.Pull.Head.SHA, policyKey)
+		delete(live.CITestRetries, token)
+		if live.CITestRuns == nil {
+			live.CITestRuns = map[string]string{}
+		}
+		live.CITestRuns[token] = reason
+		if live.CITestFailures == nil {
+			live.CITestFailures = map[string]string{}
+		}
+		var failures []string
+		for _, failure := range report.Failures {
+			lines := strings.Split(failure, "\n")
+			failures = append(failures, strings.Join(lines[:min(len(lines), 6)], "\n"))
+		}
+		live.CITestFailures[token] = failureExcerpt(strings.Join(failures, "\n\n"), false)
+		if len(problems) > 0 {
+			detail := clip(strings.Join(problems, "; "), 3000)
+			if live.CITestErrors == nil {
+				live.CITestErrors = map[string]string{}
+			}
+			live.CITestErrors[token] = detail
+			view := *live
+			view.Head = snap.Pull.Head.SHA
+			notice(&view, live.Author, detail, "test-report-error:"+snap.Pull.Head.SHA+":"+token)
+			live.Notices = view.Notices
+		}
+		warnNoJUnit := policy.WarnNoJUnit() && run.Conclusion != "cancelled" && !onlySkippedOrCancelledJobs(snap.Checks)
+		if len(problems) == 0 && (junit || earlierReports || !warnNoJUnit) {
+			live.CITestReportNote = ""
+		}
+		// A rerun of only the failed jobs keeps the reports of the jobs that passed
+		// in the first attempt. They are not read again, but the head does have
+		// JUnit reports, so the author must not be told to upload one.
+		if !junit && !earlierReports && len(problems) == 0 && warnNoJUnit && !live.CINoJUnitWarned {
+			note := fmt.Sprintf("CI uploaded no JUnit XML test report, so per-test timing (%s budget) is not enforced. Upload a JUnit report as an artifact.", strconv.FormatFloat(max.Seconds(), 'f', -1, 64)+" s")
+			live.CINoJUnitWarned = true
+			live.CITestReportNote = note
+			view := *live
+			view.Head = snap.Pull.Head.SHA
+			notice(&view, live.Author, note, "no-junit-report")
+			live.Notices = view.Notices
+		}
+		var unreadable []string
+		for _, current := range currentPRRuns(snap) {
+			if detail := live.CITestErrors[runToken(current)]; detail != "" {
+				unreadable = append(unreadable, fmt.Sprintf("Run %s: %s", runToken(current), detail))
+			}
+		}
+		if len(unreadable) > 0 {
+			live.CITestReportNote = clip(strings.Join(unreadable, "; "), 5000)
+		}
+		if len(allowWarnings) > 0 {
+			live.CITestReportNote = clip(strings.TrimSpace(live.CITestReportNote+"\n"+strings.Join(allowWarnings, "\n")), 5000)
+		}
+		if text != "" {
+			view := *live
+			view.Head = snap.Pull.Head.SHA
+			prefix := "test-budget:"
+			if !policy.EnforceCITimeBudget() {
+				prefix = "informational:" + prefix
+			}
+			notice(&view, live.Author, text, prefix+snap.Pull.Head.SHA+":"+token)
+			live.Notices = view.Notices
+		}
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	s.postSlowTestCrossings(ctx, r, run, breached)
+	return false, nil
 }
 
 func boundedNames(names []string) []string {
