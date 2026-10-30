@@ -64,12 +64,22 @@ type Media struct {
 	SHA256       string `json:"sha256"`
 }
 
+// MediaVisibility records the repository visibility approved for media.
+type MediaVisibility string
+
+const (
+	MediaVisibilityPublic   MediaVisibility = "public"
+	MediaVisibilityPrivate  MediaVisibility = "private"
+	MediaVisibilityInternal MediaVisibility = "internal"
+)
+
 // MediaDestination pins the target checked before uploading.
 type MediaDestination struct {
-	Number int    `json:"number,omitempty"`
-	Host   string `json:"host"`
-	Base   string `json:"base"`
-	Head   string `json:"head"`
+	Visibility MediaVisibility `json:"visibility"`
+	Number     int             `json:"number,omitempty"`
+	Host       string          `json:"host"`
+	Base       string          `json:"base"`
+	Head       string          `json:"head"`
 }
 
 // RequestInput is the ApprovalRequest RPC payload for a GitHub write.

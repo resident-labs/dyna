@@ -118,36 +118,37 @@ func resolveMediaDestination(ctx context.Context, cmd *exec.Cmd, r repository, t
 			return approvals.MediaDestination{}, errors.New("fork media requires an owner-qualified PR head")
 		}
 	}
+	var visibility approvals.MediaVisibility
 	for index, name := range []string{r.name, head} {
 		raw, err := authOutput(ctx, cmd, token, "api", "--hostname", r.host, "repos/"+name)
 		if err != nil {
 			return approvals.MediaDestination{}, fmt.Errorf("cannot inspect media repository visibility: %w", err)
 		}
 		var repo struct {
-			FullName string `json:"full_name"`
-			Private  *bool  `json:"private"`
+			FullName   string                    `json:"full_name"`
+			Private    *bool                     `json:"private"`
+			Visibility approvals.MediaVisibility `json:"visibility"`
 		}
 		if err := json.Unmarshal(raw, &repo); err != nil {
 			return approvals.MediaDestination{}, err
 		}
-		if repo.Private == nil || !strings.EqualFold(repo.FullName, name) {
+		if repo.Private == nil || !strings.EqualFold(repo.FullName, name) ||
+			(repo.Visibility != approvals.MediaVisibilityPublic && repo.Visibility != approvals.MediaVisibilityPrivate && repo.Visibility != approvals.MediaVisibilityInternal) ||
+			*repo.Private != (repo.Visibility != approvals.MediaVisibilityPublic) {
 			return approvals.MediaDestination{}, errors.New("repository visibility is unknown")
 		}
 		if index == 0 {
-			if *repo.Private {
-				p.flags["dyna-base-private"] = "yes"
-			}
+			visibility = repo.Visibility
 		} else {
-			basePrivate := p.flags["dyna-base-private"] == "yes"
-			if *repo.Private != basePrivate {
+			if repo.Visibility != visibility {
 				return approvals.MediaDestination{}, errors.New("base and head repository visibility differs")
 			}
-			if *repo.Private && !strings.EqualFold(r.name, head) {
+			if repo.Visibility != approvals.MediaVisibilityPublic && !strings.EqualFold(r.name, head) {
 				return approvals.MediaDestination{}, errors.New("private fork media cannot guarantee reviewer access")
 			}
 		}
 	}
-	return approvals.MediaDestination{Host: r.host, Base: r.name, Head: head, Number: number}, nil
+	return approvals.MediaDestination{Host: r.host, Base: r.name, Head: head, Number: number, Visibility: visibility}, nil
 }
 
 // stripMedia removes only attachment flags from an approved PR command.
@@ -205,7 +206,7 @@ func uploadMedia(ctx context.Context, cmd *exec.Cmd, r repository, token string,
 	if err != nil {
 		return none, err
 	}
-	if !strings.EqualFold(approved.Host, current.Host) || !strings.EqualFold(approved.Base, current.Base) || !strings.EqualFold(approved.Head, current.Head) || approved.Number != current.Number {
+	if !strings.EqualFold(approved.Host, current.Host) || !strings.EqualFold(approved.Base, current.Base) || !strings.EqualFold(approved.Head, current.Head) || approved.Number != current.Number || approved.Visibility != current.Visibility {
 		return none, errors.New("media destination changed since approval")
 	}
 	type media struct {
