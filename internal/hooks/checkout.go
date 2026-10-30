@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 
@@ -9,28 +10,59 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// fastForwardRoomCheckouts moves each room checkout, the room's repository and
-// its extra repositories, to origin's default branch. A checkout it cannot move
-// safely is skipped, and one log line says why.
-func fastForwardRoomCheckouts(ctx context.Context) {
+// TickRepositories lists the repositories a maintenance tick checks: each one
+// with hooks, then each room checkout that hooks do not cover.
+func (s Service) TickRepositories(ctx context.Context) ([]string, error) {
+	repos, err := s.Repositories(ctx)
+	checkouts, checkoutErr := s.roomCheckouts(ctx)
+	seen := map[string]bool{}
+	var out []string
+	for _, repo := range append(repos, checkouts...) {
+		if !seen[repo] {
+			seen[repo] = true
+			out = append(out, repo)
+		}
+	}
+	return out, errors.Join(err, checkoutErr)
+}
+
+// roomCheckouts lists the repository and extra repositories of each room, once.
+// A registered repository that left the disk is not listed.
+func (s Service) roomCheckouts(ctx context.Context) ([]string, error) {
+	if s.Checkouts != nil {
+		return s.Checkouts(ctx)
+	}
 	rooms, err := room.DefaultStore().List(true)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, rec := range rooms {
+		for _, repo := range rec.Repos() {
+			if !repo.Missing && !seen[repo.Path] {
+				seen[repo.Path] = true
+				paths = append(paths, repo.Path)
+			}
+		}
+	}
+	return paths, nil
+}
+
+// fastForwardRoomCheckouts moves each room checkout to origin's default branch.
+// A checkout it cannot move safely is skipped, and one log line says why.
+func (s Service) fastForwardRoomCheckouts(ctx context.Context) {
+	paths, err := s.roomCheckouts(ctx)
 	if err != nil {
 		log.Printf("room checkouts: cannot list rooms: %v", err)
 		return
 	}
-	seen := map[string]bool{}
-	for _, rec := range rooms {
-		for _, repo := range rec.Repos() {
-			if repo.Missing || seen[repo.Path] {
-				continue
-			}
-			seen[repo.Path] = true
-			reason, err := fastForwardCheckout(ctx, repo.Path)
-			if err != nil {
-				log.Printf("room checkout %s: cannot fast-forward: %v", repo.Path, err)
-			} else if reason != "" {
-				log.Printf("room checkout %s: skipped, %s", repo.Path, reason)
-			}
+	for _, path := range paths {
+		reason, err := fastForwardCheckout(ctx, path)
+		if err != nil {
+			log.Printf("room checkout %s: cannot fast-forward: %v", path, err)
+		} else if reason != "" {
+			log.Printf("room checkout %s: skipped, %s", path, reason)
 		}
 	}
 }

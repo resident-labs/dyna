@@ -117,12 +117,13 @@ func (s Service) RunWorktreeCreated(ctx context.Context, e Event) error {
 }
 
 // Tick uses persisted state to claim schedule intervals and default branch
-// changes once across all maintenance processes. Main hooks refresh the remote
-// default branch at most once every five minutes, independently of tracked pull
-// requests. The first observation establishes a baseline without an event.
+// changes once across all maintenance processes. Every repository refreshes its
+// remote default branch at most once every five minutes, with or without hooks,
+// so room checkouts follow main. The first observation establishes a baseline
+// without an event.
 func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	hooks, err := s.List(ctx, repo)
-	if err != nil || len(hooks) == 0 {
+	if err != nil {
 		return err
 	}
 	r, err := repoid.Resolve(ctx, repo)
@@ -130,26 +131,28 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 		return err
 	}
 	fetchDue := false
-	for _, h := range hooks {
-		if h.Event == MainUpdated && !h.Disabled {
-			if err := s.runtime(r.ID, func(st *state) error {
-				if st.FetchedAt.IsZero() || !now.Before(st.FetchedAt.Add(5*time.Minute)) {
-					st.FetchedAt = now
-					fetchDue = true
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			break
+	if err := s.runtime(r.ID, func(st *state) error {
+		if st.FetchedAt.IsZero() || !now.Before(st.FetchedAt.Add(5*time.Minute)) {
+			st.FetchedAt = now
+			fetchDue = true
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	// A default branch that cannot be resolved, such as a checkout without
 	// origin/HEAD and without a branch, has no movement to report. Its
 	// schedule hooks still run.
 	branch, branchErr := repoid.DefaultBranch(ctx, r.Root, repoid.Git)
-	var fetchErr error
+	// A repository without an origin remote, such as a local-only checkout, has
+	// nothing to fetch.
+	refresh := false
 	if fetchDue && branchErr == nil {
+		_, originErr := repoid.Git(ctx, r.Root, "remote", "get-url", "origin")
+		refresh = originErr == nil
+	}
+	var fetchErr error
+	if refresh {
 		fetch := s.Fetch
 		if fetch == nil {
 			fetch = func(ctx context.Context, repo string) error {
@@ -191,13 +194,10 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	for _, name := range due {
 		events = append(events, Event{Event: Schedule, Repo: r.Root, Worktree: r.Main, Name: name})
 	}
-	errs := []error{fetchErr}
-	for _, e := range events {
-		if e.Event == MainUpdated {
-			fastForwardRoomCheckouts(ctx)
-			break
-		}
+	if refresh && fetchErr == nil && head != "" {
+		s.fastForwardRoomCheckouts(ctx)
 	}
+	errs := []error{fetchErr}
 	for _, e := range events {
 		errs = append(errs, s.Emit(ctx, e))
 	}

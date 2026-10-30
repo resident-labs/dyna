@@ -419,7 +419,7 @@ func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *w
 		},
 		hookSchedule: func(ctx context.Context) (time.Time, error) {
 			errs := []error{hookService.ReconcileInstall(ctx), checkShellSilence(ctx, rooms.Notify)}
-			repos, err := hookService.Repositories(ctx)
+			repos, err := hookService.TickRepositories(ctx)
 			if err != nil {
 				errs = append(errs, err)
 			}

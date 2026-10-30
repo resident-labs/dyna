@@ -2,44 +2,38 @@ package hooks
 
 import (
 	"context"
-	"os/exec"
-	"strings"
 	"testing"
+	"time"
 )
 
-// A clean room checkout on the default branch moves to origin's default
-// branch when origin advances, and no commit is made in the checkout.
-func TestFastForwardCheckoutMovesCleanDefaultBranch(t *testing.T) {
+// A room checkout with no hooks still follows its default branch: its tick
+// fetches origin, and the clean checkout moves once origin advances.
+func TestTickFastForwardsRoomCheckoutWithoutHooks(t *testing.T) {
+	s, checkout := setup(t)
+	ctx := context.Background()
 	origin := t.TempDir()
-	checkout := t.TempDir()
-	gitIn(t, origin, "init", "-q", "--initial-branch=main")
-	gitIn(t, origin, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "first")
-	gitIn(t, "", "clone", "-q", origin, checkout)
-	gitIn(t, origin, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "second")
-	gitIn(t, checkout, "fetch", "-q", "origin")
+	git(t, origin, "init", "-b", "main")
+	git(t, origin, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "first")
+	git(t, checkout, "remote", "add", "origin", origin)
+	git(t, checkout, "fetch", "-q", "origin")
+	git(t, checkout, "reset", "-q", "--hard", "origin/main")
+	git(t, checkout, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	s.Checkouts = func(context.Context) ([]string, error) { return []string{checkout}, nil }
+	s.Fetch = func(context.Context, string) error {
+		git(t, checkout, "fetch", "-q", "origin")
+		return nil
+	}
 
-	reason, err := fastForwardCheckout(context.Background(), checkout)
-	if err != nil {
+	now := time.Now()
+	if err := s.Tick(ctx, checkout, now); err != nil {
 		t.Fatal(err)
 	}
-	if reason != "" {
-		t.Fatalf("clean checkout skipped: %s", reason)
+	git(t, origin, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "second")
+	want := git(t, origin, "rev-parse", "HEAD")
+	if err := s.Tick(ctx, checkout, now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
 	}
-	head := strings.TrimSpace(gitIn(t, checkout, "rev-parse", "HEAD"))
-	want := strings.TrimSpace(gitIn(t, origin, "rev-parse", "HEAD"))
-	if head != want {
-		t.Fatalf("HEAD = %s, want origin/main %s", head, want)
+	if got := git(t, checkout, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("checkout HEAD = %s, want origin/main %s", got, want)
 	}
-}
-
-func gitIn(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	if dir != "" {
-		args = append([]string{"-C", dir}, args...)
-	}
-	out, err := exec.Command("/usr/bin/git", args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
-	}
-	return string(out)
 }
