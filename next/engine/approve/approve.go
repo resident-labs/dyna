@@ -37,6 +37,13 @@ type Service struct {
 	waiters map[contract.OpID]chan contract.Operation
 }
 
+func New(st *store.Store, ctx context.Context, kinds map[contract.OpKind]Entry, now func() time.Time, expiry time.Duration, id func(string) (string, error)) *Service {
+	if expiry <= 0 {
+		expiry = 24 * time.Hour
+	}
+	return &Service{Store: st, Context: ctx, Kinds: kinds, Now: now, Expiry: expiry, ID: id, waiters: make(map[contract.OpID]chan contract.Operation)}
+}
+
 func (s *Service) event(room contract.RoomID, from contract.Principal, body contract.EventBody) (contract.Event, error) {
 	id, err := s.ID("ev_")
 	return contract.Event{ID: contract.EventID(id), Time: s.Now(), Room: room, From: from, Body: body}, err
@@ -67,8 +74,12 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if err := s.access(ctx, who, input.Room); err != nil {
 		return contract.Operation{}, err
 	}
-	entry, ok := s.Kinds[input.Kind]
-	if !ok || (input.Args != nil && input.Args.OpKind() != input.Kind) {
+	if input.Args == nil {
+		return contract.Operation{}, ErrInvalid
+	}
+	kind := input.Args.OpKind()
+	entry, ok := s.Kinds[kind]
+	if !ok {
 		return contract.Operation{}, ErrInvalid
 	}
 	checkErr := entry.Check(ctx, input.Args, who)
@@ -81,20 +92,13 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 		return contract.Operation{}, err
 	}
 	class := entry.Class(input.Args, who)
-	if class != contract.ClassAuto && class != contract.ClassAgent && class != contract.ClassOwner {
-		return contract.Operation{}, errors.New("invalid operation class")
-	}
 	immediate := who.Kind == contract.PrincipalOwner || class == contract.ClassAuto || class == contract.ClassAgent && who.Session == tree.Root()
 	now := s.Now()
 	id, err := s.ID("op_")
 	if err != nil {
 		return contract.Operation{}, err
 	}
-	expiry := s.Expiry
-	if expiry <= 0 {
-		expiry = 24 * time.Hour
-	}
-	op := contract.Operation{ID: contract.OpID(id), Kind: input.Kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: entry.Card(input.Args, who), State: contract.OpPending, Created: now, Expires: now.Add(expiry)}
+	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: entry.Card(input.Args, who), State: contract.OpPending, Created: now, Expires: now.Add(s.Expiry)}
 	if immediate {
 		op.State = contract.OpApproved
 	}
@@ -115,19 +119,17 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	}
 	var previous store.StoredOperation
 	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
-		{
-			found, err := s.Store.PendingOperation(tx, op.Room, who, op.Kind, args)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		found, err := s.Store.PendingOperation(tx, op.Room, who, op.Kind, args)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && !found.Operation.Expires.After(now) {
+			if err := s.expireTx(tx, found.Operation); err != nil {
 				return err
 			}
-			if err == nil && !found.Operation.Expires.After(now) {
-				if err := s.expireTx(tx, found.Operation); err != nil {
-					return err
-				}
-			} else if err == nil {
-				previous = found
-				return nil
-			}
+		} else if err == nil {
+			previous = found
+			return nil
 		}
 		if checkErr != nil {
 			return checkErr
@@ -145,9 +147,6 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 		return op, nil
 	}
 	s.mu.Lock()
-	if s.waiters == nil {
-		s.waiters = make(map[contract.OpID]chan contract.Operation)
-	}
 	waiter := make(chan contract.Operation, 1)
 	s.waiters[op.ID] = waiter
 	s.mu.Unlock()
@@ -169,7 +168,7 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	}
 }
 
-func (s *Service) Decide(ctx context.Context, who contract.Principal, id contract.OpID, approve bool, reason string) error {
+func (s *Service) Decide(ctx context.Context, who contract.Principal, id contract.OpID, state contract.OpState, reason string) error {
 	record, err := s.Store.Operation(ctx, id)
 	if err != nil {
 		return err
@@ -179,33 +178,39 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 		return err
 	}
 	if who.Kind != contract.PrincipalOwner {
-		tree, err := s.Store.RoomTree(ctx, op.Room)
+		if state == contract.OpWithdrawn {
+			if who != op.By {
+				return ErrForbidden
+			}
+		} else {
+			tree, err := s.Store.RoomTree(ctx, op.Room)
+			if err != nil {
+				return err
+			}
+			if op.Class != contract.ClassAgent || !tree.Above(who.Session, op.By.Session) {
+				return ErrForbidden
+			}
+		}
+	}
+	var entry Entry
+	if state == contract.OpApproved {
+		var ok bool
+		entry, ok = s.Kinds[op.Kind]
+		if !ok {
+			return ErrInvalid
+		}
+		op.Args, err = entry.Decode(record.Args)
 		if err != nil {
 			return err
 		}
-		if op.Class != contract.ClassAgent || !tree.Above(who.Session, op.By.Session) {
-			return ErrForbidden
-		}
 	}
-	entry, ok := s.Kinds[op.Kind]
-	if !ok {
-		return errors.New("unknown operation kind")
-	}
-	op.Args, err = entry.Decode(record.Args)
-	if err != nil {
-		return err
-	}
-	decision := contract.Decision{By: who, Approved: approve, Reason: reason, At: s.Now()}
-	state := contract.OpDenied
-	if approve {
-		state = contract.OpApproved
-	}
+	decision := contract.Decision{By: who, Approved: state == contract.OpApproved, Reason: reason, At: s.Now()}
 	event, err := s.event(op.Room, who, contract.OpDecided{ID: op.ID, State: state, Decision: decision})
 	if err != nil {
 		return err
 	}
 	var notify []contract.Delivery
-	if !approve {
+	if state == contract.OpDenied || state == contract.OpWithdrawn && who != op.By {
 		notify = delivery(op.By.Session)
 	}
 	expired := false
@@ -229,7 +234,7 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	if expired {
 		return ErrConflict
 	}
-	if approve {
+	if state == contract.OpApproved {
 		op.State = state
 		op.Decision = &decision
 		go s.run(op, entry)
@@ -237,41 +242,6 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	return nil
 }
 
-func (s *Service) Withdraw(ctx context.Context, who contract.Principal, id contract.OpID) error {
-	record, err := s.Store.Operation(ctx, id)
-	if err != nil {
-		return err
-	}
-	op := record.Operation
-	if err := s.access(ctx, who, op.Room); err != nil {
-		return err
-	}
-	if who.Kind != contract.PrincipalOwner && who != op.By {
-		return ErrForbidden
-	}
-	d := contract.Decision{By: who, At: s.Now()}
-	event, err := s.event(op.Room, who, contract.OpDecided{ID: op.ID, State: contract.OpWithdrawn, Decision: d})
-	if err != nil {
-		return err
-	}
-	var notify []contract.Delivery
-	if who != op.By {
-		notify = delivery(op.By.Session)
-	}
-	return s.Store.Write(ctx, func(tx *sql.Tx) error {
-		if !op.Expires.After(s.Now()) {
-			return s.expireTx(tx, op)
-		}
-		changed, err := s.Store.TransitionOperation(tx, id, contract.OpPending, contract.OpWithdrawn, &d, nil, event, notify)
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return ErrConflict
-		}
-		return nil
-	})
-}
 func (s *Service) expireTx(tx *sql.Tx, op contract.Operation) error {
 	d := contract.Decision{By: contract.Principal{Kind: contract.PrincipalEngine}, At: s.Now(), Reason: "expired"}
 	event, err := s.event(op.Room, d.By, contract.OpDecided{ID: op.ID, State: contract.OpExpired, Decision: d})
@@ -282,7 +252,7 @@ func (s *Service) expireTx(tx *sql.Tx, op contract.Operation) error {
 	return err
 }
 func (s *Service) Expire(ctx context.Context) error {
-	ops, err := s.Store.Operations(ctx, contract.OpPending, s.Now())
+	ops, err := s.Store.Operations(ctx, "", contract.OpPending, s.Now())
 	if err != nil {
 		return err
 	}
@@ -340,7 +310,7 @@ func (s *Service) finish(op contract.Operation, result contract.OpResult) error 
 	return nil
 }
 func (s *Service) Recover(ctx context.Context) error {
-	ops, err := s.Store.Operations(ctx, contract.OpApproved, time.Time{})
+	ops, err := s.Store.Operations(ctx, "", contract.OpApproved, time.Time{})
 	if err != nil {
 		return err
 	}
@@ -355,15 +325,12 @@ func (s *Service) List(ctx context.Context, who contract.Principal, room contrac
 	if err := s.access(ctx, who, room); err != nil {
 		return nil, err
 	}
-	records, err := s.Store.Operations(ctx, "", time.Time{})
+	records, err := s.Store.Operations(ctx, room, contract.OpPending, time.Time{})
 	if err != nil {
 		return nil, err
 	}
 	var out []contract.Operation
 	for _, record := range records {
-		if record.Operation.Room != room {
-			continue
-		}
 		entry, ok := s.Kinds[record.Operation.Kind]
 		if !ok {
 			return nil, errors.New("unknown operation kind")
