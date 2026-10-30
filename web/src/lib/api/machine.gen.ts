@@ -477,3 +477,32 @@ export interface MachinePatch {
   removeMounts?: MountRef[];
   removeDevices?: DeviceRef[];
 }
+
+//////////
+// source: internal/websvc/node_history.go
+
+/**
+ * NodeHistoryPoint is one recorded CPU and memory reading. A missing CPU sample
+ * stays null; it is never presented as zero.
+ */
+export interface NodeHistoryPoint {
+  at: string;
+  cpuPercent?: number | null;
+  memoryPercent?: number | null;
+}
+/**
+ * NodeDiagnosis is the last machine-wide doctor report, without internal IDs.
+ */
+export interface NodeDiagnosis {
+  at: string;
+  healthy: boolean;
+  summary: string;
+  findings: NodeDiagnosisFinding[];
+}
+/**
+ * NodeDiagnosisFinding is one cause and its evidence.
+ */
+export interface NodeDiagnosisFinding {
+  cause: string;
+  evidence: string;
+}

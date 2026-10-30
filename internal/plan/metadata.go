@@ -2,12 +2,6 @@ package plan
 
 import "github.com/dop251/goja/ast"
 
-type WorkflowArg struct {
-	Name        string `json:"name"`
-	Required    bool   `json:"required"`
-	Description string `json:"description"`
-}
-
 // Metadata holds literal workflow declarations. Reading it never runs source.
 type Metadata struct {
 	Name          string
