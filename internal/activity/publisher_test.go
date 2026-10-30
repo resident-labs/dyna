@@ -68,8 +68,8 @@ func TestFinalPublicationDeadline(t *testing.T) {
 	}
 }
 
-func TestLivePublisherRenewsWithoutOutput(t *testing.T) {
-	p := &Publisher{record: Record{Signal: Signal{Copier: CopierRunning}}, pending: make(chan struct{}, 1), done: make(chan struct{})}
+func TestQuietPublisherKeepsOutputUnknown(t *testing.T) {
+	p := &Publisher{record: Record{Signal: Signal{Copier: CopierUnknown}, Reason: ReasonObserverLivenessUnproven}, pending: make(chan struct{}, 1), done: make(chan struct{})}
 	ticks := make(chan time.Time)
 	saved := make(chan Record)
 	done := make(chan struct{})
@@ -80,7 +80,7 @@ func TestLivePublisherRenewsWithoutOutput(t *testing.T) {
 	second := first.Add(PublishInterval)
 	ticks <- second
 	b := <-saved
-	if a.Signal.LeaseUntil != first.Add(Lease) || b.Signal.LeaseUntil != second.Add(Lease) || b.Signal.Copier != CopierRunning {
+	if a.Signal.LeaseUntil != first.Add(Lease) || b.Signal.LeaseUntil != second.Add(Lease) || b.Signal.Copier != CopierUnknown || b.Reason != ReasonObserverLivenessUnproven {
 		t.Errorf("first = %+v, second = %+v", a, b)
 	}
 	p.Close()
