@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/updaterservice"
 )
 
 // qaSeedFixtures writes only to an existing, empty data directory. The caller
@@ -42,5 +45,26 @@ func qaSeedFixtures(dataDir string) error {
 	pr := &state.Record{Key: key, Host: "github.com", Repo: "example/widgets", Number: 7,
 		URL: "https://github.com/example/widgets/pull/7", Title: "Improve the sample page",
 		RoomID: rec.ID, GoalID: goal.ID, State: state.PROpen, Branch: "sample-change", Base: "main"}
-	return state.Write(state.Root(dataDir), state.State{Version: 1, Records: map[string]*state.Record{key: pr}})
+	if err := state.Write(state.Root(dataDir), state.State{Version: 1, Records: map[string]*state.Record{key: pr}}); err != nil {
+		return err
+	}
+	// A finished installer receipt appears in the Updates service activity.
+	// Writing a receipt does not start an installer or a service.
+	const id = "00000000000000000000000000000001"
+	root := filepath.Join(dataDir, "hooks", "install")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return err
+	}
+	logPath := filepath.Join(root, "qa-update.log")
+	if err := os.WriteFile(logPath, []byte("Sample update completed.\n"), 0600); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	install := hookinstall.Store{Root: root}
+	return install.Update(id, func(job *hookinstall.Job) error {
+		*job = hookinstall.Job{ID: id, Hook: updaterservice.RunName, HookLog: logPath,
+			Status: "finished", Result: "pass", Recorded: true,
+			StartedAt: now.Add(-time.Second), FinishedAt: now}
+		return nil
+	})
 }
