@@ -24,7 +24,8 @@ type Notice struct {
 	// Type is the registered PR event type this notice posts as. A notice
 	// stored before the typed events existed leaves it empty, and delivery
 	// then reads the type from its kind and the record.
-	Type room.PRType `json:"type,omitempty"`
+	Type    room.PRType    `json:"type,omitempty"`
+	Outcome room.PROutcome `json:"outcome,omitempty"`
 	// Merge is the typed merge event this notice posts. A merge notice carries
 	// it; every other notice leaves it nil.
 	Merge *room.MergeEvent `json:"merge,omitempty"`
