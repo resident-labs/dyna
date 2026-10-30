@@ -60,10 +60,17 @@ func (x Executor) PushCommit(ctx context.Context, repo, cache, sha, base string)
 	if err := x.Run(ctx, repo, &output, "env", push...); err != nil {
 		// A second job of the same commit can lose the race to the first one: the
 		// first creates the same ref after this push reads the remote. The ref then
-		// holds the commit this push wants, so the upload has succeeded.
-		var ref TailBuffer
-		read := "git --git-dir=" + q(cache) + " rev-parse --verify -q refs/dyna/ci/" + sha
-		if x.NodeCommand(ctx, &ref, &ref, read) == nil && strings.TrimSpace(ref.String()) == sha {
+		// holds the commit this push wants, so the upload has succeeded. Every
+		// requested ref must hold its commit; a missing base means the upload failed.
+		settled := true
+		for _, commit := range refs {
+			var ref TailBuffer
+			read := "git --git-dir=" + q(cache) + " rev-parse --verify -q refs/dyna/ci/" + commit
+			if x.NodeCommand(ctx, &ref, &ref, read) != nil || strings.TrimSpace(ref.String()) != commit {
+				settled = false
+			}
+		}
+		if settled {
 			return nil
 		}
 		return fmt.Errorf("push commit to node: %w: %s", err, &output)
