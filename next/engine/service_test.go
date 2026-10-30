@@ -613,3 +613,41 @@ func TestClosingCreatingParentRejectsConcurrentChild(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+type heldRemoveBox struct {
+	started chan struct{}
+	release chan struct{}
+	removed chan struct{}
+}
+
+func (b heldRemoveBox) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
+func (b heldRemoveBox) Remove(context.Context, contract.BoxID) error {
+	b.started <- struct{}{}
+	<-b.release
+	b.removed <- struct{}{}
+	return nil
+}
+
+func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
+	s, room, root, ctx := setup(t)
+	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root})
+	if e != nil {
+		t.Fatal(e)
+	}
+	adapter := heldRemoveBox{started: make(chan struct{}, 2), release: make(chan struct{}), removed: make(chan struct{}, 2)}
+	s.boxes = adapter
+	result := make(chan *contract.Error, 2)
+	closeLead := func() {
+		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: lead.Session})
+		result <- e
+	}
+	go closeLead()
+	<-adapter.started
+	go closeLead()
+	close(adapter.release)
+	<-result
+	<-result
+	if n := len(adapter.removed); n != 1 {
+		t.Fatalf("removed %d times", n)
+	}
+}
