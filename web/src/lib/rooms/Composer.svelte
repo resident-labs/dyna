@@ -574,8 +574,9 @@
   .file-status { padding: 5px var(--s2); font-size: var(--t-sm); color: var(--muted); }
   .pop.status { padding: 8px var(--s3); font-size: var(--t-sm); color: var(--muted); }
   .profile-chip { color: var(--muted); padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; }
-  .model-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); }
+  .model-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   .model-button:hover { background: var(--hover); color: var(--ink); }
+  .model-button:active { background: var(--select); }
   .command-chip { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   .command-chip:hover { background: var(--hover); color: var(--ink); }
   .command-chip:active { background: var(--select); }

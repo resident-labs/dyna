@@ -160,15 +160,15 @@ test('an attachment-only composer blocks reload until its file is removed', asyn
   }
 })
 
-test('profiles start sessions through slash completion without a toolbar picker', async () => {
+test('profiles start sessions through model completion', async () => {
   await withFileComposer(async (target, input, type) => {
-    assert.equal(target.querySelector('[aria-label="Session profile"]'), null)
-    await type('/so')
-    assert.match(target.textContent ?? '', /Start a session with/)
+    assert.ok(target.querySelector('[aria-label="Pick a model"]'))
+    await type('!so')
+    assert.match(target.textContent ?? '', /Pick a model/)
     element<HTMLButtonElement>(target, '[role="option"]').click()
     await settle()
-    assert.equal(input.value, '/sol ')
-    await type('/sol Review the composer')
+    assert.equal(input.value, '')
+    await type('Review the composer')
     assert.equal(element(target, '.mode').textContent, 'Start session')
     assert.equal(element(target, '.model').textContent, 'gpt-6.1-sol')
   })
