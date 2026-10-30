@@ -30,6 +30,8 @@ const (
 	WakeAssignment WakeKind = "assignment"
 	// WakeWrapUp means the engine's wrap-up check started the turn.
 	WakeWrapUp WakeKind = "wrap-up"
+	// WakeCompact means the engine compacted an idle session.
+	WakeCompact WakeKind = "compact"
 )
 
 // WakeCause is the typed fact stored with a turn: what started it.
@@ -71,6 +73,8 @@ func (c WakeCause) Line() string {
 		return "woke on an assignment from " + who
 	case WakeWrapUp:
 		return "woke on a wrap-up check from " + who
+	case WakeCompact:
+		return "compacted after sitting idle"
 	default:
 		if c.PostID != "" {
 			return room.WakeLine(c.PostID, who)
@@ -110,7 +114,7 @@ func causeFromMessage(msg room.Message) WakeCause {
 	return WakeCause{Kind: kind, PostID: msg.ID, Sender: room.WakeSender(msg)}
 }
 
-func (m *Manager) wakeCause(meta Meta, messageID, transferID string, wrapUp, first bool) WakeCause {
+func (m *Manager) wakeCause(meta Meta, messageID, transferID string, wrapUp, compactOnly, first bool) WakeCause {
 	if messageID != "" {
 		msg, err := m.rooms().Message(meta.RoomID, messageID)
 		if err != nil {
@@ -123,6 +127,9 @@ func (m *Manager) wakeCause(meta Meta, messageID, transferID string, wrapUp, fir
 	}
 	if wrapUp {
 		return WakeCause{Kind: WakeWrapUp, Sender: "the engine"}
+	}
+	if compactOnly {
+		return WakeCause{Kind: WakeCompact, Sender: "the engine"}
 	}
 	if first && meta.RunOwned() {
 		name := meta.Run.ID

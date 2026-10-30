@@ -947,5 +947,5 @@ func (m *transferCoordinator) beginTransferTurn(id, prompt, token string) (Turn,
 	if err != nil {
 		return Turn{}, false, err
 	}
-	return m.beginTurnConfigured(id, prompt, "", []string{m.store().ReportTarget(meta)}, "", token, false, time.Time{})
+	return m.beginTurnConfigured(id, prompt, "", []string{m.store().ReportTarget(meta)}, "", token, false, false, time.Time{})
 }

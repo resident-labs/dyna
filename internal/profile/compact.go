@@ -116,27 +116,24 @@ func CompactDue(p Profile, contextTokens int64) bool {
 	return p.Compact != nil && CompactRuleFor(p.Harness).Trigger && contextTokens >= p.Compact.Tokens
 }
 
-// Idle compaction. A Claude Code session that wakes after its prompt cache
-// lapsed pays for its whole context at the first model call and again at every
-// later call of the turn. Compacting first makes the later calls read a small
-// context. Dyna does not run a timer: the compaction happens when the next turn
-// starts, and a session that never wakes again costs nothing.
+// Idle compaction. A session whose prompt cache lapsed pays for its whole
+// context again at the first model call of its next turn, and at every later
+// call. The engine compacts an idle session once, after IdleCompactAfter, so
+// that turn reads a small context. A session that never wakes again costs one
+// summary call.
 const (
-	// ClaudeCacheLifetime is how long Claude Code's prompt cache stays warm on
-	// subscription accounts. It was measured on Dyna's own turns: the cache hit
-	// stayed at 100% up to an hour and fell to 49% between one and two hours.
-	// API-key accounts keep the cache for 5 minutes, so a gap past this
-	// lifetime is cold for both and the rule never compacts a warm session.
-	ClaudeCacheLifetime = time.Hour
+	// IdleCompactAfter is how long a session sits idle before it is compacted.
+	// It is one constant for every harness: Claude Code keeps its prompt cache
+	// for 5 minutes on API keys and 1 hour on subscriptions, and 30 minutes
+	// lands between them. t3code compacts idle sessions on the same idea.
+	IdleCompactAfter = 30 * time.Minute
 	// IdleCompactMinTokens is the smallest context worth a summary call.
 	IdleCompactMinTokens = 100000
 )
 
-// IdleCompactDue reports whether Dyna should compact a resumed Claude Code
-// session before its turn: it sat idle past the cache lifetime, so the cache is
-// cold, and its last model call's prompt was at least IdleCompactMinTokens.
-// The profile must turn compaction on. t3code compacts idle Claude threads for
-// the same reason, but before the cache expires and with a timer.
-func IdleCompactDue(p Profile, contextTokens int64, idle time.Duration) bool {
-	return p.Compact != nil && p.Harness == HarnessClaudeCode && idle > ClaudeCacheLifetime && contextTokens >= IdleCompactMinTokens
+// IdleCompactDue reports whether an idle session of p with contextTokens in its
+// last model call's prompt is worth compacting. Only Claude Code and Pi have a
+// compact command.
+func IdleCompactDue(p Profile, contextTokens int64) bool {
+	return (p.Harness == HarnessClaudeCode || p.Harness == HarnessPi) && contextTokens >= IdleCompactMinTokens
 }
