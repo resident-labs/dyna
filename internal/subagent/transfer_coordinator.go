@@ -26,7 +26,7 @@ type transferCoordinator struct {
 	handoffPacket          func(Meta, TransferState) (string, string, error)
 	postFallbackNotice     func(string, string)
 	transferCompactionSeen func(string, Turn) bool
-	beginTurnConfigured    func(string, string, string, []string, string, string, bool, time.Time) (Turn, bool, error)
+	beginTurnConfigured    func(string, string, string, []string, string, string, bool, bool, time.Time) (Turn, bool, error)
 }
 
 func (m *Manager) transferCoordinator() *transferCoordinator {
