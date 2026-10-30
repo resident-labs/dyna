@@ -619,6 +619,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 
 	comment := &cobra.Command{Use: "comment <number|url> [body]", Short: "Post a GitHub comment through gh and record its comment ID for routing", Args: cobra.RangeArgs(1, 2)}
 	commentBody := comment.Flags().String("body", "", "comment body text, as an alternative to the positional body")
+	commentAttachments := comment.Flags().StringArray("attach", nil, "attach a media file (repeatable)")
 	publishComment := comment.Flags().Bool("publish", false, "explicitly publish this comment to GitHub even when the room defaults to local")
 	comment.RunE = func(c *cobra.Command, a []string) error {
 		role := authority.Of(c.Context()).Role
@@ -646,7 +647,14 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 			return err
 		}
 		if agentPublish {
-			return ghclient.PublishThroughApproval(c.Context(), roomID, "", []string{"pr", "comment", r.URL(), "--body", watch.Sanitize(strings.TrimSpace(body))})
+			args := []string{"pr", "comment", r.URL(), "--body", watch.Sanitize(strings.TrimSpace(body))}
+			for _, path := range *commentAttachments {
+				args = append(args, "--attach", path)
+			}
+			return ghclient.PublishThroughApproval(c.Context(), roomID, "", args)
+		}
+		if len(*commentAttachments) > 0 {
+			return fmt.Errorf("owner comment attachments are not yet supported")
 		}
 		return engineclient.New("").Call(c.Context(), "CommentPR", []any{roomID, r, body, *publishComment}, nil)
 	}

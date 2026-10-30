@@ -2,8 +2,11 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,12 +29,15 @@ func ghApprovalExecutor(rooms *room.Store, claim claimComment) approvals.Execute
 		if err := json.Unmarshal(r.Payload, &payload); err != nil {
 			return approvals.Result{}, err
 		}
-		argv, cleanup, err := bindApprovalFiles(payload)
+		argv, cleanup, err := bindApprovalFilesForRoom(payload, rooms, r.Room)
 		if err != nil {
 			return approvals.Result{}, err
 		}
 		defer cleanup()
 		ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, r.Room), rooms)
+		if len(payload.Media) > 0 {
+			ctx = ghclient.WithApprovedMedia(ctx, payload.MediaDestination)
+		}
 		cmd := ghclient.Command(ctx, "", payload.Cwd, argv...)
 		stdout, stderr := boundedio.New(1024*1024), boundedio.New(64*1024)
 		cmd.Stdout, cmd.Stderr = stdout, stderr
@@ -95,6 +101,10 @@ func recordPostedComment(session, url string, claim claimComment) error {
 // bindApprovalFiles restores every snapshot and points the original argument
 // at it. The request's argv and working directory otherwise stay unchanged.
 func bindApprovalFiles(payload approvals.GHPayload) ([]string, func(), error) {
+	return bindApprovalFilesForRoom(payload, nil, "")
+}
+
+func bindApprovalFilesForRoom(payload approvals.GHPayload, rooms *room.Store, roomID string) ([]string, func(), error) {
 	dir, err := os.MkdirTemp("", "dyna-approval-files-")
 	if err != nil {
 		return nil, nil, err
@@ -108,6 +118,63 @@ func bindApprovalFiles(payload approvals.GHPayload) ([]string, func(), error) {
 			return nil, nil, err
 		}
 		replacements[snapshot.Path] = path
+	}
+	paths, err := ghclient.MediaPaths(payload.Argv)
+	if err != nil || len(paths) != len(payload.Media) {
+		cleanup()
+		return nil, nil, errors.New("invalid approved media arguments")
+	}
+	for i, media := range payload.Media {
+		if rooms == nil || media.Path != paths[i] || media.Name != filepath.Base(media.Path) {
+			cleanup()
+			return nil, nil, errors.New("invalid approved media")
+		}
+		msg, err := rooms.Message(roomID, media.PostID)
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		found := false
+		for _, a := range msg.Attachments {
+			if a.ID == media.AttachmentID && a.Name == media.Name {
+				found = true
+			}
+		}
+		if !found {
+			cleanup()
+			return nil, nil, errors.New("approved media missing from post")
+		}
+		source, err := rooms.AttachmentPath(roomID, media.AttachmentID)
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		f, err := os.Open(source)
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		data, err := io.ReadAll(io.LimitReader(f, (25<<20)+1))
+		closeErr := f.Close()
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		if closeErr != nil {
+			cleanup()
+			return nil, nil, closeErr
+		}
+		sum := sha256.Sum256(data)
+		if len(data) > 25<<20 || fmt.Sprintf("%x", sum) != media.SHA256 {
+			cleanup()
+			return nil, nil, errors.New("approved media hash mismatch")
+		}
+		path := filepath.Join(dir, fmt.Sprintf("media-%d%s", i, filepath.Ext(media.Name)))
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		replacements[media.Path] = path
 	}
 	argv, err := ghclient.RewriteFileArgs(payload.Argv, replacements)
 	if err != nil {
