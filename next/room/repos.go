@@ -40,5 +40,8 @@ func RepoForSession(rows []contract.RoomRepo, requested, parent contract.RepoNam
 			return row.Repo, nil
 		}
 	}
+	if selected == "" {
+		return "", nil
+	}
 	return "", errors.New("repository is not listed in the room")
 }
