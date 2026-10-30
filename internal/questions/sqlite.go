@@ -15,7 +15,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const revisionCounter database.Counter = "questions.revision"
+var revisionCounter = database.NewCounter("questions.revision")
 
 const questionsSchema = `CREATE TABLE IF NOT EXISTS questions (
  key TEXT PRIMARY KEY, room TEXT NOT NULL, state TEXT NOT NULL,
@@ -319,7 +319,7 @@ func (s *Store) updateTx(fn func(*sql.Conn, *State) error) error {
 		if err != nil || !changed {
 			return err
 		}
-		_, err = revisionCounter.Bump(context.Background(), conn)
+		err = revisionCounter.Bump(context.Background(), conn)
 		return err
 	})
 }

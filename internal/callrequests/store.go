@@ -21,7 +21,7 @@ const Topic = "call-requests"
 
 var errUnchanged = errors.New("call request unchanged")
 
-const revisionCounter database.Counter = "callrequests.revision"
+var revisionCounter = database.NewCounter("callrequests.revision")
 
 type Request struct {
 	ID             string     `json:"id"`
@@ -73,7 +73,7 @@ func (s *Store) open() (*sql.DB, error) {
 			return err
 		}
 		if old == 2 {
-			if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT ?,revision FROM call_requests_revision", revisionCounter); err != nil {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO revisions(name,n) SELECT 'callrequests.revision',revision FROM call_requests_revision"); err != nil {
 				return err
 			}
 			_, err := conn.ExecContext(ctx, "DROP TABLE call_requests_revision")
@@ -120,7 +120,7 @@ func setChange(conn *sql.Conn, event *listchange.Event, row Request) error {
 		return err
 	}
 	event.Change = listchange.Change{Op: "upsert", ID: row.ID, Item: raw}
-	_, err = revisionCounter.Bump(context.Background(), conn)
+	err = revisionCounter.Bump(context.Background(), conn)
 	return err
 }
 
