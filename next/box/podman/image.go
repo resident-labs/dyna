@@ -21,20 +21,6 @@ func (h *Host) BuildBase(ctx context.Context, containerfile, piTarball []byte) (
 		hash.Write(input)
 	}
 	tag := fmt.Sprintf("dyna-base:%x", hash.Sum(nil))
-	select {
-	case h.buildGate <- struct{}{}:
-		defer func() { <-h.buildGate }()
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-	_, err := h.run(ctx, "podman", "image", "exists", tag)
-	if err == nil {
-		return tag, nil
-	}
-	var exit remoteExit
-	if !errors.As(err, &exit) || exit != 1 {
-		return "", err
-	}
 	var contextTar bytes.Buffer
 	tw := tar.NewWriter(&contextTar)
 	for _, file := range []struct {
@@ -51,9 +37,29 @@ func (h *Host) BuildBase(ctx context.Context, containerfile, piTarball []byte) (
 	if err := tw.Close(); err != nil {
 		return "", err
 	}
-	_, err = h.runInput(ctx, contextTar.Bytes(), "podman", "build", "--tag", tag, "-")
-	if err != nil {
-		return "", err
+	return tag, h.Build(ctx, tag, "", contextTar.Bytes())
+}
+
+func (h *Host) Build(ctx context.Context, tag, base string, contextTar []byte) error {
+	select {
+	case h.buildGate <- struct{}{}:
+		defer func() { <-h.buildGate }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return tag, nil
+	_, err := h.run(ctx, "podman", "image", "exists", tag)
+	if err == nil {
+		return nil
+	}
+	var exit remoteExit
+	if !errors.As(err, &exit) || exit != 1 {
+		return err
+	}
+	args := []string{"podman", "build", "-t", tag}
+	if base != "" {
+		args = append(args, "--build-arg", "DYNA_BASE="+base)
+	}
+	args = append(args, "-")
+	_, err = h.runInput(ctx, contextTar, args...)
+	return err
 }
