@@ -316,3 +316,15 @@ func TestOutputKeepsTheNewestBytesAndReportsTheDrop(t *testing.T) {
 		t.Fatalf("unexpected output of %d bytes, starting %q", len(text), text[:60])
 	}
 }
+
+func TestSecretCrossingTheTrimPointWithoutNewlineIsDropped(t *testing.T) {
+	token := "ghp_" + strings.Repeat("a1", 15)
+	j := &job{}
+	_, _ = j.Write([]byte(strings.Repeat("x", 2*outputLimit-5) + token))
+	_, _ = j.Write([]byte(strings.Repeat("a1", 10) + "\nlast\n"))
+	j.finished = true
+	text, _ := j.unread()
+	if strings.Contains(text, "a1") || !strings.HasSuffix(text, "last\n") || !strings.Contains(text, "bytes of earlier output were dropped]") {
+		t.Fatalf("leaked or wrong text: %q", text[:min(len(text), 80)])
+	}
+}
