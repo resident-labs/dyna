@@ -413,8 +413,8 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	if s.CommandEnv != nil {
 		env = s.CommandEnv(ctx, dir, m, env)
 	}
-	// Without a terminal, a pager or color codes only get in the way.
-	cmd.Env = append(env, "PAGER=cat", "GIT_PAGER=cat", "NO_COLOR=1", JobEnv+"="+m.ID)
+	// Without a terminal, a pager, an editor or color codes only get in the way.
+	cmd.Env = append(append(env, childenv.NoEditor()...), "PAGER=cat", "GIT_PAGER=cat", "NO_COLOR=1", JobEnv+"="+m.ID)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A file, not an io.Pipe: Wait then returns when the command ends, even
 	// if a child it left behind still holds the output open.
