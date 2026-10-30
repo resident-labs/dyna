@@ -321,7 +321,7 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The run's own process is alive, so no other run may take its record.
-	if att, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks); err != nil || att != nil {
+	if att, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks); !errors.Is(err, ErrAttachmentBusy) || att != nil {
 		t.Fatalf("a live run's record was taken: %+v, %v", att, err)
 	}
 	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
