@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY pi.tgz /tmp/pi.tgz
 RUN npm install --global --ignore-scripts /tmp/pi.tgz && rm /tmp/pi.tgz \
-    && mkdir -p /box/home /box/pi && chown node:node /box/home /box/pi
+    && mkdir -p /box/home /box/pi /box/work && chown node:node /box/home /box/pi /box/work
 ENV HOME=/box/home PI_CODING_AGENT_DIR=/box/pi PATH=/opt/dyna/bin/current:${PATH}
 USER node
 WORKDIR /box/home
