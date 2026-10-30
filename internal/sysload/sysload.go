@@ -109,6 +109,9 @@ type Sampler struct {
 	// Record, when set, gets a Load averaged over about RecordEvery, once per
 	// RecordEvery, on the sampling goroutine.
 	Record func(Load)
+	// EveryMinute runs on the sampling goroutine even when a load read fails.
+	EveryMinute func()
+	nextMinute  time.Time
 
 	mu     sync.Mutex
 	prev   *reading
@@ -188,6 +191,14 @@ func (s *Sampler) tick(now time.Time) {
 		s.logf("sysload: %s", msg)
 	}
 	s.lastErr = msg
+	if s.EveryMinute != nil {
+		if s.nextMinute.IsZero() {
+			s.nextMinute = now.Add(RecordEvery)
+		} else if !now.Before(s.nextMinute) {
+			s.nextMinute = now.Add(RecordEvery)
+			s.EveryMinute()
+		}
+	}
 }
 
 func (s *Sampler) sample(now time.Time) error {
