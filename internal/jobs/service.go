@@ -1097,7 +1097,9 @@ func workDir(job Job) string {
 func workspaceCheckoutScript(cache, work, sha string) string {
 	q := shellquote.Quote
 	lock := cache + ".worktrees.lock"
-	return "if [ ! -e " + q(path.Join(work, ".git")) + " ]; then flock " + q(lock) + " git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) +
+	return "if [ ! -e " + q(path.Join(work, ".git")) + " ]; then " +
+		"if [ ! -e " + q(work) + " ]; then force=--force; else force=; fi; " +
+		"flock " + q(lock) + " git --git-dir=" + q(cache) + " worktree add $force --detach " + q(work) + " " + q(sha) +
 		"; else git -C " + q(work) + " checkout --detach --force " + q(sha) + "; fi; git -C " + q(work) + " clean -fd"
 }
 
