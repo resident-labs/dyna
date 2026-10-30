@@ -1,8 +1,8 @@
 # Dyna delegation
 
 Use a workflow for independent tasks with a join; read `dyna guide workflows` before writing one.
-Use a subagent for work that needs memory across turns. Delegate only through Dyna, never through harness subagents or workflows.
-Workflow agents are leaf sessions: they cannot delegate or start runs or subagents.
+Use a subagent for work that needs memory across turns. Delegate through Dyna subagents.
+Workflow agents are leaf sessions; their parent handles delegation and starts runs and subagents.
 Keep small or tightly coupled changes yourself. Run read-only scouts in parallel. Give each set of files one writer.
 
 For a replication or port project, build and verify one small end-to-end vertical slice before fanning out implementation. Trace a representative input through every integration seam to a visible output. Use what it reveals to define the parallel work; passing unit tests alone cannot show that the parts are wired together.
@@ -98,7 +98,7 @@ Only root uses `dyna request question` to ask the human owner, and only for deci
 A worker blocked on something only the owner can do, such as a sign-in, a live check on a
 device, a secret, or an outside decision, posts to @root or to its parent root. The post states
 what is needed and why the work stops without it. Root turns that post into one `dyna request question`
-question. Workers never ask the owner directly.
+question. Workers ask their parent.
 For a step that needs a person in a terminal, such as a sign-in or `sudo`, any session files `dyna request terminal --reason "<why>" -- <command>`. The request climbs your parent chain: each holder runs `dyna request approve <id>` or `dyna request deny <id> --reason "<why>"`, and root's approval shows it to the owner. `dyna request list` shows yours and the ones you hold.
 Root can use these question commands:
 
@@ -201,7 +201,7 @@ Include decisions the child cannot find. Save the brief in `$DYNA_SCRATCH/decode
 Context: Work in /src/app-decoder. Read docs/packet-format.md.
 Truncated packets must return ErrTruncated.
 Owned files: internal/decoder/packet.go and internal/decoder/packet_test.go.
-Other agents own all other files. Do not edit them.
+Other agents own all other files; edit only your assigned files.
 Create a worktree with dyna git worktrees new fix/truncated-packets.
 Checks: Add a regression case; run go test ./internal/decoder/...
 Return: At most 1200 characters: cause, files, tests, risks.
@@ -217,7 +217,7 @@ dyna subagent start --name decoder --profile sol --dir /src/app-decoder \
 
 ## Finishing
 
-Do not wait or poll for children. Use a foreground workflow for a join.
+Never poll for children. Use a foreground workflow for a join; otherwise end your turn.
 Read `dyna guide steering` for reports and handoffs.
 Close accepted children unless a follow-up is likely.
 When an assigned item is done, run `dyna goal item done <goal> <item>`.

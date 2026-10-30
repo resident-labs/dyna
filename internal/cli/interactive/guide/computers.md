@@ -39,12 +39,12 @@ The clip is an MP4 of at most 60 seconds (default 20, then it stops by itself) i
 A recording shows everything on screen, including secrets: check the screen first. A red box is burned into every frame.
 GitHub has no file upload API, so link the room post from the PR body.
 
-The example needs only Node.js. Do not run `npm install`. `dyna browser` installs
+The example needs only Node.js; use the installed tools. `dyna browser` installs
 `playwright-core` once into the Dyna data folder, then prints the endpoint and a
 four-line example. The first line imports `chromium` from that managed copy by
 absolute path, so it works in CommonJS and ES module scripts. Reuse that endpoint for profiling,
 tracing, network checks, and performance measurements.
-The installed app (`http://127.0.0.1:7457`) opens in a new tab, already signed in. Do not pair
+The installed app (`http://127.0.0.1:7457`) opens in a new tab, already signed in. Keep the existing sign-in instead of pairing
 by hand with `dyna engine run --pair`. Each `dyna browser` call pairs a device named
 `dyna browser · <session>` for this computer's browser only, and it shows in Settings > Devices.
 The device is revoked when the browser stops (`dyna browser stop`, idle stop or a crash),
@@ -231,8 +231,7 @@ The other actions are `{"click":"button.save"}` and
 path or URL on the QA origin. `waitFor` waits for a visible selector. Relative
 screenshot paths start at the repository root. Use paths in `$DYNA_SCRATCH`
 for QA files. Run `bash ./scripts/qa-branch.sh --help` for the full schema.
-The same read-only request policy applies to every step. Do not send posts or
-other writes as a QA test.
+The same read-only request policy applies to every step. Use read-only requests for QA tests.
 
 For manual performance QA, set the viewport to desktop size and then 390 px
 width. Capture screenshots, a CDP performance trace, time to usable, long tasks
