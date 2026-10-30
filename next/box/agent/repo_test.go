@@ -53,6 +53,34 @@ func TestSetupRepos(t *testing.T) {
 	}
 }
 
+func TestSetupRetryAfterCheckoutFailure(t *testing.T) {
+	root := t.TempDir()
+	repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"}
+	fail := true
+	git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+		if args[0] == "clone" {
+			return "", os.MkdirAll(args[len(args)-1], 0755)
+		}
+		if args[0] == "checkout" && fail {
+			return "", errors.New("checkout failed")
+		}
+		return "", nil
+	}
+	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, git); err == nil {
+		t.Fatal("expected failure")
+	}
+	if _, err := os.Stat(filepath.Join(root, "owner/repo")); !os.IsNotExist(err) {
+		t.Fatalf("partial repository visible: %v", err)
+	}
+	fail = false
+	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, git); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "owner/repo")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestArchiveRepo(t *testing.T) {
 	for _, mode := range []string{"skip", "snapshot", "error"} {
 		t.Run(mode, func(t *testing.T) {
