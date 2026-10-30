@@ -19,7 +19,7 @@ type fakeService struct {
 	Service
 	caller  contract.Principal
 	request contract.SessionCloseRequest
-	post contract.PostRequest
+	post    contract.PostRequest
 }
 
 func (f *fakeService) SessionClose(_ context.Context, c contract.Principal, r contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
