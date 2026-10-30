@@ -21,12 +21,18 @@ type Process struct {
 	Args    []string
 	Env     []string
 	Timeout time.Duration
-	Output  io.Writer
-	Stderr  io.Writer
+	// DrainTimeout bounds the wait for Output and Stderr after the child exits.
+	// Zero keeps the one-second default from Command.
+	DrainTimeout time.Duration
+	Output       io.Writer
+	Stderr       io.Writer
 	// Bind commits launch metadata while the existing native gate is closed.
 	Bind func(context.Context, Reference) error
 }
 type Executor func(context.Context, Process) error
+
+// newCommand builds each child command. Tests replace it to inspect the bounds Execute sets.
+var newCommand = Command
 
 // Execute kills the process group on cancellation, including command descendants.
 // No lock files are passed through ExtraFiles. Clean marks inherited lock
@@ -50,11 +56,14 @@ func Execute(ctx context.Context, p Process) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.Timeout)
 	defer cancel()
-	cmd := Command(ctx, p.Args[0], p.Args[1:]...)
+	cmd := newCommand(ctx, p.Args[0], p.Args[1:]...)
 	cmd.Dir, cmd.Env = p.Dir, p.Env
 	cmd.Stdout, cmd.Stderr = p.Output, p.Stderr
 	if cmd.Stderr == nil {
 		cmd.Stderr = p.Output
+	}
+	if p.DrainTimeout > 0 {
+		cmd.WaitDelay = p.DrainTimeout
 	}
 
 	var err error
