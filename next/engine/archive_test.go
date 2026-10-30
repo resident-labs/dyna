@@ -46,9 +46,10 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	if e := <-done; e != nil {
 		t.Fatal(e)
 	}
-	rows, err := s.store.Archives(ctx, session)
-	if err != nil || len(rows) != 1 || rows[0].Commit != "abc" || verifier.calls != 1 {
-		t.Fatalf("archives %+v, verifier %+v, error %v", rows, verifier, err)
+	var commit string
+	err := s.store.Read().QueryRowContext(ctx, "SELECT commit_sha FROM archives WHERE session=? AND repo=?", session, "owner/repo").Scan(&commit)
+	if err != nil || commit != "abc" || verifier.calls != 1 {
+		t.Fatalf("commit %q, verifier %+v, error %v", commit, verifier, err)
 	}
 }
 
