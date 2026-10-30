@@ -69,6 +69,9 @@ type Request struct {
 	Ahead bool
 	// OnStart runs after node setup, before the first check starts.
 	OnStart func(context.Context) error
+	// OnQueue can choose a different node while no check has started. It must
+	// return nil unless that node can admit the first check now.
+	OnQueue func(context.Context) *Node
 	// DeferSave lets the scheduler apply room budgets before publishing a result.
 	DeferSave bool
 	// Event is the GitHub event a job check runs, "pull_request" by default.
@@ -81,6 +84,11 @@ type Request struct {
 	// the runner adds the short commit it resolved.
 	Source jobs.CheckSource
 }
+
+// RelocateError asks the scheduler to retry an unstarted run on Node.
+type RelocateError struct{ Node Node }
+
+func (e *RelocateError) Error() string { return "move queued CI run to " + e.Node.Name }
 
 // Outcome is how one local CI check or a whole run ended. A check that could
 // not test the commit reports OutcomeError, which is an infrastructure cause and
