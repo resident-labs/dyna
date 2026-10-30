@@ -5,7 +5,6 @@
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { approvalDecidedEvent } from './eventPayloads.ts'
   import type { ApprovalAction } from './events.gen.ts'
-  import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
@@ -22,9 +21,8 @@
     {surface}
     title="{decided.actor} {words[decided.action]} a request"
     summary={[decided.action === 'pass' && decided.at ? `now with ${decided.at}` : '', decided.reason ?? ''].filter(Boolean).join(' · ')}
-    chips={decided.action === 'deny' ? [{ label: 'denied', failure: true }] : []}
   >
     {#snippet icon()}<span aria-hidden="true">{decided.action === 'deny' ? '✕' : '✓'}</span>{/snippet}
+    {#snippet extra()}<a href="#approval-{decided.requestId}">View request</a>{/snippet}
   </EventRow>
-  {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
 {/if}

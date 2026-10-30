@@ -9,8 +9,8 @@
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { approvalRequestedEvent } from './eventPayloads.ts'
   import { errorText } from '../errorText.ts'
-  import EventDetails from './EventDetails.svelte'
   import EventRow from './EventRow.svelte'
+  import Card from '../ui/Card.svelte'
 
   let { post, notice = post.notice, surface = 'feed', approval = undefined, latest = true, ondecideapproval = undefined }: {
     post: EventPost
@@ -28,6 +28,7 @@
   let busy = $state(false)
   let error = $state('')
   let what = $derived(asked?.command ?? asked?.tool ?? 'a write')
+  let displayWhat = $derived(what.replace(/(--body-file(?:=|\s+))(?:'[^']*'|"[^"]*"|\S+)/g, '$1[body below]'))
   let where = $derived(asked?.repository ?? asked?.server ?? '')
   let chips = $derived(approval && !waiting && approval.at !== 'owner' ? [{ label: `waits on ${approval.at}` }] : [])
 
@@ -42,9 +43,17 @@
   }
 </script>
 
+{#snippet requestDetails()}
+  <p><code>{displayWhat}</code>{#if where}{' '}in <code>{where}</code>{/if}</p>
+  {#if asked?.title}<p>{asked.title}</p>{/if}
+  {#if asked?.body}<pre class="body">{asked.body}</pre>{/if}
+  {#if displayWhat !== what}<button class="btn" onclick={() => navigator.clipboard.writeText(what)}>Copy details</button>{/if}
+{/snippet}
+
 {#if waiting && asked}
-  <section class="card" aria-label="Approval request from {asked.requester}">
-    <p class="who"><b>{asked.requester}</b> asks to run <code>{what}</code>{#if where} in <code>{where}</code>{/if}</p>
+  <div class="request" id="approval-{asked.requestId}">
+   <Card>
+    <p class="who"><b>{asked.requester}</b> asks to run <code>{displayWhat}</code>{#if where}{' '}in <code>{where}</code>{/if}</p>
     {#if asked.title}<p class="title">{asked.title}</p>{/if}
     {#if asked.body}<pre class="body">{asked.body}</pre>{/if}
     <p class="meta">Nothing runs until you approve. Dyna runs exactly this text.</p>
@@ -52,25 +61,29 @@
     {#if denying}
       <div class="row">
         <input bind:value={reason} placeholder="Reason for denying" aria-label="Reason for denying" onkeydown={(e) => { if (e.key === 'Enter' && reason.trim()) decide('deny') }} />
-        <button class="b" onclick={() => decide('deny')} disabled={busy || !reason.trim()}>Deny</button>
-        <button class="b" onclick={() => (denying = false)}>Cancel</button>
+        <button class="btn" onclick={() => decide('deny')} disabled={busy || !reason.trim()}>Deny</button>
+        <button class="btn" onclick={() => (denying = false)}>Cancel</button>
+        {#if displayWhat !== what}<button class="btn" onclick={() => navigator.clipboard.writeText(what)}>Copy details</button>{/if}
       </div>
     {:else}
       <div class="row">
-        <button class="b primary" onclick={() => decide('approve')} disabled={busy}>Approve</button>
-        <button class="b" onclick={() => (denying = true)} disabled={busy}>Deny…</button>
+        <button class="btn fill" onclick={() => decide('approve')} disabled={busy}>Approve</button>
+        <button class="btn" onclick={() => (denying = true)} disabled={busy}>Deny…</button>
+        {#if displayWhat !== what}<button class="btn" onclick={() => navigator.clipboard.writeText(what)}>Copy details</button>{/if}
       </div>
     {/if}
-  </section>
+   </Card>
+  </div>
 {:else if asked}
-  <EventRow id={post.id} ts={post.ts} {surface} title="{asked.requester} asked to run {what}" summary={[where, asked.title ?? ''].filter(Boolean).join(' · ')} {chips}>
+  <div id="approval-{asked.requestId}">
+  <EventRow id={post.id} ts={post.ts} {surface} title="{asked.requester} requested a write" {chips} detail={requestDetails}>
     {#snippet icon()}<span aria-hidden="true">?</span>{/snippet}
   </EventRow>
-  {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
+  </div>
 {/if}
 
 <style>
-  .card { margin: var(--s2) var(--s4); padding: var(--s3) 14px; border: 1px solid var(--line-soft); border-left: 3px solid var(--gold); border-radius: 8px; background: var(--gold-wash); display: flex; flex-direction: column; gap: var(--s2); font-size: var(--t-ui); color: var(--ink-2); }
+  .request { margin: var(--s2) var(--s4); border-left: 3px solid var(--tone-warning); }
   .who { margin: 0; color: var(--ink); }
   .who b { color: var(--gold); font-weight: 600; }
   code { font: var(--t-sm) var(--mono, ui-monospace, monospace); }
@@ -80,19 +93,5 @@
   .err { margin: 0; font-size: var(--t-sm); color: var(--coral); }
   .row { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; }
   input { flex: 1; min-width: 160px; padding: 6px var(--s3); border-radius: 6px; background: var(--raise); color: var(--ink); border: 1px solid var(--line-soft); font-size: var(--t-ui); }
-  .b { font-size: var(--t-ui); font-weight: 600; padding: 6px var(--s3); border-radius: 6px; background: var(--raise); color: var(--ink-2); }
-  .b:not(:disabled), .b.primary:not(:disabled) { transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
-  @media (hover: hover) {
-    .b:hover:not(:disabled) { background: var(--raise-hover); color: var(--ink); }
-  }
-  .b:active:not(:disabled) { background: var(--select); }
-  .b.primary { background: var(--iris); color: #18161d; }
-  @media (hover: hover) {
-    .b.primary:hover:not(:disabled) { background: var(--iris-hover); color: #18161d; }
-  }
-  .b.primary:active:not(:disabled) { background: var(--select); color: var(--ink); }
-  .b:disabled { opacity: 0.6; }
-  @media (max-width: 760px) {
-    .b, input { min-height: 44px; }
-  }
+  @media (max-width: 760px) { input { min-height: 44px; } }
 </style>

@@ -21,6 +21,9 @@
     chips?: readonly EventChip[]
     surface?: 'feed' | 'dm'
     icon?: Snippet
+    headline?: Snippet
+    extra?: Snippet
+    summaryExtra?: Snippet
     detail?: Snippet
     open?: boolean
     ontoggle?: (open: boolean) => void
@@ -34,6 +37,9 @@
     chips = [],
     surface = 'feed',
     icon = undefined,
+    headline = undefined,
+    extra = undefined,
+    summaryExtra = undefined,
     detail = undefined,
     open = undefined,
     ontoggle = undefined,
@@ -47,8 +53,8 @@
       <span class="glyph" aria-hidden="true">{#if icon}{@render icon()}{:else}•{/if}</span>
     {/snippet}
     {#snippet children()}
-      <span class="headline"><strong>{title}</strong>{#each chips as chip, i (i)}<span class="state" class:failed={chip.failure === true}>{chip.label}</span>{/each}</span>
-      {#if summary}<span class="summary">{summary}</span>{/if}
+      <span class="headline">{#if headline}{@render headline()}{:else}<strong>{title}</strong>{/if}{#each chips as chip, i (i)}<span class="state" class:failed={chip.failure === true}>{chip.label}</span>{/each}{#if extra}{@render extra()}{/if}</span>
+      {#if summary || summaryExtra}<span class="summary">{summary}{#if summary && summaryExtra}{' · '}{/if}{#if summaryExtra}{@render summaryExtra()}{/if}</span>{/if}
     {/snippet}
     {#snippet trail()}
       <time title={new Date(ts ?? 0).toLocaleString()}>{clock(ts)}</time>
@@ -78,6 +84,8 @@
   strong { font-weight: 600; }
   .state { color: var(--muted); font-size: var(--t-body); font-weight: 400; }
   .state.failed { color: var(--coral); }
+  .headline :global(a), .summary :global(a) { color: var(--muted); text-decoration: none; transition: color var(--motion-fast) var(--ease); }
+  .headline :global(a:hover), .summary :global(a:hover) { color: var(--ink); text-decoration: underline; }
   .summary { display: block; margin-top: 2px; color: var(--muted); font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   time, .chevron { flex: none; color: var(--faint); font-size: var(--t-cap); }
   .chevron { font-size: var(--t-title); }
