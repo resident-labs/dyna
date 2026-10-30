@@ -42,6 +42,9 @@ type Service struct {
 	boxLockMu sync.Mutex
 	boxLocks  map[contract.SessionID]*sync.Mutex
 	boxRuns   map[contract.SessionID]*boxRun
+	// transcriptMu serializes appends, so each offset check and write runs alone.
+	transcriptMu  sync.Mutex
+	transcriptDir string
 }
 
 type boxRun struct {
@@ -55,6 +58,9 @@ func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.T
 
 // SetRepositories configures repository lookup before the service starts.
 func (s *Service) SetRepositories(repos Repositories) { s.repos = repos }
+
+// SetTranscriptDir sets where transcript copies are kept, one folder per session.
+func (s *Service) SetTranscriptDir(dir string) { s.transcriptDir = dir }
 
 func (s *Service) lockBox(id contract.SessionID) func() {
 	s.boxLockMu.Lock()
