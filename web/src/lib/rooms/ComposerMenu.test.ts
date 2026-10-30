@@ -54,6 +54,52 @@ test('the slash menu names each profile and explains an empty result', async () 
   }
 })
 
+test('MCP prompts appear in the menu and run with or without arguments', async () => {
+  const dom = installDom()
+  Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
+  Reflect.set(globalThis, 'loadCommands', () => Promise.resolve([
+    { name: 'docs:search', source: 'mcp-prompt', description: 'Search docs', args: [{ name: 'query', required: true, description: '' }] },
+    { name: 'docs:hello', source: 'mcp-prompt', description: 'Say hello', args: [] },
+    { name: 'docs.example:find', source: 'mcp-prompt', description: 'Find', args: [] },
+    { name: 'docs.example:find [a+b]', source: 'mcp-prompt', description: 'Find exactly', args: [] },
+  ]))
+  const ui = await importBundle(code, 'Composer')
+  const target = need(document.getElementById('app'))
+  const component = ui.mount(ui.default, { target, props: { room: { id: 'r', name: 'room' }, onsend: async () => ({}) } })
+  try {
+    await settle()
+    const input = element<HTMLTextAreaElement>(target, 'textarea')
+    const type = async (value: string) => {
+      input.value = value
+      input.setSelectionRange(value.length, value.length)
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      await settle()
+    }
+    await type('/docs:')
+    assert.match(target.textContent ?? '', /MCP prompts/)
+    assert.match(target.textContent ?? '', /query/)
+    assert.equal(target.querySelector('[role="option"]')?.getAttribute('title'), 'Search docs')
+    await type('/docs:search query=hello')
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'docs:search', 'query=hello'])
+    await type('/docs:hello')
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'docs:hello', ''])
+    await type('/docs.example:find [a+b] query=hello')
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    assert.deepEqual(Reflect.get(globalThis, 'commandArgs'), ['r', 'docs.example:find [a+b]', 'query=hello'])
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    Reflect.deleteProperty(globalThis, 'loadCommands')
+    for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
 test('sending waits for the command list', async () => {
   const dom = installDom()
   Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
