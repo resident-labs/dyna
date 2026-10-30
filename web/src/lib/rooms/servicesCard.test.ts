@@ -7,7 +7,7 @@ import type { ServiceView } from '../api/service.ts'
 const hook = (over: Partial<Hook>): Hook => ({ name: 'maintenance', event: 'schedule', command: '', cwd: '', timeout: '5m', onFail: 'alert', scope: 'global', addedBy: 'dyna', addedAt: '', ...over })
 const run = (result: string, id = 'r1'): HookRun => ({ id, repo: '', name: 'maintenance', command: '', result, logPath: '', startedAt: '2026-10-26T10:00:00Z' })
 const summary = (h: Partial<Hook>, last?: HookRun): HookSummary => ({ hook: hook(h), lastRun: last })
-const service = (over: Partial<ServiceView>): ServiceView => ({ role: 'librarian', name: 'Librarian', page: '', profile: 'sol', pinned: '', source: '', reason: '', scope: 'global', sessions: 0, profiles: [], ...over })
+const service = (over: Partial<ServiceView>): ServiceView => ({ role: 'librarian', name: 'Librarian', page: '', profile: 'sol', pinned: '', source: '', reason: '', waiting: false, scope: 'global', sessions: 0, profiles: [], ...over })
 
 test('a failed hook run is failing, a pass is healthy, and its log is that run', () => {
   const [bad, ok] = hookRows([summary({ name: 'a' }, run('error', 'x')), summary({ name: 'b' }, run('pass'))])

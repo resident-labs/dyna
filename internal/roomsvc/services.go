@@ -21,13 +21,16 @@ import (
 // Scope is "global" when one setting covers every room, or "room", as in rules.
 // Profiles names the enabled profiles a service can run, for its menu.
 type ServiceView struct {
-	Role     string   `json:"role"`
-	Name     string   `json:"name"`
-	Page     string   `json:"page"`
-	Profile  string   `json:"profile"`
-	Pinned   string   `json:"pinned"`
-	Source   string   `json:"source"`
-	Reason   string   `json:"reason"`
+	Role    string `json:"role"`
+	Name    string `json:"name"`
+	Page    string `json:"page"`
+	Profile string `json:"profile"`
+	Pinned  string `json:"pinned"`
+	Source  string `json:"source"`
+	Reason  string `json:"reason"`
+	// Waiting is true when the pinned profile cannot run. Reason is display
+	// text only and never carries this state.
+	Waiting  bool     `json:"waiting"`
 	Scope    string   `json:"scope"`
 	Sessions int      `json:"sessions"`
 	Profiles []string `json:"profiles"`
@@ -52,6 +55,7 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 		if status.ProfileCause != "" && reviewer.Pinned != "" {
 			reviewer.Profile = reviewer.Pinned
 			reviewer.Reason = "waiting: " + status.ProfileReason
+			reviewer.Waiting = true
 		} else if reviewer.Profile == "" {
 			reviewer.Reason = status.LastError
 		}
@@ -225,5 +229,6 @@ func (s *Service) librarianView(rec room.Record) ServiceView {
 	}
 	view.Profile = pin
 	view.Reason = "waiting: " + choice.Reason
+	view.Waiting = true
 	return view
 }
