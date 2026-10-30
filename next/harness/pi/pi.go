@@ -19,11 +19,17 @@ import (
 	"github.com/resident-labs/dyna/harness"
 )
 
+type promptInput struct {
+	Message    string `json:"message"`
+	DeliveryID string `json:"deliveryId"`
+}
+
 type command struct {
-	ID         string `json:"id"`
-	Type       string `json:"type"`
-	Message    string `json:"message,omitempty"`
-	DeliveryID string `json:"deliveryId,omitempty"`
+	ID         string        `json:"id"`
+	Type       string        `json:"type"`
+	Message    string        `json:"message,omitempty"`
+	DeliveryID string        `json:"deliveryId,omitempty"`
+	Inputs     []promptInput `json:"inputs,omitempty"`
 }
 
 type contentBlock struct {
@@ -127,9 +133,12 @@ func (h *Harness) read(r io.Reader) {
 	h.readErr = scanner.Err()
 }
 
-func (h *Harness) send(ctx context.Context, typ string, input *contract.TurnInput) error {
+func (h *Harness) send(ctx context.Context, typ string, input *contract.TurnInput, inputs []contract.TurnInput) error {
 	id := strconv.FormatUint(h.sequence.Add(1), 10)
 	c := command{ID: id, Type: typ}
+	for _, item := range inputs {
+		c.Inputs = append(c.Inputs, promptInput{Message: item.Text, DeliveryID: strconv.FormatInt(int64(item.Delivery), 10)})
+	}
 	if input != nil {
 		c.Message = input.Text
 		c.DeliveryID = strconv.FormatInt(int64(input.Delivery), 10)
@@ -165,9 +174,17 @@ func (h *Harness) readerError() error {
 	return errors.New("pi RPC stream closed")
 }
 
-func (h *Harness) Start(ctx context.Context, id contract.TurnID, input contract.TurnInput) (contract.TurnEnded, error) {
+func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, error) {
+	return h.run(ctx, id, "prompt", inputs)
+}
+
+func (h *Harness) Continue(ctx context.Context, id contract.TurnID) (contract.TurnEnded, error) {
+	return h.run(ctx, id, "continue", nil)
+}
+
+func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, inputs []contract.TurnInput) (contract.TurnEnded, error) {
 	result := contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed")}
-	if err := h.send(ctx, "prompt", &input); err != nil {
+	if err := h.send(ctx, typ, nil, inputs); err != nil {
 		return result, err
 	}
 	for {
@@ -216,12 +233,12 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, input contract.
 }
 
 func (h *Harness) Steer(ctx context.Context, input contract.TurnInput) error {
-	return h.send(ctx, "steer", &input)
+	return h.send(ctx, "steer", &input, nil)
 }
 func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error {
-	return h.send(ctx, "follow_up", &input)
+	return h.send(ctx, "follow_up", &input, nil)
 }
-func (h *Harness) Abort(ctx context.Context) error { return h.send(ctx, "abort", nil) }
+func (h *Harness) Abort(ctx context.Context) error { return h.send(ctx, "abort", nil, nil) }
 
 func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	file, err := os.Open(h.session)

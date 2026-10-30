@@ -28,7 +28,7 @@ func TestRecordedTurnAndSteer(t *testing.T) {
 	result := make(chan contract.TurnEnded, 1)
 	errs := make(chan error, 1)
 	go func() {
-		r, err := h.Start(context.Background(), "turn_test", contract.TurnInput{Delivery: 21, Text: "start"})
+		r, err := h.Start(context.Background(), "turn_test", []contract.TurnInput{{Delivery: 21, Text: "start"}})
 		if err != nil {
 			errs <- err
 			return
@@ -54,7 +54,7 @@ func TestRecordedTurnAndSteer(t *testing.T) {
 		}
 	}
 	c := readCommand()
-	if c.Type != "prompt" || c.DeliveryID != "21" {
+	if c.Type != "prompt" || len(c.Inputs) != 1 || c.Inputs[0].DeliveryID != "21" {
 		t.Fatalf("prompt: %+v", c)
 	}
 	respond(c)

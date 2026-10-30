@@ -9,7 +9,8 @@ import (
 // Harness drives a single retained session. Start returns when the turn settles.
 // Steer and FollowUp may be called while Start runs.
 type Harness interface {
-	Start(context.Context, contract.TurnID, contract.TurnInput) (contract.TurnEnded, error)
+	Start(context.Context, contract.TurnID, []contract.TurnInput) (contract.TurnEnded, error)
+	Continue(context.Context, contract.TurnID) (contract.TurnEnded, error)
 	Steer(context.Context, contract.TurnInput) error
 	FollowUp(context.Context, contract.TurnInput) error
 	Abort(context.Context) error
