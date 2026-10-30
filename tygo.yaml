@@ -131,3 +131,27 @@ packages:
     fallback_type: unknown
     preserve_comments: types
     enum_style: union
+
+  - path: dyna-agent/internal/harness/runtime
+    output_path: web/src/lib/api/harness.gen.ts
+    include_files: [pin.go, harness_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+    frontmatter: |
+      import type { Provider, AccountKind as Kind } from './account.ts'
+      export type HarnessVersions = Record<string, string> | null
+
+  - path: dyna-agent/internal/harness/config
+    output_path: web/src/lib/api/harness.gen.ts
+    include_files: [harness_types.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union
+
+  - path: dyna-agent/internal/account/native
+    output_path: web/src/lib/api/harness.gen.ts
+    include_files: [provider_key.go]
+    fallback_type: unknown
+    preserve_comments: types
+    enum_style: union

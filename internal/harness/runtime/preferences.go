@@ -21,17 +21,6 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-type PreferenceKey struct {
-	Key    string `json:"key"`
-	Status string `json:"status"`
-}
-type PreferencePreview struct {
-	AccountID string          `json:"accountId"`
-	Harness   string          `json:"harness"`
-	Hash      string          `json:"hash"`
-	Keys      []PreferenceKey `json:"keys"`
-}
-
 var errPreferences = errors.New("Preference settings could not be read or saved safely.")
 
 func preferenceAllowlist(a RuntimeAdapter) []string {
