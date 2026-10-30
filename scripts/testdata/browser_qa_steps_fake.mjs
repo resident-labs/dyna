@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 const page = {
   async addInitScript() {},
   once() {},
+  on() {},
   async exposeFunction() {},
   async goto(url) {
     console.log('QA fake goto: ' + url);
@@ -61,6 +62,7 @@ export const chromium = {
         };
       },
       once() {},
+      on() {},
       async close() {},
     };
   },
