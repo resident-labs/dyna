@@ -1,13 +1,17 @@
 package processguard
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -18,6 +22,54 @@ func TestExecuteBoundsProcessDescendants(t *testing.T) {
 	err := Execute(context.Background(), Process{Args: []string{"/bin/sh", "-c", "sleep 30 & wait"}, Env: MetadataEnv(), Timeout: 50 * time.Millisecond, Output: &output})
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
 		t.Fatalf("timeout did not bound descendants: %v", err)
+	}
+}
+
+// gatedWriter blocks its first Write until open is closed, like a log on a saturated disk.
+type gatedWriter struct {
+	entered chan struct{}
+	open    chan struct{}
+	once    sync.Once
+	buf     bytes.Buffer
+}
+
+func (w *gatedWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.entered)
+		<-w.open
+	})
+	return w.buf.Write(p)
+}
+
+func TestExecuteAppliesDrainTimeout(t *testing.T) {
+	var started *exec.Cmd
+	build := newCommand
+	t.Cleanup(func() { newCommand = build })
+	newCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
+		started = build(ctx, executable, args...)
+		return started
+	}
+	err := Execute(context.Background(), Process{Args: []string{"true"}, Env: MetadataEnv(), Timeout: time.Minute, DrainTimeout: 7 * time.Second, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.WaitDelay != 7*time.Second {
+		t.Fatalf("WaitDelay = %v, want the DrainTimeout 7s", started.WaitDelay)
+	}
+}
+
+func TestExecuteDrainTimeoutKeepsReleasedOutput(t *testing.T) {
+	out := &gatedWriter{entered: make(chan struct{}), open: make(chan struct{})}
+	go func() {
+		<-out.entered
+		close(out.open)
+	}()
+	err := Execute(context.Background(), Process{Args: []string{"echo", "installed"}, Env: MetadataEnv(), Timeout: time.Minute, DrainTimeout: 5 * time.Second, Output: out})
+	if err != nil {
+		t.Fatalf("a released drain failed a successful command: %v", err)
+	}
+	if got := out.buf.String(); got != "installed\n" {
+		t.Fatalf("output = %q, want the full line", got)
 	}
 }
 
