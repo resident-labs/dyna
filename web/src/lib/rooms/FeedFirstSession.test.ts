@@ -62,3 +62,17 @@ test('a landed trial renders one card across an unrelated post', () => {
   assert.match(body, /abcdef1/)
   assert.match(body, /Unrelated note/)
 })
+
+test('an instruction thread shows all parts and its steps', () => {
+  const step = (id: string, name: string, ts: number) => ({
+    id, ts, from: 'dyna', to: ['room'], text: '', kind: 'session',
+    notice: { kind: 'instructions', thread: 'instructions:room:worker' },
+    payload: { type: 'instructions', session: 'room:worker', sections: [{ name, action: 'items', added: ['A rule'] }] },
+  })
+  const body = render(Feed, { props: { room, posts: [step('a', 'Room rules', 1000), step('b', 'Skills', 2000)] } }).body
+  assert.match(body, /Room rules · Skills/)
+  assert.match(body, /Show steps \(2\)/)
+  const steps = body.split('Show steps (2)')[1]
+  assert.match(steps, /class="name [^"]*">Room rules<\/span>.*?\+ A rule/s)
+  assert.match(steps, /class="name [^"]*">Skills<\/span>.*?\+ A rule/s)
+})
