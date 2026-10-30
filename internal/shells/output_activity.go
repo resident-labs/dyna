@@ -65,64 +65,6 @@ func (r *activityReader) end(err error) {
 	r.publish(r.signal)
 }
 
-// activityPublisher coalesces observations without ever blocking the copier.
-// The publisher flushes at most once per tick, except for the final flush.
-// Failed writes cannot renew the stored lease.
-type activityPublisher struct {
-	updates chan activity.Signal
-}
-
-func (p *activityPublisher) send(s activity.Signal) {
-	select {
-	case p.updates <- s:
-	default:
-		select {
-		case <-p.updates:
-		default:
-		}
-		select {
-		case p.updates <- s:
-		default:
-		}
-	}
-}
-
-func (p *activityPublisher) run(ticks <-chan time.Time, write func(activity.Signal) error) {
-	var pending activity.Signal
-	var storedLease, storedSince time.Time
-	dirty := false
-	flush := func() {
-		if !dirty {
-			return
-		}
-		if pending.Copier == activity.CopierRunning {
-			proof := pending.LeaseUntil.Add(-activity.Lease)
-			if storedLease.IsZero() || !proof.Before(storedLease) {
-				pending.ObservedSince = proof
-			} else if pending.ObservedSince.Before(storedSince) {
-				pending.ObservedSince = storedSince
-			}
-		}
-		if write(pending) == nil {
-			storedLease = pending.LeaseUntil
-			storedSince = pending.ObservedSince
-		}
-		dirty = false
-	}
-	for {
-		select {
-		case s, ok := <-p.updates:
-			if !ok {
-				flush()
-				return
-			}
-			pending, dirty = s, true
-		case <-ticks:
-			flush()
-		}
-	}
-}
-
 func (s *Store) publishActivity(db *sql.DB, id string, signal activity.Signal) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
 	defer cancel()
