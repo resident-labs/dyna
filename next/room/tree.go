@@ -36,9 +36,15 @@ func NewTree(nodes []Node) Tree {
 	return t
 }
 
+// Root returns the room root, or an empty ID for an empty tree.
+func (t Tree) Root() contract.SessionID { return t.root }
+
 // ParentFor picks the caller for a session start, or the requested parent
 // for an owner start, defaulting to root.
 func (t Tree) ParentFor(caller contract.Principal, requested contract.SessionID) (contract.SessionID, error) {
+	if t.root == "" {
+		return "", errors.New("room has no root")
+	}
 	if caller.Kind == contract.PrincipalSession {
 		return caller.Session, nil
 	}

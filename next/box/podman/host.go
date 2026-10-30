@@ -191,8 +191,9 @@ case "$size" in *[!0-9]*|'') exit 254 ;; esac
 size=$((10#$size))
 head -c "$size" > "$tmp/in" || exit 254
 [ "$(wc -c < "$tmp/in")" -eq "$size" ] || exit 254
-"$@" < "$tmp/in" > "$tmp/out"
+"$@" < "$tmp/in" > "$tmp/out" 2> "$tmp/err"
 status=$?
+if [ "$status" -eq 0 ]; then cat "$tmp/err" >&2; else cat "$tmp/err" >> "$tmp/out"; fi
 cat "$tmp/out"
 n=$(wc -c < "$tmp/out")
 printf 'DYNA-END %020d %03d\n' "$n" "$status"
@@ -260,7 +261,7 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 		return nil, fmt.Errorf("%w: %v", err, sshErr)
 	}
 	if status != 0 {
-		return nil, remoteExit(status)
+		return body, remoteExit(status)
 	}
 	return body, nil
 }

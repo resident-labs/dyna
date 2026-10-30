@@ -35,8 +35,9 @@ trap 'rm -rf "$tmp"' EXIT
 
 # CI installs and builds right before packing; PI_PACK_SKIP_BUILD=1 reuses that.
 if [ "${PI_PACK_SKIP_BUILD:-0}" != "1" ]; then
-  npm --prefix "$vendor" ci --ignore-scripts
+  # Hydrate first: it needs no dependencies, and its Node check fails fast.
   "$vendor/scripts/pi-hydrate.sh"
+  npm --prefix "$vendor" ci --ignore-scripts
   npm --prefix "$vendor" run build:offline
 fi
 
