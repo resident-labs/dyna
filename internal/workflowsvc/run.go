@@ -128,6 +128,16 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	if jobNamespace == "" {
 		jobNamespace = run.Meta.ID
 	}
+	if err := runstore.BeginWorkflowManifest(ctx, run.Meta.ID); err != nil {
+		_ = run.Finish("error", "", err)
+		return Result{ID: run.Meta.ID, Status: "error"}, fmt.Errorf("start workflow manifest: %w", err)
+	}
+	if opts.ResumeFrom != "" {
+		if err := runstore.MarkWorkflowManifestUnsafe(ctx, run.Meta.ID, "resumed using the legacy journal cache"); err != nil {
+			_ = run.Finish("error", "", err)
+			return Result{ID: run.Meta.ID, Status: "error"}, fmt.Errorf("mark workflow manifest unsafe: %w", err)
+		}
+	}
 	prefix := fmt.Sprintf("%s/%d/%d", run.Meta.ID, os.Getpid(), time.Now().UnixNano())
 	defer installRunWriters(ctx, run, factory(prefix))()
 	if _, planErr := plan.Ensure(run.Dir, opts.ScriptSrc, plan.Options{WriteAncestry: plan.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); planErr != nil {
@@ -156,8 +166,11 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 			ScriptSrc: opts.ScriptSrc, ScriptPath: opts.ScriptPath, Args: opts.Args, Store: store, Run: run,
 			OnEvent: observer.OnEvent, OnWarning: warning, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir,
 			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, MaxCommands: opts.MaxCommands, Commands: commands, Cache: cache, ResumeFrom: opts.ResumeFrom, JobNamespace: jobNamespace, Engine: agents,
-			Paused: func() bool { return runstore.IsPaused(run.Meta.ID) }, Poster: ScriptPoster,
+			Paused: func() bool { return runstore.IsPaused(run.Meta.ID) }, Poster: ScriptPoster, RecordManifest: true,
 		})
+	}
+	if manifestErr := sealManifest(ctx, run.Meta.ID, err); manifestErr != nil {
+		err = errors.Join(err, fmt.Errorf("seal workflow manifest: %w", manifestErr))
 	}
 	_ = runstore.SetPaused(run.Meta.ID, false)
 	status := "ok"
@@ -246,4 +259,16 @@ func installRunWriters(ctx context.Context, run *runstore.Run, out coordinatorOu
 		return meta, err
 	})
 	return func() { terminal := arm(); defer stop(); out.Close(terminal) }
+}
+
+// sealManifest leaves a failed write open, even if a script caught its error.
+func sealManifest(ctx context.Context, runID string, runErr error) error {
+	if errors.Is(runErr, workflow.ErrManifestWrite) {
+		return nil
+	}
+	err := runstore.SealWorkflowManifest(context.WithoutCancel(ctx), runID)
+	if errors.Is(err, runstore.ErrWorkflowManifestIncomplete) {
+		return nil
+	}
+	return err
 }
