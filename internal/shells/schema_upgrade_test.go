@@ -19,7 +19,7 @@ func TestShellWaitsForEngineSchemaUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP INDEX shell_jobs_prune; UPDATE meta SET value='5' WHERE key='shells.version'`); err != nil {
+	if _, err := db.Exec(`DROP INDEX shell_jobs_prune; ALTER TABLE shell_jobs DROP COLUMN activity_output; ALTER TABLE shell_jobs DROP COLUMN activity_lease; ALTER TABLE shell_jobs DROP COLUMN activity_copier; UPDATE meta SET value='5' WHERE key='shells.version'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(data); err != nil {
