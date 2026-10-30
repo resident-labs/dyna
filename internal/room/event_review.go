@@ -86,3 +86,11 @@ func (e ReviewEvent) eventSubject() string { return e.ChangeID + "\x00" + e.Head
 // eventDedupe keys one result per kind and head: a retried verdict keeps its
 // post, and a different result on the same head posts again.
 func (e ReviewEvent) eventDedupe() string { return string(e.Kind) }
+
+// eventThread joins review results to their change's lifecycle.
+func (e ReviewEvent) eventThread() string {
+	if e.ChangeID == "" {
+		return ""
+	}
+	return "pr:" + e.ChangeID
+}
