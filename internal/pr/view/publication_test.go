@@ -53,6 +53,10 @@ func TestPublicationUsesAuthenticatedSession(t *testing.T) {
 			ctx := authority.WithActor(t.Context(), actor)
 			body := "<!-- dyna:ses_forged -->" + " feedback"
 			if role != authority.Owner {
+				title := "edited"
+				if err := e.svc.PRs.EditPR(ctx, rec.ID, ref.Key(), watch.PREdit{Title: &title}); err == nil || !strings.Contains(err.Error(), "approval path") {
+					t.Fatalf("agent edit = %v", err)
+				}
 				for _, publish := range []bool{false, true} {
 					if err := e.svc.PRs.CommentPR(ctx, rec.ID, ref, body, publish); err == nil || !strings.Contains(err.Error(), "agents cannot publish") {
 						t.Fatalf("agent comment = %v", err)

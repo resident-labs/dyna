@@ -99,7 +99,7 @@ esac
 	t.Setenv(mode.EnvMode, mode.Subagent)
 	t.Setenv(mode.EnvSession, reviewer)
 	t.Setenv(mode.EnvRoomID, rec.ID)
-	if _, err := call("comment", url, "accidental post", "--attach", "one.png", "--attach", "two.png"); err == nil || !strings.Contains(err.Error(), "agents cannot publish") {
+	if _, err := call("comment", url, "accidental post", "--attach", "one.png", "--attach", "two.png"); err == nil || !strings.Contains(err.Error(), "room keeps feedback") {
 		t.Fatalf("local comment with attachments error = %v", err)
 	}
 	if _, err := os.Stat(writes); !os.IsNotExist(err) {

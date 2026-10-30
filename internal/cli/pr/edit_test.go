@@ -10,7 +10,6 @@ import (
 
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/ghclient"
-	"dyna-agent/internal/mode"
 	"dyna-agent/internal/notify"
 	prview "dyna-agent/internal/pr/view"
 	"dyna-agent/internal/pr/watch"
@@ -22,7 +21,7 @@ import (
 	"dyna-agent/internal/websvc"
 )
 
-func TestEditPRCommandUsesEngineAndAuthorRules(t *testing.T) {
+func TestOwnerEditPRCommandUsesEngine(t *testing.T) {
 	storetest.Isolate(t)
 	rooms := room.DefaultStore()
 	rec, err := rooms.Create(room.CreateInput{Name: "edit-pr"})
@@ -33,10 +32,9 @@ func TestEditPRCommandUsesEngineAndAuthorRules(t *testing.T) {
 	svc := &prview.Service{Notify: notify.New(rooms, subagent.NewManager())}
 	s := svc.Watcher()
 	const (
-		author    = "ses_20261029-000001-aaaaaaaa"
-		unrelated = "ses_20261029-000002-bbbbbbbb"
-		url       = "https://github.com/owner/repo/pull/17"
-		key       = "github.com/owner/repo#17"
+		author = "ses_20261029-000001-aaaaaaaa"
+		url    = "https://github.com/owner/repo/pull/17"
+		key    = "github.com/owner/repo#17"
 	)
 	state := watch.State{Version: 1, Records: map[string]*watch.Record{key: {
 		Key: key, Host: "github.com", Repo: "owner/repo", Number: 17, URL: url,
@@ -74,10 +72,7 @@ esac
 	if err := os.WriteFile(bodyFile, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(mode.EnvMode, mode.Subagent)
-	t.Setenv(mode.EnvRoomID, rec.ID)
-	call := func(session string, args ...string) error {
-		t.Setenv(mode.EnvSession, session)
+	call := func(args ...string) error {
 		cmd := Command(Options{Service: func() *watch.Service { return s }})
 		var out bytes.Buffer
 		cmd.SetOut(&out)
@@ -85,10 +80,10 @@ esac
 		cmd.SetArgs(args)
 		return cmd.Execute()
 	}
-	if err := call(author, "edit", url); err == nil || !strings.Contains(err.Error(), "--title or --body-file") {
+	if err := call("edit", url); err == nil || !strings.Contains(err.Error(), "--title or --body-file") {
 		t.Fatalf("edit without a change = %v", err)
 	}
-	if err := call(author, "edit", url, "--title", "Edited title", "--body-file", bodyFile); err != nil {
+	if err := call("edit", url, "--title", "Edited title", "--body-file", bodyFile); err != nil {
 		t.Fatalf("author edit = %v", err)
 	}
 	written, err := os.ReadFile(writes)
@@ -107,15 +102,4 @@ esac
 		t.Fatalf("GitHub write exposed a token: %s", written)
 	}
 
-	before := string(written)
-	if err := call(unrelated, "edit", url, "--title", "Stolen title"); err == nil || !strings.Contains(err.Error(), "git pr edit") {
-		t.Fatalf("unrelated session edit = %v", err)
-	}
-	after, err := os.ReadFile(writes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != before {
-		t.Fatalf("unrelated session wrote to GitHub:\n%s", after)
-	}
 }
