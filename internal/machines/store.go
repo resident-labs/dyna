@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"regexp"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
@@ -496,7 +498,7 @@ func validateGrants(grants []HostChecksGrant) error {
 	return nil
 }
 
-const schemaVersion = 16
+const schemaVersion = 17
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -525,6 +527,8 @@ const schema = `CREATE TABLE machines (
 	devices TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(devices))
 );
 
+CREATE TABLE IF NOT EXISTS machine_setting_changes (node_id TEXT NOT NULL, changed_ms INTEGER NOT NULL, actor_role TEXT NOT NULL, actor_session TEXT NOT NULL, actor_room TEXT NOT NULL, field TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS machine_setting_changes_node ON machine_setting_changes(node_id, changed_ms);
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
 
 // probeColumns add what the probes read to a version 1 table. A row that was
@@ -719,6 +723,11 @@ func prepare(conn *sql.Conn, old int) error {
 			if _, err := conn.ExecContext(ctx, "ALTER TABLE machines ADD COLUMN "+column+" TEXT NOT NULL DEFAULT '[]' CHECK(json_valid("+column+"))"); err != nil {
 				return fmt.Errorf("add machines.%s: %w", column, err)
 			}
+		}
+	}
+	if old < 17 {
+		if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS machine_setting_changes (node_id TEXT NOT NULL, changed_ms INTEGER NOT NULL, actor_role TEXT NOT NULL, actor_session TEXT NOT NULL, actor_room TEXT NOT NULL, field TEXT NOT NULL); CREATE INDEX IF NOT EXISTS machine_setting_changes_node ON machine_setting_changes(node_id, changed_ms)`); err != nil {
+			return err
 		}
 	}
 	if old < 15 {
@@ -1232,8 +1241,12 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 				return err
 			}
 			m.HostChecksGrants = stored.HostChecksGrants
+			m.Rooms = stored.Rooms
 			m.Mounts = stored.Mounts
 			m.Devices = stored.Devices
+			if err := recordMachineChanges(ctx, conn, stored, m); err != nil {
+				return err
+			}
 			return updateMachine(ctx, conn, m)
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -1246,7 +1259,10 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
 			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices)
-		return err
+		if err != nil {
+			return err
+		}
+		return recordMachineChanges(ctx, conn, Machine{}, m)
 	})
 	if err != nil {
 		return Machine{}, err
@@ -1280,6 +1296,12 @@ func (s Store) UpdateHostChecksGrants(ctx context.Context, id string, change fun
 			return err
 		}
 		grants = uniqueGrants(grants)
+		changed := m
+		changed.HostChecksGrants = grants
+		changed.Updated = time.Now()
+		if err := recordMachineChanges(ctx, conn, m, changed); err != nil {
+			return err
+		}
 		if err := validateGrants(grants); err != nil {
 			return err
 		}
@@ -1314,6 +1336,13 @@ func (s Store) Update(ctx context.Context, id string, change func(*Machine) erro
 		if err != nil {
 			return err
 		}
+		before := m
+		before.Rooms = slices.Clone(m.Rooms)
+		before.Labels = slices.Clone(m.Labels)
+		before.HostChecksGrants = slices.Clone(m.HostChecksGrants)
+		before.Mounts = slices.Clone(m.Mounts)
+		before.Devices = slices.Clone(m.Devices)
+		before.Resources = maps.Clone(m.Resources)
 		created, local := m.Created, m.Local
 		if err := change(&m); err != nil {
 			return err
@@ -1322,6 +1351,9 @@ func (s Store) Update(ctx context.Context, id string, change func(*Machine) erro
 		m.Updated = time.Now()
 		m.HostChecksGrants = uniqueGrants(m.HostChecksGrants)
 		if err := m.Validate(); err != nil {
+			return err
+		}
+		if err := recordMachineChanges(ctx, conn, before, m); err != nil {
 			return err
 		}
 		if err := updateMachine(ctx, conn, m); err != nil {
@@ -1334,6 +1366,67 @@ func (s Store) Update(ctx context.Context, id string, change func(*Machine) erro
 		return Machine{}, err
 	}
 	return out, nil
+}
+
+// MachineField names a node setting in the change history.
+type MachineField string
+
+// FieldChange records the latest change to one node setting.
+type FieldChange struct {
+	Field   MachineField
+	Changed time.Time
+	Actor   authority.Actor
+}
+
+func recordMachineChanges(ctx context.Context, conn *sql.Conn, before, after Machine) error {
+	// Probe samples have their own history and are not setting edits.
+	fields := []struct {
+		name    MachineField
+		changed bool
+	}{
+		{"name", before.Name != after.Name}, {"ssh", before.SSH != after.SSH},
+		{"enabled", before.Enabled != after.Enabled}, {"rooms", before.ID == "" || !slices.Equal(before.Rooms, after.Rooms)},
+		{"labels", !slices.Equal(before.Labels, after.Labels)}, {"host checks", !slices.Equal(before.HostChecksGrants, after.HostChecksGrants)},
+		{"container socket", before.ContainerSocket != after.ContainerSocket}, {"SSH timeout", before.SSHConnectTimeout != after.SSHConnectTimeout},
+		{"check temporary folder", before.CheckTmp != after.CheckTmp}, {"IO limit", before.MaxIOHeavy != after.MaxIOHeavy},
+		{"disk limit", before.MaxDiskPercent != after.MaxDiskPercent}, {"resources", !maps.Equal(before.Resources, after.Resources)},
+		{"mounts", !slices.Equal(before.Mounts, after.Mounts)}, {"devices", !slices.Equal(before.Devices, after.Devices)},
+	}
+	actor := authority.Of(ctx)
+	for _, change := range fields {
+		if !change.changed {
+			continue
+		}
+		_, err := conn.ExecContext(ctx, `INSERT INTO machine_setting_changes(node_id,changed_ms,actor_role,actor_session,actor_room,field) VALUES(?,?,?,?,?,?)`, after.ID, after.Updated.UnixMilli(), string(actor.Role), actor.Session, actor.Room, change.name)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// LatestFieldChanges returns the latest recorded edit to each setting.
+func (s Store) LatestFieldChanges(ctx context.Context, id string) ([]FieldChange, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT field,changed_ms,actor_role,actor_session,actor_room FROM machine_setting_changes WHERE node_id=? AND rowid IN (SELECT max(rowid) FROM machine_setting_changes WHERE node_id=? GROUP BY field) ORDER BY field`, id, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var changes []FieldChange
+	for rows.Next() {
+		var c FieldChange
+		var ms int64
+		if err := rows.Scan(&c.Field, &ms, &c.Actor.Role, &c.Actor.Session, &c.Actor.Room); err != nil {
+			return nil, err
+		}
+		c.Changed = time.UnixMilli(ms)
+		changes = append(changes, c)
+	}
+	return changes, rows.Err()
 }
 
 func updateMachine(ctx context.Context, conn *sql.Conn, m Machine) error {

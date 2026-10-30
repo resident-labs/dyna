@@ -6,9 +6,11 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/store/storetest"
 )
@@ -711,4 +713,42 @@ func TestMachineContainerSocketRoundTripsAndDefaultsToDocker(t *testing.T) {
 	if plain.DockerHost() != DefaultContainerSocket {
 		t.Fatalf("a machine without a socket uses %q, want %q", plain.DockerHost(), DefaultContainerSocket)
 	}
+}
+
+func TestStaleSavePreservesRoomsAndRecordsEditor(t *testing.T) {
+	s := fixture(t)
+	ctx := authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner})
+	m, err := s.Save(ctx, Machine{Name: "build", SSH: "build@host", Enabled: true, Rooms: []string{"room_a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := m
+	m, err = s.Update(ctx, m.ID, func(m *Machine) error { m.Rooms = []string{"room_a", "room_b"}; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.SSH = "build@newhost"
+	if _, err := s.Save(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.Rooms, []string{"room_a", "room_b"}) {
+		t.Fatalf("stale save changed rooms: %v", got.Rooms)
+	}
+	changes, err := s.LatestFieldChanges(ctx, m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range changes {
+		if c.Field == "rooms" {
+			if c.Actor.Role != authority.Owner || c.Changed.IsZero() {
+				t.Fatalf("room change: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatal("room edit was not recorded")
 }
