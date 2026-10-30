@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -291,5 +292,15 @@ func TestMergeFailureReportKeepsSvelteCheckEvidence(t *testing.T) {
 	}
 	if strings.Contains(report, "/workspace/") {
 		t.Errorf("report kept the CI workspace prefix:\n%s", report)
+	}
+}
+
+func TestMergeFailureLinesStripsColorsAndKeepsOneName(t *testing.T) {
+	logs := "\x1b[41m\x1b[1m FAIL \x1b[49m\x1b[39m test/codemode.test.ts > codemode worker admission > bounds\n" +
+		"FAIL test/codemode.test.ts > codemode worker admission > bounds\n"
+	_, _, frontend, _ := mergeFailureLines(logs)
+	want := []string{"FAIL test/codemode.test.ts > codemode worker admission > bounds"}
+	if !slices.Equal(frontend, want) {
+		t.Fatalf("frontend = %q, want %q", frontend, want)
 	}
 }
