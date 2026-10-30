@@ -15,17 +15,6 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// RecommendedVersion describes an install candidate, not an installed bundle.
-// Only pinned and resolved results have a Version. A resolved npm version has
-// verified package metadata, but its artifact is still checked during install.
-type RecommendedVersion struct {
-	Harness string `json:"harness"`
-	Version string `json:"version,omitempty"`
-	Source  string `json:"source"`
-	Status  string `json:"status"` // pinned, resolved, unavailable, or unsupported
-	Reason  string `json:"reason,omitempty"`
-}
-
 // RecommendedHTTPClient permits offline metadata sources. Implementations must
 // honor request contexts and must not add credentials or follow redirects.
 type RecommendedHTTPClient interface {
