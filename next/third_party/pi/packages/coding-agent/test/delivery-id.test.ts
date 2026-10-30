@@ -11,10 +11,13 @@ import { SettingsManager } from "../src/core/settings-manager.ts";
 import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
-it("rejects a delivery batch when an extension handles the first input", async () => {
+it.each(["handled", "/handled"])("rejects a delivery batch when an extension handles %s", async (input) => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-handled-delivery-"));
 	const extensionsResult = await createTestExtensionsResult([
-		(pi) => pi.on("input", () => ({ action: "handled" })),
+		(pi) => {
+			pi.registerCommand("handled", { handler: async () => { throw new Error("command executed"); } });
+			pi.on("input", () => ({ action: "handled" }));
+		},
 	]);
 	const agent = new Agent({});
 	const registry = await createModelRegistry(AuthStorage.inMemory(), dir);
@@ -24,7 +27,7 @@ it("rejects a delivery batch when an extension handles the first input", async (
 	});
 	try {
 		await session.bindExtensions({});
-		await expect(session.prompt("handled", {
+		await expect(session.prompt(input, {
 			deliveryId: "42", additionalInputs: [{ message: "second", deliveryId: "43" }],
 		})).rejects.toThrow("Delivery input was handled by an extension");
 	} finally {
