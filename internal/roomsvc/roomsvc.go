@@ -321,7 +321,7 @@ func (s *Service) Rooms() ([]Room, error) {
 		}
 		seen := map[string]bool{}
 		page, err := store.ReadPage(rec.ID, "", 1, room.PageFilter{Unread: func(m room.Message) bool {
-			thread := m.Notice.Thread
+			thread := m.ThreadKey()
 			unread := eligible[m.ID] && !reads[m.ID] && (thread == "" || !seen[thread])
 			if unread && thread != "" {
 				seen[thread] = true
@@ -697,7 +697,7 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 		},
 		Unread: func(m room.Message) bool {
 			unread := countsUnread(m, rec.Name) && !reads[m.ID]
-			thread := m.Notice.Thread
+			thread := m.ThreadKey()
 			if unread {
 				for _, view := range views.viewsFor(m, homeOf(elsewhere, m.ID)) {
 					if viewSeen[view] == nil {

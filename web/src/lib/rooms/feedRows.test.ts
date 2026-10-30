@@ -308,6 +308,20 @@ test('a merge trial folds queued, trial and landed into one card', () => {
   assert.equal(rowPost(rows[0])?.notice?.kind, 'landed')
 })
 
+test('old and mixed merge history fold across unrelated posts', () => {
+  const old = (id: string, type: 'queued' | 'trial' | 'landed', trial: string): FeedInput => {
+    const post = mergePost(id, type, trial)
+    return { ...post, notice: { kind: type } }
+  }
+  const posts = [old('a', 'queued', 'old'), old('b', 'trial', 'old'), old('c', 'landed', 'old'),
+    old('d', 'queued', 'mixed'), { id: 'note', ts: start, from: 'user' },
+    mergePost('e', 'trial', 'mixed'), mergePost('f', 'landed', 'mixed')]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.post.id), ['c', 'note', 'f'])
+  assert.deepEqual(rows[0]?.posts?.map((post) => post.id), ['a', 'b', 'c'])
+  assert.deepEqual(rows[2]?.posts?.map((post) => post.id), ['d', 'e', 'f'])
+})
+
 // A review result is one card per PR head: a re-review of the same head keeps
 // one card, and a new head starts a new one.
 const reviewPost = (id: string, kind: 'approve' | 'changes' | 'approve-fast' | 'stop-early', head: string, ts = start): FeedInput => ({
