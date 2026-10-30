@@ -16,6 +16,7 @@ const (
 	MethodBoxHello         Method = "box.hello"
 	MethodTurnOutput       Method = "turn.output"
 	MethodTranscriptAppend Method = "transcript.append"
+	MethodShellJobEnded    Method = "shell.job.ended"
 )
 
 type ErrorCode string
@@ -161,6 +162,12 @@ type TranscriptAppendRequest struct {
 type TranscriptAppendResponse struct {
 	AckedOffset int64 `json:"ackedOffset"`
 }
+type ShellJobEndedRequest struct {
+	Job      ShellJobID `json:"job"`
+	ExitCode int        `json:"exitCode"`
+	Tail     string     `json:"tail"` // the last output, masked
+}
+type ShellJobEndedResponse struct{}
 type TurnInput struct {
 	Delivery DeliverySeq  `json:"delivery"`
 	Surface  Surface      `json:"surface"`
