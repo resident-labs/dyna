@@ -90,6 +90,12 @@ func requestOf(ctx context.Context) *request {
 	return req
 }
 
+// RequestPending reports whether ctx still needs its first mutation receipt.
+func RequestPending(ctx context.Context) bool {
+	req := requestOf(ctx)
+	return req != nil && !req.recorded.Load()
+}
+
 // recordFirst wraps fn so that the call's first write records its request
 // ID first. It returns nil when there is nothing to record.
 func (w *Writer) recordFirst(ctx context.Context, fn func(*sql.Conn) error) (func(*sql.Conn) error, *request) {

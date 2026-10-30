@@ -165,10 +165,27 @@ const (
 // records it, in the same transaction. A write whose ID was already applied
 // does nothing and returns ErrRepeated (requirement 9).
 func (w *Writer) Write(ctx context.Context, c hub.Event, fn func(*sql.Conn) error) error {
-	fn, req := w.recordFirst(ctx, fn)
+	return w.WriteChanged(ctx, c, func(conn *sql.Conn) (bool, error) {
+		return true, fn(conn)
+	})
+}
+
+// WriteChanged publishes c only when fn reports a change. Request IDs are
+// recorded even when fn reports no change.
+func (w *Writer) WriteChanged(ctx context.Context, c hub.Event, fn func(*sql.Conn) (bool, error)) error {
+	changed := false
+	update, req := w.recordFirst(ctx, func(conn *sql.Conn) error {
+		var err error
+		changed, err = fn(conn)
+		return err
+	})
 	id, start := w.begin()
 	var publish func()
-	err := database.ImmediateThen(ctx, w.db, fn, func() { publish = w.queue(c) })
+	err := database.ImmediateThen(ctx, w.db, update, func() {
+		if changed {
+			publish = w.queue(c)
+		}
+	})
 	w.end(id, start, c)
 	if publish != nil {
 		publish()
