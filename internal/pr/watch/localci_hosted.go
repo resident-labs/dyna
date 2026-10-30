@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"dyna-agent/internal/localci"
@@ -41,34 +42,46 @@ type hostedCancelKey struct {
 	head string
 }
 
+type hostedCancelGate struct {
+	mu     sync.Mutex
+	next   map[hostedCancelKey]time.Time
+	active map[hostedCancelKey]bool
+}
+
 const hostedCancelInterval = 30 * time.Second
 
 // Cancellation is limited to queued exact-head runs. Started hosted jobs race
 // local CI. Main pushes and fork PRs cannot enter this path.
 func (s *Service) cancelQueuedHostedCI(ctx context.Context, job registeredCIJob, repo string) error {
+	localCIInit.Lock()
+	if s.hostedCancel == nil {
+		s.hostedCancel = &hostedCancelGate{}
+	}
+	gate := s.hostedCancel
+	localCIInit.Unlock()
 	key := hostedCancelKey{repo: repo, head: job.head}
-	s.hostedCancelMu.Lock()
+	gate.mu.Lock()
 	now := s.now()
-	for k, next := range s.hostedCancelNext {
-		if !now.Before(next) && !s.hostedCancelActive[k] {
-			delete(s.hostedCancelNext, k)
+	for k, next := range gate.next {
+		if !now.Before(next) && !gate.active[k] {
+			delete(gate.next, k)
 		}
 	}
-	if s.hostedCancelActive[key] || now.Before(s.hostedCancelNext[key]) {
-		s.hostedCancelMu.Unlock()
+	if gate.active[key] || now.Before(gate.next[key]) {
+		gate.mu.Unlock()
 		return nil
 	}
-	if s.hostedCancelActive == nil {
-		s.hostedCancelActive = make(map[hostedCancelKey]bool)
-		s.hostedCancelNext = make(map[hostedCancelKey]time.Time)
+	if gate.active == nil {
+		gate.active = make(map[hostedCancelKey]bool)
+		gate.next = make(map[hostedCancelKey]time.Time)
 	}
-	s.hostedCancelActive[key] = true
-	s.hostedCancelMu.Unlock()
+	gate.active[key] = true
+	gate.mu.Unlock()
 	defer func() {
-		s.hostedCancelMu.Lock()
-		delete(s.hostedCancelActive, key)
-		s.hostedCancelNext[key] = s.now().Add(hostedCancelInterval)
-		s.hostedCancelMu.Unlock()
+		gate.mu.Lock()
+		delete(gate.active, key)
+		gate.next[key] = s.now().Add(hostedCancelInterval)
+		gate.mu.Unlock()
 	}()
 	gh := s.github(job.record.RoomID)
 	runs, err := gh.readCommitRuns(ctx, refRecord(job.record), job.head)
