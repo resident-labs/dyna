@@ -113,3 +113,37 @@ func TestMainUpdatedStartsSourceInstaller(t *testing.T) {
 		t.Fatalf("update log = %+v, %v", log, err)
 	}
 }
+
+func TestDeferredRetrySurvivesStoreReopen(t *testing.T) {
+	storetest.Isolate(t)
+	testServices(t, false)
+	ctx := t.Context()
+	dir := store.DataDir()
+	s := updaterservice.Store{DataDir: dir}
+	if err := s.Update(ctx, func(c *updaterservice.Config) error {
+		c.Source, c.Enabled, c.EveryMinutes = "/source", true, 60
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, due, err := s.ClaimInterval(ctx, now); err != nil || !due {
+		t.Fatalf("initial claim: due=%v err=%v", due, err)
+	}
+	if err := s.ScheduleRetry(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	s = updaterservice.Store{DataDir: dir}
+	if _, due, err := s.ClaimInterval(ctx, now.Add(4*time.Minute)); err != nil || due {
+		t.Fatalf("early claim: due=%v err=%v", due, err)
+	}
+	if err := s.ScheduleRetry(ctx, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, due, err := s.ClaimInterval(ctx, now.Add(5*time.Minute)); err != nil || !due {
+		t.Fatalf("retry claim: due=%v err=%v", due, err)
+	}
+	if _, due, err := s.ClaimInterval(ctx, now.Add(6*time.Minute)); err != nil || due {
+		t.Fatalf("duplicate claim: due=%v err=%v", due, err)
+	}
+}
