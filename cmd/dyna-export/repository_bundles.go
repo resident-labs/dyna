@@ -11,6 +11,7 @@ import (
 
 type repoGap struct {
 	Identity   string              `json:"identity"`
+	Upstream   string              `json:"upstream,omitempty"`
 	Kind       string              `json:"kind"`
 	Rooms      []contract.RoomName `json:"rooms,omitempty"`
 	Placements []string            `json:"placements,omitempty"`

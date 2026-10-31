@@ -15,6 +15,7 @@ func TestCountRoomSQL(t *testing.T) {
 	defer db.Close()
 	_, err = db.Exec(`
 CREATE TABLE goal_rooms (room TEXT, body TEXT);
+CREATE TABLE hook_documents (body TEXT);
 CREATE TABLE goals (room TEXT, id TEXT, state TEXT);
 CREATE TABLE goal_items (room TEXT, goal TEXT);
 CREATE TABLE room_issues (room_id TEXT, state TEXT);

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 func TestExportAndVerifyCapturedInputs(t *testing.T) {
@@ -21,7 +23,7 @@ func TestExportAndVerifyCapturedInputs(t *testing.T) {
 		filepath.Join(config, "settings.json"):                 `{}`,
 		filepath.Join(config, "profiles.json"):                 `{"version":3,"profiles":[]}`,
 		filepath.Join(data, "rooms", roomID, "messages.jsonl"): "",
-		filepath.Join(dir, "manifest.json"):                    `{"repositories":[],"archiveRefs":[],"skills":[]}`,
+		filepath.Join(dir, "manifest.json"):                    `{"repositories":[{"path":"/capture/repo","identity":"github.com/acme/fork","defaultRoom":"alpha"}],"archiveRefs":[],"skills":[]}`,
 	} {
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -52,7 +54,7 @@ CREATE TABLE hook_documents(repo TEXT,body TEXT);
 CREATE TABLE local_ci_modes(room_id TEXT,mode TEXT);
 INSERT INTO room_records VALUES (?,?);
 INSERT INTO goals VALUES (?,'g1','active','{"id":"g1","text":"Goal","setter":"owner"}');
-INSERT INTO goal_items VALUES (?,'g1','i1','Item','open','');`, roomID, `{"id":"`+roomID+`","name":"alpha"}`, roomID, roomID)
+INSERT INTO goal_items VALUES (?,'g1','i1','Item','open','');`, roomID, `{"id":"`+roomID+`","name":"alpha","repo":"/capture/repo","upstream":"github.com/acme/upstream","rootProfile":"sonnet","sessionPause":{"paused":true}}`, roomID, roomID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,5 +67,17 @@ INSERT INTO goal_items VALUES (?,'g1','i1','Item','open','');`, roomID, `{"id":"
 	}
 	if err := run(append([]string{"verify"}, args...)); err != nil {
 		t.Fatal(err)
+	}
+	f, err := os.Open(filepath.Join(dir, "out", "rooms", "alpha.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	part, err := contract.DecodeBundle[contract.RoomBundle](f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !part.Paused || part.RootProfile != "sonnet" || len(part.Upstreams) != 1 || part.Upstreams[0].Upstream != "github.com/acme/upstream" || part.Upstreams[0].Repo != "acme/fork" {
+		t.Fatalf("room handoff fields missing: %+v", part)
 	}
 }
