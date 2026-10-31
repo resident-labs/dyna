@@ -523,9 +523,10 @@ type Polling struct {
 }
 
 type CachedResponse struct {
-	ETag string          `json:"etag"`
-	Body json.RawMessage `json:"body"`
-	Next string          `json:"next,omitempty"`
+	ETag  string          `json:"etag"`
+	Body  json.RawMessage `json:"body"`
+	Next  string          `json:"next,omitempty"`
+	Stale bool            `json:"stale,omitempty"`
 }
 
 type RateLimitScope struct {

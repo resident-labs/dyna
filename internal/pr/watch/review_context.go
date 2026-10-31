@@ -381,7 +381,7 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 		for path != "" && complete {
 			response, ok := st.Responses[r.Key][strings.ToLower(ref.Host)+"/"+path]
 			var page []Comment
-			if !ok || seen[path] || json.Unmarshal(response.Body, &page) != nil {
+			if !ok || response.Stale || seen[path] || json.Unmarshal(response.Body, &page) != nil {
 				complete = false
 				break
 			}
