@@ -40,16 +40,17 @@ type BundleSource struct {
 }
 
 type BundleCounts struct {
-	Goals         int `json:"goals"`
-	GoalItems     int `json:"goalItems"`
-	Issues        int `json:"issues"`
-	PRs           int `json:"prs"`
-	Questions     int `json:"questions"`
-	Subscriptions int `json:"subscriptions"`
-	Hosts         int `json:"hosts"`
-	Accounts      int `json:"accounts"`
-	Devices       int `json:"devices"`
-	Sessions      int `json:"sessions"`
+	InstructionChars int `json:"instructionChars"`
+	Goals            int `json:"goals"`
+	GoalItems        int `json:"goalItems"`
+	Issues           int `json:"issues"`
+	PRs              int `json:"prs"`
+	Questions        int `json:"questions"`
+	Subscriptions    int `json:"subscriptions"`
+	Hosts            int `json:"hosts"`
+	Accounts         int `json:"accounts"`
+	Devices          int `json:"devices"`
+	Sessions         int `json:"sessions"`
 }
 
 // GlobalBundle is global.json.
