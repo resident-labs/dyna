@@ -254,9 +254,39 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d con
 }
 
 func (s *Store) Post(ctx context.Context, event contract.Event, deliveries []contract.Delivery) (int64, error) {
+	_, seq, err := s.PostOnce(ctx, event, deliveries)
+	return seq, err
+}
+
+const postByClientID = "SELECT seq,id FROM events WHERE room=? AND from_kind=? AND from_id=? AND client_id=?"
+
+// PostByClientID returns the post this author already made in the room with this client ID, if any.
+func (s *Store) PostByClientID(ctx context.Context, room contract.RoomID, from contract.Principal, clientID string) (contract.EventID, int64, bool, error) {
+	var id contract.EventID
 	var seq int64
+	err := s.Read().QueryRowContext(ctx, postByClientID, room, from.Kind, from.Session, clientID).Scan(&seq, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, false, nil
+	}
+	return id, seq, err == nil, err
+}
+
+// PostOnce appends a post. When the same author already posted the same client ID in the room, it appends
+// nothing and returns that first post.
+func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries []contract.Delivery) (contract.EventID, int64, error) {
+	var seq int64
+	id := event.ID
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		var err error
+		if post, ok := event.Body.(contract.PostCreated); ok && post.ClientID != "" {
+			err = tx.QueryRowContext(ctx, postByClientID, event.Room, event.From.Kind, event.From.Session, post.ClientID).Scan(&seq, &id)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
 		seq, err = s.AppendEvent(tx, event)
 		if err != nil {
 			return err
@@ -275,7 +305,7 @@ func (s *Store) Post(ctx context.Context, event contract.Event, deliveries []con
 		}
 		return nil
 	})
-	return seq, err
+	return id, seq, err
 }
 
 // FeedInput describes a delivery selected for a box channel.
