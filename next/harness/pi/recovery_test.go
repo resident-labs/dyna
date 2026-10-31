@@ -83,6 +83,18 @@ func TestDeliverySkipsLongLineAndReadsAppends(t *testing.T) {
 	}
 }
 
+func TestDeliveryOfLargeUserMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	entry := `{"type":"message","message":{"role":"user","deliveryId":"9","content":"` + strings.Repeat("x", 2048) + `"}}` + "\n"
+	if err := os.WriteFile(path, []byte(entry), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := &Harness{session: path, deliveryLineLimit: 4096}
+	if found, err := h.Delivered(context.Background(), 9); err != nil || !found {
+		t.Fatalf("large user message: found=%v err=%v", found, err)
+	}
+}
+
 func recoveryFixture(t *testing.T, tail string) *Harness {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "session.jsonl")
