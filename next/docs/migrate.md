@@ -234,4 +234,4 @@ Each cell shows SQL source / decoded bundle / dry-run. The verifier compares the
 Zero counts are omitted from the per-room table. The verifier checked them. Repository source counts use SQLite and the captured identity manifest. Profile and skill counts use captured files. Equal counts do not prove field equality or captured-file completeness.
 
 
-The updated run exported eight profiles and recorded no unknown model mappings. Six disabled profiles were skipped. The Muse profile is reported as unsupported, as decided above. The private report inventory still needs the approved field classifications applied.
+The updated run exported eight profiles and recorded no unknown model mappings. Six disabled profiles were skipped. The Muse profile is reported as unsupported. The field classifications above apply to this run.
