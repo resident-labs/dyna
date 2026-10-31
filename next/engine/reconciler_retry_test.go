@@ -35,6 +35,7 @@ func (h *retryHost) Recreate(context.Context, lifecycle.BoxSpec, string, string)
 
 type failingCreateHost struct {
 	fakeBoxes
+	id      contract.BoxID
 	creates int
 	removes int
 }
@@ -44,8 +45,10 @@ func (h *failingCreateHost) Create(context.Context, lifecycle.BoxSpec) (string, 
 	return "", errors.New("create unavailable")
 }
 
-func (h *failingCreateHost) Remove(context.Context, contract.BoxID) error {
-	h.removes++
+func (h *failingCreateHost) Remove(_ context.Context, id contract.BoxID) error {
+	if id == h.id {
+		h.removes++
+	}
 	return nil
 }
 
@@ -62,7 +65,7 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(1000, 0)
-	host := &failingCreateHost{}
+	host := &failingCreateHost{id: session.Box}
 	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
 	for i, delay := range []time.Duration{30 * time.Second, time.Minute, 0} {
 		if err := r.Pass(ctx); err != nil {
@@ -112,6 +115,29 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 		}
 	}
 	t.Fatal("third failure did not publish create_failed")
+}
+
+func TestReconcilerCleansPinnedPendingCreate(t *testing.T) {
+	s, _, sid, ctx := setup(t)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='pending', image='', want='run', due_at=0, failures=0 WHERE id=?", session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host := &failingCreateHost{id: session.Box}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, s.now)
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	if host.creates != 1 || host.removes != 1 {
+		t.Fatalf("pinned create: creates=%d removes=%d", host.creates, host.removes)
+	}
 }
 
 type retryView struct{}
