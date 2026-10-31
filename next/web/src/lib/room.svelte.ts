@@ -2,6 +2,7 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
+import { countOf, statusOf, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, Decision, Event, OpRequested, OpResult, OpState, SessionStarted } from "./contract.gen.ts";
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
@@ -72,6 +73,19 @@ export class RoomStore {
   get error(): unknown { this.subscribe(); return this.failure; }
   // Pending owner-class operations wait for the owner; agent-class ones wait for an ancestor session first.
   get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner").length; }
+  // Each session's one status (status.ts): a request it made waits for the owner, its failure is unseen or its box
+  // failed, or a turn runs. The header, the panel and the counts read only these.
+  status(id: string): Status { return this.statusWith(id, this.asking()); }
+  get counts(): Counts { const asking = this.asking(); return countOf([...this.sessions.keys()].map(id => this.statusWith(id, asking))); }
+  private statusWith(id: string, asking: Set<string>): Status {
+    const box = this.boxes.get(id);
+    return statusOf({ waiting: asking.has(id), failed: this.unseen(id) || box === "failed" || box === "lost", working: this.turns.has(id) });
+  }
+  // The sessions whose requests wait for the owner.
+  private asking(): Set<string> {
+    return new Set([...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner")
+      .flatMap(request => request.by.session ? [request.by.session] : []));
+  }
 
   async open(): Promise<void> {
     this.opening = this.load();
