@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import { tick } from "svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import { render } from "./PostRow.svelte";
@@ -12,7 +13,8 @@
   import { maxFiles, type FileDraft } from "../attach.svelte.ts";
   import { hue } from "../identity.ts";
   import { mentionToken } from "../mentions.ts";
-  // Enter sends and Shift+Enter starts a new line. The action row keeps room for the attach and mention buttons.
+  // Enter sends and Shift+Enter starts a new line. A touch screen has no Shift+Enter, so there Enter starts a new line
+  // and the Send button sends. The action row keeps room for the attach and mention buttons.
   // A forwarded post waits above the text as in v1; the × or Escape removes it.
   // As in v1, an @word at the caret opens a list of sessions above the box: arrows move, Enter or Tab picks,
   // Escape closes. A DM passes no sessions, since the engine refuses mentions there.
@@ -46,6 +48,7 @@
     if (draft === files) note = message;
   }
   const id = $props.id();
+  const touch = new MediaQuery("pointer: coarse");
   let caret = $state(0);
   // Escape closes the list until the next typed character, as in v1.
   let dismissed = $state(-1);
@@ -79,7 +82,7 @@
       // The open list closes first, then the forwarded post goes.
       event.stopPropagation();
       if (matches.length) dismissed = token?.start ?? -1; else onunquote();
-    } else if (event.key === "Enter" && !event.shiftKey) {
+    } else if (event.key === "Enter" && !event.shiftKey && !touch.current) {
       event.preventDefault();
       if (canSend) { note = ""; onsend(); }
     }
@@ -174,6 +177,7 @@
   /* The key hint shows only while the empty message box has focus. */
   .keys { font-size: 12px; color: var(--muted); visibility: hidden; }
   .composer:has(textarea:focus:placeholder-shown) .keys { visibility: visible; }
+  @media (pointer: coarse) { .composer .keys { visibility: hidden; } }
   .actions button, .remove { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 0; border-radius: 8px; cursor: pointer; }
   .attach, .remove { background: none; color: var(--muted); }
   .remove { width: 24px; height: 24px; border-radius: 6px; }
