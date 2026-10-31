@@ -1,4 +1,4 @@
-import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
+import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, Principal, SessionCloseReason } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { Request } from "./room.svelte.ts";
 
@@ -270,20 +270,23 @@ export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : 
 export const closedSession = "A closed session";
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
+// Why the engine closed a session, after "closed". The engine closes a session whose box stayed stopped for 7 days.
+const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 quiet days" };
+
 // One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
 // "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.
 // The time runs from the first turn's start to the last turn's end in the row, in whole minutes as T3 Code's
 // "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns". A DM's saved steps give the start
 // that a reloaded window lacks.
 export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
-  const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
+  const started: string[] = [], moved: string[] = [], closed: string[] = [], quiet: string[] = [], opened: string[] = [], shut: string[] = [];
   const turns = new Map<string, Set<string>>();
   let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0, first = Infinity, last = -Infinity;
   for (const event of events) {
     switch (event.type) {
       case "session.started": started.push(name(event.body.session)); break;
       case "session.moved": moved.push(name(event.body.session)); break;
-      case "session.closed": closed.push(name(event.body.session)); break;
+      case "session.closed": (event.body.reason ? quiet : closed).push(name(event.body.session)); break;
       case "computer.changed": (event.body.to === "running" ? opened : shut).push(name(event.body.session)); break;
       case "turn.started": case "turn.ended":
         turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn));
@@ -313,6 +316,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
     memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
     rules && count(rules, "rule change"),
     opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
+    quiet.length && `${who(quiet)} closed ${closeReasons.dormant}`,
   ].filter(part => typeof part === "string");
   return parts.length ? parts.join(" · ") : count(events.length, "update");
 }
@@ -322,7 +326,7 @@ export function describe(event: Event, name: Name): string {
   switch (event.type) {
     case "session.restarted": return `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
     case "session.started": return `${name(event.body.session)} started`;
-    case "session.closed": return `${name(event.body.session)} closed`;
+    case "session.closed": return `${name(event.body.session)} closed${event.body.reason ? ` ${closeReasons[event.body.reason]}` : ""}`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return ""; // feedRows keeps box changes out of work rows.
