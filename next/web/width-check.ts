@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { chromium } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.mjs";
-import { settingsPanes } from "./src/lib/routes.ts";
+import { roomRoute, settingsPanes, settingsRoute } from "./src/lib/routes.ts";
 
 const widths = [1280, 920, 768, 390];
 const fixtures = ["full", "empty"] as const;
@@ -26,14 +26,15 @@ try {
     const origin = new URL(login.url()).origin;
     const rooms = await login.locator('nav[aria-label="Rooms"] a[href^="/r/"]').evaluateAll(links => links.map(link => link.getAttribute("href")!).filter(Boolean));
     const routes = new Set(["/", ...rooms, "/settings", ...settingsPanes.map(pane => `/settings/${pane.id}`)]);
-    for (const room of rooms) {
-      await login.goto(origin + room);
+    for (const route of routes) {
+      await login.goto(origin + route);
       await login.locator('[data-app-ready="true"]').waitFor();
-      for (const href of await login.locator('a[href^="/r/"]').evaluateAll(links => links.map(link => link.getAttribute("href")!).filter(Boolean))) routes.add(href);
+      if (route === "/" || route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
+        await login.locator('[data-page-ready="true"]').waitFor();
+      for (const href of await login.locator('a[href^="/"]').evaluateAll(links => links.map(link => link.getAttribute("href")!).filter(Boolean))) {
+        if (roomRoute.test(href) || settingsRoute.test(href)) routes.add(href);
+      }
     }
-    await login.goto(origin + "/settings/accounts");
-    await login.locator('[data-page-ready="true"]').waitFor();
-    for (const href of await login.locator('a[href^="/settings/accounts/"]').evaluateAll(links => links.map(link => link.getAttribute("href")!).filter(Boolean))) routes.add(href);
     await login.close();
     const tasks = [...routes].flatMap(route => widths.map(width => ({ route, width })));
     await Promise.all(Array.from({ length: 6 }, async () => {
@@ -46,9 +47,11 @@ try {
       try {
         await page.goto(origin + route);
         await page.locator('[data-app-ready="true"]').waitFor();
-        if (route === "/settings/accounts" || route === "/settings/profiles")
+        if (route === "/" || route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
           await page.locator('[data-page-ready="true"]').waitFor();
         await page.evaluate(() => document.fonts.ready);
+        if (process.env.DYNA_WIDTH_SHOTS && route === "/settings/profiles" && width === 920)
+          await page.screenshot({ path: `${process.env.DYNA_WIDTH_SHOTS}/${fixture}-profiles-920.png` });
         const issues = await page.evaluate(() => {
           const found: string[] = [];
           if (document.documentElement.scrollWidth > document.documentElement.clientWidth) found.push("document");
