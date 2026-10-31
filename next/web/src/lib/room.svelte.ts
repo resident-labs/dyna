@@ -29,8 +29,10 @@ export class RoomStore {
   private readonly read = new SvelteMap<string, number>();
   // Sessions whose box runs a computer the owner can watch.
   readonly computers = new SvelteSet<string>();
-  // Background shell jobs still running when each session's last turn ended.
+  // Background shell jobs still running, as of each session's last turn end and the jobs that ended since.
   readonly shellJobs = new SvelteMap<string, number>();
+  // Jobs that failed, as "session/job", so the dock can mark one while its Jobs tab is closed.
+  readonly failedJobs = new SvelteSet<string>();
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
   // The room's rules by number. rule.list reads after session.list, and rule.added and rule.removed repeat safely.
@@ -219,6 +221,10 @@ export class RoomStore {
         break;
       case "rule.added": this.rules.set(event.body.number, { number: event.body.number, text: event.body.text, by: event.from, at: event.at }); break;
       case "rule.removed": this.rules.delete(event.body.number); break;
+      case "shell.job.ended":
+        this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
+        if (event.body.exitCode !== 0) this.failedJobs.add(`${event.body.session}/${event.body.job}`);
+        break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
       case "op.decided": case "op.ran": {
         const known = this.requests.get(event.body.id);

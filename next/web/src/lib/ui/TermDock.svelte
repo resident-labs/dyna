@@ -1,16 +1,25 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { call } from "../client.ts";
   import { hostLabel } from "../hosts.ts";
   import type { TerminalTarget } from "../terminal.ts";
   import FloatWindow from "./FloatWindow.svelte";
   import Icon from "./Icon.svelte";
+  import JobsPane from "./JobsPane.svelte";
+  import StatusPill from "./StatusPill.svelte";
   import TermPane from "./TermPane.svelte";
   // The owner's terminals, one tab per shell, docked at the bottom of the main column or floating over
   // the app. The dock is app-wide: hosts are not room objects, so tabs stay across rooms and on Home.
   // A tab lives while the page is open (no reattach in M2); × closes its socket, and the engine ends
   // the shell. The new-tab menu lists the room's sessions whose box is ready, then the hosts.
-  let { sessions, element = $bindable(), onempty }: { sessions: { id: string; name: string }[]; element?: HTMLElement; onempty: () => void } = $props();
+  // After the shells, a Jobs tab shows the room's background jobs (JobsPane) while jobs has a session; it counts the
+  // running jobs only, and a red dot marks a failed job the owner has not opened (Jobs fix 4). With no shell open,
+  // the dock shows only its tab bar until the owner opens Jobs.
+  type JobSession = { id: string; name: string; root: boolean; running: number };
+  let { sessions, jobs, failures, element = $bindable(), onempty }: {
+    sessions: { id: string; name: string }[]; jobs: JobSession[]; failures: string[]; element?: HTMLElement; onempty: () => void;
+  } = $props();
   type Tab = { key: number; target: TerminalTarget; label: string; exited?: { code?: number } };
   let tabs: Tab[] = $state([]);
   let active = $state(0);
@@ -26,6 +35,21 @@
   let menu: HTMLElement | undefined = $state();
   let plus: HTMLButtonElement | undefined = $state();
   const panes: Record<number, TermPane | undefined> = $state({});
+  const JOBS = -1;
+  let only: string | undefined = $state();
+  let jobsPane: JobsPane | undefined = $state();
+  const opened = new SvelteSet<string>();
+  let unopened = $derived(failures.some(key => !opened.has(key)));
+  // The open list knows its own rows, so the tab counts those and the two cannot disagree.
+  let listed: number | undefined = $state();
+  let running = $derived(active === JOBS && (floating || !collapsed) && listed !== undefined ? listed : jobs.reduce((sum, session) => sum + session.running, 0));
+  // Jobs that leave, as on Home or when every box stops, take their tab with them.
+  $effect.pre(() => { if (active === JOBS && !jobs.length) active = tabs[0]?.key ?? 0; });
+  // A session row's jobs icon opens the tab on that session's jobs.
+  export function showJobs(session?: string) {
+    only = session;
+    void show(JOBS);
+  }
 
   // Opens the new-tab menu; the room menu's "New terminal" comes here too.
   export async function pick() {
@@ -40,7 +64,7 @@
     active = key;
     collapsed = false;
     await tick();
-    panes[key]?.focus();
+    if (key === JOBS) jobsPane?.focus(); else panes[key]?.focus();
   }
   function open(target: TerminalTarget, label: string) {
     picking = false;
@@ -61,7 +85,7 @@
     if (active === key) active = tabs[Math.min(index, tabs.length - 1)]?.key ?? 0;
     if (!tabs.length) floating = false;
     await tick();
-    if (tabs.length) panes[active]?.focus(); else if (picking) plus?.focus(); else onempty();
+    if (active === JOBS || tabs.length) await show(active); else if (picking) plus?.focus(); else onempty();
   }
   // Up and Down move in the menu, Escape closes it and returns to "+".
   function walk(event: KeyboardEvent) {
@@ -89,7 +113,7 @@
 
 <svelte:window onresize={() => { viewport = window.innerHeight; }} />
 
-{#if tabs.length || picking}
+{#if tabs.length || picking || jobs.length}
 <FloatWindow label="Terminals" kind="terminals" docked={!floating} bind:rect bind:element>
   {#snippet header()}
     <div class="tabs" role="tablist" aria-label="Terminals">
@@ -97,6 +121,10 @@
         <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{tab.label}
           {#if tab.exited}<span class="muted">exited</span>{/if}</button>
         <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => void close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
+      {#if jobs.length}<span class="tab" class:active={active === JOBS}>
+        <button type="button" role="tab" class="jobs" aria-selected={active === JOBS} onclick={() => { only = undefined; void show(JOBS); }}>Jobs
+          {#if running}<span class="muted">{running}</span>{/if}
+          {#if unopened}<StatusPill tone="failed" dot label="A failed job you have not opened" />{/if}</button></span>{/if}
     </div>
     <span class="menu">
       <button type="button" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
@@ -108,24 +136,27 @@
         {#each hosts as host (host)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host }, hostLabel(host))}>{hostLabel(host)}</button>{/each}
       </div>{/if}
     </span>
-    {#if tabs.length}<button type="button" class="tool" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
+    {#if active}<button type="button" class="tool" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
       onclick={() => { floating = !floating; }}><Icon name={floating ? "dockBottom" : "undock"} /></button>
       {#if !floating}<button type="button" class="tool" aria-label={maximized ? "Restore the terminals" : "Maximize the terminals"} title={maximized ? "Restore" : "Maximize"}
         onclick={() => { maximized = !maximized; collapsed = false; }}><Icon name={maximized ? "restore" : "maximize"} /></button>
       <button type="button" class="tool fold" class:collapsed aria-label={collapsed ? "Expand the terminals" : "Collapse the terminals"} title={collapsed ? "Expand" : "Collapse"}
-        aria-expanded={!collapsed} onclick={() => { collapsed = !collapsed; if (!collapsed) void tick().then(() => panes[active]?.focus()); }}><Icon name="chevron" /></button>{/if}{/if}
+        aria-expanded={!collapsed} onclick={() => { collapsed = !collapsed; if (!collapsed) void show(active); }}><Icon name="chevron" /></button>{/if}{/if}
   {/snippet}
-  {#if !floating && tabs.length && !collapsed && !maximized}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a separator that the arrow keys move is focusable) -->
+  {#if !floating && active && !collapsed && !maximized}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a separator that the arrow keys move is focusable) -->
     <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Terminal height" aria-valuenow={height} tabindex="0" onpointerdown={drag}
       onkeydown={event => { const step = { ArrowUp: 24, ArrowDown: -24 }[event.key]; if (step) { event.preventDefault(); height = fit(height + step); } }}></div>{/if}
   <!-- Keys typed into a shell stay there, so Escape closes no panel and Alt with an arrow key moves no window; F6 still moves between areas. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" hidden={!floating && collapsed} style:height={floating ? null : `${maximized ? tallest : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
+  <div class="body" hidden={!active || !floating && collapsed} style:height={floating ? null : `${maximized ? tallest : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
     {#each tabs as tab (tab.key)}<div class="tabpanel" hidden={tab.key !== active}>
       {#if tab.exited}<p class="exited">{tab.exited.code ? `Exited with code ${tab.exited.code}` : "The shell exited."}
         <button type="button" class="retry" onclick={() => renew(tab)}>New shell</button></p>{/if}
       <TermPane bind:this={panes[tab.key]} target={tab.target} label={tab.label} onexit={code => { tab.exited = { code }; }} />
     </div>{/each}
+    <!-- Mounted only while open, so its watches close with it (Jobs fix 1). -->
+    {#if active === JOBS && (floating || !collapsed)}<div class="tabpanel">
+      <JobsPane bind:this={jobsPane} bind:only sessions={jobs} {opened} onrunning={rows => { listed = rows; }} /></div>{/if}
   </div>
 </FloatWindow>
 {/if}
@@ -140,6 +171,7 @@
   .tab.active [role="tab"] { color: var(--text); }
   .tabs [role="tab"]:hover { background: none; }
   .muted { color: var(--muted); font-weight: 400; }
+  .jobs { padding-right: 8px; }
   .x { width: 20px; height: 20px; margin-right: 3px; }
   /* The dock's own controls sit at the right, 28 px like a floating window's. */
   .tool { width: 28px; height: 28px; }
