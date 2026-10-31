@@ -185,21 +185,21 @@ func TestRegisteredCIRelocationCoolsDownVisitedNode(t *testing.T) {
 		}
 		now = now.Add(time.Minute)
 		next := req.OnQueue(ctx)
-		if starts <= 8 {
+		if starts <= 10 {
 			if next == nil || next.Name == node.Name {
 				t.Fatalf("relocation after cooldown = %v from %s", next, node.Name)
 			}
 			return localci.Result{}, &localci.RelocateError{Node: *next}
 		}
-		if next != nil {
-			t.Fatalf("relocation limit did not stop at %s", next.Name)
+		if next == nil || next.Name == node.Name {
+			t.Fatalf("recovered capacity after ten moves = %v from %s", next, node.Name)
 		}
 		return localci.Result{Status: "passed"}, nil
 	}
 	run := &registeredCIRun{Cancel: func() {}, Ended: make(chan struct{}), Stopped: make(chan struct{})}
 	s.executeRegisteredCI(context.Background(), job, localCIPlan{execution: watchDynaDefinition(t), suites: []localci.Suite{"go-static"}}, "repo", localci.Node{Name: "first"}, "key", run, "", false)
-	if starts != 9 {
-		t.Fatalf("starts = %d, want 9", starts)
+	if starts != 11 {
+		t.Fatalf("starts = %d, want 11", starts)
 	}
 }
 
