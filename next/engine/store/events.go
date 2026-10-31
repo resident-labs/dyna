@@ -35,12 +35,16 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 	}
 	// home is the session whose DM holds the event: a DM post, a turn that answered in a DM, or a stopped turn.
 	var home *contract.SessionID
+	var clientID *string
 	switch body := event.Body.(type) {
 	case contract.SessionRestarted:
 		home = &body.Session
 	case contract.PostCreated:
 		if body.Home.Kind == contract.ConversationDM {
 			home = &body.Home.Session
+		}
+		if body.ClientID != "" {
+			clientID = &body.ClientID
 		}
 	case contract.TurnEnded:
 		for _, reply := range body.Replies {
@@ -53,7 +57,7 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 			home = &body.Session
 		}
 	}
-	result, err := tx.Exec("INSERT INTO events(id,at,room,type,from_kind,from_id,body,home) VALUES(?,?,?,?,?,?,?,?)", event.ID, event.Time.UnixMilli(), room, event.Body.EventType(), event.From.Kind, id, body, home)
+	result, err := tx.Exec("INSERT INTO events(id,at,room,type,from_kind,from_id,body,home,client_id) VALUES(?,?,?,?,?,?,?,?,?)", event.ID, event.Time.UnixMilli(), room, event.Body.EventType(), event.From.Kind, id, body, home, clientID)
 	if err != nil {
 		return 0, err
 	}
