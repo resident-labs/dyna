@@ -754,17 +754,12 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			return startCtx.Err()
 		}
 		// Competing runs can see the same free slot and move back and forth.
-		// Give a node time to settle after leaving it, and bound total moves so
-		// changing capacity cannot reset the admission timeout forever.
+		// Give a node time to settle after leaving it. The run's overall
+		// deadline above stays in force across every relocation.
 		const relocationCooldown = 30 * time.Second
-		const maxRelocations = 8
 		left := map[string]time.Time{}
-		moves := 0
 		for {
 			req.OnQueue = func(waitCtx context.Context) *localci.Node {
-				if moves >= maxRelocations {
-					return nil
-				}
 				nodes, listErr := s.registeredCINodes(waitCtx)
 				if listErr != nil {
 					return nil
@@ -792,7 +787,6 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 				break
 			}
 			left[node.Name] = s.now()
-			moves++
 			node = move.Node
 			runs := s.nodeRuns()
 			runs.Lock()
