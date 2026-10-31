@@ -946,7 +946,7 @@ Accepted risks (owner, 2026-10-30):
 
 - Every grant gives full access to its hosts. On the control plane, that includes the CLIProxyAPI sign-ins and the owner's files. Root's default grant relies on root's judgment.
 - A command can leave its scope, for example with `systemd-run --user`, or with SSH to the engine host as the owner's user, which reaches the owner socket outside any scope (decision 14). The scope check stops mistakes, not a hostile command.
-- A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. It can also connect to any box's forwarded socket under `<hostdata>/sock/` and act as that box's session, with its model route and git push rights. Hosts hold no model or GitHub credentials, and only we have admin on them.
+- A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. It can also connect to any box's forwarded socket under `<hostdata>/sock/` and act as that box's session, with its model route and git push rights. A capacity host that also runs the engine holds the model sign-ins and may hold GitHub credentials. Only we have admin on hosts.
 - Output can contain host secrets. Only the room's sessions and the owner can see it.
 
 ## 7. Identity, rooms and the tree

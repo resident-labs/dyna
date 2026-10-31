@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/store"
@@ -39,6 +40,9 @@ func TestGrantOperation(t *testing.T) {
 func TestGrantCard(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	if err := s.store.SetEngineHost(ctx, "host", false); err != nil {
+		t.Fatal(err)
+	}
 	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"host"}, Reason: "Inspect logs"}, to)
 	if card.Title != "asks for host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host for 24 hours.\nReason: Inspect logs" {
 		t.Fatalf("card: %+v", card)
@@ -66,6 +70,7 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
 	err = st.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('room','room',1,1,1);
  ALTER TABLE hosts DROP COLUMN maintained_at;
+ ALTER TABLE hosts DROP COLUMN engine_host;
  ALTER TABLE sessions DROP COLUMN shell_jobs;
  ALTER TABLE boxes DROP COLUMN want;
  ALTER TABLE boxes DROP COLUMN due_at;
@@ -104,5 +109,18 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
 	old, err := st.Operation(ctx, "old")
 	if err != nil || old.Operation.State != contract.OpExpired {
 		t.Fatalf("old request %+v: %v", old, err)
+	}
+}
+
+func TestGrantCardEngineHost(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	yes := true
+	if err := s.store.AddHost(ctx, box.Host{Name: "engine", EngineHost: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"engine"}, Reason: "Inspect"}, to)
+	if !strings.Contains(card.Body, "This host also runs the engine and holds the model sign-ins.") {
+		t.Fatal(card.Body)
 	}
 }
