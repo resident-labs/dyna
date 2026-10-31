@@ -92,5 +92,9 @@ main > header strong { font-size: 16px; }
   .shell.drawer .rail:focus { outline: none; }
   .rail > nav:first-child { grid-column: 1; align-items: center; overflow-y: auto; }
   .rail footer { grid-column: 1; display: flex; justify-content: center; }
+  /* The sessions panel is a bottom sheet over a scrim (iOS sheets); its handle grows it to full height. */
+  .shell > aside.members.shown, .shell > aside.members.shown.watching { top: auto; left: 0; right: 0; bottom: 0; z-index: 3; width: auto; height: calc(var(--app-height, 100dvh) * 0.65);
+    border: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 24px rgb(0 0 0 / 30%); transition: height 160ms ease-out; }
+  .shell > aside.members.shown.full { height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 8px); }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
