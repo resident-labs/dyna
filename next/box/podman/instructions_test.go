@@ -30,7 +30,7 @@ func TestSyncInstructionRepairsRemoteContent(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "rooms", "room", "AGENTS.md")
 	for _, value := range []string{"first", "second"} {
-		if err := h.SyncInstruction(context.Background(), path, []byte(value)); err != nil {
+		if err := h.SyncInstructions(context.Background(), []InstructionFile{{Path: path, Data: []byte(value)}}); err != nil {
 			t.Fatal(err)
 		}
 		got, err := os.ReadFile(path)
