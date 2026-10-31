@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -64,6 +65,14 @@ func TestWatchForwardsAndAcknowledgesFrame(t *testing.T) {
 				if conn.Write(r.Context(), websocket.MessageText, reply) != nil {
 					return
 				}
+				for _, frame := range []string{
+					`{"method":"Page.screencastFrame","params":{"data":"b2xk","sessionId":18,"metadata":{"timestamp":1}}}`,
+					fmt.Sprintf(`{"method":"Page.screencastFrame","params":{"data":"bmV3","sessionId":19,"metadata":{"timestamp":%d}}}`, time.Now().Unix()+60),
+				} {
+					if conn.Write(r.Context(), websocket.MessageText, []byte(frame)) != nil {
+						return
+					}
+				}
 			case "Page.screencastFrameAck":
 				var params struct {
 					SessionID int `json:"sessionId"`
@@ -77,8 +86,10 @@ func TestWatchForwardsAndAcknowledgesFrame(t *testing.T) {
 	var out bytes.Buffer
 	done := make(chan error, 1)
 	go func() { done <- watch(ctx, server.URL, &out, func(context.Context) error { return nil }) }()
-	if id := <-acked; id != 17 {
-		t.Fatalf("ack session: %d", id)
+	for _, want := range []int{17, 18, 19} {
+		if id := <-acked; id != want {
+			t.Fatalf("ack session: got %d, want %d", id, want)
+		}
 	}
 	cancel()
 	<-done
@@ -92,8 +103,8 @@ func TestWatchForwardsAndAcknowledgesFrame(t *testing.T) {
 		t.Fatalf("screenshot: %q", shot)
 	}
 	var n uint32
-	if err := binary.Read(&out, binary.BigEndian, &n); err != nil || n != 4 || out.String() != "jpeg" {
-		t.Fatalf("frame: %d %q %v", n, out.String(), err)
+	if err := binary.Read(&out, binary.BigEndian, &n); err != nil || n != 3 || out.String() != "new" {
+		t.Fatalf("new frame: %d %q %v", n, out.String(), err)
 	}
 }
 
