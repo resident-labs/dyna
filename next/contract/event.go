@@ -95,6 +95,18 @@ type ShellJobEnded struct {
 	Tail     string     `json:"tail"`
 }
 
+type ComputerState string
+
+const (
+	ComputerRunning ComputerState = "running"
+	ComputerStopped ComputerState = "stopped"
+)
+
+type ComputerChanged struct {
+	Session SessionID     `json:"session"`
+	To      ComputerState `json:"to"`
+}
+
 type BoxChanged struct {
 	Box     BoxID     `json:"box"`
 	Session SessionID `json:"session"`
@@ -191,6 +203,9 @@ func (ImageBuilt) isEventBody()         {}
 
 func (ImageFailed) EventType() EventType { return "image.failed" }
 func (ImageFailed) isEventBody()         {}
+
+func (ComputerChanged) EventType() EventType { return "computer.changed" }
+func (ComputerChanged) isEventBody()         {}
 
 func (BoxChanged) EventType() EventType { return "box.changed" }
 func (BoxChanged) isEventBody()         {}
