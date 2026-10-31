@@ -4,7 +4,7 @@ import type { Request } from "./room.svelte.ts";
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
-  | { kind: "work"; key: string; events: Event[] }
+  | { kind: "work"; key: string; events: Event[]; until?: string }
   | { kind: "request"; key: string; request: Request }
   | { kind: "day"; key: string; at: string }
   | { kind: "new"; key: string };
@@ -66,8 +66,9 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   const fresh = (seq: number, from: Principal) => {
     if (unread && seq > since && from.kind !== "owner") { rows.push({ kind: "new", key: "new" }); unread = false; }
   };
-  const flush = () => {
-    if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work }); }
+  // until is the end of a turn that answers or fails in its own row, so the work row above it still knows when the work ended.
+  const flush = (until?: string) => {
+    if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work, ...until && { until } }); }
     work = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
@@ -118,6 +119,9 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A final reply that no post of the session already carried is the session's answer here.
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
+      // Only the end of a turn whose start the row holds ends the row's time.
+      const turn = event.body.turn;
+      if ((event.body.final && answer) || event.body.outcome === "failed") flush(work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined);
       if (event.body.final && answer) {
         post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
@@ -194,19 +198,24 @@ export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : 
 
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
-// One short line per work row in the owner's terms, such as "lead-web ran 2 turns" or
-// "builder-feed started, 3 sessions ran turns, 1 job"; the opened row lists each event.
-export function workSummary(events: Event[], name: Name): string {
+// One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
+// "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.
+// The time runs from the first turn's start to the last turn's end in the row, in whole minutes as T3 Code's
+// "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns".
+export function workSummary(events: Event[], name: Name, until?: string): string {
   const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
   const turns = new Map<string, Set<string>>();
-  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0;
+  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0, first = Infinity, last = -Infinity;
   for (const event of events) {
     switch (event.type) {
       case "session.started": started.push(name(event.body.session)); break;
       case "session.moved": moved.push(name(event.body.session)); break;
       case "session.closed": closed.push(name(event.body.session)); break;
       case "computer.changed": (event.body.to === "running" ? opened : shut).push(name(event.body.session)); break;
-      case "turn.started": case "turn.ended": turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn)); break;
+      case "turn.started": case "turn.ended":
+        turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn));
+        if (event.type === "turn.started") first = Math.min(first, Date.parse(event.at)); else last = Math.max(last, Date.parse(event.at));
+        break;
       case "shell.job.ended": jobs++; break;
       case "image.built": images++; break;
       case "image.failed": failedImages++; break;
@@ -216,18 +225,21 @@ export function workSummary(events: Event[], name: Name): string {
       case "rule.added": case "rule.removed": rules++; break;
     }
   }
+  if (until) last = Math.max(last, Date.parse(until));
   const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions` : list(sessions);
-  const [ran] = turns;
+  const minutes = Math.round((last - first) / 60_000);
+  const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
+  const ran = [...turns.values()].reduce((sum, set) => sum + set.size, 0);
   const parts = [
     started.length && `${who(started)} started`,
-    turns.size > 1 ? `${who([...turns.keys()].map(name))} ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
-    jobs && count(jobs, "job"), images && `${count(images, "image")} built`,
+    turns.size && `${who([...turns.keys()].map(name))} worked${last >= first ? ` for ${took}` : ""}`,
+    ran && count(ran, "turn"), jobs && count(jobs, "job"), images && `${count(images, "image")} built`,
     failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
     memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
     rules && count(rules, "rule change"),
     opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
   ].filter(part => typeof part === "string");
-  return parts.length ? parts.join(", ") : count(events.length, "update");
+  return parts.length ? parts.join(" · ") : count(events.length, "update");
 }
 
 // One plain line for an event inside an opened work row.
