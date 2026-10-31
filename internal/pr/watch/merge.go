@@ -406,6 +406,15 @@ func (s *Service) publishMerge(ctx context.Context, current Record, children []R
 	} else {
 		_, mergeErr = s.github(current.RoomID).command(ctx, "", false, "pr", "merge", "--merge", "--match-head-commit", current.Head, "--", current.URL)
 	}
+	if mergeErr == nil {
+		// Keep the direct publication visible until GitHub reports closure.
+		if err := s.Store.updateRecordOrAll(current.Key, func(*State) bool { return false }, func(st *State) error {
+			st.Records[current.Key].PublishedHead = current.Head
+			return nil
+		}); err != nil {
+			return false, err
+		}
+	}
 	if base != nil && mergeErr == nil {
 		// Publication, not GitHub's eventually consistent PR closure, owns this
 		// fact. The room post ID deduplicates a later reconciliation or retry.
