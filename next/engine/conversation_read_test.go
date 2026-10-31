@@ -17,9 +17,6 @@ func TestConversationRead(t *testing.T) {
 	for _, conversation := range []contract.Conversation{{Kind: contract.ConversationFeed}, {Kind: contract.ConversationDM, Session: session}} {
 		for _, seq := range []int64{10, 7} {
 			req := contract.ConversationReadRequest{Room: room, Conversation: conversation, Seq: seq}
-			if _, e := s.ConversationRead(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, req); e == nil || e.Code != contract.ErrForbidden {
-				t.Fatalf("session caller: %v", e)
-			}
 			if _, e := s.ConversationRead(ctx, owner, req); e != nil {
 				t.Fatal(e)
 			}

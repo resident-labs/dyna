@@ -193,9 +193,6 @@ func (s *Service) roomAccess(ctx context.Context, caller contract.Principal, roo
 var mentionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req contract.RoomCreateRequest) (contract.RoomCreateResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.RoomCreateResponse{}, forbidden()
-	}
 	if !mentionName.MatchString(req.Name) {
 		return contract.RoomCreateResponse{}, invalid("room name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
 	}
@@ -215,9 +212,6 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 }
 
 func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, req contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.RoomRepoAddResponse{}, forbidden()
-	}
 	owner, name, ok := strings.Cut(string(req.Repo), "/")
 	ownerOK, _ := regexp.MatchString(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`, owner)
 	nameOK, _ := regexp.MatchString(`^[A-Za-z0-9_.-]+$`, name)
@@ -234,9 +228,6 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 }
 
 func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.RoomReposResponse{}, forbidden()
-	}
 	repos, err := s.store.RoomRepos(ctx, req.Room)
 	if errors.Is(err, sql.ErrNoRows) {
 		return contract.RoomReposResponse{}, invalid("unknown room")
@@ -983,9 +974,6 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 }
 
 func (s *Service) ConversationRead(ctx context.Context, caller contract.Principal, req contract.ConversationReadRequest) (contract.ConversationReadResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.ConversationReadResponse{}, forbidden()
-	}
 	if req.Seq < 0 || (req.Conversation.Kind != contract.ConversationFeed && req.Conversation.Kind != contract.ConversationDM) {
 		return contract.ConversationReadResponse{}, invalid("invalid conversation or seq")
 	}
