@@ -19,9 +19,7 @@ func TestTickCopiesOnlyChangedRowsAcrossPhasesAndTicks(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.tick()
-	// An idle tick that lands on a safety poll slot writes FullChecked, which copies one row.
-	e.holdSafetyPoll()
-	e.tick() // Include the previous tick's delivered notice and the poll-time write in the retained view.
+	e.tick() // Include the previous tick's delivered notice in the retained view.
 	whole, rows := 0, 0
 	read, copyRow := readStore, copyTickRecord
 	readStore = func(root string) (State, error) { whole++; return read(root) }

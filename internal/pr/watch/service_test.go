@@ -325,11 +325,10 @@ func stallStacks(t *testing.T) {
 	t.Cleanup(func() { timer.Stop() })
 }
 
-// fixtureClock is the real clock minus a week, once per test process, on a minute
-// boundary as nextPollTime expects. state.Write drops closed records older than 14
-// days, so a fixed date would expire, and the clock must stay inside that window.
-// One value per process keeps repeated runs identical.
-var fixtureClock = time.Now().UTC().Add(-7 * 24 * time.Hour).Truncate(time.Minute)
+// fixtureClock is 12:00 UTC of the previous day, once per test process. The day
+// boundary keeps every 9- and 10-minute poll slot at the same phase, and the rolling
+// date stays inside the 14-day retention window that state.Write applies.
+var fixtureClock = time.Now().UTC().Truncate(24 * time.Hour).Add(-12 * time.Hour)
 
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
@@ -463,21 +462,6 @@ func (e *testEnv) tick() {
 	e.clock = e.clock.Add(time.Minute)
 	e.write()
 	if _, err := e.s.Tick(context.Background()); err != nil {
-		e.t.Fatal(err)
-	}
-}
-
-// holdSafetyPoll moves each record's next safety poll an hour past the clock.
-// The safety poll runs on fixed clock minutes, so a tick that lands on one
-// would write the record and change the counts these tests expect.
-func (e *testEnv) holdSafetyPoll() {
-	e.t.Helper()
-	if err := e.s.Store.update(func(st *State) error {
-		for key := range st.Records {
-			st.Records[key].Polling.FullChecked = e.clock.Add(time.Hour)
-		}
-		return nil
-	}); err != nil {
 		e.t.Fatal(err)
 	}
 }
