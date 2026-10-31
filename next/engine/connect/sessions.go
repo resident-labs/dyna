@@ -61,15 +61,16 @@ func randomSecret() (string, error) {
 	}
 	return b64.EncodeToString(b[:]), nil
 }
-func (s *Sessions) link(ctx context.Context) (Link, error) {
+func (s *Sessions) link(ctx context.Context) (Link, int64, error) {
 	state, err := s.store.ConnectLink(ctx)
 	if err != nil || !state.Linked {
-		return Link{}, errors.New("not linked")
+		return Link{}, 0, errors.New("not linked")
 	}
-	return s.files.Link()
+	l, err := s.files.Link()
+	return l, state.Generation, err
 }
 func (s *Sessions) ManagedOrigin(ctx context.Context) string {
-	l, err := s.link(ctx)
+	l, _, err := s.link(ctx)
 	if err != nil {
 		return ""
 	}
@@ -137,29 +138,19 @@ func (s *Sessions) relay(l Link) (*Relay, error) {
 	}
 	return &Relay{Base: l.Relay, Key: key, Client: s.client, Now: s.now}, nil
 }
-func (s *Sessions) relayClaims(r *http.Request, op string) (Link, RelayClaims, error) {
-	state, err := s.store.ConnectLink(r.Context())
-	if err != nil || !state.Linked {
-		return Link{}, RelayClaims{}, errors.New("not linked")
-	}
-	l, err := s.files.Link()
-	if err != nil {
-		return l, RelayClaims{}, err
-	}
+func (s *Sessions) relayClaims(r *http.Request, op string, l Link, generation int64) (RelayClaims, *Relay, error) {
 	if r.Method != http.MethodPost {
-		return l, RelayClaims{}, errors.New("use POST")
+		return RelayClaims{}, nil, errors.New("use POST")
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8193))
 	if err != nil || len(body) > 8192 {
-		return l, RelayClaims{}, errors.New("bad relay request")
+		return RelayClaims{}, nil, errors.New("bad relay request")
 	}
-	keys, err := s.files.Keys()
-	info, statErr := os.Stat(filepath.Join(s.files.dir, "jwks.json"))
+	var relay *Relay
+	keys, err := s.files.Keys(s.now())
 	var c RelayClaims
-	if err == nil && statErr == nil && s.now().Sub(info.ModTime()) < 7*24*time.Hour {
+	if err == nil {
 		c, err = VerifyRelay(strings.TrimSpace(string(body)), op, l.Relay, l.Machine, keys, s.now())
-	} else {
-		err = errors.New("relay keys expired")
 	}
 	if err != nil {
 		s.mu.Lock()
@@ -169,27 +160,27 @@ func (s *Sessions) relayClaims(r *http.Request, op string) (Link, RelayClaims, e
 		}
 		s.mu.Unlock()
 		if !retry {
-			return l, RelayClaims{}, errors.New("relay keys unavailable")
+			return RelayClaims{}, nil, errors.New("relay keys unavailable")
 		}
-		relay, err := s.relay(l)
+		relay, err = s.relay(l)
 		if err != nil {
-			return l, RelayClaims{}, err
+			return RelayClaims{}, nil, err
 		}
 		keys, err = relay.FetchKeys(r.Context())
 		if err != nil {
-			return l, RelayClaims{}, err
+			return RelayClaims{}, nil, err
 		}
 		if err = s.files.SaveKeys(keys); err != nil {
-			return l, RelayClaims{}, err
+			return RelayClaims{}, nil, err
 		}
 		c, err = VerifyRelay(strings.TrimSpace(string(body)), op, l.Relay, l.Machine, keys, s.now())
 		if err != nil {
-			return l, c, err
+			return c, relay, err
 		}
 	}
-	c.Generation = state.Generation
+	c.Generation = generation
 	err = s.store.ConsumeConnectNonceForLink(r.Context(), c.Epoch, c.Generation, "relay:"+c.Nonce, s.now(), time.Unix(c.Exp, 0).Add(time.Minute))
-	return l, c, err
+	return c, relay, err
 }
 func (s *Sessions) proof(ctx context.Context, token, origin, path, want string, epoch, generation int64) error {
 	p, err := verifyProof(token, origin+path, s.now())
@@ -211,7 +202,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			fail(w, 405, "use GET")
 			return true
 		}
-		l, err := s.link(r.Context())
+		l, _, err := s.link(r.Context())
 		if err != nil {
 			fail(w, 404, "not linked")
 			return true
@@ -234,7 +225,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			Sig     string `json:"sig"`
 		}{l.Machine, origin, nonce, b64.EncodeToString(sig)})
 	case "/connect/v1/mint":
-		l, err := s.link(r.Context())
+		l, generation, err := s.link(r.Context())
 		if err != nil || l.App != origin {
 			fail(w, 404, "not found")
 			return true
@@ -243,7 +234,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			fail(w, 429, "too many sign-ins")
 			return true
 		}
-		l, c, err := s.relayClaims(r, "mint")
+		c, relay, err := s.relayClaims(r, "mint", l, generation)
 		if err != nil {
 			fail(w, 403, "invalid relay request")
 			return true
@@ -257,10 +248,12 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			fail(w, 503, "unavailable")
 			return true
 		}
-		relay, err := s.relay(l)
-		if err != nil {
-			fail(w, 503, "unavailable")
-			return true
+		if relay == nil {
+			relay, err = s.relay(l)
+			if err != nil {
+				fail(w, 503, "unavailable")
+				return true
+			}
 		}
 		s.mu.Lock()
 		for k, v := range s.codes {
@@ -276,7 +269,12 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			Sig  string `json:"sig"`
 		}{code, b64.EncodeToString(sig)})
 	case "/connect/v1/revoke":
-		_, c, err := s.relayClaims(r, "revoke")
+		l, generation, err := s.link(r.Context())
+		if err != nil {
+			fail(w, 403, "invalid relay request")
+			return true
+		}
+		c, _, err := s.relayClaims(r, "revoke", l, generation)
 		if err != nil {
 			fail(w, 403, "invalid relay request")
 			return true
