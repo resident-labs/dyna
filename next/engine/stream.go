@@ -113,19 +113,37 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				}
 				continue
 			}
+			unlock := s.lockBox(session.ID)
+			allowed, err := s.store.CanDispatch(ctx, session.ID)
+			if err != nil {
+				unlock()
+				return
+			}
+			if !allowed {
+				unlock()
+				select {
+				case <-sub:
+					continue
+				case <-ctx.Done():
+					return
+				}
+			}
 			s.mu.Lock()
 			turnID, err := id("turn_", s.now())
 			if err != nil {
 				s.mu.Unlock()
+				unlock()
 				return
 			}
 			started, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
 			if err != nil {
 				s.mu.Unlock()
+				unlock()
 				return
 			}
 			turn, deliveries, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
 			s.mu.Unlock()
+			unlock()
 			if err != nil {
 				return
 			}

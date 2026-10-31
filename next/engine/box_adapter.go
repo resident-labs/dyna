@@ -20,4 +20,6 @@ type BoxSpec struct {
 type BoxAdapter interface {
 	Create(context.Context, BoxSpec) (string, error)
 	Remove(context.Context, contract.BoxID) error
+	Start(context.Context, contract.BoxID) error
+	Stop(context.Context, contract.BoxID) error
 }

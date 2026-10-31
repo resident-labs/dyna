@@ -69,20 +69,35 @@ func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 	if err = b.sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", err
 	}
-	boxCtx, cancel := context.WithCancel(b.ctx)
-	b.mu.Lock()
-	b.cancel[spec.Box] = cancel
-	b.mu.Unlock()
-	go b.run(boxCtx, spec.Box)
+	if err := b.Start(ctx, spec.Box); err != nil {
+		return "", err
+	}
 	return "fake", nil
 }
-func (b *boxes) Remove(_ context.Context, id contract.BoxID) error {
+func (b *boxes) Start(_ context.Context, id contract.BoxID) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.cancel[id] != nil {
+		return nil
+	}
+	boxCtx, cancel := context.WithCancel(b.ctx)
+	b.cancel[id] = cancel
+	go b.run(boxCtx, id)
+	return nil
+}
+func (b *boxes) Stop(_ context.Context, id contract.BoxID) error {
 	b.mu.Lock()
 	if cancel := b.cancel[id]; cancel != nil {
 		cancel()
 		delete(b.cancel, id)
 	}
 	b.mu.Unlock()
+	return nil
+}
+func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
+	if err := b.Stop(ctx, id); err != nil {
+		return err
+	}
 	return b.sockets.RemoveBox(id)
 }
 func (b *boxes) run(ctx context.Context, id contract.BoxID) {
