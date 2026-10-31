@@ -52,6 +52,7 @@ type Boxes struct {
 	InstructionsDir     string
 	instructionsMu      sync.Mutex
 	hostRunner          podman.Runner
+	machineIDFile       string
 	instructionFailures map[contract.HostName]uint64
 	Version             string
 	PiTarball           []byte
@@ -285,7 +286,7 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			if err != nil {
 				return nil, err
 			}
-			same, err := engineHost(ctx, h)
+			same, err := b.engineHost(ctx, h)
 			if err != nil {
 				return nil, err
 			}
@@ -339,7 +340,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err := b.syncInstructions(ctx, h); err != nil {
 		return false, err
 	}
-	same, err := engineHost(ctx, h)
+	same, err := b.engineHost(ctx, h)
 	if err != nil {
 		return false, err
 	}
@@ -704,8 +705,12 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.
 	return slice, c
 }
 
-func engineHost(ctx context.Context, h *podman.Host) (bool, error) {
-	local, err := os.ReadFile("/etc/machine-id")
+func (b *Boxes) engineHost(ctx context.Context, h *podman.Host) (bool, error) {
+	path := b.machineIDFile
+	if path == "" {
+		path = "/etc/machine-id"
+	}
+	local, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
