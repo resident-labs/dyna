@@ -142,6 +142,22 @@ test("a failed jump keeps the sent post and shows the load error", async () => {
   } finally { server.restore(); }
 });
 
+test("fill loads older pages for sparse rows but never leaves the present", async () => {
+  const server = engine(5000);
+  // A busy DM leaves the feed two posts, at 1200 and 4800.
+  server.posts.forEach(({ seq }, i) => {
+    if (seq !== 1200 && seq !== 4800) server.posts[i] = event(seq, { type: "post.created", body: { text: "dm", home: dm } });
+  });
+  try {
+    const window = await opened();
+    await window.fill(async () => window.posts().length > 0);
+    assert.deepEqual([window.oldest, window.atPresent], [4601, true]);
+    await window.fill(async () => false);
+    assert.deepEqual([window.oldest, window.newest, window.atPresent, window.hasOlder], [4001, 5000, true, true]);
+    assert.equal(server.requests.filter(request => request.startsWith("before")).length, 5);
+  } finally { server.restore(); }
+});
+
 test("a DM window reads and keeps only the events whose home is that DM", async () => {
   const server = engine(1500);
   server.posts.push(event(1501, { type: "post.created", body: { text: "ask", home: dm } }));
