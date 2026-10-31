@@ -38,7 +38,6 @@ import type {
 	ImageContent,
 	Model,
 	ProviderHeaders,
-	SystemMessage,
 	TextContent,
 	ToolResultMessage,
 	Usage,
@@ -526,7 +525,6 @@ export class AgentSession {
 		this._installAgentRequestProjection();
 		this._installAgentBoundaryHooks();
 		this._installHiddenDeclarationsProjection();
-		this._installAgentForcedPromptProjection();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -1807,14 +1805,8 @@ export class AgentSession {
 	}
 
 	/**
-	 * Apply a prompt and tool loadout for the next request. Sets the executable tools and
-	 * returns a system message patching the prompt sections the model currently has (replayed
-	 * from `messages`), or undefined when the prompt is unchanged. Tool changes are declared by
-	 * the agent loop before the request.
-	 *
-	 * A forced prompt does not affect the transcript: the structured sections are still diffed
-	 * and persisted, and the forced text is projected onto the request by
-	 * {@link _installAgentForcedPromptProjection}.
+	 * Apply the tool loadout and produce the initial head or a context update.
+	 * The active branch records the last delivered sections.
 	 */
 	private _preparePromptAndToolLoadout(
 		options: NormalizedBuildSystemPromptOptions,
@@ -1830,16 +1822,6 @@ export class AgentSession {
 		return createContextUpdate(previous ?? {}, sections);
 	}
 
-	/**
-	 * Send a forced prompt as the provider's leading system prompt without recording it.
-	 *
-	 * A `before_agent_start` handler that returns `systemPrompt` needs that exact text at the
-	 * head of the request; a mid-conversation system message would leave the original prompt
-	 * in place. The forced text is a rendering of the current prompt, so the transcript keeps
-	 * its structured sections and the request is projected instead: the system messages
-	 * collapse into one head holding the forced text and the current tools. Runs after the
-	 * `context` extension handlers.
-	 */
 	/**
 	 * Remove the declarations that `prepareLoadout` hooks hide from every request. The whole
 	 * transcript is filtered with the current set, so the projected declarations stay consistent
@@ -1862,23 +1844,6 @@ export class AgentSession {
 					...(removed.length > 0 ? { toolsRemoved: removed } : {}),
 				};
 			});
-		};
-	}
-
-	private _installAgentForcedPromptProjection(): void {
-		const previousTransformContext = this.agent.transformContext;
-		this.agent.transformContext = async (messages, signal) => {
-			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
-			const forced = this._runSystemPromptOptions?.forceSystemPrompt;
-			if (forced === undefined) return transformed;
-			const current = getCurrentSystemMessage(transformed);
-			const head: SystemMessage = {
-				role: "system",
-				content: forced,
-				...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
-				timestamp: current?.timestamp ?? Date.now(),
-			};
-			return [head, ...transformed.filter((message) => message.role !== "system")];
 		};
 	}
 
