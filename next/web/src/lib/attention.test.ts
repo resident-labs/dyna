@@ -1,0 +1,31 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { Attention } from "./attention.svelte.ts";
+import type { Event, EventBody } from "./contract.gen.ts";
+
+const event = (seq: number, room: string, body: EventBody): Event => ({ seq, id: String(seq), at: "", room, from: { kind: "owner" }, ...body });
+const card = { title: "Push", target: { kind: "room", name: "a" } } as const;
+const decision = { by: { kind: "owner" }, approved: true, at: "" } as const;
+
+test("room.list seeds each room's waiting requests and working sessions, and the owner stream updates them", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [
+    { id: "a", name: "A", waiting: ["o1"], working: ["s1"] }, { id: "b", name: "B", waiting: null, working: null }] }));
+  const urls: string[] = [];
+  try {
+    const attention = new Attention((room, after, apply) => { urls.push(`${room}/${after()}`); return () => {}; });
+    await attention.open();
+    assert.deepEqual(urls, ["undefined/5"]);
+    // Events at or before the list's seq are already in it.
+    attention.apply(event(5, "a", { type: "turn.ended", body: { session: "s1", turn: "t", outcome: "completed", usage: { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } }));
+    attention.apply(event(6, "b", { type: "op.requested", body: { id: "o2", kind: "k", by: { kind: "owner" }, class: "owner", card, expires: "" } }));
+    attention.apply(event(7, "b", { type: "op.requested", body: { id: "o3", kind: "k", by: { kind: "owner" }, class: "agent", card, expires: "" } }));
+    attention.apply(event(8, "a", { type: "op.decided", body: { id: "o1", state: "approved", decision } }));
+    attention.apply(event(9, "b", { type: "turn.started", body: { session: "s2", turn: "t", inputs: [] } }));
+    assert.deepEqual([[...attention.waiting.get("a")!], [...attention.waiting.get("b")!]], [[], ["o2"]]);
+    assert.deepEqual([[...attention.working.get("a")!], [...attention.working.get("b")!]], [["s1"], ["s2"]]);
+    // A session closed during its turn sends no turn.ended.
+    attention.apply(event(10, "a", { type: "session.closed", body: { session: "s1" } }));
+    assert.equal(attention.working.get("a")!.size, 0);
+  } finally { globalThis.fetch = original; }
+});
