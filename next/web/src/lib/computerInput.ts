@@ -211,15 +211,20 @@ export class InputQueue {
   }
 }
 
-// A mouse button the owner holds on the computer. Control or the pointer may end outside the picture, so the release
+// The mouse buttons the owner holds on the computer. Control or the pointer may end outside the picture, so a release
 // goes where the pointer last was inside it, and control never ends with a button held there.
 export class MouseHold {
-  private held: { button: MouseButton; at: Point } | undefined;
-  down(button: MouseButton, at: Point): void { this.held = { button, at }; }
-  move(at: Point): void { if (this.held) this.held.at = at; }
-  release(): ComputerInput[] {
-    const held = this.held;
-    this.held = undefined;
-    return held ? [{ kind: "mouse.up", ...held.at, button: held.button }] : [];
+  private held = new Map<MouseButton, Point>();
+  down(button: MouseButton, at: Point): void { this.held.set(button, at); }
+  move(at: Point): void { for (const button of this.held.keys()) this.held.set(button, at); }
+  // One button, or every held button when none is named.
+  release(button?: MouseButton): ComputerInput[] {
+    const out: ComputerInput[] = [];
+    for (const [held, at] of this.held) {
+      if (button !== undefined && held !== button) continue;
+      out.push({ kind: "mouse.up", ...at, button: held });
+      this.held.delete(held);
+    }
+    return out;
   }
 }
