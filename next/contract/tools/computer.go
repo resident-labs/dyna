@@ -1,11 +1,11 @@
 package tools
 
-func computerEntries() []Entry {
-	return []Entry{
-		local("computer", "open", ComputerOpen, typ[OpenRequest](), "Open url in the box computer.", "computer open"),
-		local("computer", "click", ComputerClick, typ[SelectorRequest](), "Click the element at selector.", "computer click"),
-		local("computer", "type", ComputerType, typ[TypeRequest](), "Type text into the element at selector.", "computer type"),
-		local("computer", "text", ComputerText, typ[SelectorRequest](), "Read page text. Omit selector to read the whole page.", "computer text"),
-		local("computer", "screenshot", ComputerScreenshot, typ[FileRequest](), "Save a screenshot to file.", "computer screenshot"),
+func computerActions() []BoxAction {
+	return []BoxAction{
+		{Tool: "computer", Name: "open", Handler: ComputerOpen, Request: typ[OpenRequest](), Help: "Open url in the box computer.", CLI: []string{"computer open"}},
+		{Tool: "computer", Name: "click", Handler: ComputerClick, Request: typ[SelectorRequest](), Help: "Click the element at selector.", CLI: []string{"computer click"}},
+		{Tool: "computer", Name: "type", Handler: ComputerType, Request: typ[TypeRequest](), Help: "Type text into the element at selector.", CLI: []string{"computer type"}},
+		{Tool: "computer", Name: "text", Handler: ComputerText, Request: typ[SelectorRequest](), Help: "Read page text. Omit selector to read the whole page.", CLI: []string{"computer text"}},
+		{Tool: "computer", Name: "screenshot", Handler: ComputerScreenshot, Request: typ[FileRequest](), Help: "Save a screenshot to file.", CLI: []string{"computer screenshot"}},
 	}
 }

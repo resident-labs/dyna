@@ -9,13 +9,19 @@ import (
 
 func TestRegistryCLIBindings(t *testing.T) {
 	root := newRootCmd()
-	for _, entry := range tools.Entries() {
-		for _, binding := range entry.CLI {
+	check := func(cli []string) {
+		for _, binding := range cli {
 			cmd, rest, err := root.Find(strings.Fields(binding))
 			if err != nil || len(rest) != 0 || cmd == root {
 				t.Errorf("missing CLI binding %s", binding)
 			}
 		}
+	}
+	for _, a := range tools.Actions() {
+		check(a.CLI)
+	}
+	for _, b := range tools.BoxActions() {
+		check(b.CLI)
 	}
 }
 
