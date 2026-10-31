@@ -25,6 +25,8 @@
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import RulesPanel from "./lib/ui/RulesPanel.svelte";
+  import ActiveNow from "./lib/ui/ActiveNow.svelte";
+  import { activeRooms } from "./lib/active.ts";
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
@@ -34,6 +36,8 @@
   let rooms = $derived([...attention.rooms.values()]);
   // Distinct initials for every room avatar, so two rooms never look alike on the rail.
   let initials = $derived(distinctInitials(rooms.map(item => item.name)));
+  // Home's Active now column, in the same place as a room's sessions panel. With no active room it leaves, and the page takes its width.
+  let activity = $derived(activeRooms(attention));
   // While the engine is not reachable, open runs again by itself: after a growing wait while the page is visible, and at
   // once when a hidden page becomes visible again. Try again runs it at once.
   // An open runs alone, so Try again or a wake during one adds no second stream; none starts after stop.
@@ -369,6 +373,10 @@
     else if (refocus) menuButton?.focus({ focusVisible: !tapped });
   }
   $effect(() => { if (!phone.current) drawer = false; });
+  // A room's open sheet closes on the way Home, and Home's own closes when its last active room leaves.
+  $effect(() => { if (!room) panel = false; });
+  // Before the DOM update, so showPanel still sees focus in the sheet that is about to leave.
+  $effect.pre(() => { if (!room && !activity.active.length && panel) { if (wide.current) panel = false; else void showPanel(false); } });
   // On a phone the sessions panel is a bottom sheet that fits its content, up to about two thirds of the height (fix 1). Its handle drags it to
   // full height, or down to its first height and then closed; a tap toggles the height. The tree already puts what
   // needs the owner first and folds idle sessions.
@@ -393,7 +401,8 @@
     if (wide.current) tucked = !open; else panel = open;
     if (!open) sheetFull = false;
     await tick();
-    if (open) members?.focus({ focusVisible: !tapped }); else if (held) toggle?.focus({ focusVisible: !tapped });
+    // Home's strip leaves with its last active room, and then the menu button takes focus.
+    if (open) members?.focus({ focusVisible: !tapped }); else if (held) (toggle?.isConnected ? toggle : menuButton)?.focus({ focusVisible: !tapped });
   }
   // The sessions the feed composer offers after @: the root first, then by name. A DM offers none.
   let mentions = $derived(session ? [] : [...store?.sessions.values() ?? []].filter(mentionable)
@@ -433,7 +442,12 @@
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
-<div class="shell" class:open={room} class:drawer class:tucked={wide.current && tucked}>
+{#snippet sheetHandle(of: string)}
+  <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
+    onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>
+{/snippet}
+
+<div class="shell" class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
@@ -466,7 +480,7 @@
         {/each}
       {/if}</nav>{/if}
   </aside>
-  {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : "Close the sessions"}
+  {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
   <main inert={drawer || (panel && phone.current) || covered}>
     <header>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
@@ -498,7 +512,8 @@
     {:else}<div class="feed">
       {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
-      {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} />
+      {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active}
+        onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable && unavailable !== "room"}<Blocked kind={unavailable} onretry={unavailable === "unreachable" ? reopen : undefined} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
@@ -520,8 +535,7 @@
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered}>
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
-      {#if phone.current}<button type="button" class="handle" aria-label={sheetFull ? "Shrink the sessions sheet" : "Expand the sessions sheet"}
-        onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>{/if}
+      {#if phone.current}{@render sheetHandle("sessions")}{/if}
       {#if session && !closed}<header class="tabs">
         <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
@@ -553,6 +567,12 @@
       {#if panelShown}<HostFoot {navigate} />{/if}
     </aside>
     {#if watching && !docked}{@render computerView(watching)}{/if}
+  {:else if activity.active.length}
+    <aside class="members" id="active" class:shown={panel} class:full={sheetFull} aria-label="Active now" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
+      {#if phone.current}{@render sheetHandle("active rooms")}{/if}
+      <header><strong>Active now</strong><span class="count active">{activity.active.length}</span></header>
+      <div class="tree rooms"><ActiveNow {...activity} {initials} navigate={openSession} /></div>
+    </aside>
   {/if}
 </div>
 
@@ -560,7 +580,7 @@
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
-  aside.members > header strong { font-size: 16px; }
+  aside.members > header strong, .count.active { font-size: 16px; }
   /* The header's face rings its dot in the header's color. */
   main > header { --ring: var(--bg); }
   .tabs { gap: 4px; }
@@ -637,6 +657,7 @@
   .pages .count, .pages :global(.count) { position: static; margin-left: auto; }
   a.member[aria-current="page"] { background: var(--selected); }
   .tree { flex: 1; min-height: 0; }
+  .rooms { padding: 8px; }
   .row { position: relative; display: flex; align-items: center; }
   /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same
      button, but it sits on the row line beside the chevron. */
