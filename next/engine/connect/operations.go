@@ -222,7 +222,10 @@ func (o *Operations) Unlink(ctx context.Context) error {
 			return err
 		}
 		if err := (&Relay{Base: link.Relay, Key: key}).Unlink(ctx, link.Machine); err != nil {
-			return err
+			var relayErr *RelayError
+			if !errors.As(err, &relayErr) || relayErr.Status != 410 {
+				return err
+			}
 		}
 	}
 	if err := o.state.UnlinkConnect(ctx); err != nil {
