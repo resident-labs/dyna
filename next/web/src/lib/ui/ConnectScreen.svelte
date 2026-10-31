@@ -74,7 +74,7 @@
       <h1>{pin ? "Signed out" : "Sign in to Dyna"}</h1>
       <p>{pin?.name ? "Continue to your machine." : `Continue to ${location.host}.`}</p>
       <button bind:this={button} class="primary" disabled={busy} onclick={() => void begin()}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.6"/><path d="M3 20a6 6 0 0 1 9.5-4.8"/><circle cx="17.5" cy="14" r="2.4"/><path d="M17.5 16.4V22M17.5 19.5h2.2"/></svg> Sign in with Resident Labs</button>
-      <p class="small">You sign in on <code>{allowedOrigin(greeting.relay) ? new URL(greeting.relay).host : "an invalid address"}</code> and come back here.{#if !pin} This browser remembers the machine key for next time.{/if}</p>
+      <p class="small">You sign in on <code>{allowedOrigin(greeting.relay) ? new URL(greeting.relay).host : "an invalid address"}</code> and come back here.{#if !pin}{" "}This browser remembers the machine key for next time.{/if}</p>
       <div class="or"><span></span>or<span></span></div>
       <button class="outline" onclick={() => { pairing = true; }}>Pair with a code</button>
       <p class="small">A code comes from Settings › Sharing &amp; access on a signed-in device, or from <code>dyna device pair</code> on the machine.</p>

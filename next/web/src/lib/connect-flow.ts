@@ -20,7 +20,7 @@ export async function beginConnect(greeting: Hello): Promise<Landing | undefined
   sessionStorage.setItem("dyna-connect-machine", greeting.machine);
   sessionStorage.setItem("dyna-connect-key", greeting.key);
   sessionStorage.setItem("dyna-connect-relay", greeting.relay);
-  sessionStorage.setItem(returnKey, location.pathname + location.search);
+  sessionStorage.setItem(returnKey, location.pathname === "/connect" ? sessionStorage.getItem(returnKey) ?? "/" : location.pathname + location.search);
   const params = new URLSearchParams({ machine: greeting.machine, origin: location.origin, jkt: await thumbprint(await deviceKey()), state });
   location.assign(greeting.relay + "/open?" + params);
 }
