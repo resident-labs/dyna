@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { APIError, call } from "../client.ts";
-  import { instructionDiff } from "../instruction-diff.ts";
+  import { instructionDiff, instructionHunks, type DiffLine } from "../instruction-diff.ts";
   import { recoverInstructionDraft } from "../instruction-draft.ts";
   import StatusPill from "./StatusPill.svelte";
 
-  let { room, roomName, sessions, onclose }: { room: string; roomName: string; sessions: number; onclose: () => void } = $props();
+  let { room, roomName, rooms, sessions, onclose }: { room: string; roomName: string; rooms: number; sessions: number; onclose: () => void } = $props();
   let selected = $state<"room" | "global">("room");
   let base = $state(""), hash = $state(""), savedAt = $state<string>(), draft = $state("");
   let other = $state<{ text: string; hash: string; savedAt?: string | null }>();
@@ -21,6 +21,7 @@
   let changed = $derived(changes.filter(line => line.kind !== "same"));
   let tokens = $derived(Math.ceil(draft.length / 4));
   let delta = $derived(tokens - Math.ceil(base.length / 4));
+  let peerTokens = $derived(Math.ceil(peer.text.length / 4));
   let savedLabel = $derived(savedAt ? `Saved ${relative(savedAt)}` : "Not saved yet");
   function relative(value: string) {
     const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
@@ -122,6 +123,14 @@
   function select(which: "room" | "global") { if (!saving && selected !== which) { selected = which; mobile = "edit"; void load(); } }
 </script>
 
+{#snippet diffView(lines: DiffLine[])}
+  {#each instructionHunks(lines) as hunk}
+    <button class="line-number" type="button" onclick={() => void jump(hunk.line)}>Line {hunk.line}</button>
+    {#each hunk.lines as line}
+      <div class:add={line.kind === "add"} class:remove={line.kind === "remove"} class:same={line.kind === "same"} class="diff"><span>{line.kind === "add" ? "+" : line.kind === "remove" ? "−" : ""}</span>{line.text}</div>
+    {/each}
+  {/each}
+{/snippet}
 <svelte:window onkeydown={keys} />
 <div class="instructions">
   <header>
@@ -140,48 +149,38 @@
     {#if saveFailed}<p class="error" role="status">Your changes were not saved. <button type="button" onclick={() => void save()}>Retry</button></p>{/if}
     <nav class="mobile-tabs" aria-label="Editor view">
       <button type="button" class:active={mobile === "edit"} onclick={() => mobile = "edit"}>Edit</button>
-      <button type="button" class:active={mobile === "changes"} onclick={() => mobile = "changes"}>Changes {changed.length || ""}</button>
+      <button type="button" class:active={mobile === "changes"} onclick={() => mobile = "changes"}>Changes <span>{changed.length || ""}</span></button>
     </nav>
     <div class="body">
       <section class:mobile-hidden={mobile !== "edit"} class="edit" aria-label="Instruction editor">
-        <p class="facts">{selected === "room" ? `Every session in ${roomName} reads this file after the file for all rooms.` : "Every session reads this file first."}
+        <p class="facts">{selected === "room" ? `Every session in ${roomName} reads this file at its next run, after the file for all rooms.` : "Every session reads this file first."}
           <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens <span>·</span> {savedLabel.toLowerCase()}</p>
         <label class="find">Find in file <input bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); void find(); } }} placeholder="Find text" /></label>
         <textarea bind:this={editor} value={draft} oninput={event => { draft = event.currentTarget.value; keepDraft(); }} spellcheck="false"
           placeholder={selected === "room" ? `Write instructions for every session in ${roomName}` : "Write instructions for every session"} aria-label="Markdown instructions"></textarea>
-        <p class="editor-foot">{draft === base ? savedLabel : `${changed.length} lines changed`}</p>
       </section>
       <aside class:mobile-hidden={mobile !== "changes"} aria-label="Instruction review">
         {#if other}
           <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
           <div class="review"><strong>Their change</strong>
-            {#each instructionDiff(base, other.text).filter(line => line.kind !== "same") as line}
-              <button class="line-number" type="button" onclick={() => void jump(line.line)}>Line {line.line}</button>
-              <div class:add={line.kind === "add"} class:remove={line.kind === "remove"} class="diff"><span>{line.kind === "add" ? "+" : "−"}</span>{line.text}</div>
-            {/each}
+            {@render diffView(instructionDiff(base, other.text))}
             <strong>Yours</strong>
-            {#each changed as line}
-              <button class="line-number" type="button" onclick={() => void jump(line.line)}>Line {line.line}</button>
-              <div class:add={line.kind === "add"} class:remove={line.kind === "remove"} class="diff"><span>{line.kind === "add" ? "+" : "−"}</span>{line.text}</div>
-            {/each}
+            {@render diffView(changes)}
           </div>
         {:else if changed.length}
           <div class="side-head"><strong>What sessions get</strong> <span>{changed.length} lines changed</span></div>
           <div class="review">
             <p>{delta >= 0 ? "Adds" : "Removes"} about {Math.abs(delta).toLocaleString()} tokens {delta >= 0 ? "to" : "from"} every prompt · {sessions} open sessions in {roomName}</p>
-            {#each changed as line}
-              <button class="line-number" type="button" onclick={() => void jump(line.line)}>Line {line.line}</button>
-              <div class:add={line.kind === "add"} class:remove={line.kind === "remove"} class="diff"><span>{line.kind === "add" ? "+" : "−"}</span>{line.text}</div>
-            {/each}
+            {@render diffView(changes)}
             <p>Running sessions get these changed lines at their next run.</p>
           </div>
         {:else}
           <div class="side-head"><strong>Read by</strong></div>
           <div class="review"><strong>Sessions in {roomName} read, in this order</strong>
-            <ol><li>All rooms <span>{selected === "global" ? (!savedAt ? "No file yet" : `about ${tokens.toLocaleString()} tokens`) : (!peer.savedAt ? "No file yet" : `about ${Math.ceil(peer.text.length / 4).toLocaleString()} tokens`)}</span></li>
-              <li>{roomName} <span>{selected === "room" ? (!savedAt ? "No file yet" : `about ${tokens.toLocaleString()} tokens`) : (!peer.savedAt ? "No file yet" : `about ${Math.ceil(peer.text.length / 4).toLocaleString()} tokens`)}</span></li>
-              <li>Each repository’s AGENTS.md</li></ol>
-            <p>Changes reach running sessions at their next run.</p>
+            <ol><li><b>All rooms</b> <span>about {(selected === "global" ? tokens : peerTokens).toLocaleString()} tokens</span><small>Every session in {rooms} {rooms === 1 ? "room" : "rooms"}</small></li>
+              <li><b>{roomName}</b> <span>about {(selected === "room" ? tokens : peerTokens).toLocaleString()} tokens</span><small>{sessions} open sessions</small></li>
+              <li><b>Each repository’s AGENTS.md</b><small>Read from the checkout and edited in the repository</small></li></ol>
+            <p>A change reaches each running session as a diff at its next run, and it becomes part of the system prompt at the next compaction.</p>
           </div>
         {/if}
         <div class="actions">
@@ -193,7 +192,7 @@
     <div class="mobile-save">
       <span>{draft === base ? savedLabel : `${changed.length} lines changed`}</span>
       {#if other}<button type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine</button>
-      {:else}<button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
+      {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button><button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
     </div>
   {/if}
 </div>
@@ -201,7 +200,7 @@
 <style>
   .instructions { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
   header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-  .crumb, .slash, .facts, .editor-foot, .review p, .side-head span { color: var(--muted); }
+  .crumb, .slash, .facts, .review p, .side-head span, .mobile-tabs span { color: var(--muted); }
   .back { font-size: 24px; }
   .files { margin-left: auto; display: flex; gap: 4px; }
   button { font: inherit; color: inherit; cursor: pointer; border: 0; border-radius: 6px; background: transparent; padding: 6px 10px; }
@@ -216,18 +215,18 @@
   textarea { flex: 1; resize: none; width: 100%; min-height: 0; box-sizing: border-box; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; font: inherit; line-height: 1.45; }
   textarea:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
-  .editor-foot { margin: 0; font-size: 12.5px; }
   aside { width: 380px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); min-height: 0; }
   .side-head { padding: 16px; border-bottom: 1px solid var(--line); }.side-head span { font-size: 12.5px; margin-left: 4px; }.side-head p { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
   .review { flex: 1; overflow: auto; padding: 16px; font-size: 12.5px; }.review strong { display: block; margin-bottom: 12px; }.review p { line-height: 1.45; font-variant-numeric: tabular-nums; }.review ol { padding-left: 28px; }.review li { padding: 8px 0; }.review li span { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .review li small { display: block; color: var(--muted); margin-top: 4px; }
   .line-number { display: block; width: 100%; border-radius: 0; background: var(--hover); color: var(--muted); text-align: left; font-size: 11px; padding: 3px 10px; }
-  .diff { display: flex; gap: 8px; padding: 4px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }.diff span { flex: none; }.diff.add { background: color-mix(in srgb, var(--success) 12%, transparent); }.diff.remove { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+  .diff { display: flex; gap: 8px; padding: 4px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }.diff span { flex: none; width: 8px; }.diff.same { color: var(--muted); }.diff.add { background: color-mix(in srgb, var(--success) 12%, transparent); }.diff.remove { background: color-mix(in srgb, var(--danger) 12%, transparent); }
   .actions { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }.primary { background: var(--focus); color: var(--bg); }.primary:hover { background: var(--focus); opacity: .85; }
   .mobile-tabs, .mobile-save { display: none; }.loading { padding: 24px; display: grid; gap: 12px; }.loading span { display: block; height: 14px; width: 70%; background: var(--hover); border-radius: 6px; }.loading span:nth-child(2) { width: 90%; }.error { color: var(--muted); padding: 16px; }
   @media (max-width: 700px) {
     header { padding: 0 8px; }.crumb, .slash { display: none; }.files button { min-height: 40px; }
     .mobile-tabs { display: flex; padding: 4px 8px; border-bottom: 1px solid var(--line); }.mobile-tabs button { min-height: 40px; }
     .mobile-hidden { display: none !important; }.edit { padding: 12px; }.facts { line-height: 1.4; }.find input { min-height: 40px; }.body aside { width: 100%; border: 0; }.actions { display: none; }
-    .mobile-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }.mobile-save button, .line-number, .error button { min-height: 40px; }.back { min-width: 40px; min-height: 40px; }
+    .mobile-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }.mobile-save span { margin-right: auto; }.mobile-save button, .line-number, .error button { min-height: 40px; }.back { min-width: 40px; min-height: 40px; }
   }
 </style>
