@@ -27,10 +27,11 @@ type Operations struct {
 	mu                sync.Mutex
 	cancel            context.CancelFunc
 	done              chan struct{}
+	wake              chan struct{}
 }
 
 func NewOperations(ctx context.Context, files *Files, state operationState, appPort, cardPort int) *Operations {
-	return &Operations{ctx: ctx, files: files, state: state, appPort: appPort, cardPort: cardPort}
+	return &Operations{ctx: ctx, files: files, state: state, appPort: appPort, cardPort: cardPort, wake: make(chan struct{}, 1)}
 }
 
 func (o *Operations) launch(req contract.ConnectStartRequest) {
@@ -41,6 +42,7 @@ func (o *Operations) launch(req contract.ConnectStartRequest) {
 		defer close(done)
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
+		defer o.signal()
 		_, _ = LinkMachine(ctx, &Relay{Base: req.Relay}, o.files, o.state, LinkOptions{Name: req.Name, AppPort: o.appPort, CardPort: o.cardPort, Ticks: ticker.C})
 	}()
 }
@@ -123,6 +125,14 @@ func (o *Operations) Status(ctx context.Context) (contract.ConnectStatusResponse
 	return out, nil
 }
 
+func (o *Operations) signal() {
+	select {
+	case o.wake <- struct{}{}:
+	default:
+	}
+}
+func (o *Operations) Wake() <-chan struct{} { return o.wake }
+
 func (o *Operations) stop() {
 	if o.cancel != nil {
 		o.cancel()
@@ -154,6 +164,7 @@ func (o *Operations) Cancel(ctx context.Context) error {
 }
 
 func (o *Operations) Unlink(ctx context.Context) error {
+	defer o.signal()
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.stop()
