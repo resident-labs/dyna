@@ -33,7 +33,7 @@
     <ul>{#each list as job (job.job)}
       <li><button type="button" class="job" aria-current={job.job === shown.job} title={job.command} onclick={() => pick(job.job)}>
         <code>{job.command}</code>
-        {#if job.running}<span class="count">running</span>{:else if job.exitCode}<StatusPill tone="failed">exited {job.exitCode}</StatusPill>
+        {#if job.running}<span class="count">running</span>{:else if job.exitCode}<StatusPill tone="failed" label={`exited ${job.exitCode}`} />
         {:else}<span class="count">exited 0</span>{/if}</button></li>
     {/each}</ul>
     <pre bind:this={output} aria-label={`Output of ${shown.command}`} onscroll={() => {

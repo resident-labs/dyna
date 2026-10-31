@@ -37,12 +37,12 @@
   <button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
     aria-label={waiting ? `Room menu, ${waiting} ${waiting === 1 ? "request waits" : "requests wait"} for you` : "Room menu"} title="Room menu"
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <Icon name="more" />{#if waiting}<StatusPill tone="warning">{waiting}</StatusPill>{/if}</button>
+    <Icon name="more" />{#if waiting}<StatusPill tone="warning" label={String(waiting)} title={`${waiting} waiting for you`} />{/if}</button>
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
       {#each entries as entry (entry.id)}
         <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onchoose(entry.id); }}>{entry.label}
-          {#if counts[entry.id]}<StatusPill tone="warning">{counts[entry.id]}</StatusPill>{/if}</button>
+          {#if counts[entry.id]}<StatusPill tone="warning" label={String(counts[entry.id])} title={`${counts[entry.id]} waiting for you`} />{/if}</button>
       {/each}
     </div>
   {/if}

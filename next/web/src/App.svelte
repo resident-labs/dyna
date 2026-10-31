@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { APIError } from "./lib/client.ts";
   import Feed from "./lib/ui/Feed.svelte";
@@ -73,7 +73,7 @@
     const walk = (parent: string | undefined, depth: number) => {
       for (const item of children(parent)) {
         const hidden = folded.has(item.session) ? under(item.session) : [];
-        // A folded row keeps the failure of a session it hides in sight, with the same rule as the row pill.
+        // A folded row keeps the failure of a session it hides in sight, with the same rule as the row mark.
         rows.push({ session: item, depth, parent: children(item.session).length > 0, hidden: hidden.length, hiddenTrouble: hidden.some(id => trouble(id)) });
         if (!hidden.length) walk(item.session, depth + 1);
       }
@@ -210,10 +210,17 @@
   let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
+  // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
+  $effect(() => { const read = attention.rooms.get(room ?? "")?.lastRead; if (store && read) store.noteRead({ kind: "feed" }, read); });
+  // Only opening counts: a failure that arrives while the DM is open clears once its row is on screen.
+  $effect(() => {
+    const open = session, current = store;
+    if (open && current?.ready) untrack(() => { if (current.unseen(open)) current.see({ kind: "dm", session: open }, current.failed.get(open) ?? 0); });
+  });
   const trouble = (id: string) => {
     const box = store?.boxes.get(id);
-    // A failed turn shows until the session's next turn succeeds.
-    return store?.failed.has(id) ? "Last turn failed" : box === "failed" ? "Could not start" : box === "lost" ? "Stopped unexpectedly" : "";
+    // A failed turn shows until the owner sees it or the session's next turn succeeds.
+    return store?.unseen(id) ? "Last turn failed" : box === "failed" ? "Could not start" : box === "lost" ? "Stopped unexpectedly" : "";
   };
 </script>
 
@@ -247,9 +254,9 @@
       {:else if room}<Icon name="room" />{/if}<strong>{title}</strong>
       {#if closed}<span class="count">· closed</span>{/if}
       {#if store && !unavailable}<RoomMenu bind:this={menu} waiting={store.waiting} onchoose={next => { if (next === "terminal") void terminals?.pick(); else section = next; }} />{/if}
-      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.failed.size ? "Sessions, a turn failed" : "Sessions"}
+      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.unseenCount ? "Sessions, a turn failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
-        {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
+        {#if store?.unseenCount && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={requests} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
       {#if !room && !roomsError}<Home {attention} {navigate} onrequests={() => { section = "requests"; }} />
@@ -283,8 +290,8 @@
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
-          {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>
-          {:else if hiddenTrouble}<StatusPill tone="failed">Failed</StatusPill>{/if}</a>
+          {#if trouble(item.session)}<StatusPill tone="failed" dot label={trouble(item.session)} />
+          {:else if hiddenTrouble}<StatusPill tone="failed" dot label="A folded session failed" />{/if}</a>
           {#if jobs(item.session)}<button type="button" class="watch" class:open={jobsOf === item.session} data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
