@@ -127,6 +127,14 @@
   let watching: string | undefined = $state();
   let docked = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
+  // The first window opens at the bottom right of the feed, above the composer, as in v1; later ones keep the owner's rect.
+  let placed = false;
+  function watch(id: string) {
+    const box = feed?.getBoundingClientRect();
+    if (box && !placed) rect = { ...rect, x: box.right - rect.w - 16, y: box.bottom - rect.h - 16 };
+    placed = true;
+    watching = id;
+  }
   // The view closes when its computer stops or the room changes, before the DOM updates, so it never
   // streams again unasked. Focus that was in the view returns to the row's button, or to the panel;
   // below 900 px with the panel closed, it returns to the panel's toggle button.
@@ -212,7 +220,7 @@
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
           {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
           {#if store?.computers.has(item.session)}<button type="button" class="watch" data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
-            title={`Watch ${item.name}'s computer`} onclick={() => { watching = item.session; }}><Icon name="monitor" /></button>{/if}</div>
+            title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
       {/if}
     </aside>
