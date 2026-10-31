@@ -107,11 +107,11 @@ func shouldRefreshUnwatched(st State, r *Record, now time.Time, force bool) bool
 // pullVersion ignores fields that GitHub can recompute without updating the PR.
 func pullVersion(p Pull, policy ChangePolicy) string {
 	b, _ := json.Marshal(struct {
-		Updated, Head, State, Discussion string
-		Draft, Merged                    bool
-		Labels                           []string
-		Policy                           ChangePolicy
-	}{p.Updated, p.Head.SHA, p.State, p.DiscussionVersion, p.Draft, p.Merged, p.labelNames(), policy})
+		Updated, Head, State string
+		Draft, Merged        bool
+		Labels               []string
+		Policy               ChangePolicy
+	}{p.Updated, p.Head.SHA, p.State, p.Draft, p.Merged, p.labelNames(), policy})
 	return digest(string(b))
 }
 
@@ -142,7 +142,7 @@ func (g GitHub) pollSnapshotFromPull(ctx context.Context, r Record, policy Chang
 	// all pages at least every nine minutes, even while CI remains pending.
 	if g.requests != nil && !g.requests.forceSnapshot && !g.requests.forceBudgets &&
 		pull.State == "open" && pull.Updated != "" && pull.DiscussionVersion != "" && r.Polling.Error == "" &&
-		r.Polling.PullVersion == pullVersion(pull, policy) && !r.Polling.DiscussionChecked.IsZero() &&
+		r.Polling.PullVersion == pullVersion(pull, policy) && r.Polling.DiscussionVersion == pull.DiscussionVersion && !r.Polling.DiscussionChecked.IsZero() &&
 		now.Before(r.Polling.DiscussionChecked.Add(9*time.Minute)) {
 		saved := g
 		saved.requests = &requestCache{cacheOnly: true, entries: g.requests.entries}
@@ -183,7 +183,7 @@ func (g GitHub) settledPollCI(ctx context.Context, r Record, pull Pull, ciProbe 
 // quietPull reports that pull and the CI probe show nothing new since the
 // last complete poll, so the PR needs no CI, discussion or artifact requests.
 func quietPull(r Record, policy ChangePolicy, pull Pull, ciProbe string, notModified bool, now time.Time) bool {
-	return pull.State == "open" && pull.DiscussionVersion != "" && settledCI(r) && headVerified(r) && r.Polling.Error == "" && (ciProbe == "" || ciProbe == r.Polling.CIVersion) &&
+	return pull.State == "open" && pull.DiscussionVersion != "" && r.Polling.DiscussionVersion == pull.DiscussionVersion && settledCI(r) && headVerified(r) && r.Polling.Error == "" && (ciProbe == "" || ciProbe == r.Polling.CIVersion) &&
 		r.Head == pull.Head.SHA && r.Polling.PullVersion == pullVersion(pull, policy) &&
 		// A retarget that waits on its parent's merge needs another full poll.
 		(pull.Base.Ref == "" || pull.Base.Ref == r.BaseRef) &&

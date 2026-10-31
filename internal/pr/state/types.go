@@ -512,6 +512,7 @@ type Polling struct {
 	LocalCI string `json:"localCI,omitempty"`
 	// PullVersion identifies metadata and policy from the last complete poll.
 	PullVersion       string    `json:"pullVersion,omitempty"`
+	DiscussionVersion string    `json:"discussionVersion,omitempty"`
 	PullHead          string    `json:"pullHead,omitempty"`
 	FullChecked       time.Time `json:"fullChecked,omitempty"`
 	DiscussionChecked time.Time `json:"discussionChecked,omitempty"`

@@ -705,6 +705,9 @@ func (s *Service) observePoll(st *State, r *Record, snap Snapshot, pollTime []ti
 		r.Polling.Next = nextPollTime(pollTime[0], 1)
 	}
 	r.Polling.PullVersion = pullVersion(snap.Pull, EffectivePolicy(*st, *r))
+	if snap.Pull.DiscussionVersion != "" {
+		r.Polling.DiscussionVersion = snap.Pull.DiscussionVersion
+	}
 	previousPullHead = r.Polling.PullHead
 	r.Polling.PullHead = snap.Pull.Head.SHA
 	r.Polling.CIVersion = snap.ciProbe
