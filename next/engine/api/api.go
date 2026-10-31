@@ -41,6 +41,10 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.web.login(ctx, p, req)
 	})
+	call(mux, contract.MethodDevicePair, c, contract.ScopeAdmin, owner, a.service.DevicePair)
+	call(mux, contract.MethodDeviceList, c, contract.ScopeAdmin, owner, a.service.DeviceList)
+	call(mux, contract.MethodDeviceRevoke, c, contract.ScopeAdmin, owner, a.service.DeviceRevoke)
+	call(mux, contract.MethodDeviceSetScopes, c, contract.ScopeAdmin, owner, a.service.DeviceSetScopes)
 	call(mux, contract.MethodRuleAdd, c, contract.ScopeAdmin, user, func(ctx context.Context, p contract.Principal, req contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error) {
 		if box(c) && req.Room == "" {
 			req.Room = c.Room

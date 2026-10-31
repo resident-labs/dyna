@@ -42,3 +42,18 @@ func (f *fakeService) OperationScope(kind contract.OpKind) contract.Scope {
 	}
 	return ""
 }
+
+func TestDeviceManagementRequiresAdminOwner(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	for _, c := range []Caller{
+		{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeOperate}},
+		boxCaller(),
+	} {
+		for _, method := range []contract.Method{contract.MethodDevicePair, contract.MethodDeviceList, contract.MethodDeviceRevoke, contract.MethodDeviceSetScopes} {
+			w := request(a.handler(c), "/v1/"+string(method), `{}`)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("%s: got %d", method, w.Code)
+			}
+		}
+	}
+}
