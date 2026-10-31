@@ -107,8 +107,11 @@
   .unsent button { all: unset; cursor: pointer; color: var(--focus); border-radius: 3px; }
   .unsent button:hover { text-decoration: underline; }
   .unsent button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .name { margin: 0; display: flex; align-items: baseline; gap: 8px; }
-  strong { color: oklch(var(--id-name) var(--hue)); }
+  /* The name line stays one line: a long name or recipient list truncates and the time stays whole. */
+  .name { margin: 0; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+  strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
+  time { flex: none; }
+  .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }
   time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
@@ -137,7 +140,13 @@
   .text { overflow-wrap: anywhere; }
   .text :global(:is(p, ul, ol, pre, blockquote)) { margin: 0 0 4px; }
   .text :global(:is(p, ul, ol, pre, blockquote):last-child) { margin-bottom: 0; }
-  .text :global(pre) { padding: 8px 10px; border-radius: 8px; background: var(--sidebar); overflow-x: auto; }
+  /* The type scale: post text is 15 px, a title 16 and a head 18. A heading is no larger than a section header. */
+  .text :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 8px 0 4px; font-size: 15px; line-height: 1.25; }
+  .text :global(h1) { font-size: 18px; }
+  .text :global(h2) { font-size: 16px; }
+  .text :global(:is(h1, h2, h3, h4, h5, h6):first-child) { margin-top: 0; }
+  /* A code block sits on the raised surface and scrolls sideways; it never wraps. */
+  .text :global(pre) { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); overflow-x: auto; white-space: pre; overflow-wrap: normal; }
   .text :global(code) { font: 13px var(--mono); font-variant-ligatures: none; }
   .text :global(blockquote) { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
   .text :global(a) { color: var(--focus); }
