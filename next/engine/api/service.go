@@ -23,6 +23,8 @@ type Service interface {
 	DeviceList(context.Context, contract.Principal, contract.DeviceListRequest) (contract.DeviceListResponse, *contract.Error)
 	DeviceRevoke(context.Context, contract.Principal, contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, *contract.Error)
 	DeviceSetScopes(context.Context, contract.Principal, contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, *contract.Error)
+	InstructionsGet(context.Context, contract.Principal, contract.InstructionsGetRequest) (contract.InstructionsGetResponse, *contract.Error)
+	InstructionsSet(context.Context, contract.Principal, contract.InstructionsSetRequest) (contract.InstructionsSetResponse, *contract.Error)
 	OperationScope(contract.OpKind) contract.Scope
 	Terminal(context.Context, contract.SessionID, contract.HostName) ([]string, func(), *contract.Error)
 	ShellWatch(context.Context, contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error)
@@ -31,10 +33,6 @@ type Service interface {
 	ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
 	ComputerInput(context.Context, contract.Principal, contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error)
 	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error
-	RuleAdd(context.Context, contract.Principal, contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error)
-	RuleRemove(context.Context, contract.Principal, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error)
-	RuleEdit(context.Context, contract.Principal, contract.RuleEditRequest) (contract.RuleEditResponse, *contract.Error)
-	RuleList(context.Context, contract.Principal, contract.RuleListRequest) (contract.RuleListResponse, *contract.Error)
 	RoomSetLimits(context.Context, contract.Principal, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, *contract.Error)
 	RoomPause(context.Context, contract.Principal, contract.RoomPauseRequest) (contract.RoomPauseResponse, *contract.Error)
 	SessionStop(context.Context, contract.Principal, contract.SessionStopRequest) (contract.SessionStopResponse, *contract.Error)

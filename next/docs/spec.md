@@ -166,7 +166,6 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `pr_owners` |
 | `grants` |
 | `hostexec_runs` |
-| `rules` |
 | `conversation_reads` |
 | `backup_copy_status` |
 | `devices` |
@@ -310,7 +309,9 @@ The owner socket rejects callers in `dyna-hostexec-` scopes with `hostexec_scope
 
 v2 has no rules feature. Pi loads global `/box/pi/AGENTS.md`, room `/box/work/AGENTS.md`, and each repository's own file. The engine stores the first two as owner configuration at `<data>/files/instructions/global/AGENTS.md` and `<data>/files/instructions/rooms/<room-id>/AGENTS.md`. It atomically replaces files; boxes mount their folders read-only at `/run/dyna/instructions/{global,room}` and symlink to them. The room file is outside every checkout.
 
-For remote hosts, the engine copies both files over its SSH master to `<hostdata>/instructions/`, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. Only the owner edits them, in the web markdown editor; `instructions.set` uses the read hash and returns a typed conflict for stale saves. Agents ask the owner for changes. Pi sends changes as context diffs at the next run and folds them into the head at compaction; there is no delivery or event. The v1 import renders rules in ID order as list items, such as `- (r22) first line`, with later lines indented two spaces.
+Pi starts in the default repository's checkout, or in `/box/work` when the session has no repository.
+
+For remote hosts, the engine copies both files over its SSH master to `<hostdata>/instructions/`, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. Only the owner edits them, in the web markdown editor; `instructions.set` uses the read hash and returns a typed conflict for stale saves. Agents ask the owner for changes. Pi sends changes as context diffs at the next run and folds them into the head at compaction; there is no delivery or event. The v1 import writes rule texts as plain Markdown bullets under a short heading, without numbers or authors.
 
 ### 7.1 Principals
 

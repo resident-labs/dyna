@@ -14,6 +14,7 @@ type Slice struct {
 type Mount struct {
 	HostPath, BoxPath string
 	ReadOnly          bool
+	MakeDir           bool
 }
 type EnvVar struct{ Name, Value string }
 type Label struct{ Key, Value string }
@@ -25,10 +26,14 @@ type ContainerSpec struct {
 	Env          []EnvVar
 	Labels       []Label
 }
+
+// ContainerLayout identifies the mount layout created by the current engine.
+const ContainerLayout = "2"
+
 type ContainerStatus struct {
-	Box               contract.BoxID
-	Running           bool
-	LegacySharedMount bool
+	Box         contract.BoxID
+	Running     bool
+	StaleLayout bool
 }
 type Forward struct {
 	Box                  contract.BoxID

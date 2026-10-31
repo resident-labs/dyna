@@ -39,6 +39,12 @@ type Session struct {
 	NewRoomName string // nonempty only for a new room root
 }
 
+// RoomExists returns sql.ErrNoRows when the room does not exist.
+func (s *Store) RoomExists(ctx context.Context, room contract.RoomID) error {
+	var id contract.RoomID
+	return s.Read().QueryRowContext(ctx, "SELECT id FROM rooms WHERE id=?", room).Scan(&id)
+}
+
 func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES(?,?,?,?,?)", id, name, at.UnixMilli(), 0, 0)

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/resident-labs/dyna/box"
@@ -47,6 +48,7 @@ type Host struct {
 	forwards            map[box.Forward]struct{}
 	restored            bool
 	masterReset         bool
+	generation          atomic.Uint64
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
@@ -79,6 +81,10 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	}
 	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), hostexecGate: make(chan struct{}, 3), stopGate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
 }
+
+// Generation changes each time the SSH master and its forwards are restored.
+func (h *Host) Generation() uint64 { return h.generation.Load() }
+
 func (h *Host) lock(ctx context.Context) error {
 	select {
 	case h.gate <- struct{}{}:
@@ -153,6 +159,7 @@ func (h *Host) ensure(ctx context.Context) error {
 		}
 	}
 	h.restored = true
+	h.generation.Add(1)
 	return nil
 }
 func validateForward(f box.Forward) error {
@@ -354,7 +361,7 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), "--userns=keep-id:uid=1000,gid=1000", "--user", "1000:1000", "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna:mode=1777", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-" + string(c.Box) + ":/box"}
 	for _, m := range c.Mounts {
-		if !m.ReadOnly {
+		if !m.ReadOnly || m.MakeDir {
 			if _, err := h.run(ctx, "bash", "-c", `if [ ! -e "$1" ]; then mkdir -p -m 0700 -- "$1"; fi`, "dyna", m.HostPath); err != nil {
 				return err
 			}
@@ -435,7 +442,7 @@ func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error
 	}
 	out := make([]box.ContainerStatus, 0, len(records))
 	for _, r := range records {
-		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", LegacySharedMount: r.Labels["dyna.shared"] != "1"})
+		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout})
 	}
 	return out, nil
 }

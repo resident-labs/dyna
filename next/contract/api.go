@@ -5,13 +5,28 @@ import (
 	"time"
 )
 
+type InstructionsGetRequest struct {
+	Room RoomID `json:"room,omitempty"`
+}
+type InstructionsGetResponse struct {
+	Text    string     `json:"text"`
+	Hash    string     `json:"hash"`
+	SavedAt *time.Time `json:"savedAt,omitempty"`
+}
+type InstructionsSetRequest struct {
+	Room RoomID `json:"room,omitempty"`
+	Text string `json:"text"`
+	Base string `json:"base"`
+}
+type InstructionsSetResponse struct {
+	Hash string `json:"hash"`
+}
+
 type Method string
 
 const (
-	MethodRuleAdd                 Method = "rule.add"
-	MethodRuleRemove              Method = "rule.remove"
-	MethodRuleEdit                Method = "rule.edit"
-	MethodRuleList                Method = "rule.list"
+	MethodInstructionsGet         Method = "instructions.get"
+	MethodInstructionsSet         Method = "instructions.set"
 	MethodWebLogin                Method = "web.login"
 	MethodConversationRead        Method = "conversation.read"
 	MethodRoomList                Method = "room.list"
@@ -58,37 +73,6 @@ const (
 	MethodShellJobEnded           Method = "shell.job.ended"
 	MethodShellOutput             Method = "shell.output"
 )
-
-type RoomRule struct {
-	Number int       `json:"number"`
-	Text   string    `json:"text"`
-	By     Principal `json:"by"`
-	At     time.Time `json:"at"`
-}
-type RuleAddRequest struct {
-	Room RoomID `json:"room"`
-	Text string `json:"text"`
-}
-type RuleAddResponse struct {
-	Number int `json:"number"`
-}
-type RuleRemoveRequest struct {
-	Room   RoomID `json:"room"`
-	Number int    `json:"number"`
-}
-type RuleRemoveResponse struct{}
-type RuleEditRequest struct {
-	Room   RoomID `json:"room"`
-	Number int    `json:"number"`
-	Text   string `json:"text"`
-}
-type RuleEditResponse struct{}
-type RuleListRequest struct {
-	Room RoomID `json:"room"`
-}
-type RuleListResponse struct {
-	Rules []RoomRule `json:"rules"`
-}
 
 type ErrorCode string
 
@@ -467,7 +451,6 @@ type BoxHelloResponse struct {
 	Box           BoxID            `json:"box"`
 	Model         ModelChoice      `json:"model"`
 	Repos         []BoxRepo        `json:"repos,omitempty"`
-	Rules         []RoomRule       `json:"rules,omitempty"`
 	Transcripts   []TranscriptFile `json:"transcripts,omitempty"`
 }
 type TurnOutputRequest struct {

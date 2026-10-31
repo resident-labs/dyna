@@ -6,11 +6,41 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
 )
+
+// Pi discovers room instructions from its working directory.
+func TestOpenUsesWorkDirectory(t *testing.T) {
+	work := t.TempDir()
+	repo := filepath.Join(work, "owner", "repo")
+	if err := os.MkdirAll(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	for path, content := range map[string]string{
+		filepath.Join(agent, "AGENTS.md"): "global",
+		filepath.Join(work, "AGENTS.md"):  "room",
+		filepath.Join(repo, "AGENTS.md"):  "repository",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := `read -r request; files="$(cat "$PI_CODING_AGENT_DIR/AGENTS.md")-$(cat ../../AGENTS.md)-$(cat AGENTS.md)"; printf '{"id":"1","type":"response","success":true,"data":{"sessionFile":"%s"}}\n' "$files"; read -r wait`
+	h, err := Open(context.Background(), "sh", []string{"-c", script}, "", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if got := h.SessionFile(); got != "global-room-repository" {
+		t.Fatalf("work directory exposed %q, want global, room, and repository instructions", got)
+	}
+}
 
 // The fixture contains selected, sanitized events from Pi 1.4.0-dyna.10,
 // session ses_20261030-143118-fad2075a, turn 7.
