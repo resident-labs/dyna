@@ -173,6 +173,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `connect_connector` |
 | `connect_link_state` |
 | `connect_nonces` |
+| `connect_devices` |
+| `connect_sessions` |
 | `devices` |
 | `device_scopes` |
 | `pairing_codes` |
