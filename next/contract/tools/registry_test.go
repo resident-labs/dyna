@@ -23,6 +23,10 @@ func TestRegistryTableIsValid(t *testing.T) {
 		}
 		seenMethod[row.Method] = true
 		for _, a := range row.Actions {
+			meta, ok := ToolkitFor(a.Tool)
+			if !ok || meta.Name != a.Tool || meta.Title == "" {
+				t.Errorf("missing toolkit metadata for %s", a.Tool)
+			}
 			key := a.Tool + "/" + a.Name
 			if a.Tool == "" || a.Name == "" || a.Help == "" || len(a.CLI) == 0 || a.Request == nil || a.Request.Kind() != reflect.Struct {
 				t.Errorf("invalid action %s", key)
@@ -56,6 +60,10 @@ func TestRegistryTableIsValid(t *testing.T) {
 		}
 	}
 	for _, b := range BoxActions() {
+		meta, ok := ToolkitFor(b.Tool)
+		if !ok || meta.Name != b.Tool || meta.Title == "" {
+			t.Errorf("missing toolkit metadata for %s", b.Tool)
+		}
 		key := b.Tool + "/" + b.Name
 		if b.Tool == "" || b.Name == "" || b.Help == "" || len(b.CLI) == 0 || b.Request == nil || b.Request.Kind() != reflect.Struct || b.Handler == NoBoxHandler || b.Handler > ComputerScreenshot {
 			t.Errorf("invalid box action %s", key)
