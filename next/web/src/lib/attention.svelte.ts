@@ -105,8 +105,17 @@ export class Attention {
 
   failing(room: string): number { return this.down(room).length; }
 
-  // A room's sessions for Home, which seed the room's set once. A failed call keeps no buffer.
+  // A room's sessions for Home, which seed the room's set once. Callers share one read until the room seeds, so only
+  // that read owns the buffer. A failed one keeps no buffer.
+  private readonly seeding = new Map<string, Promise<SessionListResponse>>();
   listSessions(room: string): Promise<SessionListResponse> {
+    if (this.sessions.has(room)) return this.readSessions(room);
+    const read = this.seeding.get(room) ?? this.readSessions(room).finally(() => this.seeding.delete(room));
+    this.seeding.set(room, read);
+    return read;
+  }
+
+  private readSessions(room: string): Promise<SessionListResponse> {
     if (!this.sessions.has(room)) this.pending.set(room, this.pending.get(room) ?? []);
     return call("session.list", { room }).then(async list => {
       for (const { id, lastRead } of list.sessions ?? []) if (lastRead > (this.read.get(id) ?? 0)) this.read.set(id, lastRead);
