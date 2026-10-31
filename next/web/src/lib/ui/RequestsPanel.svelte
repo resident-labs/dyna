@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { requestDecision } from "../request-decision.ts";
   import { hue } from "../identity.ts";
   import { closedSession, fromNow } from "../feed.ts";
@@ -23,7 +23,7 @@
   let decided = $derived(requests.filter(item => item.decision && new Date(item.decision.at).toDateString() === new Date(now).toDateString())
     .sort((a, b) => (b.decision?.at ?? "").localeCompare(a.decision?.at ?? "")));
   let groups = $derived(requestGroups(waiting));
-  let current = $derived(pending.some(item => item.id === chosen) ? chosen : pending[0]?.id);
+  let current = $derived(pending.some(item => item.id === chosen) ? chosen : waiting.length > groupThreshold ? groups[0]?.[1][0]?.id : pending[0]?.id);
   function keys(event: KeyboardEvent) {
     if (event.target instanceof HTMLInputElement || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !current) return;
     const at = pending.findIndex(item => item.id === current), key = event.key.toLowerCase();
@@ -34,7 +34,13 @@
       if (!expanded.includes(group)) expanded = [...expanded, group];
       moreGroups = true;
     }
-    else if (admin && (key === "a" || key === "d") && !event.repeat) void rows[current]?.decide(key === "a");
+    else if (admin && (key === "a" || key === "d") && !event.repeat) {
+      const id = current;
+      void tick().then(() => {
+        element?.querySelector(".current")?.scrollIntoView({ block: "nearest" });
+        if (id === current) void rows[id]?.decide(key === "a");
+      });
+    }
     else return;
     event.preventDefault();
   }
@@ -44,6 +50,10 @@
     if (results.some(result => result.status === "rejected")) failure = "Some decisions were not saved. Try again.";
     else { denying = ""; reason = ""; }
   }
+  $effect(() => {
+    void current; void expanded; void moreGroups;
+    void tick().then(() => element?.querySelector(".current")?.scrollIntoView({ block: "nearest" }));
+  });
   onMount(() => { element?.focus(); const timer = setInterval(() => { now = Date.now(); }, 30_000); return () => clearInterval(timer); });
 </script>
 {#snippet row(request: Request, grouped = false)}
