@@ -9,8 +9,8 @@ import (
 
 func TestTranscriptMasksBeforeLabelLimit(t *testing.T) {
 	secret := "ghp_" + strings.Repeat("a", 100)
-	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\\n" +
-		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c","name":"bash","arguments":{"command":"` + secret + `"}}]}}` + "\\n"
+	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\n" +
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c","name":"bash","arguments":{"command":"` + secret + `"}}]}}` + "\n"
 	steps, _, err := ReadSteps(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "turn_a"}, "", 200)
 	if err != nil || len(steps) != 1 || steps[0].Label != "bash [masked]" {
 		t.Fatalf("steps=%+v err=%v", steps, err)
