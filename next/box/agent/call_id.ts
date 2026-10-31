@@ -10,7 +10,7 @@ export default function (pi: ExtensionAPI) {
 		// Nested calls are not transcript items; link their posts to the outer call.
 		const root = event.parentToolCallId ? (roots.get(event.parentToolCallId) ?? event.parentToolCallId) : event.toolCallId;
 		roots.set(event.toolCallId, root);
-		if (event.toolName === "mcp__shell__shell") {
+		if (event.toolName === "mcp__shell__shell" || event.toolName.startsWith("mcp__dyna__")) {
 			event.input[callIDArgument] = root;
 		}
 	});
