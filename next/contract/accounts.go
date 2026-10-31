@@ -44,6 +44,7 @@ type AccountProviderInfo struct {
 	ID            AccountProvider `json:"id"`
 	DisplayName   string          `json:"displayName"`
 	ConnectMethod ConnectMethod   `json:"connectMethod"`
+	ConnectFlow   ConnectFlow     `json:"connectFlow"`
 }
 type Account struct {
 	ID       AccountID            `json:"id"`
@@ -63,6 +64,7 @@ type ConnectFlow string
 const (
 	ConnectFlowCallback ConnectFlow = "callback"
 	ConnectFlowDevice   ConnectFlow = "device"
+	ConnectFlowKey      ConnectFlow = "key"
 )
 
 type ConnectStatus string
