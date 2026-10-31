@@ -13,6 +13,12 @@ type fakeRepos struct {
 	calls    int
 	commits  map[contract.RepoName]string
 	size     contract.BoxSizeName
+	deleted  string
+}
+
+func (r *fakeRepos) DeleteArchiveRef(_ context.Context, _ contract.RepoName, ref, _ string) error {
+	r.deleted = ref
+	return r.err
 }
 
 func (r *fakeRepos) Ref(_ context.Context, repo contract.RepoName, _ string) (string, error) {
@@ -35,6 +41,10 @@ func (r *fakeRepos) Size(context.Context, contract.RepoName) (contract.BoxSizeNa
 }
 
 type placementRepos struct{}
+
+func (placementRepos) DeleteArchiveRef(context.Context, contract.RepoName, string, string) error {
+	return nil
+}
 
 func (placementRepos) Size(context.Context, contract.RepoName) (contract.BoxSizeName, error) {
 	return "", nil
