@@ -10,7 +10,9 @@ const decision = { by: { kind: "owner" }, approved: true, at: "" } as const;
 
 test("a session whose box failed with its turn open is broken, not working, until the box is ready again", async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ seq: 1, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: ["s1", "s2"] }] }));
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("device.scopes")
+    ? { scopes: ["read"] }
+    : { seq: 1, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: ["s1", "s2"] }] }));
   try {
     const attention = new Attention(() => () => {});
     await attention.open();
