@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 
 // process is one running command. Signal reaches its whole process group.
 type process interface {
-	Wait() int
+	Wait() (int, string)
 	Signal(syscall.Signal)
 	GroupAlive() bool // whether any process of the group is left, after the leader exited
 }
@@ -47,9 +48,13 @@ func startBash(command, cwd string, out io.Writer) (process, error) {
 	return &execProcess{cmd}, nil
 }
 
-func (p *execProcess) Wait() int {
+func (p *execProcess) Wait() (int, string) {
 	_ = p.cmd.Wait()
-	return p.cmd.ProcessState.ExitCode()
+	status := p.cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if status.Signaled() {
+		return -1, unix.SignalName(status.Signal())
+	}
+	return p.cmd.ProcessState.ExitCode(), ""
 }
 
 func (p *execProcess) GroupAlive() bool { return syscall.Kill(-p.cmd.Process.Pid, 0) == nil }
@@ -57,11 +62,12 @@ func (p *execProcess) GroupAlive() bool { return syscall.Kill(-p.cmd.Process.Pid
 func (p *execProcess) Signal(sig syscall.Signal) { _ = syscall.Kill(-p.cmd.Process.Pid, sig) }
 
 type job struct {
-	id      contract.ShellJobID
-	command string
-	started time.Time
-	proc    process
-	done    chan struct{}
+	id          contract.ShellJobID
+	command     string
+	description string
+	started     time.Time
+	proc        process
+	done        chan struct{}
 
 	mu            sync.Mutex
 	output        []byte // the newest output
@@ -70,6 +76,7 @@ type job struct {
 	owner         int
 	ownerFinished bool
 	exit          int
+	end           *contract.ShellJobEnd
 	finished      bool
 	ended         time.Time
 	background    bool
@@ -130,7 +137,14 @@ func (j *job) status() string {
 	if !j.finished {
 		return "running"
 	}
-	return fmt.Sprintf("exit %d", j.exit)
+	switch j.end.Kind {
+	case contract.ShellJobStopped:
+		return "stopped"
+	case contract.ShellJobSignaled:
+		return "signal " + j.end.Signal
+	default:
+		return fmt.Sprintf("exit %d", j.exit)
+	}
 }
 
 // Config sets what the tests replace.
@@ -182,11 +196,12 @@ func (s *Server) find(id contract.ShellJobID) (*job, bool) {
 }
 
 // run starts a command and waits up to the foreground limit. A job still running then continues in the background.
-func (s *Server) run(cancel <-chan struct{}, command, cwd string) (*job, error) {
+func (s *Server) run(cancel <-chan struct{}, command, cwd, description string) (*job, error) {
 	if cwd == "" {
 		cwd = s.cfg.Dir
 	}
 	j := &job{id: s.cfg.newID(), command: command, started: s.cfg.now(), owner: -1, done: make(chan struct{})}
+	j.description = Mask(description)
 	proc, err := s.cfg.start(command, cwd, j)
 	if err != nil {
 		return nil, err
@@ -196,10 +211,17 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd string) (*job, error) 
 	s.jobs = append(s.dropOldFinished(), j)
 	s.mu.Unlock()
 	go func() {
-		code := proc.Wait()
+		code, signal := proc.Wait()
 		j.mu.Lock()
 		j.exit, j.finished, j.ended = code, true, s.cfg.now()
-		report := j.background && !j.stopped
+		j.end = &contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: code}
+		if signal != "" {
+			j.end = &contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: signal}
+		}
+		if j.stopped {
+			j.end = &contract.ShellJobEnd{Kind: contract.ShellJobStopped}
+		}
+		report := j.background
 		j.mu.Unlock()
 		close(j.done)
 		if report {
@@ -241,7 +263,7 @@ func (s *Server) report(j *job) {
 	j.mu.Lock()
 	text := Mask(string(j.output)) // mask first: cutting first could split a token
 	tail := strings.ToValidUTF8(text[max(0, len(text)-tailLimit):], "")
-	req := contract.ShellJobEndedRequest{Job: j.id, ExitCode: j.exit, Tail: tail}
+	req := contract.ShellJobEndedRequest{Job: j.id, Description: j.description, End: j.end, ExitCode: j.exit, Tail: tail}
 	j.mu.Unlock()
 	for delay := retryStart; s.cfg.Report(req) != nil; delay = min(delay*2, retryMax) {
 		select {
@@ -255,7 +277,9 @@ func (s *Server) report(j *job) {
 // stop ends the job's process group: SIGTERM, then SIGKILL after the grace period.
 func (s *Server) stop(j *job) {
 	j.mu.Lock()
-	j.stopped = true
+	if !j.finished {
+		j.stopped = true
+	}
 	j.mu.Unlock()
 	grace := s.cfg.After(stopGrace)
 	j.proc.Signal(syscall.SIGTERM)
@@ -336,7 +360,7 @@ func (s *Server) View(reset bool) []contract.ShellJobOutput {
 		if fresh || end > start || j.ownerFinished != j.finished {
 			command := Mask(j.command)
 			command = strings.ToValidUTF8(command[:min(len(command), 4<<10)], "")
-			result = append(result, contract.ShellJobOutput{Job: j.id, Command: command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh,
+			result = append(result, contract.ShellJobOutput{Job: j.id, Description: j.description, End: j.end, Command: command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh,
 				Started: j.started, Ended: j.ended})
 			budget -= end - start + len(command) + 256 // JSON fields and job ID
 			s.viewNext = (index + 1) % len(s.jobs)
