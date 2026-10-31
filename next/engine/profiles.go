@@ -212,8 +212,8 @@ func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req
 	}
 	s.treeMu.Lock()
 	defer s.treeMu.Unlock()
-	var inUse bool
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions WHERE profile=? AND closed_at IS NULL)", req.Name).Scan(&inUse); err != nil {
+	inUse, err := s.store.ProfileInUse(ctx, req.Name)
+	if err != nil {
 		return contract.ProfileRemoveResponse{}, failure(err)
 	}
 	if inUse {
