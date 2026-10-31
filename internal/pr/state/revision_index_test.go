@@ -97,3 +97,35 @@ VALUES(?,'room','owner/repo',0,0,?,?)`, row.key, row.rev, `{"padding":"`+strings
 		t.Fatalf("PR table version: %q, %v; want 2", version, err)
 	}
 }
+
+// A warm refresh must not scan the large JSON bodies of unchanged PRs.
+func TestSnapshotRowsUseCoveringIndex(t *testing.T) {
+	root := newRoot(t)
+	if err := Migrate(filepath.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(filepath.Dir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("EXPLAIN QUERY PLAN " + snapshotRowsQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plans []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plans = append(plans, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 1 || !strings.Contains(plans[0], "USING COVERING INDEX pr_records_revision") {
+		t.Fatalf("snapshot reads record bodies: %v", plans)
+	}
+}
