@@ -79,6 +79,10 @@ type boxes struct {
 	cancel  map[contract.BoxID]context.CancelFunc
 }
 
+func (b *boxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, fmt.Errorf("terminals are unavailable in webdev")
+}
+
 func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error) {
 	session, err := b.st.Session(ctx, spec.Session)
 	if err != nil {
