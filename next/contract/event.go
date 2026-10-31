@@ -92,10 +92,15 @@ type SessionMoved struct {
 	NewParent SessionID `json:"newParent"`
 }
 
+type SessionCloseReason string
+
+const SessionCloseDormant SessionCloseReason = "dormant"
+
 type SessionClosed struct {
-	Session SessionID `json:"session"`
-	Archive string    `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
-	Unheld  []GoalID  `json:"unheld,omitempty"`  // M3: open goals left with no holder, because the parent is root (7.4)
+	Reason  SessionCloseReason `json:"reason,omitempty"`
+	Session SessionID          `json:"session"`
+	Archive string             `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
+	Unheld  []GoalID           `json:"unheld,omitempty"`  // M3: open goals left with no holder, because the parent is root (7.4)
 }
 
 type TurnStarted struct {

@@ -23,7 +23,7 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) erro
 		if err != nil {
 			return err
 		}
-		event, err := r.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: row.Session})
+		event, err := r.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: row.Session, Reason: session.CloseReason})
 		if err != nil {
 			return err
 		}
