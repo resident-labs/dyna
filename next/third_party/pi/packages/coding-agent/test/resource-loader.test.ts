@@ -444,7 +444,7 @@ Content`,
 			const skill = join(skillRoot, "new-skill");
 			mkdirSync(skill);
 			writeFileSync(join(skill, "SKILL.md"), "---\nname: new-skill\ndescription: New skill\n---\nUse it.");
-			loader.refreshPromptResources();
+			await loader.refreshPromptResources();
 
 			expect(loader.getAgentsFiles().agentsFiles).toContainEqual({
 				path: instructions,

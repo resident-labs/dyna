@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { detectCapabilities, getTerminalColorMode, type TerminalColorMode } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -157,7 +158,7 @@ export interface ResourceLoader {
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
-	refreshPromptResources?(): void;
+	refreshPromptResources?(): Promise<void>;
 	getSystemPrompt(): string | undefined;
 	getSystemPromptSource(): { path: string } | undefined;
 	getAppendSystemPrompt(): string[];
@@ -324,6 +325,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private readonly contextFileCache = new ContextFileCache();
 	private readonly skillFileCache = new ContextFileCache();
 	private skillDirectories = new Set<string>();
+	private skillDiscoveryDirectories = new Set<string>();
 	private settingsManager: SettingsManager;
 	private eventBus: EventBus;
 	private packageManager: DefaultPackageManager;
@@ -460,6 +462,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			...this.lastSkillPaths,
 			...this.skills.map((skill) => skill.filePath),
 			...this.skillDirectories,
+			...this.skillDiscoveryDirectories,
 			...[...this.skillDirectories].flatMap((dir) =>
 				[".gitignore", ".ignore", ".fdignore"].map((name) => join(dir, name)),
 			),
@@ -477,7 +480,32 @@ export class DefaultResourceLoader implements ResourceLoader {
 		);
 	}
 
-	refreshPromptResources(): void {
+	private scanSkillDirectories(): void {
+		const roots = [
+			join(this.agentDir, "skills"),
+			join(this.cwd, CONFIG_DIR_NAME, "skills"),
+			join(process.env.HOME ?? homedir(), ".agents", "skills"),
+		];
+		for (let dir = this.cwd; ; dir = dirname(dir)) {
+			roots.push(join(dir, ".agents", "skills"));
+			if (dirname(dir) === dir) break;
+		}
+		const dirs = new Set<string>();
+		const visit = (dir: string): void => {
+			if (dirs.has(dir)) return;
+			dirs.add(dir);
+			const stat = statSync(dir, { throwIfNoEntry: false });
+			if (!stat?.isDirectory()) return;
+			for (const entry of readdirSync(dir, { withFileTypes: true })) {
+				if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules")
+					visit(join(dir, entry.name));
+			}
+		};
+		for (const root of roots) visit(root);
+		this.skillDiscoveryDirectories = dirs;
+	}
+
+	async refreshPromptResources(): Promise<void> {
 		if (!this.noContextFiles && this.contextFileCache.changed(this.contextWatchPaths())) {
 			const base = {
 				agentsFiles: loadProjectContextFiles({
@@ -488,8 +516,19 @@ export class DefaultResourceLoader implements ResourceLoader {
 			};
 			this.agentsFiles = (this.agentsFilesOverride ? this.agentsFilesOverride(base) : base).agentsFiles;
 		}
-		if (!this.noSkills && this.skillFileCache.changed(this.skillWatchPaths())) {
-			this.updateSkillsFromPaths(this.lastSkillPaths, this.resourceMetadataByPath);
+		if ((!this.noSkills || this.lastSkillPaths.length > 0) && this.skillFileCache.changed(this.skillWatchPaths())) {
+			const resolved = await this.packageManager.resolve();
+			const metadata = this.resourceMetadataByPath;
+			const retained = this.lastSkillPaths.filter((path) => metadata.get(path)?.source !== "auto");
+			const discovered = resolved.skills
+				.filter((resource) => resource.enabled)
+				.map((resource) => {
+					metadata.set(resource.path, resource.metadata);
+					return this.mapSkillPath(resource, metadata);
+				});
+			this.lastSkillPaths = this.noSkills ? retained : this.mergePaths(retained, discovered);
+			this.scanSkillDirectories();
+			this.updateSkillsFromPaths(this.lastSkillPaths, metadata);
 		}
 	}
 
@@ -648,6 +687,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
 
 		this.lastSkillPaths = skillPaths;
+		this.scanSkillDirectories();
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
 		for (const p of this.additionalSkillPaths) {
 			if (isLocalPath(p)) {

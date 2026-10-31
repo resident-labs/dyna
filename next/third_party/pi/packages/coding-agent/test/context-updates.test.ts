@@ -17,7 +17,7 @@ describe("context updates", () => {
 	it("does no reads, hashes or diffs when file metadata is unchanged", () => {
 		let reads = 0;
 		let hashes = 0;
-		const stamp = { ino: 1, size: 4, mtimeMs: 1, isFile: true };
+		const stamp = { ino: 1, size: 4, mtimeMs: 1, ctimeMs: 1, isFile: true };
 		const cache = new ContextFileCache(
 			() => stamp,
 			() => {
@@ -42,7 +42,7 @@ describe("context updates", () => {
 		const head = session.appendMessage({ role: "system", content: "", sections: { goal: "first" }, timestamp: 0 });
 		const update = createContextUpdate({ goal: "first" }, { goal: "second" });
 		if (!update) throw new Error("expected update");
-		session.appendMessage(update);
+		session.appendCustomMessageEntry(update.customType, update.content, update.display, update.details);
 		expect(deliveredSections(session.getBranch())).toEqual({ goal: "second" });
 		session.branch(head);
 		expect(deliveredSections(session.getBranch())).toEqual({ goal: "first" });
