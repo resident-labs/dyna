@@ -306,23 +306,47 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	}
 }
 
+type archiveRestartBoxes struct {
+	fakeBoxes
+	started chan contract.BoxID
+}
+
+func (b archiveRestartBoxes) Start(_ context.Context, id contract.BoxID) error {
+	b.started <- id
+	return nil
+}
+
 func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
 	connectAgent(ctx, t, s, session)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := testChannel(t, s, ctx, caller); e != nil {
+		t.Fatal(e)
+	}
 	_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	boxes := archiveRestartBoxes{started: make(chan contract.BoxID, 1)}
+	restarted := New(s.store, boxes, fakeProfiles{}, s.now)
 	restarted.SetRepositories(&fakeRepos{})
-	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	passLifecycle(t, restarted, ctx)
+	select {
+	case id := <-boxes.started:
+		if id != record.Box {
+			t.Fatalf("started box %s, want %s", id, record.Box)
+		}
+	default:
+		t.Fatal("restart did not start the box for archive")
+	}
 	channel, e := testChannel(t, restarted, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
@@ -334,6 +358,8 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, restarted, ctx)
+	passLifecycle(t, restarted, ctx)
 	current, err := s.store.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxDeleted {
 		t.Fatalf("box %+v, error %v", current, err)
