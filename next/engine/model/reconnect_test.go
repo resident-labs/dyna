@@ -152,6 +152,9 @@ func TestRemoveCancelsUnsavedReconnect(t *testing.T) {
 	if err := st.RemoveAccount(ctx, "account"); err != nil {
 		t.Fatal(err)
 	}
+	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+		t.Fatal("late reconnect recreated a removed credential")
+	}
 	rows, err := st.ListProxyAuths(ctx)
 	if err != nil || len(rows) != 0 {
 		t.Fatal("credential remains")
