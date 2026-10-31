@@ -15,9 +15,9 @@ import (
 
 var contextQueries atomic.Int64
 
-func init() { sql.Register("context-count", countingDriver{}) }
+func init() { sql.Register("context-count", countingDriver{Driver: &sqlite.Driver{}}) }
 
-type countingDriver struct{ sqlite.Driver }
+type countingDriver struct{ *sqlite.Driver }
 type countingConn struct{ driver.Conn }
 
 func (d countingDriver) Open(name string) (driver.Conn, error) {
