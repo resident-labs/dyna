@@ -84,4 +84,9 @@ func TestActionDecodeIsStrict(t *testing.T) {
 	if !res.IsError || !strings.Contains(string(res.StructuredContent), "invalid") {
 		t.Fatalf("%+v", res)
 	}
+	_ = json.Unmarshal([]byte(`{"action":"missing"}`), &args)
+	res = server.call(context.Background(), callParams{Name: "session", Arguments: args})
+	if !res.IsError || !strings.Contains(string(res.StructuredContent), "unknown_action") || !strings.Contains(string(res.StructuredContent), "start") {
+		t.Fatalf("%+v", res)
+	}
 }
