@@ -19,9 +19,9 @@
   // the dock shows only its tab bar until the owner opens Jobs.
   type JobSession = { id: string; name: string; root: boolean; running: number };
   let { sessions, jobs, failures, element = $bindable(), onempty }: {
-    sessions: { id: string; name: string }[]; jobs: JobSession[]; failures: string[]; element?: HTMLElement; onempty: () => void;
+    sessions: { id: string; name: string; root: boolean }[]; jobs: JobSession[]; failures: string[]; element?: HTMLElement; onempty: () => void;
   } = $props();
-  type Tab = { key: number; target: TerminalTarget; label: string; exited?: { code?: number } };
+  type Tab = { key: number; target: TerminalTarget; label: string; root: boolean; exited?: { code?: number } };
   let tabs: Tab[] = $state([]);
   let active = $state(0);
   let next = 1;
@@ -68,17 +68,17 @@
     if (key === JOBS) jobsPane?.focus(); else panes[key]?.focus();
   }
   // Opens a session's shell directly, for the DM header's Terminal button.
-  export function shell(id: string, name: string) { open({ box: id }, name); }
-  function open(target: TerminalTarget, label: string) {
+  export function shell(id: string, name: string, root: boolean) { open({ box: id }, name, root); }
+  function open(target: TerminalTarget, label: string, root = false) {
     picking = false;
-    const tab = { key: next++, target, label };
+    const tab = { key: next++, target, label, root };
     tabs.push(tab);
     void show(tab.key);
   }
   // A new shell for an exited tab reopens its target under a new key, so its pane starts over.
   function renew(tab: Tab) {
     const index = tabs.findIndex(item => item.key === tab.key);
-    tabs[index] = { key: next++, target: tab.target, label: tab.label };
+    tabs[index] = { key: next++, target: tab.target, label: tab.label, root: tab.root };
     void show(tabs[index].key);
   }
   // Focus moves to the tab that takes the closed one's place, or out of the dock when none is left. A collapsed dock
@@ -123,7 +123,7 @@
   {#snippet header()}
     <div class="tabs" role="tablist" aria-label="Terminals">
       {#each tabs as tab (tab.key)}<span class="tab" class:active={tab.key === active}>
-        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{#if "box" in tab.target}<Avatar kind="session" name={tab.label} size={16} />{/if}{tab.label}
+        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{#if "box" in tab.target}<Avatar kind="session" name={tab.label} root={tab.root} size={16} />{/if}{tab.label}
           {#if tab.exited}<span class="muted">exited{tab.exited.code === undefined ? "" : ` ${tab.exited.code}`}</span>{/if}</button>
         <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => void close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
       {#if jobs.length}<span class="tab" class:active={active === JOBS}>
@@ -136,7 +136,7 @@
         onclick={() => { if (picking) picking = false; else void pick(); }}><Icon name="plus" /></button>
       {#if picking}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
         {#if sessions.length}<p class="label">Sessions</p>{/if}
-        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => shell(session.id, session.name)}>{session.name}</button>{/each}
+        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => shell(session.id, session.name, session.root)}>{session.name}</button>{/each}
         {#if hosts.length}<p class="label">Hosts</p>{/if}
         {#each hosts as host (host)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host }, hostLabel(host))}>{hostLabel(host)}</button>{/each}
       </div>{/if}
