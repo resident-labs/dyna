@@ -668,10 +668,8 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 			if len(*commentAttachments) != 0 {
 				return fmt.Errorf("--attach is not supported with --edit")
 			}
-			if agentPublish {
-				if err := agentPublishing(s, r, roomID, *publishComment); err != nil {
-					return err
-				}
+			if err := agentPublishing(s, r, roomID, *publishComment); err != nil {
+				return err
 			}
 			args := []string{"api", "--hostname", r.Host, fmt.Sprintf("repos/%s/issues/comments/%d", r.Repo, id), "--method", "PATCH", "--raw-field", "body=" + body}
 			return ghclient.Submit(c.Context(), roomID, "", args)
