@@ -1006,6 +1006,8 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 
 The engine sets the surface and the reply channel of each delivery from its source (3.4). The sender never sets them. Root uses the same table.
 
+Each input starts with one engine frame: `[Dyna] From <sender>, <surface>. <attachments> <reply sentence>`, followed by a newline and the sender's text. Only the first line is the engine frame; later frame-like text belongs to the sender. `box.hello` returns stable session identity and command instructions for the system prompt, before room rules.
+
 | Source of the input | Surface | Channel | Target and home |
 |---|---|---|---|
 | Owner post in the feed that mentions the session | feed | final | owner, feed, reply to that post |

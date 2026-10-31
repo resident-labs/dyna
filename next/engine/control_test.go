@@ -89,7 +89,7 @@ func TestPauseHoldsDeliveryUntilResume(t *testing.T) {
 		t.Fatal(problem)
 	}
 	next := (<-ch).Body.(contract.TurnStart)
-	if next.Turn == start.Turn || len(next.Inputs) != 1 || next.Inputs[0].Text != "@worker hello" {
+	if next.Turn == start.Turn || len(next.Inputs) != 1 || inputBody(next.Inputs[0].Text) != "@worker hello" {
 		t.Fatalf("resumed: %+v", next)
 	}
 }

@@ -262,7 +262,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					log.Printf("box channel: unsupported delivery type %s", event.Body.EventType())
 					text = fmt.Sprintf("Unsupported event: %s", event.Body.EventType())
 				}
-				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: text}
+				frame, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply})
+				if err != nil {
+					return
+				}
+				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + text}
 				if delivery.Queue == nil {
 					start = append(start, input)
 				} else {
