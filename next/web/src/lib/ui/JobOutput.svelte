@@ -14,11 +14,15 @@
   let bad = $derived(job !== undefined && failed(job));
   let cause = $derived(job && (job.running ? "Running" : endCause(job, session.name)));
   let time = $derived(job && jobTime(job));
-  let copied = $state(false);
+  let copied = $state<"yes" | "failed" | undefined>();
   async function copy() {
     if (!job) return;
-    await navigator.clipboard.writeText(job.command);
-    copied = true;
+    try {
+      await navigator.clipboard.writeText(job.command);
+      copied = "yes";
+    } catch {
+      copied = "failed";
+    }
   }
   // The block shows at most 3 lines of the command, so a long heredoc cannot fill the pane; "Show the whole command"
   // opens the rest. clipped says whether the 3 lines hide any of it, measured again when the block resizes.
@@ -30,7 +34,7 @@
     const element = block;
     void command;
     whole = false;
-    copied = false;
+    copied = undefined;
     if (!element) return;
     const measure = () => { clipped = element.scrollHeight > element.clientHeight + 1; };
     const observer = new ResizeObserver(measure);
@@ -65,7 +69,7 @@
   <header>
     <div class="title">{#if onback}<button type="button" class="back" aria-label="Back to jobs" onclick={onback}><Icon name="backChevron" /></button>{/if}
       <h3>{label}</h3>
-      {#if job}<button type="button" class="mini" onclick={() => void copy()}><Icon name={copied ? "check" : "copy"} size={14} />{copied ? "Copied" : "Copy command"}</button>{/if}</div>
+      {#if job}<button type="button" class="mini" onclick={() => void copy()}><Icon name={copied === "yes" ? "check" : "copy"} size={14} />{copied === "yes" ? "Copied" : copied === "failed" ? "Could not copy" : "Copy command"}</button>{/if}</div>
     {#if job}
       <p class="meta"><Avatar kind="session" name={session.name} root={session.root} size={16} /><span>{session.name}</span><span class="sep">·</span>
         <span class:bad>{cause}{time ? ` after ${time}` : ""}</span><span class="sep">·</span>
