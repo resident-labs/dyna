@@ -22,19 +22,14 @@ describe("context updates", () => {
 		expect(update?.content).not.toContain("far away");
 	});
 
-	it("does no reads, hashes or diffs when file metadata is unchanged", () => {
+	it("does no reads or diffs when file metadata is unchanged", () => {
 		let reads = 0;
-		let hashes = 0;
 		const stamp = { ino: 1, size: 4, mtimeMs: 1, ctimeMs: 1, isFile: true };
 		const cache = new ContextFileCache(
 			() => stamp,
 			() => {
 				reads++;
 				return "same";
-			},
-			(value) => {
-				hashes++;
-				return value;
 			},
 		);
 		expect(cache.changed(["file"])).toBe(true);
@@ -46,10 +41,6 @@ describe("context updates", () => {
 			{ file: first ?? "" },
 			{ file: second ?? "" },
 			{
-				hash: (value) => {
-					hashes++;
-					return value;
-				},
 				diff: () => {
 					diffs++;
 					return "";
@@ -57,7 +48,7 @@ describe("context updates", () => {
 			},
 		);
 		expect(update).toBeUndefined();
-		expect([reads, hashes, diffs]).toEqual([1, 1, 0]);
+		expect([reads, diffs]).toEqual([1, 0]);
 	});
 
 	it("removes retained pre-compaction updates already folded into the head", () => {
@@ -81,10 +72,16 @@ describe("context updates", () => {
 		const update = createContextUpdate({ goal: "first" }, { goal: "second" });
 		if (!update) throw new Error("expected update");
 		session.appendCustomMessageEntry(update.customType, update.content, update.display, update.details);
-		expect(deliveredSections(session.getBranch())).toEqual({ goal: "second" });
+		expect(deliveredSections(session)).toEqual({ goal: "second" });
+		let lookups = 0;
+		expect(deliveredSections({
+			getLeafEntry: () => session.getLeafEntry(),
+			getEntry: (id) => { lookups++; return session.getEntry(id); },
+		})).toEqual({ goal: "second" });
+		expect(lookups).toBe(0);
 		session.branch(head);
-		expect(deliveredSections(session.getBranch())).toEqual({ goal: "first" });
+		expect(deliveredSections(session)).toEqual({ goal: "first" });
 		session.appendCompaction("summary", null, 0, undefined, false, undefined, { goal: "folded" });
-		expect(deliveredSections(session.getBranch())).toEqual({ goal: "folded" });
+		expect(deliveredSections(session)).toEqual({ goal: "folded" });
 	});
 });
