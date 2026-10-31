@@ -55,10 +55,6 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 			return contract.BoxHelloResponse{}, failure(err)
 		}
 	}
-	rules, problem := s.RuleList(ctx, caller, contract.RuleListRequest{Room: session.Room})
-	if problem != nil {
-		return contract.BoxHelloResponse{}, problem
-	}
 	files, err := s.store.Transcripts(ctx, session.ID)
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
@@ -91,10 +87,10 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		"Use dyna session start --room ROOM --name NAME --profile PROFILE --goal GOAL --brief BRIEF to start a child. It prints the child session ID for stop and close.\n" +
 		"Add --size agent, small, medium or large to a start to request a box size.\n" +
 		"Use dyna session stop SESSION or dyna session close SESSION to manage a child.\n" +
-		"Use dyna rules to read room rules and dyna room log ROOM to read the feed.\n" +
+		"Use dyna room log ROOM to read the feed.\n" +
 		"Use dyna op list ROOM, dyna op approve ID, or dyna op deny ID --reason WHY for requests.\n" +
 		"Use dyna pr open --title TITLE --body-file FILE to open a pull request."
-	return contract.BoxHelloResponse{GitName: s.gitName, GitEmail: s.gitEmail, Session: session.ID, Box: session.Box, Model: model, CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Rules: rules.Rules, Transcripts: files, Instructions: instructions}, nil
+	return contract.BoxHelloResponse{GitName: s.gitName, GitEmail: s.gitEmail, Session: session.ID, Box: session.Box, Model: model, CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: instructions}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {

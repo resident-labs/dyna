@@ -194,15 +194,6 @@ func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, re
 	return response, nil
 }
 
-// RuleList ages the seeded rules, 9 hours per number, since the seed adds them all at once.
-func (d devService) RuleList(ctx context.Context, p contract.Principal, req contract.RuleListRequest) (contract.RuleListResponse, *contract.Error) {
-	response, problem := d.Service.RuleList(ctx, p, req)
-	for i := range response.Rules {
-		response.Rules[i].At = response.Rules[i].At.Add(-time.Duration(21-response.Rules[i].Number) * 9 * time.Hour)
-	}
-	return response, problem
-}
-
 // SessionList shows builder-feed's computer as running, so the computer view can be opened.
 func (d devService) SessionList(ctx context.Context, p contract.Principal, req contract.SessionListRequest) (contract.SessionListResponse, *contract.Error) {
 	list, problem := d.Service.SessionList(ctx, p, req)
@@ -278,12 +269,6 @@ type scripted struct {
 
 func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	text := inputs[0].Text
-	for _, in := range inputs { // rule notices ride along with the next turn, so the reply quotes the first message instead
-		if !strings.HasPrefix(in.Text, "Rule r") {
-			text = in.Text
-			break
-		}
-	}
 	for _, in := range inputs { // a turn can batch inputs; one with a marker wins, so the marker works in any order
 		if marked(in.Text, "[fail]") || marked(in.Text, "[jobs]") || marked(in.Text, "[wait]") || marked(in.Text, "[lost]") {
 			text = in.Text
@@ -552,50 +537,6 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	post(owner, contract.PostRequest{Text: "Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
 	post(owner, contract.PostRequest{Text: "Then tidy the room menu", Mentions: []string{"builder-feed"}})
-	// Room rules from the owner and from the root session, the only session that may add them.
-	listed, e := s.SessionList(ctx, owner, contract.SessionListRequest{Room: room.Room})
-	if e != nil {
-		log.Fatal(e.Message)
-	}
-	root := owner
-	for _, item := range listed.Sessions {
-		if item.Parent == "" {
-			root = contract.Principal{Kind: contract.PrincipalSession, Session: item.ID}
-		}
-	}
-	for _, rule := range []struct {
-		by   contract.Principal
-		text string
-	}{
-		{owner, "Tests must be fast and high-signal: one fail-first test per fix, under 1 second, with no sleeps."},
-		{root, "Never poll GitHub or Dyna in shell loops; wait for the engine's notices."},
-		{owner, "Builds and test runs go to hermeslab, never to the desktop node."},
-		{owner, "Every UI change must be an obvious, tasteful improvement over v1's matching screen. Builders screenshot v1's screen and a strong product's piece first, and each UI change shows them beside its own."},
-		{root, "Each reviewer reads spec.md first and never reopens settled owner decisions."},
-		{root, "Pull requests stay small: one change, one reason, and a body that says who outside this room benefits."},
-		{root, "Strict typing everywhere. Web code is strict TypeScript only: never add a .js or .mjs file under web/, and do not use `any` or untyped casts unless a comment explains why no type works. Reviewers reject changes that break this."},
-		{root, "Nothing the system shows the owner is raw text. Every notice uses a typed event with a designed view, e.g. a card or a muted line. An agent that sees a gap files an issue for it."},
-		{root, "Runtime state that changes goes in SQLite, not JSON files. JSON is for settings only. Append-only logs stay JSONL files, and large blobs stay files."},
-		{owner, "Merged branches are removed within a day. Keep nothing on a branch that a person still needs."},
-		{root, "Builders use the cheapest profile that can do the work well. Large work gets a design check first, as in r4. A quota limit moves sessions to a provider with quota."},
-		{root, "Colored marks only for state that needs attention. Plain facts are muted text. The old rule r13 no longer applies, and `r4` in a quoted command is only text."},
-		{root, "When no reported bug is open, one lead cuts token use, CPU, memory, disk and latency. Measure before and after."},
-		{root, "An upgrade shim may be removed once it shipped at least 30 days ago."},
-		{root, "Before the first release, shims may go sooner, once the floor names the main commit that ran them; see r14. The engine refuses an older store with a typed error."},
-		{root, "Before choosing a library or a design, read how the old code does it. Reuse proven parts, never the old architecture."},
-		{owner, "Each milestone report lists product lines per package against the last report, and names the packages past plan."},
-		{root, "Reports use plain words. Say what changed, what passed and what is still open."},
-		{root, "Direct merges are fine for docs, specs and small blocking fixes once a review approves them and CI is green."},
-		{owner, "Ask before any change that reaches outside this room."},
-	} {
-		if _, e := s.RuleAdd(ctx, rule.by, contract.RuleAddRequest{Room: room.Room, Text: rule.text}); e != nil {
-			log.Fatal(e.Message)
-		}
-	}
-	// A removed rule keeps the list's gaps real, and a number that points at it stays plain text on the page.
-	if _, e := s.RuleRemove(ctx, owner, contract.RuleRemoveRequest{Room: room.Room, Number: 13}); e != nil {
-		log.Fatal(e.Message)
-	}
 	// A session may attach only files uploaded in its room, so each file is uploaded by the principal that posts it.
 	upload := func(by contract.Principal, name, media, body string) (a contract.Attachment) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+name, strings.NewReader(body))

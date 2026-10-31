@@ -69,15 +69,6 @@ func (f *fakeClient) DeviceSetScopes(_ context.Context, q contract.DeviceSetScop
 	return contract.DeviceSetScopesResponse{}, nil
 }
 
-func (f *fakeClient) RuleAdd(context.Context, contract.RuleAddRequest) (contract.RuleAddResponse, error) {
-	return contract.RuleAddResponse{}, nil
-}
-func (f *fakeClient) RuleRemove(context.Context, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, error) {
-	return contract.RuleRemoveResponse{}, nil
-}
-func (f *fakeClient) RuleList(context.Context, contract.RuleListRequest) (contract.RuleListResponse, error) {
-	return contract.RuleListResponse{}, nil
-}
 func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return f.hostexecResp, nil
 }

@@ -56,9 +56,11 @@ type Service struct {
 	shellGeneration    uint64
 	readMu             sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
-	transcriptMu  sync.Mutex
-	transcriptDir string
-	filesDir      string
+	transcriptMu        sync.Mutex
+	transcriptDir       string
+	filesDir            string
+	instructionsMu      sync.Mutex
+	publishInstructions func(context.Context)
 }
 
 // sessionState is the engine's in-memory state for one session. s.mu guards its fields.
