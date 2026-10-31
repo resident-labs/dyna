@@ -333,8 +333,8 @@ export function describe(event: Event, name: Name): string {
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
     case "grant.expired": return "A host execution grant expired";
-    case "room.paused": return "Room paused";
-    case "room.resumed": return "Room resumed";
+    // The owner reads this feed; a room's root may also pause it.
+    case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;
     case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
     case "rule.removed": return `Rule r${event.body.number} removed`;
     case "rule.edited": return `Rule r${event.body.number} changed: ${event.body.text}`;
