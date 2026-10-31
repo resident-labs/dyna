@@ -243,7 +243,7 @@
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title} />
       {#if failed === key}<p class="hint" role="alert">Your message was not sent. Press Enter to try again.</p>{/if}
     {/if}{/if}
-    <TermDock bind:this={terminals} bind:element={dock}
+    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
