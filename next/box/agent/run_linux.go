@@ -20,6 +20,7 @@ import (
 	"github.com/resident-labs/dyna/box/dynamcp"
 	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/box/shell"
+	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
 )
@@ -152,9 +153,9 @@ func Run(ctx context.Context) error {
 	if hello.AgentSurface != contract.AgentSurfaceCaller && hello.AgentSurface != contract.AgentSurfaceDeclared {
 		err = pi.WriteMCPConfig(mcpPath, "shell", "http://127.0.0.1:7781/shell/")
 	} else {
-		dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), func(ctx context.Context, path string) (contract.Attachment, error) {
+		dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), post.Preparer{Dir: workdir, Render: visual.Preview, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
 			return post.UploadHTTP(ctx, client.http, path)
-		})
+		}})
 		if problem != nil {
 			return problem
 		}
