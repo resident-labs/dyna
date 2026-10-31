@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { RoomStore } from "./room.svelte.ts";
 import { EventWindow, PAGE, WINDOW, dmOf } from "./window.svelte.ts";
 import { feedRows as dayRows } from "./feed.ts";
+import { failedJobs } from "./status.ts";
 import { decodeEvent } from "./event.ts";
 import type { Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
 
@@ -281,6 +282,15 @@ test("session.list and later events set and clear the running computers", async 
     room.apply(event(6, { type: "box.changed", body: { box: "b", session: "x", from: "ready", to: "lost" } }));
     assert.equal(room.computers.size, 0);
   } finally { server.restore(); }
+});
+
+test("failed jobs read from history keep their session, and a job that passed stays out", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ events: [
+    event(1, { type: "shell.job.ended", body: { session: "s", job: "j1", exitCode: 1, tail: "" } }),
+    event(2, { type: "shell.job.ended", body: { session: "s", job: "j2", exitCode: 0, tail: "" } }),
+  ] }));
+  try { assert.deepEqual(await failedJobs("r", 3), ["s/j1"]); } finally { globalThis.fetch = original; }
 });
 
 test("a job that ends counts as ended at once, even while a turn holds the running count", () => {
