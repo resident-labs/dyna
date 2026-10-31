@@ -114,6 +114,14 @@ export function commandLine(argv: string[]): string {
   return argv.map(arg => /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`).join(" ");
 }
 
+// Files the browser shows inline as a thumbnail; other types get a file card.
+export const isImage = (file: Attachment) => /^image\/(png|jpeg|gif|webp)$/.test(file.media);
+
+// A file size as v1 shows it, such as "512 B", "12.4 KB" or "3.1 MB".
+export function fileSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
