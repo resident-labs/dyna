@@ -16,17 +16,16 @@
   let room = $derived(segment(/^\/r\/([^/]+)/));
   let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
   let store: RoomStore | undefined = $state();
-  let unavailable = $state("");
   $effect(() => {
     if (!room) return;
     const current = new RoomStore(room);
     store = current;
-    unavailable = "";
-    void current.open().catch((error: unknown) => {
-      if (store === current) unavailable = signedOut(error) ? "Your sign-in ended. Run dyna web to sign in again." : "This room is not available.";
-    });
+    void current.open();
     return () => current.close();
   });
+  // A room that failed to open is unavailable; later load errors show inside the feed.
+  let unavailable = $derived(!store || store.ready || store.error === undefined ? ""
+    : signedOut(store.error) ? "Your sign-in ended. Run dyna web to sign in again." : "This room is not available.");
   function navigate(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey) return;
     event.preventDefault();
@@ -61,8 +60,9 @@
     if (!text.trim()) return;
     drafts[sent] = "";
     failed = undefined;
-    store.post({ room, text, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
+    view?.send({ room, text, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
   }
+  let view: Feed | undefined = $state();
   let rail: HTMLElement;
   let feed: HTMLDivElement | undefined = $state();
   let composer: HTMLElement | undefined = $state();
@@ -94,7 +94,7 @@
     <header><span>{title}</span></header>
     <div class="feed">
       {#if store && !unavailable}
-        {#key key}<Feed {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
+        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
       {:else}<p class="empty">{unavailable || "Select a room."}</p>{/if}
     </div>
     {#if room && !unavailable}

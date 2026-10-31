@@ -48,6 +48,7 @@ test("folds sessions, box, turns and pending operations", () => {
 // A fake engine with posts 1..count; it records each events.list range.
 function engine(count: number) {
   const requests: string[] = [];
+  const state = { down: false };
   const posts = Array.from({ length: count }, (_, i) => event(i + 1, { type: "post.created", body: { text: String(i + 1), home: { kind: "feed" } } }));
   const original = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
@@ -58,6 +59,7 @@ function engine(count: number) {
       return new Response(JSON.stringify({ seq: posts.length, event: String(posts.length) }));
     }
     if (method !== "events.list") return new Response(JSON.stringify({}));
+    if (state.down) return new Response(JSON.stringify({ code: "internal", message: "down" }), { status: 500 });
     const limit = request.limit ?? PAGE;
     if (request.beforeSeq) {
       requests.push(`before ${request.beforeSeq}`);
@@ -67,7 +69,7 @@ function engine(count: number) {
     requests.push(`after ${request.afterSeq}`);
     return new Response(JSON.stringify({ events: posts.filter(post => post.seq > Number(request.afterSeq)).slice(0, limit), next: 0 }));
   };
-  return { requests, posts, restore: () => { globalThis.fetch = original; } };
+  return { requests, posts, state, restore: () => { globalThis.fetch = original; } };
 }
 
 test("releases the far end of the window and refetches it by the boundary seq", async () => {
@@ -112,5 +114,21 @@ test("a post sent while an older page loads still brings the window to the prese
     await older;
     assert.deepEqual([room.newest, room.atPresent, room.pendingPosts.size], [1501, true, 0]);
     assert.equal(room.posts({ kind: "feed" }).at(-1)?.body.text, "sent");
+  } finally { server.restore(); }
+});
+
+test("a failed jump keeps the sent post and shows the load error", async () => {
+  const server = engine(1500);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    for (let i = 0; i < 5; i++) await room.loadOlder();
+    server.state.down = true;
+    await room.post({ room: "r", text: "sent" });
+    assert.deepEqual([room.atPresent, room.pendingPosts.size], [false, 1]);
+    assert.notEqual(room.error, undefined);
+    server.state.down = false;
+    await room.jumpToPresent();
+    assert.deepEqual([room.newest, room.pendingPosts.size, room.error], [1501, 0, undefined]);
   } finally { server.restore(); }
 });

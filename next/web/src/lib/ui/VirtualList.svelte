@@ -39,13 +39,11 @@
     if (untrack(() => follow)) virtualizer.scrollToEnd();
     return cleanup;
   });
-  // A jump back to the present lands on the newest row once the new rows render;
-  // scrollToEnd keeps retargeting as they are measured.
-  let following = untrack(() => follow);
-  $effect(() => {
-    if (follow && !following) void tick().then(() => virtualizer.scrollToEnd());
-    following = follow;
-  });
+  // Lands on the newest row once new rows render; scrollToEnd keeps retargeting as they are measured.
+  export async function toEnd(): Promise<void> {
+    await tick();
+    virtualizer.scrollToEnd();
+  }
 
   function scrolled() {
     if (!element) return;
