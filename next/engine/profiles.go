@@ -59,8 +59,12 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 
 func validateProfiles(profiles map[contract.ProfileName]profile) error {
 	for name, p := range profiles {
+		if p.AgentSurface == "" {
+			p.AgentSurface = contract.AgentSurfaceOff
+			profiles[name] = p
+		}
 		switch p.AgentSurface {
-		case "", contract.AgentSurfaceOff, contract.AgentSurfaceCaller, contract.AgentSurfaceDeclared:
+		case contract.AgentSurfaceOff, contract.AgentSurfaceCaller, contract.AgentSurfaceDeclared:
 		default:
 			return fmt.Errorf("profile %q: invalid agentSurface", name)
 		}
@@ -121,11 +125,7 @@ func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ con
 func (p *ProfileConfig) Surface(name contract.ProfileName) contract.AgentSurface {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	surface := p.entries[name].AgentSurface
-	if surface == "" {
-		return contract.AgentSurfaceOff
-	}
-	return surface
+	return p.entries[name].AgentSurface
 }
 
 func (p *ProfileConfig) CompactionTokens(name contract.ProfileName) int {
