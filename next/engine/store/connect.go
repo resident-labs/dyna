@@ -120,16 +120,8 @@ func (s *Store) unlinkConnect(ctx context.Context, generation int64) error {
 	})
 }
 
-// ConsumeConnectNonce advances the epoch and consumes the nonce in one transaction.
-func (s *Store) ConsumeConnectNonce(ctx context.Context, epoch int64, nonce string, now, expires time.Time) error {
-	return s.consumeConnectNonce(ctx, epoch, 0, nonce, now, expires)
-}
-
-// ConsumeConnectNonceForLink rejects requests verified against a superseded link.
+// ConsumeConnectNonceForLink advances the epoch and rejects replayed nonces.
 func (s *Store) ConsumeConnectNonceForLink(ctx context.Context, epoch, generation int64, nonce string, now, expires time.Time) error {
-	return s.consumeConnectNonce(ctx, epoch, generation, nonce, now, expires)
-}
-func (s *Store) consumeConnectNonce(ctx context.Context, epoch, generation int64, nonce string, now, expires time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM connect_nonces WHERE expires_at<?", now.Unix()); err != nil {
 			return err
@@ -145,7 +137,7 @@ func (s *Store) consumeConnectNonce(ctx context.Context, epoch, generation int64
 		if n != 1 {
 			return errors.New("replayed relay request")
 		}
-		r, err = tx.ExecContext(ctx, "UPDATE connect_link_state SET epoch=? WHERE id=1 AND linked=1 AND epoch<=? AND (?=0 OR generation=?)", epoch, epoch, generation, generation)
+		r, err = tx.ExecContext(ctx, "UPDATE connect_link_state SET epoch=? WHERE id=1 AND linked=1 AND epoch<=? AND generation=?", epoch, epoch, generation)
 		if err != nil {
 			return err
 		}
