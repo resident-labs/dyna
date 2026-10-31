@@ -68,11 +68,15 @@ func readRepoManifest(file string) (capture, error) {
 	}
 	result := capture{Repos: make(map[string]contract.RepoName), Defaults: make(map[contract.RepoName]contract.RoomName), Refs: make(map[string]string)}
 	for _, entry := range manifest.Repositories {
-		if !filepath.IsAbs(entry.Path) || filepath.Clean(entry.Path) != entry.Path || !repoIdentityPattern.MatchString(entry.Identity) || path.Clean(entry.Identity) != entry.Identity || room.ValidateName(entry.DefaultRoom) != nil {
+		if !filepath.IsAbs(entry.Path) || filepath.Clean(entry.Path) != entry.Path || (entry.Identity != "" && (!repoIdentityPattern.MatchString(entry.Identity) || path.Clean(entry.Identity) != entry.Identity || room.ValidateName(entry.DefaultRoom) != nil)) || (entry.Identity == "" && entry.DefaultRoom != "") {
 			return capture{}, fmt.Errorf("invalid repository manifest entry")
 		}
 		if _, ok := result.Repos[entry.Path]; ok {
 			return capture{}, fmt.Errorf("duplicate repository path in manifest")
+		}
+		if entry.Identity == "" {
+			result.Repos[entry.Path] = ""
+			continue
 		}
 		id, target := contract.RepoName(entry.Identity), contract.RoomName(entry.DefaultRoom)
 		if prior, ok := result.Defaults[id]; ok && prior != target {
@@ -132,5 +136,5 @@ func repoName(manifest map[string]contract.RepoName, source string) (contract.Re
 		}
 		return "", errUnsupportedForge
 	}
-	return "", fmt.Errorf("repository identity is missing from manifest")
+	return "", errUnsupportedForge
 }
