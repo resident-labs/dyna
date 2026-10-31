@@ -1,10 +1,10 @@
-import type { VisualCard, VisualCheck, VisualCheckName } from "./contract.gen.ts";
+import type { VisualCard, VisualCheck, VisualCheckName, VisualSuperseded } from "./contract.gen.ts";
 import { APIError } from "./client.ts";
 import type { PostEvent } from "./window.svelte.ts";
 
-export function visualReplyFailure(_error: unknown): { kind: "failed" } | { kind: "superseded"; visual: import("./contract.gen.ts").VisualSuperseded } {
-  return _error instanceof APIError && _error.detail.code === "visual_superseded" && _error.detail.visual
-    ? { kind: "superseded", visual: _error.detail.visual } : { kind: "failed" };
+export function visualReplyFailure(error: unknown): { kind: "failed" } | { kind: "superseded"; visual: VisualSuperseded } {
+  return error instanceof APIError && error.detail.code === "visual_superseded" && error.detail.visual
+    ? { kind: "superseded", visual: error.detail.visual } : { kind: "failed" };
 }
 
 export type VisualVersion = { event: PostEvent; visual: VisualCard };
