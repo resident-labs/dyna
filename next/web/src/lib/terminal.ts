@@ -13,34 +13,40 @@ export interface Connection {
   close(): void;
 }
 
-// One WebSocket per tab, with no reattach (M2). Binary frames carry the terminal's bytes both ways, a
-// TerminalResize text frame sets the size, and the engine's last text frame is TerminalExit. A socket
-// that closes without one, such as on an engine restart, exits with no code. Frames sent before the
-// socket opens wait for it.
+// One WebSocket per tab, with no reattach (M2). The first resize connects, because the engine opens the
+// shell at that size. Binary frames carry the terminal's bytes both ways, a TerminalResize text frame sets
+// the size, and the engine's last text frame is TerminalExit. A socket that closes without one, such as on
+// an engine restart, exits with no code. Frames sent before the socket opens wait for it, in order, so keys
+// typed as the pane appears reach the shell.
 export function openTerminal(
-  target: TerminalTarget, size: TerminalResize, handlers: { output(bytes: Uint8Array): void; exit(code?: number): void },
+  target: TerminalTarget, handlers: { output(bytes: Uint8Array): void; exit(code?: number): void },
   connect: (path: string) => Connection = path => new WebSocket(new URL(path, location.href.replace(/^http/, "ws"))),
 ): TerminalSocket {
-  const query = new URLSearchParams({ ...target, cols: String(size.cols), rows: String(size.rows) });
-  const socket = connect(`/v1/terminal?${query}`);
-  socket.binaryType = "arraybuffer";
-  let waiting: (string | Uint8Array)[] | undefined = [];
+  const waiting: (string | Uint8Array)[] = [];
+  let socket: Connection | undefined;
+  let live: Connection | undefined;
   let code: number | undefined;
   let closed = false;
-  const put = (frame: string | Uint8Array) => { if (waiting) waiting.push(frame); else socket.send(frame); };
-  socket.onopen = () => { for (const frame of waiting ?? []) socket.send(frame); waiting = undefined; };
-  socket.onmessage = ({ data }) => {
-    if (data instanceof ArrayBuffer) handlers.output(new Uint8Array(data));
-    else if (typeof data === "string") {
-      const exit: unknown = JSON.parse(data);
-      if (typeof exit === "object" && exit && "exitCode" in exit && typeof exit.exitCode === "number" && Number.isInteger(exit.exitCode)) code = exit.exitCode;
-    }
+  const put = (frame: string | Uint8Array) => { if (live) live.send(frame); else waiting.push(frame); };
+  const start = (size: TerminalResize) => {
+    const query = new URLSearchParams({ ...target, cols: String(size.cols), rows: String(size.rows) });
+    const opening = connect(`/v1/terminal?${query}`);
+    socket = opening;
+    opening.binaryType = "arraybuffer";
+    opening.onopen = () => { for (const frame of waiting) opening.send(frame); waiting.length = 0; live = opening; };
+    opening.onmessage = ({ data }) => {
+      if (data instanceof ArrayBuffer) handlers.output(new Uint8Array(data));
+      else if (typeof data === "string") {
+        const exit: unknown = JSON.parse(data);
+        if (typeof exit === "object" && exit && "exitCode" in exit && typeof exit.exitCode === "number" && Number.isInteger(exit.exitCode)) code = exit.exitCode;
+      }
+    };
+    opening.onclose = () => { if (!closed) { closed = true; handlers.exit(code); } };
   };
-  socket.onclose = () => { if (!closed) { closed = true; handlers.exit(code); } };
   return {
     send: text => put(new TextEncoder().encode(text)),
-    resize: (cols, rows) => put(JSON.stringify({ cols, rows } satisfies TerminalResize)),
+    resize: (cols, rows) => { if (socket) put(JSON.stringify({ cols, rows } satisfies TerminalResize)); else start({ cols, rows }); },
     // The owner closed the tab; the engine hangs up the shell, and nothing waits for its exit.
-    close: () => { closed = true; socket.close(); },
+    close: () => { closed = true; socket?.close(); },
   };
 }
