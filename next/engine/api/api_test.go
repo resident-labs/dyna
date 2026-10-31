@@ -319,3 +319,12 @@ func TestShellWatchRejectsBox(t *testing.T) {
 		t.Fatalf("status %d", w.Code)
 	}
 }
+
+func TestOwnerStreamRejectsSession(t *testing.T) {
+	h := New(&fakeService{}, nil).handler(boxCaller())
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/v1/events?after=0", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+}

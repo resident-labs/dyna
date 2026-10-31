@@ -49,11 +49,15 @@ type Error struct {
 
 type RoomListRequest struct{}
 type RoomSummary struct {
-	ID   RoomID `json:"id"`
-	Name string `json:"name"`
+	ID      RoomID      `json:"id"`
+	Name    string      `json:"name"`
+	Waiting []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides
+	Working []SessionID `json:"working"` // open sessions with a running turn
 }
 type RoomListResponse struct {
 	Rooms []RoomSummary `json:"rooms"`
+	// Seq is the newest event in any room when the list was read; the owner stream resumes after it.
+	Seq int64 `json:"seq"`
 }
 type SessionListRequest struct {
 	Room RoomID `json:"room"`
