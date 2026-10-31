@@ -2,8 +2,6 @@ package lifecycle
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -16,11 +14,8 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) erro
 		return err
 	}
 	if row.State == contract.BoxDeleted {
-		session, err := r.store.Session(ctx, row.Session)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
+		session, found, err := r.store.OpenSession(ctx, row.Session)
+		if err != nil || !found {
 			return err
 		}
 		event, err := r.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: row.Session, Reason: session.CloseReason})
