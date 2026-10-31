@@ -3,7 +3,7 @@ import type { UsageWindow } from "./contract.gen.ts";
 export type PaceStatus = "ahead" | "on" | "under";
 export const paceWords: Record<PaceStatus, string> = { ahead: "ahead of pace", on: "on pace", under: "under pace" };
 
-export interface Pace {
+export type Pace = {
   status: PaceStatus;
   expectedRemaining: number;
 }
@@ -36,8 +36,8 @@ export function poolPace(windows: readonly UsageWindow[], now: number): PaceStat
 }
 
 // Wake at the next minute or reset, whichever comes first.
-export function meterWake(resetsAt: string | undefined, now: number): number {
-  const end = Date.parse(resetsAt ?? "");
+export function meterWake(resetsAt: string, now: number): number {
+  const end = Date.parse(resetsAt);
   if (!Number.isFinite(end) || end <= now) return NaN;
   return Math.min(end, (Math.floor(now / MINUTE) + 1) * MINUTE);
 }
