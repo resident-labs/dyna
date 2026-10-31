@@ -15,6 +15,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
+	"github.com/resident-labs/dyna/engine/connect"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -65,6 +66,11 @@ func (a *API) handler(c Caller) http.Handler {
 		if err != nil {
 			return contract.ConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect status unavailable"}
 		}
+		if a.web != nil {
+			routes, tunnel := a.web.routeOrigins(ctx)
+			out.Routes = connect.RankedRoutes(routes, tunnel)
+			out.Tunnel = tunnel
+		}
 		return out, nil
 	})
 	call(mux, contract.MethodConnectCancel, c, func(ctx context.Context, _ contract.Principal, _ contract.ConnectCancelRequest) (contract.ConnectCancelResponse, *contract.Error) {
@@ -91,7 +97,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodDevicePair, c, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {
 		out, problem := a.service.DevicePair(ctx, p, req)
 		if a.web != nil {
-			out.Routes = a.web.publicRoutes()
+			out.Routes = a.web.PublicRoutes()
 		}
 		return out, problem
 	})
