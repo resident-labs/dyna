@@ -15,6 +15,7 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Preserve `seven_day_oauth_apps` alongside nonempty `limits` when the normalized limits omit that window. `engine/model` uses it for the correct Claude weekly quota. This separate patch adds 38 lines and removes 3, including its regression test; drop it when upstream fixes mixed responses.
 - OAuth in-memory handoff and adoption status: 124 product lines added, 4 removed. Dyna enables it for Claude and Codex callbacks, and it exposes adopted credential IDs for the supported flows. Upstream PR #4800 handles a busy callback port, not secret-free handoff; issue #295 asks for manual callbacks, not this storage boundary.
+- Durable credential writes: 18 product lines added, 1 removed. An opt-in store rejects publication after a failed save with a typed, secret-free error. If a provider already invalidated the old token, the owner must sign in again. Upstream PR #6295 makes file replacement atomic but does not reject an uncommitted refresh.
 
 ## Update
 

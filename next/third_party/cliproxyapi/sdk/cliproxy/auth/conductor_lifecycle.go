@@ -138,6 +138,10 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	// Persist failures stay non-fatal, but must not be silent: a restart would
 	// lose the credential that only exists in memory.
 	if errPersist := m.persistLocked(ctx, auth); errPersist != nil {
+		if durable, ok := m.store.(DurableAuthStore); ok && durable.RequireDurableAuth() {
+			m.mu.Unlock()
+			return nil, ErrCredentialNotDurable
+		}
 		log.WithFields(log.Fields{"auth_id": auth.ID, "credential": auth.ID, "provider": auth.Provider}).Warnf("failed to persist registered auth %s (%s): %v", auth.Provider, auth.ID, errPersist)
 	}
 	if m.authEpochs[auth.ID] != auth.RegistrationEpoch {
@@ -520,6 +524,10 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 	refreshPatchBeforeSave := auth.CodexRefreshPatch
 	persistMetaMint := (mode == updateModePrepare || mode == updateModeRefresh) && strings.EqualFold(strings.TrimSpace(auth.Provider), "meta")
 	if errPersist := m.persistLocked(ctx, auth); errPersist != nil {
+		if durable, ok := m.store.(DurableAuthStore); ok && durable.RequireDurableAuth() {
+			m.mu.Unlock()
+			return nil, false, false, ErrCredentialNotDurable
+		}
 		// A minted Meta key must reach the store before requests can use it.
 		if persistMetaMint {
 			m.mu.Unlock()
