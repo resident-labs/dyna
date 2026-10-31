@@ -22,6 +22,7 @@ export type BoxFailure = { box: "failed" | "lost"; cause?: FailureCause; at?: st
 export async function lastBoxChanges(room: string, beforeSeq: number, sessions: Iterable<string>): Promise<Map<string, Extract<Event, { type: "box.changed" }>>> {
   const unplaced = new Set(sessions);
   const found = new Map<string, Extract<Event, { type: "box.changed" }>>();
+  // Accepted limit (lead-rewrite, 2026-10-31): the read stays bounded; a reason past 5 pages shows as "Starting".
   for (let before = beforeSeq, pages = 0; unplaced.size && pages < 5; pages++) {
     const page = await call("events.list", { room, afterSeq: 0, beforeSeq: before, limit: 200, types: ["box.changed"] }).catch(() => undefined);
     const events = page?.events ?? [];
