@@ -325,6 +325,11 @@ func stallStacks(t *testing.T) {
 	t.Cleanup(func() { timer.Stop() })
 }
 
+// fixtureClock is 12:00 UTC of the previous day, once per test process. The day
+// boundary keeps every 9- and 10-minute poll slot at the same phase, and the rolling
+// date stays inside the 14-day retention window that state.Write applies.
+var fixtureClock = time.Now().UTC().Truncate(24 * time.Hour).Add(-12 * time.Hour)
+
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
 	stallStacks(t)
@@ -337,7 +342,7 @@ func newEnv(t *testing.T) *testEnv {
 	}
 	roomfixture.Repository(t, room.DefaultStore(), scoped.ID, "github.com", "owner/repo", "read-write")
 	// The real clock, on a minute boundary as nextPollTime expects: state.Write drops closed records older than 14 days, so a fixed date would expire.
-	e := &testEnv{t: t, file: filepath.Join(dir, "fixture.json"), calls: filepath.Join(dir, "calls"), clock: time.Now().UTC().Truncate(time.Minute)}
+	e := &testEnv{t: t, file: filepath.Join(dir, "fixture.json"), calls: filepath.Join(dir, "calls"), clock: fixtureClock}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
