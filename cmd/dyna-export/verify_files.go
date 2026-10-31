@@ -31,6 +31,9 @@ func verifyCapturedFiles(data, config, bundle string, cap capture) error {
 		return err
 	}
 	known := map[string]bool{
+		"haiku": true, "opus": true, "sonnet": true,
+		"openai-codex/gpt-6-luna": true, "openai-codex/gpt-6.1-terra": true,
+		"zai/glm-5.3": true, "zai/glm-5.3-flash": true,
 		"anthropic/claude-opus-5-5": true, "claude-opus-5-5": true,
 		"anthropic/claude-sonnet-5-5": true, "claude-sonnet-5-5": true,
 		"anthropic/claude-haiku-4-5-20251001": true, "claude-haiku-4-5-20251001": true,
