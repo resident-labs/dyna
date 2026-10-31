@@ -141,6 +141,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	return ch, nil
 }
 
+// computerInputHandle serializes enqueueing with box replacement.
 type computerInputHandle struct {
 	mu    sync.Mutex
 	queue chan contract.ComputerInputBatch
