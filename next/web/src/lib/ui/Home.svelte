@@ -26,6 +26,7 @@
   const keepSessions = (list: SessionListResponse, fresh: string[]) => {
     for (const item of list.sessions ?? []) sessions.set(item.id, { name: item.name, root: !item.parent });
     for (const id of fresh) answered.add(id);
+    attention.seed(list.sessions ?? []);
   };
   $effect(() => {
     void attempt;
@@ -68,7 +69,7 @@
       <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/if}
   {#if anyWorking}<h2 class="label">Working{#if working.length}<span>{working.length}</span>{/if}</h2>
     {#each working as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
-      <SessionRow name={value.name} root={value.root} status={`working · ${room.name}`} /></a>{/each}{/if}
+      <SessionRow name={value.name} root={value.root} status={["working", attention.activity.get(id), room.name].filter(Boolean).join(" · ")} /></a>{/each}{/if}
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
   {#if !anyWaiting && !anyWorking}<p class="empty">Nothing waits for you, and no session is working.</p>{/if}
 </div>
