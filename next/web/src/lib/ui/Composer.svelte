@@ -19,8 +19,11 @@
   // As in v1, an @word at the caret opens a list of sessions above the box: arrows move, Enter or Tab picks,
   // Escape closes. A DM passes no sessions, since the engine refuses mentions there.
   // Files wait above the text as chips, as in v1's tray; the paperclip, a paste or the picker adds them.
-  let { value = $bindable(""), placeholder, onsend, quote, onunquote, sessions = [], files, element = $bindable() }: {
+  // While a DM's session runs a turn, an empty draft's Send becomes a square Stop, as in T3 Code; a draft keeps Send, which
+  // steers the turn.
+  let { value = $bindable(""), placeholder, onsend, quote, onunquote, sessions = [], files, stop, element = $bindable() }: {
     value?: string; placeholder: string; onsend: () => void; quote?: Quote; onunquote: () => void; sessions?: Mentionable[]; files: FileDraft;
+    stop?: { stopping: boolean; failed: boolean; run: () => void };
     element?: HTMLTextAreaElement;
   } = $props();
   let picker: HTMLInputElement | undefined = $state();
@@ -29,7 +32,8 @@
   // A forwarded post's files count toward the engine's limit, so a post never carries more than it accepts.
   let forwarded = $derived(quote?.attachments.length ?? 0);
   let over = $derived(files.items.length + forwarded - maxFiles);
-  let canSend = $derived(!files.busy && over <= 0 && (!!value.trim() || !!quote || files.items.length > 0));
+  let empty = $derived(!value.trim() && !quote && !files.items.length);
+  let canSend = $derived(!files.busy && over <= 0 && !empty);
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
   // v1's order (attach.ts pastedFiles): the files, else file items, else an image from the async clipboard. Files win over
   // text, since Finder also puts the file name in text/plain; WebKitGTK may leave both empty for a screenshot.
@@ -117,6 +121,7 @@
       <button type="button" class="remove" aria-label="Remove {item.file.name}" title="Remove {item.file.name}" onclick={() => files.remove(item.id)}><Icon name="close" size={14} /></button>
     </li>{/each}</ul>{/if}
   {#if note || over > 0}<p class="note" role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
+  {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
     oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
@@ -125,7 +130,9 @@
     <button type="button" class="attach" aria-label="Attach files" title="Attach files" onclick={() => picker?.click()}><Icon name="clip" /></button>
     <input bind:this={picker} type="file" multiple hidden onchange={event => { note = files.add(event.currentTarget.files ?? [], forwarded); event.currentTarget.value = ""; element?.focus(); }} />
     <span class="keys">Enter to send · Shift+Enter for a new line</span>
-    <button type="button" class="send" aria-label="Send" title="Send" disabled={!canSend} onclick={() => { note = ""; onsend(); element?.focus(); }}><Icon name="send" /></button>
+    {#if stop && empty}<button type="button" class="send stop" aria-label={stop.stopping ? "Stopping" : "Stop"} title={stop.stopping ? "Stopping" : "Stop"} disabled={stop.stopping}
+      onclick={event => { stop.run(); if (!event.detail) element?.focus(); }}><Icon name="stop" /></button>
+    {:else}<button type="button" class="send" aria-label="Send" title="Send" disabled={!canSend} onclick={() => { note = ""; onsend(); element?.focus(); }}><Icon name="send" /></button>{/if}
   </div>
 </div>
 
@@ -185,5 +192,7 @@
   @media (hover: none) { .attach, .remove { width: 40px; height: 40px; } }
   .send { background: var(--focus); color: var(--bg); }
   .send:disabled { background: var(--selected); color: var(--muted); cursor: default; }
+  .stop { background: var(--text); }
+  .stop :global(svg) { fill: currentColor; }
   .actions button:focus-visible, .remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
