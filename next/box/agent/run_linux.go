@@ -92,6 +92,20 @@ func Run(ctx context.Context) error {
 		return setupRepos(ctx, "/box/work", hello.Repos, hello.GitName, hello.GitEmail, runGit)
 	}
 	setupErr := setup(ctx)
+	for _, link := range []struct{ path, target string }{
+		{"/box/pi/AGENTS.md", "/run/dyna/instructions/global/AGENTS.md"},
+		{"/box/work/AGENTS.md", "/run/dyna/instructions/room/AGENTS.md"},
+	} {
+		if err := os.MkdirAll(filepath.Dir(link.path), 0700); err != nil {
+			return err
+		}
+		if err := os.Remove(link.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := os.Symlink(link.target, link.path); err != nil {
+			return err
+		}
+	}
 	args, err := modelArgs(hello.Model, hello.CompactTokens)
 	if err != nil {
 		return err
