@@ -1,7 +1,13 @@
 package tools
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -9,13 +15,69 @@ import (
 )
 
 // The table has exactly one row per Method constant, and no row without one.
+// The test reads the constants from the contract package itself, so a new
+// constant fails until its row exists.
 func TestMethodTableCoversEveryConstant(t *testing.T) {
+	files, err := filepath.Glob("../*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	var constants []contract.Method
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, sp := range gd.Specs {
+				v, ok := sp.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				id, ok := v.Type.(*ast.Ident)
+				if !ok || id.Name != "Method" {
+					continue
+				}
+				for i := range v.Names {
+					if i >= len(v.Values) {
+						continue
+					}
+					lit, ok := v.Values[i].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						continue
+					}
+					value, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						t.Fatal(err)
+					}
+					constants = append(constants, contract.Method(value))
+				}
+			}
+		}
+	}
+	sort.Slice(constants, func(i, j int) bool { return constants[i] < constants[j] })
+	for i := 1; i < len(constants); i++ {
+		if constants[i] == constants[i-1] {
+			t.Fatalf("duplicate Method constant %s", constants[i])
+		}
+	}
+	if len(constants) == 0 {
+		t.Fatal("no Method constants found")
+	}
 	rows := Methods()
 	count := map[contract.Method]int{}
 	for _, row := range rows {
 		count[row.Method]++
 	}
-	for _, m := range contract.AllMethods {
+	for _, m := range constants {
 		if count[m] != 1 {
 			t.Errorf("method %s has %d rows, want 1", m, count[m])
 		}
