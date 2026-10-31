@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strconv"
 	"time"
 
@@ -82,65 +84,53 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.service.EventsList(ctx, p, req)
 	})
-	if computers, ok := a.service.(interface {
-		ComputerChanged(context.Context, contract.Principal, contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error)
-		ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
-		ComputerFrames(context.Context, contract.Principal, io.Reader) *contract.Error
-	}); ok {
-		call(mux, contract.MethodComputerChanged, c, box, computers.ComputerChanged)
-		mux.HandleFunc("POST /v1/computers/frames", func(w http.ResponseWriter, r *http.Request) {
-			if !box(c) {
-				writeError(w, forbidden())
-				return
-			}
-			if err := computers.ComputerFrames(r.Context(), c.Principal, r.Body); err != nil {
-				writeError(w, err)
-			}
-		})
-		mux.HandleFunc("GET /v1/computers/watch", func(w http.ResponseWriter, r *http.Request) {
-			if !owner(c) || !c.Web {
-				writeError(w, forbidden())
-				return
-			}
-			session := contract.SessionID(r.URL.Query().Get("session"))
-			if session == "" {
-				writeError(w, invalid())
-				return
-			}
-			frames, err := computers.ComputerWatch(r.Context(), session)
+	call(mux, contract.MethodComputerChanged, c, box, a.service.ComputerChanged)
+	mux.HandleFunc("POST /v1/computers/frames", func(w http.ResponseWriter, r *http.Request) {
+		if !box(c) {
+			writeError(w, forbidden())
+			return
+		}
+		if err := a.service.ComputerFrames(r.Context(), c.Principal, r.Body); err != nil {
+			writeError(w, err)
+		}
+	})
+	mux.HandleFunc("GET /v1/computers/watch", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if !owner(c) || !c.Web {
+			writeError(w, forbidden())
+			return
+		}
+		session := contract.SessionID(r.URL.Query().Get("session"))
+		if session == "" {
+			writeError(w, invalid())
+			return
+		}
+		frames, err := a.service.ComputerWatch(r.Context(), session)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		multi := multipart.NewWriter(w)
+		_ = multi.SetBoundary("frame")
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+		w.WriteHeader(http.StatusOK)
+		f, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
+		f.Flush()
+		header := textproto.MIMEHeader{"Content-Type": []string{"image/jpeg"}}
+		for frame := range frames {
+			part, err := multi.CreatePart(header)
 			if err != nil {
-				writeError(w, err)
 				return
 			}
-			w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-			w.WriteHeader(http.StatusOK)
-			f, ok := w.(http.Flusher)
-			if !ok {
+			if _, err = part.Write(frame); err != nil {
 				return
 			}
 			f.Flush()
-			for {
-				select {
-				case frame, ok := <-frames:
-					if !ok {
-						return
-					}
-					if _, err := fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame)); err != nil {
-						return
-					}
-					if _, err := w.Write(frame); err != nil {
-						return
-					}
-					if _, err := fmt.Fprint(w, "\r\n"); err != nil {
-						return
-					}
-					f.Flush()
-				case <-r.Context().Done():
-					return
-				}
-			}
-		})
-	}
+		}
+	})
 	call(mux, contract.MethodBoxHello, c, box, a.service.BoxHello)
 	call(mux, contract.MethodTurnOutput, c, box, a.service.TurnOutput)
 	call(mux, contract.MethodDeliveryDone, c, box, a.service.DeliveryDone)

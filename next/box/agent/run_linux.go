@@ -47,13 +47,13 @@ func Run(ctx context.Context, version string) error {
 	defer cancel()
 	client := NewClient(engineSocket)
 	errs := make(chan error, 4)
-	states := make(chan bool, 8)
+	states := make(chan struct{}, 1)
 	var computerRunning atomic.Bool
 	closeComputer, err := computer.Serve(ctx, "/run/dyna/agent.sock", errs, func(running bool) {
 		computerRunning.Store(running)
 		select {
-		case states <- running:
-		case <-ctx.Done():
+		case states <- struct{}{}:
+		default:
 		}
 	})
 	if err != nil {
@@ -64,7 +64,8 @@ func Run(ctx context.Context, version string) error {
 	go func() {
 		for {
 			select {
-			case running := <-states:
+			case <-states:
+				running := computerRunning.Load()
 				state := contract.ComputerStopped
 				if running {
 					state = contract.ComputerRunning
@@ -163,10 +164,10 @@ func Run(ctx context.Context, version string) error {
 			}
 			return runner.Handle(ctx, message)
 		}, func(connected bool) {
-			if connected && computerRunning.Load() {
+			if connected {
 				select {
-				case states <- true:
-				case <-ctx.Done():
+				case states <- struct{}{}:
+				default:
 				}
 			}
 			if !connected && stopWatch != nil {
