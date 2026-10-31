@@ -757,7 +757,54 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	if len(events) > 0 {
 		next = events[len(events)-1].Seq
 	}
-	return contract.EventsListResponse{Events: events, Next: next}, nil
+	// Names of the sessions this page names, so that posts and events of closed sessions keep their authors.
+	named := map[contract.SessionID]bool{}
+	for _, event := range events {
+		named[event.From.Session] = true
+		switch body := event.Body.(type) {
+		case contract.SessionStarted:
+			named[body.Session] = true
+		case contract.SessionClosed:
+			named[body.Session] = true
+		case contract.TurnStarted:
+			named[body.Session] = true
+		case contract.TurnEnded:
+			named[body.Session] = true
+		case contract.ShellJobEnded:
+			named[body.Session] = true
+		case contract.BoxChanged:
+			named[body.Session] = true
+		case contract.PrOpened:
+			named[body.Session] = true
+		case contract.OpRequested:
+			named[body.By.Session] = true
+		}
+	}
+	delete(named, "")
+	var ids []any
+	for id := range named {
+		ids = append(ids, id)
+	}
+	names := map[contract.SessionID]string{}
+	if len(ids) > 0 {
+		rows, err := s.store.Read().QueryContext(ctx, "SELECT id,name FROM sessions WHERE id IN (?"+strings.Repeat(",?", len(ids)-1)+")", ids...)
+		if err != nil {
+			return contract.EventsListResponse{}, failure(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id contract.SessionID
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				return contract.EventsListResponse{}, failure(err)
+			}
+			names[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			return contract.EventsListResponse{}, failure(err)
+		}
+	}
+	return contract.EventsListResponse{Events: events, Next: next, Names: names}, nil
 }
 
 func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req contract.BoxHelloRequest) (contract.BoxHelloResponse, *contract.Error) {
