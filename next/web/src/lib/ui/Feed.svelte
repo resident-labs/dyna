@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { APIError } from "../client.ts";
+  import { APIError, call } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
   import BoxRestart from "./BoxRestart.svelte";
@@ -19,7 +19,7 @@
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
   let { store, home, admin, operate, intro, unsent, onunsent, onsettled, onforward, waiting, onclosed, onjobs, onvisual, target, ontarget, element = $bindable() }: {
     store: RoomStore; home: Conversation; admin: boolean; operate: boolean; intro: Snippet<[boolean]>; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; waiting?: Quote; onclosed: () => void; onjobs: (session: string) => void; onvisual: (versions: VisualVersion[], selected: number) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; waiting?: Quote; onclosed: () => void; onjobs: (session: string) => void; onvisual: (versions: VisualVersion[], selected: number, send: (text: string, event: string) => Promise<void>) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -95,7 +95,7 @@
       if (index >= 0) void list?.reveal(index);
       return;
     }
-    onvisual(versions, visual.version);
+    onvisual(versions, visual.version, async (text, event) => { await call("post", { room: store.room, text, visualReply: event }); });
   }
   let failure = $derived(home.kind === "dm" && home.session && view.atPresent ? store.boxFailures.get(home.session) : undefined);
   let steps = $derived(home.kind === "dm" && home.session && view.atPresent ? (store.steps.get(home.session) ?? []).slice(0, failure ? undefined : -1) : []);
