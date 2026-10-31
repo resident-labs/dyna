@@ -1,3 +1,5 @@
+export const pagingEdge = (client: number): number => Math.max(600, 3 * client);
+
 // The ends of a scrolling list to page at. moved is how far scrollTop changed in a scroll event:
 // the list also scrolls itself (following a live row, keeping its anchor when rows load above),
 // so only a move toward an end pages that end. A check after a change of the rows has no move;

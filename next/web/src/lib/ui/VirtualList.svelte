@@ -8,18 +8,19 @@
     type VirtualItem, type VirtualizerOptions,
   } from "@tanstack/virtual-core";
   import { tick, untrack, type Snippet } from "svelte";
-  import { shouldPage } from "../paging.ts";
+  import { pagingEdge, shouldPage } from "../paging.ts";
+  import { SCROLL_QUIET_MS, ScrollHold } from "../scrollHold.ts";
 
   let { items, key, row, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, onbottom, element = $bindable() }: {
     items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string; role?: "feed" | "group"; align?: "top" | "bottom";
     // Chat mode: open at the newest row and follow new rows while the reader is at the bottom.
-    follow?: boolean; estimate?: number;
+    follow?: boolean; estimate?: number | ((item: T) => number);
     // onbottom tells whether the end of the rows is within 24 px of the view's bottom edge.
     onstart?: () => void; onend?: () => void; onbottom?: (shown: boolean) => void; element?: HTMLDivElement;
   } = $props();
 
-  const edge = 600;
-  let visible: VirtualItem[] = $state([]);
+  const edge = () => pagingEdge(element?.clientHeight ?? 0);
+  let visible: VirtualItem[] = $state.raw([]);
   let total = $state(0);
   // The rows the virtualizer and the template use. A new items value marks the rendered rows dirty before the effect
   // below moves visible, so a row read from items could point past its end. rows and visible change together.
@@ -29,12 +30,42 @@
   // no distance can meet turns that off.
   let held = false;
   const options = (): VirtualizerOptions<HTMLDivElement, HTMLDivElement> => ({
-    count: rows.length, getScrollElement: () => element ?? null, estimateSize: () => estimate,
-    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow, scrollEndThreshold: held ? -1 : 1,
+    count: rows.length, getScrollElement: () => element ?? null, estimateSize: index => typeof estimate === "number" ? estimate : estimate(rows[index]),
+    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow, scrollEndThreshold: held || touch || scrollHold.active(performance.now()) ? -1 : 1,
     scrollToFn: elementScroll, observeElementRect, observeElementOffset, measureElement,
     onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); },
   });
+  const scrollHold = new ScrollHold();
+  let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+  let touch = false;
+  let waiters: (() => void)[] = [];
   const virtualizer = new Virtualizer(options());
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, delta, instance) => {
+    const offset = instance.scrollOffset ?? 0;
+    const adjust = !instance.itemSizeCache.has(item.key) ? item.start < offset
+      : item.end <= offset && instance.scrollDirection !== "backward";
+    if (adjust && (touch || scrollHold.active(performance.now()))) { scrollHold.add(delta); return false; }
+    return adjust;
+  };
+  function activity() {
+    scrollHold.activity(performance.now());
+    virtualizer.setOptions(options());
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(finishScroll, SCROLL_QUIET_MS);
+  }
+  function finishScroll() {
+    if (touch || scrollHold.active(performance.now())) { scrollTimer = setTimeout(finishScroll, SCROLL_QUIET_MS); return; }
+    const delta = scrollHold.take(performance.now());
+    if (element && delta) element.scrollTop += delta;
+    virtualizer.setOptions(options());
+    for (const done of waiters.splice(0)) done();
+  }
+  // A fetched older page waits for the reader's current scroll before it changes the list.
+  export function scrollSettled(): Promise<void> {
+    if (!touch && !scrollHold.active(performance.now())) return Promise.resolve();
+    return new Promise(resolve => waiters.push(resolve));
+  }
+  $effect(() => () => { clearTimeout(scrollTimer); for (const done of waiters.splice(0)) done(); });
 
   $effect.pre(() => {
     rows = items;
@@ -81,7 +112,7 @@
 
   // True once the rows overflow the view far enough to scroll up to older ones.
   export function full(): boolean {
-    return element !== undefined && virtualizer.getTotalSize() > element.clientHeight + edge;
+    return element !== undefined && virtualizer.getTotalSize() > element.clientHeight + edge();
   }
 
   // Reads the element itself: the scroll handler runs before the virtualizer sees the new offset.
@@ -105,9 +136,10 @@
   });
   function scrolled(event?: Event) {
     if (!element) return;
+    if (event && scrollHold.active(performance.now())) activity();
     const top = element.scrollTop;
     atEnd = top + element.clientHeight >= element.scrollHeight - 2;
-    const page = shouldPage(top, element.scrollHeight, element.clientHeight, edge, event ? top - last : undefined);
+    const page = shouldPage(top, element.scrollHeight, element.clientHeight, edge(), event ? top - last : undefined);
     last = top;
     if (page.start) onstart?.();
     if (page.end) onend?.();
@@ -137,7 +169,10 @@
   }
 </script>
 
-<div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}>
+<div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}
+  onwheel={activity} ontouchstart={() => { touch = true; activity(); }} ontouchmove={activity}
+  ontouchend={() => { touch = false; activity(); }} ontouchcancel={() => { touch = false; activity(); }}
+  onkeydown={event => { if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) activity(); }}>
   <div class="space" class:top={align === "top"} style:height="{total}px">
     {#each visible as item (item.key)}
       <div class="item" data-index={item.index} style:transform="translateY({item.start}px)" {@attach measure}>

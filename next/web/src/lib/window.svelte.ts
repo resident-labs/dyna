@@ -77,10 +77,11 @@ export class EventWindow {
   }
 
   // Loads the page before the window and releases the newest end beyond WINDOW.
-  async loadOlder(): Promise<void> {
+  async loadOlder(beforeApply?: () => Promise<void>): Promise<void> {
     if (this.busy || !this.older) return;
     await this.run(async () => {
       const page = await this.page({ beforeSeq: this.oldest });
+      await beforeApply?.();
       for (const event of page.events) this.insert(event);
       this.older = page.full;
       this.release("newest");
