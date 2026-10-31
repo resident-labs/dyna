@@ -294,7 +294,7 @@
   let watching: string | undefined = $state();
   let docked = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
-  // A session's first window opens against the app's right edge, clear of the feed's cards and the composer; where it
+  // A session's first window opens inside the feed's right edge, clear of its cards and the composer; where it
   // cannot clear them it docks, unless the owner has used Dock or Undock. It then opens where the owner left it.
   // On a phone the window fills the screen (fix 3).
   const places = new Map<string, Rect>();
@@ -308,7 +308,7 @@
     if (place) rect = place;
     else if (box) {
       // Feed cards start at the feed's left; the Requests page centers its 744 px cards.
-      const first = computerPlace(window.innerWidth, box.top + 16, section ? (box.left + box.right + 744) / 2 : box.left + 680);
+      const first = computerPlace(box.right, box.top + 16, section ? (box.left + box.right + 744) / 2 : box.left + 680);
       rect = first.rect;
       if (!dockChosen && !phone.current) {
         docked = !first.clear;
