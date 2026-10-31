@@ -156,6 +156,22 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 	return result{Content: []content{{Type: "text", Text: string(out)}}, StructuredContent: out}
 }
 
+func sendProgress(w http.ResponseWriter, token json.RawMessage, count int) {
+	notice := struct {
+		JSONRPC string `json:"jsonrpc"`
+		Method  string `json:"method"`
+		Params  struct {
+			ProgressToken json.RawMessage `json:"progressToken"`
+			Progress      int             `json:"progress"`
+		} `json:"params"`
+	}{JSONRPC: "2.0", Method: "notifications/progress"}
+	notice.Params.ProgressToken, notice.Params.Progress = token, count
+	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", marshal(notice))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -164,7 +180,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req request
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32700, "Parse error."}})
+		return
+	}
+	if req.JSONRPC != "2.0" || req.Method == "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32600, "Invalid request."}})
 		return
 	}
 	if len(req.ID) == 0 {
@@ -231,19 +253,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if stream {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
-			progress := struct {
-				JSONRPC string `json:"jsonrpc"`
-				Method  string `json:"method"`
-				Params  struct {
-					ProgressToken json.RawMessage `json:"progressToken"`
-					Progress      int             `json:"progress"`
-				} `json:"params"`
-			}{JSONRPC: "2.0", Method: "notifications/progress"}
-			progress.Params.ProgressToken = p.Meta.ProgressToken
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", marshal(progress))
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
+			sendProgress(w, p.Meta.ProgressToken, 0)
 		}
 		if stream {
 			done := make(chan result, 1)
@@ -261,19 +271,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					goto complete
 				case <-tick.C:
 					progress++
-					notice := struct {
-						JSONRPC string `json:"jsonrpc"`
-						Method  string `json:"method"`
-						Params  struct {
-							ProgressToken json.RawMessage `json:"progressToken"`
-							Progress      int             `json:"progress"`
-						} `json:"params"`
-					}{JSONRPC: "2.0", Method: "notifications/progress"}
-					notice.Params.ProgressToken, notice.Params.Progress = p.Meta.ProgressToken, progress
-					_, _ = fmt.Fprintf(w, "event: message\\ndata: %s\\n\\n", marshal(notice))
-					if f, ok := w.(http.Flusher); ok {
-						f.Flush()
-					}
+					sendProgress(w, p.Meta.ProgressToken, progress)
 				}
 			}
 		}
