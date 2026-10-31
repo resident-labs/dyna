@@ -12,6 +12,6 @@
 
 <style>
   .intro { padding: 32px 16px 8px; }
-  h1 { margin: 12px 0 4px; font-size: 28px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+  h1 { margin: 12px 0 4px; font-size: 24px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
   p { margin: 0; color: var(--muted); }
 </style>

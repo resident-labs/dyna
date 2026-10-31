@@ -110,7 +110,7 @@
 <style>
   .working { margin: 0; padding: 6px 16px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
   /* A centred muted date on a hairline, as in Discord. */
-  .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .hint { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump { all: unset; cursor: pointer; padding: 6px 16px; color: var(--muted); font-size: 12px; }
