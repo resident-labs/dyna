@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -11,10 +12,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"filippo.io/age"
+	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
@@ -62,7 +65,16 @@ func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principa
 	if req.Name == "" || !req.OwnerOnlyAdmin || strings.Count(req.SSH, "@") != 1 || strings.HasPrefix(req.SSH, "@") || strings.HasSuffix(req.SSH, "@") {
 		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "name, user@host, and owner-only administration are required"}
 	}
+	for i, room := range req.Rooms {
+		if room == "" || slices.Contains(req.Rooms[:i], room) {
+			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "room IDs must be nonempty and unique"}
+		}
+	}
 	if err := s.boxes.AddHost(ctx, req); err != nil {
+		var required podman.RequiredError
+		if errors.As(err, &required) {
+			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrPodmanRequired, Message: err.Error()}
+		}
 		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
 	}
 	return contract.HostAddResponse{}, nil

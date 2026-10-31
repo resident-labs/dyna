@@ -3,6 +3,7 @@ package box
 import (
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -17,6 +18,7 @@ const (
 	PendingMemory         PendingReason = "memory"
 	PendingDisk           PendingReason = "disk"
 	PendingSliceCollision PendingReason = "slice-collision"
+	PendingRoomHost       PendingReason = "room-host"
 	PendingParentHost     PendingReason = "parent-host"
 	PendingInvalidSize    PendingReason = "invalid-size"
 )
@@ -76,6 +78,12 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 	component := fmt.Sprintf("%x", sha256.Sum256([]byte(request.ID)))[:12]
 	for _, h := range hosts {
 		if h.State != HostReady || (parentHost != "" && h.Name != parentHost) || (existing != nil && h.Name != existing.Host) {
+			continue
+		}
+		if len(h.Rooms) > 0 && !slices.Contains(h.Rooms, request.Room) {
+			if reason == PendingNoReadyHost {
+				reason = PendingRoomHost
+			}
 			continue
 		}
 		cpu, mem, disk := 0, int64(0), h.DiskBytes

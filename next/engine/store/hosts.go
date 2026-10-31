@@ -14,7 +14,15 @@ import (
 func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, engine_host) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost)
-		return err
+		if err != nil {
+			return err
+		}
+		for _, room := range h.Rooms {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO host_rooms(host,room) VALUES(?,?)", h.Name, room); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -87,7 +95,30 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 		}
 		hosts = append(hosts, h)
 	}
-	return hosts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	roomRows, err := s.Read().QueryContext(ctx, "SELECT host,room FROM host_rooms ORDER BY host,room")
+	if err != nil {
+		return nil, err
+	}
+	defer roomRows.Close()
+	byName := make(map[contract.HostName]int, len(hosts))
+	for i := range hosts {
+		byName[hosts[i].Name] = i
+	}
+	for roomRows.Next() {
+		var name contract.HostName
+		var room contract.RoomID
+		if err := roomRows.Scan(&name, &room); err != nil {
+			return nil, err
+		}
+		hosts[byName[name]].Rooms = append(hosts[byName[name]].Rooms, room)
+	}
+	return hosts, roomRows.Err()
 }
 
 // ResetEngineHosts discards comparisons made by a previous engine process.

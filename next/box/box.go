@@ -26,11 +26,13 @@ type Host struct {
 	MemBytes, DiskBytes int64
 	MaintainedAt        time.Time
 	Labels              []string
+	Rooms               []contract.RoomID
 	CheckedAt           time.Time
 }
 type Box struct {
 	ID           contract.BoxID
 	Session      contract.SessionID
+	Room         contract.RoomID
 	BudgetParent contract.BoxID
 	Host         contract.HostName
 	Image        string

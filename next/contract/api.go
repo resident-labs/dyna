@@ -76,17 +76,18 @@ type RuleListResponse struct {
 type ErrorCode string
 
 const (
-	ErrInvalid       ErrorCode = "invalid"
-	ErrNotFound      ErrorCode = "not_found"
-	ErrForbidden     ErrorCode = "forbidden"
-	ErrConflict      ErrorCode = "conflict"
-	ErrMoveBusy      ErrorCode = "move_busy"
-	ErrHasChildren   ErrorCode = "has_children"
-	ErrParentClosing ErrorCode = "parent_closing"
-	ErrStale         ErrorCode = "stale"
-	ErrUnavailable   ErrorCode = "unavailable"
-	ErrStoreFromV1   ErrorCode = "store_from_v1"
-	ErrStoreTooOld   ErrorCode = "store_too_old"
+	ErrPodmanRequired ErrorCode = "podman_required"
+	ErrInvalid        ErrorCode = "invalid"
+	ErrNotFound       ErrorCode = "not_found"
+	ErrForbidden      ErrorCode = "forbidden"
+	ErrConflict       ErrorCode = "conflict"
+	ErrMoveBusy       ErrorCode = "move_busy"
+	ErrHasChildren    ErrorCode = "has_children"
+	ErrParentClosing  ErrorCode = "parent_closing"
+	ErrStale          ErrorCode = "stale"
+	ErrUnavailable    ErrorCode = "unavailable"
+	ErrStoreFromV1    ErrorCode = "store_from_v1"
+	ErrStoreTooOld    ErrorCode = "store_too_old"
 )
 
 type Error struct {
@@ -207,6 +208,7 @@ type UsageWindow struct {
 }
 
 type HostAddRequest struct {
+	Rooms          []RoomID `json:"rooms,omitempty"`
 	Name           HostName `json:"name"`
 	SSH            string   `json:"ssh"`
 	OwnerOnlyAdmin bool     `json:"ownerOnlyAdmin"`

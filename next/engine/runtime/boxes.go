@@ -312,6 +312,9 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 	if !check.Ready() {
 		for _, item := range check.Items {
 			if !item.OK {
+				if item.Name == podman.CheckPodman {
+					return podman.RequiredError{}
+				}
 				return fmt.Errorf("host check %s: %s", item.Name, item.Reason)
 			}
 		}
@@ -324,7 +327,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 	if err != nil {
 		return err
 	}
-	record := box.Host{EngineHost: &same, Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
+	record := box.Host{Rooms: req.Rooms, EngineHost: &same, Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
 	if err := b.Store.AddHost(ctx, record); err != nil {
 		return err
 	}
