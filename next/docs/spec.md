@@ -994,7 +994,7 @@ Owner, 2026-10-31: v2 has no rules feature. Pi owns standing instructions throug
 - **Room:** `AGENTS.md` in the work folder one level above the repository checkouts (`/box/work/AGENTS.md`). Pi walks up from its working directory, so it finds this file from every checkout.
 - **Repository:** the repository's own `AGENTS.md`, unchanged.
 
-The engine keeps the global file and one file per room in its data folder, under `files/instructions/`, which the daily backup already includes (4.1). They are owner config, not queried runtime state, so they are plain files, not SQLite rows (r1). The engine saves a file by renaming a new one into place, so a box mounts each file's folder read-only, never the file itself: a bind-mounted file would keep the old inode. The box agent links `/box/pi/AGENTS.md` and `/box/work/AGENTS.md` to the mounted files. A box restart keeps them, and nothing in the box can write them. A box on another host cannot mount a folder from the engine host, so the engine writes both files to each host over its SSH master when they are saved (5.7), and the box mounts the host's copy read-only. The room file sits outside every checkout, at `/box/work/`, which is not a git work tree, so no `git add` in a checkout can stage it.
+The engine keeps each file alone in its own folder in its data folder, which the daily backup already includes (4.1): `<data>/files/instructions/global/AGENTS.md`, and `<data>/files/instructions/rooms/<room-id>/AGENTS.md`, by room ID because the ID never changes. They are owner config, not queried runtime state, so they are plain files, not SQLite rows (r1). The engine saves a file by renaming a new one into place, so a box mounts each folder read-only, never the file itself: a bind-mounted file would keep the old inode. The folders mount at `/run/dyna/instructions/global` and `/run/dyna/instructions/room`, and the box agent makes `/box/pi/AGENTS.md` (Pi's agent folder, `PI_CODING_AGENT_DIR`) and `/box/work/AGENTS.md` (the work folder above the checkouts) symlinks into them, so Pi finds them by its normal lookup. A box restart keeps them, and nothing in the box can write them. A box on another host cannot mount a folder from the engine host, so the engine writes both files to each host over its SSH master when they are saved, into the same folder layout under `<hostdata>/instructions/` (5.7), and the box mounts the host's copies read-only. The room file sits outside every checkout, at `/box/work/`, which is not a git work tree, so no `git add` in a checkout can stage it.
 
 The web app's rules page becomes a plain markdown editor for the global file and the current room's file. It saves with `instructions.set` and the content hash it read, so a stale save returns a typed conflict instead of overwriting. Only the owner edits them. An agent that wants a change asks the owner in a post.
 
@@ -1342,7 +1342,7 @@ type GlobalBundle struct {
 	Version       BundleVersion  `json:"version"`
 	Exported      time.Time      `json:"exported"`
 	Source        BundleSource   `json:"source"`
-	Rules         []Rule         `json:"rules"`         // global rules; the import writes them to the global AGENTS.md
+	Instructions  Instructions   `json:"instructions"`  // v1 rules rendered by the exporter; the import writes the files unchanged
 	Settings      SettingsBundle `json:"settings"`      // cleaned settings.json; subagentMaxDepth becomes --session.max-depth at cutover
 	Profiles      []ProfileBundle `json:"profiles"`
 	Hosts         []HostBundle   `json:"hosts"`         // from machines
@@ -1360,7 +1360,6 @@ type RoomBundle struct {
 	Repos         []RoomRepo       `json:"repos"`
 	Limits        RoomLimits       `json:"limits"`
 	Color         string           `json:"color"`
-	Rules         []Rule           `json:"rules"`     // the import writes them to the room AGENTS.md
 	Goals         []GoalBundle     `json:"goals"`     // active, with items; no holder
 	Issues        []IssueBundle    `json:"issues"`    // open and goal-linked; D-numbers kept
 	NextIssue     int              `json:"nextIssue"`
@@ -1371,8 +1370,21 @@ type RoomBundle struct {
 	Counts        BundleCounts     `json:"counts"`
 }
 
+// Instructions holds the standing-instruction files as rendered markdown.
+// v2 keeps no rule type: the v1 exporter renders each rule as one list item
+// under its v1 number, and its verifier checks IDs and text against v1's SQL.
+type Instructions struct {
+	Global string             `json:"global"`
+	Rooms  []RoomInstructions `json:"rooms"`
+}
+
+type RoomInstructions struct {
+	Room RoomID `json:"room"`
+	Text string `json:"text"`
+}
+
 type BundleCounts struct {
-	Rules, Goals, GoalItems, Issues, PRs, Questions int
+	Goals, GoalItems, Issues, PRs, Questions        int
 	Subscriptions, Hosts, Accounts                  int
 	Devices, Sessions                               int
 }
