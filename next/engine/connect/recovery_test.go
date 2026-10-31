@@ -14,6 +14,42 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestUnlinkFinishesAfterRelayAlreadyRevoked(t *testing.T) {
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusGone) }))
+	defer relay.Close()
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	files, err := OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.Key(); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.SaveLink(Link{Relay: relay.URL, Machine: "invented-machine"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InitializeConnectLink(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	ops := NewOperations(context.Background(), files, st, 1001, 1002)
+	defer ops.Close()
+	if err := ops.Unlink(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := st.ConnectLinked(context.Background())
+	if err != nil || linked {
+		t.Fatalf("linked=%t error=%v", linked, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "connect", "machine.key")); !os.IsNotExist(err) {
+		t.Fatal("machine key remains")
+	}
+}
+
 func TestCancelRemovesPendingApproval(t *testing.T) {
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(LinkStart{ID: "invented-id", URL: "https://example.invalid", UserCode: "invented-code", Expires: time.Now().Add(time.Minute).UnixMilli()})
