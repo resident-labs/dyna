@@ -141,9 +141,9 @@
     {/if}
   </div>
   {#if pending !== null}<div class="confirm" role="group" aria-label="Confirm what the card sends">
-    <p>{current.visual.title} v{version} asks to send this to {recipient}:</p><pre>{pending}</pre>
+    <p><strong>{current.visual.title} v{version}</strong> asks to send this to <strong>{recipient}</strong>:</p><pre>{pending}</pre>
     {#if sendFailed}<p role="alert">The reply did not send. Try again.</p>{/if}
-    <div><button type="button" onclick={confirm} disabled={sending || !!superseded}>Send</button><button type="button" onclick={cancel} disabled={sending}>Cancel</button></div>
+    <div><button class="send" type="button" onclick={confirm} disabled={sending || !!superseded}>Send</button><button type="button" onclick={cancel} disabled={sending}>Cancel</button></div>
   </div>{/if}
 </section>
 
@@ -180,8 +180,12 @@
   .failure button { text-decoration: underline; }
   .confirm { flex: none; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--raised); }
   .confirm p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+  .confirm strong { color: var(--text); font-weight: 600; }
   .confirm pre { margin: 0 0 8px; max-height: 120px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px var(--mono); }
   .confirm button { margin-right: 8px; border: 1px solid var(--firm); color: var(--text); }
+  .confirm .send { border-color: var(--focus); background: var(--focus); color: var(--bg); font-weight: 600; }
+  .confirm .send:hover:enabled { background: color-mix(in srgb, var(--focus) 88%, var(--text)); }
+  .confirm button:disabled { opacity: .5; cursor: default; }
   @media (max-width: 640px) {
     header strong { white-space: nowrap; display: block; text-overflow: ellipsis; }
     .back { display: block; white-space: nowrap; }
