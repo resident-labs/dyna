@@ -195,7 +195,7 @@
             {:else}
               {@const { lead, rest } = splitRule(rule.text)}
               <li data-rule={rule.number} tabindex="-1" class:flash={flash === rule.number}><span class="number">r{rule.number}</span>
-                <p class="text"><span class="first">{@render words(lead)}</span>{@render words(rest)}&nbsp;<span class="cite">· <span class="who" class:you={rule.by.kind === "owner"}
+                <p class="text"><span class="first">{@render words(lead)}</span>{@render words(rest)}<span class="cite"><span class="who" class:you={rule.by.kind === "owner"}
                   style:--hue={hue(name(rule))}>{name(rule)}</span>, <time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{ruleAge(rule.at, now)}</time></span></p>
                 <!-- The bar sits on the row's top edge, in the padding and the gap above, so it never covers text. -->
                 <span class="bar">
@@ -267,8 +267,8 @@
   mark { padding: 0 1px; border-radius: 2px; background: color-mix(in srgb, var(--attention) 22%, transparent); color: var(--text); }
   .ref { all: unset; color: var(--focus); cursor: pointer; border-radius: 2px; }
   .ref:hover { text-decoration: underline; }
-  /* The no-break space keeps the rule's last word with the citation, so the dot never starts a line. */
-  .cite { font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* No space comes before it, so the citation stays on a line with the rule's last word. */
+  .cite { margin-left: 8px; font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .who { color: oklch(var(--id-name) var(--hue)); font-weight: 500; }
   .who.you { color: var(--focus); }
   .gone { align-items: center; color: var(--muted); font-size: 14px; }
