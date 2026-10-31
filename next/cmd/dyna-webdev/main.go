@@ -126,6 +126,7 @@ func fatal(err error) {
 func main() {
 	listen := flag.String("web.listen", "127.0.0.1:7790", "web listen address")
 	seed := flag.Bool("seed", false, "create example room")
+	posts := flag.Int("posts", 0, "with -seed, add this many posts across the sessions for long-list checks")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -155,7 +156,7 @@ func main() {
 	defer b.sockets.Close()
 	fatal(st.AddHost(ctx, box.Host{Name: "fake", State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
 	if *seed {
-		seedRoom(ctx, svc)
+		seedRoom(ctx, svc, *posts)
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(runtime, "owner.sock"))
@@ -168,7 +169,7 @@ func main() {
 	fmt.Println(login.URL)
 	<-ctx.Done()
 }
-func seedRoom(ctx context.Context, s *engine.Service) {
+func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e1 := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 	lead, e2 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "lead-web", Profile: "fake", Goal: "Build the room view"})
@@ -199,4 +200,12 @@ func seedRoom(ctx context.Context, s *engine.Service) {
 		fatal(json.Unmarshal(rec.Body.Bytes(), &attachments[i]))
 	}
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: attachments})
+	authors := []contract.SessionID{lead.Session, child.Session} // session posts wake no turns
+	for i := range posts {
+		text := fmt.Sprintf("Long-list post %d of %d.", i+1, posts)
+		if i%5 == 0 { // every fifth post is taller, so rows have different heights
+			text += "\n\n- The feed measures each row.\n- The window keeps 1,000 events."
+		}
+		post(contract.Principal{Kind: contract.PrincipalSession, Session: authors[i%2]}, contract.PostRequest{Text: text})
+	}
 }
