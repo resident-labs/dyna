@@ -147,7 +147,7 @@ func (c *Connections) Callback(ctx context.Context, req contract.AccountsConnect
 	return c.request(ctx, http.MethodPost, "oauth/callback", payload, &result)
 }
 
-func (c *Connections) Status(ctx context.Context, req contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, error) {
+func (c *Connections) Status(ctx context.Context, req contract.AccountsConnectStatusRequest, commit func(func() error) error) (contract.AccountsConnectStatusResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	a := c.attempts[req.Attempt]
@@ -189,7 +189,7 @@ func (c *Connections) Status(ctx context.Context, req contract.AccountsConnectSt
 			return contract.AccountsConnectStatusResponse{}, errConnect
 		}
 		id := contract.AccountID(hex.EncodeToString(raw[:]))
-		if err := c.store.BindAccount(ctx, id, result.AuthID, a.provider, a.label); err != nil {
+		if err := commit(func() error { return c.store.BindAccount(ctx, id, result.AuthID, a.provider, a.label) }); err != nil {
 			return contract.AccountsConnectStatusResponse{}, errConnect
 		}
 		a.account, a.status = id, contract.ConnectConnected
