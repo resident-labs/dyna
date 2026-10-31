@@ -192,5 +192,6 @@
   .step.done { background: transparent; border: 1px solid var(--line); }
   .connect a { text-decoration: none; font-weight: 500; }
   .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-family: var(--mono); font-size: 24px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+  @media (min-width: 641px) { .row:has(.remove-confirm) { flex-wrap: wrap; } .remove-confirm { width: 100%; } .remove-confirm > span:first-child { margin-right: auto; } }
   @media (max-width: 640px) { .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; } .row > .btn { grid-column: 2; grid-row: 1; } .expired, .remove-confirm { grid-column: 1 / -1; } .expired { grid-row: 2; margin: 0; } .expired + .remove-confirm { grid-row: 3; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { padding: 0 12px; border: 1px solid var(--line); } .body { padding: 12px 16px; } .connect { padding: 16px; } .key-fields { flex-direction: column; align-items: stretch; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
 </style>
