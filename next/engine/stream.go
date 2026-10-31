@@ -51,7 +51,10 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 	return out, nil
 }
 
-type boxChannel struct{ stop context.CancelFunc }
+type boxChannel struct {
+	stop    context.CancelFunc
+	control chan contract.BoxMessage
+}
 
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
@@ -64,23 +67,50 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	ctx, stop := context.WithCancel(ctx)
 	s.mu.Lock()
 	if previous := s.channels[session.ID]; previous != nil {
+		s.clearComputerLocked(session.ID)
 		previous.stop()
 	}
-	channel := &boxChannel{stop: stop}
+	channel := &boxChannel{stop: stop, control: make(chan contract.BoxMessage, 2)}
 	s.channels[session.ID] = channel
 	s.mu.Unlock()
 	sub, cancel := s.store.Subscribe()
 	out := make(chan contract.BoxMessage)
+	turns := make(chan contract.BoxMessage)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case m, ok := <-turns:
+				if !ok {
+					return
+				}
+				select {
+				case out <- m:
+				case <-ctx.Done():
+					return
+				}
+			case m := <-channel.control:
+				select {
+				case out <- m:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	go func() {
 		defer func() {
 			stop()
 			s.mu.Lock()
 			if s.channels[session.ID] == channel {
 				delete(s.channels, session.ID)
+				s.clearComputerLocked(session.ID)
 			}
 			s.mu.Unlock()
 		}()
-		defer close(out)
+		defer close(turns)
 		defer func() { cancel() }()
 		replay := true
 		archiveSent := false
@@ -95,7 +125,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				}
 				if !archiveSent && current.Reason == "" {
 					select {
-					case out <- contract.BoxMessage{Body: contract.Archive{}}:
+					case turns <- contract.BoxMessage{Body: contract.Archive{}}:
 						archiveSent = true
 					case <-ctx.Done():
 						return
@@ -200,14 +230,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			if len(start) != 0 {
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start}}:
+				case turns <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start}}:
 				case <-ctx.Done():
 					return
 				}
 			}
 			for _, input := range steer {
 				select {
-				case out <- contract.BoxMessage{Body: input}:
+				case turns <- contract.BoxMessage{Body: input}:
 				case <-ctx.Done():
 					return
 				}

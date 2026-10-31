@@ -14,7 +14,7 @@ import (
 )
 
 // Channel reads typed messages and reconnects after a broken socket.
-func (c *Client) Channel(ctx context.Context, handle func(contract.BoxMessage) error) error {
+func (c *Client) Channel(ctx context.Context, handle func(contract.BoxMessage) error, connected func(bool)) error {
 	delay := 500 * time.Millisecond
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/box/channel", nil)
@@ -28,6 +28,7 @@ func (c *Client) Channel(ctx context.Context, handle func(contract.BoxMessage) e
 				return fmt.Errorf("box channel: %s", resp.Status)
 			}
 			delay = 500 * time.Millisecond
+			connected(true)
 			decoder := json.NewDecoder(resp.Body)
 			for {
 				var msg contract.BoxMessage
@@ -48,6 +49,7 @@ func (c *Client) Channel(ctx context.Context, handle func(contract.BoxMessage) e
 				}
 			}
 			resp.Body.Close()
+			connected(false)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
