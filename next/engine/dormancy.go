@@ -18,6 +18,7 @@ type dormancy struct {
 
 // ReconcileDormancy is level-triggered. The runtime serializes its calls.
 func (s *Service) ReconcileDormancy(ctx context.Context, startup, retry bool) {
+	s.drainMoveStops()
 	if startup || retry {
 		clear(s.dormancy.failedStarts)
 		boxes, err := s.store.Boxes(ctx)
@@ -73,6 +74,7 @@ func (s *Service) ReconcileDormancy(ctx context.Context, startup, retry bool) {
 func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID, force bool) error {
 	unlock := s.lockBox(id)
 	defer unlock()
+	s.drainMoveStops()
 	session, err := s.store.Session(ctx, id)
 	if err != nil {
 		return err
@@ -144,19 +146,19 @@ func (s *Service) stopBox(ctx context.Context, id contract.BoxID) error {
 
 func (s *Service) startBox(ctx context.Context, current box.Box) error {
 	var startErr error
-	if current.Slice == "" {
-		path, err := s.store.BoxAncestry(ctx, current.ID)
-		if err != nil {
-			return err
-		}
-		var ancestry []contract.BoxID
-		for _, b := range path {
-			ancestry = append(ancestry, b.ID)
-		}
-		slice, err := box.SliceName(ancestry)
-		if err != nil {
-			return err
-		}
+	path, err := s.store.BoxAncestry(ctx, current.ID)
+	if err != nil {
+		return err
+	}
+	var ancestry []contract.BoxID
+	for _, b := range path {
+		ancestry = append(ancestry, b.ID)
+	}
+	slice, err := box.SliceName(ancestry)
+	if err != nil {
+		return err
+	}
+	if current.Slice != slice {
 		var repos []contract.BoxRepo
 		if s.repos != nil {
 			repos, err = s.repos.Get(ctx, current.Session, current.Host, false)
@@ -164,7 +166,7 @@ func (s *Service) startBox(ctx context.Context, current box.Box) error {
 				return err
 			}
 		}
-		startErr = s.boxes.Recreate(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: slice, Size: current.Size, Repos: repos}, current.Image)
+		startErr = s.boxes.Recreate(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: slice, Size: current.Size, Repos: repos}, current.Image, current.Slice)
 		if startErr == nil {
 			startErr = s.store.SetRecreated(ctx, current.ID, slice)
 		}
@@ -216,4 +218,13 @@ func (s *Service) wakeAncestors(ctx context.Context, id contract.SessionID) erro
 		}
 	}
 	return nil
+}
+
+func (s *Service) drainMoveStops() {
+	s.moveMu.Lock()
+	for _, id := range s.moveStops {
+		s.dormancy.unconfirmed[id] = true
+	}
+	s.moveStops = nil
+	s.moveMu.Unlock()
 }

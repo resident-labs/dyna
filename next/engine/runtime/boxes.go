@@ -332,17 +332,8 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 	return r.StopHostexec(ctx, scope)
 }
 
-// RemoveContainer keeps the volume and forwarding socket for a moved box.
-func (b *Boxes) RemoveContainer(ctx context.Context, id contract.BoxID) error {
-	h, err := b.containerHost(ctx, id)
-	if err != nil {
-		return err
-	}
-	return h.RemoveContainer(ctx, id)
-}
-
 // Recreate replaces a moved container without touching its volume.
-func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image string) error {
+func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image, oldSlice string) error {
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
 		return err
@@ -352,6 +343,11 @@ func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image string)
 	}
 	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
 		return err
+	}
+	if oldSlice != "" {
+		if err := h.RemoveSlice(ctx, oldSlice); err != nil {
+			return err
+		}
 	}
 	slice, c := b.container(spec, image)
 	if err := h.EnsureSlice(ctx, slice); err != nil {

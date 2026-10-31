@@ -94,8 +94,7 @@ func (b *boxes) Stop(_ context.Context, id contract.BoxID) error {
 	b.mu.Unlock()
 	return nil
 }
-func (b *boxes) RemoveContainer(ctx context.Context, id contract.BoxID) error { return b.Stop(ctx, id) }
-func (b *boxes) Recreate(ctx context.Context, spec engine.BoxSpec, _ string) error {
+func (b *boxes) Recreate(ctx context.Context, spec engine.BoxSpec, _, _ string) error {
 	return b.Start(ctx, spec.Box)
 }
 func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
