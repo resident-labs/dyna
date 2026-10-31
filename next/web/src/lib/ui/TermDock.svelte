@@ -127,7 +127,9 @@
   .list [role="menuitem"]:focus { background: var(--hover); outline: none; }
   .grip { position: absolute; top: -3px; left: 0; right: 0; height: 6px; z-index: 1; cursor: ns-resize; touch-action: none; }
   .grip:hover, .grip:focus-visible { background: var(--focus); opacity: 0.6; outline: none; }
-  .body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  /* Docked, the body keeps the dragged height; floating, it fills the window. */
+  .body { display: flex; flex-direction: column; min-height: 0; flex: none; }
+  :global(.floating) .body { flex: 1; }
   .tabpanel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .tabpanel[hidden] { display: none; }
   .exited { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; }
