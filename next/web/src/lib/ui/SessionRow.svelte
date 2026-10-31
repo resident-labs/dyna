@@ -18,7 +18,7 @@
 
 <SessionFace {name} {root} {dot} {mark} />
 <span class="who"><span class="name" class:quiet style:--hue={hue(name)}>{name}</span>
-  <span class="line" class:split={state === "failed"} class:ask={state === "waiting"}>{#if state === "failed"}<StatusPill tone="failed" word label="Failed" />{#if line}<span class="reason">{` · ${line}`}</span>{/if}{:else}{line}{/if}</span></span>
+  {#if line || state === "failed"}<span class="line" class:split={state === "failed"} class:ask={state === "waiting"}>{#if state === "failed"}<StatusPill tone="failed" word label="Failed" />{#if line}<span class="reason">{` · ${line}`}</span>{/if}{:else}{line}{/if}</span>{/if}</span>
 
 <style>
   .who { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
