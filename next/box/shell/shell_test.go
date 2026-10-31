@@ -328,3 +328,30 @@ func TestSecretCrossingTheTrimPointWithoutNewlineIsDropped(t *testing.T) {
 		t.Fatalf("leaked or wrong text: %q", text[:min(len(text), 80)])
 	}
 }
+
+func TestOwnerViewKeepsAgentPosition(t *testing.T) {
+	j := &job{id: "j", command: "build", done: make(chan struct{})}
+	s := New(Config{})
+	s.jobs = []*job{j}
+	j.Write([]byte("first\npartial"))
+	first := s.View(true)
+	if len(first) != 1 || !first[0].Reset || first[0].Text != "first\n" {
+		t.Fatalf("reset: %+v", first)
+	}
+	if text, _ := j.unread(); text != "first\n" {
+		t.Fatalf("agent read moved: %q", text)
+	}
+	j.Write([]byte(" line\n"))
+	next := s.View(false)
+	if len(next) != 1 || next[0].Reset || next[0].Text != "partial line\n" {
+		t.Fatalf("delta: %+v", next)
+	}
+	j.mu.Lock()
+	j.finished = true
+	j.exit = 7
+	j.mu.Unlock()
+	next = s.View(false)
+	if len(next) != 1 || next[0].Running || next[0].ExitCode != 7 {
+		t.Fatalf("state: %+v", next)
+	}
+}
