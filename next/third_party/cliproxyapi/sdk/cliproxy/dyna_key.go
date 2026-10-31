@@ -11,10 +11,16 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
+// StageDynaCredential keeps a credential out of routing until it is bound.
+func StageDynaCredential(_ context.Context, auth *coreauth.Auth) error {
+	auth.Disabled = true
+	return nil
+}
+
 // RegisterDynaCredential persists and adopts a new credential without a file.
 // Its caller provides a unique ID and a fixed provider catalog.
 func (s *Service) RegisterDynaCredential(ctx context.Context, auth *coreauth.Auth) error {
-	auth.Disabled = true
+	_ = StageDynaCredential(ctx, auth)
 	_, err := s.coreManager.Register(coreauth.WithAuthCreationIntent(ctx), auth)
 	return err
 }
