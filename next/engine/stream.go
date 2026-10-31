@@ -225,6 +225,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					text = fmt.Sprintf("Your model is now %s.", body.Profile)
 				case contract.PostCreated:
 					text = body.Text
+				case contract.SessionRestarted:
+					text = "Your box was replaced. Your conversation is restored. Unpushed work in the old volume is gone."
 				case contract.SessionStarted:
 					var parts []string
 					if body.Goal != "" {

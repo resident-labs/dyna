@@ -31,6 +31,7 @@ const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "c
 const bodies: Record<string, Check> = {
   "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string),
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string })))) }),
+  "session.restarted": object({ session: string }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), brief: optional(string) }),
   "session.moved": object({ session: string, newParent: string }),
   "session.closed": object({ session: string, archive: optional(string), unheld: optional(nullable(array(string))) }),

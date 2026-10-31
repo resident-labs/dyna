@@ -1,4 +1,6 @@
 import { test } from "node:test";
+import { decodeEvent } from "./event.ts";
+import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
 import { commandLine, dayLabel, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
@@ -161,4 +163,11 @@ test("says how long the work in a row took, from the first turn's start to the l
 test("a long path in an activity label keeps its first folder and its file, and short paths stay whole", () => {
   assert.equal(shortPaths("editing next/engine/approve/store/files.go"), "editing next/…/store/files.go");
   assert.equal(shortPaths("editing next/engine/files.go and web/src/a.ts"), "editing next/engine/files.go and web/src/a.ts");
+});
+
+test("a decoded restart appears as a quiet row in the session DM", () => {
+  const notice = decodeEvent(event(2, { type: "session.restarted", body: { session: "l" } }));
+  assert.ok(notice);
+  assert.equal(dmOf(notice), "l");
+  assert.deepEqual(feedRows([notice], { kind: "dm", session: "l" }, [], 1).map(row => row.kind), ["restarted"]);
 });
