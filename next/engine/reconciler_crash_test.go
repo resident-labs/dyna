@@ -67,7 +67,9 @@ func TestRepeatedExitedBoxesFailAndCompletedTurnResets(t *testing.T) {
 			t.Fatalf("crash %d: state=%s failures=%d due=%v", want, got.State, got.Failures, got.DueAt)
 		}
 		if state == contract.BoxStopped {
-			now = got.DueAt
+			if !got.DueAt.IsZero() { // the first crash restarts with no delay
+				now = got.DueAt
+			}
 			pass()
 			if got = row(); got.State != contract.BoxStarting {
 				t.Fatalf("restart: %+v", got)
