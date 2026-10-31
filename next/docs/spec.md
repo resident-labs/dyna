@@ -33,6 +33,12 @@ The owner settled the design on the card. Writing the spec needed the decisions 
      - **Ownership.** When the response to a call shows a new PR, the engine records the session as its owner in `pr_owners`, so Dyna tracks it as if it came from `pr.open`.
      - **Accepted risks.** The engine checks no repository scope, needs no approval for writes and does not wrap response text. So a box can reach every repository that the owner's token reaches, make any other write that the token allows, and read outside text without the wrapper. The merge refusal sends agents to the approval flag, but it is not a boundary: other writes can still move a base branch, such as the branch merge API (`POST /repos/{owner}/{repo}/merges`), a ref update or a file write. Stricter rules can come later, when the owner asks for them.
      - **Budget:** about 100 engine lines and 40 box agent lines. Any owner gets the full `gh` command for agents, with no token in a box and one guard for the GitHub quota.
+14. **The engine runs on an always-on host** (owner, q54; root, 2026-10-31). The control plane carries every model byte, git push and transcript. On a desktop that sleeps, reboots or loses its network, every box stalls. So the control plane runs on an always-on host, which may also be a capacity host. Today that host is hermeslab: the trial engine runs there as a systemd user unit with linger and a restart rule. The owner's desktop is a client only.
+   - **Web app and desktop window.** The web listener binds only loopback. Until remote access lands (M3), the owner reaches it through an SSH local forward. After that, a paired device opens it directly, and the desktop window is such a paired client.
+   - **CLI.** The owner forwards the owner socket over SSH and passes `--socket`, or runs `dyna` on the engine host over SSH. The engine's `SO_PEERCRED` check sees the owner's UID, because sshd serves the forward as that user. A connection through sshd carries no `dyna-hostexec-` scope, so it is one more way to leave the scope, an accepted risk in 6.4. When remote access lands, the desktop CLI can use a paired device token with scopes instead.
+   - **GitHub token.** It stays in `gh`'s own store on the engine host. The engine reads it when it starts, so Dyna's files and unit files hold no token.
+   - **Backups.** The daily `store.db` backup is also copied over SSH to a second machine. A setting names that machine; the owner chooses it.
+   - **Reboot.** The user unit starts the engine again. Rootless containers do not restart after a host reboot, so the host check (5.10) marks them `stopped`, and the next wake starts them.
 
 ## 1. Goals and non-goals
 
@@ -84,7 +90,7 @@ The old module (`dyna-agent`) adds only `cmd/dyna-export`. It imports `next/cont
 |---|---|---|
 | `dyna engine` | control plane | serves the API, owns the store, supervises CLIProxyAPI and runs the engine timers |
 | `dyna box-agent` | in each box | turn runner, shell server, transcript stream, model and git routes into the box |
-| `dyna <noun> <verb>` | anywhere | the CLI. In a box it uses the box socket. On the control plane it uses the owner socket. |
+| `dyna <noun> <verb>` | anywhere | the CLI. In a box it uses the box socket. On the control plane it uses the owner socket. On the owner's desktop it uses the owner socket through an SSH forward (`--socket`, decision 14). |
 
 **Dependency direction.** `contract` imports nothing from the module. `room` imports only `contract`, and it does no I/O: it decides, and the engine acts. `harness` imports only `contract`. `box` imports `contract` and `harness`, because the box agent runs the adapters. `engine` imports `room`, `box`, `harness` and `contract`. `cmd/dyna` wires them. `migrate` imports `contract` and `engine/store`. A unit test enforces this with `go list -deps`.
 
@@ -542,7 +548,7 @@ Drafted by dyna:node-shell.
 
 ### 5.1 Control plane and hosts
 
-The control plane runs no boxes. It opens one SSH master to each host and does all host work over it. v2 keeps the v1 design from #1250: one Dyna-owned `ControlMaster` per host with `ControlPersist`, and framed replies. Input starts with a `DYNA-IN <bytes>` header, and output ends with a fixed-width `DYNA-END <bytes> <status>` trailer. A reply without a valid trailer is a transport failure, never a success.
+The control plane runs on an always-on host (decision 14). The engine itself runs no boxes, but its machine may also be a capacity host, as hermeslab is; the engine then reaches it over SSH like any other host. It opens one SSH master to each host and does all host work over it. v2 keeps the v1 design from #1250: one Dyna-owned `ControlMaster` per host with `ControlPersist`, and framed replies. Input starts with a `DYNA-IN <bytes>` header, and output ends with a fixed-width `DYNA-END <bytes> <status>` trailer. A reply without a valid trailer is a transport failure, never a success.
 
 The owner adds a host with `dyna host add <name> --ssh user@addr`. The engine then runs the **host check** over the master. A host is `ready` only when every item passes:
 
@@ -753,7 +759,7 @@ Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expire
 2. Copy `store.db` with the SQLite backup command, and copy the rest of the data folder: the transcripts, the attachment and output files, the config files, the CLIProxyAPI auth folder until M3 moves it into `store.db` (5.7), and the Connect secrets. Daily backups are never used here.
 3. On the new host, run `PRAGMA integrity_check` on the copy, then start the engine. It opens the masters, adds every forward again, and the box agents reconnect.
 
-The new host must reach every host over SSH. The copy holds secrets, so it moves only over SSH between our hosts and is deleted after the move. `docs/relocate.md` holds the exact commands; it is written in M3.
+The new host must reach every host over SSH. When the old engine host is also a capacity host, its boxes keep running there, and the new engine reaches them over SSH like any other host. The copy holds secrets, so it moves only over SSH between our hosts and is deleted after the move. `docs/relocate.md` holds the exact commands; it is written in M3.
 
 ### 5.11 Carried from D-585
 
@@ -884,7 +890,7 @@ Host exec on the control plane runs as the owner's user. To stop such a command 
 Accepted risks (owner, 2026-10-30):
 
 - Every grant gives full access to its hosts. On the control plane, that includes the CLIProxyAPI sign-ins and the owner's files. Root's default grant relies on root's judgment.
-- A command can leave its scope, for example with `systemd-run --user`. The scope check stops mistakes, not a hostile command.
+- A command can leave its scope, for example with `systemd-run --user`, or with SSH to the engine host as the owner's user, which reaches the owner socket outside any scope (decision 14). The scope check stops mistakes, not a hostile command.
 - A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. It can also connect to any box's forwarded socket under `<hostdata>/sock/` and act as that box's session, with its model route and git push rights. Hosts hold no model or GitHub credentials, and only we have admin on them.
 - Output can contain host secrets. Only the room's sessions and the owner can see it.
 
@@ -1089,10 +1095,10 @@ The external Opus agent runs steps 3 to 10 from a prompt we write. The owner doe
 3. **Archive trees.** Each open session with a dirty or unmerged worktree pushes a commit to `refs/dyna/archive/<session>` (the #1246 method). These refs are kept 30 days.
 4. **Stop v1 and take the final backup** with the SQLite backup API. Copy it to the desktop archive folder and to hermeslab.
 5. **Tag `v1-final`** on main. Main holds `cmd/dyna-export` and `next/` at M3.
-6. **Export.** Build `cmd/dyna-export` at `v1-final` on hermeslab (r19). Run it on the desktop against the final backup, read-only. `dyna-export verify` compares the counts with SQL counts. Any difference stops the cutover.
+6. **Export.** Build `cmd/dyna-export` at `v1-final` on hermeslab (r19). Run it on the desktop against the final backup, read-only. `dyna-export verify` compares the counts with SQL counts. Any difference stops the cutover. Copy the bundle and the Connect secrets (`machine.key`, `jwks.json`, `link.json`, `tunnel-token`) to the engine host over SSH, with mode 0600 (decision 14).
 7. **Cutover commit.** One commit moves `next/*` to the repository root and deletes the old tree. The owner merges it on GitHub, because the v1 merge service is stopped.
-8. **Install v2** from the cutover commit, built on hermeslab. Its store is `~/.local/share/dyna/store.db`.
-9. **Import.** `dyna import <bundle>` writes the store in one transaction and records the bundle hash. It copies the Connect secrets (`machine.key`, `jwks.json`, `link.json`, `tunnel-token`) file to file with mode 0600, so they never enter the bundle. It then moves the v1 files to `~/.local/share/dyna-v1/`. The owner deletes that folder after the first good week.
+8. **Install v2 on the engine host** (hermeslab) from the cutover commit, built there. Its store is `~/.local/share/dyna/store.db`. Its systemd user unit replaces the trial's `dyna-next` unit, and the trial's CLIProxyAPI auth folder is copied into the new data folder on the same host.
+9. **Import.** `dyna import <bundle>` writes the store in one transaction and records the bundle hash. It copies the Connect secrets file to file with mode 0600, so they never enter the bundle, and deletes the copies it read. On the desktop, the v1 data folder moves to `~/.local/share/dyna-v1/`. The owner deletes that folder after the first good week.
 10. **Start.** `dyna engine` starts each room's root in a box. Each root gets one `migrate.handoff` event with its open goals, PRs, questions, issue count and handoff cards.
 11. **Owner checks.** The owner checks that the CLIProxyAPI sign-ins from the trial work (the auth folder moves with the engine), opens a room from a paired device, and turns auto-update back on.
 
@@ -1164,7 +1170,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | accounts | M1 one sign-in in CLIProxyAPI; M3 the Accounts page (5.12) with sign-in, keys and quota | model calls need one account at M1 |
 | shells | M1 Pi's bash tool in the box; M2 the Dyna shell server with secret masking | every turn runs commands |
 | nodes | M1 hermeslab; M3 Boat and pve | renamed hosts |
-| settings | M1 store; M3 import and daily backups | backups are required at the gate |
+| settings | M1 store; M3 import and daily backups, also copied to a second machine that a setting names (decision 14) | backups are required at the gate |
 | approvals | M2 | one Submit |
 | sessions, session-dormancy | M1 one session; M2 the tree, children and session dormancy | dormant boxes must stop, or host memory fills |
 | web-app, web-server, room-feed, session-view | M2 | the room view, ported |
@@ -1178,12 +1184,12 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
 | maintenance | M3, only the daily backups (5.2) and the 14-day expiry of archive refs (5.9) | boxes are deleted on close, so nothing else needs pruning |
-| remote-access, connect, device-scopes | M3 | phone access must work on cutover day |
+| remote-access, connect, device-scopes | M3, right after the box reconciler and before workflows (root, 2026-10-31) | phone access must work on cutover day, and the desktop is a client of the always-on engine (decision 14) |
 | settings-accounts, settings-devices | M3 | sign in again and pair devices after the cutover |
 | skills | M3 | small catalog; fl-rea uses it |
 | install | M3 the install script and guard path; after: release pipeline, WSL image, branch QA | other installs need the guard at the cutover |
 | updates | M3 manual `dyna update`; after: hourly auto-update | the owner turns updates back on in step 11 |
-| desktop | M3 | a thin window over the web app; the owner keeps it at the cutover |
+| desktop | M3 | a thin window over the web app, as a paired client of the engine on its always-on host (decision 14); the owner keeps it at the cutover |
 | relay | no change | a separate module and Cloudflare worker with the same protocol |
 | library | cut for now (owner, 2026-10-30) | not imported; the frozen v1 backup keeps the map |
 | issue-watch, room-mcp | after; their data is not imported (owner, r22) | no self-hosting step needs them; the owner adds watches and MCP servers again when they are ported |
@@ -1337,7 +1343,7 @@ Scope: the approval flag, merges and CI through GitHub (decision 13), `gh` for a
 
 The order inside M3:
 
-1. Build the features. Each has its unit tests.
+1. Build the features. Each has its unit tests. The box reconciler (re-review finding 1) comes first. Remote access comes right after it and before workflows (root, 2026-10-31).
 2. **Self-hosting.** The trial started in M2. v2 sessions make the remaining M3 changes through v2 PRs, and more of the work moves to v2 as each M3 part lands.
 3. **Dry run.** Export from a copy of the latest v1 backup, and import into a scratch v2 store. Compare the counts.
 4. **Cutover** (section 8).
