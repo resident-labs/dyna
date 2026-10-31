@@ -124,7 +124,7 @@
         {#if !phone}<div class="heading"><h2>Add an account</h2><button class="btn ghost" type="button" onclick={close}>Cancel</button></div>{/if}
         <p class="muted">Pick a provider. Each one connects in its own way.</p>
         <div class="providers">{#each providers as provider (provider.id)}
-          <button type="button" class:chosen={selected?.id === provider.id} onclick={() => choose(provider, false)}><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName} <span>{provider.connectMethod === "key" ? "key" : "sign-in"}</span></button>
+          <button type="button" class:chosen={selected?.id === provider.id} onclick={() => choose(provider, false)}><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName} <span>{provider.connectFlow === "key" ? "key" : provider.connectFlow === "device" ? "code" : "sign-in"}</span></button>
         {/each}</div>
         {@render form()}
       </section>
