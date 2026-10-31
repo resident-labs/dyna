@@ -25,6 +25,14 @@ type ConnectCancelResponse struct{}
 type ConnectUnlinkRequest struct{}
 type ConnectUnlinkResponse struct{}
 
+// ConnectConnector reports a missing or restored tunnel connector.
+type ConnectConnector struct {
+	Missing bool `json:"missing"`
+}
+
+func (ConnectConnector) EventType() EventType { return "connect.connector" }
+func (ConnectConnector) isEventBody()         {}
+
 // ConnectAttemptState is the durable state of the owner's link attempt.
 type ConnectAttemptState string
 

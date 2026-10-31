@@ -269,6 +269,13 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	apiServer.SetConnectOperations(connectOps)
+	tunnelCtx, stopTunnel := context.WithCancel(ctx)
+	tunnelDone := make(chan struct{})
+	go func() {
+		defer close(tunnelDone)
+		connect.SuperviseTunnel(tunnelCtx, files, st, appPort, card.Addr().(*net.TCPAddr).Port, connectOps.Wake())
+	}()
+	defer func() { stopTunnel(); <-tunnelDone }()
 	sockets := api.NewSockets(apiServer, cfg.Runtime, uint32(os.Getuid()), nil)
 	boxes.Sockets = sockets
 	if err := sockets.OpenOwner(); err != nil {
