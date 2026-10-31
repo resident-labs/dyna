@@ -158,6 +158,14 @@ esac
 	reviewFile := file
 	// The owner can still publish comments and reviews without attribution.
 	storetest.ClearStamp(t)
+	for _, tc := range []struct{ url, want string }{
+		{url, "room keeps feedback"},
+		{"https://github.com/owner/repo/pull/18", "untracked PR"},
+	} {
+		if _, err := call("comment", tc.url, "owner edit", "--edit", "55"); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("owner edit %s: %v", tc.url, err)
+		}
+	}
 	t.Setenv("PR_CLI_ID", "111")
 	if _, err := call("comment", url, "owner public post", "--publish"); err != nil {
 		t.Fatalf("owner comment: %v", err)
