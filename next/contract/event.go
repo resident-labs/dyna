@@ -163,10 +163,12 @@ type Usage struct {
 
 // ShellJobEnded reports a background shell job that ended. It wakes the session once.
 type ShellJobEnded struct {
-	Session  SessionID  `json:"session"`
-	Job      ShellJobID `json:"job"`
-	ExitCode int        `json:"exitCode"`
-	Tail     string     `json:"tail"`
+	Description string       `json:"description,omitempty"`
+	End         *ShellJobEnd `json:"end,omitempty"`
+	Session     SessionID    `json:"session"`
+	Job         ShellJobID   `json:"job"`
+	ExitCode    int          `json:"exitCode"`
+	Tail        string       `json:"tail"`
 }
 
 type ComputerState string
