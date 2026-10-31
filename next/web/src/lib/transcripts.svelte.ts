@@ -20,15 +20,24 @@ export class TurnTranscripts {
     Promise.all(turns.map(async turn => {
       const steps: TranscriptStep[] = [];
       let itemIndex = 0;
+      let tail = false;
+      let postIndex = 0;
       let afterItem: string | undefined;
       let truncated = false;
       while (steps.length < 200) {
-        const read = await call("transcript.read", { session: this.#session, turn, itemIndex, afterItem });
+        const read = await call("transcript.read", { session: this.#session, turn, itemIndex, afterItem, tail, postIndex });
         steps.push(...(read.steps ?? []));
         const page = read.turns?.[0];
-        if (!page?.more || page.tail) break;
-        if (page.after) { afterItem = page.after; continue; }
+        if (!page?.more) break;
         if (steps.length >= 200) { truncated = true; break; }
+        if (page.after) { afterItem = page.after; continue; }
+        if (page.tail) {
+          const nextPost = page.nextPost ?? 0;
+          if (tail && nextPost <= postIndex) { truncated = true; break; }
+          tail = true;
+          postIndex = nextPost;
+          continue;
+        }
         if (page.nextItem == null || page.nextItem <= itemIndex) { truncated = true; break; }
         itemIndex = page.nextItem;
       }
