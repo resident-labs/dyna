@@ -155,36 +155,37 @@ func (s *Sessions) relayClaims(r *http.Request, op string) (Link, RelayClaims, e
 	}
 	keys, err := s.files.Keys()
 	info, statErr := os.Stat(filepath.Join(s.files.dir, "jwks.json"))
+	var c RelayClaims
 	if err == nil && statErr == nil && s.now().Sub(info.ModTime()) < 7*24*time.Hour {
-		if c, e := VerifyRelay(strings.TrimSpace(string(body)), op, l.Relay, l.Machine, keys, s.now()); e == nil {
-			c.Generation = state.Generation
-			e = s.store.ConsumeConnectNonceForLink(r.Context(), c.Epoch, c.Generation, "relay:"+c.Nonce, s.now(), time.Unix(c.Exp, 0).Add(time.Minute))
-			return l, c, e
+		c, err = VerifyRelay(strings.TrimSpace(string(body)), op, l.Relay, l.Machine, keys, s.now())
+	} else {
+		err = errors.New("relay keys expired")
+	}
+	if err != nil {
+		s.mu.Lock()
+		retry := s.keysTried.IsZero() || s.now().Sub(s.keysTried) >= time.Minute
+		if retry {
+			s.keysTried = s.now()
 		}
-	}
-	s.mu.Lock()
-	retry := s.keysTried.IsZero() || s.now().Sub(s.keysTried) >= time.Minute
-	if retry {
-		s.keysTried = s.now()
-	}
-	s.mu.Unlock()
-	if !retry {
-		return l, RelayClaims{}, errors.New("relay keys unavailable")
-	}
-	relay, err := s.relay(l)
-	if err != nil {
-		return l, RelayClaims{}, err
-	}
-	keys, err = relay.FetchKeys(r.Context())
-	if err != nil {
-		return l, RelayClaims{}, err
-	}
-	if err = s.files.SaveKeys(keys); err != nil {
-		return l, RelayClaims{}, err
-	}
-	c, err := VerifyRelay(strings.TrimSpace(string(body)), op, l.Relay, l.Machine, keys, s.now())
-	if err != nil {
-		return l, c, err
+		s.mu.Unlock()
+		if !retry {
+			return l, RelayClaims{}, errors.New("relay keys unavailable")
+		}
+		relay, err := s.relay(l)
+		if err != nil {
+			return l, RelayClaims{}, err
+		}
+		keys, err = relay.FetchKeys(r.Context())
+		if err != nil {
+			return l, RelayClaims{}, err
+		}
+		if err = s.files.SaveKeys(keys); err != nil {
+			return l, RelayClaims{}, err
+		}
+		c, err = VerifyRelay(strings.TrimSpace(string(body)), op, l.Relay, l.Machine, keys, s.now())
+		if err != nil {
+			return l, c, err
+		}
 	}
 	c.Generation = state.Generation
 	err = s.store.ConsumeConnectNonceForLink(r.Context(), c.Epoch, c.Generation, "relay:"+c.Nonce, s.now(), time.Unix(c.Exp, 0).Add(time.Minute))
@@ -323,7 +324,6 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 	var req struct {
 		Code  string `json:"code"`
 		Proof string `json:"proof"`
-		Name  string `json:"name"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req) != nil {
 		fail(w, 400, "bad request")
@@ -332,48 +332,33 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	var x store.ConnectSession
-	switch {
-	case req.Code != "":
-		c, ok := s.codes[hashToken(req.Code)]
-		delete(s.codes, hashToken(req.Code))
-		if !ok || !now.Before(c.End) || c.Origin != origin {
-			fail(w, 403, "invalid code")
-			return
-		}
-		if err := s.proof(r.Context(), req.Proof, origin, "/api/connect/session", c.JKT, c.Epoch, c.Generation); err != nil {
-			fail(w, 403, "invalid proof")
-			return
-		}
-		x = store.ConnectSession{RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation, Created: now, Minted: c.Minted, End: now.Add(30 * 24 * time.Hour), Grant: now}
-
-	default:
+	if req.Code == "" {
 		fail(w, 400, "send a code")
 		return
 	}
-	token, err := randomSecret()
-	if err != nil {
+	c, ok := s.codes[hashToken(req.Code)]
+	delete(s.codes, hashToken(req.Code))
+	if !ok || !now.Before(c.End) || c.Origin != origin {
+		fail(w, 403, "invalid code")
+		return
+	}
+	if err := s.proof(r.Context(), req.Proof, origin, "/api/connect/session", c.JKT, c.Epoch, c.Generation); err != nil {
+		fail(w, 403, "invalid proof")
+		return
+	}
+	var secrets [96]byte
+	if _, err := rand.Read(secrets[:]); err != nil {
 		fail(w, 503, "unavailable")
 		return
 	}
-	id, err := randomSecret()
-	if err != nil {
-		fail(w, 503, "unavailable")
-		return
+	token := b64.EncodeToString(secrets[:32])
+	x := store.ConnectSession{
+		ID: "cs_" + b64.EncodeToString(secrets[32:64]), Device: "cd_" + b64.EncodeToString(secrets[64:]),
+		RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation,
+		Created: now, Minted: c.Minted, End: now.Add(30 * 24 * time.Hour), Grant: now, Access: now.Add(15 * time.Minute),
+		Hash: sha256.Sum256([]byte(token)),
 	}
-	device, err := randomSecret()
-	if err != nil {
-		fail(w, 503, "unavailable")
-		return
-	}
-	x.ID = "cs_" + id
-	x.Device = "cd_" + device
-	x.Hash = sha256.Sum256([]byte(token))
-	x.Access = now.Add(15 * time.Minute)
-	if x.End.Before(x.Access) {
-		x.Access = x.End
-	}
-	if err = s.store.StartConnectSession(r.Context(), x); err != nil {
+	if err := s.store.StartConnectSession(r.Context(), x); err != nil {
 		fail(w, 403, "session could not start")
 		return
 	}
