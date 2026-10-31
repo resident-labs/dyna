@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -103,7 +104,7 @@ func TestHostexecLanesReserveHeartbeatAndStop(t *testing.T) {
 	}
 	cancelled, stop := context.WithCancel(ctx)
 	stop()
-	if _, _, _, err := h.RunHostexec(cancelled, contract.HostexecRunArgs{Argv: []string{"true"}}, "extra"); !errors.Is(err, context.Canceled) {
+	if _, _, _, err := h.RunHostexec(ctx, contract.HostexecRunArgs{Argv: []string{"true"}}, "extra"); !errors.Is(err, hostexec.ErrHostBusy) {
 		t.Fatalf("fourth hostexec: %v", err)
 	}
 	for range 5 {
