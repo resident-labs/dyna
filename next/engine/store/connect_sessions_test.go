@@ -21,7 +21,7 @@ func TestConnectDeviceMappingAndRevocation(t *testing.T) {
 	if err := s.InitializeConnectLink(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	x := ConnectSession{ID: "first", RelayDevice: "dev_example", Device: "device1", Origin: "https://test.example", JKT: "key", User: "user", Epoch: 1, Hash: sha256.Sum256([]byte("first")), Created: now, Access: now.Add(time.Minute), End: now.Add(time.Hour), Grant: now}
+	x := ConnectSession{ID: "first", RelayDevice: "dev_example", Device: "device1", Origin: "https://test.example", JKT: "key", User: "user", Epoch: 1, Generation: 1, Hash: sha256.Sum256([]byte("first")), Created: now, Access: now.Add(time.Minute), End: now.Add(time.Hour), Grant: now}
 	if err := s.StartConnectSession(ctx, x); err != nil {
 		t.Fatal(err)
 	}

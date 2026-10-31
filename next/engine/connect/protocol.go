@@ -29,17 +29,18 @@ type MachineInfo struct {
 }
 
 type RelayClaims struct {
-	Op     string `json:"op"`
-	Iss    string `json:"iss"`
-	Aud    string `json:"aud"`
-	Sub    string `json:"sub"`
-	Dev    string `json:"dev"`
-	Epoch  int64  `json:"epoch"`
-	JKT    string `json:"jkt"`
-	Origin string `json:"origin"`
-	Nonce  string `json:"nonce"`
-	Iat    int64  `json:"iat"`
-	Exp    int64  `json:"exp"`
+	Generation int64  `json:"-"`
+	Op         string `json:"op"`
+	Iss        string `json:"iss"`
+	Aud        string `json:"aud"`
+	Sub        string `json:"sub"`
+	Dev        string `json:"dev"`
+	Epoch      int64  `json:"epoch"`
+	JKT        string `json:"jkt"`
+	Origin     string `json:"origin"`
+	Nonce      string `json:"nonce"`
+	Iat        int64  `json:"iat"`
+	Exp        int64  `json:"exp"`
 }
 
 type JWK struct {
