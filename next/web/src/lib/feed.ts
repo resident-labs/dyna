@@ -1,9 +1,11 @@
 import type { Attachment, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
+import type { Request } from "./room.svelte.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[] }
+  | { kind: "request"; key: string; request: Request }
   | { kind: "day"; key: string; at: string }
   | { kind: "new"; key: string };
 
@@ -45,7 +47,8 @@ function subject(event: Event): string | undefined {
 }
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
-// failed turn is its own row, and all other events between them fold into one work row.
+// failed turn and a request are each their own row, and all other events between them fold into one work row.
+// A request's decision and run update its row, so they never show twice.
 // Pending owner posts follow as post rows, so they group like the posts that replace them.
 // A day row comes before the first row of each local day, so a new day also starts a new name line.
 // With the owner's read position (since), a New row comes before the first later post or failed row by someone else.
@@ -53,6 +56,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   const rows: Row[] = [];
   let work: Event[] = [];
   let today = "";
+  const requests = new Map<string, Extract<Row, { kind: "request" }>>();
   const dated = (at: string) => {
     const day = new Date(at).toDateString();
     if (day !== today) rows.push({ kind: "day", key: `d${day}`, at });
@@ -81,8 +85,22 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
       continue;
     }
+    // A decision can come from a session outside a DM, so it updates the request's row before the DM filter.
+    if (event.type === "op.decided" || event.type === "op.ran") {
+      const row = requests.get(event.body.id);
+      if (row) row.request = { ...row.request, ...event.body };
+      continue;
+    }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
+    if (event.type === "op.requested") {
+      flush();
+      dated(event.at);
+      const row = { kind: "request" as const, key: `r${event.seq}`, request: { ...event.body, state: "pending" as const } };
+      requests.set(event.body.id, row);
+      rows.push(row);
+      continue;
+    }
     // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
     // shows as a failed row with its cause in the owner's words.
     if (event.type === "box.changed") {
@@ -181,7 +199,6 @@ const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.s
 export function workSummary(events: Event[], name: Name): string {
   const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
   const turns = new Map<string, Set<string>>();
-  const requests = new Set<string>();
   let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0;
   for (const event of events) {
     switch (event.type) {
@@ -191,7 +208,6 @@ export function workSummary(events: Event[], name: Name): string {
       case "computer.changed": (event.body.to === "running" ? opened : shut).push(name(event.body.session)); break;
       case "turn.started": case "turn.ended": turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn)); break;
       case "shell.job.ended": jobs++; break;
-      case "op.requested": case "op.decided": case "op.ran": requests.add(event.body.id); break;
       case "image.built": images++; break;
       case "image.failed": failedImages++; break;
       case "pr.opened": prs++; break;
@@ -205,7 +221,7 @@ export function workSummary(events: Event[], name: Name): string {
   const parts = [
     started.length && `${who(started)} started`,
     turns.size > 1 ? `${who([...turns.keys()].map(name))} ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
-    jobs && count(jobs, "job"), requests.size && count(requests.size, "request"), images && `${count(images, "image")} built`,
+    jobs && count(jobs, "job"), images && `${count(images, "image")} built`,
     failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
     memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
     rules && count(rules, "rule change"),
@@ -216,7 +232,6 @@ export function workSummary(events: Event[], name: Name): string {
 
 // One plain line for an event inside an opened work row.
 export function describe(event: Event, name: Name): string {
-  const who = (principal: Principal) => principal.kind === "owner" ? "You" : principal.session ? name(principal.session) : "Dyna";
   switch (event.type) {
     case "session.started": return `${name(event.body.session)} started`;
     case "session.closed": return `${name(event.body.session)} closed`;
@@ -229,12 +244,7 @@ export function describe(event: Event, name: Name): string {
     case "conversation.read": return "";
     case "turn.activity": return event.body.label;
     case "shell.job.ended": return event.body.exitCode === 0 ? `${name(event.body.session)}'s job finished` : `${name(event.body.session)}'s job failed with exit code ${event.body.exitCode}`;
-    case "op.requested": return `${who(event.body.by)} asked to ${event.body.card.title}`;
-    case "op.decided": return `A request was ${event.body.state}`;
-    case "op.ran": {
-      const { state, result: { cause } } = event.body;
-      return state === "done" ? "A request ran" : cause ? `A request ${state}: ${causes[cause]}` : `A request ${state}`;
-    }
+    case "op.requested": case "op.decided": case "op.ran": return ""; // feedRows gives each request its own row.
     case "image.built": return `Image ${event.body.name}:${event.body.tag} built in ${event.body.seconds} s`;
     // The reason is raw build output (r8); the build log holds it.
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;

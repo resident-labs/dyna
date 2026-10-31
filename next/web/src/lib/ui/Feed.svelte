@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onDestroy, tick, untrack, type Snippet } from "svelte";
+  import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { APIError } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
+  import RequestCard from "./RequestCard.svelte";
   import WorkingDot from "./WorkingDot.svelte";
   import { dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
@@ -57,6 +58,7 @@
   });
   // The intro opens the conversation once the window reaches its first event; it also stands in for an empty feed.
   // A DM ends with one muted line while its session runs a turn, only when the window shows the present.
+  // Requests stay in the room feed and the Requests panel: a DM reads only its posts and the turns that answered in it (spec 5.13).
   let items: Item[] = $derived([
     ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
     ...feedRows(view.ordered, home, pending, since),
@@ -68,6 +70,12 @@
   const author = (from: Principal) => from.kind === "owner" ? "You" : from.session ? name(from.session) : "Dyna";
   // The root session is the open session with no parent.
   const root = (session?: string) => { const open = session ? store.sessions.get(session) : undefined; return open !== undefined && !open.parent; };
+  // Request expiry times refresh each half minute; this reads nothing from the engine.
+  let now = $state(Date.now());
+  onMount(() => {
+    const timer = setInterval(() => { now = Date.now(); }, 30_000);
+    return () => clearInterval(timer);
+  });
   const toggle = (key: string) => { if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
   // The owner's own post and a jump always land on the newest row, even from inside the present window.
@@ -110,6 +118,10 @@
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined} />
+      <!-- The store knows every request that waited when the room opened and every later one. A request the window
+        shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
+      {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
+        <RequestCard request={live ?? item.request} gone={!live && item.request.state === "pending"} {store} {now} feed />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
