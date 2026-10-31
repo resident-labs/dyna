@@ -36,13 +36,17 @@ func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, 
 		if err := json.Unmarshal(body, &doc); err != nil {
 			return nil, nil, fmt.Errorf("decode hook document: %w", err)
 		}
-		targets := repoRooms[cap.Repos[doc.Repo]]
+		identity, mapped := cap.Repos[doc.Repo]
+		targets := repoRooms[identity]
 		if repo == "global" {
 			targets = allRooms
 		}
 		for _, hook := range doc.Hooks {
 			if hook.Disabled || hook.Builtin != "" {
 				continue
+			}
+			if repo != "global" && !mapped {
+				return nil, nil, fmt.Errorf("active repository hook checkout is missing from the capture manifest")
 			}
 			// v1 hooks always execute a shell command; the typed Wake form
 			// cannot faithfully represent an arbitrary shell command.

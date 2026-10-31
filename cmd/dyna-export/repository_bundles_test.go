@@ -17,7 +17,7 @@ func TestRepositoriesReportLocalCIAndUnsupportedForge(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE local_ci_modes(room_id TEXT,mode TEXT); INSERT INTO local_ci_modes VALUES ('r1','local')`); err != nil {
 		t.Fatal(err)
 	}
-	records := []room.Record{{ID: "r1", Name: "alpha", Repo: "/github", ExtraRepos: []string{"/forge"}}}
+	records := []room.Record{{ID: "r1", Name: "alpha", Repo: "/github", ExtraRepos: []string{"/forge", "/unverified"}}}
 	cap := capture{
 		Repos:    map[string]contract.RepoName{"/github": "github.com/acme/repo", "/forge": "git.example/acme/repo"},
 		Defaults: map[contract.RepoName]contract.RoomName{"github.com/acme/repo": "alpha", "git.example/acme/repo": "alpha"},
@@ -30,7 +30,7 @@ func TestRepositoriesReportLocalCIAndUnsupportedForge(t *testing.T) {
 		t.Fatalf("unexpected repos: %+v", got.Repos)
 	}
 	handoff := got.RoomHandoffs["alpha"]
-	if len(handoff) != 2 || handoff[0].Reason != contract.RepoUnsupportedForge || handoff[1].Reason != contract.RepoLocalCI {
+	if len(handoff) != 3 || handoff[0].Reason != contract.RepoUnsupportedForge || handoff[1].Reason != contract.RepoUnverifiedIdentity || handoff[2].Reason != contract.RepoLocalCI {
 		t.Fatalf("unexpected handoff: %+v", handoff)
 	}
 }

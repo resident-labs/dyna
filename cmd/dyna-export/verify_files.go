@@ -105,10 +105,7 @@ func countRepositories(db *sql.DB, cap capture) (int, error) {
 			rec.ExtraRepos = append(rec.ExtraRepos, rec.Repo)
 		}
 		for _, p := range rec.ExtraRepos {
-			id, ok := cap.Repos[p]
-			if !ok {
-				return 0, fmt.Errorf("repository missing from captured manifest")
-			}
+			id := cap.Repos[p]
 			if repo, ok := githubRepo(string(id)); ok {
 				seen[repo] = true
 			}

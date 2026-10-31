@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"dyna-agent/internal/room"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -45,13 +46,20 @@ INSERT INTO hook_documents VALUES ('sha256-key','{"repo":"/capture/checkout","ho
 	if err != nil {
 		t.Fatal(err)
 	}
-	cap := capture{Repos: map[string]contract.RepoName{"/capture/checkout": "github.com/acme/repo"}}
-	rooms := map[contract.RepoName][]contract.RoomName{"github.com/acme/repo": {"alpha", "beta"}}
-	got, _, err := readHooks(db, rooms, cap, nil)
+	cap := capture{Repos: map[string]contract.RepoName{"/capture/checkout": "github.com/acme/repo", "/capture/room-worktree": "github.com/acme/repo"}}
+	cap.Defaults = map[contract.RepoName]contract.RoomName{"github.com/acme/repo": "alpha"}
+	if _, err := db.Exec("CREATE TABLE local_ci_modes(room_id TEXT, mode TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	repos, err := buildRepositories(db, []room.Record{{ID: "r1", Name: "alpha", Repo: "/capture/room-worktree"}}, cap)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []contract.RoomName{"alpha", "beta"} {
+	got, _, err := readHooks(db, repos.RepoRooms, cap, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []contract.RoomName{"alpha"} {
 		if len(got[name]) != 1 || got[name][0].Name != "verify" {
 			t.Fatalf("handoff for %s = %+v", name, got[name])
 		}
