@@ -171,12 +171,8 @@ func (a *API) handler(c Caller) http.Handler {
 			return
 		}
 		room := contract.RoomID(r.URL.Query().Get("room"))
-		if room == "" || (c.Principal.Kind == contract.PrincipalSession && room != c.Room) {
-			if room == "" {
-				writeError(w, invalid())
-			} else {
-				writeError(w, forbidden())
-			}
+		if c.Principal.Kind == contract.PrincipalSession && (room == "" || room != c.Room) {
+			writeError(w, forbidden())
 			return
 		}
 		var after int64
