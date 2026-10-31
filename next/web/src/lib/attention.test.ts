@@ -10,7 +10,7 @@ const decision = { by: { kind: "owner" }, approved: true, at: "" } as const;
 test("room.list seeds each room's waiting requests and working sessions, and the owner stream updates them", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [
-    { id: "a", name: "A", waiting: ["o1"], working: ["s1"] }, { id: "b", name: "B", waiting: null, working: null }] }));
+    { id: "a", name: "A", created: "", waiting: ["o1"], working: ["s1"] }, { id: "b", name: "B", created: "", waiting: null, working: null }] }));
   const urls: string[] = [];
   try {
     const attention = new Attention((room, after, apply) => { urls.push(`${room}/${after()}`); return () => {}; });

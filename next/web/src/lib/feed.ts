@@ -3,7 +3,8 @@ import type { Attachment, Conversation, Event, FailureCause, Principal } from ".
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
-  | { kind: "work"; key: string; events: Event[] };
+  | { kind: "work"; key: string; events: Event[] }
+  | { kind: "day"; key: string; at: string };
 
 // An owner's post the engine has not confirmed yet, with its mentions as sessions.
 export type Pending = { id: number; at: string; text: string; attachments: Attachment[]; to: Principal[]; failed: boolean };
@@ -45,16 +46,24 @@ function subject(event: Event): string | undefined {
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn is its own row, and all other events between them fold into one work row.
 // Pending owner posts follow as post rows, so they group like the posts that replace them.
+// A day row comes before the first row of each local day, so a new day also starts a new name line.
 export function feedRows(events: Event[], home: Conversation, pending: Pending[] = []): Row[] {
   const rows: Row[] = [];
   let work: Event[] = [];
+  let today = "";
+  const dated = (at: string) => {
+    const day = new Date(at).toDateString();
+    if (day !== today) rows.push({ kind: "day", key: `d${day}`, at });
+    today = day;
+  };
   const flush = () => {
-    if (work.length) rows.push({ kind: "work", key: `w${work[0].seq}`, events: work });
+    if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work }); }
     work = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
   const post = (key: string, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending) => {
     flush();
+    dated(at);
     const previous = rows.at(-1);
     const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) ||
       previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
@@ -73,6 +82,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const { to, cause } = event.body;
       if (to === "failed" || to === "lost" || cause) {
         flush();
+        dated(event.at);
         rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, cause: cause ? causes[cause] : "",
           label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" : to === "lost" ? "Stopped unexpectedly" : "Could not start" });
       }
@@ -89,6 +99,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.
       if (event.body.outcome === "failed") {
         flush();
+        dated(event.at);
         const cause = event.body.cause;
         rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
@@ -117,6 +128,15 @@ export type Quote = { author: string; at: string; text: string; attachments: Att
 export function quoted({ author, at, text }: Quote, note: string): string {
   const lines = [`**Forwarded from ${author}** · ${formatTime(at)}`, "", ...text.split(/\r\n|\r|\n/)];
   return lines.map(line => line ? `> ${line}` : ">").join("\n") + (note.trim() ? `\n\n${note.trim()}` : "");
+}
+
+// A day row's label: "Today", "Yesterday", else the weekday and date, with the year only when it is not this year.
+export function dayLabel(value: string, now: number): string {
+  const at = new Date(value), day = new Date(now);
+  if (at.toDateString() === day.toDateString()) return "Today";
+  day.setDate(day.getDate() - 1);
+  if (at.toDateString() === day.toDateString()) return "Yesterday";
+  return at.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", ...at.getFullYear() !== day.getFullYear() && { year: "numeric" } });
 }
 
 // A muted time from now, such as "in 59 minutes" or "2 minutes ago".
