@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -98,7 +99,7 @@ func TestQuotasThroughManagement(t *testing.T) {
 		t.Fatalf("accounts: %+v", first.Accounts)
 	}
 	account := first.Accounts[0]
-	if account.Provider != "claude" || account.Label != "Personal" || account.Cause != "" || len(account.Windows) != 2 {
+	if account.Provider != "claude" || account.Label != "Personal" || account.Cause != "" || account.ObservedAt == nil || !account.ObservedAt.Equal(now) || len(account.Windows) != 2 {
 		t.Fatalf("account: %+v", account)
 	}
 	a, b := account.Windows[0], account.Windows[1]
@@ -107,7 +108,7 @@ func TestQuotasThroughManagement(t *testing.T) {
 	}
 	now = now.Add(4 * time.Minute)
 	second, err := q.Read(context.Background())
-	if err != nil || len(second.Accounts) != 1 || calls != 1 {
+	if err != nil || len(second.Accounts) != 1 || second.Accounts[0].ObservedAt == nil || !second.Accounts[0].ObservedAt.Equal(*account.ObservedAt) || calls != 1 {
 		t.Fatalf("cache: %+v, calls %d, error %v", second, calls, err)
 	}
 	now = now.Add(2 * time.Minute)
@@ -115,5 +116,44 @@ func TestQuotasThroughManagement(t *testing.T) {
 	third, err := q.Read(context.Background())
 	if err != nil || len(third.Accounts) != 1 || third.Accounts[0].Cause != "sign_in_expired" || calls != 2 {
 		t.Fatalf("refresh failure: %+v, calls %d, error %v", third, calls, err)
+	}
+}
+
+func TestCodexPassiveQuota(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"files":[{"provider":"codex","quota":{"observed_at":"2026-01-02T00:00:00Z","signals":{"X-Codex-Primary-Used-Percent":"42","X-Codex-Primary-Window-Minutes":"300","X-Codex-Primary-Reset-At":"1767405600"}}},{"provider":"codex","quota":{"signals":{}}}]}`))
+	}))
+	defer server.Close()
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", time.Now)
+	got, err := q.Read(context.Background())
+	if err != nil || len(got.Accounts) != 2 {
+		t.Fatalf("read failed: %v", err)
+	}
+	a := got.Accounts[0]
+	if a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 1 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Seconds != 18000 || a.Windows[0].ResetsAt.IsZero() {
+		t.Fatal("Codex snapshot did not preserve its observation")
+	}
+	if got.Accounts[1].ObservedAt != nil || len(got.Accounts[1].Windows) != 0 {
+		t.Fatal("missing signal became an observation")
+	}
+}
+
+type deadlineTransport struct{}
+
+func (deadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/auth-files") {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"files":[{"auth_index":"invented","provider":"claude"}]}`)), Header: make(http.Header)}, nil
+	}
+	<-r.Context().Done()
+	return nil, r.Context().Err()
+}
+
+func TestQuotaDeadlineIsUnreachable(t *testing.T) {
+	q := (&Proxy{client: &http.Client{Transport: deadlineTransport{}}}).Quotas("key", time.Now)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancel()
+	got, err := q.Read(ctx)
+	if err != nil || len(got.Accounts) != 1 || got.Accounts[0].Cause != "unreachable" {
+		t.Fatalf("deadline did not report unreachable: %v", err)
 	}
 }
