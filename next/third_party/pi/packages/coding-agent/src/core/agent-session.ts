@@ -1902,11 +1902,11 @@ export class AgentSession {
 		deliveryId?: string,
 		additionalInputs: AgentMessage[] = [],
 	): Promise<void> {
-		await this._refreshPromptResources();
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
 		try {
+			await this._refreshPromptResources();
 			messages = trigger ? await this._prepareRun(trigger, deliveryId, additionalInputs) : [];
 		} catch (error) {
 			this._isAgentRunActive = false;
@@ -2010,6 +2010,10 @@ export class AgentSession {
 			});
 		}
 		this._runSystemPromptOptions = result.systemPromptOptions;
+		const initial = this.agent.state.messages[0];
+		if (initial?.role === "system" && this.sessionManager.getBranch().length === 0) {
+			this.sessionManager.appendMessage(initial);
+		}
 		if (!getCurrentSystemMessage(this.agent.state.messages)) {
 			const head = this._preparePromptAndToolLoadout(result.systemPromptOptions);
 			if (head?.role === "system") messages.unshift(head);

@@ -92,8 +92,13 @@ describe("extension active tools next-turn refresh", () => {
 			await harness.session.prompt("start");
 
 			expect(providerPrompts).toHaveLength(2);
-			expect(providerPrompts[0]).not.toBe(providerPrompts[1]);
-			expect(sessionPrompts).toEqual(providerPrompts);
+			expect(providerPrompts[0]).toBe(providerPrompts[1]);
+			expect(sessionPrompts[0]).not.toBe(sessionPrompts[1]);
+			expect(
+				harness.session.messages.some(
+					(message) => message.role === "custom" && message.customType === "context_update",
+				),
+			).toBe(true);
 		} finally {
 			harness.cleanup();
 		}
