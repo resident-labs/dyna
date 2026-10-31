@@ -158,7 +158,8 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			return nil
 		}
-		if output.Outcome == contract.TurnCompleted {
+		// These failures can occur before Pi runs or when its process exits.
+		if output.Cause != contract.CauseHarnessFailed && output.Cause != contract.CauseSetModelFailed && output.Cause != contract.CauseSetupFailed {
 			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET failures=0 WHERE session=?", session); err != nil {
 				return err
 			}

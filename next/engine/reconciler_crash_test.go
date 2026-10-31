@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
@@ -97,4 +98,46 @@ func TestRepeatedExitedBoxesFailAndCompletedTurnResets(t *testing.T) {
 	crash(1)
 	crash(2)
 	crash(3)
+}
+
+func TestTurnOutcomeResetsCrashCount(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outcome contract.TurnOutcome
+		cause   contract.FailureCause
+		want    int
+	}{
+		{"completed", contract.TurnCompleted, "", 0},
+		{"model failed", contract.TurnFailed, contract.CauseModelFailed, 0},
+		{"stopped", contract.TurnStopped, "", 0},
+		{"harness failed", contract.TurnFailed, contract.CauseHarnessFailed, 2},
+		{"set model failed", contract.TurnFailed, contract.CauseSetModelFailed, 2},
+		{"setup failed", contract.TurnFailed, contract.CauseSetupFailed, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, sid, ctx := setup(t)
+			caller := contract.Principal{Kind: contract.PrincipalSession, Session: sid}
+			channel, problem := testChannel(t, s, ctx, caller)
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			start := (<-channel).Body.(contract.TurnStart)
+			if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, "UPDATE boxes SET failures=2 WHERE session=?", sid)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: tc.outcome, Cause: tc.cause}); problem != nil {
+				t.Fatal(problem)
+			}
+			var failures int
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT failures FROM boxes WHERE session=?", sid).Scan(&failures); err != nil {
+				t.Fatal(err)
+			}
+			if failures != tc.want {
+				t.Fatalf("failures=%d, want %d", failures, tc.want)
+			}
+		})
+	}
 }

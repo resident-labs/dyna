@@ -90,6 +90,15 @@ func TestReconcilerRecoversLostHost(t *testing.T) {
 			if err != nil || b.State != tc.want || host.inspections != 1 {
 				t.Fatalf("recovery: box=%+v inspections=%d want=%s err=%v", b, host.inspections, tc.want, err)
 			}
+			rows, err := s.store.LifecycleBoxes(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range rows {
+				if row.ID == session.Box && row.Failures != 0 {
+					t.Fatalf("host loss counted as crash: %+v", row)
+				}
+			}
 		})
 	}
 }
