@@ -18,7 +18,7 @@ main { display: flex; flex-direction: column; min-width: 0; }
 aside { background: var(--sidebar); border-right: 1px solid var(--line); overflow-y: auto; }
 aside.members { border-right: 0; border-left: 1px solid var(--line); }
 .label { font-size: 12px; font-weight: 600; color: var(--muted); }
-.member { padding: 6px 16px; }
+.member { padding: 6px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 header { height: 48px; display: flex; align-items: center; padding: 0 16px; }
 .section-title { padding: 12px 16px 0; font-size: 12px; font-weight: 600; color: var(--muted); }
 nav { display: grid; padding: 6px 8px; }
@@ -26,11 +26,7 @@ nav a { color: var(--text); text-decoration: none; padding: 6px 8px; border-radi
 :focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 nav a[aria-current="page"] { background: var(--selected); }
 .hint { margin: 10px 16px; font-size: 12px; color: var(--muted); }
-.feed { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 12px; }
-.feed > :first-child { margin-top: auto; }
+.feed { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 12px; }
 .empty { margin: auto; color: var(--muted); }
-.author { margin: 12px 0 2px; padding: 0 16px; font-weight: 600; }
-.post { margin: 0; padding: 2px 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.pending { color: var(--muted); }
 .composer { margin: 0 16px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar); color: inherit; font: inherit; resize: none; field-sizing: content; max-height: 40vh; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
