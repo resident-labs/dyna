@@ -29,6 +29,14 @@ func (s *fakeBackupStore) RecordBackupCopy(_ context.Context, _ time.Time, failu
 	return nil
 }
 
+func TestBackupFlags(t *testing.T) {
+	for _, cfg := range []Config{{BackupDest: "host"}, {BackupRecipient: "bad"}, {BackupDest: "host", BackupRecipient: "bad"}} {
+		if err := Run(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "backup.") {
+			t.Fatalf("invalid flags accepted: %v", err)
+		}
+	}
+}
+
 func TestBackupStartAge(t *testing.T) {
 	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	for _, age := range []time.Duration{23 * time.Hour, 25 * time.Hour} {
