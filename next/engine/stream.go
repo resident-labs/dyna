@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"regexp"
 
@@ -192,7 +193,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			close(out)
 		}()
 		var reason streamStopReason
-		defer func() { slog.Info("box dispatch stopped", "reason", reason) }()
+		var cause error
+		defer func() { slog.Info("box dispatch stopped", "session", session.ID, "reason", reason, "err", cause) }()
 		replay := true
 		archiveSent := false
 		var stopSent contract.TurnID
@@ -214,12 +216,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			s.mu.Unlock()
 			if !s.sendWatch(ctx, out, desired, &channel.watching, contract.ComputerWatchStart{Generation: desired}, contract.ComputerWatchStop{}) ||
 				!s.sendWatch(ctx, out, shellDesired, &channel.shellWatching, contract.ShellWatchStart{Generation: shellDesired}, contract.ShellWatchStop{}) {
-				reason = streamWatchStopped
+				reason, cause = streamWatchStopped, ctx.Err()
 				return
 			}
 			current, err := s.store.Box(ctx, session.Box)
 			if err != nil {
-				reason = streamBoxReadFailed
+				reason, cause = streamBoxReadFailed, err
 				return
 			}
 			if current.State == contract.BoxDeleted {
@@ -235,7 +237,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					case out <- contract.BoxMessage{Body: contract.Archive{}}:
 						archiveSent = true
 					case <-ctx.Done():
-						reason = streamCanceled
+						reason, cause = streamCanceled, ctx.Err()
 						return
 					}
 				}
@@ -243,13 +245,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case <-channel.wake:
 					continue
 				case <-ctx.Done():
-					reason = streamCanceled
+					reason, cause = streamCanceled, ctx.Err()
 					return
 				}
 			}
 			allowed, err := s.store.CanDispatch(ctx, session.ID)
 			if err != nil {
-				reason = streamAdmissionFailed
+				reason, cause = streamAdmissionFailed, err
 				return
 			}
 			if !allowed {
@@ -257,23 +259,23 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case <-channel.wake:
 					continue
 				case <-ctx.Done():
-					reason = streamCanceled
+					reason, cause = streamCanceled, ctx.Err()
 					return
 				}
 			}
 			turnID, err := id("turn_", s.now())
 			if err != nil {
-				reason = streamIDFailed
+				reason, cause = streamIDFailed, err
 				return
 			}
 			started, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
 			if err != nil {
-				reason = streamEventFailed
+				reason, cause = streamEventFailed, err
 				return
 			}
 			turn, deliveries, profile, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
 			if err != nil {
-				reason = streamDispatchFailed
+				reason, cause = streamDispatchFailed, err
 				return
 			}
 			replay = false
@@ -282,17 +284,17 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			for _, delivery := range deliveries {
 				event, err := s.store.Event(ctx, int64(delivery.Seq))
 				if err != nil {
-					reason = streamDeliveryReadFailed
+					reason, cause = streamDeliveryReadFailed, err
 					return
 				}
 				text, err := room.RenderDelivery(event.Body)
 				if err != nil {
-					reason = streamDeliveryRenderFailed
+					reason, cause = streamDeliveryRenderFailed, err
 					return
 				}
 				frame, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, HandoffFrom: delivery.HandoffFrom})
 				if err != nil {
-					reason = streamFrameFailed
+					reason, cause = streamFrameFailed, err
 					return
 				}
 				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(text, "${1}[quoted]")}
@@ -305,12 +307,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			if len(start) != 0 {
 				model, _, err := s.profiles.Model(profile)
 				if err != nil {
-					reason = streamProfileFailed
+					reason, cause = streamProfileFailed, err
 					return
 				}
 				sections, saved, err := s.store.SavedTurnSections(ctx, turn)
 				if err != nil {
-					reason = streamSectionsReadFailed
+					reason, cause = streamSectionsReadFailed, err
 					return
 				}
 				if !saved {
@@ -318,27 +320,27 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					if s.profiles.Surface(profile) != contract.AgentSurfaceOff {
 						snapshot, problem := s.ContextSnapshot(ctx, caller, contract.ContextSnapshotRequest{})
 						if problem != nil {
-							reason = streamSnapshotFailed
+							reason, cause = streamSnapshotFailed, errors.New(problem.Message)
 							return
 						}
 						sections = snapshot.Sections
 					}
 					sections, err = s.store.TurnSections(ctx, turn, sections)
 					if err != nil {
-						reason = streamSectionsSaveFailed
+						reason, cause = streamSectionsSaveFailed, err
 						return
 					}
 				}
 				select {
 				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, Sections: sections}}:
 				case <-ctx.Done():
-					reason = streamCanceled
+					reason, cause = streamCanceled, ctx.Err()
 					return
 				}
 			}
 			stopTurn, err := s.store.StopRequested(ctx, session.ID)
 			if err != nil {
-				reason = streamStopReadFailed
+				reason, cause = streamStopReadFailed, err
 				return
 			}
 			if stopTurn != "" && stopTurn != stopSent {
@@ -346,7 +348,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case out <- contract.BoxMessage{Body: contract.TurnStop{Turn: stopTurn, Reason: "Stopped by request"}}:
 					stopSent = stopTurn
 				case <-ctx.Done():
-					reason = streamCanceled
+					reason, cause = streamCanceled, ctx.Err()
 					return
 				}
 			}
@@ -354,7 +356,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				select {
 				case out <- contract.BoxMessage{Body: input}:
 				case <-ctx.Done():
-					reason = streamCanceled
+					reason, cause = streamCanceled, ctx.Err()
 					return
 				}
 			}
@@ -362,7 +364,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			case <-channel.wake:
 				continue
 			case <-ctx.Done():
-				reason = streamCanceled
+				reason, cause = streamCanceled, ctx.Err()
 				return
 			}
 		}
