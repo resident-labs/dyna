@@ -20,7 +20,7 @@ func TestTransitions(t *testing.T) {
 		contract.BoxReady:    {contract.BoxStopped, contract.BoxFailed, contract.BoxClosing, contract.BoxLost},
 		contract.BoxStopped:  {contract.BoxStarting, contract.BoxPending, contract.BoxClosing, contract.BoxLost},
 		contract.BoxClosing:  {contract.BoxDeleted, contract.BoxLost, contract.BoxFailed},
-		contract.BoxFailed:   {contract.BoxClosing},
+		contract.BoxFailed:   {contract.BoxClosing, contract.BoxPending},
 		contract.BoxLost:     {contract.BoxReady, contract.BoxStopped, contract.BoxFailed, contract.BoxClosing},
 	}
 	for _, from := range states {
