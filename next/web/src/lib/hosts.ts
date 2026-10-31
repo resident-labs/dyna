@@ -1,5 +1,5 @@
 import { call } from "./client.ts";
-import type { HostSummary } from "./contract.gen.ts";
+import type { HostSummary, RoomShared } from "./contract.gen.ts";
 
 export const hostLabel = (host: string) => host === "control-plane" ? "This computer" : host;
 
@@ -29,6 +29,14 @@ export function lastSeen(h: HostSummary, now: number): string | undefined {
   const minutes = Math.max(0, Math.round((now - Date.parse(h.lastSeen)) / 60_000));
   return "Last seen " + (minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`);
 }
+
+// The rooms whose shared folder holds more than a quarter of the host's disk, largest first (spec 5.6). The folder has
+// no hard limit, so Home names the room and the size for the owner to clean up. The engine sends null for no folders.
+export const largeShared = (h: HostSummary): RoomShared[] =>
+  h.diskBytes ? (h.shared ?? []).filter(folder => folder.bytes > h.diskBytes / 4).sort((a, b) => b.bytes - a.bytes) : [];
+
+// A folder's size in whole GB of 2^30 bytes, as the meters count.
+export const sharedSize = (bytes: number) => `${Math.round(bytes / 2 ** 30).toLocaleString()} GB`;
 
 // The off-host backup problem Home marks, if any (spec 4.1): the stored failure, or a copy over 48 hours old. No copy
 // yet, a copy in time and backups that are not configured all show nothing.

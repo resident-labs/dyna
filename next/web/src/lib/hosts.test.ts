@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupProblem, hostLoads, hostMeters, lastSeen } from "./hosts.ts";
+import { backupProblem, hostLoads, hostMeters, largeShared, lastSeen } from "./hosts.ts";
 
 test("words a host's load, marks meters at 90% of their limit as busy, and has none without capacity", () => {
   const gib = 2 ** 30;
@@ -34,4 +34,13 @@ test("Home marks a stored backup failure or a copy over 48 hours old, and nothin
   assert.deepEqual(backupProblem({ ...on, backupCopyAt: "2026-10-28T11:00:00Z" }, now), { tone: "warning", label: "Backup 3 days old" });
   assert.deepEqual(backupProblem({ ...on, backupCopyAt: "2026-10-31T00:00:00Z", backupCopyFailure: "no_space" }, now), { tone: "error", label: "Backup machine full", title: "The second machine has no room for the backup" });
   assert.equal(backupProblem({ ...on, backupCopyFailure: "failed" }, now)?.label, "Backup failed");
+});
+
+test("Home names a room's shared folder only past a quarter of its host's disk, largest first", () => {
+  const host = (diskBytes: number, shared: { room: string; bytes: number }[] | null) => ({ name: "build-server", reachable: true, boxes: 1, cpus: 8, memBytes: 0,
+    cpuUsed: 0, memUsed: 0, diskBytes, diskUsed: 0, diskLow: false, shared, history: null });
+  const quarter = 100 * 2 ** 30;
+  assert.deepEqual(largeShared(host(4 * quarter, [{ room: "a", bytes: quarter }, { room: "b", bytes: quarter + 1 }, { room: "c", bytes: 2 * quarter }])).map(f => f.room), ["c", "b"]);
+  assert.deepEqual(largeShared(host(4 * quarter, null)), []);
+  assert.deepEqual(largeShared(host(0, [{ room: "a", bytes: quarter }])), []);
 });
