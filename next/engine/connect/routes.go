@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"cmp"
 	"net"
 	"net/http"
 	"net/url"
@@ -37,17 +38,9 @@ func routeRank(origin, tunnel string) int {
 
 // RankedRoutes filters and orders configured routes for browsers.
 func RankedRoutes(routes []string, tunnel string) []string {
-	list := []string{}
-	for _, app := range routes {
-		if routeRank(app, tunnel) >= 0 {
-			list = append(list, app)
-		}
-	}
+	list := slices.DeleteFunc(append([]string{}, routes...), func(app string) bool { return routeRank(app, tunnel) < 0 })
 	slices.SortFunc(list, func(a, b string) int {
-		if rank := routeRank(a, tunnel) - routeRank(b, tunnel); rank != 0 {
-			return rank
-		}
-		return strings.Compare(a, b)
+		return cmp.Or(routeRank(a, tunnel)-routeRank(b, tunnel), strings.Compare(a, b))
 	})
 	return list
 }

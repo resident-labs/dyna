@@ -178,6 +178,13 @@ func (o *Operations) Status(ctx context.Context) (contract.ConnectStatusResponse
 		return contract.ConnectStatusResponse{}, err
 	}
 	out := contract.ConnectStatusResponse{Attempt: a, Linked: linked, ConnectorMissing: missing}
+	if linked {
+		link, err := o.files.Link()
+		if err != nil {
+			return out, err
+		}
+		out.Relay = link.Relay
+	}
 	if linked || a.State == contract.ConnectAttemptPending {
 		key, err := o.files.existingKey()
 		if err != nil {

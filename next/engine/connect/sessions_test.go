@@ -76,6 +76,10 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	unlinked, err := NewOperations(context.Background(), files, st, 0, 0).Status(context.Background())
+	if err != nil || unlinked.Relay != "" {
+		t.Fatalf("unlinked relay: %q %v", unlinked.Relay, err)
+	}
 	if err = st.InitializeConnectLink(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
@@ -105,8 +109,8 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatal("hello returned the wrong public key")
 	}
 	status, err := NewOperations(context.Background(), files, st, 0, 0).Status(context.Background())
-	if err != nil || status.Fingerprint != Fingerprint(key.Public().(ed25519.PublicKey)) {
-		t.Fatalf("linked fingerprint: %q %v", status.Fingerprint, err)
+	if err != nil || status.Fingerprint != Fingerprint(key.Public().(ed25519.PublicKey)) || status.Relay != link.Relay {
+		t.Fatalf("linked status: %+v %v", status, err)
 	}
 	signature, err := b64.DecodeString(greeting.Sig)
 	if err != nil || !ed25519.Verify(key.Public().(ed25519.PublicKey), []byte("dyna-connect-hello.v1\n"+greeting.Machine+"\n"+greeting.Origin+"\n"+greeting.Nonce), signature) {
