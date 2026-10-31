@@ -193,6 +193,15 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: cookie.Value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
+		var streamScope contract.Scope
+		switch r.URL.Path {
+		case "/v1/terminal":
+			streamScope = contract.ScopeTerminal
+		case "/v1/computers/watch":
+			streamScope = contract.ScopeComputers
+		case "/v1/events", "/v1/shell/watch":
+			streamScope = contract.ScopeRead
+		}
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		ticks, stop := w.ticks()
@@ -203,8 +212,8 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 				case <-ctx.Done():
 					return
 				case <-ticks:
-					_, alive, err := w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
-					if err != nil || !alive {
+					current, alive, err := w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
+					if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: current.Scopes}, streamScope)) {
 						cancel()
 						return
 					}
