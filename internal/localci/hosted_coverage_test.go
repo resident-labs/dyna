@@ -49,6 +49,11 @@ func TestHostedJobsHaveLocalCoverage(t *testing.T) {
 		"frontend-shard": {"go", "frontend test (0)"}, "frontend": {"go", "frontend"},
 		"frontend-check": {"go", "frontend-check"}, "computer-smoke": {"computer-smoke", "computer-smoke"},
 	}
+	// Changes to the shared command must run its local Pi check.
+	checks := definition.RequiredChecks(definition.SuitesForFiles([]string{"scripts/ci.sh"}))
+	if !slices.Contains(checks, CheckName("next-pi")) {
+		t.Errorf("scripts/ci.sh does not select next-pi: %v", checks)
+	}
 	condition := regexp.MustCompile(`needs\.changes\.outputs\.(\w+)`)
 	for job, spec := range doc.Jobs {
 		if job == "changes" || job == "cache-warm" {
