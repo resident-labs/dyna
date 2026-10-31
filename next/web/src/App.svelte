@@ -10,6 +10,7 @@
   import Avatar from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { count, quoted, type Quote } from "./lib/feed.ts";
+  import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import ShellView from "./lib/ui/ShellView.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
@@ -95,11 +96,15 @@
   const settle = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: (unsent[keyOf(request)] ?? []).filter(kept => kept !== request) }; };
   // A forwarded post waits in its conversation's composer like a draft.
   let quotes: Record<string, Quote | undefined> = $state({});
+  // Each conversation keeps its own draft files; FileDraft is reactive inside, so a plain map holds them.
+  const fileDrafts = new Map<string, FileDraft>();
+  const files = (key: string) => { let draft = fileDrafts.get(key); if (!draft) fileDrafts.set(key, draft = new FileDraft()); return draft; };
   let key = $derived(`${room}/${session ?? ""}`);
   function send() {
     if (!store || !room) return;
-    const text = drafts[key] ?? "", quote = quotes[key];
-    if (!text.trim() && !quote) return;
+    const text = drafts[key] ?? "", quote = quotes[key], draft = files(key);
+    if (draft.busy || (!text.trim() && !quote && !draft.items.length)) return;
+    const attachments = [...quote?.attachments ?? [], ...draft.take()];
     drafts[key] = "";
     quotes[key] = undefined;
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
@@ -107,7 +112,7 @@
     const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
     // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
     void view?.send({ room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
-      home: session ? home : undefined, attachments: quote?.attachments.length ? quote.attachments : undefined });
+      home: session ? home : undefined, attachments: attachments.length ? attachments : undefined });
   }
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
@@ -256,7 +261,7 @@
     </div>
     {#if room && !unavailable}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
-        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} />
+        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} />
     {/if}{/if}
     <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
