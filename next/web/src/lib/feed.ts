@@ -119,7 +119,9 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A final reply that no post of the session already carried is the session's answer here.
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
-      if ((event.body.final && answer) || event.body.outcome === "failed") flush(event.at);
+      // Only the end of a turn whose start the row holds ends the row's time.
+      const turn = event.body.turn;
+      if ((event.body.final && answer) || event.body.outcome === "failed") flush(work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined);
       if (event.body.final && answer) {
         post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
