@@ -77,8 +77,8 @@ func TestHostListIncludesLoadAndRunningBoxes(t *testing.T) {
 
 type missingPodmanRegistrar struct{ fakeRegistrar }
 
-func (*missingPodmanRegistrar) AddHost(context.Context, contract.HostAddRequest) error {
-	return podman.RequiredError{}
+func (*missingPodmanRegistrar) AddHost(context.Context, contract.HostAddRequest) (bool, error) {
+	return false, podman.RequiredError{}
 }
 func TestHostAddRefusesMissingPodman(t *testing.T) {
 	s := serviceWithHosts{boxes: &missingPodmanRegistrar{}}
