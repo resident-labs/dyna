@@ -13,8 +13,8 @@
   import { LiveStream, type Phase } from "../live.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
-  let { session, name, root, activity, docked, rect = $bindable(), element = $bindable(), onclose, ondock }: {
-    session: string; name: string; root: boolean; activity?: string; docked: boolean; rect: Rect; element?: HTMLElement; onclose: () => void; ondock: (event: MouseEvent) => void;
+  let { session, name, root, activity, docked, full = false, rect = $bindable(), element = $bindable(), onclose, ondock }: {
+    session: string; name: string; root: boolean; activity?: string; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
   } = $props();
   let visible = $state(document.visibilityState === "visible");
   // A stopped computer closes this view, so a failure here is a broken or silent stream. The owner's retry or the
@@ -37,21 +37,21 @@
   onMount(() => { element?.focus(); });
   // Escape closes.
   function key(event: KeyboardEvent) {
-    if (event.key === "Escape") { event.stopPropagation(); onclose(); }
+    if (event.key === "Escape") { event.stopPropagation(); onclose(false); }
   }
   // Try again loads a new stream: the key remounts the image.
   let attempt = $state(0);
 </script>
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; if (visible && phase === "failed") attempt++; }} />
-<FloatWindow label={`${name}'s computer`} kind="computer" {docked} bind:rect bind:element onkeydown={key}>
+<FloatWindow label={`${name}'s computer`} kind="computer" {docked} {full} bind:rect bind:element onkeydown={key}>
   {#snippet header()}<Avatar kind="session" {name} {root} size={20} /><span class="title">{name}'s computer</span>
     {#if phase === "live"}<span class="live">Live</span>{:else if phase === "connecting"}<span class="connecting">Connecting</span>{/if}
-    <button type="button" class="first" aria-label={docked ? "Undock" : "Dock in the sessions panel"} title={docked ? "Undock" : "Dock"} onclick={ondock}>
-      <Icon name={docked ? "undock" : "dock"} /></button>
-    <button type="button" aria-label="Close" title="Close" onclick={onclose}><Icon name="close" /></button>{/snippet}
+    {#if !full}<button type="button" class="first" aria-label={docked ? "Undock" : "Dock in the sessions panel"} title={docked ? "Undock" : "Dock"} onclick={ondock}>
+      <Icon name={docked ? "undock" : "dock"} /></button>{/if}
+    <button type="button" class:first={full} aria-label="Close" title="Close" onclick={event => onclose(event.detail > 0)}><Icon name="close" /></button>{/snippet}
   <!-- The image streams only while the owner can see it: this view open, the page visible. -->
-  <div class="screen" class:docked class:foot={activity} style:--ratio={ratio}>
+  <div class="screen" class:docked class:full class:foot={activity} style:--ratio={ratio}>
     {#if visible}{#key attempt}<img alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
@@ -69,6 +69,7 @@
      floating, it fills the window body edge to edge and the dark background fills the letterbox. */
   .screen { position: relative; display: grid; place-items: center; flex: 1; margin: 0; border-radius: 0 0 7px 7px; overflow: hidden; background: #0d0d0f; }
   .screen.foot { border-radius: 0; }
+  .screen.full { border-radius: 0; }
   .screen.docked { flex: none; aspect-ratio: var(--ratio); margin: 12px 12px 0; border: 1px solid var(--line); border-radius: 8px; }
   img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   /* v1's badge: a dark chip over the last picture, readable on any frame. */
