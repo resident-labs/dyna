@@ -90,6 +90,42 @@ func TestDormancyKeepsClosingAncestor(t *testing.T) {
 	}
 }
 
+func TestDormancyTransitionRechecksClosing(t *testing.T) {
+	for _, wake := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stop", true: "wake"}[wake], func(t *testing.T) {
+			s, _, room, sid, ctx := quietSession(t, 0)
+			if wake {
+				s.ReconcileDormancy(ctx, false, true)
+				wakeSession(t, s, ctx, room, sid)
+			}
+			session, err := s.store.Session(ctx, sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := s.store.Box(ctx, session.Box)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.MarkClosing(ctx, sid); err != nil {
+				t.Fatal(err)
+			}
+			event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var changed bool
+			if wake {
+				changed, err = s.store.Wake(ctx, b, contract.BoxStarting, "", event)
+			} else {
+				changed, err = s.store.StopIdle(ctx, b, event, s.now())
+			}
+			if err != nil || changed {
+				t.Fatalf("closing transition changed=%v err=%v", changed, err)
+			}
+		})
+	}
+}
+
 func TestDormancyKeepsParentWithLiveChild(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
 	_, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: sid, Name: "child", Profile: "test"})
