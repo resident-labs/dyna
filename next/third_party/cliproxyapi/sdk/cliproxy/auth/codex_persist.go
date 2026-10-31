@@ -29,6 +29,11 @@ func IsCodexAuthRecord(auth *Auth) bool {
 	return false
 }
 
+// MergeCodexSavedCredentials preserves the saved credential partitions on metadata-only writes.
+func MergeCodexSavedCredentials(saved, updated map[string]any) map[string]any {
+	return codex.MergeCodexCredentialsFromDisk(saved, updated)
+}
+
 // PersistCodexAuthFile persists a Codex auth record to path using inter-process file locking,
 // read-before-write merging, and scoped refresh patches when present.
 // It returns handled=false when auth is not a Codex credential record.
