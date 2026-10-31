@@ -42,6 +42,8 @@ func (a *AccountActions) Entry() approve.Entry {
 			switch args.(contract.AccountsActionArgs).Action {
 			case contract.AccountActionConnect:
 				name = "Start account connection"
+			case contract.AccountActionReconnect:
+				name = "Reconnect account"
 			case contract.AccountActionCallback:
 				name = "Complete account authorization"
 			case contract.AccountActionComplete:
@@ -82,6 +84,13 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action unavailable"}
 	}
 	if op.State == contract.OpFailed {
+		select {
+		case result := <-resultCh:
+			if errors.Is(result.err, model.ErrReconnectUnavailable) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrReconnectUnavailable, Message: "reconnect unavailable"}
+			}
+		default:
+		}
 		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action failed"}
 	}
 	select {
@@ -143,10 +152,30 @@ func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Pr
 	return result.connect, problem
 }
 
+func (s *AccountActions) AccountsReconnect(ctx context.Context, caller contract.Principal, req contract.AccountsReconnectRequest) (contract.AccountsReconnectResponse, *contract.Error) {
+	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionReconnect, req.AccountID, func(ctx context.Context) accountActionResult {
+		s.removeMu.Lock()
+		defer s.removeMu.Unlock()
+		bindings, err := s.service.store.Accounts(ctx)
+		if err != nil {
+			return accountActionResult{err: err}
+		}
+		for _, binding := range bindings {
+			if binding.Account.ID == req.AccountID {
+				out, err := s.connections.Reconnect(ctx, req.AccountID, binding.ProxyID, binding.Account.Provider)
+				return accountActionResult{connect: out, err: err}
+			}
+		}
+		return accountActionResult{err: errAccountAction}
+	})
+	return contract.AccountsReconnectResponse(result.connect), problem
+}
+
 func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Principal, req contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error) {
 	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionRemove, req.AccountID, func(ctx context.Context) accountActionResult {
 		s.removeMu.Lock()
 		defer s.removeMu.Unlock()
+		s.connections.CancelReconnect(req.AccountID)
 		id, err := s.service.store.AccountProxyID(ctx, req.AccountID)
 		if err == nil {
 			err = s.connections.RemoveCredential(ctx, id)
@@ -181,6 +210,8 @@ func (s *AccountActions) AccountsConnectCallback(ctx context.Context, caller con
 
 // CompleteOAuth commits a private proxy completion without a browser request.
 func (s *AccountActions) CompleteOAuth(ctx context.Context, completed model.OAuthCompletion) error {
+	s.removeMu.Lock()
+	defer s.removeMu.Unlock()
 	return s.connections.Complete(ctx, completed, func(commit func() error) error {
 		_, problem := s.runAccountAction(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountActionComplete, "", func(context.Context) accountActionResult { return accountActionResult{err: commit()} })
 		if problem != nil {
@@ -194,6 +225,8 @@ func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contr
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 	}
+	s.removeMu.Lock()
+	defer s.removeMu.Unlock()
 	out, err := s.connections.Status(ctx, req, func(commit func() error) error {
 		_, problem := s.runAccountAction(ctx, caller, contract.AccountActionComplete, "", func(context.Context) accountActionResult {
 			return accountActionResult{err: commit()}

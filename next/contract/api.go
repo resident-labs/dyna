@@ -37,6 +37,7 @@ const (
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"
 	MethodAccountsConnect         Method = "accounts.connect"
+	MethodAccountsReconnect       Method = "accounts.reconnect"
 	MethodAccountsConnectCallback Method = "accounts.connect_callback"
 	MethodAccountsConnectStatus   Method = "accounts.connect_status"
 	MethodAccountsSetKey          Method = "accounts.set_key"
@@ -77,20 +78,21 @@ const (
 type ErrorCode string
 
 const (
-	ErrPodmanRequired   ErrorCode = "podman_required"
-	ErrInvalid          ErrorCode = "invalid"
-	ErrNotFound         ErrorCode = "not_found"
-	ErrForbidden        ErrorCode = "forbidden"
-	ErrConflict         ErrorCode = "conflict"
-	ErrMoveBusy         ErrorCode = "move_busy"
-	ErrHasChildren      ErrorCode = "has_children"
-	ErrParentClosing    ErrorCode = "parent_closing"
-	ErrSessionClosing   ErrorCode = "session_closing"
-	ErrStale            ErrorCode = "stale"
-	ErrVisualSuperseded ErrorCode = "visual_superseded"
-	ErrUnavailable      ErrorCode = "unavailable"
-	ErrStoreFromV1      ErrorCode = "store_from_v1"
-	ErrStoreTooOld      ErrorCode = "store_too_old"
+	ErrPodmanRequired       ErrorCode = "podman_required"
+	ErrInvalid              ErrorCode = "invalid"
+	ErrNotFound             ErrorCode = "not_found"
+	ErrForbidden            ErrorCode = "forbidden"
+	ErrConflict             ErrorCode = "conflict"
+	ErrMoveBusy             ErrorCode = "move_busy"
+	ErrHasChildren          ErrorCode = "has_children"
+	ErrParentClosing        ErrorCode = "parent_closing"
+	ErrSessionClosing       ErrorCode = "session_closing"
+	ErrStale                ErrorCode = "stale"
+	ErrVisualSuperseded     ErrorCode = "visual_superseded"
+	ErrUnavailable          ErrorCode = "unavailable"
+	ErrReconnectUnavailable ErrorCode = "reconnect_unavailable"
+	ErrStoreFromV1          ErrorCode = "store_from_v1"
+	ErrStoreTooOld          ErrorCode = "store_too_old"
 )
 
 type Error struct {
