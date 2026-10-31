@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"slices"
 
 	"github.com/resident-labs/dyna/box"
@@ -198,4 +200,49 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	}
 	s.reconciler.Kick()
 	return contract.SessionRestartResponse{}, nil
+}
+
+// SessionSetProfile moves a session to another profile. A failed session wakes to carry its failed input with it.
+func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Principal, req contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, *contract.Error) {
+	var response contract.SessionSetProfileResponse
+	target, err := s.store.Session(ctx, req.Session)
+	if err != nil {
+		return response, failure(err)
+	}
+	if e := s.roomAccess(ctx, caller, target.Room); e != nil {
+		return response, e
+	}
+	tree, err := s.store.RoomTree(ctx, target.Room)
+	if err != nil {
+		return response, failure(err)
+	}
+	if !tree.CanManage(caller, target.ID) {
+		return response, forbidden()
+	}
+	if _, _, err := s.profiles.Model(req.Profile); err != nil {
+		return response, invalid("unknown profile")
+	}
+	event, err := s.event(target.Room, caller, contract.SessionProfileChanged{Session: target.ID, Profile: req.Profile})
+	if err != nil {
+		return response, failure(err)
+	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		var outcome contract.TurnOutcome
+		err := tx.QueryRowContext(ctx, "SELECT outcome FROM turns WHERE session=? AND ended_at IS NOT NULL ORDER BY ended_at DESC, started_seq DESC LIMIT 1", target.ID).Scan(&outcome)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET profile=? WHERE id=?", req.Profile, target.ID); err != nil {
+			return err
+		}
+		seq, err := s.store.AppendEvent(tx, event)
+		if err != nil {
+			return err
+		}
+		return s.store.InsertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: target.ID}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: outcome == contract.TurnFailed})
+	})
+	if err != nil {
+		return response, failure(err)
+	}
+	return response, nil
 }

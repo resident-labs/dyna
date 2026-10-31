@@ -35,6 +35,7 @@ type client interface {
 	RoomRepos(context.Context, contract.RoomReposRequest) (contract.RoomReposResponse, error)
 	SessionStart(context.Context, contract.SessionStartRequest) (contract.SessionStartResponse, error)
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
+	SessionSetProfile(context.Context, contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error)
 	SessionRestart(context.Context, contract.SessionRestartRequest) (contract.SessionRestartResponse, error)
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
 	EventsList(context.Context, contract.EventsListRequest) (contract.EventsListResponse, error)
@@ -53,10 +54,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
+	contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
 }
 type responseType interface {
-	contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
+	contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -164,6 +165,9 @@ func (c *socketClient) RoomRepos(ctx context.Context, q contract.RoomReposReques
 }
 func (c *socketClient) SessionStart(ctx context.Context, q contract.SessionStartRequest) (contract.SessionStartResponse, error) {
 	return call[contract.SessionStartRequest, contract.SessionStartResponse](ctx, c, contract.MethodSessionStart, q)
+}
+func (c *socketClient) SessionSetProfile(ctx context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
+	return call[contract.SessionSetProfileRequest, contract.SessionSetProfileResponse](ctx, c, contract.MethodSessionSetProfile, q)
 }
 func (c *socketClient) SessionClose(ctx context.Context, q contract.SessionCloseRequest) (contract.SessionCloseResponse, error) {
 	return call[contract.SessionCloseRequest, contract.SessionCloseResponse](ctx, c, contract.MethodSessionClose, q)
@@ -435,7 +439,11 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
 		return err
 	}}
-	session.AddCommand(start, closeCmd, restart)
+	setProfile := &cobra.Command{Use: "set-profile SESSION PROFILE", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().SessionSetProfile(cmd.Context(), contract.SessionSetProfileRequest{Session: contract.SessionID(args[0]), Profile: contract.ProfileName(args[1])})
+		return err
+	}}
+	session.AddCommand(start, closeCmd, restart, setProfile)
 	root.AddCommand(session)
 	var postRoom string
 	var mentions, paths []string

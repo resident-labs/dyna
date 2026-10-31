@@ -32,7 +32,7 @@ func TestEndTurnFinalReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := contract.Event{ID: "start", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
-	if _, _, err := s.Dispatch(ctx, "child", "turn", start, false); err != nil {
+	if _, _, _, err := s.Dispatch(ctx, "child", "turn", start, false); err != nil {
 		t.Fatal(err)
 	}
 	post := contract.Event{ID: "reply", Time: now, Room: "room", From: child, Body: contract.PostCreated{Text: "done", Home: feed, Mentions: []contract.Principal{parent}}}
@@ -87,7 +87,7 @@ func TestEndTurnIgnoresPostBeforeTurnStart(t *testing.T) {
 		post("brief", parent, []contract.Delivery{{To: child, Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: parent, Home: feed}, Wake: true}})
 		post("early", child, nil)
 		start := contract.Event{ID: "start", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
-		if _, _, err := s.Dispatch(ctx, "child", "turn", start, false); err != nil {
+		if _, _, _, err := s.Dispatch(ctx, "child", "turn", start, false); err != nil {
 			t.Fatal(err)
 		}
 		want := contract.EventID("")

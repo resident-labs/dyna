@@ -37,6 +37,7 @@ type Harness struct {
 	Turns     []Turn
 	Inputs    []Input
 	OnTool    func(ToolCall)
+	Models    []contract.ModelChoice // each SetModel call, in order
 	delivered map[contract.DeliverySeq]bool
 	stopped   chan struct{}
 }
@@ -79,6 +80,13 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	result := turn.Result
 	result.Turn = id
 	return result, turn.Err
+}
+
+func (h *Harness) SetModel(_ context.Context, model contract.ModelChoice) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.Models = append(h.Models, model)
+	return nil
 }
 
 func (h *Harness) Continue(ctx context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
