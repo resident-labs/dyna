@@ -80,25 +80,24 @@ type event struct {
 }
 
 type Harness struct {
-	Activity          func(contract.TurnID, string)
-	cmd               *exec.Cmd
-	stdin             io.WriteCloser
-	session           string
-	writeMu           sync.Mutex
-	mu                sync.Mutex
-	pending           map[string]chan event
-	events            chan event
-	done              chan struct{}
-	stop              chan struct{}
-	readErr           error
-	sequence          atomic.Uint64
-	closeOnce         sync.Once
-	closeErr          error
-	deliveryMu        sync.Mutex
-	deliveryPath      string
-	deliveryOffset    int64
-	deliveryLineLimit int
-	delivered         map[string]struct{}
+	Activity       func(contract.TurnID, string)
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	session        string
+	writeMu        sync.Mutex
+	mu             sync.Mutex
+	pending        map[string]chan event
+	events         chan event
+	done           chan struct{}
+	stop           chan struct{}
+	readErr        error
+	sequence       atomic.Uint64
+	closeOnce      sync.Once
+	closeErr       error
+	deliveryMu     sync.Mutex
+	deliveryPath   string
+	deliveryOffset int64
+	delivered      map[string]struct{}
 }
 
 var _ harness.Harness = (*Harness)(nil)
@@ -338,48 +337,26 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 	if h.delivered == nil {
 		h.delivered = make(map[string]struct{})
 	}
-	limit := h.deliveryLineLimit
-	if limit == 0 {
-		limit = 64 << 20
-	}
 	reader := bufio.NewReader(file)
-	var line []byte
-	var length int64
-	tooLong := false
 	for {
-		part, readErr := reader.ReadSlice('\n')
-		length += int64(len(part))
-		if !tooLong {
-			if len(line)+len(part) > limit {
-				tooLong = true
-				line = nil
-			} else {
-				line = append(line, part...)
-			}
-		}
-		if readErr == bufio.ErrBufferFull {
-			continue
-		}
+		line, readErr := reader.ReadBytes('\n')
 		if readErr == io.EOF {
 			break // Re-read a partial line on the next call.
 		}
 		if readErr != nil {
 			return false, readErr
 		}
-		if !tooLong {
-			var entry struct {
-				Type    string `json:"type"`
-				Message struct {
-					Role       string `json:"role"`
-					DeliveryID string `json:"deliveryId"`
-				} `json:"message"`
-			}
-			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" {
-				h.delivered[entry.Message.DeliveryID] = struct{}{}
-			}
+		var entry struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role       string `json:"role"`
+				DeliveryID string `json:"deliveryId"`
+			} `json:"message"`
 		}
-		h.deliveryOffset += length
-		line, length, tooLong = nil, 0, false
+		if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" {
+			h.delivered[entry.Message.DeliveryID] = struct{}{}
+		}
+		h.deliveryOffset += int64(len(line))
 	}
 	_, found := h.delivered[strconv.FormatInt(int64(id), 10)]
 	return found, nil
