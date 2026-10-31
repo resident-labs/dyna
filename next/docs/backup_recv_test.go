@@ -146,19 +146,24 @@ func TestBackupReceiver(t *testing.T) {
 			if err := os.WriteFile(old, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if day == 1 {
-				at := time.Now().Add(-16 * 24 * time.Hour)
-				if err := os.Chtimes(old, at, at); err != nil {
-					t.Fatal(err)
-				}
-			}
+		}
+		if code := receive(t, script, strconv.Itoa(len(body)), body); code != 0 {
+			t.Fatalf("exit status %d; want 0", code)
+		}
+		if kept := copies(t, dir); len(kept) != 15 {
+			t.Fatalf("recent copies kept = %d; want 15", len(kept))
+		}
+		oldest := filepath.Join(dir, "dyna-20261001T000000Z.tar.gz.age")
+		at := time.Now().Add(-16 * 24 * time.Hour)
+		if err := os.Chtimes(oldest, at, at); err != nil {
+			t.Fatal(err)
 		}
 		if code := receive(t, script, strconv.Itoa(len(body)), body); code != 0 {
 			t.Fatalf("exit status %d; want 0", code)
 		}
 		kept := copies(t, dir)
-		if len(kept) != 14 {
-			t.Fatalf("copies kept = %d; want 14: %v", len(kept), kept)
+		if len(kept) != 15 {
+			t.Fatalf("copies kept = %d; want 15: %v", len(kept), kept)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "dyna-20261001T000000Z.tar.gz.age")); !os.IsNotExist(err) {
 			t.Fatalf("oldest copy still there: %v", err)
