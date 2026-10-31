@@ -12,11 +12,13 @@ import (
 )
 
 type profile struct {
-	Provider      contract.ModelProvider `json:"provider"`
-	Model         string                 `json:"model"`
-	AllowedModels []string               `json:"allowedModels"`
-	Thinking      contract.ThinkingLevel `json:"thinking"`
-	CompactTokens int                    `json:"compactTokens,omitempty"`
+	Provider       contract.ModelProvider `json:"provider"`
+	Model          string                 `json:"model"`
+	AllowedModels  []string               `json:"allowedModels"`
+	Thinking       contract.ThinkingLevel `json:"thinking"`
+	CompactTokens  int                    `json:"compactTokens,omitempty"`
+	MaxConcurrent  int                    `json:"maxConcurrent,omitempty"`
+	MaxCallsPerRun int                    `json:"maxCallsPerRun,omitempty"`
 }
 
 type ProfileConfig map[contract.ProfileName]profile
@@ -38,6 +40,9 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 		return nil, fmt.Errorf("profiles: no profiles")
 	}
 	for name, p := range profiles {
+		if p.MaxConcurrent < 0 || p.MaxCallsPerRun < 0 {
+			return nil, fmt.Errorf("profile %q: limits must be non-negative", name)
+		}
 		if p.CompactTokens < 0 {
 			return nil, fmt.Errorf("profile %q: compactTokens must be non-negative", name)
 		}
