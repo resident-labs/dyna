@@ -60,6 +60,32 @@ describe("AgentSession prompt characterization", () => {
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
+	it("delivers section changes as one user update without changing the system head", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const requests: TranscriptContext[] = [];
+		harness.setResponses(
+			Array.from({ length: 3 }, () => (context: TranscriptContext) => {
+				requests.push(structuredClone(context));
+				return fauxAssistantMessage("done");
+			}),
+		);
+		harness.session.setPromptSections([{ key: "goal", text: "first" }]);
+		await harness.session.prompt("first request");
+		harness.session.setPromptSections([{ key: "goal", text: "second" }]);
+		await harness.session.prompt("second request");
+		await harness.session.prompt("third request");
+		const systems = requests.map((request) => request.messages.filter((message) => message.role === "system"));
+		expect(systems.map((messages) => messages.length)).toEqual([1, 1, 1]);
+		expect(systems[1]).toEqual(systems[0]);
+		expect(systems[2]).toEqual(systems[0]);
+		const updates = harness.session.messages.filter(
+			(message) => message.role === "custom" && message.customType === "context_update",
+		);
+		expect(updates).toHaveLength(1);
+		expect(updates[0]?.role === "custom" && updates[0].content).toContain("+second");
+	});
+
 	it("handles a tool call turn and waits for the follow-up LLM response", async () => {
 		const toolRuns: string[] = [];
 		const echoTool: AgentTool = {
