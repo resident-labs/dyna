@@ -9,6 +9,7 @@ const (
 	MethodArchiveDone      Method = "archive.done"
 	MethodDeliveryDone     Method = "delivery.done"
 	MethodHostAdd          Method = "host.add"
+	MethodHostList         Method = "host.list"
 	MethodRoomCreate       Method = "room.create"
 	MethodRoomRepoAdd      Method = "room.repo.add"
 	MethodRoomRepos        Method = "room.repos"
@@ -89,6 +90,12 @@ type HostAddRequest struct {
 	OwnerOnlyAdmin bool     `json:"ownerOnlyAdmin"`
 }
 type HostAddResponse struct{}
+
+// HostListRequest asks for the hosts an owner terminal can open (5.15). Only the owner calls it.
+type HostListRequest struct{}
+type HostListResponse struct {
+	Hosts []HostName `json:"hosts"` // ControlPlane first, then each added host by name
+}
 
 type RoomCreateRequest struct {
 	Name        string      `json:"name"`
