@@ -85,7 +85,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		return contract.TurnOutputResponse{}, invalid("turn cause needs a failed outcome")
 	}
 	switch req.Cause {
-	case "", contract.CauseSetupFailed, contract.CauseModelFailed, contract.CauseOutputLimit, contract.CauseHarnessFailed:
+	case "", contract.CauseSetupFailed, contract.CauseModelFailed, contract.CauseOutputLimit, contract.CauseHarnessFailed, contract.CauseSetModelFailed:
 	default:
 		return contract.TurnOutputResponse{}, invalid("invalid turn cause")
 	}
