@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +90,10 @@ func TestProfileWrites(t *testing.T) {
 	}
 	if got := request(owner, "/v1/profile.set", body); got.Code != http.StatusOK {
 		t.Fatalf("set: %d %s", got.Code, got.Body)
+	}
+	duplicate := `{"create":true,"profile":{"name":"new"}}`
+	if got := request(owner, "/v1/profile.set", duplicate); got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), `"profile_exists"`) {
+		t.Fatalf("duplicate: %d %s", got.Code, got.Body)
 	}
 	model, _, err := profiles.Model("new")
 	if err != nil || model.ID != "new-model" {
