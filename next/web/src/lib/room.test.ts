@@ -107,6 +107,28 @@ test("the waiting count holds pending owner-class operations from op.list and op
   } finally { globalThis.fetch = original; }
 });
 
+test("a pending post is replaced by the event that echoes its clientId, before its call returns", async () => {
+  const window = new EventWindow("r", feed);
+  const original = globalThis.fetch;
+  let body = "";
+  globalThis.fetch = (input, init) => { if (String(input).endsWith("post")) body = String(init?.body); return new Promise<Response>(() => {}); };
+  try {
+    void window.post({ room: "r", text: "hello" });
+    const clientId = JSON.parse(body).clientId;
+    assert.equal(typeof clientId, "string");
+    window.apply(event(9, { type: "post.created", body: { text: "hello", home: feed, clientId } }));
+    assert.equal(window.pendingPosts.size, 0);
+    // The event arrives, then the call fails: the delivered post does not come back as unsent.
+    let reject!: (error: Error) => void;
+    globalThis.fetch = (input, init) => { if (String(input).endsWith("post")) body = String(init?.body); return new Promise<Response>((_, fail) => { reject = fail; }); };
+    const lost = window.post({ room: "r", text: "again" });
+    window.apply(event(10, { type: "post.created", body: { text: "again", home: feed, clientId: JSON.parse(body).clientId } }));
+    reject(new Error("offline"));
+    await lost;
+    assert.equal(window.pendingPosts.size, 0);
+  } finally { globalThis.fetch = original; }
+});
+
 // A fake engine with feed posts 1..count. It honors the events.list home filter and records each range.
 function engine(count: number, sessions: SessionSummary[] = []) {
   const requests: string[] = [];

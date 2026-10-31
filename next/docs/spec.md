@@ -216,6 +216,7 @@ type PostCreated struct {
 	Home        Conversation `json:"home"`              // feed or a DM
 	ReplyTo     EventID      `json:"replyTo,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	ClientID    string       `json:"clientId,omitempty"` // PostRequest.ClientID, at most 64 characters; the same author repeating it in a room gets the first post, with no new event
 }
 
 type Attachment struct {
