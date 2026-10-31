@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
+  import { ForwardExpiry } from "./lib/forward-clock.ts";
   import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
   import Blocked from "./lib/ui/Blocked.svelte";
   import PairScreen from "./lib/ui/PairScreen.svelte";
@@ -218,14 +219,14 @@
   // A forwarded post waits in its conversation's composer like a draft.
   let quotes: Record<string, Quote | undefined> = $state({});
   let replaced: Record<string, Quote | undefined> = $state({});
-  const replaceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  function clearReplacement() { clearTimeout(replaceTimers.get(key)); replaceTimers.delete(key); replaced[key] = undefined; }
+  const expiry = new ForwardExpiry(conversation => { replaced[conversation] = undefined; });
+  function clearReplacement() { expiry.clear(key); replaced[key] = undefined; }
   function forward(quote: Quote) {
     clearReplacement();
-    const previous = quotes[key], conversation = key;
+    const previous = quotes[key];
     if (previous) {
       replaced[key] = previous;
-      replaceTimers.set(key, setTimeout(() => { replaced[conversation] = undefined; replaceTimers.delete(conversation); }, 5000));
+      expiry.start(key);
     }
     quotes[key] = quote;
     composer?.focus({ preventScroll: true });
