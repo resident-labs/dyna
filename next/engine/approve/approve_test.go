@@ -306,26 +306,60 @@ func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
 	}
 }
 
-func TestInterruptedExecutionIsNotRetried(t *testing.T) {
+func TestRecoverOperations(t *testing.T) {
+	for _, tc := range []struct {
+		state, want contract.OpState
+		runs        int32
+	}{{contract.OpApproved, contract.OpDone, 1}, {contract.OpRunning, contract.OpFailed, 0}, {contract.OpDone, contract.OpDone, 0}} {
+		t.Run(string(tc.state), func(t *testing.T) {
+			f := setup(t)
+			op := f.submit(t, principal("worker"))
+			err := f.s.Store.Write(context.Background(), func(tx *sql.Tx) error {
+				_, err := f.s.Store.TransitionOperation(tx, op.ID, contract.OpPending, tc.state, nil, nil, contract.Event{}, nil)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			updates, stop := f.s.Store.Subscribe()
+			defer stop()
+			if err := f.s.Recover(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			var record store.StoredOperation
+			for {
+				record, err = f.s.Store.Operation(context.Background(), op.ID)
+				if err != nil || record.Operation.State == tc.want {
+					break
+				}
+				<-updates
+			}
+			if err != nil || record.Operation.State != tc.want || f.runs.Load() != tc.runs {
+				t.Fatalf("record %+v, runs %d, error %v", record, f.runs.Load(), err)
+			}
+			if tc.state == contract.OpRunning && (record.Operation.Result == nil || record.Operation.Result.Cause != contract.CauseInterrupted) {
+				t.Fatalf("result %+v", record.Operation.Result)
+			}
+		})
+	}
+}
+
+func TestFinishFailureReturnsToSubmit(t *testing.T) {
 	f := setup(t)
-	op := f.submit(t, principal("worker"))
+	f.class = contract.ClassAuto
+	entry := f.s.Kinds["test.run"]
+	entry.Execute = func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
+		f.s.ID = func(string) (string, error) { return "", errors.New("event failure") }
+		return contract.OpResult{}
+	}
+	f.s.Kinds["test.run"] = entry
+	op, err := f.s.Submit(context.Background(), principal("worker"), contract.Operation{Room: "room", Args: fakeArgs{}})
+	if err == nil {
+		t.Fatal("expected finish error")
+	}
 	record, err := f.s.Store.Operation(context.Background(), op.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = f.s.Store.Write(context.Background(), func(tx *sql.Tx) error {
-		_, err := f.s.Store.TransitionOperation(tx, record.Operation.ID, contract.OpPending, contract.OpApproved, nil, nil, contract.Event{}, nil)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.s.Recover(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	record, err = f.s.Store.Operation(context.Background(), op.ID)
-	if err != nil || record.Operation.State != contract.OpFailed || record.Operation.Result == nil || record.Operation.Result.Cause != contract.CauseInterrupted || f.runs.Load() != 0 {
-		t.Fatalf("record %+v err %v", record, err)
+	if err != nil || record.Operation.State != contract.OpRunning {
+		t.Fatalf("record %+v error %v", record, err)
 	}
 }
 
@@ -338,5 +372,45 @@ func TestSubmitRejectsMismatchedArgumentRoom(t *testing.T) {
 	_, err := f.s.Submit(context.Background(), principal("worker"), contract.Operation{Room: "room", Args: scopedArgs{}})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("mismatched room: %v", err)
+	}
+}
+
+func TestRecoverDoesNotWaitForExecutor(t *testing.T) {
+	f := setup(t)
+	op := f.submit(t, principal("worker"))
+	if err := f.s.Store.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := f.s.Store.TransitionOperation(tx, op.ID, contract.OpPending, contract.OpApproved, nil, nil, contract.Event{}, nil)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	entry := f.s.Kinds["test.run"]
+	entry.Execute = func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
+		close(started)
+		<-release
+		return contract.OpResult{}
+	}
+	f.s.Kinds["test.run"] = entry
+	updates, stop := f.s.Store.Subscribe()
+	defer stop()
+	go func() {
+		defer close(finished)
+		if err := f.s.Recover(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	<-started
+	<-finished
+	close(release)
+	for {
+		record, err := f.s.Store.Operation(context.Background(), op.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.Operation.State == contract.OpDone {
+			break
+		}
+		<-updates
 	}
 }
