@@ -22,7 +22,20 @@ test("folds the work between two posts into one row", () => {
   ], { kind: "feed" });
   assert.deepEqual(rows.map(row => row.kind), ["post", "work", "failed", "post"]);
   const work = rows[1];
-  assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web: 2 turns, box ready");
+  assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web finished 2 turns and started its box");
+});
+
+test("names up to three sessions in one work sentence", () => {
+  const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
+  const name = (session: string) => session;
+  assert.equal(workSummary([started(1, "a"), started(2, "b")], name), "a and b worked");
+  assert.equal(workSummary([started(1, "a"), started(2, "b"), started(3, "c"), started(4, "d")], name), "a, b and 2 more worked");
+});
+
+test("a failed image build reads as a failure in the work sentence", () => {
+  const image = { host: "h", repo: "r", name: "base", tag: "1" };
+  const failed = event(1, { type: "image.failed", body: { ...image, reason: "no space", logTail: "" } });
+  assert.equal(workSummary([failed], session => session), "Dyna had 1 image build fail");
 });
 
 test("puts a turn's final reply in its home only", () => {
