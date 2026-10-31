@@ -35,7 +35,6 @@ type Repositories interface {
 
 type Service struct {
 	store              *store.Store
-	dispatch           func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes              BoxAdapter
 	profiles           Profiles
 	repos              Repositories
@@ -93,7 +92,6 @@ func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.T
 	s := &Service{sessions: make(map[contract.SessionID]*sessionState), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
 	s.wakePending = make(map[contract.SessionID]bool)
 	s.wakeSignal = make(chan struct{}, 1)
-	s.dispatch = st.Dispatch
 	st.SetWake(s.queueWakes)
 	go s.wakeSessions(st.Done())
 	return s
