@@ -8,45 +8,54 @@ import (
 type Method string
 
 const (
-	MethodRuleAdd           Method = "rule.add"
-	MethodRuleRemove        Method = "rule.remove"
-	MethodRuleEdit          Method = "rule.edit"
-	MethodRuleList          Method = "rule.list"
-	MethodWebLogin          Method = "web.login"
-	MethodConversationRead  Method = "conversation.read"
-	MethodRoomList          Method = "room.list"
-	MethodSessionList       Method = "session.list"
-	MethodArchiveDone       Method = "archive.done"
-	MethodDeliveryDone      Method = "delivery.done"
-	MethodHostAdd           Method = "host.add"
-	MethodHostList          Method = "host.list"
-	MethodProfileList       Method = "profile.list"
-	MethodAccountsQuota     Method = "accounts.quota"
-	MethodRoomPause         Method = "room.pause"
-	MethodRoomSetLimits     Method = "room.set_limits"
-	MethodRoomCreate        Method = "room.create"
-	MethodRoomRepoAdd       Method = "room.repo.add"
-	MethodRoomRepos         Method = "room.repos"
-	MethodSessionStart      Method = "session.start"
-	MethodSessionClose      Method = "session.close"
-	MethodSessionStop       Method = "session.stop"
-	MethodSessionSetProfile Method = "session.set_profile"
-	MethodSessionRestart    Method = "session.restart"
-	MethodSessionMove       Method = "session.move"
-	MethodPost              Method = "post"
-	MethodPostSearch        Method = "post.search"
-	MethodSessionSearch     Method = "session.search"
-	MethodEventsList        Method = "events.list"
-	MethodBoxHello          Method = "box.hello"
-	MethodComputerChanged   Method = "computer.changed"
-	MethodComputerInput     Method = "computer.input"
-	MethodTurnOutput        Method = "turn.output"
-	MethodTurnActivity      Method = "turn.activity"
-	MethodTranscriptFetch   Method = "transcript.fetch"
-	MethodTranscriptAppend  Method = "transcript.append"
-	MethodTranscriptRead    Method = "transcript.read"
-	MethodShellJobEnded     Method = "shell.job.ended"
-	MethodShellOutput       Method = "shell.output"
+	MethodRuleAdd                 Method = "rule.add"
+	MethodRuleRemove              Method = "rule.remove"
+	MethodRuleEdit                Method = "rule.edit"
+	MethodRuleList                Method = "rule.list"
+	MethodWebLogin                Method = "web.login"
+	MethodConversationRead        Method = "conversation.read"
+	MethodRoomList                Method = "room.list"
+	MethodSessionList             Method = "session.list"
+	MethodArchiveDone             Method = "archive.done"
+	MethodDeliveryDone            Method = "delivery.done"
+	MethodHostAdd                 Method = "host.add"
+	MethodHostList                Method = "host.list"
+	MethodAccountsList            Method = "accounts.list"
+	MethodAccountsConnect         Method = "accounts.connect"
+	MethodAccountsConnectCallback Method = "accounts.connect_callback"
+	MethodAccountsConnectStatus   Method = "accounts.connect_status"
+	MethodAccountsSetKey          Method = "accounts.set_key"
+	MethodAccountsRemove          Method = "accounts.remove"
+	MethodAccountsSetLimits       Method = "accounts.set_limits"
+	MethodProfileSet              Method = "profile.set"
+	MethodProfileRemove           Method = "profile.remove"
+	MethodProfileList             Method = "profile.list"
+	MethodAccountsQuota           Method = "accounts.quota"
+	MethodRoomPause               Method = "room.pause"
+	MethodRoomSetLimits           Method = "room.set_limits"
+	MethodRoomCreate              Method = "room.create"
+	MethodRoomRepoAdd             Method = "room.repo.add"
+	MethodRoomRepos               Method = "room.repos"
+	MethodSessionStart            Method = "session.start"
+	MethodSessionClose            Method = "session.close"
+	MethodSessionStop             Method = "session.stop"
+	MethodSessionSetProfile       Method = "session.set_profile"
+	MethodSessionRestart          Method = "session.restart"
+	MethodSessionMove             Method = "session.move"
+	MethodPost                    Method = "post"
+	MethodPostSearch              Method = "post.search"
+	MethodSessionSearch           Method = "session.search"
+	MethodEventsList              Method = "events.list"
+	MethodBoxHello                Method = "box.hello"
+	MethodComputerChanged         Method = "computer.changed"
+	MethodComputerInput           Method = "computer.input"
+	MethodTurnOutput              Method = "turn.output"
+	MethodTurnActivity            Method = "turn.activity"
+	MethodTranscriptFetch         Method = "transcript.fetch"
+	MethodTranscriptAppend        Method = "transcript.append"
+	MethodTranscriptRead          Method = "transcript.read"
+	MethodShellJobEnded           Method = "shell.job.ended"
+	MethodShellOutput             Method = "shell.output"
 )
 
 type RoomRule struct {
@@ -112,10 +121,14 @@ type ConversationReadResponse struct{}
 
 type ProfileListRequest struct{}
 type ProfileSummary struct {
-	Name     ProfileName   `json:"name"`
-	Provider ModelProvider `json:"provider"`
-	Model    string        `json:"model"`
-	Thinking ThinkingLevel `json:"thinking"`
+	Name           ProfileName   `json:"name"`
+	Provider       ModelProvider `json:"provider"`
+	Model          string        `json:"model"`
+	Thinking       ThinkingLevel `json:"thinking"`
+	AllowedModels  []string      `json:"allowedModels,omitempty"`
+	CompactTokens  int           `json:"compactTokens,omitempty"`
+	MaxConcurrent  int           `json:"maxConcurrent,omitempty"`
+	MaxCallsPerRun int           `json:"maxCallsPerRun,omitempty"`
 }
 type ProfileListResponse struct {
 	Profiles []ProfileSummary `json:"profiles"`
@@ -211,9 +224,11 @@ const (
 	UsageOK            UsageCause = ""
 	UsageSignInExpired UsageCause = "sign_in_expired"
 	UsageUnreachable   UsageCause = "unreachable"
+	UsageRateLimited   UsageCause = "rate_limited"
 )
 
 type AccountUsage struct {
+	AccountID  AccountID     `json:"accountId,omitempty"`
 	ObservedAt *time.Time    `json:"observedAt,omitempty"`
 	Provider   string        `json:"provider"`
 	Label      string        `json:"label"`
