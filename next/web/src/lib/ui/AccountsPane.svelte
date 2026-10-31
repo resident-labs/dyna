@@ -13,7 +13,7 @@
   let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state("");
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
-  let reconnectId: string | undefined = $state(), error = $state(""), copied = $state(false);
+  let reconnectId: string | undefined = $state(), error = $state(""), copied = $state(false), now = $state(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined, generation = 0;
   const base = "/settings/accounts";
   let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/"));
@@ -38,6 +38,7 @@
   $effect(() => { path; return () => { if (attempt) reset(); }; });
   function watch(id: string, ticket: number) {
     timer = setTimeout(() => {
+      now = Date.now();
       void call("accounts.connect_status", { attempt: id }).then(result => {
         if (ticket !== generation) return;
         if (result.status === "connected") { reset(); reload(); document.getElementById("accounts-back")?.click(); }
@@ -45,6 +46,10 @@
         else { connectState = result.status; error = result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
       }, () => { if (ticket === generation) { connectState = "failed"; error = "Could not reach the service. Try again."; } });
     }, 2000);
+  }
+  function remaining(at: string) {
+    const seconds = Math.max(0, Math.ceil((Date.parse(at) - now) / 1000));
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   }
   async function start() {
     if (!selected || busy) return;
@@ -111,7 +116,7 @@
         <section class="card connect">
           <h2><span class="initial">{selected.displayName.slice(0, 1)}</span>{selected.displayName}<span class="muted">{accounts.filter(a => a.provider === selected.id).length} connected</span></h2>
           {#if !attempt}
-            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "Connect with an API key."}</strong> Connect this account to let Dyna use it.</p>
+            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "Connect with an API key."}</strong> {selected.connectFlow === "callback" ? "Use a plan you already pay for. Dyna shows its usage limits." : selected.connectFlow === "device" ? "Dyna shows a short code for the provider’s page." : "Paste a key to let Dyna use this provider."}</p>
             <p class="muted">Dyna keeps the sign-in on this computer and sends it only to {selected.displayName}.</p>
             <label>Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
             {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
@@ -120,14 +125,14 @@
             <label>Label <input value={label} disabled /></label>
             {#if attempt.flow === "device"}
               <p>Open the provider's page and enter this code.</p><div class="code"><strong>{attempt.code}</strong><button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(attempt?.code ?? ""); copied = true; }}>{copied ? "Copied" : "Copy"}</button></div>
-              <a href={attempt.link} target="_blank" rel="noopener noreferrer">Open sign-in ↗</a><p class="muted">Waiting for you to approve.</p>
+              <a href={attempt.link} target="_blank" rel="noopener noreferrer">Open sign-in ↗</a><p class="muted">Waiting for you to approve · Expires in {remaining(attempt.expiresAt)}</p>
             {:else}
               <p>① Open the {selected.displayName} sign-in and approve Dyna.<br /><a href={attempt.link} target="_blank" rel="noopener noreferrer">Opened in your browser ↗</a> <button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(attempt?.link ?? ""); copied = true; }}>{copied ? "Copied" : "Copy link"}</button></p>
               <form onsubmit={(e) => { e.preventDefault(); void finish(); }}>
                 <label>② Paste the address of the page you land on. That page may say it cannot be reached; that is expected.<input aria-label="Address of the page you land on" bind:value={redirect} placeholder="http://localhost/…" autocomplete="off" /></label>
                 <div class="actions"><button class="btn fill" type="submit" disabled={busy || !redirect.trim()}>Finish</button><a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a><span class="muted">Leaving this page cancels.</span></div>
               </form>
-              <p class="muted">The address holds a one-time code. Dyna hands it to the sign-in service and never keeps it.</p>
+              <p class="muted">Enter finishes. Escape, or leaving this page, cancels. The address holds a one-time code. Dyna hands it to the sign-in service and never keeps it. Expires in {remaining(attempt.expiresAt)}.</p>
             {/if}
             {#if attempt.flow === "device"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}
           {/if}
@@ -136,7 +141,7 @@
         </section>
         <section class="card legend">
           <h2>{attempt ? "After you finish" : "Three ways to connect"}</h2>
-          {#if attempt}<p class="muted">The account will appear in Accounts when sign-in finishes.</p>
+          {#if attempt}<p class="muted"><strong>{label}</strong> joins {selected.displayName} in your account list. It serves every room until you choose rooms in its view.</p>
           {:else}<p><strong>Sign in with your plan</strong> <span class="muted">You approve Dyna on the provider's page, then paste back the address it lands on. Dyna shows your plan's limits.</span></p>
           <p><strong>Sign in with a code</strong> <span class="muted">Dyna shows a short code here. You enter it on the provider's page, and Dyna finishes by itself.</span></p>
           <p><strong>API key</strong> <span class="muted">You paste a key once. It stays on this computer, and Dyna never shows it again.</span></p>{/if}
