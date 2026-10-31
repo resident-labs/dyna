@@ -1,4 +1,4 @@
-import type { UsageCause, UsageWindow } from "./contract.gen.ts";
+import type { AccountUsage, UsageCause, UsageWindow } from "./contract.gen.ts";
 import type { Meter } from "./hosts.ts";
 
 export const causeText: Record<Exclude<UsageCause, "">, { pill: string; line: string }> = {
@@ -8,9 +8,21 @@ export const causeText: Record<Exclude<UsageCause, "">, { pill: string; line: st
 
 const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
 
+// A window's length in its largest whole unit: [5, "hour"], [7, "day"], [30, "minute"].
+const unitOf = (seconds: number): [number, string] =>
+  seconds % 86400 === 0 ? [seconds / 86400, "day"] : seconds % 3600 === 0 ? [seconds / 3600, "hour"] : [Math.round(seconds / 60), "minute"];
+
 // A window's span from its length: "5 hours", "7 days", "1 day", "30 minutes".
-function span(seconds: number): string {
-  return seconds % 86400 === 0 ? count(seconds / 86400, "day") : seconds % 3600 === 0 ? count(seconds / 3600, "hour") : count(Math.round(seconds / 60), "minute");
+const span = (seconds: number) => count(...unitOf(seconds));
+
+// The busiest window of any account that reports one, as "Claude at 62% of the 5-hour window"; none without one.
+// The provider names the account, because a label can be a sign-in address.
+export function busiestWindow(accounts: AccountUsage[]): string | undefined {
+  const windows = accounts.flatMap(a => a.cause ? [] : (a.windows ?? []).map(w => ({ provider: a.provider, w })));
+  const top = windows.reduce<(typeof windows)[number] | undefined>((max, next) => !max || next.w.usedPercent > max.w.usedPercent ? next : max, undefined);
+  if (!top) return undefined;
+  const [n, unit] = unitOf(top.w.seconds);
+  return `${top.provider.charAt(0).toUpperCase()}${top.provider.slice(1)} at ${Math.round(top.w.usedPercent)}% of the ${n}-${unit} window`;
 }
 
 // "2 h 10 min", "3 d 4 h" or "10 min" until a time, with no-break spaces so it wraps as one; none when it is not

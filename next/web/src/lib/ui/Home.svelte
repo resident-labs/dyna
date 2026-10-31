@@ -4,6 +4,7 @@
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { hostMeters } from "../hosts.ts";
+  import { busiestWindow } from "../usage.ts";
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
@@ -102,12 +103,24 @@
   $effect(() => {
     void call("accounts.quota", {}).then(list => { accounts = list.accounts ?? []; loadedAt = Date.now(); }, () => { accountsFailed = true; });
   });
+  // One sentence says what needs the owner, counted from the same store as the header's Requests button. Under it, a
+  // muted line sums rooms, machines and the busiest usage window; a part with nothing to say is left out.
+  const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  let asks = $derived(total(attention.waiting));
+  let roomsWorking = $derived([...attention.working.values()].filter(set => set.size).length);
+  let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
+  let summary = $derived([
+    roomsWorking && `${count(roomsWorking, "room")} working`,
+    hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
+    accounts && busiestWindow(accounts),
+  ].filter(Boolean).join(" · "));
 </script>
 
 <div class="home">
-  <!-- Waiting for you, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
+  <p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>
+  <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
-    <section class="card"><h2>Waiting for you{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
+    {#if asks}<section class="card"><h2>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
       <div class="rows">{#each groups as { room, count } (room.id)}<a class="item" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
@@ -115,7 +128,7 @@
         onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Avatar kind={value.by.kind} name={who} {root} size={28} />
         <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/each}</div>
-      {#if !total(attention.waiting)}<p class="none">Nothing is waiting for you.</p>{/if}</section>
+      </section>{/if}
     <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
       <div class="rows">{#each allRooms ? busy : busy.slice(0, 6) as { room, line } (room.id)}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} size={28} />
@@ -138,6 +151,8 @@
   /* 340 px columns keep three metric tiles' figures on one line. */
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 12px; margin: 0 8px; }
   .top { display: grid; gap: 12px; margin: 8px 8px 0; }
+  .hero { display: grid; gap: 4px; margin: 8px 8px 16px; font-size: 20px; font-weight: 600; line-height: 1.25; }
+  .hero span { color: var(--muted); font-size: 14px; font-weight: 400; line-height: 1.45; font-variant-numeric: tabular-nums; }
   .rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); column-gap: 12px; margin: 0 -8px; }
   h2 { display: flex; align-items: baseline; gap: 8px; margin: 24px 8px 12px; font-size: 18px; font-weight: 600; line-height: 1.25; }
   .card h2 { margin: 0 0 8px; font-size: 16px; }
