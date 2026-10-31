@@ -65,13 +65,20 @@
     const count = waiting.filter(row => row.room.id === room.id).length;
     return count ? [{ room, count }] : [];
   }));
-  // Activity sums per room, never one row per session: each room with sessions, busiest first, six at most until the
-  // owner asks for the rest. A failed session shows in its room, on its row and the rail.
-  let busy = $derived([...attention.rooms.values()].flatMap(room => {
-    const working = attention.working.get(room.id)?.size ?? 0, idle = Math.max(0, (attention.sessions.get(room.id)?.size ?? 0) - working);
-    return working || idle ? [{ room, line: [working && `${working} working`, idle && `${idle} idle`].filter(Boolean).join(" · "), working }] : [];
-  }).sort((a, b) => b.working - a.working || a.room.name.localeCompare(b.room.name)));
-  let allRooms = $state(false);
+  const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  // Activity has one row per room, never one per session: rooms with requests first, then working rooms, each by name.
+  // A working room names its busiest agent, the one with the newest activity label. Quiet rooms fold into one line.
+  let activity = $derived([...attention.rooms.values()].map(room => {
+    const working = [...attention.working.get(room.id) ?? []], asks = attention.waiting.get(room.id)?.size ?? 0;
+    const idle = Math.max(0, (attention.sessions.get(room.id)?.size ?? 0) - working.length);
+    const [busiest, label] = [...attention.activity].findLast(([id]) => working.includes(id)) ?? [];
+    const name = busiest && (sessions.get(busiest)?.name ?? (room.latest?.session === busiest ? room.latest.name : undefined));
+    const line = [asks && count(asks, "request"), working.length ? `${working.length} working` : idle ? `${idle} idle` : "No open session", name, label];
+    return { room, working, rank: asks ? 0 : working.length ? 1 : 2, line: line.filter(Boolean).join(" · ") };
+  }).sort((a, b) => a.rank - b.rank || a.room.name.localeCompare(b.room.name)));
+  let active = $derived(activity.filter(row => row.rank < 2));
+  let quiet = $derived(activity.filter(row => row.rank === 2));
+  let showQuiet = $state(false);
   // Approve and Deny decide in place. The engine's op.decided event takes the row out of waiting; the owner's own
   // decision stays as one muted line until Home closes, so the row does not just vanish under the pointer.
   const decided = new SvelteMap<string, string>();
@@ -124,7 +131,6 @@
   });
   // One sentence says what needs the owner, counted from the same store as the header's Requests button. Under it, a
   // muted line sums rooms, machines and the busiest usage window; a part with nothing to say is left out.
-  const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
   let asks = $derived(total(attention.waiting));
   let roomsWorking = $derived([...attention.working.values()].filter(set => set.size).length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
@@ -157,11 +163,17 @@
         {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
       </section>{/if}
     <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
-      <div class="rows">{#each allRooms ? busy : busy.slice(0, 6) as { room, line } (room.id)}<a class="item" href={roomHref(room.id)} onclick={navigate}>
+      {#snippet row({ room, working, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} size={28} />
-        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span></a>{/each}</div>
-      {#if busy.length > 6 && !allRooms}<button type="button" class="retry more" onclick={() => { allRooms = true; }}>{busy.length - 6} more {busy.length === 7 ? "room" : "rooms"}</button>{/if}
-      {#if !busy.length}{#if loaded}<p class="none">No session is open.</p>
+        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span>
+        <!-- Who works: three small avatars at most, then the rest as a count. -->
+        {#if working.length}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} root={sessions.get(id)?.root ?? false} size={20} />{/each}
+          {#if working.length > 3}<span class="more-count">+{working.length - 3}</span>{/if}</span>{/if}</a>{/snippet}
+      <div class="list">{#each active as item (item.room.id)}{@render row(item)}{/each}
+        {#if quiet.length}<button type="button" class="item fold quiet" aria-expanded={showQuiet} onclick={() => { showQuiet = !showQuiet; }}>
+          <Icon name="chevron" /><span class="line">{count(quiet.length, "quiet room")}</span></button>
+          {#if showQuiet}{#each quiet as item (item.room.id)}{@render row(item)}{/each}{/if}{/if}</div>
+      {#if !activity.length}{#if loaded}<p class="none">No room yet.</p>
         {:else}<div class="item skeleton" aria-hidden="true"><i class="avatar"></i><span class="lines"><i></i><i></i></span></div>{/if}{/if}</section>
   </div>
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
@@ -221,11 +233,15 @@
   .acts :disabled { opacity: 0.6; cursor: default; }
   /* A folded room's row starts with a chevron, as every fold line does. */
   .fold :global(svg) { flex: none; color: var(--muted); transform: rotate(-90deg); }
+  .fold[aria-expanded="true"] :global(svg) { transform: none; }
+  .quiet { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; min-height: 36px; }
+  .stack { display: flex; flex: none; align-items: center; }
+  .stack > :global(*) + :global(*) { margin-left: -4px; }
+  .more-count { margin-left: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .decided { margin: 0; padding: 8px; color: var(--muted); font-size: 13px; }
   /* On a narrow card, Approve and Deny fill the width at 40 px, an easy touch target. */
   @container (max-width: 480px) {
     .acts { width: 100%; margin-left: 38px; }
     .acts button { flex: 1; height: 40px; }
   }
-  .more { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 13px; }
 </style>
