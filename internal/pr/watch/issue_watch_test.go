@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -28,6 +29,32 @@ func TestIssueWatchKeepsTickDueWithoutPRWatch(t *testing.T) {
 	watched, err = s.pollIssueWatches(t.Context())
 	if err == nil || !watched {
 		t.Fatalf("watched issue: watched=%v err=%v, want true and an error", watched, err)
+	}
+}
+
+// A quota response pauses later watches and later polls for the same account.
+func TestIssueWatchSharesRateLimitPause(t *testing.T) {
+	e := newEnv(t)
+	base := "repos/owner/repo/issues/3"
+	e.f.Raw[base] = "HTTP/2.0 429 Too Many Requests\r\nRetry-After: 3600\r\n\r\n{\"message\":\"secondary rate limit\"}"
+	e.write()
+	store := issuewatch.Store{DataDir: e.s.dataDir()}
+	for _, n := range []int{3, 4} {
+		if err := store.Save(t.Context(), issuewatch.Watch{Room: e.author.RoomID, Host: "github.com", Repo: "owner/repo", Number: n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if _, err := e.s.pollIssueWatches(t.Context()); err == nil {
+			t.Fatal("expected quota pause")
+		}
+	}
+	calls, err := os.ReadFile(e.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "api --hostname"); got != 1 {
+		t.Fatalf("got %d API calls during pause, want 1: %s", got, calls)
 	}
 }
 
