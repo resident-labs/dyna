@@ -8,6 +8,7 @@ export const firstFrameMs = 10_000;
 
 export class LiveStream {
   private cancel = () => {};
+  private current = 0;
   private readonly set: (phase: Phase) => void;
   private readonly after: After;
   constructor(set: (phase: Phase) => void, after: After = (ms, run) => { const timer = setTimeout(run, ms); return () => clearTimeout(timer); }) {
@@ -15,13 +16,15 @@ export class LiveStream {
     this.after = after;
   }
 
-  // A new stream: connecting, with the first-frame timer running.
-  start(): void {
+  // A new stream: connecting, with the first-frame timer running. Its image reports through the returned frame and
+  // fail, which do nothing once stop or a later start ends the stream, so a closed image's late events are ignored.
+  start(): { frame: () => void; fail: () => void } {
     this.cancel();
+    const stream = ++this.current;
     this.set("connecting");
     this.cancel = this.after(firstFrameMs, () => this.set("failed"));
+    const end = (phase: Phase) => () => { if (stream === this.current) { this.cancel(); this.set(phase); } };
+    return { frame: end("live"), fail: end("failed") };
   }
-  frame(): void { this.cancel(); this.set("live"); }
-  fail(): void { this.cancel(); this.set("failed"); }
-  stop(): void { this.cancel(); }
+  stop(): void { this.current++; this.cancel(); }
 }

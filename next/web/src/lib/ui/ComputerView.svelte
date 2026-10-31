@@ -1,3 +1,9 @@
+<script lang="ts" module>
+  // Every image mount gets its own stream URL. Chromium can show a reused multipart URL from its image cache
+  // without a new request: a frozen frame under "Live" after a retry, the page showing again, or the view reopening.
+  let opened = 0;
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
@@ -17,14 +23,14 @@
   // The screen's shape, from the first frame; 16:9 until then.
   let ratio = $state(16 / 9);
   // Chromium may keep a multipart request open until a removed <img> is garbage-collected, so the
-  // image drops its stream before it leaves. The error that the clearing fires is not a failure.
-  // A failed image stays, so the browser keeps showing the last frame under the notice, as in v1.
+  // image drops its stream before it leaves. The load or error that the clearing fires belongs to a stopped stream,
+  // so the view ignores it. A failed image stays, so the browser keeps showing the last frame under the notice, as in v1.
   function watch(image: HTMLImageElement) {
-    let closing = false;
-    stream.start();
-    image.addEventListener("load", () => { stream.frame(); if (image.naturalHeight) ratio = image.naturalWidth / image.naturalHeight; });
-    image.addEventListener("error", () => { if (!closing) stream.fail(); });
-    return () => { closing = true; stream.stop(); image.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="; };
+    const { frame, fail } = stream.start();
+    image.src = `/v1/computers/watch?session=${encodeURIComponent(session)}&n=${++opened}`;
+    image.addEventListener("load", () => { frame(); if (image.naturalHeight > 1) ratio = image.naturalWidth / image.naturalHeight; });
+    image.addEventListener("error", fail);
+    return () => { stream.stop(); image.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="; };
   }
   // The view takes focus when it opens.
   onMount(() => { element?.focus(); });
@@ -45,7 +51,7 @@
     <button type="button" aria-label="Close" title="Close" onclick={onclose}><Icon name="close" /></button>{/snippet}
   <!-- The image streams only while the owner can see it: this view open, the page visible. -->
   <div class="screen" class:docked style:--ratio={ratio}>
-    {#if visible}{#key attempt}<img src={`/v1/computers/watch?session=${encodeURIComponent(session)}`} alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
+    {#if visible}{#key attempt}<img alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
   {#if docked && activity}<p class="activity">{activity}</p>{/if}
