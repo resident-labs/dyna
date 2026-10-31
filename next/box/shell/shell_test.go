@@ -330,12 +330,13 @@ func TestSecretCrossingTheTrimPointWithoutNewlineIsDropped(t *testing.T) {
 }
 
 func TestOwnerViewKeepsAgentPosition(t *testing.T) {
-	j := &job{id: "j", command: "build", done: make(chan struct{})}
+	token := "ghp_" + strings.Repeat("a1", 15)
+	j := &job{id: "j", command: "build " + token, done: make(chan struct{})}
 	s := New(Config{})
 	s.jobs = []*job{j}
 	j.Write([]byte("first\npartial"))
 	first := s.View(true)
-	if len(first) != 1 || !first[0].Reset || first[0].Text != "first\n" {
+	if len(first) != 1 || !first[0].Reset || first[0].Text != "first\n" || strings.Contains(first[0].Command, token) {
 		t.Fatalf("reset: %+v", first)
 	}
 	if text, _ := j.unread(); text != "first\n" {
@@ -346,7 +347,6 @@ func TestOwnerViewKeepsAgentPosition(t *testing.T) {
 	if len(next) != 1 || next[0].Reset || next[0].Text != "partial line\n" {
 		t.Fatalf("delta: %+v", next)
 	}
-	token := "ghp_" + strings.Repeat("a1", 15)
 	j.Write([]byte(token + "\n"))
 	masked := s.View(false)
 	if len(masked) != 1 || strings.Contains(masked[0].Text, token) {
@@ -359,5 +359,32 @@ func TestOwnerViewKeepsAgentPosition(t *testing.T) {
 	next = s.View(false)
 	if len(next) != 1 || next[0].Running || next[0].ExitCode != 7 {
 		t.Fatalf("state: %+v", next)
+	}
+}
+
+func TestOwnerViewBudgetsAndResets(t *testing.T) {
+	s := New(Config{})
+	for i := 0; i < 8; i++ {
+		j := &job{id: contract.ShellJobID(fmt.Sprint(i)), done: make(chan struct{})}
+		j.Write([]byte(strings.Repeat("x", (64<<10)-1) + "\n"))
+		s.jobs = append(s.jobs, j)
+	}
+	first := s.View(true)
+	if len(first) != 4 {
+		t.Fatalf("first batch: %d", len(first))
+	}
+	second := s.View(false)
+	if len(second) != 4 {
+		t.Fatalf("second batch: %d", len(second))
+	}
+	for _, j := range append(first, second...) {
+		if !j.Reset || len(j.Text) > 64<<10 {
+			t.Fatalf("job: %+v", j)
+		}
+	}
+	s.jobs[0].Write([]byte(strings.Repeat("x\n", 1<<19)))
+	third := s.View(false)
+	if len(third) != 1 || !third[0].Reset || len(third[0].Text) > 64<<10 {
+		t.Fatalf("large output: %+v", third)
 	}
 }
