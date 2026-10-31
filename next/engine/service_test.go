@@ -1174,7 +1174,7 @@ func TestOwnerAttention(t *testing.T) {
 	}
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		for _, row := range []struct{ id, class string }{{"owner-op", "owner"}, {"agent-op", "agent"}} {
-			if _, err := tx.Exec(`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES(?, 'test', ?, 'owner', '', ?, 'pending', '{}', '{}', x'00', 1, 2)`, row.id, a, row.class); err != nil {
+			if _, err := tx.Exec(`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES(?, ?, ?, 'owner', '', ?, 'pending', '{}', '{}', x'00', 1, 2)`, row.id, row.id, a, row.class); err != nil {
 				return err
 			}
 		}
