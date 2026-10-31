@@ -107,6 +107,8 @@ type Service struct {
 	onMemberScan func(sessions int)
 	// onUnreadScan, for tests, observes room rail unread scans.
 	onUnreadScan func(roomID string)
+	// onOwnerHomes observes the number of IDs sent to the home lookup in tests.
+	onOwnerHomes func(int)
 }
 
 type unreadRevision struct {
@@ -326,11 +328,11 @@ func (s *Service) Rooms() ([]Room, error) {
 		if err != nil {
 			return nil, err
 		}
-		ids, err := s.ownerPosts(rec)
+		reads, err := store.OwnerReadIDs(rec.ID)
 		if err != nil {
 			return nil, err
 		}
-		reads, err := store.OwnerReadIDs(rec.ID)
+		ids, err := s.ownerPosts(rec, reads)
 		if err != nil {
 			return nil, err
 		}
@@ -396,10 +398,22 @@ func (s *Service) Rooms() ([]Room, error) {
 // ownerPosts returns the IDs of the posts unread in the room rail: the room's
 // own posts addressed to the owner. A post written in a DM or in the owner's
 // voice call is not in the room chat, so it is not unread in the room either.
-func (s *Service) ownerPosts(rec room.Record) ([]string, error) {
+func (s *Service) ownerPosts(rec room.Record, reads map[string]bool) ([]string, error) {
 	ids, err := s.ownerSelection(rec)
 	if err != nil {
 		return nil, err
+	}
+	if reads != nil {
+		unread := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if !reads[id] {
+				unread = append(unread, id)
+			}
+		}
+		ids = unread
+	}
+	if s.onOwnerHomes != nil {
+		s.onOwnerHomes(len(ids))
 	}
 	elsewhere, err := s.rooms().OtherHomesOf(rec.ID, ids)
 	if err != nil {
@@ -957,7 +971,7 @@ func (s *Service) MarkRoomRead(roomID string) error {
 	if err != nil {
 		return err
 	}
-	ids, err := s.ownerPosts(rec)
+	ids, err := s.ownerPosts(rec, nil)
 	if err != nil {
 		return err
 	}
