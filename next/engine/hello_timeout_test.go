@@ -10,7 +10,7 @@ import (
 func TestFailStaleStarts(t *testing.T) {
 	s, room, first, ctx := setup(t)
 	s.now = func() time.Time { return time.Unix(1061, 0) }
-	second, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "fresh", Profile: "test"})
+	second, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "fresh", Profile: "test", Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}
