@@ -519,7 +519,7 @@
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<SessionFace name={title} root={!store?.sessions.get(session)?.parent} dot={shown} size={24} />{/if}
       <span class="heading"><strong>{title}</strong>
-        {#if closed && !missing}<span class="count">closed</span>{:else if word}<span class="count word">{word}</span>{/if}
+        {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
