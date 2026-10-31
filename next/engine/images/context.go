@@ -3,7 +3,10 @@ package images
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
+
+	"github.com/resident-labs/dyna/box"
 )
 
 type Runner interface {
@@ -13,13 +16,35 @@ type Runner interface {
 var ErrImageChoice = errors.New("choosing an image is not supported yet")
 
 // Context reads the sole toolchain image from the mirrored default branch.
-func Context(ctx context.Context, runner Runner, mirror string) (string, TreeID, []byte, error) {
+func Context(ctx context.Context, runner Runner, mirror string) (string, TreeID, []byte, []box.Need, error) {
 	name, tree, err := soleImage(ctx, runner, mirror)
 	if err != nil || name == "" {
-		return "", "", nil, err
+		return "", "", nil, nil, err
+	}
+	entry, err := runner.Run(ctx, nil, "--git-dir", mirror, "ls-tree", string(tree), "box-needs")
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	var needs []box.Need
+	if len(entry) > 0 {
+		data, err := runner.Run(ctx, nil, "--git-dir", mirror, "show", string(tree)+":box-needs")
+		if err != nil {
+			return "", "", nil, nil, err
+		}
+		for _, word := range strings.Fields(string(data)) {
+			need := box.Need(word)
+			switch need {
+			case box.NeedNestedContainers, box.NeedKVM:
+				if !slices.Contains(needs, need) {
+					needs = append(needs, need)
+				}
+			default:
+				return "", "", nil, nil, errors.New("unknown box need: " + word)
+			}
+		}
 	}
 	data, err := runner.Run(ctx, nil, "--git-dir", mirror, "archive", "--format=tar", string(tree))
-	return name, tree, data, err
+	return name, tree, data, needs, err
 }
 
 // DefaultSize reads the size file of the sole toolchain image. It returns "" when there is none.

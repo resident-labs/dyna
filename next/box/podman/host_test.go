@@ -127,6 +127,29 @@ func TestContainerAndGrandchildSliceArguments(t *testing.T) {
 		}
 	}
 }
+func TestNestedContainerNeeds(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	err := h.CreateContainer(context.Background(), box.ContainerSpec{Box: "a", Image: "image", Needs: []box.Need{box.NeedNestedContainers}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := r.calls[len(r.calls)-1][len(r.calls[len(r.calls)-1])-1]
+	if !strings.Contains(cmd, "test -c /dev/net/tun") || !strings.Contains(cmd, "'--device' '/dev/net/tun' '--security-opt' 'unmask=/proc/sys' 'image'") || strings.Contains(cmd, "/dev/kvm") {
+		t.Fatalf("command %s", cmd)
+	}
+}
+
+func TestMissingDeviceIsTyped(t *testing.T) {
+	r := &runner{status: 254, body: "kvm"}
+	h := newTestHost(t, r)
+	err := h.CreateContainer(context.Background(), box.ContainerSpec{Box: "a", Image: "image", Needs: []box.Need{box.NeedKVM}})
+	var missing box.MissingDevice
+	if !errors.As(err, &missing) || missing.Need != box.NeedKVM {
+		t.Fatalf("error %v", err)
+	}
+}
+
 func TestStopContainerIgnoresMissing(t *testing.T) {
 	r := &runner{}
 	h := newTestHost(t, r)
