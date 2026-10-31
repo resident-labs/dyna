@@ -28,7 +28,7 @@
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
-  import { fitted, type Rect } from "./lib/float.ts";
+  import { computerPlace, fitted, type Rect } from "./lib/float.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
@@ -294,16 +294,27 @@
   let watching: string | undefined = $state();
   let docked = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
-  // A session's first window opens at the top right of the feed, clear of the composer below it (round 2, page 6);
-  // it then opens where the owner left it. On a phone the window fills the screen (fix 3).
+  // A session's first window opens against the app's right edge, clear of the feed's cards and the composer; where it
+  // cannot clear them it docks, unless the owner has used Dock or Undock. It then opens where the owner left it.
+  // On a phone the window fills the screen (fix 3).
   const places = new Map<string, Rect>();
+  let dockChosen = false;
   // The header's Computer button when it opened the view; focus goes back to it, as the row's icon has no place under About.
   let opener: HTMLElement | undefined;
   function watch(id: string, from?: HTMLElement) {
     if (watching) places.set(watching, rect);
-    const box = feed?.getBoundingClientRect();
-    const w = box ? Math.min(600, box.width - 32) : rect.w, h = box ? Math.min(400, box.height - 32) : rect.h;
-    rect = places.get(id) ?? (box ? { w, h, x: box.right - w - 16, y: box.top + 16 } : rect);
+    const box = (section ? page : feed)?.getBoundingClientRect();
+    const place = places.get(id);
+    if (place) rect = place;
+    else if (box) {
+      // Feed cards start at the feed's left; the Requests page centers its 744 px cards.
+      const first = computerPlace(window.innerWidth, box.top + 16, section ? (box.left + box.right + 744) / 2 : box.left + 680);
+      rect = first.rect;
+      if (!dockChosen && !phone.current) {
+        docked = !first.clear;
+        if (docked && !panelShown) void showPanel(true).then(() => computer?.focus());
+      }
+    }
     opener = from;
     watching = id;
   }
@@ -404,9 +415,9 @@
 
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
-  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} {docked} full={phone.current && !docked} bind:rect bind:element={computer}
+  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} steps={store?.steps.get(id) ?? []} {docked} full={phone.current && !docked} bind:rect bind:element={computer}
     onfit={(ratio, chrome) => { if (!places.has(id)) places.set(id, rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16)); }}
-    onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
+    onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; dockChosen = true; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
