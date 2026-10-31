@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
@@ -657,6 +658,7 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 // and a superseded cancellation does not fail main. One read serves every PR of
 // the repository, and every probe of that head gets the same result.
 func (s *Service) recheckCancelledMainCI(ctx context.Context, gh GitHub, records []*Record, localRepos map[string]bool, heads map[string]headProbe) error {
+	gh.runPhase = ghquota.RunMainRecheck
 	results := map[string]mainCIResult{}
 	failed := map[string]bool{}
 	var failures []error
