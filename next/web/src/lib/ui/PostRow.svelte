@@ -14,14 +14,14 @@
   import Avatar from "./Avatar.svelte";
   import { formatTime, type Row } from "../feed.ts";
   import { hue } from "../identity.ts";
-  let { row, author, to }: { row: Extract<Row, { kind: "post" }>; author: string; to?: string } = $props();
+  let { row, author, to, root }: { row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean } = $props();
   // Markdown from any author is sanitized before it reaches the page. Images wait for the files view.
   let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] }));
 </script>
 
 <article class="post" class:first={row.first}>
   {#if row.first}
-    <Avatar kind={row.from.kind} name={author} />
+    <Avatar kind={row.from.kind} name={author} {root} />
     <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {/if}
