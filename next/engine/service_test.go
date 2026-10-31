@@ -485,7 +485,11 @@ func TestFailedResultReachesParent(t *testing.T) {
 		t.Fatal(e)
 	}
 	<-channel
-	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalSession, Session: "child"}, contract.TurnEnded{Session: "child", Outcome: contract.TurnFailed, Error: "tool failed"})
+	child, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.TurnEnded{Session: child.Session, Outcome: contract.TurnFailed, Error: "tool failed"})
 	if err != nil {
 		t.Fatal(err)
 	}
