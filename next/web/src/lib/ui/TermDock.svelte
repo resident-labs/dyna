@@ -17,8 +17,8 @@
   // running jobs only, and a red dot marks a failed job the owner has not opened (Jobs fix 4). With no shell open,
   // the dock shows only its tab bar until the owner opens Jobs.
   type JobSession = { id: string; name: string; root: boolean; running: number };
-  let { sessions, jobs, element = $bindable(), onempty }: {
-    sessions: { id: string; name: string }[]; jobs: JobSession[]; element?: HTMLElement; onempty: () => void;
+  let { sessions, jobs, failures, element = $bindable(), onempty }: {
+    sessions: { id: string; name: string }[]; jobs: JobSession[]; failures: string[]; element?: HTMLElement; onempty: () => void;
   } = $props();
   type Tab = { key: number; target: TerminalTarget; label: string; exited?: { code?: number } };
   let tabs: Tab[] = $state([]);
@@ -39,9 +39,10 @@
   let only: string | undefined = $state();
   let jobsPane: JobsPane | undefined = $state();
   const opened = new SvelteSet<string>();
-  let failures: string[] = $state([]);
   let unopened = $derived(failures.some(key => !opened.has(key)));
-  let running = $derived(jobs.reduce((sum, session) => sum + session.running, 0));
+  // The open list knows its own rows, so the tab counts those and the two cannot disagree.
+  let listed: number | undefined = $state();
+  let running = $derived(active === JOBS && (floating || !collapsed) && listed !== undefined ? listed : jobs.reduce((sum, session) => sum + session.running, 0));
   // Jobs that leave, as on Home or when every box stops, take their tab with them.
   $effect.pre(() => { if (active === JOBS && !jobs.length) active = tabs[0]?.key ?? 0; });
   // A session row's jobs icon opens the tab on that session's jobs.
@@ -84,7 +85,7 @@
     if (active === key) active = tabs[Math.min(index, tabs.length - 1)]?.key ?? 0;
     if (!tabs.length) floating = false;
     await tick();
-    if (tabs.length) panes[active]?.focus(); else if (picking) plus?.focus(); else onempty();
+    if (active === JOBS || tabs.length) await show(active); else if (picking) plus?.focus(); else onempty();
   }
   // Up and Down move in the menu, Escape closes it and returns to "+".
   function walk(event: KeyboardEvent) {
@@ -155,7 +156,7 @@
     </div>{/each}
     <!-- Mounted only while open, so its watches close with it (Jobs fix 1). -->
     {#if active === JOBS && (floating || !collapsed)}<div class="tabpanel">
-      <JobsPane bind:this={jobsPane} bind:only sessions={jobs} {opened} onfailures={keys => { failures = keys; }} /></div>{/if}
+      <JobsPane bind:this={jobsPane} bind:only sessions={jobs} {opened} onrunning={rows => { listed = rows; }} /></div>{/if}
   </div>
 </FloatWindow>
 {/if}

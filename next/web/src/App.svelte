@@ -205,7 +205,7 @@
   // The tree is virtual, so the next row may not be rendered yet: the list scrolls to it first. A held key's presses
   // that come meanwhile move on from that row, and only the newest one focuses.
   let walkingTo: number | undefined;
-  // Focus goes back to a row's computer icon when the docked computer closes. The list mounts again at its top, so
+  // Focus goes back to a row's computer icon when the docked computer closes. The list may have scrolled, so
   // the row is scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus
   // before the icon. With the icon gone, focus stays on the link.
   async function focusRowIcon(id: string) {
@@ -283,6 +283,7 @@
   $effect(() => { for (const [id, count] of store?.shellJobs ?? []) if (count > 0) hadJobs.add(id); });
   let jobSessions = $derived([...store?.sessions.values() ?? []].filter(item => hadJobs.has(item.session) && store?.boxes.get(item.session) === "ready")
     .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: jobs(item.session) })));
+  let jobFailures = $derived([...store?.failedJobs ?? []].filter(key => jobSessions.some(item => key.startsWith(`${item.id}/`))));
   const wide = new MediaQuery("min-width: 761px");
   // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
   // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open or
@@ -421,7 +422,7 @@
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} />
     {/if}{/if}
-    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} jobs={jobSessions}
+    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} jobs={jobSessions} failures={jobFailures}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
@@ -447,7 +448,7 @@
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
-          {#if jobs(item.session)}<button type="button" class="watch" data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
+          {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { terminals?.showJobs(item.session); if (!wide.current) void showPanel(false); }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
