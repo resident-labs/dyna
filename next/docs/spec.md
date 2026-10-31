@@ -1186,8 +1186,8 @@ A request with no change adds nothing. The update stays in the transcript, so la
 
 **Performance** (owner, 2026-10-31: Pi and the engine stay fast).
 
-- **Pi, no change.** Before each run Pi checks every context file and the skills folder by `stat` (size and modification time) and reads a file only when that changed; it diffs a file's text only when its content hash changed. It compares each section by hash and diffs only sections whose hash changed. Budget: under 5 ms of Pi work per run when nothing changed.
-- **Pi, test.** A unit test runs the no-change path with an injected file system and counts reads, diffs and hashes: zero reads and zero diffs when nothing changed. It uses no clock and no sleeps (r2).
+- **Pi, no change.** Before each run Pi checks every context file and the skills folder by `stat` first (inode, size and modification time). It reads and hashes a file only when its stat changed, and diffs it only when its hash changed. A rename that keeps the size and time still changes the inode. Each section is compared by hash, and only sections whose hash changed are diffed. Budget: under 5 ms of Pi work per run when nothing changed, measured once in the evaluation, not asserted in a test.
+- **Pi, test.** A unit test runs the no-change path with an injected file system that counts work: zero reads, zero hashes and zero diffs when nothing changed. It uses no clock and no sleeps (r2).
 - **Engine.** `context.snapshot` renders from indexed store queries for the session, its children, its requests and its PRs, with no per-turn full scans. A test counts the queries per render.
 - **Files.** The engine writes the `AGENTS.md` files only on save, never per turn.
 
@@ -1313,6 +1313,7 @@ One run, before `agentSurface` becomes the default.
 - **Measures.** A correct engine call with correct arguments, wrong calls, extra calls (including searches), uncached input and output tokens, cache-read share, and time.
 - **Checks.** Cloaked tool names map back, and the model finds and calls the aliased `tool_search` and `call_tool`. A call over 60 seconds completes.
 - **Cache check.** Six tasks change state mid-session: a rule added, a rule removed, a child finished, usage pace changed, a `tool_search` hit, and a skill added. One more task compacts. Per provider, the run reports cache-read share on the request after each update and on the second request after compaction, and whether the model obeys the changed rule, drops the removed one, calls the found tool and reads the new skill. It measures the one path; it decides no fallback.
+- **Pi time.** Pi's work per run on the no-change path, against the 5 ms budget.
 - **Fixed tool list.** For each provider, one session checks that the tools array is byte-identical on every request between compactions, after the proxy, including the proxy's aliases for Pi's own tools.
 - **Gate.** On every provider, MCP accuracy is at least the CLI arm's, and tokens per task fall by at least 20%. Profiles on a provider that fails keep the setting off until a fix lands, and the setting stays until then. The better MCP shape wins.
 - **Cost.** 300 task runs, at about 30,000 input tokens (mostly cache reads) and 1,000 output tokens each: about 9 million input and 0.3 million output tokens over 5 accounts. The cache check adds 35 runs (7 tasks, 5 providers): about 1 million input and 35,000 output tokens.
