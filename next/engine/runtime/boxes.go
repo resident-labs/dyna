@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,9 +43,16 @@ type Boxes struct {
 	Images    *engineimages.Builder
 	Context   context.Context
 	Pressure  *engine.Service
+	Proc      string // Proc is the folder with stat and meminfo; empty means /proc.
 	mu        sync.Mutex
 	hosts     map[contract.HostName]*podman.Host
 	loads     map[contract.HostName]contract.HostSummary
+	cpuPrev   *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+}
+
+// cpuTimes holds the cumulative jiffies of the aggregate cpu line in /proc/stat.
+type cpuTimes struct {
+	busy, total uint64
 }
 
 // cache stores a host driver and starts its heartbeat until the engine stops. A cached name keeps its first driver and heartbeat. The caller holds b.mu.
@@ -87,7 +96,51 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 		load := b.loads[h.Name]
 		h.Reachable, h.CPUUsed, h.MemUsed, h.Boxes = load.Reachable, load.CPUUsed, load.MemUsed, counts[h.Name]
 	}
+	b.controlPlane(&hosts[0])
 	return nil
+}
+
+// controlPlane fills the CPU and memory figures of this machine from the proc folder. A failed read leaves its figures at zero. The caller holds b.mu.
+func (b *Boxes) controlPlane(h *contract.HostSummary) {
+	root := b.Proc
+	if root == "" {
+		root = "/proc"
+	}
+	h.Reachable = true
+	h.CPUs = goruntime.NumCPU()
+	if stat, err := os.ReadFile(filepath.Join(root, "stat")); err == nil {
+		h.CPUUsed = b.cpuCores(string(stat), h.CPUs)
+	}
+	if meminfo, err := os.ReadFile(filepath.Join(root, "meminfo")); err == nil {
+		h.MemBytes, h.MemUsed = memory(string(meminfo))
+	}
+}
+
+// cpuCores returns the cores busy since the previous sample and keeps this sample. The first sample reports zero.
+func (b *Boxes) cpuCores(stat string, cpus int) float64 {
+	line, _, _ := strings.Cut(stat, "\n")
+	var user, nice, system, idle, iowait, irq, softirq, steal uint64
+	if n, _ := fmt.Sscanf(line, "cpu %d %d %d %d %d %d %d %d", &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal); n != 8 {
+		return 0
+	}
+	total := user + nice + system + idle + iowait + irq + softirq + steal
+	now := cpuTimes{busy: total - idle - iowait, total: total}
+	prev := b.cpuPrev
+	b.cpuPrev = &now
+	if prev == nil || now.total <= prev.total || now.busy < prev.busy {
+		return 0
+	}
+	return float64(now.busy-prev.busy) / float64(now.total-prev.total) * float64(cpus)
+}
+
+// memory returns the total and used bytes from the text of /proc/meminfo.
+func memory(meminfo string) (total, used int64) {
+	var avail int64
+	for _, line := range strings.Split(meminfo, "\n") {
+		fmt.Sscanf(line, "MemTotal: %d", &total)
+		fmt.Sscanf(line, "MemAvailable: %d", &avail)
+	}
+	return total * 1024, (total - avail) * 1024
 }
 
 func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host, error) {
