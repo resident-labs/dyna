@@ -118,6 +118,7 @@ type ConversationReadResponse struct{}
 
 type ProfileListRequest struct{}
 type ProfileSummary struct {
+	Billing        ModelBilling  `json:"billing,omitempty"`
 	InUse          int           `json:"inUse"`
 	Description    string        `json:"description"`
 	Taste          int           `json:"taste"`
@@ -231,12 +232,12 @@ const (
 )
 
 type AccountUsage struct {
-	AccountID  AccountID     `json:"accountId,omitempty"`
-	ObservedAt *time.Time    `json:"observedAt,omitempty"`
-	Provider   string        `json:"provider"`
-	Label      string        `json:"label"`
-	Windows    []UsageWindow `json:"windows"`
-	Cause      UsageCause    `json:"cause"`
+	AccountID  AccountID       `json:"accountId,omitempty"`
+	ObservedAt *time.Time      `json:"observedAt,omitempty"`
+	Provider   AccountProvider `json:"provider"`
+	Label      string          `json:"label"`
+	Windows    []UsageWindow   `json:"windows"`
+	Cause      UsageCause      `json:"cause"`
 }
 type UsageWindowKind string
 
@@ -435,6 +436,13 @@ const (
 	ModelProviderOpenAI    ModelProvider = "openai"
 )
 
+type ModelBilling string
+
+const (
+	ModelBillingPlan ModelBilling = "plan"
+	ModelBillingKey  ModelBilling = "key"
+)
+
 type ThinkingLevel string
 
 const (
@@ -447,6 +455,7 @@ const (
 )
 
 type ModelChoice struct {
+	Billing  ModelBilling  `json:"billing,omitempty"`
 	Provider ModelProvider `json:"provider"`
 	ID       string        `json:"id"`
 	Thinking ThinkingLevel `json:"thinking"`
@@ -460,15 +469,16 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
-	GitName       string           `json:"gitName,omitempty"`
-	GitEmail      string           `json:"gitEmail,omitempty"`
-	CompactTokens int              `json:"compactTokens,omitempty"`
-	Instructions  string           `json:"instructions"`
-	Session       SessionID        `json:"session"`
-	Box           BoxID            `json:"box"`
-	Model         ModelChoice      `json:"model"`
-	Repos         []BoxRepo        `json:"repos,omitempty"`
-	Transcripts   []TranscriptFile `json:"transcripts,omitempty"`
+	ModelRoutes   map[ModelProvider]string `json:"modelRoutes"`
+	GitName       string                   `json:"gitName,omitempty"`
+	GitEmail      string                   `json:"gitEmail,omitempty"`
+	CompactTokens int                      `json:"compactTokens,omitempty"`
+	Instructions  string                   `json:"instructions"`
+	Session       SessionID                `json:"session"`
+	Box           BoxID                    `json:"box"`
+	Model         ModelChoice              `json:"model"`
+	Repos         []BoxRepo                `json:"repos,omitempty"`
+	Transcripts   []TranscriptFile         `json:"transcripts,omitempty"`
 }
 type TurnOutputRequest struct {
 	ShellJobs int          `json:"shellJobs"`

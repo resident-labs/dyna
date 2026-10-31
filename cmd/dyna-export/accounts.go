@@ -12,7 +12,7 @@ import (
 var accountProviders = map[string]contract.AccountProvider{
 	"anthropic":   contract.ProviderAnthropic,
 	"chatgpt":     contract.ProviderOpenAI,
-	"kimi-code":   contract.ProviderKimi,
+	"kimi-code":   contract.ProviderKimiCoding,
 	"xai":         contract.ProviderXAI,
 	"zai":         contract.ProviderZAI,
 	"opencode-go": contract.ProviderOpencodeGo,

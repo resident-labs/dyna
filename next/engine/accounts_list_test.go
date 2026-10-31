@@ -42,7 +42,7 @@ func TestAccountList(t *testing.T) {
 	response, problem := actions.AccountsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountsListRequest{})
 	flows := map[contract.AccountProvider]contract.ConnectFlow{
 		contract.ProviderAnthropic: contract.ConnectFlowCallback, contract.ProviderOpenAI: contract.ConnectFlowCallback,
-		contract.ProviderKimi: contract.ConnectFlowDevice, contract.ProviderXAI: contract.ConnectFlowDevice,
+		contract.ProviderKimiCoding: contract.ConnectFlowDevice, contract.ProviderXAI: contract.ConnectFlowDevice,
 		contract.ProviderZAI: contract.ConnectFlowKey, contract.ProviderOpencodeGo: contract.ConnectFlowKey, contract.ProviderDeepSeek: contract.ConnectFlowKey,
 	}
 	for _, provider := range response.Providers {

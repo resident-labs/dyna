@@ -126,6 +126,16 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 	}
 	for i, binding := range bindings {
 		accounts[i] = binding.Account
+		if strings.HasPrefix(binding.ProxyID, "dyna-key-") {
+			accounts[i].Flow = contract.ConnectFlowKey
+		} else {
+			for _, provider := range s.connections.AccountProviders() {
+				if provider.ID == binding.Account.Provider && len(provider.Flows) > 0 {
+					accounts[i].Flow = provider.Flows[0]
+					break
+				}
+			}
+		}
 		if err == nil {
 			switch states[binding.ProxyID] {
 			case model.CredentialConnected:
@@ -139,7 +149,7 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 			}
 		}
 	}
-	return contract.AccountsListResponse{Accounts: accounts, Providers: model.AccountProviders()}, nil
+	return contract.AccountsListResponse{Accounts: accounts, Providers: s.connections.AccountProviders()}, nil
 }
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {

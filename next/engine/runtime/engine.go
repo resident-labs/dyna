@@ -128,6 +128,14 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	catalog, skipped, err := model.LoadCatalog(pi)
+	if err != nil {
+		return err
+	}
+	for _, provider := range skipped {
+		log.Printf("invalid Pi catalog provider %q", provider)
+	}
+	keyProviders := catalog.KeyProviders()
 	st, err := store.Open(cfg.Data)
 	if err != nil {
 		return err
@@ -152,11 +160,12 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	managementKey := hex.EncodeToString(key[:])
-	proxy, err := model.NewProxy(cfg.Data, managementKey)
+	proxy, err := model.NewProxy(cfg.Data, managementKey, keyProviders...)
 	if err != nil {
 		return err
 	}
 	defer proxy.Listener.Close()
+	proxy.SetPlanModels(catalog)
 	proxyCtx, stopProxy := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopProxy()
 	done := make(chan struct{})
@@ -166,6 +175,12 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, InstructionsDir: filepath.Join(cfg.Data, "files", "instructions"), Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
+	routes := map[contract.ModelProvider]string{"anthropic": "", "openai": "/v1", "kimi-coding": "/v1", "xai": "/v1"}
+	for _, provider := range keyProviders {
+		routes[contract.ModelProvider(provider.Provider)] = "/v1"
+	}
+	service.SetModelRoutes(routes)
+	service.SetModelNamespace(proxy.Namespace)
 	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
@@ -211,7 +226,7 @@ func Run(ctx context.Context, cfg Config) error {
 				http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			_, allowed, err := profiles.Model(session.Profile)
+			choice, allowed, err := profiles.Model(session.Profile)
 			if err != nil {
 				http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
 				return
@@ -221,7 +236,12 @@ func Run(ctx context.Context, cfg Config) error {
 				http.Error(w, "account policy unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			proxy.Handler(string(session.ID), allowed, eligible).ServeHTTP(w, r)
+			namespace, err := proxy.Namespace(choice, allowed)
+			if err != nil {
+				http.Error(w, "profile unavailable", http.StatusForbidden)
+				return
+			}
+			proxy.Handler(string(session.ID), namespace, allowed, eligible).ServeHTTP(w, r)
 		}))
 	})
 	apiServer.Build = cfg.Version

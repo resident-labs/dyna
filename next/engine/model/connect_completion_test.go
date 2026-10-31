@@ -19,7 +19,7 @@ func TestExpiredCompletionRejectsWithoutBreakingOtherAttempts(t *testing.T) {
 	defer server.Close()
 	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", nil, func() time.Time { return now })
-	start, err := c.Start(context.Background(), contract.AccountsConnectRequest{Provider: contract.ProviderKimi})
+	start, err := c.Start(context.Background(), contract.AccountsConnectRequest{Provider: contract.ProviderKimiCoding})
 	if err != nil {
 		t.Fatal(err)
 	}

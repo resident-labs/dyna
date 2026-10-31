@@ -80,7 +80,7 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 		if !ok {
 			continue
 		}
-		usage := contract.AccountUsage{AccountID: account.ID, Provider: file.Provider, Label: account.Label, Windows: []contract.UsageWindow{}}
+		usage := contract.AccountUsage{AccountID: account.ID, Provider: account.Provider, Label: account.Label, Windows: []contract.UsageWindow{}}
 		if file.Provider == "codex" && file.Quota.ObservedAt != nil && !file.Quota.ObservedAt.IsZero() {
 			usage.ObservedAt = file.Quota.ObservedAt
 			for _, item := range []struct {

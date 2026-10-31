@@ -6,20 +6,38 @@ var oauthProviders = []struct {
 	info  contract.AccountProviderInfo
 	proxy string
 }{
-	{contract.AccountProviderInfo{ID: contract.ProviderAnthropic, DisplayName: "Claude", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCallback}, "claude"},
-	{contract.AccountProviderInfo{ID: contract.ProviderOpenAI, DisplayName: "ChatGPT", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCallback}, "codex"},
-	{contract.AccountProviderInfo{ID: contract.ProviderKimi, DisplayName: "Kimi Code", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, "kimi"},
-	{contract.AccountProviderInfo{ID: contract.ProviderXAI, DisplayName: "xAI", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, "xai"},
+	{contract.AccountProviderInfo{ID: contract.ProviderAnthropic, DisplayName: "Claude", Flows: []contract.ConnectFlow{contract.ConnectFlowCallback}}, "claude"},
+	{contract.AccountProviderInfo{ID: contract.ProviderOpenAI, DisplayName: "ChatGPT", Flows: []contract.ConnectFlow{contract.ConnectFlowCallback}}, "codex"},
+	{contract.AccountProviderInfo{ID: contract.ProviderKimiCoding, DisplayName: "Kimi Code", Flows: []contract.ConnectFlow{contract.ConnectFlowDevice}}, "kimi"},
+	{contract.AccountProviderInfo{ID: contract.ProviderXAI, DisplayName: "xAI", Flows: []contract.ConnectFlow{contract.ConnectFlowDevice}}, "xai"},
 }
 
 // AccountProviders describes the same catalog used by the connection handlers.
-func AccountProviders() []contract.AccountProviderInfo {
-	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(KeyProviders()))
+func (p *Proxy) AccountProviders() []contract.AccountProviderInfo {
+	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(p.keyProviders))
 	for _, provider := range oauthProviders {
 		providers = append(providers, provider.info)
 	}
-	for _, provider := range KeyProviders() {
-		providers = append(providers, contract.AccountProviderInfo{ID: provider.Provider, DisplayName: provider.DisplayName, ConnectMethod: contract.ConnectKey, ConnectFlow: contract.ConnectFlowKey})
+	for _, provider := range p.keyProviders {
+		index := -1
+		for i := range providers {
+			if providers[i].ID == provider.Provider {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			providers = append(providers, contract.AccountProviderInfo{ID: provider.Provider, DisplayName: provider.DisplayName})
+			index = len(providers) - 1
+		}
+		info := &providers[index]
+		info.Flows = append(info.Flows, contract.ConnectFlowKey)
+		info.KeyName = provider.KeyName
+		info.Models = provider.Models
 	}
 	return providers
+}
+
+func (c *Connections) AccountProviders() []contract.AccountProviderInfo {
+	return c.proxy.AccountProviders()
 }

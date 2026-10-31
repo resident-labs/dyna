@@ -36,11 +36,6 @@ const (
 var callIDExtension string
 
 func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
-	switch model.Provider {
-	case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
-	default:
-		return nil, fmt.Errorf("unsupported model provider %q", model.Provider)
-	}
 	switch model.Thinking {
 	case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
 	default:
@@ -136,7 +131,7 @@ func Run(ctx context.Context) error {
 		}
 		log.Printf("transcript restore: %v", err)
 	}
-	models, err := json.Marshal(Models())
+	models, err := json.Marshal(Models(hello.ModelRoutes))
 	if err != nil {
 		return err
 	}

@@ -32,6 +32,8 @@ type Repositories interface {
 }
 
 type Service struct {
+	modelRoutes        map[contract.ModelProvider]string
+	modelNamespace     func(contract.ModelChoice, []string) (string, error)
 	gitName, gitEmail  string
 	maxDepth           int
 	store              *store.Store
@@ -96,6 +98,14 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 	go s.live.Run(st.Done())
 	return s
 }
+
+// SetModelNamespace configures catalog validation before the service starts.
+func (s *Service) SetModelNamespace(validate func(contract.ModelChoice, []string) (string, error)) {
+	s.modelNamespace = validate
+}
+
+// SetModelRoutes configures the Pi provider routes before the service starts.
+func (s *Service) SetModelRoutes(routes map[contract.ModelProvider]string) { s.modelRoutes = routes }
 
 // SetGitIdentity configures the commit identity sent to boxes.
 func (s *Service) SetGitIdentity(name, email string) { s.gitName, s.gitEmail = name, email }

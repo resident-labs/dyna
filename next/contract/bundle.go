@@ -135,7 +135,7 @@ type AccountProvider string
 const (
 	ProviderAnthropic  AccountProvider = "anthropic"
 	ProviderOpenAI     AccountProvider = "openai"
-	ProviderKimi       AccountProvider = "kimi"
+	ProviderKimiCoding AccountProvider = "kimi-coding"
 	ProviderXAI        AccountProvider = "xai"
 	ProviderZAI        AccountProvider = "zai"
 	ProviderOpencodeGo AccountProvider = "opencode-go"

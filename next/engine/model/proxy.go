@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
+	"github.com/resident-labs/dyna/contract"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -17,16 +18,18 @@ import (
 
 // Proxy owns the proxy listener and its private client key.
 type Proxy struct {
-	Listener   *net.UnixListener
-	Config     string
-	Socket     string
-	clientKey  string
-	client     *http.Client
-	generation atomic.Uint64
+	keyProviders []KeyProvider
+	planModels   map[contract.AccountProvider]string
+	Listener     *net.UnixListener
+	Config       string
+	Socket       string
+	clientKey    string
+	client       *http.Client
+	generation   atomic.Uint64
 }
 
 // NewProxy creates a private proxy configuration. managementKey is held by the engine.
-func NewProxy(dataDir, managementKey string) (*Proxy, error) {
+func NewProxy(dataDir, managementKey string, providers ...KeyProvider) (*Proxy, error) {
 	if managementKey == "" {
 		return nil, fmt.Errorf("model: management key is required")
 	}
@@ -79,13 +82,14 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	cfg.AuthDir = authDir
-	for _, provider := range KeyProviders() {
-		catalog := config.OpenAICompatibility{Name: string(provider.Provider), BaseURL: provider.URL, DynaCatalogOnly: true}
-		for _, name := range provider.Models {
-			catalog.Models = append(catalog.Models, config.OpenAICompatibilityModel{Name: name, Alias: name})
+	for _, provider := range providers {
+		catalog := config.OpenAICompatibility{Name: string(provider.Provider), Prefix: string(provider.Provider), BaseURL: provider.URL, Headers: provider.Headers, DynaCatalogOnly: true}
+		for _, model := range provider.Models {
+			catalog.Models = append(catalog.Models, config.OpenAICompatibilityModel{Name: model.ID, Alias: model.ID})
 		}
 		cfg.OpenAICompatibility = append(cfg.OpenAICompatibility, catalog)
 	}
+	cfg.ForceModelPrefix = true
 	cfg.APIKeys = []string{key}
 	// Unix clients have no loopback IP; the private socket limits access.
 	cfg.RemoteManagement.AllowRemote = true
@@ -112,10 +116,20 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, closeErr
 	}
 	owned = false
-	return &Proxy{Listener: listener, Config: path, Socket: socket, clientKey: key, client: unixClient(socket)}, nil
+	return &Proxy{keyProviders: providers, Listener: listener, Config: path, Socket: socket, clientKey: key, client: unixClient(socket)}, nil
+}
+
+// SetPlanModels records the pinned Pi models used to verify plan activation.
+func (p *Proxy) SetPlanModels(c Catalog) {
+	p.planModels = make(map[contract.AccountProvider]string)
+	for _, provider := range c.Providers {
+		if len(provider.Models) > 0 {
+			p.planModels[contract.AccountProvider(provider.ID)] = provider.Models[0].ID
+		}
+	}
 }
 
 // Handler binds a route to a session and its permitted models.
-func (p *Proxy) Handler(sessionID string, allowedModels, eligibleIDs []string) http.Handler {
-	return handler(p.client, p.clientKey, sessionID, allowedModels, eligibleIDs)
+func (p *Proxy) Handler(sessionID, namespace string, allowedModels, eligibleIDs []string) http.Handler {
+	return handler(p.client, p.clientKey, sessionID, namespace, allowedModels, eligibleIDs)
 }

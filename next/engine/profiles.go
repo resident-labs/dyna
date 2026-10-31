@@ -14,6 +14,7 @@ import (
 )
 
 type profile struct {
+	Billing        contract.ModelBilling  `json:"billing,omitempty"`
 	Description    string                 `json:"description"`
 	Taste          int                    `json:"taste"`
 	Diagnostics    int                    `json:"diagnostics"`
@@ -83,10 +84,13 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 		if name == "" || p.Model == "" || !slices.Contains(p.AllowedModels, p.Model) {
 			return fmt.Errorf("profile %q: model must be allowed", name)
 		}
-		switch p.Provider {
-		case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
+		if p.Provider == "" {
+			return fmt.Errorf("profile %q: provider is required", name)
+		}
+		switch p.Billing {
+		case "", contract.ModelBillingPlan, contract.ModelBillingKey:
 		default:
-			return fmt.Errorf("profile %q: invalid provider", name)
+			return fmt.Errorf("profile %q: invalid billing", name)
 		}
 		switch p.Thinking {
 		case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
@@ -102,7 +106,7 @@ func (p *ProfileConfig) List() []contract.ProfileSummary {
 	defer p.mu.RUnlock()
 	result := make([]contract.ProfileSummary, 0, len(p.entries))
 	for name, profile := range p.entries {
-		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent, MaxCallsPerRun: profile.MaxCallsPerRun})
+		result = append(result, contract.ProfileSummary{Name: name, Billing: profile.Billing, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent, MaxCallsPerRun: profile.MaxCallsPerRun})
 	}
 	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
@@ -136,7 +140,7 @@ func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, 
 	if !ok {
 		return contract.ModelChoice{}, nil, fmt.Errorf("unknown profile %q", name)
 	}
-	return contract.ModelChoice{Provider: profile.Provider, ID: profile.Model, Thinking: profile.Thinking}, slices.Clone(profile.AllowedModels), nil
+	return contract.ModelChoice{Provider: profile.Provider, Billing: profile.Billing, ID: profile.Model, Thinking: profile.Thinking}, slices.Clone(profile.AllowedModels), nil
 }
 
 func (p *ProfileConfig) update(name contract.ProfileName, value *profile, create bool) *contract.Error {
@@ -204,7 +208,7 @@ func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req cont
 		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
 	v := req.Profile
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, MaxCallsPerRun: v.MaxCallsPerRun}, req.Create)
+	err := p.update(v.Name, &profile{Billing: v.Billing, Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, MaxCallsPerRun: v.MaxCallsPerRun}, req.Create)
 	return contract.ProfileSetResponse{}, err
 }
 
