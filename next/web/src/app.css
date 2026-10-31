@@ -31,6 +31,9 @@ aside.members { border-right: 0; border-left: 1px solid var(--line); }
 .rail nav { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
 .rail a { position: relative; display: flex; border-radius: 30%; text-decoration: none; }
 .rail a:hover { box-shadow: 0 0 0 2px var(--line); }
+/* Home leads the rail: a neutral square the size of a room's. */
+.rail a.home { display: grid; place-items: center; width: 40px; height: 40px; background: var(--selected); color: var(--muted); }
+.rail a.home:hover, .rail a.home[aria-current="page"] { color: var(--text); }
 /* The selected room gets a short pill on the rail's edge; the focus ring stays for focus only. */
 .rail a[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: calc(50% - 14px); width: 4px; height: 28px; border-radius: 0 4px 4px 0; background: var(--text); }
 /* A request waits for the owner: StatusPill's attention color, ringed so it reads on any room color. */
