@@ -45,6 +45,11 @@ type SessionStarted struct {
 	Brief   string      `json:"brief,omitempty"`
 }
 
+type SessionMoved struct {
+	Session   SessionID `json:"session"`
+	NewParent SessionID `json:"newParent"`
+}
+
 type SessionClosed struct {
 	Session SessionID `json:"session"`
 	Archive string    `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
@@ -165,6 +170,9 @@ func (PostCreated) isEventBody()         {}
 
 func (SessionStarted) EventType() EventType { return "session.started" }
 func (SessionStarted) isEventBody()         {}
+
+func (SessionMoved) EventType() EventType { return "session.moved" }
+func (SessionMoved) isEventBody()         {}
 
 func (SessionClosed) EventType() EventType { return "session.closed" }
 func (SessionClosed) isEventBody()         {}

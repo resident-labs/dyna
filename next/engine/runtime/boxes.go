@@ -338,3 +338,41 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 	}
 	return r.StopHostexec(ctx, scope)
 }
+
+// RemoveContainer keeps the volume and forwarding socket for a moved box.
+func (b *Boxes) RemoveContainer(ctx context.Context, id contract.BoxID) error {
+	h, err := b.containerHost(ctx, id)
+	if err != nil {
+		return err
+	}
+	return h.RemoveContainer(ctx, id)
+}
+
+// Recreate replaces a moved container without touching its volume.
+func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image string) error {
+	h, err := b.host(ctx, spec.Host)
+	if err != nil {
+		return err
+	}
+	if err := h.StopContainer(ctx, spec.Box); err != nil {
+		return err
+	}
+	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
+		return err
+	}
+	size := spec.Size
+	if err := h.EnsureSlice(ctx, box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}); err != nil {
+		return err
+	}
+	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Mounts: []box.Mount{
+		{HostPath: filepath.Join(b.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
+		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
+	}}
+	for _, repo := range spec.Repos {
+		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
+	}
+	if err := h.CreateContainer(ctx, c); err != nil {
+		return err
+	}
+	return h.StartContainer(ctx, spec.Box)
+}

@@ -14,6 +14,7 @@ const (
 	MethodRoomRepos        Method = "room.repos"
 	MethodSessionStart     Method = "session.start"
 	MethodSessionClose     Method = "session.close"
+	MethodSessionMove      Method = "session.move"
 	MethodPost             Method = "post"
 	MethodEventsList       Method = "events.list"
 	MethodBoxHello         Method = "box.hello"
@@ -29,6 +30,7 @@ const (
 	ErrNotFound      ErrorCode = "not_found"
 	ErrForbidden     ErrorCode = "forbidden"
 	ErrConflict      ErrorCode = "conflict"
+	ErrMoveBusy      ErrorCode = "move-busy"
 	ErrHasChildren   ErrorCode = "has_children"
 	ErrParentClosing ErrorCode = "parent_closing"
 	ErrStale         ErrorCode = "stale"
@@ -110,6 +112,12 @@ type SessionStartResponse struct {
 	Session SessionID `json:"session"`
 	Box     BoxID     `json:"box"`
 }
+type SessionMoveRequest struct {
+	Session   SessionID `json:"session"`
+	NewParent SessionID `json:"newParent"`
+}
+type SessionMoveResponse struct{}
+
 type SessionCloseRequest struct {
 	Session SessionID `json:"session"`
 	Discard bool      `json:"discard,omitempty"`
