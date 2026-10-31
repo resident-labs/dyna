@@ -15,29 +15,35 @@ import (
 )
 
 type fakeClient struct {
-	host       contract.HostAddRequest
-	room       contract.RoomCreateRequest
-	repoAdd    contract.RoomRepoAddRequest
-	repoList   contract.RoomReposRequest
-	start      contract.SessionStartRequest
-	close      contract.SessionCloseRequest
-	post       contract.PostRequest
-	events     []contract.Event
-	after      int64
-	opList     contract.OpListRequest
-	opDecide   contract.OpDecideRequest
-	ops        []contract.Operation
-	submit     contract.OpSubmitRequest
-	submitResp contract.OpSubmitResponse
+	host         contract.HostAddRequest
+	room         contract.RoomCreateRequest
+	repoAdd      contract.RoomRepoAddRequest
+	repoList     contract.RoomReposRequest
+	start        contract.SessionStartRequest
+	close        contract.SessionCloseRequest
+	post         contract.PostRequest
+	events       []contract.Event
+	after        int64
+	opList       contract.OpListRequest
+	opDecide     contract.OpDecideRequest
+	ops          []contract.Operation
+	submit       contract.OpSubmitRequest
+	submitResp   contract.OpSubmitResponse
+	uploads      []string
+	hostexecResp contract.HostexecRunResponse
 }
 
 func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
-	return contract.HostexecRunResponse{}, nil
+	return f.hostexecResp, nil
 }
 func (f *fakeClient) HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error) {
 	return contract.HostexecRevokeResponse{}, nil
 }
 func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil }
+func (f *fakeClient) Upload(_ context.Context, path string) (contract.Attachment, error) {
+	f.uploads = append(f.uploads, path)
+	return contract.Attachment{Name: path}, nil
+}
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
 	return contract.HostAddResponse{}, nil
@@ -156,6 +162,28 @@ func TestPostMapsFlags(t *testing.T) {
 	runCLI(t, f, "post", "hello", "--room", "r", "--mention", "bob")
 	if f.post.Room != "r" || f.post.Text != "hello" || len(f.post.Mentions) != 1 || f.post.Mentions[0] != "bob" {
 		t.Fatalf("%+v", f.post)
+	}
+}
+func TestPostAttachments(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "post", "hello", "--attach", "one.png", "--attach", "two.txt")
+	if len(f.post.Attachments) != 2 || f.post.Attachments[0].Name != "one.png" || f.post.Attachments[1].Name != "two.txt" {
+		t.Fatalf("attachments: %+v", f.post.Attachments)
+	}
+	args := []string{"post", "hello"}
+	for i := 0; i < 17; i++ {
+		args = append(args, "--attach", "file")
+	}
+	f.uploads = nil
+	if _, err := execCLI(f, args...); err == nil || len(f.uploads) != 0 {
+		t.Fatalf("too many attachments: err=%v uploads=%v", err, f.uploads)
+	}
+}
+func TestHostexecPending(t *testing.T) {
+	f := &fakeClient{hostexecResp: contract.HostexecRunResponse{Operation: contract.Operation{ID: "op_1", State: contract.OpPending}}}
+	out := runCLI(t, f, "hostexec", "run", "--host", "h", "--", "true")
+	if !strings.Contains(out, "waits for approval") || !strings.Contains(out, "op_1") || !strings.Contains(out, "op.ran") {
+		t.Fatalf("pending output: %q", out)
 	}
 }
 func TestRoomLogFollowsInOrder(t *testing.T) {
