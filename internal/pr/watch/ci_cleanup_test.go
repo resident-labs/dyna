@@ -3,10 +3,12 @@ package watch
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTerminalPRCleansUpRunsOnce(t *testing.T) {
@@ -59,6 +61,35 @@ func TestTerminalPRCleansUpRunsOnce(t *testing.T) {
 				t.Fatalf("cleanup repeated: %s", after)
 			}
 		})
+	}
+}
+
+func TestTerminalEffectsRetryAfterFailure(t *testing.T) {
+	e := newEnv(t)
+	e.f.Pull.Head.Ref = "feature"
+	e.write()
+	e.track()
+	e.f.Pull.State, e.f.Pull.Merged = "closed", true
+	attempts := 0
+	e.s.CleanupMerged = func(context.Context, Record, string) error {
+		attempts++
+		if attempts == 1 {
+			return fmt.Errorf("temporary cleanup failure")
+		}
+		return nil
+	}
+	e.clock = e.clock.Add(time.Minute)
+	e.write()
+	if _, err := e.s.Tick(context.Background()); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	if attempts != 1 || !e.record().Watching {
+		t.Fatalf("failed cleanup was not retained for retry: attempts=%d record=%+v", attempts, e.record())
+	}
+	e.clock = e.record().Polling.Next.Add(-time.Minute)
+	e.tick()
+	if attempts != 2 || e.record().Watching {
+		t.Fatalf("cleanup was not retried: attempts=%d record=%+v", attempts, e.record())
 	}
 }
 
