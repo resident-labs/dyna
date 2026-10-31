@@ -187,7 +187,6 @@ export function commandLine(argv: string[]): string {
   return argv.map(arg => /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`).join(" ");
 }
 
-// Files the browser shows inline as a thumbnail; other types get a file card.
 // A request's first line, split around the host or repository it names, so that name shows in mono. named is empty when
 // the line does not name it.
 export function requestLine(card: Pick<Card, "body" | "target">): { text: string; named: string; after: string } {
@@ -195,6 +194,8 @@ export function requestLine(card: Pick<Card, "body" | "target">): { text: string
   const at = name ? text.indexOf(name) : -1;
   return at < 0 ? { text, named: "", after: "" } : { text: text.slice(0, at), named: name, after: text.slice(at + name.length) };
 }
+
+// Files the browser shows inline as a thumbnail; other types get a file card.
 export const isImage = (file: Attachment) => /^image\/(png|jpeg|gif|webp)$/.test(file.media);
 
 // A file size as v1 shows it, such as "512 B", "12.4 KB" or "3.1 MB".

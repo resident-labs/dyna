@@ -6,6 +6,7 @@
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
+  import PageCrumb from "./PageCrumb.svelte";
   import type { RoomStore } from "../room.svelte.ts";
   import type { RoomRule } from "../contract.gen.ts";
   // The room's rules as a short numbered document, with the add box where the composer sits. Numbers are stable:
@@ -86,8 +87,7 @@
 <svelte:window onpointerdown={event => { if (menuFor !== undefined && event.target instanceof Element && !event.target.closest(".more")) menuFor = undefined; }} />
 <section class="panel" aria-label="Rules" tabindex="-1" bind:this={element}>
   <!-- One way back: the room name in the crumb when wide, a 40 px arrow on a phone. -->
-  <div class="top"><button type="button" class="back" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}><Icon name="back" /></button>
-    <button type="button" class="room" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}>{room}</button><span class="slash" aria-hidden="true">/</span><strong>Rules</strong>{#if rules.length}<span class="count">{rules.length}</span>{/if}
+  <div class="top"><PageCrumb {room} page="Rules" {onback} />{#if rules.length}<span class="count">{rules.length}</span>{/if}
     <!-- Filters help only in a long list. -->
     {#if rules.length > 10}<div class="filters" role="group" aria-label="Show rules by">
       {#each [["all", "All", undefined], ["owner", "Yours", owner], ["agents", "Agents", rules.length - owner]] as const as [value, label, total] (value)}
@@ -134,12 +134,6 @@
 <style>
   .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
   .top { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-  .back, .room { border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; cursor: pointer; }
-  .back:hover, .room:hover { background: var(--hover); color: var(--text); }
-  .back { display: none; place-items: center; width: 40px; height: 40px; margin: -8px 0 -8px -12px; padding: 0; }
-  .room { margin-left: -6px; padding: 2px 6px; font-size: 13px; }
-  .slash { color: var(--muted); font-size: 13px; }
-  @media (max-width: 640px) { .back { display: grid; } .room, .slash { display: none; } }
   .count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .filters { margin-left: auto; display: flex; gap: 2px; }
   .filters button { display: flex; gap: 6px; padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }

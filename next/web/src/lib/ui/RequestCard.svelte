@@ -7,11 +7,15 @@
   import type { Request, RoomStore } from "../room.svelte.ts";
   import type { OpState, Principal } from "../contract.gen.ts";
   // feed places the card in the post column, where the request happened. gone marks a request that no longer waits
-  // although its decision is unknown here, so it shows as decided without one.
-  let { request, store, now, feed = false, gone = false }: { request: Request; store: RoomStore; now: number; feed?: boolean; gone?: boolean } = $props();
+  // although its decision is unknown here, so it shows as decided without one. On the Requests page a waiting request
+  // is folded to one row until it opens; current marks the row the keys act on. Approve is filled only on the open
+  // card and the current row.
+  let { request, store, now, feed = false, gone = false, folded = false, current = false, onopen }: {
+    request: Request; store: RoomStore; now: number; feed?: boolean; gone?: boolean; folded?: boolean; current?: boolean; onopen?: () => void;
+  } = $props();
   const name = (who: Principal) => who.kind === "owner" ? "You" : who.session ? store.names.get(who.session) ?? "A closed session" : "Dyna";
   const outcome: Record<OpState, string> = {
-    pending: "", approved: "Approved", denied: "Denied", expired: "Expired", withdrawn: "Withdrawn", done: "Approved", failed: "Approved",
+    pending: "", approved: "approved", denied: "denied", expired: "expired", withdrawn: "withdrawn", done: "approved", failed: "approved",
   };
   // The root session is the open session with no parent.
   let open = $derived(request.by.session ? store.sessions.get(request.by.session) : undefined);
@@ -19,13 +23,14 @@
   // An agent-class request may also be decided by the requester's parent session.
   let parent = $derived(open?.parent && store.names.get(open.parent));
   // The body's first line says what runs; the lines after it, such as the reason, are muted.
+  let pending = $derived(request.state === "pending" && !gone);
   let [lead = "", ...rest] = $derived((request.card.body ?? "").split("\n"));
   // A host or repository target shows in mono: inside the first line when the line names it, else after the title.
   let named = $derived(request.card.target.kind !== "room" ? request.card.target.name : "");
   let line = $derived(requestLine(request.card));
   // The engine decides expiry; the owner sees it in the attention color for its last 5 minutes.
   let soon = $derived(Date.parse(request.expires) - now < 5 * 60_000);
-  // One muted line for a decided request, such as "Denied by you · just now · “Use CI”".
+  // One muted line for a decided request, such as "builder-feed · host access · denied by you · just now · “Use CI”".
   // A decision can be newer than the half-minute clock, so it never reads as in the future.
   let decided = $derived.by(() => {
     const decision = request.decision;
@@ -42,8 +47,14 @@
   let reason = $state("");
   let busy = $state(false);
   let failure = $state("");
+  // Who may decide, as one plain phrase: an agent-class request may also be decided by the asker's parent.
+  let deciders = $derived(request.class !== "owner" && parent ? `You or ${parent} can decide` : "You can decide");
+  // A title is the phrase after the asker's name; a decided line keeps only what was asked for.
+  let asked = $derived(request.card.title.replace(/^asks (for|to) /, ""));
   // The card becomes a muted line when the op.decided event arrives; the answer itself carries nothing.
-  async function decide(approve: boolean) {
+  // The Requests page calls it for the A and D keys.
+  export async function decide(approve: boolean) {
+    if (busy) return;
     busy = true;
     failure = "";
     await call("op.decide", { id: request.id, approve, reason: reason.trim() || undefined }).catch((error: unknown) => {
@@ -53,20 +64,34 @@
   }
 </script>
 
-{#snippet who()}<Avatar kind={request.by.kind} name={name(request.by)} {root} size={request.state === "pending" && !gone ? 24 : 20} />
+{#snippet who()}<Avatar kind={request.by.kind} name={name(request.by)} {root} size={pending ? 24 : 20} />
   <strong class={request.by.kind} class:root style:--hue={hue(name(request.by))}>{name(request.by)}</strong>
-  <span class="title">{request.card.title}{#if named && !line.named} on <code>{named}</code>{/if}</span>{/snippet}
+  <span class="title">{#if pending}{request.card.title}{#if named && !line.named} on <code>{named}</code>{/if}{:else}{asked}{/if}</span>{/snippet}
 
-<!-- While it waits, a request reads as a sentence on a card, with the exact command that runs; an owner-class card has the attention edge. -->
-{#if request.state === "pending" && !gone}
-  <article class="card" class:feed class:yours={request.class === "owner"}>
+{#snippet expiry()}{#if soon}<StatusPill tone="warning" label="Expires {fromNow(request.expires, now)}" />{:else}Expires {fromNow(request.expires, now)}{/if}{/snippet}
+
+<!-- While it waits, a request reads as a sentence on a card, with the exact command that runs; an owner-class card has the attention edge.
+     Folded on the Requests page, it is one row: the sentence, what runs or who decides, and its own Approve and Deny. -->
+{#if pending && folded}
+  <article class="row" class:current>
+    <button type="button" class="head" aria-expanded="false" onclick={onopen}><span class="top">{@render who()}</span>
+      <span class="sub">{request.class === "owner" ? lead : deciders} · {@render expiry()}</span></button>
+    <div class="actions">
+      <button type="button" class:approve={current} onclick={() => void decide(true)} disabled={busy}>Approve</button>
+      <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
+    </div>
+    {#if failure}<p class="why" role="alert">{failure}</p>{/if}
+  </article>
+{:else if pending}
+  <article class="card" class:feed class:current class:yours={request.class === "owner"}>
     <p class="top">{@render who()}
-      <span class="expires">{#if soon}<StatusPill tone="warning" label="Expires {fromNow(request.expires, now)}" />{:else}Expires {fromNow(request.expires, now)}{/if}</span></p>
+      <span class="expires">{@render expiry()}</span></p>
     {#if lead}<p class="what">{line.text}{#if line.named}<code>{line.named}</code>{line.after}{/if}</p>{/if}
     {#if rest.length}<p class="why">{rest.join("\n")}</p>{/if}
     {#if request.card.command?.length}<pre class="exact">{commandLine(request.card.command)}</pre>{/if}
     {#each request.card.changes ?? [] as change (change.field)}<p class="what"><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
-    {#if request.class !== "owner" && parent}<p class="why">{parent} or you can decide.</p>{/if}
+    <!-- The page says who decides on every open card; the card body already says what the grant allows. -->
+    {#if !feed || (request.class !== "owner" && parent)}<p class="why">{deciders}.</p>{/if}
     {#if noting}<!-- svelte-ignore a11y_autofocus -->
       <input type="text" bind:value={reason} placeholder="Note to {name(request.by)}" aria-label="Note to the session" disabled={busy} autofocus />{/if}
     <div class="actions">
@@ -119,11 +144,21 @@
   .ghost:hover:not(:disabled) { color: var(--text); }
   :disabled { opacity: 0.6; cursor: default; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  /* A folded row on the Requests page: the sentence and one muted line, then outline Approve and Deny. */
+  .row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+  .row.current { background: var(--hover); }
+  .row .head { all: unset; flex: 1; min-width: 0; display: grid; gap: 2px; cursor: pointer; border-radius: 6px; }
+  .row .head:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .sub { padding-left: 32px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .row .actions { flex: none; margin: 0; }
+  .row .why { flex-basis: 100%; }
   /* A decided request is one muted line, in the panel and in the feed's post column. */
   .decided { padding: 8px 16px; color: var(--muted); font-size: 13px; }
   .decided.feed { padding: 4px 16px 4px var(--gutter); }
   .decided strong { color: inherit; font-weight: 500; }
   .decided .title { flex: 0 1 auto; }
+  .decided .title::before { content: "· "; }
+  .decided .ghost { margin-left: auto; }
   .outcome { flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .outcome::before { content: "·"; }
   .decided .ghost { height: 24px; padding: 0 6px; font-size: 12.5px; font-weight: 400; }
@@ -133,11 +168,21 @@
     .top { flex-wrap: wrap; row-gap: 2px; }
     .title { white-space: normal; }
     .expires { flex-basis: 100%; padding-left: 32px; }
+    /* A decided line keeps the sentence on its first line and puts the outcome under it. */
+    .decided .line { flex-wrap: wrap; row-gap: 2px; }
+    .decided .title { flex: 1; white-space: nowrap; }
+    .outcome { order: 1; flex-basis: 100%; max-width: none; padding-left: 28px; }
+    .outcome::before { content: none; }
   }
   /* On a phone the card spans the feed, and Approve and Deny share its width at touch size. */
   @media (max-width: 640px) {
     .card.feed { margin-left: 16px; }
     .decided.feed { padding-left: 16px; }
+  }
+  /* On a phone a row is its text, then Approve and Deny across the full width at touch size. */
+  @media (max-width: 640px) {
+    .row { flex-wrap: wrap; }
+    .row .actions { flex-basis: 100%; }
   }
   @media (max-width: 640px), (hover: none) {
     .actions { display: grid; grid-template-columns: 1fr 1fr; }
