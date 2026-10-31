@@ -1,7 +1,6 @@
 package eval
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -61,11 +60,7 @@ func TestFrozenReplacementOutcomes(t *testing.T) {
 	if !ScoreTask(reveal, Observation{Complete: true, Answer: "unique-code"}).Correct {
 		t.Fatal("reveal code not credited")
 	}
-	f.Task11Fallback = true
-	fallback, _ := Expected(11, f)
-	if fallback.Calls[0].Operation != "room.log" || !strings.Contains(tasks[10].PromptFor(f), "visual") {
-		t.Fatal("fallback not applied")
-	}
+
 }
 
 func TestFixtureValidationRequiresOnlyTaskInputs(t *testing.T) {

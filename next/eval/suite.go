@@ -39,13 +39,9 @@ func Tasks() []Task { return append([]Task(nil), tasks[:]...) }
 
 // Prompt resolves fixture identities without replacing ordinary words in the task.
 func (t Task) PromptFor(f Fixture) string {
-	prompt := t.Prompt
-	if t.ID == 11 && f.Task11Fallback {
-		prompt = "List the room log filtered to visual posts and report the title of the seeded visual post."
-	}
 	return strings.NewReplacer(
 		"{{A}}", f.A, "{{B}}", f.B, "{{AName}}", f.AName, "{{BName}}", f.BName, "{{C}}", f.C, "{{Lead}}", f.Lead,
 		"{{Profile}}", f.Profile, "{{Operation}}", f.Operation, "{{Host}}", f.Host,
 		"{{File}}", f.File, "{{Visual}}", f.Visual, "{{Page}}", f.Page,
-	).Replace(prompt)
+	).Replace(t.Prompt)
 }

@@ -89,9 +89,6 @@ func Expected(id int, f Fixture) (Expectation, error) {
 	case 10:
 		return Expectation{Calls: []Call{call("session.stop", field("session", f.A))}, State: []Field{field("turn.stopped", "true")}}, nil
 	case 11:
-		if f.Task11Fallback {
-			return Expectation{ReadValue: f.ReadValue, Calls: []Call{call("room.log", field("types", "visual"))}}, nil
-		}
 		return Expectation{ReadValue: f.ReadValue, Calls: []Call{call("context.snapshot", field("section", "dyna_children"))}}, nil
 	case 12:
 		return Expectation{Calls: []Call{call("room.pause", field("room", f.Room), field("paused", "true"))}, State: []Field{field("room.paused", "true")}}, nil
