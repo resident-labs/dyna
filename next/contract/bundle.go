@@ -58,7 +58,7 @@ type GlobalBundle struct {
 	Rooms         []RoomName      `json:"rooms"`
 	Exported      time.Time       `json:"exported"`
 	Source        BundleSource    `json:"source"`
-	Instructions  Instructions    `json:"instructions"`
+	Instructions  string          `json:"instructions"`
 	Settings      SettingsBundle  `json:"settings"`
 	Profiles      []ProfileBundle `json:"profiles"`
 	Hosts         []HostBundle    `json:"hosts"`
@@ -80,6 +80,7 @@ type RoomBundle struct {
 	Paused        bool             `json:"paused"`
 	RootProfile   ProfileName      `json:"rootProfile,omitempty"`
 	Upstreams     []RoomUpstream   `json:"upstreams,omitempty"`
+	Instructions  string           `json:"instructions"`
 	Goals         []GoalBundle     `json:"goals"`
 	Issues        []IssueBundle    `json:"issues"`
 	NextIssue     int              `json:"nextIssue"`
@@ -91,17 +92,6 @@ type RoomBundle struct {
 	LimitHandoff  []RoomLimitGap   `json:"limitHandoff,omitempty"`
 	RepoHandoff   []RepoHandoff    `json:"repoHandoff,omitempty"`
 	Counts        BundleCounts     `json:"counts"`
-}
-
-// Instructions contains the rendered standing-instruction files.
-type Instructions struct {
-	Global string             `json:"global"`
-	Rooms  []RoomInstructions `json:"rooms"`
-}
-
-type RoomInstructions struct {
-	Room RoomID `json:"room"`
-	Text string `json:"text"`
 }
 
 // SettingsBundle keeps only the v1 settings that v2 uses.
