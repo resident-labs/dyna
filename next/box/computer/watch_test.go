@@ -69,7 +69,7 @@ func TestWatchForwardsAndAcknowledgesFrame(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var out bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- watch(ctx, server.URL, &out) }()
+	go func() { done <- watch(ctx, server.URL, &out, func(context.Context) error { return nil }) }()
 	if id := <-acked; id != 17 {
 		t.Fatalf("ack session: %d", id)
 	}
