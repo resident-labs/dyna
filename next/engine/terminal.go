@@ -41,14 +41,11 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 		}
 		host, id = current.Host, current.ID
 		s.mu.Lock()
-		s.terminals[session]++
+		s.sessionLocked(session).terminals++
 		s.mu.Unlock()
 		release = func() {
 			s.mu.Lock()
-			s.terminals[session]--
-			if s.terminals[session] == 0 {
-				delete(s.terminals, session)
-			}
+			s.sessions[session].terminals--
 			s.mu.Unlock()
 		}
 	}
