@@ -42,6 +42,17 @@ func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte,
 	return nil, nil
 }
 
+func TestDeleteArchiveRefUsesLease(t *testing.T) {
+	r := &fakeRunner{}
+	m := &Mirror{Data: t.TempDir(), Token: "secret", Runner: r}
+	if err := m.DeleteArchiveRef(context.Background(), "owner/repo", "refs/dyna/archive/s", "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.calls) != 2 || !strings.Contains(strings.Join(r.calls[1], " "), "push --force-with-lease=refs/dyna/archive/s:abc https://github.com/owner/repo.git :refs/dyna/archive/s") {
+		t.Fatalf("calls %v", r.calls)
+	}
+}
+
 type fakeCache struct {
 	called bool
 	mirror string
