@@ -39,15 +39,15 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var refused atomic.Bool
+	var relayStatus atomic.Int32
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/machine/grant" || r.Header.Get("Authorization") == "" {
 			t.Errorf("unexpected relay request %s", r.URL.Path)
 			http.Error(w, "bad", 400)
 			return
 		}
-		if refused.Load() {
-			http.Error(w, "revoked", http.StatusForbidden)
+		if status := relayStatus.Load(); status != 0 {
+			http.Error(w, "relay error", int(status))
 			return
 		}
 		_, _ = w.Write([]byte(`{"active":true,"epoch":1}`))
@@ -167,7 +167,7 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("authenticate: %v %v", ok, err)
 	}
 	out := httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, []string{origin}, x)
+	service.ServePrivate(out, r, origin, x)
 	if out.Code != 200 {
 		t.Fatalf("renew: %d %s", out.Code, out.Body.String())
 	}
@@ -187,12 +187,29 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("grace auth: %v %v", ok, err)
 	}
 	out = httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, []string{origin}, x)
+	service.ServePrivate(out, r, origin, x)
 	var renewal struct {
 		Grace bool `json:"grace"`
 	}
 	if err := json.Unmarshal(out.Body.Bytes(), &renewal); err != nil || out.Code != 200 || !renewal.Grace {
 		t.Fatalf("grace: %d %s %v", out.Code, out.Body.String(), err)
+	}
+	rotated = out.Result().Cookies()[0]
+	transport.down.Store(false)
+	relayStatus.Store(http.StatusServiceUnavailable)
+	r = httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnopi")+`"}`))
+	r.Header.Set("Origin", origin)
+	r.Header.Set("X-Dyna", "1")
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(rotated)
+	x, _, ok, err = service.Authenticate(r.Context(), r, origin)
+	if err != nil || !ok {
+		t.Fatalf("503 auth: %v %v", ok, err)
+	}
+	out = httptest.NewRecorder()
+	service.ServePrivate(out, r, origin, x)
+	if err := json.Unmarshal(out.Body.Bytes(), &renewal); err != nil || out.Code != 200 || !renewal.Grace {
+		t.Fatalf("503 grace: %d %s %v", out.Code, out.Body.String(), err)
 	}
 	rotated = out.Result().Cookies()[0]
 	now = now.Add(14 * time.Minute)
@@ -206,12 +223,12 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("expired grace auth: %v %v", ok, err)
 	}
 	out = httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, []string{origin}, x)
+	service.ServePrivate(out, r, origin, x)
 	if out.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expired grace: %d", out.Code)
 	}
 	transport.down.Store(false)
-	refused.Store(true)
+	relayStatus.Store(http.StatusForbidden)
 	r = httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnops")+`"}`))
 	r.Header.Set("Origin", origin)
 	r.Header.Set("X-Dyna", "1")
@@ -222,7 +239,7 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("rotated auth: %v %v", ok, err)
 	}
 	out = httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, []string{origin}, x)
+	service.ServePrivate(out, r, origin, x)
 	if out.Code != http.StatusUnauthorized {
 		t.Fatalf("relay refusal: %d %s", out.Code, out.Body.String())
 	}
