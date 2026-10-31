@@ -34,7 +34,6 @@ type HostexecRunArgs struct {
 	Cwd     string     `json:"cwd"`
 	Timeout DurationMS `json:"timeout"`
 	Grant   GrantID    `json:"grant"`
-	Mode    GrantMode  `json:"mode"`
 }
 
 func (HostexecRunArgs) OpKind() OpKind          { return "hostexec.run" }
@@ -47,7 +46,7 @@ func (a *HostexecRunArgs) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	if v.Room == "" || v.Host == "" || len(v.Argv) == 0 || v.Argv[0] == "" || v.Timeout <= 0 || v.Timeout > DurationMS((2*time.Hour).Milliseconds()) || v.Grant == "" || (v.Mode != GrantModeApprove && v.Mode != GrantModePreapproved) {
+	if v.Room == "" || v.Host == "" || len(v.Argv) == 0 || v.Argv[0] == "" || v.Timeout <= 0 || v.Timeout > DurationMS((2*time.Hour).Milliseconds()) || v.Grant == "" {
 		return errors.New("invalid hostexec run")
 	}
 	*a = HostexecRunArgs(v)

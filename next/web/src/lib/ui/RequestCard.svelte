@@ -32,7 +32,7 @@
   async function decide(approve: boolean) {
     busy = true;
     failure = "";
-    await call("op.decide", { id: request.id, approve, reason: approve ? undefined : reason.trim() || undefined }).catch((error: unknown) => {
+    await call("op.decide", { id: request.id, approve, reason: reason.trim() || undefined }).catch((error: unknown) => {
       failure = error instanceof APIError && error.detail.code === "conflict" ? "This request is no longer waiting." : "Your decision was not saved. Try again.";
     });
     busy = false;
@@ -44,15 +44,13 @@
   <p class="meta"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={20} /><span class="who">{name(request.by)}</span>
     {#if request.card.target.kind !== "room"}<span>· {request.card.target.kind} {request.card.target.name}</span>{/if}{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>
       {#if request.class === "agent" && parent}<span>· {parent} can also decide</span>{/if}{/if}</p>
-  <!-- A grant's body names the grant on its first line, then lists one command per line, shown in mono. -->
-  {#if request.card.body}{@const [lead, ...lines] = request.kind === "hostexec.grant" ? request.card.body.split("\n") : [request.card.body]}
-    <p class="body">{lead}</p>{#if lines.length}<pre>{lines.join("\n")}</pre>{/if}{/if}
+  {#if request.card.body}<p class="body">{request.card.body}</p>{/if}
   {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
   {#if request.card.changes?.length}<ul class="changes">{#each request.card.changes as change (change.field)}
     <li><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</li>{/each}</ul>{/if}
   {#if request.state === "pending"}
     <div class="actions">
-      <input type="text" bind:value={reason} placeholder="Reason (optional)" aria-label="Reason for Deny (optional)" disabled={busy} />
+      <input type="text" bind:value={reason} placeholder="Note (optional)" aria-label="Note to the session (optional)" disabled={busy} />
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
       <button type="button" class="approve" onclick={() => void decide(true)} disabled={busy}>Approve</button>
     </div>

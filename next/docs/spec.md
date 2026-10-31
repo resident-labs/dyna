@@ -415,30 +415,22 @@ const (
 	GrantAskOwner GrantKind = "ask-owner" // open owner questions and terminal requests
 )
 
-type GrantMode string // "approve" | "preapproved" (host exec only)
-
 type Grant struct {
 	ID       GrantID       `json:"id"`
 	Kind     GrantKind     `json:"kind"`
 	To       Principal     `json:"to"`
 	Room     RoomID        `json:"room"`
 	Hosts    []HostName    `json:"hosts,omitempty"`    // host exec: names, or AllHosts
-	Commands []CommandRule `json:"commands,omitempty"` // host exec
-	Mode     GrantMode     `json:"mode,omitempty"`     // host exec
+	Reason   string        `json:"reason,omitempty"`   // host exec
 	Expires  time.Time     `json:"expires,omitzero"`   // zero: no expiry
 	By       Principal     `json:"by"`
 	Created  time.Time     `json:"created"`
 	Revoked  time.Time     `json:"revoked,omitzero"`
 }
 
-type CommandRule struct {
-	Program string   `json:"program"`        // exact name or path; "*" matches any program
-	Args    []string `json:"args,omitempty"` // exact leading arguments
-	Prefix  bool     `json:"prefix"`         // more arguments may follow
-}
 ```
 
-Sessions need no grant to work in their own room: the tree gives them that (section 7.2). When the engine creates a room, it creates root and gives it two grants: `ask-owner`, and `hostexec` on `AllHosts` with `Program: "*"`, mode `preapproved` and no expiry. It also adds the default subscription that wakes root on engine notices (8.5).
+Sessions need no grant to work in their own room: the tree gives them that (section 7.2). When the engine creates a room, it creates root and gives it two grants: `ask-owner`, and `hostexec` on `AllHosts` with any command and no expiry. It also adds the default subscription that wakes root on engine notices (8.5).
 
 ### 3.6 Bundle
 
@@ -858,18 +850,14 @@ Drafted by dyna:node-shell. Host exec runs one command outside every box: on a c
 
 ### 6.1 Grants
 
-A host-exec grant is a `contract.Grant` with `Kind: hostexec` (3.5).
+A host-exec grant names the hosts, the reason and the expiry. It permits any command on those hosts until expiry or revocation. There are no command rules or per-run approvals. If no active grant matches the host, the call fails with `no-grant`.
 
-- **Matching is by argv**, never by a shell string. `sh -c "..."` matches only a rule whose `Program` is `sh` or `*`. An exact rule refuses extra arguments; a prefix rule accepts them.
-- When several grants match, `preapproved` wins over `approve`. When none matches, the call fails with `no-grant`, and nothing runs.
-- The class of `hostexec.run` comes from the grant that matched: `auto` when a `preapproved` grant matches, and `owner` when only an `approve` grant matches.
-
-The `grants` table stores hosts and command rules as JSON columns.
+`hostexec.run` is class `auto`. Every run emits `op.ran` and records a `hostexec_runs` row. The `grants` table stores hosts as JSON.
 
 ### 6.2 Default grant, owner grants, revoke and expiry
 
-- **Root's default grant** is made with the room: every host including the control plane, any command, `preapproved`, no expiry (3.5). The owner can narrow it like any other grant.
-- **Owner grants.** Only the owner grants host exec: `dyna hostexec grant` or the web card, as the operation `hostexec.grant` with class `owner`. A session may ask for a grant; the request goes to the owner. The default expiry is 24 hours. `--expires never` must be explicit.
+- **Root's default grant** is made with the room: every host including the control plane, any command, no expiry (3.5). The owner can revoke it.
+- **Owner grants.** Only the owner grants host exec: `dyna hostexec grant` or the web card, as the operation `hostexec.grant` with class `owner`. A session requests the hosts, why it needs access, and for how long. The owner approves once. The default expiry is 24 hours. `--expires never` must be explicit.
 - **Revoke.** `dyna hostexec revoke <grant>`, by the owner. Pending runs fail their grant recheck. Running units are stopped with `systemctl --user stop`; `TimeoutStopSec=5` gives SIGTERM, then SIGKILL after 5 s. The engine retries stops on its 10 s tick to cover a launch racing revoke. A reachable unit receives the stop within 10 s, and systemd forces termination within another 5 s.
 - **Expiry** is checked at match time. A sweep marks expired grants and emits `grant.expired`. A running command is not stopped at expiry; only a revoke stops it.
 - The web app lists active grants with their expiry and a revoke button.
@@ -877,7 +865,7 @@ The `grants` table stores hosts and command rules as JSON columns.
 ### 6.3 Run path
 
 1. The agent runs `dyna hostexec run --host <h> [--timeout 10m] -- <argv>` in its box. The request comes over the box socket, so the engine knows the principal.
-2. The engine matches the grants and submits `hostexec.run{Host, Argv, Cwd, Timeout, Grant}`. It runs at once or waits for the owner.
+2. The engine matches the grants and submits `hostexec.run{Host, Argv, Cwd, Timeout, Grant}`. It runs at once.
 3. On a capacity host, the command runs over the master as `systemd-run --user --scope --unit=dyna-hostexec-<op> -p RuntimeMaxSec=<timeout> -p TimeoutStopSec=5 -- <argv>`, with framed replies. On the control plane, the same `systemd-run` runs locally.
 4. The command gets the host user's login environment. The engine adds no secrets. Stdin is empty.
 5. There is no live output stream for now. The CLI waits for the result. Up to 64 KiB is kept inline in the result; the rest is a file named in the result, and output is capped at 8 MiB. The default timeout is 10 minutes, and the maximum is 2 hours.
@@ -893,7 +881,7 @@ Host exec on the control plane runs as the owner's user. To stop such a command 
 
 Accepted risks (owner, 2026-10-30):
 
-- `*` on a host is full access to that host. On the control plane, that includes the CLIProxyAPI sign-ins and the owner's files. Root's default grant relies on root's judgment.
+- Every grant gives full access to its hosts. On the control plane, that includes the CLIProxyAPI sign-ins and the owner's files. Root's default grant relies on root's judgment.
 - A command can leave its scope, for example with `systemd-run --user`. The scope check stops mistakes, not a hostile command.
 - A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. It can also connect to any box's forwarded socket under `<hostdata>/sock/` and act as that box's session, with its model route and git push rights. Hosts hold no model or GitHub credentials, and only we have admin on them.
 - Output can contain host secrets. Only the room's sessions and the owner can see it.
@@ -925,7 +913,7 @@ Root is the session with no parent. Four things replace the 89 root checks in 12
 |---|---|
 | Approve agent-class operations | The tree: any session above the caller may approve (3.5). Root is above every session. |
 | Start, move, stop or close sessions | The tree: any session above another may do this. Root is above every session. |
-| Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). The owner can narrow or revoke them. |
+| Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). The owner can revoke them. |
 | Engine notices and unowned repository events | A default room subscription that wakes root (8.5). |
 | Hold no goals | One rule: the session with no parent holds no goals. Goals that a close would hand to root stay with no holder (7.4). |
 
