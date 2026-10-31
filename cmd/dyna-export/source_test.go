@@ -14,7 +14,7 @@ func TestOpenBackupReadOnlyAndRejectSidecar(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = db.Exec(`CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
-INSERT INTO meta VALUES ('room.records','1'),('room.records.import','1'),('goals.schema','5'),('goal_items.schema','2'),('questions.schema','4'),('room.issues.schema','3'),('sessions.records','7'),('sessions.import','1'),('machines.version','18'),('account.registry','11'),('web_devices.version','1'),('device_grants.version','2'),('hooks.documents','5'),('pr.state','2'),('pr.record_parts','1');`)
+INSERT INTO meta VALUES ('room.records','1'),('room.records.import','1'),('goals.schema','5'),('goal_items.schema','2'),('questions.schema','4'),('room.issues.schema','3'),('sessions.records','7'),('sessions.import','1'),('machines.version','18'),('account.registry','11'),('web_devices.version','1'),('device_grants.version','2'),('hooks.documents','5'),('pr.state','2'),('pr.record_parts','1'),('localci.schema','6'),('sessions.service','1'),('sessions.history','1');`)
 	if err != nil {
 		t.Fatal(err)
 	}

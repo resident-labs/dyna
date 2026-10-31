@@ -60,6 +60,7 @@ func buildRepositories(db *sql.DB, records []room.Record, cap capture) (repoOutp
 		keys = append(keys, string(id))
 	}
 	sort.Strings(keys)
+	normalized := make(map[contract.RepoName]bool)
 	for _, key := range keys {
 		id := contract.RepoName(key)
 		rooms := members[id]
@@ -81,6 +82,10 @@ func buildRepositories(db *sql.DB, records []room.Record, cap capture) (repoOutp
 			out.Gaps = append(out.Gaps, repoGap{Identity: key, Reason: "unsupportedForge"})
 			continue
 		}
+		if normalized[repo] {
+			return out, fmt.Errorf("distinct captured identities map to the same GitHub repository")
+		}
+		normalized[repo] = true
 		// v1 queue eligibility includes runtime and room policy; until it maps
 		// cleanly the conservative manual setting is reported as a gap.
 		bundle := contract.RepoBundle{Repo: repo, DefaultRoom: defaultRoom, MergePolicy: contract.MergeManual, CIMode: contract.CIGitHub}
