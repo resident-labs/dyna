@@ -16,6 +16,9 @@ type retryTimeoutBoxes struct {
 	states  []contract.BoxState
 }
 
+func (*retryTimeoutBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, errors.New("unavailable")
+}
 func (*retryTimeoutBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
 func (b *retryTimeoutBoxes) Remove(ctx context.Context, id contract.BoxID) error {
 	current, err := b.service.store.Box(ctx, id)
