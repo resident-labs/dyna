@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -33,6 +34,28 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 		return contract.RoomListResponse{}, failure(err)
 	}
 	rows.Close()
+	failed, err := s.store.Read().QueryContext(ctx, `SELECT s.room,COUNT(*) FROM sessions s WHERE s.closed_at IS NULL AND (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' GROUP BY s.room`)
+	if err != nil {
+		return contract.RoomListResponse{}, failure(err)
+	}
+	for failed.Next() {
+		var id contract.RoomID
+		var count int
+		if err := failed.Scan(&id, &count); err != nil {
+			failed.Close()
+			return contract.RoomListResponse{}, failure(err)
+		}
+		for i := range rooms {
+			if rooms[i].ID == id {
+				rooms[i].Failed = count
+			}
+		}
+	}
+	err = failed.Err()
+	failed.Close()
+	if err != nil {
+		return contract.RoomListResponse{}, failure(err)
+	}
 	// newest holds each room's activityOrder of its Latest label.
 	newest := make([]uint64, len(rooms))
 	for kind, query := range []string{
@@ -88,7 +111,8 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	rows, err := s.store.Read().QueryContext(ctx, `SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),s.goal,
 		COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1),''),
 		COALESCE((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1),''),
-		s.shell_jobs, COALESCE(c.seq,0)
+		s.shell_jobs, COALESCE(c.seq,0), s.created_at,
+		(SELECT ended_at FROM turns WHERE session=s.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1)
 		FROM sessions s LEFT JOIN boxes b ON b.session=s.id LEFT JOIN conversation_reads c ON c.room=s.room AND c.conversation='dm:'||s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, req.Room)
 	if err != nil {
 		return contract.SessionListResponse{}, failure(err)
@@ -97,8 +121,14 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	sessions := []contract.SessionSummary{}
 	for rows.Next() {
 		var session contract.SessionSummary
-		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead); err != nil {
+		var started int64
+		var lastTurn sql.NullInt64
+		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn); err != nil {
 			return contract.SessionListResponse{}, failure(err)
+		}
+		session.StartedAt = time.UnixMilli(started).UTC()
+		if lastTurn.Valid {
+			session.LastTurnAt = time.UnixMilli(lastTurn.Int64).UTC()
 		}
 		s.mu.Lock()
 		state := s.sessionLocked(session.ID)

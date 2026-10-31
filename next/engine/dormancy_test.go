@@ -290,3 +290,61 @@ func TestSessionListLowersJobCountForAJobEndingInTheTurnEndMillisecond(t *testin
 		t.Fatalf("jobs after the job ended: %d", got)
 	}
 }
+
+func TestRuleEditKeepsTheNumberAndWakesNoOne(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	added, problem := s.RuleAdd(ctx, owner, contract.RuleAddRequest{Room: room, Text: "Old"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := s.RuleEdit(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.RuleEditRequest{Room: room, Number: added.Number, Text: "New"}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("worker edit: %v", problem)
+	}
+	if _, problem := s.RuleEdit(ctx, owner, contract.RuleEditRequest{Room: room, Number: added.Number, Text: "New"}); problem != nil {
+		t.Fatal(problem)
+	}
+	list, problem := s.RuleList(ctx, owner, contract.RuleListRequest{Room: room})
+	if problem != nil || len(list.Rules) != 1 || list.Rules[0].Number != added.Number || list.Rules[0].Text != "New" {
+		t.Fatalf("list: %+v, %v", list, problem)
+	}
+	var deliveries, wakes int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT COUNT(*), COALESCE(SUM(wake),0) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='rule.edited'", worker).Scan(&deliveries, &wakes); err != nil || deliveries != 1 || wakes != 0 {
+		t.Fatalf("deliveries %d wakes %d: %v", deliveries, wakes, err)
+	}
+	if _, problem := s.RuleRemove(ctx, owner, contract.RuleRemoveRequest{Room: room, Number: added.Number}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := s.RuleEdit(ctx, owner, contract.RuleEditRequest{Room: room, Number: added.Number, Text: "Gone"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("edit of a removed rule: %v", problem)
+	}
+}
+
+func TestRoomListCountsFailedSessionsAndSessionListShowsTimes(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('t1',?,1,5000,'failed','',0,0,0,0),('t2',?,6000,7000,'stopped','',0,0,0,0)", worker, worker)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooms, problem := s.RoomList(ctx, owner, contract.RoomListRequest{})
+	if problem != nil || len(rooms.Rooms) != 1 || rooms.Rooms[0].Failed != 1 {
+		t.Fatalf("rooms %+v: %v", rooms, problem)
+	}
+	list, problem := s.SessionList(ctx, owner, contract.SessionListRequest{Room: room})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, session := range list.Sessions {
+		if session.ID == worker {
+			if !session.StartedAt.Equal(time.Unix(1000, 0)) || !session.LastTurnAt.Equal(time.UnixMilli(7000)) {
+				t.Fatalf("times %v %v", session.StartedAt, session.LastTurnAt)
+			}
+		} else if !session.LastTurnAt.IsZero() {
+			t.Fatalf("a session with no ended turn has lastTurnAt %v", session.LastTurnAt)
+		}
+	}
+}
