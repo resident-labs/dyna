@@ -348,6 +348,9 @@ func TestDirectLandKeepsReasonWhenGitHubClosesLater(t *testing.T) {
 	if err != nil || r.State != "open" {
 		t.Fatalf("deferred read did not keep the PR open: %+v, %v", r, err)
 	}
+	if err := f.e.s.SetDraft(t.Context(), r.Key, true, "wait"); err == nil || !strings.Contains(err.Error(), "landed") {
+		t.Fatalf("hold after direct landing = %v, want landed error", err)
+	}
 	landed := mergeNotices(f.e.sent, room.MergeLanded)
 	if len(landed) != 1 || landed[0].Merge.ReasonKind != room.MergeTestedHead {
 		t.Fatalf("deferred direct landing event = %+v", landed)
