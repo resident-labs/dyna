@@ -19,7 +19,7 @@ func filledGlobalBundle() GlobalBundle {
 		Source:       BundleSource{Commit: "abc123", Backup: "dyna-final.db", BackupSHA256: "f00d"},
 		Instructions: "- (u1) report bugs to root\n",
 		Settings: SettingsBundle{
-			OwnerName: "Ari", RootProfile: "opus", RulesMaxChars: 4000, SubagentMaxDepth: 3,
+			OwnerName: "Ari", RootProfile: "opus", SubagentMaxDepth: 3,
 			CheckInInterval: 900000, ShellSilence: 600000,
 		},
 		Profiles: []ProfileBundle{{

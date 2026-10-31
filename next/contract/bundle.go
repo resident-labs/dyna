@@ -98,7 +98,6 @@ type RoomBundle struct {
 type SettingsBundle struct {
 	OwnerName        string      `json:"ownerName"`
 	RootProfile      ProfileName `json:"rootProfile"`
-	RulesMaxChars    int         `json:"rulesMaxChars"`
 	SubagentMaxDepth int         `json:"subagentMaxDepth"`
 	CheckInInterval  DurationMS  `json:"checkInInterval"`
 	ShellSilence     DurationMS  `json:"shellSilence"`
