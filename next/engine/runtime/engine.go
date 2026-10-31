@@ -244,6 +244,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	sessions := connect.NewSessions(files, st, time.Now, nil)
 	appPort := 0
+	var webRoutes []string
 	if cfg.WebListen != "" {
 		app, err := fs.Sub(web.Dist, "dist")
 		if err != nil {
@@ -263,6 +264,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		defer listener.Close()
 		appPort = listener.Addr().(*net.TCPAddr).Port
+		webRoutes = webServer.PublicRoutes()
 	}
 	card, cardServer, err := connect.CardListener()
 	if err != nil {
@@ -280,7 +282,7 @@ func Run(ctx context.Context, cfg Config) error {
 	tunnelDone := make(chan struct{})
 	go func() {
 		defer close(tunnelDone)
-		connect.SuperviseTunnel(tunnelCtx, files, st, appPort, card.Addr().(*net.TCPAddr).Port, connectOps.Wake())
+		connect.SuperviseTunnel(tunnelCtx, files, st, appPort, card.Addr().(*net.TCPAddr).Port, webRoutes, connectOps.Wake())
 	}()
 	defer func() { stopTunnel(); <-tunnelDone }()
 	sockets := api.NewSockets(apiServer, cfg.Runtime, uint32(os.Getuid()), nil)

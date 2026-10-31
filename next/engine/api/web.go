@@ -87,8 +87,8 @@ func (w *Web) SetRoutes(routes []string) error {
 	return nil
 }
 
-// publicRoutes lists the origins set with SetRoutes, without the loopback one.
-func (w *Web) publicRoutes() []string {
+// PublicRoutes lists the origins set with SetRoutes, without the loopback one.
+func (w *Web) PublicRoutes() []string {
 	out := []string{}
 	for host, origin := range w.routes {
 		if host != w.host {

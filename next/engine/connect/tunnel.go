@@ -28,7 +28,7 @@ type tunnelHooks struct {
 }
 
 // SuperviseTunnel runs cloudflared as a child and retries failures until shutdown.
-func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPort, cardPort int, wake <-chan struct{}) {
+func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPort, cardPort int, routes []string, wake <-chan struct{}) {
 	h := tunnelHooks{
 		find: func() (string, error) { return exec.LookPath("cloudflared") }, now: time.Now, after: time.After,
 		prepare: func(ctx context.Context) (string, error) {
@@ -45,6 +45,9 @@ func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPo
 			}
 			relay := Relay{Base: link.Relay, Key: key}
 			if err := relay.ReportOrigin(ctx, link.Machine, appPort, cardPort); err != nil {
+				return "", err
+			}
+			if err := relay.reportRoutes(ctx, link, routes); err != nil {
 				return "", err
 			}
 			token := filepath.Join(files.dir, "tunnel-token")
