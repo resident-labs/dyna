@@ -11,7 +11,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-// Watch sends JPEG frames and acknowledges each only after it reaches the stream.
+// Watch sends JPEG frames and paces screencast notifications.
 func Watch(ctx context.Context, out io.Writer) error {
 	return watch(ctx, URL, out, func(ctx context.Context) error {
 		timer := time.NewTimer(100 * time.Millisecond)
@@ -37,33 +37,7 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":1}`)); err != nil {
 		return err
 	}
-	result, err := d.Call(ctx, "Page.captureScreenshot", json.RawMessage(`{"format":"jpeg","quality":70}`))
-	if err != nil {
-		return err
-	}
-	// Ignore delayed frames captured before the screenshot completed.
-	lastFrameTime := float64(time.Now().UnixNano()) / 1e9
-	var shot struct {
-		Data string `json:"data"`
-	}
-	if err = json.Unmarshal(result, &shot); err != nil {
-		return err
-	}
-	// Frames received before the screenshot response predate the screenshot.
-	// Acknowledge them without showing them, so they cannot replace it.
-	for _, m := range d.pending {
-		var frame struct {
-			SessionID int `json:"sessionId"`
-		}
-		if err = json.Unmarshal(m.Params, &frame); err != nil {
-			return err
-		}
-		if err = ackFrame(ctx, d, frame.SessionID); err != nil {
-			return err
-		}
-	}
-	d.pending = nil
-	if err = writeFrame(out, shot.Data); err != nil {
+	if err = captureFrame(ctx, d, out); err != nil {
 		return err
 	}
 	for {
@@ -84,37 +58,38 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 			continue
 		}
 		var frame struct {
-			Data      string `json:"data"`
-			SessionID int    `json:"sessionId"`
-			Metadata  struct {
-				Timestamp float64 `json:"timestamp"`
-			} `json:"metadata"`
+			SessionID int `json:"sessionId"`
 		}
 		if err := json.Unmarshal(m.Params, &frame); err != nil {
 			return err
 		}
-		if frame.Metadata.Timestamp < lastFrameTime {
-			if err = ackFrame(ctx, d, frame.SessionID); err != nil {
-				return err
-			}
-			continue
-		}
-		lastFrameTime = frame.Metadata.Timestamp
-		if err = writeFrame(out, frame.Data); err != nil {
-			return err
-		}
-		// Pace acknowledgements so busy pages do not stream at display refresh rate.
-		if err = pace(ctx); err != nil {
-			return err
-		}
+		// Acknowledge first so updates during capture trigger another frame.
 		if err = ackFrame(ctx, d, frame.SessionID); err != nil {
+			return err
+		}
+		if err = captureFrame(ctx, d, out); err != nil {
+			return err
+		}
+		if err = pace(ctx); err != nil {
 			return err
 		}
 	}
 }
 
-func writeFrame(out io.Writer, data string) error {
-	jpeg, err := base64.StdEncoding.DecodeString(data)
+// Each screencast event triggers a fresh capture. Event and screenshot replies
+// can interleave, so displaying the event image itself could show stale pixels.
+func captureFrame(ctx context.Context, d *DevTools, out io.Writer) error {
+	result, err := d.Call(ctx, "Page.captureScreenshot", json.RawMessage(`{"format":"jpeg","quality":70}`))
+	if err != nil {
+		return err
+	}
+	var shot struct {
+		Data string `json:"data"`
+	}
+	if err = json.Unmarshal(result, &shot); err != nil {
+		return err
+	}
+	jpeg, err := base64.StdEncoding.DecodeString(shot.Data)
 	if err != nil {
 		return err
 	}
