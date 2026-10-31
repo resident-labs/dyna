@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountRows, accountState, refused, removalPrompt } from "../accounts.ts";
+  import { accountRows, accountState, refused, removalPrompt, canReconnect } from "../accounts.ts";
   import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
@@ -14,6 +14,7 @@
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let busy = $state(false), opened = $state(false), now = $state(Date.now());
+  let reconnectId: string | undefined = $state();
   let removing: string | undefined = $state(), removeFailed = $state(false), unreachable = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0, loadGeneration = 0;
@@ -32,7 +33,7 @@
   });
   function close() {
     generation++; clearTimeout(timer); adding = false; inline = false; selected = undefined; attempt = undefined;
-    label = ""; secret = ""; redirect = ""; connectState = "idle"; unreachable = false; opened = false;
+    reconnectId = undefined; label = ""; secret = ""; redirect = ""; connectState = "idle"; unreachable = false; opened = false;
   }
   function choose(provider: AccountProviderInfo, inPlace: boolean) {
     close(); adding = true; selected = provider; inline = inPlace;
@@ -56,7 +57,8 @@
       const key = secret; secret = "";
       await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { close(); reload(); } }, () => { if (ticket === generation) { unreachable = true; reload(); } });
     } else {
-      await call("accounts.connect", { provider: selected.id, label }).then(result => {
+      const request = reconnectId ? call("accounts.reconnect", { accountId: reconnectId }) : call("accounts.connect", { provider: selected.id, label });
+      await request.then(result => {
         if (ticket !== generation) return;
         attempt = result;
         const url = URL.canParse(result.link) ? new URL(result.link) : undefined;
@@ -88,7 +90,7 @@
 {#snippet form()}
   {#if selected}
     <div class="connect">
-      <h3>New {selected.displayName} account</h3>
+      <h3>{reconnectId ? `Sign in again to ${label}` : `New ${selected.displayName} account`}</h3>
       {#if selected.connectMethod === "key"}
         <div class="key-fields"><label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy} /></label>
         <label>Key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} class:invalid={unreachable} /></label>
@@ -96,13 +98,13 @@
         <p class="muted">Dyna hands the key to the sign-in service and never shows it again.</p>
         {#if unreachable}<p class="error" role="alert">Could not reach the service. Try again.</p>{/if}
       {:else}
-        <label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt} /></label>
+        <label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt || !!reconnectId} /></label>
         {#if connectState === "expired"}
         <p>The code expired.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Get a new code</button>
       {:else if connectState === "failed"}
         <p class="error" role="alert">{unreachable ? "Could not reach the service. Try again." : `${selected.displayName} did not accept the sign-in.`}</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Try again</button>
       {:else if !attempt}
-        <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy || !label.trim()} onclick={() => void start()}>Start sign-in</button>
+        <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy || (!reconnectId && !label.trim())} onclick={() => void start()}>Start sign-in</button>
       {:else if attempt.flow === "device"}
         <p><span class="step">1</span> Open <a href={attempt.link} target="_blank" rel="noopener noreferrer">{linkText} ↗</a> and enter this code:</p><strong class="code">{attempt.code}</strong>
         <p class="muted">Waiting for you to approve · Expires in {remaining(attempt.expiresAt, now)}</p>
@@ -148,13 +150,14 @@
                 {#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}
                 <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}</div></div>
                 {#if account.state === "sign_in_expired"}
-                  <div class="expired"><span>Its limits show once it is signed in.</span><span>Remove it, then use Connect another to sign in again.</span></div>
+                  <div class="expired">{#if canReconnect(account, provider.connectMethod)}<button class="btn fill" type="button" onclick={() => { choose(provider, true); reconnectId = account.id; label = account.label; }}>Sign in again</button>{/if}<span>Its limits show once it is signed in.</span></div>
                 {/if}
                   {#if removing === account.id}<div class="remove-confirm"><span>{removalPrompt(provider.connectMethod)}</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
                   {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; }}>Remove</button>{/if}
               </div>
+              {#if reconnectId === account.id}{@render form()}{/if}
             {/each}
-            {#if inline && selected?.id === provider.id}{@render form()}{/if}
+            {#if inline && !reconnectId && selected?.id === provider.id}{@render form()}{/if}
           </div>
         </section>
       {/each}
