@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+func TestSupportedPiForkVersions(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		want    bool
+	}{
+		{"1.4.0", true},
+		{"1.4.0-dyna.10", true},
+		{"1.4.0-dyna.10.f27c5c3013df", true},
+		{"1.4.1-dyna.10.f27c5c3013df", false},
+		{"1.4.0-other.10", false},
+		{"1.4.0-dyna.no", false},
+		{"1.4.0-dyna.10.bad", false},
+	} {
+		if got := Supported(HarnessPi, tc.version); got != tc.want {
+			t.Errorf("Supported(Pi, %q) = %v, want %v", tc.version, got, tc.want)
+		}
+	}
+}
+
 // piFixture writes the given Pi session lines and returns the file path.
 func piFixture(t *testing.T, lines ...string) string {
 	t.Helper()
