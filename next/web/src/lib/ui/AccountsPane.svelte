@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountRows, accountState } from "../accounts.ts";
+  import { accountRows, accountState, refused, showLoadError } from "../accounts.ts";
   import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
@@ -13,8 +13,8 @@
   let label = $state(""), secret = $state(""), redirect = $state("");
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
-  let busy = $state(false), keyFailed = $state(false), now = $state(Date.now());
-  let removing: string | undefined = $state(), removeFailed = $state(false);
+  let busy = $state(false), opened = $state(false), now = $state(Date.now());
+  let removing: string | undefined = $state(), removeFailed = $state(false), unreachable = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0, loadGeneration = 0;
 
@@ -23,7 +23,7 @@
     void call("accounts.list", {}).then(result => {
       if (ticket !== loadGeneration) return;
       providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; loadFailed = false;
-    }, (error: unknown) => { if (ticket !== loadGeneration) return; if (error instanceof SignedOut) signedout(); else loadFailed = true; });
+    }, (error: unknown) => { if (ticket !== loadGeneration) return; if (error instanceof SignedOut) signedout(); else if (showLoadError(loaded)) loadFailed = true; });
   }
   onMount(() => {
     reload();
@@ -32,7 +32,7 @@
   });
   function close() {
     generation++; clearTimeout(timer); adding = false; inline = false; selected = undefined; attempt = undefined;
-    label = ""; secret = ""; redirect = ""; connectState = "idle"; keyFailed = false;
+    label = ""; secret = ""; redirect = ""; connectState = "idle"; unreachable = false; opened = false;
   }
   function choose(provider: AccountProviderInfo, inPlace: boolean) {
     close(); adding = true; selected = provider; inline = inPlace;
@@ -45,28 +45,28 @@
         if (result.status === "connected") { close(); reload(); }
         else if (result.status === "pending") watch(id, ticket);
         else connectState = result.status;
-      }, () => { if (ticket === generation) connectState = "failed"; });
+      }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
     }, 2000);
   }
   async function start() {
     if (!selected || busy) return;
-    busy = true; connectState = "idle"; keyFailed = false;
+    busy = true; connectState = "idle"; unreachable = false;
     const ticket = ++generation;
     if (selected.connectMethod === "key") {
       const key = secret; secret = "";
-      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { close(); reload(); } }, () => { if (ticket === generation) keyFailed = true; });
+      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { close(); reload(); } }, (error: unknown) => { if (ticket === generation) { unreachable = true; reload(); } });
     } else {
       await call("accounts.connect", { provider: selected.id, label }).then(result => {
         if (ticket !== generation) return;
         attempt = result; connectState = "pending"; now = Date.now(); watch(result.attempt, ticket);
-      }, () => { if (ticket === generation) connectState = "failed"; });
+      }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
     }
     busy = false;
   }
   async function finish() {
     if (!attempt || busy) return;
     const url = redirect, ticket = generation; redirect = ""; busy = true;
-    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch(() => { if (ticket === generation) connectState = "failed"; });
+    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch((error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
     busy = false;
   }
   async function remove(account: Account) {
@@ -86,26 +86,29 @@
   {#if selected}
     <div class="connect">
       <h3>New {selected.displayName} account</h3>
-      <label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt} /></label>
       {#if selected.connectMethod === "key"}
-        <label>Key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} class:invalid={keyFailed} /></label>
+        <div class="key-fields"><label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy} /></label>
+        <label>Key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} class:invalid={unreachable} /></label>
+        <button class="btn fill" type="button" disabled={busy || !secret || !label.trim()} onclick={() => void start()}>Save</button></div>
         <p class="muted">Dyna hands the key to the sign-in service and never shows it again.</p>
-        {#if keyFailed}<p class="error" role="alert">{selected.displayName} refused this key. Check it and paste it again.</p>{/if}
-        <button class="btn fill" type="button" disabled={busy || !secret} onclick={() => void start()}>Add key</button>
-      {:else if connectState === "expired"}
+        {#if unreachable}<p class="error" role="alert">Could not reach the sign-in service. Try again.</p>{/if}
+      {:else}
+        <label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt} /></label>
+        {#if connectState === "expired"}
         <p>The code expired.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Get a new code</button>
       {:else if connectState === "failed"}
-        <p class="error" role="alert">{selected.displayName} did not accept the sign-in.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Try again</button>
+        <p class="error" role="alert">{unreachable ? "Could not reach the sign-in service. Try again." : `${selected.displayName} did not accept the sign-in.`}</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Try again</button>
       {:else if !attempt}
-        <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy} onclick={() => void start()}>Start sign-in</button>
+        <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy || !label.trim()} onclick={() => void start()}>Start sign-in</button>
       {:else if attempt.flow === "device"}
-        <p><span class="step">1</span> Open <a href={attempt.link} target="_blank" rel="noopener noreferrer">{selected.displayName} sign-in ↗</a> and enter this code.</p><strong class="code">{attempt.code}</strong>
+        <p><span class="step">1</span> Open <a href={attempt.link} target="_blank" rel="noopener noreferrer">{new URL(attempt.link).host}{new URL(attempt.link).pathname} ↗</a> and enter this code:</p><strong class="code">{attempt.code}</strong>
         <p class="muted">Waiting for you to approve · Expires in {remaining(attempt.expiresAt, now)}</p>
       {:else}
-        <p><span class="step done">✓</span> Open the {selected.displayName} sign-in and approve Dyna. <a href={attempt.link} target="_blank" rel="noopener noreferrer">Opened ↗</a></p>
+        <p><span class:done={opened} class="step">{opened ? "✓" : "1"}</span> Open the {selected.displayName} sign-in and approve Dyna. <a href={attempt.link} target="_blank" rel="noopener noreferrer" onclick={() => { opened = true; }}>{opened ? "Opened ↗" : "Open sign-in ↗"}</a></p>
         <p><span class="step">2</span> Copy the address of the page you land on and paste it here. That page may say it cannot be reached; that is expected.</p>
         <div class="finish"><input aria-label="Address of the page you land on" bind:value={redirect} placeholder="http://localhost/..." autocomplete="off" /><button class="btn fill" type="button" disabled={busy || !redirect} onclick={() => void finish()}>Finish</button></div>
         <p class="muted">The address holds a one-time code. Dyna hands it to the sign-in service and never keeps it. Expires in {remaining(attempt.expiresAt, now)}.</p>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -127,7 +130,7 @@
       </section>
     {/if}
     {#if !phone || !adding}
-      <p class="muted">{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers</p>
+      <p class="muted">{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers{#if accounts.some(a => a.state === "sign_in_expired")}{" · "}<StatusPill tone="error" label={`${accounts.filter(a => a.state === "sign_in_expired").length} sign-in expired`} />{/if}</p>
       {#each providers.filter(p => accounts.some(a => a.provider === p.id)) as provider (provider.id)}
         {@const group = accountRows(accounts.filter(a => a.provider === provider.id))}
         <section>
@@ -159,7 +162,7 @@
 <style>
   .add-button { margin-left: auto; }
   .phone-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-  .body { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; display: grid; align-content: start; gap: 18px; }
+  .body { flex: 1; min-height: 0; overflow: auto; width: min(1096px, 100%); box-sizing: border-box; padding: 20px 24px; display: grid; align-content: start; gap: 18px; }
   p { margin: 0; } .muted { color: var(--muted); font-size: 12.5px; }
   .heading { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; }
   h2, h3 { margin: 0; font-size: 14px; font-weight: 600; } h2 { display: flex; align-items: center; gap: 8px; }
@@ -177,6 +180,8 @@
   .providers button.chosen { border-color: var(--focus); background: var(--selected); }
   .providers span { color: var(--muted); font-size: 12px; }
   .connect { display: grid; justify-items: start; gap: 12px; padding: 16px 48px; font-size: 14px; }
+  .key-fields { display: flex; align-items: end; gap: 12px; width: 100%; }
+  .connect .key-fields label { flex: 1; display: grid; grid-template-columns: 1fr; gap: 4px; }
   .connect label { display: grid; grid-template-columns: 70px minmax(0, 450px); align-items: center; gap: 12px; width: 100%; color: var(--muted); }
   input { min-width: 0; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
   input.invalid { border-color: var(--danger); }
@@ -184,5 +189,5 @@
   .step.done { background: transparent; border: 1px solid var(--line); }
   .connect a { text-decoration: none; font-weight: 500; }
   .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-family: "JetBrains Mono", monospace; font-size: 24px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
-  @media (max-width: 640px) { .row { flex-wrap: wrap; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { margin-left: -10px; } .expired, .remove-confirm { flex-basis: 100%; margin: 0; } .body { padding: 12px 16px; } .connect { padding: 16px; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
+  @media (max-width: 640px) { .row { flex-wrap: wrap; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { margin-left: -10px; } .expired, .remove-confirm { flex-basis: 100%; margin: 0; } .body { padding: 12px 16px; } .connect { padding: 16px; } .key-fields { flex-direction: column; align-items: stretch; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
 </style>
