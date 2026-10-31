@@ -218,9 +218,13 @@ func TestCICleanupSkipsCancelWhenOpenPRCheckFails(t *testing.T) {
 	e.f.Pull.State = "closed"
 	e.f.Fail = "/pulls?"
 	e.f.Runs = []Run{{ID: 100, HeadBranch: "feature", Event: "pull_request", Status: "queued"}}
-	e.tick()
+	e.clock = e.clock.Add(time.Minute)
+	e.write()
+	if _, err := e.s.Tick(context.Background()); err == nil {
+		t.Fatal("expected open PR check failure")
+	}
 	calls, _ := os.ReadFile(e.calls)
-	if strings.Contains(string(calls), "/cancel") || !e.record().CICleanupDone {
+	if strings.Contains(string(calls), "/cancel") || e.record().CICleanupDone || !e.record().Watching {
 		t.Fatalf("cleanup did not fail safely: %s", calls)
 	}
 }
