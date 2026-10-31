@@ -44,6 +44,12 @@ func (r *AuthRPC) Save(req AuthSave, _ *struct{}) error {
 	if req.Create && r.Connections != nil {
 		c := r.Connections
 		c.mu.Lock()
+		if a := c.attempts[req.Attempt]; a != nil && a.ready != nil {
+			ready := a.ready
+			c.mu.Unlock()
+			<-ready
+			c.mu.Lock()
+		}
 		defer c.mu.Unlock()
 		if a := c.attempts[req.Attempt]; a != nil && a.account != "" && a.proxyID == req.Record.ID && a.status == contract.ConnectPending && !a.saved && c.now().Before(a.expires) && a.generation == c.proxy.generation.Load() {
 			if err := r.Store.SaveProxyAuth(ctx, req.Record, false); err != nil {

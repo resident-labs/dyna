@@ -12,6 +12,53 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestStatusDoesNotBlockReconnectSave(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte("old")}
+	if err := st.SaveProxyAuth(ctx, old, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindAccount(ctx, "account", old.ID, contract.ProviderAnthropic, "label"); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v8/management/oauth/auth-url" {
+			_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"state"}`))
+			return
+		}
+		close(entered)
+		<-release
+		_, _ = w.Write([]byte(`{"status":"wait"}`))
+	}))
+	defer server.Close()
+	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	c := p.Connections("key", st, time.Now)
+	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: a.Attempt}, func(fn func() error) error { return fn() })
+		close(done)
+	}()
+	<-entered
+	rpc := AuthRPC{Store: st, Connections: c}
+	old.Record = []byte("new")
+	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+}
+
 func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1000, 0)
