@@ -9,8 +9,8 @@ import (
 const (
 	MethodHostexecRun    Method    = "hostexec.run"
 	MethodHostexecRevoke Method    = "hostexec.revoke"
-	ErrNoGrant           ErrorCode = "no-grant"
-	ErrHostexecScope     ErrorCode = "hostexec-scope"
+	ErrNoGrant           ErrorCode = "no_grant"
+	ErrHostexecScope     ErrorCode = "hostexec_scope"
 )
 
 type HostexecRunRequest struct {

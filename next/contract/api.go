@@ -66,7 +66,7 @@ const (
 	ErrNotFound      ErrorCode = "not_found"
 	ErrForbidden     ErrorCode = "forbidden"
 	ErrConflict      ErrorCode = "conflict"
-	ErrMoveBusy      ErrorCode = "move-busy"
+	ErrMoveBusy      ErrorCode = "move_busy"
 	ErrHasChildren   ErrorCode = "has_children"
 	ErrParentClosing ErrorCode = "parent_closing"
 	ErrStale         ErrorCode = "stale"
