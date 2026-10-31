@@ -6,12 +6,12 @@ import (
 	"io"
 	"net/rpc"
 
-	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/contract/private"
 )
 
 // AuthRPC exchanges opaque proxy records over the inherited private connection.
 type AuthRPC struct {
-	Store    *store.Store
+	Store    AuthStore
 	Complete func(context.Context, OAuthCompletion) error
 }
 
@@ -23,11 +23,11 @@ type OAuthCompletion struct {
 }
 type AuthDelete struct{ ID string }
 type AuthSave struct {
-	Record store.ProxyAuth
+	Record private.ProxyAuth
 	Create bool
 }
 
-func (r *AuthRPC) List(_ struct{}, out *[]store.ProxyAuth) error {
+func (r *AuthRPC) List(_ struct{}, out *[]private.ProxyAuth) error {
 	records, err := r.Store.ListProxyAuths(context.Background())
 	if err != nil {
 		return errors.New("proxy store unavailable")
@@ -65,7 +65,7 @@ func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult
 	return nil
 }
 
-func serveAuthRPC(conn io.ReadWriteCloser, st *store.Store, complete func(context.Context, OAuthCompletion) error) {
+func serveAuthRPC(conn io.ReadWriteCloser, st AuthStore, complete func(context.Context, OAuthCompletion) error) {
 	server := rpc.NewServer()
 	_ = server.RegisterName("Auth", &AuthRPC{Store: st, Complete: complete})
 	server.ServeConn(conn)
