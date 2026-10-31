@@ -23,7 +23,7 @@
   // "N more". On a phone the strip is 40 px with tabs that scroll sideways, and a tab opens full screen with Back and
   // Close, and for a shell the key row (v1's Esc, Tab, Ctrl and arrows).
   type Session = { id: string; name: string; root: boolean };
-  let { sessions, phone, strip, element = $bindable(), onempty }: { sessions: Session[]; phone: boolean; strip: boolean; element?: HTMLElement; onempty: () => void } = $props();
+  let { sessions, terminal, phone, strip, element = $bindable(), onempty }: { sessions: Session[]; terminal: boolean; phone: boolean; strip: boolean; element?: HTMLElement; onempty: () => void } = $props();
   type Tab = { key: number; label: string; root: boolean; exited?: { code?: number } } & ({ target: TerminalTarget } | { session: Session; job: string });
   type Pane = { focus(): void; key?: TermPane["key"] };
   let tabs: Tab[] = $state([]);
@@ -160,8 +160,8 @@
       <button type="button" aria-label={`Close ${shown.label}`} title="Close" onclick={() => void close(shown!.key)}><Icon name="close" /></button>
     {:else}
     <span class="menu">
-      <button type="button" class="add" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
-        onclick={() => { if (picking) picking = false; else void pick(); }}><Icon name="plus" size={14} />Terminal</button>
+      {#if terminal}<button type="button" class="add" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
+        onclick={() => { if (picking) picking = false; else void pick(); }}><Icon name="plus" size={14} />Terminal</button>{/if}
       {#if picking}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
         {#if sessions.length}<p class="label">Sessions</p>{/if}
         {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open2({ box: session.id }, session.name, session.root)}>{session.name}</button>{/each}
