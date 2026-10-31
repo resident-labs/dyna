@@ -5,6 +5,22 @@ import (
 	"time"
 )
 
+type InstructionsGetRequest struct {
+	Room RoomID `json:"room,omitempty"`
+}
+type InstructionsGetResponse struct {
+	Text string `json:"text"`
+	Hash string `json:"hash"`
+}
+type InstructionsSetRequest struct {
+	Room RoomID `json:"room,omitempty"`
+	Text string `json:"text"`
+	Base string `json:"base"`
+}
+type InstructionsSetResponse struct {
+	Hash string `json:"hash"`
+}
+
 type Method string
 
 const (
@@ -12,6 +28,8 @@ const (
 	MethodRuleRemove              Method = "rule.remove"
 	MethodRuleEdit                Method = "rule.edit"
 	MethodRuleList                Method = "rule.list"
+	MethodInstructionsGet         Method = "instructions.get"
+	MethodInstructionsSet         Method = "instructions.set"
 	MethodWebLogin                Method = "web.login"
 	MethodConversationRead        Method = "conversation.read"
 	MethodRoomList                Method = "room.list"
