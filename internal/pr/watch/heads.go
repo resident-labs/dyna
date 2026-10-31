@@ -74,15 +74,11 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 	}
 	out := map[string]headProbe{}
 	var failures []error
-	read := func(chunk []*Record) (map[string]headProbe, map[string]RateLimit, error) {
-		chunkCtx, cancel := withHeadChunkTimeout(ctx, 3*time.Second)
-		defer cancel()
-		return g.readHeadChunk(chunkCtx, chunk)
-	}
 	for start := 0; start < len(records); start += headBatchSize {
 		chunk := records[start:min(start+headBatchSize, len(records))]
-		heads, _, err := read(chunk)
-		if err != nil && len(chunk) > 1 && ctx.Err() == nil {
+		heads, _, err := g.readHeadChunk(ctx, chunk)
+		var rateErr *rateLimitError
+		if err != nil && !errors.As(err, &rateErr) && len(chunk) > 1 && ctx.Err() == nil {
 			// Preserve successful observations; only retry records that failed.
 			failed := make([]*Record, 0, len(chunk))
 			for _, r := range chunk {
@@ -98,7 +94,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					if len(half) == 0 {
 						continue
 					}
-					retried, _, retryErr := read(half)
+					retried, _, retryErr := g.readHeadChunk(ctx, half)
 					for k, p := range retried {
 						out[k] = p
 					}
@@ -216,7 +212,9 @@ func (g GitHub) readHeadChunk(ctx context.Context, records []*Record) (map[strin
 		}
 		query.WriteString("}")
 		g.requests.account = group.login
-		body, _, callErr := g.requestMethod(ghclient.WithRoom(ctx, grouped[repos[0]][0].RoomID), Ref{Host: host, Repo: repos[0]}, "graphql", "POST", "-f", "query="+query.String())
+		requestCtx, cancel := withHeadChunkTimeout(ctx, 3*time.Second)
+		body, _, callErr := g.requestMethod(ghclient.WithRoom(requestCtx, grouped[repos[0]][0].RoomID), Ref{Host: host, Repo: repos[0]}, "graphql", "POST", "-f", "query="+query.String())
+		cancel()
 		if errors.Is(callErr, context.DeadlineExceeded) || (callErr != nil && strings.Contains(callErr.Error(), "GitHub HTTP status 504")) {
 			reason := "http_504"
 			if errors.Is(callErr, context.DeadlineExceeded) {
