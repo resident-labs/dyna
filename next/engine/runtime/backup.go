@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 const backupStamp = "20060102T150405.000000000Z"
@@ -53,7 +53,7 @@ func sshBackup(ctx context.Context, dest, name string, size int64, input *os.Fil
 	return err
 }
 
-var errBackupNoSpace = errors.New(string(contract.BackupCopyNoSpace))
+var errBackupNoSpace = errors.New(store.BackupCopyNoSpace)
 
 type backupLoop struct {
 	store     backupStore
