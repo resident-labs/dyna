@@ -14,14 +14,20 @@
   let busy = $state(false), keyFailed = $state(false), now = $state(Date.now());
   let removing: string | undefined = $state(), removeFailed = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let generation = 0;
+  let generation = 0, loadGeneration = 0;
 
   function reload() {
+    const ticket = ++loadGeneration;
     void call("accounts.list", {}).then(result => {
+      if (ticket !== loadGeneration) return;
       providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; loadFailed = false;
-    }, (error: unknown) => { if (error instanceof SignedOut) signedout(); else loadFailed = true; });
+    }, (error: unknown) => { if (ticket !== loadGeneration) return; if (error instanceof SignedOut) signedout(); else loadFailed = true; });
   }
-  onMount(() => { reload(); return () => { generation++; clearTimeout(timer); }; });
+  onMount(() => {
+    reload();
+    window.addEventListener("focus", reload);
+    return () => { generation++; loadGeneration++; clearTimeout(timer); window.removeEventListener("focus", reload); };
+  });
   function close() {
     generation++; clearTimeout(timer); adding = false; selected = undefined; attempt = undefined;
     label = ""; secret = ""; redirect = ""; connectState = "idle"; keyFailed = false;
