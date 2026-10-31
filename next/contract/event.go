@@ -53,6 +53,7 @@ func (SessionProfileChanged) isEventBody()         {}
 
 type PostCreated struct {
 	Text        string       `json:"text"`
+	Turn        TurnID       `json:"turn,omitempty"`
 	Mentions    []Principal  `json:"mentions,omitempty"`
 	Home        Conversation `json:"home"` // feed or a DM
 	ReplyTo     EventID      `json:"replyTo,omitempty"`
@@ -175,6 +176,12 @@ type TurnActivity struct {
 	Session SessionID `json:"session"`
 	Turn    TurnID    `json:"turn"`
 	Label   string    `json:"label"` // the running tool call, masked, one line of at most 80 characters
+}
+
+// TranscriptChanged is an owner-only live notification; it contains no transcript text.
+type TranscriptChanged struct {
+	Session SessionID `json:"session"`
+	Turn    TurnID    `json:"turn"`
 }
 
 type FinalReply struct {
@@ -340,6 +347,9 @@ func (TurnStarted) isEventBody()         {}
 
 func (TurnEnded) EventType() EventType { return "turn.ended" }
 func (TurnEnded) isEventBody()         {}
+
+func (TranscriptChanged) EventType() EventType { return "transcript.changed" }
+func (TranscriptChanged) isEventBody()         {}
 
 func (TurnActivity) EventType() EventType { return "turn.activity" }
 func (TurnActivity) isEventBody()         {}
