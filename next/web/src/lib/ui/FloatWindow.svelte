@@ -58,7 +58,9 @@
   .window { position: relative; display: flex; flex-direction: column; min-height: 0; }
   .window:focus { outline: none; }
   .window:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-  .floating { position: fixed; z-index: 3; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 32px var(--shadow-lg); }
+  /* A float clips its content and has a clear edge over the feed. --firm comes with the theme tokens (#1606); until
+     then the window keeps the line color. */
+  .floating { position: fixed; z-index: 3; overflow: hidden; background: var(--raised); border: 1px solid var(--firm, var(--line)); border-radius: 16px; box-shadow: 0 12px 32px var(--shadow-lg); }
   header { gap: 6px; padding: 0 6px 0 12px; }
   .floating header { height: 40px; cursor: grab; user-select: none; touch-action: none; }
   /* Full screen: no frame, clear of the notch and the home bar; its one focus is the window itself, so no ring. */
