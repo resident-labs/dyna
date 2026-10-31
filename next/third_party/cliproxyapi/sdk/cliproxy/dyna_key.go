@@ -13,15 +13,30 @@ import (
 
 // RegisterDynaCredential persists and adopts a new credential without a file.
 // Its caller provides a unique ID and a fixed provider catalog.
-func (s *Service) RegisterDynaCredential(ctx context.Context, auth *coreauth.Auth, model string) error {
-	registered, err := s.coreManager.Register(coreauth.WithAuthCreationIntent(ctx), auth)
+func (s *Service) RegisterDynaCredential(ctx context.Context, auth *coreauth.Auth) error {
+	auth.Disabled = true
+	_, err := s.coreManager.Register(coreauth.WithAuthCreationIntent(ctx), auth)
+	return err
+}
+
+// ActivateDynaCredential publishes a credential only after its account is bound.
+func (s *Service) ActivateDynaCredential(ctx context.Context, id, model string) error {
+	auth, ok, err := s.coreManager.Modify(ctx, id, 0, func(auth *coreauth.Auth) error {
+		auth.Disabled = false
+		if auth.Status == coreauth.StatusDisabled {
+			auth.Status = coreauth.StatusActive
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	s.ensureExecutorsForAuthWithContext(ctx, registered, false)
-	s.completeModelRegistrationForAuth(ctx, registered)
-	if !GlobalModelRegistry().ClientSupportsModel(registered.ID, model) {
-		_ = s.DeleteDynaCredential(ctx, registered.ID)
+	if !ok {
+		return errors.New("credential unavailable")
+	}
+	s.ensureExecutorsForAuthWithContext(ctx, auth, false)
+	s.completeModelRegistrationForAuth(ctx, auth)
+	if model != "" && !GlobalModelRegistry().ClientSupportsModel(id, model) {
 		return errors.New("credential model registration failed")
 	}
 	return nil
