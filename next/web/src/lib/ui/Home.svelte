@@ -32,9 +32,10 @@
     for (const room of attention.rooms.keys()) {
       load(attention.waiting.get(room) ?? [], requests, () => call("op.list", { room }), list => {
         for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, by: op.by });
-        const by = (list.operations ?? []).flatMap(op => op.by.session ? [op.by.session] : []);
-        load(by, sessions, () => call("session.list", { room }), keepSessions);
       });
+      // Requesters load beside the requests, so Try again reaches them too.
+      const by = [...attention.waiting.get(room) ?? []].flatMap(id => requests.get(id)?.by.session ?? []);
+      load(by, sessions, () => call("session.list", { room }), keepSessions);
       load(attention.working.get(room) ?? [], sessions, () => call("session.list", { room }), keepSessions);
     }
   });
