@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestContainerMountsRoomSharedReadWrite(t *testing.T) {
+	b := &Boxes{HostData: "/host"}
+	_, c := b.container(lifecycle.BoxSpec{Room: "room"}, "image")
+	want := box.Mount{HostPath: "/host/rooms/room", BoxPath: "/box/shared"}
+	found := false
+	for _, mount := range c.Mounts {
+		if mount == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("mounts: %#v", c.Mounts)
+	}
+}
+
 func TestContainerSharesDependencyCaches(t *testing.T) {
 	b := &Boxes{HostData: "/host"}
 	_, c := b.container(lifecycle.BoxSpec{}, "image")
