@@ -277,6 +277,9 @@ func TestHostexecGrantSubmitsOperation(t *testing.T) {
 	if !ok || out != "op_1\n" || len(args.Hosts) != 1 || args.Hosts[0] != "hermeslab" || args.Reason != "Inspect logs" || args.To.Kind != "" {
 		t.Fatalf("%+v: %q", f.submit, out)
 	}
+	if _, err := json.Marshal(f.submit); err != nil {
+		t.Fatal(err)
+	}
 	if d := args.Expires.Sub(before); d < 2*time.Hour || d > 2*time.Hour+time.Minute {
 		t.Fatalf("expires in %v", d)
 	}
