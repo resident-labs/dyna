@@ -124,6 +124,11 @@ case "$suite" in
   next-web)
     # next/web is the v2 web app, a Svelte project with its own package.json.
     # Its check runs on Node 24, the image set for next-web in local CI.
+    # Older Node fails to load the TypeScript configs with "No Svelte configuration found".
+    if (($(node -p 'process.versions.node.split(".")[0]') < 24)); then
+      echo "next/web needs Node 24 or newer, but node on PATH is $(node -v). Put Node 24 first on PATH." >&2
+      exit 1
+    fi
     cd next/web
     npm ci --prefer-offline --no-audit
     npm run check
