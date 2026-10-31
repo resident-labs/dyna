@@ -157,6 +157,8 @@ func failure(err error) *contract.Error {
 		code = contract.ErrConflict
 	} else if errors.Is(err, sql.ErrNoRows) {
 		code = contract.ErrNotFound
+	} else if errors.Is(err, store.ErrSessionClosing) {
+		code = contract.ErrSessionClosing
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing
 	} else if errors.Is(err, store.ErrTurnConflict) {

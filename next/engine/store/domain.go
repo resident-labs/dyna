@@ -13,6 +13,7 @@ import (
 )
 
 var ErrParentClosing = errors.New("parent session is closing")
+var ErrSessionClosing = errors.New("session is closing")
 var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigned host")
 
 // Session describes the stored session and its box.
@@ -122,6 +123,31 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE pr_owners SET session=(SELECT parent FROM sessions WHERE id=?) WHERE session=? AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND parent IS NOT NULL)", id, id, id); err != nil {
 			return err
+		}
+		var parent contract.SessionID
+		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(parent,'') FROM sessions WHERE id=?", id).Scan(&parent); err != nil {
+			return err
+		}
+		if parent != "" {
+			result, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,handoff_from)
+SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries WHERE to_kind='session' AND to_id=? AND state='pending'
+ON CONFLICT(to_kind,to_id,seq) DO UPDATE SET wake=1,surface='session',reply_kind='post',reply_target_kind='',reply_target_id='',reply_home='',reply_to='',handoff_from=excluded.handoff_from WHERE deliveries.state='pending'`, parent, id, id)
+			if err != nil {
+				return err
+			}
+			n, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				if _, err := tx.ExecContext(ctx, "UPDATE boxes SET want='run' WHERE session=? AND want='stop' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NULL)", parent); err != nil {
+					return err
+				}
+				s.wakePending = append(s.wakePending, parent)
+			}
+			if _, err := tx.ExecContext(ctx, "DELETE FROM deliveries WHERE to_kind='session' AND to_id=? AND state='pending'", id); err != nil {
+				return err
+			}
 		}
 		_, err = s.AppendEvent(tx, event)
 		return err
@@ -309,6 +335,18 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 				return err
 			}
 		}
+		for _, delivery := range deliveries {
+			if delivery.To.Kind != contract.PrincipalSession {
+				continue
+			}
+			var open bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND b.want NOT IN ('close','discard'))", delivery.To.Session).Scan(&open); err != nil {
+				return err
+			}
+			if !open {
+				return ErrSessionClosing
+			}
+		}
 		seq, err = s.AppendEvent(tx, event)
 		if err != nil {
 			return err
@@ -332,10 +370,11 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 
 // FeedInput describes a delivery selected for a box channel.
 type FeedInput struct {
-	Seq     contract.DeliverySeq
-	Surface contract.Surface
-	Reply   contract.ReplyChannel
-	Queue   *contract.TurnQueue
+	Seq         contract.DeliverySeq
+	Surface     contract.Surface
+	Reply       contract.ReplyChannel
+	Queue       *contract.TurnQueue
+	HandoffFrom contract.SessionID
 }
 
 // Dispatch atomically assigns pending inputs to the active turn, or starts one.
@@ -370,7 +409,7 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,d.reply_home,d.reply_to,d.wake FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
+		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,d.reply_home,d.reply_to,d.wake,COALESCE(d.handoff_from,'') FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
 		if err != nil {
 			return err
 		}
@@ -386,7 +425,7 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 		var items []item
 		for rows.Next() {
 			var v item
-			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn, &v.input.Reply.Kind, &v.input.Reply.Target.Kind, &v.input.Reply.Target.Session, &v.home, &v.input.Reply.ReplyTo, &v.wake); err != nil {
+			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn, &v.input.Reply.Kind, &v.input.Reply.Target.Kind, &v.input.Reply.Target.Session, &v.home, &v.input.Reply.ReplyTo, &v.wake, &v.input.HandoffFrom); err != nil {
 				rows.Close()
 				return err
 			}

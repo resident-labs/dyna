@@ -34,11 +34,12 @@ type ReplyChannel struct {
 }
 
 type Delivery struct {
-	Seq     int64        `json:"seq"` // the event
-	To      Principal    `json:"to"`  // a session
-	Surface Surface      `json:"surface"`
-	Reply   ReplyChannel `json:"reply"`
-	Wake    bool         `json:"wake"` // starts or steers a turn
+	Seq         int64        `json:"seq"` // the event
+	To          Principal    `json:"to"`  // a session
+	Surface     Surface      `json:"surface"`
+	Reply       ReplyChannel `json:"reply"`
+	Wake        bool         `json:"wake"` // starts or steers a turn
+	HandoffFrom SessionID    `json:"handoffFrom,omitempty"`
 }
 
 const (
