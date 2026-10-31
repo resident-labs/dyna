@@ -37,4 +37,5 @@ const (
 type Principal struct {
 	Kind    PrincipalKind `json:"kind"`
 	Session SessionID     `json:"session,omitempty"` // Kind session only
+	Device  DeviceID      `json:"device,omitempty"`  // Paired owner device, if any
 }

@@ -409,7 +409,7 @@ func main() {
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
 	app, err := fs.Sub(web.Dist, "dist")
 	fatal(err)
-	webServer, err := api.NewWeb(a, *listen, app, time.Now)
+	webServer, err := api.NewWeb(a, *listen, app, time.Now, st)
 	fatal(err)
 	listener, err := webServer.Listen()
 	fatal(err)
