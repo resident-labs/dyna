@@ -10,6 +10,7 @@ export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
+import { ContextFileCache } from "./context-file-cache.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import {
 	clearExtensionCache,
@@ -156,6 +157,7 @@ export interface ResourceLoader {
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
+	refreshPromptResources?(): void;
 	getSystemPrompt(): string | undefined;
 	getSystemPromptSource(): { path: string } | undefined;
 	getAppendSystemPrompt(): string[];
@@ -181,11 +183,14 @@ function resolvePromptInput(input: string | undefined, description: string): str
 	return input;
 }
 
-function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
+function loadContextFileFromDir(dir: string, cache?: ContextFileCache): { path: string; content: string } | null {
 	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
-		if (existsSync(filePath)) {
+		if (cache) {
+			const content = cache.readFile(filePath);
+			if (content !== undefined) return { path: filePath, content: stripBom(content) };
+		} else if (existsSync(filePath)) {
 			try {
 				if (!statSync(filePath).isFile()) {
 					continue;
@@ -211,7 +216,7 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
  * file's `gitdir:` target in realpath form while cwd may still be symlinked
  * (macOS `/tmp` -> `/private/tmp`).
  */
-function findShadowedContextFile(cwd: string): string | undefined {
+function findShadowedContextFile(cwd: string, cache?: ContextFileCache): string | undefined {
 	const gitPaths = findGitPaths(cwd);
 	if (!gitPaths) return undefined;
 	const commonGitDir = canonicalizePath(gitPaths.commonGitDir);
@@ -225,13 +230,14 @@ function findShadowedContextFile(cwd: string): string | undefined {
 	// `proj/main`) it is just the directory holding `.bare`, which tracks nothing; a
 	// submodule's gitdir has no `commondir`, so it lands under `.git/modules`.
 	if (canonicalizePath(join(mainRepoRoot, ".git")) !== commonGitDir) return undefined;
-	const worktreeContextFile = loadContextFileFromDir(worktreeRoot);
+	const worktreeContextFile = loadContextFileFromDir(worktreeRoot, cache);
 	return worktreeContextFile ? join(mainRepoRoot, basename(worktreeContextFile.path)) : undefined;
 }
 
 export function loadProjectContextFiles(options: {
 	cwd: string;
 	agentDir: string;
+	cache?: ContextFileCache;
 }): Array<{ path: string; content: string }> {
 	const resolvedCwd = resolvePath(options.cwd);
 	const resolvedAgentDir = resolvePath(options.agentDir);
@@ -239,7 +245,7 @@ export function loadProjectContextFiles(options: {
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
 
-	const globalContext = loadContextFileFromDir(resolvedAgentDir);
+	const globalContext = loadContextFileFromDir(resolvedAgentDir, options.cache);
 	if (globalContext) {
 		contextFiles.push(globalContext);
 		seenPaths.add(globalContext.path);
@@ -247,11 +253,11 @@ export function loadProjectContextFiles(options: {
 
 	const ancestorContextFiles: Array<{ path: string; content: string }> = [];
 
-	const shadowedContextFile = findShadowedContextFile(resolvedCwd);
+	const shadowedContextFile = findShadowedContextFile(resolvedCwd, options.cache);
 	let currentDir = resolvedCwd;
 
 	while (true) {
-		const contextFile = loadContextFileFromDir(currentDir);
+		const contextFile = loadContextFileFromDir(currentDir, options.cache);
 		// Compare the directory's real path, not the file's: a worktree AGENTS.md that
 		// symlinks to the main repo's file resolves to the shadowed path itself.
 		const isShadowed =
@@ -315,6 +321,9 @@ export interface DefaultResourceLoaderOptions {
 export class DefaultResourceLoader implements ResourceLoader {
 	private cwd: string;
 	private agentDir: string;
+	private readonly contextFileCache = new ContextFileCache();
+	private readonly skillFileCache = new ContextFileCache();
+	private skillDirectories = new Set<string>();
 	private settingsManager: SettingsManager;
 	private eventBus: EventBus;
 	private packageManager: DefaultPackageManager;
@@ -444,6 +453,44 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> } {
 		return { agentsFiles: this.agentsFiles };
+	}
+
+	private skillWatchPaths(): string[] {
+		return [
+			...this.lastSkillPaths,
+			...this.skills.map((skill) => skill.filePath),
+			...this.skillDirectories,
+			...[...this.skillDirectories].flatMap((dir) =>
+				[".gitignore", ".ignore", ".fdignore"].map((name) => join(dir, name)),
+			),
+		];
+	}
+
+	private contextWatchPaths(): string[] {
+		const dirs = [this.agentDir];
+		for (let dir = this.cwd; ; dir = dirname(dir)) {
+			dirs.push(dir);
+			if (dirname(dir) === dir) break;
+		}
+		return dirs.flatMap((dir) =>
+			["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"].map((name) => join(dir, name)),
+		);
+	}
+
+	refreshPromptResources(): void {
+		if (!this.noContextFiles && this.contextFileCache.changed(this.contextWatchPaths())) {
+			const base = {
+				agentsFiles: loadProjectContextFiles({
+					cwd: this.cwd,
+					agentDir: this.agentDir,
+					cache: this.contextFileCache,
+				}),
+			};
+			this.agentsFiles = (this.agentsFilesOverride ? this.agentsFilesOverride(base) : base).agentsFiles;
+		}
+		if (!this.noSkills && this.skillFileCache.changed(this.skillWatchPaths())) {
+			this.updateSkillsFromPaths(this.lastSkillPaths, this.resourceMetadataByPath);
+		}
 	}
 
 	getSystemPrompt(): string | undefined {
@@ -649,10 +696,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 				: loadProjectContextFiles({
 						cwd: this.cwd,
 						agentDir: this.agentDir,
+						cache: this.contextFileCache,
 					}),
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
+		this.contextFileCache.changed(this.contextWatchPaths());
 
 		const systemPromptSource = this.systemPromptSource ?? this.discoverSystemPromptFile();
 		const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
@@ -839,6 +888,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	private updateSkillsFromPaths(skillPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {
 		let skillsResult: { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
+		const directories = new Set<string>();
 		if (this.noSkills && skillPaths.length === 0) {
 			skillsResult = { skills: [], diagnostics: [] };
 		} else {
@@ -847,6 +897,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				agentDir: this.agentDir,
 				skillPaths,
 				includeDefaults: false,
+				cache: { files: this.skillFileCache, directories },
 			});
 		}
 		const resolvedSkills = this.skillsOverride ? this.skillsOverride(skillsResult) : skillsResult;
@@ -858,6 +909,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 				this.getDefaultSourceInfoForPath(skill.filePath),
 		}));
 		this.skillDiagnostics = resolvedSkills.diagnostics;
+		this.skillDirectories = directories;
+		this.skillFileCache.changed(this.skillWatchPaths());
 	}
 
 	private updatePromptsFromPaths(promptPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {

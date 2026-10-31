@@ -35,7 +35,7 @@ import type { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
 import { parseStreamingJson, parseToolCallArguments } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
-import { getSystemMessageText, renderSystemMessageUpdate } from "../utils/text.ts";
+import { getSystemMessageText } from "../utils/text.ts";
 import { resolveTranscript, resolveTranscriptTools, type TranscriptToolSupport } from "../utils/transcript.ts";
 import {
 	appendGrammarToolInputJsonDelta,
@@ -282,7 +282,7 @@ export function convertResponsesMessages<TApi extends Api>(
 			const anchorsToolChanges = systemIndex++ >= transcriptTools.foldedSystemMessages;
 			if (anchorsToolChanges) appendSystemToolAdditions(msg, `system:${msgIndex}`);
 			if (!isLeadingSystemMessage || includeInitialSystemMessage) {
-				const parts = [isLeadingSystemMessage ? getSystemMessageText(msg) : renderSystemMessageUpdate(msg)];
+				const parts = [isLeadingSystemMessage ? getSystemMessageText(msg) : ""];
 				if (anchorsToolChanges) {
 					// A redefinition is a removal plus an addition of the same name; only true removals are announced.
 					const added = new Set((msg.toolsAdded ?? []).map((tool) => tool.name));
