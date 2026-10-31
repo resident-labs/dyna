@@ -522,6 +522,9 @@ func TestUnknownPostAddress(t *testing.T) {
 
 func TestPostToOwnerDM(t *testing.T) {
 	s, room, session, ctx := setup(t)
+	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	home := contract.Conversation{Kind: contract.ConversationDM, Session: session}
 	post, e := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "direct", Home: home})
@@ -540,6 +543,9 @@ func TestPostToOwnerDM(t *testing.T) {
 
 func TestOwnPostDoesNotWake(t *testing.T) {
 	s, room, session, ctx := setup(t)
+	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
 	_, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.PostRequest{Room: room, Text: "self", Mentions: []string{"worker"}})
 	if e != nil {
 		t.Fatal(e)
