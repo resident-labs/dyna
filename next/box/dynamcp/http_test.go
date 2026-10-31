@@ -39,6 +39,37 @@ func TestStreamCancellationAndTypedErrors(t *testing.T) {
 	}
 }
 
+func TestOperationActionForwardsReplayKey(t *testing.T) {
+	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
+		if method != contract.MethodOpSubmit {
+			t.Fatalf("method = %s", method)
+		}
+		var req struct {
+			ClientID  string `json:"clientId"`
+			Operation struct {
+				Kind contract.OpKind     `json:"kind"`
+				Args contract.PrOpenArgs `json:"args"`
+			} `json:"operation"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.ClientID != "key" || req.Operation.Kind != "pr.open" || req.Operation.Args.Title != "title" {
+			t.Fatalf("%+v", req)
+		}
+		return []byte(`{"ok":true}`), nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(`{"action":"open","title":"title","base":"main","clientId":"key"}`), &args)
+	result := server.call(context.Background(), callParams{Name: "pr", Arguments: args})
+	if result.IsError {
+		t.Fatalf("%+v", result)
+	}
+}
+
 func TestActionDecodeIsStrict(t *testing.T) {
 	server, err := New(func(context.Context, contract.Method, []byte) ([]byte, *contract.Error) {
 		t.Fatal("forwarded invalid action")
