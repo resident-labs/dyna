@@ -62,17 +62,23 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(source, []byte("new"), 0600); err != nil {
+	if err := os.WriteFile(source, []byte("old"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	transport := &instructionTransport{offline: true}
+	transport := &instructionTransport{}
 	host, err := podman.New("user@host", t.TempDir(), "host", transport)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: instructionStore{}, InstructionsDir: data, HostData: hostData, hosts: map[contract.HostName]*podman.Host{"host": host}}
-	b.PublishInstructions(ctx)
 	heartbeat := b.instructionHeartbeat(ctx, "host", host)
+	heartbeat(true)
+	heartbeat(true) // Establish the current master generation.
+	if err := os.WriteFile(source, []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	transport.offline = true
+	b.PublishInstructions(ctx)
 	heartbeat(true) // Failed repair stays pending.
 	transport.offline = false
 	heartbeat(true) // The next healthy heartbeat retries.

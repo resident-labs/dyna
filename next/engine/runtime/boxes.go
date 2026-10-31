@@ -44,28 +44,29 @@ type heartbeatStore interface {
 }
 
 type Boxes struct {
-	HeartbeatStore  heartbeatStore
-	Store           boxStore
-	Sockets         *api.Sockets
-	Runtime         string
-	HostData        string
-	InstructionsDir string
-	instructionsMu  sync.Mutex
-	Version         string
-	PiTarball       []byte
-	Mirror          *enginegit.Mirror
-	Images          *engineimages.Builder
-	Context         context.Context
-	Pressure        *engine.Service
-	Proc            string // Proc is the folder with stat and meminfo; empty means /proc.
-	mu              sync.Mutex
-	hosts           map[contract.HostName]*podman.Host
-	restored        map[contract.HostName]bool
-	loads           map[contract.HostName]hostLoad
-	cpuPrev         *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
-	binOnce         sync.Once
-	binSum          string
-	binErr          error
+	HeartbeatStore      heartbeatStore
+	Store               boxStore
+	Sockets             *api.Sockets
+	Runtime             string
+	HostData            string
+	InstructionsDir     string
+	instructionsMu      sync.Mutex
+	instructionFailures map[contract.HostName]uint64
+	Version             string
+	PiTarball           []byte
+	Mirror              *enginegit.Mirror
+	Images              *engineimages.Builder
+	Context             context.Context
+	Pressure            *engine.Service
+	Proc                string // Proc is the folder with stat and meminfo; empty means /proc.
+	mu                  sync.Mutex
+	hosts               map[contract.HostName]*podman.Host
+	restored            map[contract.HostName]bool
+	loads               map[contract.HostName]hostLoad
+	cpuPrev             *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+	binOnce             sync.Once
+	binSum              string
+	binErr              error
 }
 
 type hostLoad struct {

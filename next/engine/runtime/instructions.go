@@ -25,6 +25,12 @@ func (b *Boxes) PublishInstructions(ctx context.Context) {
 			err = b.syncInstructions(ctx, h)
 		}
 		if err != nil {
+			b.mu.Lock()
+			if b.instructionFailures == nil {
+				b.instructionFailures = make(map[contract.HostName]uint64)
+			}
+			b.instructionFailures[record.Name]++
+			b.mu.Unlock()
 			log.Printf("host %s: instructions: %v", record.Name, err)
 		}
 	}
@@ -84,13 +90,16 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host, extra ...c
 
 // instructionHeartbeat retries failed repairs and skips unchanged masters.
 func (b *Boxes) instructionHeartbeat(ctx context.Context, name contract.HostName, h *podman.Host) func(bool) {
-	var repaired uint64
+	var repaired, repairedFailures uint64
 	return func(ok bool) {
 		if !ok {
 			return
 		}
 		generation := h.Generation()
-		if generation != 0 && generation == repaired {
+		b.mu.Lock()
+		failures := b.instructionFailures[name]
+		b.mu.Unlock()
+		if generation != 0 && generation == repaired && failures == repairedFailures {
 			return
 		}
 		if err := b.syncInstructions(ctx, h); err != nil {
@@ -98,5 +107,6 @@ func (b *Boxes) instructionHeartbeat(ctx context.Context, name contract.HostName
 			return
 		}
 		repaired = generation
+		repairedFailures = failures
 	}
 }
