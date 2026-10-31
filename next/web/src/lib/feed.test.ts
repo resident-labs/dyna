@@ -61,8 +61,10 @@ test("keeps box changes out of the feed except a failed or lost box or a failed 
 
 test("a failed turn with a final reply keeps its failed row", () => {
   const ended = event(1, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "failed", final: "Partial", usage, error: "Broke",
-    replies: [{ reply: { kind: "final", target: { kind: "owner" } } }] } });
-  assert.deepEqual(feedRows([ended], { kind: "feed" }).map(row => row.kind), ["post", "failed"]);
+    cause: "model_failed", replies: [{ reply: { kind: "final", target: { kind: "owner" } } }] } });
+  const rows = feedRows([ended], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind), ["post", "failed"]);
+  assert.deepEqual(rows[1], { kind: "failed", key: "f1", session: "l", at: ended.at, label: "Turn failed", cause: "The model provider refused or failed the request" });
 });
 
 test("puts a turn's final reply in its home only", () => {
