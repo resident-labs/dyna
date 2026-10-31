@@ -126,3 +126,23 @@ func unixServer(t *testing.T, handler http.Handler) *httptest.Server {
 	up.Start()
 	return up
 }
+
+func TestProxyPreservesNonSocket(t *testing.T) {
+	dir := t.TempDir()
+	proxyDir := filepath.Join(dir, "cliproxy")
+	if err := os.Mkdir(proxyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(proxyDir, "proxy.sock")
+	if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if proxy, err := NewProxy(dir, "key"); err == nil {
+		proxy.Listener.Close()
+		t.Fatal("accepted non-socket")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "keep" {
+		t.Fatalf("file changed: %q %v", data, err)
+	}
+}
