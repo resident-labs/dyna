@@ -18,7 +18,9 @@
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
   let rules = $derived([...store.rules.values()]);
   let owner = $derived(rules.filter(rule => rule.by.kind === "owner").length);
-  let rows = $derived([...rules.filter(rule => filter === "all" || (rule.by.kind === "owner") === (filter === "owner")), ...removed.values()]
+  // The filter applies only while its controls show. A removed rule can come back for a moment from a late rule.added.
+  let shown: Filter = $derived(rules.length > 10 ? filter : "all");
+  let rows = $derived([...rules.filter(rule => !removed.has(rule.number) && (shown === "all" || (rule.by.kind === "owner") === (shown === "owner"))), ...removed.values()]
     .sort((a, b) => a.number - b.number));
   let draft = $state("");
   let busy = $state(false);
@@ -43,9 +45,8 @@
     failure = "";
     const added = await call("rule.add", { room: store.room, text }).catch(() => undefined);
     busy = false;
+    // The rule shows when its rule.added event arrives, so the event stream alone orders adds and removes.
     if (!added) { failure = "The rule was not added. Try again."; return false; }
-    // The rule.added event brings the same rule; setting it now shows it at once.
-    store.rules.set(added.number, { number: added.number, text, by: { kind: "owner" }, at: new Date().toISOString() });
     return true;
   }
   async function submit() {
