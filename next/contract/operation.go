@@ -67,6 +67,7 @@ type PrOpenArgs struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Base  string `json:"base"`
+	Head  string `json:"head,omitempty"`
 	Draft bool   `json:"draft"`
 }
 

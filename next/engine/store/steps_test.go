@@ -57,7 +57,7 @@ func TestUpgradeGrantsExistingRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{12: steps[12], 13: steps[13], 14: steps[14], 15: steps[15], 16: steps[16], 17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{12: steps[12], 13: steps[13], 14: steps[14], 15: steps[15], 16: steps[16], 17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	s := &Store{read: db}
@@ -83,7 +83,7 @@ func TestUpgradeSetsOpenTurnStartSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}, 18: steps[18], 19: {}, 20: steps[20], 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}, 18: steps[18], 19: {}, 20: steps[20], 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var seq sql.NullInt64
@@ -115,7 +115,7 @@ func TestUpgradeRevokesOldGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.Query(`SELECT id,revoked_at,reason FROM grants ORDER BY id`)
@@ -165,7 +165,7 @@ func TestUpgradeBoxIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := upgrade(db, 1, "", map[int][]string{21: steps[21], 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}}, nil); err != nil {
+	if err := upgrade(db, 1, "", map[int][]string{21: steps[21], 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.Query(`SELECT b.want,s.state,b.due_at,b.failures FROM boxes b JOIN sessions s ON s.id=b.session ORDER BY b.id`)
@@ -188,5 +188,35 @@ func TestUpgradeBoxIntent(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpgradeRecoversPRBranchAfterHandoff(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+ INSERT INTO meta VALUES ('schema_version','28');
+ CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT);
+ INSERT INTO pr_owners VALUES ('owner/repo',42,'parent'),('owner/repo',43,'parent');
+ CREATE TABLE events (seq INTEGER PRIMARY KEY, type TEXT, body BLOB);
+ INSERT INTO events VALUES (1,'pr.opened','{"repo":"owner/repo","number":42,"session":"child"}');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade(db, 1, "", map[int][]string{28: steps[28]}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var branch, unknown string
+	if err := db.QueryRow("SELECT branch FROM pr_owners WHERE number=42").Scan(&branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT branch FROM pr_owners WHERE number=43").Scan(&unknown); err != nil {
+		t.Fatal(err)
+	}
+	if branch != "v2/child" || unknown != "" {
+		t.Fatalf("branches %q, %q", branch, unknown)
 	}
 }

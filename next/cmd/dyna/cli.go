@@ -525,7 +525,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(op)
 
 	pr := &cobra.Command{Use: "pr"}
-	var prTitle, prBodyFile, prBase string
+	var prTitle, prBodyFile, prBase, prHead string
 	var prDraft bool
 	prOpen := &cobra.Command{Use: "open", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		var body string
@@ -538,7 +538,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{
 			Kind: "pr.open",
-			Args: contract.PrOpenArgs{Title: prTitle, Body: body, Base: prBase, Draft: prDraft},
+			Args: contract.PrOpenArgs{Title: prTitle, Body: body, Base: prBase, Head: prHead, Draft: prDraft},
 		}})
 		if err != nil {
 			return err
@@ -555,6 +555,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	prOpen.Flags().StringVar(&prTitle, "title", "", "Pull request title")
 	prOpen.Flags().StringVar(&prBodyFile, "body-file", "", "File with the pull request body")
+	prOpen.Flags().StringVar(&prHead, "head", "", "Head branch (default: session branch)")
 	prOpen.Flags().StringVar(&prBase, "base", "main", "Base branch")
 	prOpen.Flags().BoolVar(&prDraft, "draft", false, "Open as a draft")
 	_ = prOpen.MarkFlagRequired("title") // fails only for an undefined flag, and "title" is defined above
