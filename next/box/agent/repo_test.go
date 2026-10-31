@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -121,7 +122,7 @@ func TestArchiveRetryAfterAnotherRepoFails(t *testing.T) {
 }
 
 func TestArchiveRepo(t *testing.T) {
-	for _, mode := range []string{"skip", "snapshot", "error"} {
+	for _, mode := range []string{"skip", "snapshot", "empty", "error"} {
 		t.Run(mode, func(t *testing.T) {
 			var calls [][]string
 			var index string
@@ -136,6 +137,9 @@ func TestArchiveRepo(t *testing.T) {
 					}
 					return "", nil
 				case "ls-remote":
+					if mode == "empty" {
+						return "", nil
+					}
 					if mode == "skip" {
 						return "head\trefs/heads/v2/s", nil
 					}
@@ -165,7 +169,7 @@ func TestArchiveRepo(t *testing.T) {
 				if !strings.Contains(got.Error, "failed") {
 					t.Fatal(got)
 				}
-			case "snapshot":
+			case "snapshot", "empty":
 				if got.Commit != "snapshot" || got.Error != "" || index == "" {
 					t.Fatal(got)
 				}
@@ -178,5 +182,44 @@ func TestArchiveRepo(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestArchiveRetriesBeforeReporting(t *testing.T) {
+	attempts := 0
+	git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+		switch args[0] {
+		case "rev-parse":
+			attempts++
+			if attempts < 3 {
+				return "", errors.New("temporary failure")
+			}
+			return "head", nil
+		case "status":
+			return "modified", nil
+		case "write-tree":
+			return "tree", nil
+		case "-c":
+			return "snapshot", nil
+		}
+		return "", nil
+	}
+	var waits []time.Duration
+	after := func(d time.Duration) <-chan time.Time {
+		waits = append(waits, d)
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	var reports []contract.ArchiveDoneRequest
+	err := archiveAndReport(context.Background(), t.TempDir(), "s", []contract.BoxRepo{{Name: "owner/repo"}}, git, after, func(_ context.Context, req contract.ArchiveDoneRequest) error {
+		reports = append(reports, req)
+		return nil
+	})
+	if err != nil || attempts != 3 || len(reports) != 1 || reports[0].Error != "" || reports[0].Commit != "snapshot" {
+		t.Fatalf("err=%v attempts=%d reports=%+v", err, attempts, reports)
+	}
+	if !reflect.DeepEqual(waits, []time.Duration{transcriptRetryMin, 2 * transcriptRetryMin}) {
+		t.Fatalf("waits=%v", waits)
 	}
 }
