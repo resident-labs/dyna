@@ -15,7 +15,7 @@ type hookGap struct {
 	Fields []string
 }
 
-func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, allRooms []contract.RoomName) (map[contract.RoomName][]contract.HookHandoff, []hookGap, error) {
+func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, cap capture, allRooms []contract.RoomName) (map[contract.RoomName][]contract.HookHandoff, []hookGap, error) {
 	rows, err := db.Query("SELECT repo,body FROM hook_documents ORDER BY repo")
 	if err != nil {
 		return nil, nil, err
@@ -30,12 +30,13 @@ func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, 
 			return nil, nil, err
 		}
 		var doc struct {
+			Repo  string       `json:"repo"`
 			Hooks []hooks.Hook `json:"hooks"`
 		}
 		if err := json.Unmarshal(body, &doc); err != nil {
 			return nil, nil, fmt.Errorf("decode hook document: %w", err)
 		}
-		targets := repoRooms[contract.RepoName(repo)]
+		targets := repoRooms[cap.Repos[doc.Repo]]
 		if repo == "global" {
 			targets = allRooms
 		}
