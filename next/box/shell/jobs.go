@@ -62,15 +62,17 @@ type job struct {
 	proc    process
 	done    chan struct{}
 
-	mu         sync.Mutex
-	output     []byte // the newest output
-	base       int    // bytes dropped before output[0]
-	read       int    // bytes already returned, counted from the start of all output
-	exit       int
-	finished   bool
-	background bool
-	stopped    bool
-	skipping   bool // inside a line that was cut; drop it to its newline
+	mu            sync.Mutex
+	output        []byte // the newest output
+	base          int    // bytes dropped before output[0]
+	read          int    // bytes already returned, counted from the start of all output
+	owner         int
+	ownerFinished bool
+	exit          int
+	finished      bool
+	background    bool
+	stopped       bool
+	skipping      bool // inside a line that was cut; drop it to its newline
 }
 
 func (j *job) Write(p []byte) (int, error) {
@@ -177,7 +179,7 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd string) (*job, error) 
 	if cwd == "" {
 		cwd = s.cfg.Dir
 	}
-	j := &job{id: s.cfg.newID(), command: command, done: make(chan struct{})}
+	j := &job{id: s.cfg.newID(), command: command, owner: -1, done: make(chan struct{})}
 	proc, err := s.cfg.start(command, cwd, j)
 	if err != nil {
 		return nil, err
@@ -285,4 +287,39 @@ func (s *Server) Close() {
 	for _, j := range s.jobs {
 		j.proc.Signal(syscall.SIGKILL)
 	}
+}
+
+// View returns a fresh or incremental masked owner view without moving agent reads.
+func (s *Server) View(reset bool) []contract.ShellJobOutput {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []contract.ShellJobOutput
+	for _, j := range s.jobs {
+		j.mu.Lock()
+		fresh := reset || j.owner < j.base
+		start := max(j.owner, j.base) - j.base
+		end := len(j.output)
+		if !j.finished {
+			end = bytes.LastIndexByte(j.output, '\n') + 1
+		}
+		if fresh {
+			start = max(0, end-(64<<10))
+			if start > 0 {
+				if i := bytes.IndexByte(j.output[start:end], '\n'); i >= 0 {
+					start += i + 1
+				} else {
+					start = end
+				}
+			}
+		}
+		if end < start {
+			end = start
+		}
+		if fresh || end > start || j.ownerFinished != j.finished {
+			result = append(result, contract.ShellJobOutput{Job: j.id, Command: j.command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh})
+		}
+		j.owner, j.ownerFinished = j.base+end, j.finished
+		j.mu.Unlock()
+	}
+	return result
 }

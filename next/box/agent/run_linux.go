@@ -135,9 +135,24 @@ func Run(ctx context.Context, version string) error {
 	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
 	var closing atomic.Bool
 	var stopWatch context.CancelFunc
+	var stopShellWatch context.CancelFunc
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
 			switch body := message.Body.(type) {
+			case contract.ShellWatchStart:
+				if stopShellWatch != nil {
+					stopShellWatch()
+				}
+				var watch context.Context
+				watch, stopShellWatch = context.WithCancel(ctx)
+				go client.watchShell(watch, jobs, body.Generation, time.NewTicker(250*time.Millisecond))
+				return nil
+			case contract.ShellWatchStop:
+				if stopShellWatch != nil {
+					stopShellWatch()
+					stopShellWatch = nil
+				}
+				return nil
 			case contract.ComputerWatchStart:
 				if stopWatch != nil {
 					stopWatch()
@@ -174,6 +189,10 @@ func Run(ctx context.Context, version string) error {
 				case states <- struct{}{}:
 				default:
 				}
+			}
+			if !connected && stopShellWatch != nil {
+				stopShellWatch()
+				stopShellWatch = nil
 			}
 			if !connected && stopWatch != nil {
 				stopWatch()

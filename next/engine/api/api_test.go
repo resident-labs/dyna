@@ -310,3 +310,12 @@ func TestOpSubmitRejectsHostexecRun(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, response.Body.String())
 	}
 }
+
+func TestShellWatchRejectsBox(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	w := httptest.NewRecorder()
+	a.handler(boxCaller()).ServeHTTP(w, httptest.NewRequest("GET", "/v1/shell/watch?session=session-a", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status %d", w.Code)
+	}
+}
