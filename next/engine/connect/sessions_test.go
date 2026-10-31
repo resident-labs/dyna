@@ -1,0 +1,144 @@
+package connect
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/resident-labs/dyna/engine/store"
+)
+
+func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
+	now := time.Unix(1900000000, 0)
+	relayPub, relayKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/machine/grant" || r.Header.Get("Authorization") == "" {
+			t.Errorf("unexpected relay request %s", r.URL.Path)
+			http.Error(w, "bad", 400)
+			return
+		}
+		_, _ = w.Write([]byte(`{"active":true,"epoch":1}`))
+	}))
+	defer relay.Close()
+	files, err := OpenFiles(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = files.Key(); err != nil {
+		t.Fatal(err)
+	}
+	origin := "https://machine.example"
+	link := Link{Relay: relay.URL, Machine: "machine", Owner: Owner{ID: "owner"}, App: origin}
+	if err = files.SaveLink(link); err != nil {
+		t.Fatal(err)
+	}
+	if err = files.SaveKeys(KeySet{Keys: []JWK{{Kty: "OKP", Crv: "Ed25519", Kid: "key", X: b64.EncodeToString(relayPub)}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chtimes(filepath.Join(files.dir, "jwks.json"), now, now); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err = st.InitializeConnectLink(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSessions(files, st, func() time.Time { return now }, relay.Client())
+	browser, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, _ := browser.PublicKey.Bytes()
+	jwk := ecJWK{Kty: "EC", Crv: "P-256", X: b64.EncodeToString(pub[1:33]), Y: b64.EncodeToString(pub[33:])}
+	proof := func(path, jti string) string {
+		h, _ := json.Marshal(struct {
+			Alg string `json:"alg"`
+			Typ string `json:"typ"`
+			JWK ecJWK  `json:"jwk"`
+		}{"ES256", "dpop+jwt", jwk})
+		c, _ := json.Marshal(proofClaims{Htm: "POST", Htu: origin + path, Iat: now.Unix(), Jti: jti})
+		input := b64.EncodeToString(h) + "." + b64.EncodeToString(c)
+		d := sha256.Sum256([]byte(input))
+		r, s, e := ecdsa.Sign(rand.Reader, browser, d[:])
+		if e != nil {
+			t.Fatal(e)
+		}
+		sig := make([]byte, 64)
+		r.FillBytes(sig[:32])
+		s.FillBytes(sig[32:])
+		return input + "." + b64.EncodeToString(sig)
+	}
+	mint := func(nonce string) string {
+		h, _ := json.Marshal(jwsHeader{Alg: "EdDSA", Kid: "key"})
+		c, _ := json.Marshal(RelayClaims{Op: "mint", Iss: relay.URL, Aud: "machine", Sub: "owner", Dev: "dev_one", Epoch: 1, JKT: jwk.thumbprint(), Origin: origin, Nonce: nonce, Iat: now.Unix(), Exp: now.Add(time.Minute).Unix()})
+		input := b64.EncodeToString(h) + "." + b64.EncodeToString(c)
+		signed := input + "." + b64.EncodeToString(ed25519.Sign(relayKey, []byte(input)))
+		r := httptest.NewRequest("POST", origin+"/connect/v1/mint", bytes.NewBufferString(signed))
+		w := httptest.NewRecorder()
+		service.ServePublic(w, r, origin, []string{origin})
+		if w.Code != 200 {
+			t.Fatalf("mint: %d %s", w.Code, w.Body.String())
+		}
+		var out struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Code
+	}
+	exchange := func(code, p string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"code": code, "proof": p})
+		r := httptest.NewRequest("POST", origin+"/api/connect/session", bytes.NewReader(body))
+		r.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		service.ServePublic(w, r, origin, []string{origin})
+		return w
+	}
+	code := mint("abcdefghijklmnop")
+	p := proof("/api/connect/session", "abcdefghijklmnop")
+	w := exchange(code, p)
+	if w.Code != 200 {
+		t.Fatalf("exchange: %d %s", w.Code, w.Body.String())
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly {
+		t.Fatalf("cookie: %+v", cookies)
+	}
+	second := mint("abcdefghijklmnopq")
+	if w := exchange(second, p); w.Code != 403 {
+		t.Fatalf("replayed proof: %d", w.Code)
+	}
+	r := httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnopr")+`"}`))
+	r.Header.Set("Origin", origin)
+	r.AddCookie(cookies[0])
+	x, _, ok, err := service.Authenticate(r.Context(), r, origin)
+	if err != nil || !ok {
+		t.Fatalf("authenticate: %v %v", ok, err)
+	}
+	out := httptest.NewRecorder()
+	service.ServePrivate(out, r, origin, []string{origin}, x)
+	if out.Code != 200 {
+		t.Fatalf("renew: %d %s", out.Code, out.Body.String())
+	}
+	if out.Result().Cookies()[0].Value == cookies[0].Value {
+		t.Fatal("cookie did not rotate")
+	}
+}
