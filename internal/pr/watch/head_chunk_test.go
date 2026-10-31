@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -33,6 +34,47 @@ func TestHeadChunkDeadlineDoesNotBlockLaterChunk(t *testing.T) {
 	heads, _, err := g.readHeads(t.Context(), records)
 	if err == nil || heads["1"].Err == nil || heads["21"].Err != nil || heads["21"].Pull.Number != 21 || calls != 4 {
 		t.Fatalf("calls=%d first=%+v last=%+v err=%v", calls, heads["1"], heads["21"], err)
+	}
+}
+
+// A head request slower than 3 seconds but within 10 succeeds on the injected clock.
+func TestHeadChunkWaitsLongerThanThreeSeconds(t *testing.T) {
+	old := withHeadChunkTimeout
+	defer func() { withHeadChunkTimeout = old }()
+	start := time.Now()
+	withHeadChunkTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithDeadline(ctx, start.Add(d))
+	}
+	const latency = 5 * time.Second
+	g := GitHub{run: func(ctx context.Context, cmd *exec.Cmd) error {
+		// Simulated server latency: the request fails only when its deadline comes first.
+		if deadline, ok := ctx.Deadline(); ok && deadline.Before(start.Add(latency)) {
+			return context.DeadlineExceeded
+		}
+		fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n"+`{"data":{"r0":{"defaultBranchRef":{"name":"main"},"p1":{"number":1,"state":"OPEN","headRefOid":"`+strings.Repeat("a", 40)+`"}}}}`)
+		return nil
+	}}
+	heads, _, err := g.readHeads(t.Context(), []*Record{{Key: "1", Host: "github.com", Repo: "owner/repo", Number: 1}})
+	if err != nil || heads["1"].Err != nil || heads["1"].Pull.Number != 1 {
+		t.Fatalf("head=%+v err=%v", heads["1"], err)
+	}
+}
+
+// A cancelled parent context still cancels the head request.
+func TestHeadChunkKeepsParentCancellation(t *testing.T) {
+	old := withHeadChunkTimeout
+	defer func() { withHeadChunkTimeout = old }()
+	withHeadChunkTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(ctx, d)
+	}
+	parent, cancel := context.WithCancel(t.Context())
+	cancel()
+	g := GitHub{run: func(ctx context.Context, cmd *exec.Cmd) error {
+		return ctx.Err()
+	}}
+	heads, _, err := g.readHeads(parent, []*Record{{Key: "1", Host: "github.com", Repo: "owner/repo", Number: 1}})
+	if err == nil || !errors.Is(heads["1"].Err, context.Canceled) {
+		t.Fatalf("head=%+v err=%v", heads["1"], err)
 	}
 }
 
