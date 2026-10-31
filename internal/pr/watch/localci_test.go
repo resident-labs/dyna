@@ -105,6 +105,11 @@ func TestRegisteredCIDoesNotQueuePullRequestHeads(t *testing.T) {
 		"repo":       {Head: "trial", Branch: "dyna/merge-trial/1", Phase: "running", Changes: []state.MergeTrialChange{{Key: "recent", Head: "recent"}}, Created: now},
 		"older/repo": {Head: "older", Branch: "dyna/merge-trial/2", Phase: "running", Changes: []state.MergeTrialChange{{Key: "ready", Head: "ready"}}, Created: now.Add(-time.Hour)},
 	}}
+	st.MergeTrials["repo"].Phase = state.MergeTrialPhaseBuilding
+	if jobs := registeredCIJobs(st); len(jobs) != 1 || jobs[0].head != "older" {
+		t.Fatalf("unpublished trial entered local CI: %+v", jobs)
+	}
+	st.MergeTrials["repo"].Phase = state.MergeTrialPhaseRunning
 	jobs := registeredCIJobs(st)
 	if len(jobs) != 2 || !jobs[0].trial || jobs[0].head != "older" || jobs[1].head != "trial" {
 		t.Fatalf("queue: %+v", jobs)
