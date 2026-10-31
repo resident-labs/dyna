@@ -5,9 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/resident-labs/dyna/box/visual"
-	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/contract/tools"
 	"io"
 	"mime"
 	"net/http"
@@ -15,11 +12,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/resident-labs/dyna/box/visual"
+	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/tools"
 )
 
 type Upload func(context.Context, string) (contract.Attachment, error)
 
 func Prepare(ctx context.Context, upload Upload, in tools.PostInput) (contract.PostRequest, []contract.VisualCheck, error) {
+	return prepare(ctx, upload, in, visual.Preview)
+}
+
+func prepare(ctx context.Context, upload Upload, in tools.PostInput, render func(context.Context, []byte, string, bool) visual.Result) (contract.PostRequest, []contract.VisualCheck, error) {
 	req := contract.PostRequest{Room: in.Room, Text: in.Text, Mentions: in.Mentions, Home: in.Home, ReplyTo: in.ReplyTo, ClientID: in.ClientID, VisualUpdate: in.VisualUpdate, VisualReply: in.VisualReply}
 	if (in.VisualUpdate != "" || in.AllowNet) && in.HTML == "" {
 		return req, nil, fmt.Errorf("visualUpdate and allowNet need html")
@@ -58,7 +63,7 @@ func Prepare(ctx context.Context, upload Upload, in tools.PostInput) (contract.P
 		return req, nil, err
 	}
 	card := &contract.VisualCard{Title: title, Height: height, AllowNet: in.AllowNet}
-	preview := visual.Preview(ctx, data, visual.CSP(in.AllowNet), in.AllowNet)
+	preview := render(ctx, data, visual.CSP(in.AllowNet), in.AllowNet)
 	if err = visualImages(ctx, upload, preview, card); err != nil {
 		return req, nil, err
 	}
