@@ -141,6 +141,31 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	return ch, nil
 }
 
+// ComputerInput queues owner events for the box's computer. It does not touch the session's turn.
+func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.ComputerInputResponse{}, forbidden()
+	}
+	if _, err := s.store.Session(ctx, req.Session); err != nil {
+		return contract.ComputerInputResponse{}, failure(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessionLocked(req.Session)
+	if state.channel == nil {
+		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	}
+	if c := state.computer; c == nil || c.state != contract.ComputerRunning {
+		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "computer is not running"}
+	}
+	select {
+	case state.channel.input <- contract.ComputerInputBatch{Frame: req.Frame, Events: req.Events}:
+		return contract.ComputerInputResponse{}, nil
+	default:
+		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "input queue is full"}
+	}
+}
+
 func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal, generation uint64, r io.Reader) *contract.Error {
 	if caller.Kind != contract.PrincipalSession {
 		return forbidden()

@@ -83,6 +83,7 @@ type boxChannel struct {
 	watching      uint64
 	shellWatching uint64
 	archiveRetry  bool
+	input         chan contract.ComputerInputBatch // owner input for the box's computer, sent apart from the turn loop so a paused room does not hold it
 }
 
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
@@ -109,7 +110,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		s.clearShellLocked(session.ID)
 		previous.stop()
 	}
-	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1)}
+	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1), input: make(chan contract.ComputerInputBatch, 64)}
 	state.channel = channel
 	s.mu.Unlock()
 	if stopped {
@@ -136,7 +137,27 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			state.computerLock.Unlock()
 		}()
-		defer close(out)
+		pumpDone := make(chan struct{})
+		go func() {
+			defer close(pumpDone)
+			for {
+				select {
+				case batch := <-channel.input:
+					select {
+					case out <- contract.BoxMessage{Body: batch}:
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		defer func() {
+			stop()
+			<-pumpDone
+			close(out)
+		}()
 		replay := true
 		archiveSent := false
 		var stopSent contract.TurnID
