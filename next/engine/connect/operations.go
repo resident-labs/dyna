@@ -29,10 +29,11 @@ type Operations struct {
 	cancel            context.CancelFunc
 	done              chan struct{}
 	wake              chan struct{}
+	relay             func(string) *Relay
 }
 
 func NewOperations(ctx context.Context, files *Files, state operationState, appPort, cardPort int) *Operations {
-	return &Operations{ctx: ctx, files: files, state: state, appPort: appPort, cardPort: cardPort, wake: make(chan struct{}, 1)}
+	return &Operations{ctx: ctx, files: files, state: state, appPort: appPort, cardPort: cardPort, wake: make(chan struct{}, 1), relay: func(base string) *Relay { return &Relay{Base: base} }}
 }
 
 func (o *Operations) launch(req contract.ConnectStartRequest) <-chan error {
@@ -52,7 +53,7 @@ func (o *Operations) launch(req contract.ConnectStartRequest) <-chan error {
 			}
 		}
 		for {
-			_, err := LinkMachine(ctx, &Relay{Base: req.Relay}, o.files, o.state, LinkOptions{Name: req.Name, AppPort: o.appPort, CardPort: o.cardPort, Ticks: ticker.C, Started: started})
+			_, err := LinkMachine(ctx, o.relay(req.Relay), o.files, o.state, LinkOptions{Name: req.Name, AppPort: o.appPort, CardPort: o.cardPort, Ticks: ticker.C, Started: started})
 			if !notified {
 				ready <- err
 				notified = true
