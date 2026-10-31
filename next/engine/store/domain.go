@@ -52,8 +52,17 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if clientID != "" {
+			response, err := json.Marshal(contract.SessionStartResponse{Session: session.ID, Box: session.Box})
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO client_replays(method,caller_kind,caller_id,client_id,response) VALUES(?,?,?,?,?)", contract.MethodSessionStart, event.From.Kind, event.From.Session, clientID, response); err != nil {
+				return err
+			}
+		}
 		var host *contract.HostName
 		if sameHost {
 			if parent == "" {
