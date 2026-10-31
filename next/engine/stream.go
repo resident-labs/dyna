@@ -199,15 +199,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			if err != nil {
 				return
 			}
-			latest, err := s.store.Session(ctx, session.ID)
-			if err != nil {
-				return
-			}
-			model, _, err := s.profiles.Model(latest.Profile)
-			if err != nil {
-				return
-			}
-			turn, deliveries, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
+			turn, deliveries, profile, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
 			if err != nil {
 				return
 			}
@@ -273,6 +265,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				}
 			}
 			if len(start) != 0 {
+				model, _, err := s.profiles.Model(profile)
+				if err != nil {
+					return
+				}
 				select {
 				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model}}:
 				case <-ctx.Done():
