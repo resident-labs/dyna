@@ -13,6 +13,8 @@ export class RoomStore {
   readonly boxes = new SvelteMap<string, BoxState>();
   readonly turns = new SvelteMap<string, string>();
   readonly failed = new SvelteSet<string>();
+  // Sessions whose box runs a computer the owner can watch.
+  readonly computers = new SvelteSet<string>();
   readonly operations = new SvelteMap<string, PendingOperation>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
@@ -61,6 +63,7 @@ export class RoomStore {
       this.boxes.set(session.id, session.boxState);
       if (session.turn) this.turns.set(session.id, session.turn);
       if (session.lastOutcome === "failed") this.failed.add(session.id);
+      if (session.computer === "running") this.computers.add(session.id);
     }
     for (const op of listed.operations ?? []) if (op.state === "pending") this.operations.set(op.id, op);
   }
@@ -98,7 +101,15 @@ export class RoomStore {
         if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
         break;
       }
-      case "box.changed": this.boxes.set(event.body.session, event.body.to); break;
+      case "box.changed":
+        this.boxes.set(event.body.session, event.body.to);
+        // A computer runs only inside a ready box.
+        if (event.body.to !== "ready") this.computers.delete(event.body.session);
+        break;
+      case "computer.changed":
+        if (event.body.to === "running") this.computers.add(event.body.session);
+        else this.computers.delete(event.body.session);
+        break;
       case "turn.started": this.turns.set(event.body.session, event.body.turn); break;
       case "turn.ended":
         if (this.turns.get(event.body.session) === event.body.turn) this.turns.delete(event.body.session);

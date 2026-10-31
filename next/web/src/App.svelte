@@ -11,6 +11,8 @@
   import Avatar from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import DirectMessages from "./lib/ui/DirectMessages.svelte";
+  import ComputerView from "./lib/ui/ComputerView.svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   let rooms: RoomSummary[] = $state([]);
@@ -105,6 +107,11 @@
   // Below 900 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
+  // The session whose computer the sessions panel shows instead of the list, while it runs. The view
+  // mounts only where the panel is on screen: always when wide, below 900 px only while it is open.
+  let watching: string | undefined = $state();
+  let watched = $derived(watching && store?.computers.has(watching) ? watching : undefined);
+  const wide = new MediaQuery("min-width: 901px");
   let toggle: HTMLButtonElement | undefined = $state();
   async function showPanel(open: boolean) {
     const held = members?.contains(document.activeElement);
@@ -169,15 +176,22 @@
     {/if}
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} aria-label="Sessions" tabindex="-1" bind:this={members}>
+    <aside class="members" id="sessions" class:shown={panel} class:watching={watched !== undefined} aria-label="Sessions" tabindex="-1" bind:this={members}>
+      {#if watched}
+        {#if wide.current || panel}<ComputerView session={watched} name={store?.names.get(watched) ?? "Session"}
+          onback={() => { watching = undefined; members?.focus(); }} />{/if}
+      {:else}
       <header class="label">Sessions</header>
       {#each tree as { session: item, depth } (item.session)}
-        <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate} onkeydown={walkTree}
+        <div class="row"><a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate} onkeydown={walkTree}
           aria-current={session === item.session ? "page" : undefined} style:padding-left="{16 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session, item.profile)} />
           {#if store?.turns.has(item.session)}<WorkingDot label="Working" />
           {:else if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
+          {#if store?.computers.has(item.session)}<button type="button" class="watch" aria-label={`Watch ${item.name}'s computer`}
+            title={`Watch ${item.name}'s computer`} onclick={() => { watching = item.session; }}><Icon name="monitor" /></button>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
+      {/if}
     </aside>
   {/if}
 </div>
@@ -185,4 +199,12 @@
 <style>
   a.member { color: var(--text); text-decoration: none; }
   a.member[aria-current="page"] { background: var(--selected); }
+  .row { display: flex; align-items: center; }
+  .row a.member { flex: 1; min-width: 0; }
+  .watch { all: unset; display: grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+  .watch:hover { background: var(--hover); color: var(--text); }
+  .watch:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+  /* The computer needs room: the panel widens while it shows one. */
+  @media (min-width: 901px) { .shell.open:has(aside.watching) { grid-template-columns: 280px 1fr 420px; } }
+  @media (max-width: 900px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
 </style>
