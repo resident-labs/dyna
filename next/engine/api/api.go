@@ -147,6 +147,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodProfileSet, c, a.service.ProfileSet)
 	call(mux, contract.MethodProfileRemove, c, a.service.ProfileRemove)
 	call(mux, contract.MethodAccountsList, c, a.service.AccountsList)
+	call(mux, contract.MethodAccountsSetLimits, c, a.service.AccountsSetLimits)
 	call(mux, contract.MethodAccountsRemove, c, a.service.AccountsRemove)
 	call(mux, contract.MethodAccountsConnect, c, a.service.AccountsConnect)
 	call(mux, contract.MethodAccountsReconnect, c, a.service.AccountsReconnect)
