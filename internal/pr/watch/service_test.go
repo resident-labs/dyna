@@ -466,6 +466,21 @@ func (e *testEnv) tick() {
 		e.t.Fatal(err)
 	}
 }
+
+// holdSafetyPoll moves each record's next safety poll an hour past the clock.
+// The safety poll runs on fixed clock minutes, so a tick that lands on one
+// would write the record and change the counts these tests expect.
+func (e *testEnv) holdSafetyPoll() {
+	e.t.Helper()
+	if err := e.s.Store.update(func(st *State) error {
+		for key := range st.Records {
+			st.Records[key].Polling.FullChecked = e.clock.Add(time.Hour)
+		}
+		return nil
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+}
 func (e *testEnv) record() Record {
 	e.t.Helper()
 	r, err := e.s.Store.Get("github.com/owner/repo#17")
