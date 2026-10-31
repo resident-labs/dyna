@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 15
+const schemaVersion = 16
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -36,6 +36,12 @@ var steps = map[int][]string{
 		`CREATE INDEX hostexec_runs_grant ON hostexec_runs(grant_id, ended_at);`,
 	},
 	14: {`ALTER TABLE hostexec_runs ADD COLUMN lost_at INTEGER`, `CREATE INDEX hostexec_runs_pending ON hostexec_runs(ended_at) WHERE ended_at IS NULL`, `UPDATE hostexec_runs SET ended_at=NULL,lost_at=unixepoch()*1000 WHERE stopped='lost' AND started_at+timeout_ms+10000>unixepoch()*1000`},
+	15: {
+		"ALTER TABLE events ADD COLUMN home TEXT",
+		`UPDATE events SET home=json_extract(CAST(body AS TEXT),'$.home.session') WHERE type='post.created' AND json_extract(CAST(body AS TEXT),'$.home.kind')='dm'`,
+		`UPDATE events SET home=(SELECT json_extract(value,'$.reply.home.session') FROM json_each(CAST(events.body AS TEXT),'$.replies') WHERE json_extract(value,'$.reply.home.kind')='dm' LIMIT 1) WHERE type='turn.ended'`,
+		"CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL",
+	},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.

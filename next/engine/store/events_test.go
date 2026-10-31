@@ -154,8 +154,54 @@ func TestEventsBefore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := s.EventsBefore(context.Background(), "", 4, 2, nil)
+	events, err := s.EventsPage(context.Background(), "", 0, 4, 2, nil, "")
 	if err != nil || len(events) != 2 || events[0].ID != "b" || events[1].ID != "c" {
 		t.Fatalf("events %v, error %v", events, err)
 	}
+}
+
+func TestEventsPageDM(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	dm := contract.Conversation{Kind: contract.ConversationDM, Session: "s"}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	bodies := []contract.EventBody{
+		contract.PostCreated{Text: "feed", Home: contract.Conversation{Kind: contract.ConversationFeed}},
+		contract.PostCreated{Text: "ask", Home: dm},
+		contract.TurnStarted{Session: "s", Turn: "t"},
+		contract.TurnEnded{Session: "s", Turn: "t", Final: "answer", Replies: []contract.FinalReply{{Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: dm}}}},
+		contract.PostCreated{Text: "other", Home: contract.Conversation{Kind: contract.ConversationDM, Session: "x"}},
+	}
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		for i, body := range bodies {
+			if _, err := s.AppendEvent(tx, contract.Event{ID: contract.EventID(rune('a' + i)), Time: time.UnixMilli(10), From: owner, Body: body}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(stage string) {
+		events, err := s.EventsPage(ctx, "", 0, 6, 10, nil, "s")
+		if err != nil || len(events) != 2 || events[0].Seq != 2 || events[1].Seq != 4 {
+			t.Fatalf("%s: events %+v, error %v", stage, events, err)
+		}
+	}
+	check("append")
+	// The upgrade step fills home for events written before the column existed.
+	if _, err := s.writer.ExecContext(ctx, "UPDATE events SET home=NULL"); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range steps[15][1:3] {
+		if _, err := s.writer.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("upgrade")
 }
