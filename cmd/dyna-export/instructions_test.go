@@ -19,14 +19,14 @@ func TestInstructionsRoundTripAndDetectChangedText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "- (r1) First\n- (r2) Line\n  \n  ```\n    x\n  ```\n  \n"
+	want := "# Instructions\n\n- First\n- Line\n  \n  ```\n    x\n  ```\n  \n"
 	if text != want {
 		t.Fatalf("got %q, want %q", text, want)
 	}
 	if err := verifyInstructions(db, "r", text); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyInstructions(db, "r", text+"- (r3) injected\n"); err == nil {
+	if err := verifyInstructions(db, "r", text+"- injected\n"); err == nil {
 		t.Fatal("accepted extra rule")
 	}
 }
