@@ -224,6 +224,7 @@ type SessionStartRequest struct {
 	Profile ProfileName `json:"profile"`
 	Goal    string      `json:"goal,omitempty"`
 	Brief   string      `json:"brief,omitempty"`
+	Size    BoxSizeName `json:"size,omitempty"` // a placement root only; a child keeps its parent's size
 }
 type SessionStartResponse struct {
 	Session SessionID `json:"session"`
