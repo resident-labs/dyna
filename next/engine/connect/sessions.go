@@ -24,7 +24,7 @@ import (
 type mintCode struct {
 	JKT, Origin, Device, User string
 	Epoch, Generation         int64
-	End                       time.Time
+	End, Minted               time.Time
 }
 type handoffCode struct {
 	Session store.ConnectSession
@@ -266,7 +266,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 				delete(s.codes, k)
 			}
 		}
-		s.codes[hashToken(code)] = mintCode{c.JKT, c.Origin, c.Dev, c.Sub, c.Epoch, c.Generation, s.now().Add(5 * time.Minute)}
+		s.codes[hashToken(code)] = mintCode{c.JKT, c.Origin, c.Dev, c.Sub, c.Epoch, c.Generation, s.now().Add(5 * time.Minute), s.now()}
 		s.mu.Unlock()
 		sig := ed25519.Sign(relay.Key, []byte("dyna-connect-mint.v1\n"+c.Nonce+"\n"+hashToken(code)))
 		reply(w, 200, struct {
@@ -340,7 +340,7 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 			fail(w, 403, "invalid proof")
 			return
 		}
-		x = store.ConnectSession{RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation, Created: now, End: now.Add(30 * 24 * time.Hour), Grant: now}
+		x = store.ConnectSession{RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation, Created: now, Minted: c.Minted, End: now.Add(30 * 24 * time.Hour), Grant: now}
 	case req.Handoff != "":
 		h, ok := s.handoffs[hashToken(req.Handoff)]
 		delete(s.handoffs, hashToken(req.Handoff))

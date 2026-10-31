@@ -15,7 +15,7 @@ type ConnectSession struct {
 	ID, RelayDevice, Device, Origin, JKT, User string
 	Epoch, Generation                          int64
 	Hash                                       [32]byte
-	Created, Access, End, Grant                time.Time
+	Created, Access, End, Grant, Minted        time.Time
 	Stale                                      bool
 }
 
@@ -33,27 +33,40 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 		var device string
 		var revoked sql.NullInt64
 		err := tx.QueryRowContext(ctx, "SELECT d.id,d.revoked_at FROM connect_devices c JOIN devices d ON d.id=c.device WHERE c.relay_device=?", x.RelayDevice).Scan(&device, &revoked)
-		if errors.Is(err, sql.ErrNoRows) {
+		newDevice := errors.Is(err, sql.ErrNoRows)
+		if err != nil && !newDevice {
+			return err
+		}
+		if revoked.Valid && x.Minted.UnixMilli() <= revoked.Int64 {
+			return errors.New("Connect device revoked after mint")
+		}
+		if newDevice || revoked.Valid {
 			var token [32]byte
 			if _, err := rand.Read(token[:]); err != nil {
 				return err
 			}
+			previous := device
 			device = x.Device
 			if _, err := tx.ExecContext(ctx, "INSERT INTO devices(id,name,token_sha256,paired_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)", device, "Connect browser", token[:], x.Created.UnixMilli(), x.Created.UnixMilli(), x.End.UnixMilli()); err != nil {
 				return err
 			}
-			for _, scope := range FullDeviceScopes {
-				if _, err := tx.ExecContext(ctx, "INSERT INTO device_scopes(device,scope) VALUES(?,?)", device, scope); err != nil {
+			if newDevice {
+				for _, scope := range FullDeviceScopes {
+					if _, err := tx.ExecContext(ctx, "INSERT INTO device_scopes(device,scope) VALUES(?,?)", device, scope); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.ExecContext(ctx, "INSERT INTO connect_devices(relay_device,device) VALUES(?,?)", x.RelayDevice, device); err != nil {
+					return err
+				}
+			} else {
+				if _, err := tx.ExecContext(ctx, "INSERT INTO device_scopes(device,scope) SELECT ?,scope FROM device_scopes WHERE device=?", device, previous); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, "UPDATE connect_devices SET device=? WHERE relay_device=?", device, x.RelayDevice); err != nil {
 					return err
 				}
 			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO connect_devices(relay_device,device) VALUES(?,?)", x.RelayDevice, device); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		} else if revoked.Valid {
-			return errors.New("Connect device revoked")
 		} else if _, err := tx.ExecContext(ctx, "UPDATE devices SET expires_at=?,last_seen_at=? WHERE id=?", x.End.UnixMilli(), x.Created.UnixMilli(), device); err != nil {
 			return err
 		}
