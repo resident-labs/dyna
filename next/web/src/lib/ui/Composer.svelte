@@ -194,7 +194,16 @@
   /* The key hint shows only while the empty message box has focus. */
   .keys { font-size: 12px; color: var(--muted); visibility: hidden; }
   .composer:has(textarea:focus:placeholder-shown) .keys { visibility: visible; }
-  @media (pointer: coarse) { .composer .keys { visibility: hidden; } }
+  @media (pointer: coarse) {
+    .composer { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; padding: 8px 10px; }
+    .quote, .tray, .note, .mentions { grid-column: 1 / -1; }
+    .tray { max-height: 88px; overflow-y: auto; }
+    textarea { grid-column: 2; grid-row: 4; min-height: 40px; max-height: 30vh; padding: 8px 0; }
+    .actions { display: contents; }
+    .actions .attach { grid-column: 1; grid-row: 4; }
+    .actions .send { grid-column: 3; grid-row: 4; }
+    .composer .keys { display: none; }
+  }
   .actions button, .remove { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 0; border-radius: 8px; cursor: pointer; }
   .attach, .remove { background: none; color: var(--muted); }
   .remove { width: 24px; height: 24px; border-radius: 6px; }
