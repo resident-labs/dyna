@@ -65,15 +65,36 @@ test("one request is in flight, and the events that wait go together after it", 
   const sent: string[][] = [];
   const gates: (() => void)[] = [];
   const results: boolean[] = [];
-  const queue = new InputQueue(events => { sent.push(events.map(event => event.key ?? "")); return new Promise<void>(resolve => gates.push(resolve)); }, ok => results.push(ok));
+  let settle = () => {};
+  const queue = new InputQueue(events => { sent.push(events.map(event => event.key ?? "")); return new Promise<void>(resolve => gates.push(resolve)); }, ok => { results.push(ok); settle(); });
   const frame = { width: 10, height: 10 };
   const key = (name: string): ComputerInput[] => tap(name, name);
   queue.push(key("a"), frame);
   queue.push(key("b"), frame);
   queue.push(key("c"), frame);
   assert.deepEqual(sent, [["a", "a"]]);
+  const first = new Promise<void>(resolve => { settle = resolve; });
   gates[0]();
-  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  await first;
   assert.deepEqual(sent.slice(1), [["b", "b", "c", "c"]]);
   assert.deepEqual(results, [true]);
+});
+
+test("a refused batch goes again, first, when the owner retries", async () => {
+  const sent: string[][] = [];
+  const results: boolean[] = [];
+  let settle = () => {};
+  let fail = true;
+  const queue = new InputQueue(async events => { sent.push(events.map(event => event.key ?? "")); if (fail) throw new Error("refused"); }, ok => { results.push(ok); settle(); });
+  const frame = { width: 10, height: 10 };
+  const next = () => new Promise<void>(resolve => { settle = resolve; });
+  let done = next();
+  queue.push(tap("a", "a"), frame);
+  await done;
+  fail = false;
+  done = next();
+  queue.retry();
+  await done;
+  assert.deepEqual(sent, [["a", "a"], ["a", "a"]]);
+  assert.deepEqual(results, [false, true]);
 });
