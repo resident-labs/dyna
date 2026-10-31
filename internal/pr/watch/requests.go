@@ -170,12 +170,17 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 	// A response for a different resource cannot change the requested resource's quota.
 	matching := headers.Get("X-Ratelimit-Resource") == "" || strings.EqualFold(headers.Get("X-Ratelimit-Resource"), scope.Resource)
 	reset := rate.Reset
-	if n, err := strconv.ParseInt(headers.Get("X-Ratelimit-Reset"), 10, 64); err == nil && matching {
+	resetValue, resetErr := strconv.ParseInt(headers.Get("X-Ratelimit-Reset"), 10, 64)
+	if n, err := resetValue, resetErr; err == nil && matching {
 		reset = time.Unix(n, 0).UTC()
 	}
 	if reset.After(rate.Reset) {
 		rate.Reset = reset
 		rate.Remaining = nil
+		rate.Limit = nil
+	}
+	if n, err := strconv.Atoi(headers.Get("X-Ratelimit-Limit")); err == nil && n > 0 && resetErr == nil && matching && reset.Equal(rate.Reset) {
+		rate.Limit = &n
 	}
 	if n, err := strconv.Atoi(headers.Get("X-Ratelimit-Remaining")); err == nil && matching && reset.Equal(rate.Reset) {
 		// Replies in one quota window can only decrease its remaining count.
@@ -380,6 +385,9 @@ func applyRateLimitsWithRecovery(st *State, rates map[string]RateLimit, now time
 		// A stale snapshot must not increase quota or erase a later pause.
 		if previous.Reset.Equal(rate.Reset) && previous.Remaining != nil && rate.Remaining != nil && *previous.Remaining < *rate.Remaining {
 			rate.Remaining = previous.Remaining
+		}
+		if previous.Reset.Equal(rate.Reset) && rate.Limit == nil {
+			rate.Limit = previous.Limit
 		}
 		// A concurrent snapshot cannot clear a pause that has not expired.
 		if key != recoveryKey && now.Before(previous.PauseUntil) && previous.PauseUntil.After(rate.PauseUntil) {

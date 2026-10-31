@@ -48,6 +48,7 @@ const web = await import(pathToFileURL(app).href)
 // One typed fixture per registered event. A new event fails the test until it
 // gets a fixture and a card.
 const fixtures: Record<string, EventPayload> = {
+  'github-quota/low': { host: 'github.com', resource: 'core', remaining: 1000, limit: 5000, reset: '2026-10-31T21:00:00Z' },
   'machine/low-disk': {
     name: 'hermeslab',
     freeBytes: 3 * 1024 ** 3,
@@ -506,6 +507,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('filer' in payload) return `D-${payload.number}`
   if ('goalId' in payload) return payload.goalId
   if ('crossings' in payload) return payload.run
+  if ('host' in payload && 'resource' in payload) return payload.host
   if ('children' in payload) return payload.children[0]?.name ?? payload.parent
   if ('ruleId' in payload) return payload.sessions?.length ? `reached ${payload.sessions.length} sessions` : payload.ruleId
   if ('block' in payload) return payload.name
