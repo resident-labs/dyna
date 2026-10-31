@@ -122,10 +122,10 @@
   .opened > .detail time { margin-left: auto; }
   .workers { margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); }
   .step { margin-left: 16px; }
-  details { min-width: 0; overflow-wrap: anywhere; }
+  details { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
   summary::-webkit-details-marker { display: none; }
-  .details-chevron { margin-left: auto; display: inline-flex; transform: rotate(-90deg); }
+  .details-chevron { flex: none; margin-left: auto; display: inline-flex; transform: rotate(-90deg); }
   details[open] .details-chevron { transform: none; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>
