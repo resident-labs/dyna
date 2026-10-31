@@ -77,7 +77,9 @@ func TestHeadChunkRetriesDoNotStarveLaterChunks(t *testing.T) {
 			parent, cancel := context.WithDeadline(t.Context(), start.Add(15*time.Second))
 			defer cancel()
 			last := fmt.Sprintf("p%d:", tc.records)
-			g := GitHub{now: func() time.Time { return start.Add(elapsed) }, run: func(ctx context.Context, cmd *exec.Cmd) error {
+			headChunkNow = func() time.Time { return start.Add(elapsed) }
+			defer func() { headChunkNow = time.Now }()
+			g := GitHub{run: func(ctx context.Context, cmd *exec.Cmd) error {
 				// Simulated GitHub: every head but the last stalls for a minute; the last answers in one second.
 				latency := 60 * time.Second
 				if strings.Contains(cmd.Args[len(cmd.Args)-1], last) {
@@ -116,7 +118,9 @@ func TestHeadChunkFastChunksSucceedAcrossManyChunks(t *testing.T) {
 	parent, cancel := context.WithDeadline(t.Context(), start.Add(15*time.Second))
 	defer cancel()
 	re := regexp.MustCompile(`p([0-9]+):pullRequest`)
-	g := GitHub{now: func() time.Time { return start.Add(elapsed) }, run: func(ctx context.Context, cmd *exec.Cmd) error {
+	headChunkNow = func() time.Time { return start.Add(elapsed) }
+	defer func() { headChunkNow = time.Now }()
+	g := GitHub{run: func(ctx context.Context, cmd *exec.Cmd) error {
 		// Simulated GitHub: every request answers in 1.5 seconds unless its deadline comes first.
 		const latency = 1500 * time.Millisecond
 		if deadline, ok := ctx.Deadline(); ok && deadline.Before(start.Add(elapsed+latency)) {
