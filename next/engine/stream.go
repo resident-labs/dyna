@@ -89,6 +89,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	if err != nil {
 		return nil, failure(err)
 	}
+	if err := s.store.WakeLostInventory(ctx, session.Box); err != nil {
+		return nil, failure(err)
+	}
 	ctx, stop := context.WithCancel(ctx)
 	s.mu.Lock()
 	state := s.sessionLocked(session.ID)

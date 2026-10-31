@@ -80,6 +80,14 @@ func TestHostLossGuardsStaleResults(t *testing.T) {
 	if err := s.Read().QueryRow("SELECT state,disk_bytes,checked_at FROM hosts WHERE name='drain'").Scan(&state, &disk, &checked); err != nil || state != "draining" || disk != 42 || checked != 60 {
 		t.Fatalf("draining sample %s %d %d: %v", state, disk, checked, err)
 	}
+	if _, err := s.writer.Exec(`UPDATE boxes SET want='discard' WHERE id='b'`); err != nil {
+		t.Fatal(err)
+	}
+	ready := old
+	ready.State = contract.BoxReady
+	if ok, err := s.SetBoxLifecycle(ctx, old, ready, time.Time{}, 0, event); err != nil || ok {
+		t.Fatalf("reconnect after discard: %v %v", ok, err)
+	}
 	if ok, err := s.SetBoxLifecycle(ctx, old, next, time.Time{}, 0, event); err != nil || !ok {
 		t.Fatalf("fresh inventory: %v %v", ok, err)
 	}
