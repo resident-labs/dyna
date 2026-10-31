@@ -16,7 +16,8 @@
     call("device.list", {}).then(list => { devices = list.devices ?? []; admin = true; failed = false; }, (error: unknown) => {
       if (error instanceof SignedOut) signedout();
       else if (error instanceof APIError && error.detail.code === "forbidden") admin = false;
-      else failed = true;
+      // A failed poll keeps the list and the pair card on screen.
+      else if (!devices) failed = true;
     });
   }
   untrack(reload);

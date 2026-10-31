@@ -56,12 +56,12 @@
   let link = $derived(live && address ? pairLink(address, live.code) : "");
   let qr = $derived(link ? qrPath(link) : undefined);
 
-  // Copy answers in place for 2 seconds, as a post's Copy does.
+  // Copy answers in place for 2 seconds, as a post's Copy does. A plain http page has no navigator.clipboard, so its throw becomes a rejection.
   let copied = $state("");
   let timer: ReturnType<typeof setTimeout> | undefined;
   function copy() {
     clearTimeout(timer);
-    navigator.clipboard.writeText(link).then(() => { copied = "Copied"; }, () => { copied = "Could not copy"; })
+    Promise.resolve().then(() => navigator.clipboard.writeText(link)).then(() => { copied = "Copied"; }, () => { copied = "Could not copy"; })
       .finally(() => { timer = setTimeout(() => { copied = ""; }, 2000); });
   }
 </script>
@@ -72,7 +72,7 @@
     {#if left === 0}<button type="button" class="btn fill" onclick={() => void make()}>Make a new code</button>{/if}</div>{/if}
   <div class="side">
     <h3>Pair a device<button type="button" class="close" aria-label="Close and end this code" title="Close" onclick={close}><Icon name="close" /></button></h3>
-    {#if failed}<p class="problem" role="alert">The code did not change. <button type="button" class="retry" onclick={() => void make()}>Try again</button></p>{/if}
+    {#if failed}<p class="problem" role="alert">{live ? "The code did not change." : "The code was not made."} <button type="button" class="retry" onclick={() => void make()}>Try again</button></p>{/if}
     {#if live && !addresses.length}<p>No web address is set, so another device cannot reach this engine. Start the engine with <code>--web.route</code>, then pair again.</p>
     {:else if live}
       <div><div class="code" class:dead={left === 0}>{showCode(live.code)}</div><div class="left" role="timer">{left ? `Works once, for ${clock(left)}` : "Expired"}</div></div>
