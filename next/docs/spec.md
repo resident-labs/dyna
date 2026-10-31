@@ -784,7 +784,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 
 ### 5.9 Close (archive in M2)
 
-Close ends the whole subtree, as the card decided: each child is closed and deleted, deepest first, with its own archive. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
+Close writes `want=close` for the whole subtree, or `want=discard` when the owner chooses discard. The reconciler finishes close in durable steps. It closes and deletes each child, deepest first, with its own archive. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
 
 1. Stop the harness and every shell job.
 2. Archive the session's repository, if it has one. Push HEAD and a snapshot of the dirty tree to `refs/dyna/archive/<session>`. The snapshot is a commit of the working tree, with untracked files that are not ignored, made through a temporary index and `commit-tree` (the v1 #1246 method), so the session branch and the index do not change. The ref points at the snapshot, whose first parent is HEAD. Skip this when the tree is clean and HEAD is already on the remote.
@@ -793,7 +793,7 @@ Close ends the whole subtree, as the card decided: each child is closed and dele
 
 Closing a dormant session starts its box for the archive without admission. Archiving boxes are idle and short-lived, so many closed at once can briefly overcommit their host.
 
-The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
+The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. If removal fails, the box stays in `closing` with the error as its reason, and the reconciler retries removal after 30 s. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
 
 Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`, PK `(session, repo)`).
 
