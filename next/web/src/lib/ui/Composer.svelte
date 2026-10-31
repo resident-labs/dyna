@@ -22,7 +22,7 @@
     element?: HTMLTextAreaElement;
   } = $props();
   let picker: HTMLInputElement | undefined = $state();
-  // The limits line shows after a file did not fit, until the next add or send.
+  // The line that names a refused file and why shows until the next add or send.
   let note = $state("");
   let canSend = $derived(!files.busy && (!!value.trim() || !!quote || files.items.length > 0));
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
