@@ -66,8 +66,8 @@
 </article>
 
 <style>
-  .request { display: grid; gap: 8px; max-width: 760px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
-  .card { margin: 8px 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
+  .request { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .card { max-width: 760px; margin: 8px 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
   .yours { border-left: 3px solid var(--attention); padding-left: 14px; }
   .decided { gap: 4px; color: var(--muted); }
   .title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; font-size: 16px; line-height: 1.25; font-weight: 600; overflow-wrap: anywhere; }
