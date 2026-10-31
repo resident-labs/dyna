@@ -118,7 +118,7 @@ func TestPollSnapshotRefreshesChangedOrUnfinishedWork(t *testing.T) {
 
 func TestPollDueRecoversLegacyQuietBackoff(t *testing.T) {
 	now := time.Now()
-	r := &Record{Watching: true, Checked: now.Add(-2 * time.Minute), Polling: Polling{Next: now.Add(3 * time.Minute), IntervalMinutes: 5}}
+	r := &Record{State: prstate.PROpen, Watching: true, Checked: now.Add(-2 * time.Minute), Polling: Polling{Next: now.Add(3 * time.Minute), IntervalMinutes: 5}}
 	if !pollDue(State{}, r, now) {
 		t.Fatal("legacy quiet schedule delayed the next poll")
 	}
