@@ -17,11 +17,11 @@
   .name { color: var(--muted); font-size: 12.5px; }
   strong { font-size: 24px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .unit { margin-left: 4px; color: var(--muted); font-size: 12.5px; }
-  .track { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 7%, transparent); overflow: hidden; }
+  .track { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
   .fill { display: block; height: 100%; background: color-mix(in srgb, var(--muted) 70%, transparent); }
   .text { overflow: hidden; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
   .busy strong, .busy .text { color: var(--attention); }
-  .busy .fill { background: var(--attention); }
+  .busy .fill { background: var(--attention-fill); }
   /* A narrow card, such as on a phone, keeps three tiles in one row: smaller figures, and the text may take two lines
      instead of being cut. */
   @container (max-width: 320px) {

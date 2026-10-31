@@ -197,7 +197,7 @@
   .fold.collapsed :global(svg) { transform: rotate(180deg); }
   .menu { position: relative; margin-right: auto; }
   .list { position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 4; min-width: 200px; padding: 4px; display: grid;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }
   :global(.floating) .list { bottom: auto; top: calc(100% + 4px); }
   .list .label { margin: 6px 8px 2px; }
   .list [role="menuitem"] { width: auto; height: auto; justify-content: space-between; gap: 12px; display: flex; padding: 6px 8px; color: var(--text); font-size: 14px; }

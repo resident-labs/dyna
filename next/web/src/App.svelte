@@ -587,8 +587,8 @@
   .paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .paused button { flex: none; }
   .faces { display: flex; }
-  /* Faces side by side, ringed in the page color, so no face covers another's initials, which stay on the type scale. */
-  .faces > :global(.avatar) { box-shadow: 0 0 0 2px var(--bg); font-size: 11px; letter-spacing: 0; }
+  /* Faces side by side, on an opaque layer of the page color and ringed in it, so glass faces never mix. */
+  .faces > :global(.avatar) { --under: var(--bg); box-shadow: 0 0 0 2px var(--bg); letter-spacing: 0; }
   .more { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .shell.open.tucked { grid-template-columns: 64px 1fr; }
   .shell.tucked > aside.members { display: none; }
@@ -616,7 +616,7 @@
     .phone { display: inline; }
     /* The header keeps its width for the room's name: the faces and the count already say who works. */
     .more { display: none; }
-    .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: rgb(0 0 0 / 50%); }
+    .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: var(--scrim); }
   }
   .handle { display: none; }
   @media (max-width: 640px) {
@@ -664,6 +664,6 @@
   /* The docked computer needs 420 px. It docks beside the feed from 1024 px, where the feed keeps 540 px; below
      that it covers the feed, and Back or Escape closes it. */
   @media (min-width: 1024px) { .shell.open:not(.tucked):has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
-  @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); } }
+  @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px var(--shadow-lg); } }
   @media (max-width: 760px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
 </style>

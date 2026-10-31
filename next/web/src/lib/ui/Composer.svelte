@@ -142,7 +142,7 @@
   .composer:has(textarea:focus-visible) { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
   /* A raised card over the feed at the box's top left, as Discord's mention list; v1's list spans the whole box. */
   .mentions { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 2; width: min(320px, 100%); padding: 4px;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / 22%); }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px var(--shadow-md); }
   .head { margin: 0; padding: 4px 8px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
   .option { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 8px; border-radius: 6px; cursor: pointer; }
   .option.active { background: var(--selected); }
