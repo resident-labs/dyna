@@ -125,6 +125,8 @@ export type GrantKind = "hostexec" | "ask-owner";
 export type GrantMode = "approve" | "preapproved";
 export type Grant = { id: GrantID; kind: GrantKind; to: Principal; room: RoomID; hosts?: Array<HostName> | null; commands?: Array<CommandRule> | null; mode?: GrantMode; expires?: string; by: Principal; created: string; revoked?: string; };
 export type CommandRule = { program: string; args?: Array<string> | null; prefix: boolean; };
+export type HostexecGrantArgs = { room: RoomID; to: Principal; hosts: Array<HostName> | null; commands: Array<CommandRule> | null; mode: GrantMode; expires?: string; never: boolean; };
+export type GrantExpired = { grant: GrantID; };
 export type RoomID = string;
 export type SessionID = string;
 export type BoxID = string;
@@ -170,6 +172,7 @@ export type OpRan = { id: OpID; state: OpState; result: OpResult; };
 export type EventBody =
   | { type: "box.changed"; body: BoxChanged }
   | { type: "box.pressure"; body: BoxPressure }
+  | { type: "grant.expired"; body: GrantExpired }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
   | { type: "op.decided"; body: OpDecided }
@@ -183,7 +186,7 @@ export type EventBody =
   | { type: "turn.ended"; body: TurnEnded }
   | { type: "turn.started"; body: TurnStarted }
 ;
-export type OpArgs = PrOpenArgs;
+export type OpArgs = HostexecGrantArgs | PrOpenArgs;
 export type BoxMessageBody =
   | { type: "archive"; body: Archive }
   | { type: "turn.start"; body: TurnStart }

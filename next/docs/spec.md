@@ -495,7 +495,7 @@ M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`,
 - **The upgrade guard.** Before it opens anything, the engine checks the data folder. If `dyna.db` exists and `store.db` does not, it stops with `store_from_v1` and the text in section 8.4, which names the export step. The engine never opens or changes a v1 file. A `store.db` without `meta.format = 'dyna-v2'` is refused too.
 - **One writer.** One connection writes, in one goroutine. Every write is one transaction. A state change and its events are written in the same transaction. After `COMMIT`, the writer publishes the committed events to subscribers in `seq` order. Reads use a pool of read-only connections.
 - **Checkpoints off the writer path (D-582).** The writer connection sets `wal_autocheckpoint=0`. A checkpointer goroutine with its own connection runs `PRAGMA wal_checkpoint(PASSIVE)` when the WAL passes 64 MiB or 30 seconds pass, and `TRUNCATE` when the writer is idle. A `COMMIT` never waits for a checkpoint.
-- **No JSON state.** JSON appears only as the typed body columns (`events.body`, `operations.args`, `operations.card`), which only `contract` decodes. Settings, profiles and harness config stay JSON config files (r1).
+- **No JSON state.** JSON appears only as typed body columns (`events.body`, `operations.args`, `operations.card`, `grants.hosts`, `grants.commands`), which decode only into contract types and no query reads by field. Settings, profiles and harness config stay JSON config files (r1).
 - **Files.** Transcripts are append-only JSONL files per session. Attachments and large outputs are files stored by SHA-256. Rows hold the hash and the size.
 - **Backups.** Each day the engine runs `VACUUM INTO` from a read connection to `backups/`, and keeps 3. Daily backups are for disasters only. Relocation never uses them; it takes a fresh snapshot after writes stop (section 5.10).
 - **Budget.** `store.db` stays under 1 GiB. An archiver moves events older than 180 days for closed sessions to monthly JSONL files under `archive/`. It lands after the cutover, when the growth rate is measured.
@@ -517,8 +517,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `transcripts` | (`session`, `path`) PK, `acked_offset`, `file` |
 | M2 | `images` | section 5.2 |
 | M2 | `operations` | `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
-| M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at` |
-| M2 | `grant_hosts`, `grant_commands`, `grant_command_args` | section 6.1; no JSON columns |
+| M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `hosts` JSON, `commands` JSON, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at`, `expired_at` |
 | M2 | `hostexec_runs` | section 6.3 |
 | M2 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; the default notice subscription needs them |
 | M2 | `archives` | section 5.9 |
@@ -823,7 +822,7 @@ A host-exec grant is a `contract.Grant` with `Kind: hostexec` (3.5).
 - When several grants match, `preapproved` wins over `approve`. When none matches, the call fails with `no-grant`, and nothing runs.
 - The class of `hostexec.run` comes from the grant that matched: `auto` when a `preapproved` grant matches, and `owner` when only an `approve` grant matches.
 
-Tables: `grant_hosts` (`grant`, `host`), `grant_commands` (`grant`, `idx`, `program`, `prefix`) and `grant_command_args` (`grant`, `idx`, `pos`, `arg`).
+The `grants` table stores hosts and command rules as JSON columns.
 
 ### 6.2 Default grant, owner grants, revoke and expiry
 
