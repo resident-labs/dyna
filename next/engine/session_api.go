@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -31,13 +30,8 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	s.treeMu.Lock()
 	defer s.treeMu.Unlock()
 	if req.ClientID != "" {
-		var data []byte
-		err := s.store.Read().QueryRowContext(ctx, "SELECT response FROM client_replays WHERE method=? AND caller_kind=? AND caller_id=? AND client_id=?", contract.MethodSessionStart, caller.Kind, caller.Session, req.ClientID).Scan(&data)
+		response, err := s.store.SessionReplay(ctx, caller, req.ClientID)
 		if err == nil {
-			var response contract.SessionStartResponse
-			if err := json.Unmarshal(data, &response); err != nil {
-				return response, failure(err)
-			}
 			return response, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
