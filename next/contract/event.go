@@ -21,6 +21,14 @@ type EventBody interface {
 	isEventBody()
 }
 
+type RoomLimitsChanged struct {
+	CPUs     int   `json:"cpus"`
+	MemBytes int64 `json:"memBytes"`
+}
+
+func (RoomLimitsChanged) EventType() EventType { return "room.limits_changed" }
+func (RoomLimitsChanged) isEventBody()         {}
+
 type RoomPaused struct{}
 type RoomResumed struct{}
 
