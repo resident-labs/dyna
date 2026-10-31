@@ -1,13 +1,17 @@
 import type { Quote } from "./feed.ts";
 
-export type ForwardState = { quote?: Quote; previous?: Quote; draft: string };
+export type ForwardState = { quote?: Quote; previous?: Quote };
+
+export function sameForward(first: Quote | undefined, second: Quote): boolean {
+  return first?.author === second.author && first.at === second.at;
+}
 
 export function replaceForward(state: ForwardState, quote: Quote): ForwardState {
-  return { quote, previous: state.quote, draft: state.draft };
+  return sameForward(state.quote, quote) ? state : { quote, previous: state.quote };
 }
 
 export function undoForward(state: ForwardState): ForwardState {
-  return { quote: state.previous, draft: state.draft };
+  return { quote: state.previous };
 }
 
 // Pending and failed posts may move slightly, but never forward.

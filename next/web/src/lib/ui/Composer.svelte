@@ -11,6 +11,7 @@
   import { render } from "./PostRow.svelte";
   import { count, fileSize, type Quote } from "../feed.ts";
   import { maxFiles, type FileDraft } from "../attach.svelte.ts";
+  import { filesSummary } from "../files-summary.ts";
   import { hue } from "../identity.ts";
   import { mentionToken } from "../mentions.ts";
   // Enter sends and Shift+Enter starts a new line. A touch screen has no Shift+Enter, so there Enter starts a new line
@@ -93,7 +94,7 @@
   }
 </script>
 
-<div class="composer" class:has-files={touch.current && files.items.length > 0}>
+<div class="composer">
   {#if matches.length}
     <div class="mentions" id="{id}-list" role="listbox" aria-label="Sessions">
       <p class="head" aria-hidden="true">Sessions</p>
@@ -121,13 +122,16 @@
       {#if item.state === "failed"}<button type="button" class="retry" onclick={() => files.save(item.id)}>Retry</button>{/if}
       <button type="button" class="remove" aria-label="Remove {item.file.name}" title="Remove {item.file.name}" onclick={() => files.remove(item.id)}><Icon name="close" size={14} /></button>
     </li>{/each}</ul>{/snippet}
-  {#if files.items.length}{#if touch.current}<details class="files-toggle"><summary><Icon name="file" size={14} />{count(files.items.length, "file")}</summary>{@render fileTray()}</details>{:else}{@render fileTray()}{/if}{/if}
+  {#if files.items.length && !touch.current}{@render fileTray()}{/if}
   {#if note || over > 0}<p class="note" class:over={over > 0} role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
+  <div class="inputline">
+  {#if files.items.length && touch.current}<details class="files-toggle"><summary><Icon name="file" size={14} />{filesSummary(files.items)}</summary>{@render fileTray()}</details>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
     oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
     aria-activedescendant={matches.length ? `${id}-${pick}` : undefined}></textarea>
+  </div>
   <div class="actions">
     <button type="button" class="attach" aria-label="Attach files" title="Attach files" onclick={() => picker?.click()}><Icon name="clip" /></button>
     <input bind:this={picker} type="file" multiple hidden onchange={event => { note = files.add(event.currentTarget.files ?? [], forwarded); event.currentTarget.value = ""; element?.focus(); }} />
@@ -167,6 +171,7 @@
   .quoted :global(:is(p, ul, ol, pre, blockquote)) { margin: 0; }
   .quoted :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 0; font-size: inherit; }
   .files { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .inputline { display: contents; }
   textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; }
   /* iOS zooms into a field under 16 px when it takes focus. */
   @media (pointer: coarse) { textarea { font-size: 16px; } }
@@ -200,11 +205,11 @@
     .composer { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; padding: 8px 10px; }
     .quote, .tray, .note, .mentions { grid-column: 1 / -1; }
     .note.over { grid-row: 5; margin: 4px 0 0; }
-    .files-toggle { grid-column: 2; grid-row: 4; justify-self: start; z-index: 1; }
+    .inputline { display: flex; align-items: center; gap: 6px; min-width: 0; grid-column: 2; grid-row: 4; }
+    .files-toggle { flex: none; z-index: 1; }
     .files-toggle summary { display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; cursor: pointer; list-style: none; white-space: nowrap; }
     .files-toggle .tray { position: absolute; left: 0; right: 0; bottom: 100%; max-height: 180px; overflow-y: auto; padding: 8px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
-    .has-files textarea { padding-left: 76px; }
-    textarea { grid-column: 2; grid-row: 4; min-height: 40px; max-height: 30vh; padding: 8px 0; }
+    textarea { min-width: 0; flex: 1; min-height: 40px; max-height: 30vh; padding: 8px 0; }
     .actions { display: contents; }
     .actions .attach { grid-column: 1; grid-row: 4; }
     .actions .send { grid-column: 3; grid-row: 4; }
