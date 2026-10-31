@@ -63,10 +63,11 @@ func setupRepo(ctx context.Context, dir string, repo contract.BoxRepo, git gitRu
 		}
 		entries, readErr := os.ReadDir(dir)
 		if readErr != nil {
+			err = errors.Join(err, readErr)
 			return
 		}
 		for _, entry := range entries {
-			_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
+			err = errors.Join(err, os.RemoveAll(filepath.Join(dir, entry.Name())))
 		}
 	}()
 	if _, err = git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir); err != nil {
