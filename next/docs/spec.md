@@ -19,7 +19,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. The engine refuses owner-only calls from host-exec processes (section 6).
 7. **Root is a position in the tree.** Any session above another may approve its agent-class operations and start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The trial starts in M2, as soon as one box can build and test dyna (root, 2026-10-30). From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback until the cutover. The cutover follows only after the trial works and a dry-run import passes (section 11).
-9. **Some v1 features wait until after the cutover.** Voice, web search through Dyna and the librarian's updates come back after the cutover. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
+9. **Some v1 features wait until after the cutover.** Voice and web search through Dyna come back after the cutover. The library (the feature map, the librarian and its page) is cut from v2 for now (owner, 2026-10-30); the frozen v1 backup keeps the map. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
 11. **CLIProxyAPI is vendored and runs inside the engine.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` runs it in-process through its Go SDK, on the control-plane loopback, so v2 stays one binary (5.7). It lands in M1, because the model route needs it.
 12. **Size budget and scope cuts (r22).** Each milestone report counts product lines per package against the plan's budget. On 2026-10-30 the owner kept subtree moves, `Run` subscriptions and terminal questions, and cut these until a need shows: box growth (`box.grow`; only the `box.pressure` report ships, 5.4, owner q40), a box starting again on another host after a host failure (a lost box waits for its host, 5.10), box checkpoints, the relocation commands (a manual procedure instead, 5.10), the bundle data of issue watches and room MCP servers, one cgroup per shell job (process groups instead, 5.8), `node_modules` reflink seeding, and external members (7.3). M1 also moves the Dyna shell server and the transcript stream to M2 (5.8).
@@ -529,7 +529,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M3 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; hooks and the default notice subscription need them |
 | M3 | `repo_attribution`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
-| M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `library_entries`, `accounts` (labels and limits only), `counters`. The import also fills `pr_owners`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
+| M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `accounts` (labels and limits only), `counters`. The import also fills `pr_owners`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
 | M3 | `proxy_auths` | `id` PK, `provider`, `record` (the proxy's auth record, which holds tokens), `updated_at`. Only the embedded proxy's token store reads and writes it (5.7). |
 
 `counters` holds keyed counters (D-580), such as the next issue number per room. A counter update is one primary-key write with prebuilt SQL.
@@ -1002,7 +1002,7 @@ type GlobalBundle struct {
 	Hosts         []HostBundle   `json:"hosts"`         // from machines
 	Accounts      []AccountLabel `json:"accounts"`      // provider, label, limits; no credential
 	Devices       []DeviceBundle `json:"devices"`       // name, scopes, token hash
-	Repos         []RepoBundle   `json:"repos"`         // settings, default room, library entries
+	Repos         []RepoBundle   `json:"repos"`         // settings, default room
 	Skills        []SkillBundle  `json:"skills"`
 	Subscriptions []Subscription `json:"subscriptions"` // machine scope
 	Counts        BundleCounts   `json:"counts"`
@@ -1027,7 +1027,7 @@ type RoomBundle struct {
 
 type BundleCounts struct {
 	Rules, Goals, GoalItems, Issues, PRs, Questions int
-	LibraryEntries, Subscriptions, Hosts, Accounts  int
+	Subscriptions, Hosts, Accounts                  int
 	Devices, Sessions                               int
 }
 
@@ -1112,7 +1112,7 @@ Exactly one of `On` and `Every`, and exactly one of `Wake` and `Run`, is set. A 
 | v1 hooks | Count | v2 form |
 |---|---|---|
 | Engine timers: doctor, account usage, check-ins, maintenance, harness versions | 5 | engine scheduled tasks; not subscriptions |
-| Librarian on main-updated, pr-merged, every 10 min | 7 | not imported, because the librarian comes after the cutover. They are listed on the dyna room's handoff card and made again with the librarian. |
+| Librarian on main-updated, pr-merged, every 10 min | 7 | not imported, because the library is cut from v2 for now (owner, 2026-10-30). |
 | Owner self-update script | 1 | the built-in updater |
 | horizon upstream-watch | 1 | `Run` in a small box in room horizon, every 30 min. The bundle carries the script as a `RunFile`. |
 | Notices to root | new | default room subscription: `Wake` root on `notice.posted` and unowned repository events |
@@ -1157,14 +1157,14 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | updates | M3 manual `dyna update`; after: hourly auto-update | the owner turns updates back on in step 11 |
 | desktop | M3 | a thin window over the web app; the owner keeps it at the cutover |
 | relay | no change | a separate module and Cloudflare worker with the same protocol |
-| library | data at M3; after: the librarian session | the map must survive; updates can wait |
+| library | cut for now (owner, 2026-10-30) | not imported; the frozen v1 backup keeps the map |
 | issue-watch, room-mcp | after; their data is not imported (owner, r22) | no self-hosting step needs them; the owner adds watches and MCP servers again when they are ported |
 | voice and its children | after, ported as it is: the Go voice service with its persona, relaying to the room's root, with no redesign (owner, 2026-10-30) | no self-hosting step needs voice |
 | workflows | M3, before the cutover (9.2) | fl-rea depends on them (owner, 2026-10-30) |
 | web-search | after | Pi has no built-in search, so agents have no web search until this port (9.1) |
 | computers | M2, minimal (5.14): one browser per box, driven by the agent and watched by the owner | UI work inside v2 needs screenshots and the T3 Code side-by-side (5.13) |
 | computer-reminders | after | a convenience |
-| command-palette, library-page, services-page, settings-mcp, settings-profiles, web-settings | after | the CLI covers them until they are ported |
+| command-palette, services-page, settings-mcp, settings-profiles, web-settings | after | the CLI covers them until they are ported |
 | idle-compaction | after | a convenience; Pi compacts by itself |
 | pr-comment-trust | dropped; outside text is wrapped instead (decision 13) | no hold and no state; the owner accepted the risk |
 | ci-test-budget, pr-conflict-radar, room-prs | dropped | an Actions step fails slow tests; GitHub shows conflicts and the PR list (decision 13) |
@@ -1176,7 +1176,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | settings-harnesses | dropped | harness versions live in the image; sign-in moves to accounts |
 | claude-code | dropped | Pi is the only harness (section 0, decision 4) |
 
-**What the owner gives up from the cutover until each port:** voice calls, web search through Dyna, the librarian's updates, issue watches, room MCP servers, and several settings panes. External members (7.3) and the reviewer service (decision 13) are dropped. Paired devices, the desktop window, issues, goals, PRs, rules and the library map keep working.
+**What the owner gives up from the cutover until each port:** voice calls, web search through Dyna, issue watches, room MCP servers, and several settings panes. External members (7.3), the reviewer service (decision 13) and, for now, the library are dropped. Paired devices, the desktop window, issues, goals, PRs and rules keep working.
 
 ### 9.1 What we lose from Claude Code
 
