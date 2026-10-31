@@ -40,15 +40,15 @@ type CellResult struct {
 	Measured bool
 }
 
-// RunSuite executes the fixed schedule once. Setup, observation and cleanup errors
+// RunSuite executes the live-trial sanity schedule once. Setup, observation and cleanup errors
 // stop the run; a repeated early provider failure is retained as unmeasured.
 // The backend must journal attempts durably before execution and refuse replays.
-// task11Fallback is chosen once from the fake pass and applies to every arm.
-func RunSuite(ctx context.Context, backend Backend, task11Fallback bool, emit func(CellResult) error) error {
+// skipRepository is decided before the run. task11Fallback applies to both arms.
+func RunSuite(ctx context.Context, backend Backend, skipRepository, task11Fallback bool, emit func(CellResult) error) error {
 	if err := backend.Preflight(ctx); err != nil {
 		return fmt.Errorf("evaluation preflight: %w", err)
 	}
-	for _, cell := range Schedule() {
+	for _, cell := range Schedule(skipRepository) {
 		fixture, err := backend.Prepare(ctx, cell)
 		if err != nil {
 			return fmt.Errorf("prepare task %d: %w", cell.Task, err)
