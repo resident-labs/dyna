@@ -72,6 +72,7 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
  DROP TABLE room_shared;
  DROP TABLE host_rooms;
  ALTER TABLE pr_owners DROP COLUMN branch;
+ ALTER TABLE deliveries DROP COLUMN handoff_from;
  ALTER TABLE archives DROP COLUMN retry_at;
  DROP INDEX events_client_id;
  ALTER TABLE events DROP COLUMN client_id;
