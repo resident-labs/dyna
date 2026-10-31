@@ -18,7 +18,7 @@ test("reconnects after the last applied event", () => {
   let seq = 0;
   const stop = stream("room", () => seq, event => { seq = event.seq; }, url => {
     urls.push(url);
-    const source: EventConnection = { onmessage: null, onerror: null, close() {} };
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener() {}, close() {} };
     connections.push(source);
     return source;
   }, (callback, ms) => { scheduled = callback; delay = ms; return () => {}; });
