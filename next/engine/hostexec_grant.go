@@ -23,7 +23,10 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if a.Never {
 				expiry = "without expiry"
 			} else if !a.Expires.IsZero() {
-				expiry = "until " + a.Expires.UTC().Format(time.RFC3339)
+				expiry = "for up to 1 hour"
+				if hours := (a.Expires.Sub(s.now()) + time.Hour - 1) / time.Hour; hours > 1 {
+					expiry = fmt.Sprintf("for up to %d hours", hours)
+				}
 			}
 			var hosts []string
 			for _, host := range a.Hosts {
