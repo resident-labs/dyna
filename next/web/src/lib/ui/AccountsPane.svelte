@@ -4,6 +4,7 @@
   import { accountRows, accountState } from "../accounts.ts";
   import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
+  import Icon from "./Icon.svelte";
 
   let { bar, phone, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void } = $props();
   let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]);
@@ -87,7 +88,8 @@
       <h3>New {selected.displayName} account</h3>
       <label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt} /></label>
       {#if selected.connectMethod === "key"}
-        <label>Key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>
+        <label>Key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} class:invalid={keyFailed} /></label>
+        <p class="muted">Dyna hands the key to the sign-in service and never shows it again.</p>
         {#if keyFailed}<p class="error" role="alert">{selected.displayName} refused this key. Check it and paste it again.</p>{/if}
         <button class="btn fill" type="button" disabled={busy || !secret} onclick={() => void start()}>Add key</button>
       {:else if connectState === "expired"}
@@ -97,19 +99,18 @@
       {:else if !attempt}
         <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy} onclick={() => void start()}>Start sign-in</button>
       {:else if attempt.flow === "device"}
-        <p>Open the sign-in and enter this code.</p><strong class="code">{attempt.code}</strong>
-        <p><a href={attempt.link} target="_blank" rel="noopener noreferrer">Open {selected.displayName} sign-in ↗</a></p>
+        <p><span class="step">1</span> Open <a href={attempt.link} target="_blank" rel="noopener noreferrer">{selected.displayName} sign-in ↗</a> and enter this code.</p><strong class="code">{attempt.code}</strong>
         <p class="muted">Waiting for you to approve · Expires in {remaining(attempt.expiresAt, now)}</p>
       {:else}
-        <p>1　<a href={attempt.link} target="_blank" rel="noopener noreferrer">Open the {selected.displayName} sign-in and approve Dyna ↗</a></p>
-        <p>2　Copy the address of the page you land on and paste it here. That page may say it cannot be reached; that is expected.</p>
+        <p><span class="step done">✓</span> Open the {selected.displayName} sign-in and approve Dyna. <a href={attempt.link} target="_blank" rel="noopener noreferrer">Opened ↗</a></p>
+        <p><span class="step">2</span> Copy the address of the page you land on and paste it here. That page may say it cannot be reached; that is expected.</p>
         <div class="finish"><input aria-label="Address of the page you land on" bind:value={redirect} placeholder="http://localhost/..." autocomplete="off" /><button class="btn fill" type="button" disabled={busy || !redirect} onclick={() => void finish()}>Finish</button></div>
         <p class="muted">The address holds a one-time code. Dyna hands it to the sign-in service and never keeps it. Expires in {remaining(attempt.expiresAt, now)}.</p>
       {/if}
     </div>
   {/if}
 {/snippet}
-{#if phone && adding && !inline}<header class="phone-bar"><button class="btn ghost" type="button" onclick={close} aria-label="Back to Accounts">‹</button><strong>Add an account</strong></header>
+{#if phone && adding && !inline}<header class="phone-bar"><button class="btn ghost" type="button" onclick={close} aria-label="Back to Accounts"><Icon name="backChevron" size={20} /></button><strong>Add an account</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
 <div class="body">
   {#if loadFailed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
@@ -117,10 +118,10 @@
   {:else}
     {#if adding && !inline}
       <section class="add">
-        <div class="heading"><h2>Add an account</h2><button class="btn ghost" type="button" onclick={close}>Cancel</button></div>
-        <p class="muted">Choose a provider to connect.</p>
+        {#if !phone}<div class="heading"><h2>Add an account</h2><button class="btn ghost" type="button" onclick={close}>Cancel</button></div>{/if}
+        <p class="muted">Pick a provider. Each one connects in its own way.</p>
         <div class="providers">{#each providers as provider (provider.id)}
-          <button type="button" class:chosen={selected?.id === provider.id} onclick={() => choose(provider, false)}>{provider.displayName} <span>{provider.connectMethod === "key" ? "Key" : "Sign-in"}</span></button>
+          <button type="button" class:chosen={selected?.id === provider.id} onclick={() => choose(provider, false)}><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName} <span>{provider.connectMethod === "key" ? "key" : "sign-in"}</span></button>
         {/each}</div>
         {@render form()}
       </section>
@@ -139,7 +140,7 @@
               {@const status = accountState(account)}
               <div class="row"><div><strong>{account.label || `${provider.displayName} account ${index + 1}`}</strong>
                 {#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}
-                <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}{#if status.line} · {status.line}{/if}</div></div>
+                <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}</div></div>
                 {#if account.state === "sign_in_expired"}
                   <div class="expired"><span>Its limits show once it is signed in.</span><span>Remove it, then use Connect another to sign in again.</span></div>
                   {#if removing === account.id}<div class="remove-confirm"><span>Remove this account? Dyna deletes its sign-in. You can connect it again later.</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
@@ -172,12 +173,16 @@
   .row strong { font-size: 14px; } .row .muted { margin-top: 3px; }
   .add { padding: 16px; display: grid; gap: 12px; } .add .heading { margin: 0; }
   .providers { display: flex; flex-wrap: wrap; gap: 8px; }
-  .providers button { border: 1px solid var(--line); background: transparent; color: var(--text); padding: 8px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+  .providers button { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; border: 1px solid var(--line); background: transparent; color: var(--text); padding: 8px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
   .providers button.chosen { border-color: var(--focus); background: var(--selected); }
   .providers span { color: var(--muted); font-size: 12px; }
   .connect { display: grid; justify-items: start; gap: 12px; padding: 16px 48px; font-size: 14px; }
   .connect label { display: grid; grid-template-columns: 70px minmax(0, 450px); align-items: center; gap: 12px; width: 100%; color: var(--muted); }
   input { min-width: 0; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
-  .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-size: 24px; font-variant-numeric: tabular-nums; }
-  @media (max-width: 640px) { .row { flex-wrap: wrap; } .expired, .remove-confirm { flex-basis: 100%; margin: 0; } .body { padding: 12px 16px; } .connect { padding: 16px; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
+  input.invalid { border-color: var(--danger); }
+  .step { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; }
+  .step.done { background: transparent; border: 1px solid var(--line); }
+  .connect a { text-decoration: none; font-weight: 500; }
+  .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-family: "JetBrains Mono", monospace; font-size: 24px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+  @media (max-width: 640px) { .row { flex-wrap: wrap; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { margin-left: -10px; } .expired, .remove-confirm { flex-basis: 100%; margin: 0; } .body { padding: 12px 16px; } .connect { padding: 16px; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
 </style>
