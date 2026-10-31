@@ -23,6 +23,14 @@ export class MessageSearch {
     this.subscribe();
     return { state: this.state, posts: this.posts, total: this.total };
   }
+  prepare(query: string): void {
+    ++this.generation;
+    this.posts = [];
+    this.total = 0;
+    this.names = {};
+    this.state = query ? "searching" : "idle";
+    this.changed();
+  }
   async start(query: string, room?: string): Promise<void> {
     const generation = ++this.generation;
     this.query = query;
