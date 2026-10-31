@@ -29,9 +29,11 @@ aside.members { border-right: 0; border-left: 1px solid var(--line); }
 /* The rooms column: a rail of room squares beside the selected room's feed, direct messages and the owner footer. */
 aside.rooms { display: grid; grid-template-columns: 56px minmax(0, 1fr); overflow: hidden; }
 .rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; border-right: 1px solid var(--line); overflow-y: auto; }
-.rail a { padding: 2px; border-radius: 30%; }
+.rail a { position: relative; padding: 2px; border-radius: 30%; }
 .rail a:hover { background: none; box-shadow: 0 0 0 2px var(--line); }
-.rail a[aria-current="page"] { background: none; box-shadow: 0 0 0 2px var(--focus); }
+/* The selected room gets a short pill on the rail's edge, as Discord does; the focus ring stays for focus only. */
+.rail a[aria-current="page"] { background: none; }
+.rail a[aria-current="page"]::before { content: ""; position: absolute; left: -8px; top: calc(50% - 12px); width: 4px; height: 24px; border-radius: 0 4px 4px 0; background: var(--text); }
 .column { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .column footer { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); }
 .label { font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -67,6 +69,7 @@ nav a[aria-current="page"] { background: var(--selected); color: var(--text); fo
   .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); --panel-top: 109px; }
   aside.rooms { display: block; border: 0; border-bottom: 1px solid var(--line); }
   .rail { flex-direction: row; padding: 8px 12px; border: 0; overflow-x: auto; }
+  .rail a[aria-current="page"]::before { left: calc(50% - 12px); top: auto; bottom: -8px; width: 24px; height: 4px; border-radius: 4px 4px 0 0; }
   .column { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

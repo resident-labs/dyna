@@ -27,7 +27,9 @@
   textarea:focus-visible { outline: none; }
   textarea::placeholder { color: var(--muted); }
   .actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
-  .keys { font-size: 12px; color: var(--muted); }
+  /* The key hint shows only while the empty message box has focus. */
+  .keys { font-size: 12px; color: var(--muted); visibility: hidden; }
+  .composer:has(textarea:focus:placeholder-shown) .keys { visibility: visible; }
   button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--focus); color: var(--bg); cursor: pointer; }
   button:disabled { background: var(--selected); color: var(--muted); cursor: default; }
   button:focus-visible { outline-offset: 2px; }
