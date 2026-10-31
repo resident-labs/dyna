@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountRows, accountState } from "./accounts.ts";
+import { accountRows, accountState, removalPrompt } from "./accounts.ts";
 import type { Account } from "./contract.gen.ts";
+
+test("removal explains what Dyna deletes for each connection method", () => {
+  assert.equal(removalPrompt("key"), "Remove this account? Dyna deletes its key. You can connect it again later.");
+  assert.equal(removalPrompt("oauth"), "Remove this account? Dyna deletes its sign-in. You can connect it again later.");
+});
 
 test("unknown is muted and expired accounts sort first", () => {
   const unknown: Account = { id: "a", provider: "anthropic", label: "Alpha", rooms: null, state: "unknown" };
