@@ -111,7 +111,6 @@
   .file:hover { background: var(--hover); }
   /* A file that did not load is plain text: nothing to open. */
   .file.dead { cursor: default; }
-  .file.dead:hover { background: none; }
   .file.dead .file-name { color: var(--text); }
   .reload { margin-left: auto; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
   .reload:hover { color: var(--text); text-decoration: underline; }
