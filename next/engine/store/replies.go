@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Store) turnReplies(ctx context.Context, tx *sql.Tx, room contract.RoomID, session contract.SessionID, turn contract.TurnID) ([]contract.Delivery, []contract.Event, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to FROM deliveries WHERE to_id=? AND turn=? ORDER BY seq", session, turn)
+	rows, err := tx.QueryContext(ctx, "SELECT reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to FROM deliveries WHERE to_kind=? AND to_id=? AND turn=? ORDER BY seq", contract.PrincipalSession, session, turn)
 	if err != nil {
 		return nil, nil, err
 	}

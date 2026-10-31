@@ -757,7 +757,43 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	if len(events) > 0 {
 		next = events[len(events)-1].Seq
 	}
-	return contract.EventsListResponse{Events: events, Next: next}, nil
+	ids := map[contract.SessionID]bool{}
+	for _, event := range events {
+		if event.From.Kind == contract.PrincipalSession {
+			ids[event.From.Session] = true
+		}
+		switch body := event.Body.(type) {
+		case contract.SessionStarted:
+			ids[body.Session] = true
+		case contract.SessionClosed:
+			ids[body.Session] = true
+		case contract.TurnStarted:
+			ids[body.Session] = true
+		case contract.TurnEnded:
+			ids[body.Session] = true
+		case contract.ShellJobEnded:
+			ids[body.Session] = true
+		case contract.BoxChanged:
+			ids[body.Session] = true
+		case contract.OpRequested:
+			if body.By.Kind == contract.PrincipalSession {
+				ids[body.By.Session] = true
+			}
+		}
+	}
+	names := map[contract.SessionID]string{}
+	for id := range ids {
+		if id == "" {
+			continue
+		}
+		var name string
+		err := s.store.Read().QueryRowContext(ctx, "SELECT name FROM sessions WHERE id=?", id).Scan(&name)
+		if err != nil {
+			return contract.EventsListResponse{}, failure(err)
+		}
+		names[id] = name
+	}
+	return contract.EventsListResponse{Events: events, Next: next, Names: names}, nil
 }
 
 func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req contract.BoxHelloRequest) (contract.BoxHelloResponse, *contract.Error) {
