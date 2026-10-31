@@ -39,7 +39,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
    - **GitHub token.** It stays in `gh`'s own store on the engine host. The engine reads it when it starts, so Dyna's files and unit files hold no token.
    - **Backups.** Each daily backup is also copied over SSH to a second machine, as one archive of `store.db`, `files/`, `transcripts/`, `archive/`, `connect/` and the proxy sign-ins. Git mirrors and box data stay out, because the owner can fetch or rebuild them. The archive is encrypted with age to a recipient whose private key is not on the engine host, so the second machine can hold it even when other work runs there. Two engine flags name the machine and the recipient; the owner chooses both. The engine's SSH key can only add a copy (`docs/backup-recv.sh`): it gets no shell and cannot read older copies. Without the flags the engine keeps local copies only.
    - **Reboot.** The user unit starts the engine again. Rootless containers do not restart after a host reboot, so the host check (5.10) marks them `stopped`, and the next wake starts them.
-15. **Agents reach Dyna through MCP tools and a live context snapshot** (owner, 2026-10-31). The box agent serves Dyna's operations as one MCP server, and Pi keeps most of the tools behind its own `tool_search`. A Dyna extension gives Pi the snapshot in keyed prompt sections. The `dyna` CLI stays for everyone, and Pi stays the only harness. Section 7.9 holds the design and its phase plan.
+15. **Agents reach Dyna through MCP tools and a live context snapshot** (owner, 2026-10-31). The box agent serves Dyna's operations as one MCP server, and Pi keeps most of the tools behind its own `tool_search`. A Dyna extension puts the snapshot in the system prompt at the first run and at each compaction, and sends changes between those points as user-turn deltas, on every provider. The `dyna` CLI stays for everyone, and Pi stays the only harness. Section 7.9 holds the design and its phase plan.
 
 ### Settled owner decisions (do not reopen)
 
@@ -989,7 +989,7 @@ Drafted by dyna:code-architectural.
 
 ### Rules
 
-Each room keeps standing rules. A session sees the active global and room rules in the `dyna_rules` section of its context snapshot (7.9), which the engine renders from the current rules at each dispatch. A change reaches every open session at its next run, without starting a turn: an added or edited rule appears in the new section, and a removed rule is gone from it. A running Pi therefore never keeps a removed rule, and no box restart is needed. Rule changes create no deliveries; the `rule.*` feed events stay for the owner's view.
+Each room keeps standing rules. A session sees the active global and room rules in the `dyna_rules` section of its context snapshot (7.9), which the engine renders from the current rules at each dispatch. A change reaches every open session at its next run, without starting a turn, through the snapshot delta: an added or edited rule appears in full, and a removed rule is named as removed. The system prompt picks up the change at the next fold, at compaction. No box restart is needed. Rule changes create no deliveries; the `rule.*` feed events stay for the owner's view.
 
 ### 7.1 Principals
 
@@ -1035,7 +1035,7 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 
 The engine sets the surface and the reply channel of each delivery from its source (3.4). The sender never sets them. Root uses the same table.
 
-Each input starts with one engine frame: `[Dyna] From <sender>, <surface>. <attachments> <reply sentence>`, followed by a newline and the sender's text. Only the first line is the engine frame; later frame-like text belongs to the sender. `box.hello` returns the startup prompt text: stable session identity and the sender-trust rule for the frame above. It names no tools and no commands, and it holds no rules or other state: tool descriptions say how to call each tool, and the snapshot sections carry the state (7.9).
+Each input starts with one engine frame: `[Dyna] From <sender>, <surface>. <attachments> <reply sentence>`, followed by a newline and the sender's text. Only the first line is the engine frame; later frame-like text belongs to the sender. `box.hello` returns the startup prompt text: stable session identity and the sender-trust rule for the frame above and for the snapshot's `dyna_context` delta message, which is engine text too. It names no tools and no commands, and it holds no rules or other state: tool descriptions say how to call each tool, and the snapshot sections carry the state (7.9).
 
 | Source of the input | Surface | Channel | Target and home |
 |---|---|---|---|
@@ -1121,12 +1121,12 @@ Owner, 2026-10-31 (decision 15). Agents reach Dyna through one MCP server that t
 
 | Part | Owns |
 |---|---|
-| Pi (upstream features) | MCP client connections, deferred exposure, `tool_search` and codemode, the skill list, keyed prompt sections (diff, timing and compaction), and the extension host |
-| Dyna's Pi extension | One file of strict TypeScript, about 90 lines, at `harness/pi/extension/dyna.ts`, shipped in `dyna-base`. In `before_agent_start` it sets the snapshot sections it receives from the box agent. It uses only public upstream APIs, so it also runs on stock Pi. |
+| Pi (upstream features, one fork patch) | MCP client connections, deferred exposure, `tool_search` and codemode, the skill list, keyed prompt sections, compaction and the extension host |
+| Dyna's Pi extension | One file of strict TypeScript, about 120 lines, at `harness/pi/extension/dyna.ts`, shipped in `dyna-base`. It puts the full snapshot in the head and sends later changes as reminder blocks (The context snapshot, below). Besides the fork patch's compaction field, it uses only public upstream APIs. |
 | Box agent | The `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`. Each `tools/call` becomes one `POST /v1/<method>` on the box socket. It writes Pi's `mcp.json` entry for `dyna` and hands the snapshot from `TurnStart` to the extension. It holds no authority and no credential. |
 | Engine | The only authority. A tool call and a CLI command reach the same method, through the same box socket, as the same principal, under the same checks (3.7, 7.1). It renders the snapshot with `context.snapshot`. |
 
-**No Pi fork patch.** Upstream Pi already has every mechanism this needs: `before_agent_start` sets `systemPromptOptions.sections`, Pi diffs the sections against the current system message, appends only the changed ones (`null` for a removed one), and the compaction entry keeps the current system message. The only Pi work is to cherry-pick two merged upstream tool-search ranking fixes, earendil-works/pi#11625 (names weigh above descriptions) and #11632 (more matched terms rank first), and name them in `third_party/pi/DYNA.md` (r26).
+**Pi work.** Cherry-pick two merged upstream tool-search ranking fixes, earendil-works/pi#11625 (names weigh above descriptions) and #11632 (more matched terms rank first), and add one fork patch for the compaction head (The context snapshot, below). `third_party/pi/DYNA.md` names all three (r26).
 
 #### Tools
 
@@ -1140,7 +1140,7 @@ The base is T3 Code's MCP server (`apps/server/src/mcp/` in pingdotgg/t3code, re
 - **Title and hints.** Each tool has a title and the MCP annotations `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, as T3 sets them. Pi reports them to extensions.
 - **A required access level.** T3 declares every handler through `McpToolAccess` (`reads`, `actsAsCaller`, `writes`, `startsThreads`, …), and a lint rule forbids any other registration. Each Dyna registry entry has a required typed `Access`: `session` (any session), `tree` (an ancestor of the target), `grant` (needs a grant, 3.5) or `owner`. The MCP server registers tools only from the registry, and it never lists `owner` entries. The engine still makes the final check.
 - **Failures are results.** As T3 returns `OrchestratorMcpFailure {code, message}` with `failureMode: "return"`, a refused call returns an MCP result with `isError` and `{code, message}`. The code is the contract's `ErrorCode` or the typed cause the engine already uses (`no_grant`, `host_busy`, `session_closing`, …). There is no MCP-only code list, so one code set serves the CLI, the web app and MCP. The message names the fix.
-- **A retry key.** As T3's `clientRequestId`, every creating action takes an optional `client_id`. The same caller repeating it gets the first result and creates nothing, as `PostRequest.ClientID` already works (3.3). This covers `post`, `session` start, `op` submit, `goal` set and `issue` file. Box sockets reconnect, so a retried start must not create a second child.
+- **A retry key.** As T3's `clientRequestId`, every creating action takes an optional `client_id`. The same caller repeating it gets the first result and creates nothing, as `PostRequest.ClientID` already works (3.3). This covers `post`, `session` start, `hostexec` request_grant, `goal` set and `issue` file. Box sockets reconnect, so a retried start must not create a second child.
 
 | Tool | Actions | Methods | Phase |
 |---|---|---|---|
@@ -1148,12 +1148,12 @@ The base is T3 Code's MCP server (`apps/server/src/mcp/` in pingdotgg/t3code, re
 | `session` | start, list, stop, close, restart, set_profile, move, profiles | `session.*`, `profile.list` | 1 |
 | `room` | log, repos, pause | `events.list`, `room.repos`, `room.pause` | 1 |
 | `rules` | list, add, edit, remove | `rule.*` | 1 |
-| `op` | list, decide, withdraw | `op.list`, `op.decide`, `op.withdraw` | 1 |
+| `op` | list, withdraw | `op.list` (own operations), `op.withdraw` (own pending ones); deciding is the owner's (3.5 classes) | 1 |
 | `hostexec` | run, request_grant | `hostexec.run`, `op.submit` with `hostexec.grant` | 1 |
 | `pr` | open, approve, status | `pr.open`; `pr.approve` and status in M3 | 1, 2 |
 | `visual` | check | the visual checker in the box | 1 |
 | `computer` | open, click, type, text, screenshot | the box computer (5.14); screenshots return as image results | 1 |
-| `context` | show, usage | `context.snapshot` (one section in full), `accounts.quota` | 1 |
+| `context` | show, usage | `context.snapshot` for both (show: one section in full; usage: the usage section) | 1 |
 | `goal` | set, list, item, done, journal | `goal.*` | 2 |
 | `issue` | file, list, show, close | `issue.*` | 2 |
 | `question` | ask, list | `question.*`; ask needs the `ask-owner` grant | 2 |
@@ -1161,7 +1161,8 @@ The base is T3 Code's MCP server (`apps/server/src/mcp/` in pingdotgg/t3code, re
 | `subscription` | list, add, remove | `subscription.*` | 2 |
 
 - **Loaded and deferred.** `post` is declared to every session. `session` is also declared to a session whose depth is below `--session.max-depth`, because starting and managing children is its main work. Every other tool has `deferred` exposure, through `toolExposure` in the box agent's `mcp.json`. Once `tool_search` loads a tool, it stays declared on that branch. The 4 shell tools stay as they are.
-- **Owner-only methods are not tools.** `host.add`, `device.*`, `room.create`, `room.set_limits`, the accounts sign-in methods, the terminal and the shell watch stay in the CLI and the web app.
+- **Owner-only methods are not tools.** `host.add`, `device.*`, `room.create`, `room.set_limits`, `op.decide`, `accounts.quota`, the accounts sign-in methods, the terminal and the shell watch stay in the CLI and the web app.
+- **Access changes.** These change engine authority. `profile.list` opens to sessions that may start children, and it returns no account binding or credential. `session.restart` takes `tree` access, as stop and close do. `room.repos` takes `session` access for the caller's own room.
 - **Long calls.** Pi's MCP client times out a call after 60 seconds by default, and T3 Code hit this. The box agent sets the `dyna` server's `timeout` to 600 seconds and sends MCP progress notifications while a call runs; a progress notification resets Pi's timer. Work that can outlast that, such as `hostexec run` or `workflow run`, returns its operation at once, and the session wakes on `op.ran` (6.3).
 
 **What Pi shows the model about deferred tools** (checked in the vendored source, `extensions/mcp/index.ts` and `extensions/tool-search/tool.ts`). Pi does not list deferred tool names anywhere. Its `mcp_servers` prompt section has one intro line, then one line per server: `- mcp__dyna (tool_search): <first line of the server description>`, with at most 250 characters per description and 4,096 for the section. The `tool_search` description lists no tools. Its index holds each tool's name, description and schema property names, and the server's description and instructions. So the server description is the only place where the model learns which areas Dyna's deferred tools cover. The box agent writes it from the registry, naming only the tools that are deferred for this session. The startup prompt names no tools.
@@ -1182,7 +1183,19 @@ A unit test fails when an action that a session may call has no CLI command, or 
 
 #### The context snapshot
 
-The engine renders the snapshot from current state when it dispatches a turn, and `TurnStart` carries it. The extension sets one prompt section per part in `before_agent_start`, which runs at the start of every run. Pi appends only the sections that changed. A steer during a run does not refresh them, because the steer already carries its news.
+Owner decision, 2026-10-31: the snapshot uses v1's model on every provider. The system prompt changes only where the cached prefix is rebuilt anyway, and changes between those points go as user-turn deltas. Dyna sends no snapshot text as a mid-conversation system message, so no part of this path depends on a model's catalog flags.
+
+The engine renders the snapshot from current state when it dispatches a turn, and `TurnStart` carries it. The extension delivers it under five invariants:
+
+1. **Fold.** The `dyna_*` prompt sections change only at a session's first run and at each compaction. At the first run, `before_agent_start` sets them in `systemPromptOptions.sections`, so they are part of the head. At each later run the extension sets the same values again, so Pi's section diff finds no change and appends nothing. At compaction the fold happens in the compaction step itself (the fork patch below), so no delta is lost between the summary and the next run.
+2. **Delta.** Every other run whose snapshot differs from the last delivered state starts with one user-turn message, through `before_agent_start`'s `message` (`customType: "dyna_context"`), which Pi sends as a user message. It holds only the changed sections in full, in their own tags, and it names each removed section or rule: "Rule r5 removed; it no longer applies." A run with no change adds nothing. The message stays in the transcript, so later requests repeat the same bytes and the cache holds.
+3. **Durable state.** The extension keeps the last delivered state in Pi's session file with `appendEntry`, so a box restart neither repeats nor drops a delta. A `continue` run skips `before_agent_start` (checked in `agent-session.ts`) and adds nothing; the next run carries the change.
+4. **Trust.** The startup prompt's sender-trust rule names the `dyna_context` message as engine text, as it does for the `[Dyna]` frame (7.5).
+5. **Same path for all providers.** There is no model branch. A steer during a run sends no delta, because the steer already carries its news.
+
+**The compaction fork patch.** `SessionManager.appendCompaction` copies the replayed current system message into the compaction entry, and that copy is the head after compaction. Without a patch, that head would keep the snapshot from the last fold, and the extension could only refresh it with a section change after the summary: a mid-conversation system message, and a second cache break on the run that follows. A retry after an overflow starts with `continue`, so it would also run on the stale head. The patch adds an optional `systemPromptSections` patch to `SessionBeforeCompactResult`. `appendCompaction` applies it to the copied system message, `null` removing a section, on every compaction path (manual, threshold and overflow). The extension returns the full current snapshot from `session_before_compact`, which it reads from the box agent at that moment, and it records that state as delivered. The first request after compaction is uncached anyway, so the fold costs no extra break. Upstream check, 2026-10-31: no upstream issue or PR lets an extension change the compaction head. #5253 asked for cache-aware compaction and was closed as not planned, and #11234 shows that `session_before_compact` reads only `cancel` and `compaction`. The patch is about 15 lines plus one test, written to go upstream, and we offer it there.
+
+The extension sets only `systemPromptOptions.sections`. It never returns `systemPrompt` or sets `forceSystemPrompt`, because upstream collapses every system message into the head for both (open issues #11157 and #10489). Pi's own prompt and tool changes keep Pi's behavior: a `tool_search` load records the new tool as a tool change, sent natively where the model allows it.
 
 | Section | Contents | Cap (tokens) |
 |---|---|---|
@@ -1194,14 +1207,14 @@ The engine renders the snapshot from current state when it dispatches a turn, an
 | `dyna_profiles` | ratings and limits; only for a session that may start children | 300 |
 | `dyna_usage` | each account window in 10% steps, with pace: ahead, on or under | 80 |
 
-- **Budget.** The sections other than `dyna_rules` hold about 400 tokens typically and 1,130 at most. A section over its cap ends with "N more: context show".
-- **Rules are never cut.** Every active rule reaches every session in full at its next run, because rules bind every session and a session may never call `context show`. Rule text is already capped at 2,000 characters per rule (3.7), so the owner and root bound the section's size by the rules they keep. When `dyna_rules` passes 2,000 tokens, `rule.list` and the web app's rules view show its size, so the owner can consolidate rules; nothing is dropped.
+Caps count characters, at 4 per token, so the renderer needs no tokenizer and tests are exact.
+
+- **Budget.** The sections other than `dyna_rules` hold about 1,600 characters typically and 4,520 characters at most. A section over its cap ends with "N more: context show". A delta holds only changed sections, so it is usually far smaller.
+- **Account names.** `dyna_usage` names each account by provider and number ("Claude 1"), never by its label or sign-in name, because those can carry the owner's identity.
+- **Rules are never cut.** Every active rule reaches every session in full at its next run, because rules bind every session and a session may never call `context show`. Rule text is already capped at 2,000 characters per rule (3.7), so the owner and root bound the section's size by the rules they keep. When `dyna_rules` passes 8,000 characters, `rule.list` and the web app's rules view show its size, so the owner can consolidate rules; nothing is dropped.
 - **Pace.** It compares the share used with the share of the window that has passed. "Ahead" means more than 10 points above, "under" means more than 10 points below, and anything else is "on". Agents use it to choose a cheaper profile.
-- **No churn.** Sections hold no timestamps or durations, so a run where nothing changed appends nothing.
-- **Removed rules.** A removed rule is absent from the next `dyna_rules` section (section 7, Rules).
-- **Compaction.** The compaction entry keeps the current system message, so the sections survive it.
-- **Resume.** A run that Pi starts with `continue` after a box restart skips `before_agent_start` (checked in `agent-session.ts`). The sections then stay as they were, and the next prompt refreshes them.
-- **Providers.** Pi sends a section change as a mid-conversation system message only to models whose catalog entry allows it (9.1 item 2). For other models, Pi folds all system messages into the head system prompt, so a change re-sends the prompt and that request loses its cache. The evaluation measures cache-read share after a change for each provider. If the loss is material, the extension sends changed sections for those models as a run message (`before_agent_start` returns `message`) and sends the full snapshot after compaction. Pi's model compat decides between the two.
+- **No churn.** Sections hold no timestamps or durations, so a run where nothing changed sends no delta.
+- **Removed rules.** A removed rule leaves at the next run through a delta that names it, and it leaves the system prompt at the next fold (section 7, Rules).
 
 #### Skills and room MCP servers
 
@@ -1232,11 +1245,11 @@ These are source checks, not live captures. The evaluation confirms them.
 
 dyna:lead-rewrite schedules the build after the M2 trial parts (section 11).
 
-1. **Phase 1.** The registry and the 10 phase-1 toolkits, the `dyna` MCP server in the box agent, `context.snapshot` with every section whose data exists, the extension, the `client_id` retry key, the shorter `box.hello` text (7.5), the end of rule-change deliveries (section 7, Rules), and the two upstream Pi cherry-picks. Phase 1 ships behind one profile setting, `agentSurface`, off by default. Off keeps today's `box.hello` text, today's quiet rule-change deliveries, and no `dyna` MCP server or snapshot.
+1. **Phase 1.** The registry and the 10 phase-1 toolkits, the `dyna` MCP server in the box agent, `context.snapshot` with every section whose data exists, the extension, the `client_id` retry key, the shorter `box.hello` text (7.5), the end of rule-change deliveries (section 7, Rules), the two upstream Pi cherry-picks and the compaction fork patch. Phase 1 ships behind one setting, `agentSurface`, a typed per-profile enum: `off` (the default), `area` or `action`. `area` and `action` are the evaluation's two MCP arms, and both turn on the snapshot. `off` keeps today's `box.hello` text, today's quiet rule-change deliveries, and no `dyna` MCP server or snapshot. Once the evaluation picks a shape, the switch and the losing shape go.
 2. **Evaluation**, run once in a sandbox by a terra agent (10.1), with the setting on. It settles the tool shape. When the gate passes, the default becomes on. The setting and the old `box.hello` text go in the next release, so 7.5 then describes the only behavior.
 3. **Phase 2, in M3.** Each M3 feature ships its toolkit with its methods: `goal`, `issue`, `question`, `workflow`, `subscription`, and `pr` approve and status. The `dyna_goal` section and the skills port land with their features.
 
-**Size (r22).** About +1,150 product lines in phase 1: `contract` +300 (registry and snapshot types), `box` +400 (MCP adapter that reuses the shell server's framing, skills writer, snapshot hand-off), `engine` +310 (snapshot renderer, `TurnStart` field, `client_id` replay, minus rule deliveries and the command list in `box.hello`), `harness` +10, `cmd` ±20, and about 90 TypeScript lines. Each phase-2 action costs about 10 registry lines instead of a CLI-only command and instruction text.
+**Size (r22).** About +1,150 product lines in phase 1: `contract` +300 (registry and snapshot types), `box` +400 (MCP adapter that reuses the shell server's framing, skills writer, snapshot hand-off), `engine` +310 (snapshot renderer, `TurnStart` field, `client_id` replay, minus rule deliveries and the command list in `box.hello`), `harness` +10, `cmd` ±20, and about 120 TypeScript lines. The Pi patch is in `third_party`, outside the budget. Each phase-2 action costs about 10 registry lines instead of a CLI-only command and instruction text.
 
 #### Evaluation
 
@@ -1246,9 +1259,10 @@ One run, before `agentSurface` becomes the default.
 - **Providers**, all through CLIProxyAPI: Claude Opus and Sonnet, ChatGPT, zai and Kimi.
 - **Arms.** The CLI through the shell; area tools; one tool per action. Both MCP shapes come from the same registry.
 - **Measures.** A correct engine call with correct arguments, wrong calls, extra calls (including searches), uncached input and output tokens, cache-read share, and time.
-- **Checks.** Cloaked tool names map back, and the model finds and calls the aliased `tool_search`. Cache-read share holds after a section change, for each provider. A call over 60 seconds completes.
+- **Checks.** Cloaked tool names map back, and the model finds and calls the aliased `tool_search`. A call over 60 seconds completes.
+- **Cache check.** Five tasks change the snapshot mid-session: a rule added, a rule removed, a child finished, a request answered, and usage pace changed. One more task compacts. Per provider, the run reports cache-read share on the request after each delta and on the second request after compaction, and whether the model obeys the changed rule and drops the removed one. It measures the one path; it decides no fallback.
 - **Gate.** On every provider, MCP accuracy is at least the CLI arm's, and tokens per task fall by at least 20%. Profiles on a provider that fails keep the setting off until a fix lands, and the setting stays until then. The better MCP shape wins.
-- **Cost.** 300 task runs, at about 30,000 input tokens (mostly cache reads) and 1,000 output tokens each: about 9 million input and 0.3 million output tokens over 5 accounts.
+- **Cost.** 300 task runs, at about 30,000 input tokens (mostly cache reads) and 1,000 output tokens each: about 9 million input and 0.3 million output tokens over 5 accounts. The cache check adds 30 runs (6 tasks, 5 providers): about 0.9 million input and 30,000 output tokens.
 
 **Who benefits (r9).** Any owner on any provider pays fewer prompt tokens per turn and gets typed tools with typed errors. Owners with many integrations keep room MCP servers deferred. Scripts and the owner keep the full CLI with the same help text.
 
@@ -1465,7 +1479,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 Pi is the only harness (section 0, decision 4). These Claude Code features have no v2 form:
 
 1. **Anthropic's tuning.** Claude Code's system prompt, tool set and tool descriptions are made and tested by Anthropic for each Claude model. Pi's are general. The self-hosting trial compares the work quality on real tasks before the cutover.
-2. **Client-side request features.** When it cloaks, the proxy adds Claude Code's beta headers and context-management fields (M0c). Features that need client code work only when Pi implements them. Pi already has tool search (deferred MCP exposure and `tool_search`) and mid-conversation system and tool changes. Pi sends those changes natively only to models whose catalog entry allows them: today Claude Opus 4.8 and 5, the Claude 5.5 models, Fable 5 and 5.1 on the `anthropic` provider, and the OpenAI Responses models in Pi's tool-search list. For other models, Pi folds them into the head system prompt (7.9). The trial and the evaluation in 7.9 measure both behaviors through the proxy.
+2. **Client-side request features.** When it cloaks, the proxy adds Claude Code's beta headers and context-management fields (M0c). Features that need client code work only when Pi implements them. Pi already has tool search (deferred MCP exposure and `tool_search`) and mid-conversation system and tool changes. Pi sends those changes natively only to models whose catalog entry allows them: today Claude Opus 4.8 and 5, the Claude 5.5 models, Fable 5 and 5.1 on the `anthropic` provider, and the OpenAI Responses models in Pi's tool-search list. For other models, Pi folds them into the head system prompt. Dyna's snapshot does not use these messages on any model (owner, 2026-10-31): it sends changes as user-turn deltas (7.9). The trial measures Pi's tool changes through the proxy.
 3. **Built-in tools.** Claude Code's web search and web fetch, its todo list, plan mode and notebook editing are gone. Pi has no web search, so agents have none until the web-search port (section 9).
 4. **First access to new Claude features.** New tools, betas and effort levels reach Claude Code first. With Pi, we wait for upstream Pi or add them to our fork.
 5. **Terms.** Claude Code is the only client in which Anthropic allows subscription sign-ins. Decision 4 records the accepted risk.
