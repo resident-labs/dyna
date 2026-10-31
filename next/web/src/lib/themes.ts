@@ -71,5 +71,10 @@ export const themes: readonly Theme[] = [
   },
 ];
 
-// The stored id is the one unknown value: anything but a known id is Carbon.
-export const themeFor = (stored: string | null): Theme => themes.find(item => item.id === stored) ?? carbon;
+// The stored id is the one unknown value: anything but a known id is Carbon. A browser that blocks site storage
+// throws on the read, and the app must still paint, so that is Carbon too.
+export function themeFor(read: () => string | null): Theme {
+  let stored: string | null = null;
+  try { stored = read(); } catch { /* Storage is blocked: no stored id. */ }
+  return themes.find(item => item.id === stored) ?? carbon;
+}
