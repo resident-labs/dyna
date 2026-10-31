@@ -152,6 +152,8 @@
   .quoted :global(:is(p, ul, ol, pre, blockquote)) { margin: 0; }
   .files { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; }
+  /* iOS zooms into a field under 16 px when it takes focus. */
+  @media (pointer: coarse) { textarea { font-size: 16px; } }
   textarea:focus-visible { outline: none; }
   textarea::placeholder { color: var(--muted); }
   .actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
