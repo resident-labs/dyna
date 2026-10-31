@@ -89,8 +89,13 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
 		}
 		if workErr != nil {
-			next.State, next.Reason = contract.BoxFailed, workErr.Error()
-			cause = contract.CauseCreateFailed
+			failures++
+			if failures >= 3 {
+				next.State, next.Reason = contract.BoxFailed, workErr.Error()
+				cause = contract.CauseCreateFailed
+			} else {
+				due = r.retryAt(failures)
+			}
 		} else {
 			next.State = contract.BoxStarting
 			due = r.now().Add(60 * time.Second)
