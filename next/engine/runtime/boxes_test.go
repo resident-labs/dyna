@@ -3,11 +3,10 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	goruntime "runtime"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/fakehost"
@@ -98,28 +97,34 @@ func TestRemoveHostBoxCleansPartialCreation(t *testing.T) {
 	}
 }
 
-// TestHostLoadControlPlaneCPUAndMemory reads two /proc/stat samples and one /proc/meminfo from a temp folder.
-func TestHostLoadControlPlaneCPUAndMemory(t *testing.T) {
-	proc := t.TempDir()
-	write := func(name, text string) {
-		if err := os.WriteFile(filepath.Join(proc, name), []byte(text), 0o600); err != nil {
-			t.Fatal(err)
-		}
+func TestControlPlaneParsers(t *testing.T) {
+	b := &Boxes{}
+	b.cpuCores("cpu 100 0 100 800 0 0 0 0", 8)
+	cpu := b.cpuCores("cpu 200 0 200 1000 0 0 0 0", 8)
+	total, used := memory("MemTotal: 8388608 kB\nMemAvailable: 2097152 kB\n")
+	if cpu != 4 || total != 8388608*1024 || used != 6291456*1024 {
+		t.Fatalf("cpu %v memory %d/%d", cpu, used, total)
 	}
-	write("meminfo", "MemTotal:       8388608 kB\nMemFree:        1024 kB\nMemAvailable:   2097152 kB\n")
-	b := &Boxes{Store: listStore{}, Proc: proc}
-	write("stat", "cpu  100 0 100 800 0 0 0 0\ncpu0 50 0 50 400 0 0 0 0\n")
-	hosts := []contract.HostSummary{{Name: contract.ControlPlane}, {Name: "host"}}
+}
+
+func TestRecordHostLoad(t *testing.T) {
+	b := &Boxes{Store: listStore{}}
+	start := time.Now().Truncate(time.Minute)
+	b.record("host", true, podman.Load{CPUUsed: 1, MemUsed: 10, DiskBytes: 100, DiskUsed: 20}, start)
+	b.record("host", true, podman.Load{CPUUsed: 3, MemUsed: 20, DiskBytes: 100, DiskUsed: 30}, start.Add(10*time.Second))
+	b.record("host", true, podman.Load{CPUUsed: 4, MemUsed: 40, DiskBytes: 100, DiskUsed: 50}, start.Add(70*time.Second))
+	b.record("host", false, podman.Load{}, start.Add(80*time.Second))
+	hosts := []contract.HostSummary{{Name: "host"}}
 	if err := b.HostLoad(context.Background(), hosts); err != nil {
 		t.Fatal(err)
 	}
-	write("stat", "cpu  200 0 200 1000 0 0 0 0\ncpu0 100 0 100 500 0 0 0 0\n")
-	if err := b.HostLoad(context.Background(), hosts); err != nil {
-		t.Fatal(err)
+	got := hosts[0]
+	want := []contract.HostLoadPoint{{At: start, CPUUsed: 2, MemUsed: 15}, {At: start.Add(time.Minute), CPUUsed: 4, MemUsed: 40}}
+	if got.Reachable || got.CPUUsed != 4 || got.MemUsed != 40 || got.DiskBytes != 100 || got.DiskUsed != 50 || !got.LastSeen.Equal(start.Add(70*time.Second)) || !reflect.DeepEqual(got.History, want) {
+		t.Fatalf("load = %+v", got)
 	}
-	cp := hosts[0]
-	wantCPU := 0.5 * float64(goruntime.NumCPU())
-	if !cp.Reachable || cp.CPUs != goruntime.NumCPU() || cp.CPUUsed != wantCPU || cp.MemBytes != 8388608*1024 || cp.MemUsed != 6291456*1024 {
-		t.Fatalf("control plane: %+v, want cores %v", cp, wantCPU)
+	b.record("host", true, podman.Load{}, start.Add(61*time.Minute))
+	if got := b.loads["host"].summary.History; len(got) != 1 {
+		t.Fatalf("old points retained: %+v", got)
 	}
 }
