@@ -27,7 +27,11 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) erro
 		if err != nil {
 			return err
 		}
-		return r.store.CloseSession(ctx, row.Session, event)
+		if err := r.store.CloseSession(ctx, row.Session, event); err != nil {
+			return err
+		}
+		r.Kick()
+		return nil
 	}
 	if row.State != contract.BoxClosing {
 		next := row.Box
