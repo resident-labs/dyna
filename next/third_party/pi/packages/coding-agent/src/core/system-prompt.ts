@@ -127,6 +127,7 @@ function buildRules(
 /** Build the ordered, independently replaceable sections of the structured system prompt. */
 export function buildSystemPromptSections(input: BuildSystemPromptOptions): SystemPromptSections {
 	const options = normalizeBuildSystemPromptOptions(input);
+	if (options.forceSystemPrompt !== undefined) return { preamble: options.forceSystemPrompt };
 	const {
 		customPrompt,
 		selectedTools,
@@ -142,13 +143,13 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	} = options;
 
 	for (const name of Object.keys(customSections)) {
-		if (!SYSTEM_PROMPT_SECTION_NAME.test(name) || name === "preamble") {
+		if (!name || name === "preamble") {
 			throw new Error(`Invalid system prompt section name: ${name}`);
 		}
 	}
 
 	const declaredTools = selectedTools.filter((name) => !hiddenTools.includes(name));
-	const promptSections: Record<string, string> = {};
+	const promptSections: Record<string, string> = Object.create(null);
 	if (customPrompt) {
 		promptSections.preamble = customPrompt;
 	} else {
@@ -170,7 +171,9 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	}
 
 	if (appendSystemPrompt) promptSections.addendum = appendSystemPrompt;
-	if (contextFiles.length > 0) promptSections.project_context = renderProjectContext(contextFiles);
+	for (const file of contextFiles) {
+		promptSections[`file:${file.path}`] = renderProjectContext([file]);
+	}
 	// A hidden reader is still reachable through another tool, so skills stay but the hint names no tool.
 	const readers = ["read", "bash"] as const;
 	const skillFileReadTool =
@@ -182,12 +185,16 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	}
 	promptSections.cwd = cwd.replace(/\\/g, "/");
 	for (const [name, content] of Object.entries(customSections)) {
-		if (content) promptSections[name] = content;
+		promptSections[name] = content;
 	}
 
-	const sections: SystemPromptSections = { preamble: promptSections.preamble };
+	const sections: SystemPromptSections = Object.create(null);
+	sections.preamble = promptSections.preamble;
 	for (const [name, content] of Object.entries(promptSections)) {
-		if (name !== "preamble") sections[name] = `<${name}>\n${content}\n</${name}>`;
+		if (name !== "preamble") {
+			const tag = SYSTEM_PROMPT_SECTION_NAME.test(name) ? name : "context_section";
+			sections[name] = `<${tag}>\n${content}\n</${tag}>`;
+		}
 	}
 	return sections;
 }
@@ -204,26 +211,7 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
 	return { content: "", sections: buildSystemPromptSections(input) };
 }
 
-/** Build the system prompt text, rendered exactly as the transcript's system message replays it. */
+/** Build the complete system prompt text. */
 export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
 	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
-}
-
-/**
- * Diff the sections the model currently has (replayed from the transcript, so never null)
- * against the desired ones. Returns a `SystemMessage.sections` patch, or undefined when
- * nothing changed.
- */
-export function diffSystemPromptSections(
-	previous: Record<string, string | null>,
-	current: SystemPromptSections,
-): Record<string, string | null> | undefined {
-	const patch: Record<string, string | null> = {};
-	for (const [name, text] of Object.entries(current)) {
-		if (previous[name] !== text) patch[name] = text;
-	}
-	for (const name of Object.keys(previous)) {
-		if (current[name] === undefined) patch[name] = null;
-	}
-	return Object.keys(patch).length > 0 ? patch : undefined;
 }

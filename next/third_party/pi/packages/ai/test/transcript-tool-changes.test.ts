@@ -149,7 +149,7 @@ interface AnthropicPayload {
 }
 
 describe("transcript system messages", () => {
-	test("sends Anthropic updates and tool changes in native system messages", async () => {
+	test("sends legacy Anthropic tool changes without prompt patches", async () => {
 		const payload = await capturePayload<AnthropicPayload>(anthropicNativeModel, context);
 
 		expect(payload.betas).toContain("inline-tools-2026-09-15");
@@ -170,7 +170,6 @@ describe("transcript system messages", () => {
 		expect(update).toMatchObject({
 			role: "system",
 			content: [
-				{ type: "text" },
 				{ type: "tool_removal", tool: { type: "tool_reference", name: "base_tool" } },
 				{
 					type: "tool_addition",
@@ -180,12 +179,10 @@ describe("transcript system messages", () => {
 			],
 		});
 		// Cache control goes on the block, never on the inline definition; nothing is deferred.
-		const definition = update?.content[2]?.tool?.definition;
+		const definition = update?.content[1]?.tool?.definition;
 		expect(definition?.cache_control).toBeUndefined();
 		expect(definition?.defer_loading).toBeUndefined();
-		expect(update?.content[0]?.text).toContain("updated guidance");
-		expect(update?.content[0]?.text).toContain("<rules>\nnew rules\n</rules>");
-		expect(update?.content[0]?.text).toContain('Removed system prompt section "docs"');
+		expect(update?.content.every((block) => block.type !== "text")).toBe(true);
 
 		// The placeholder is declared before any change so its scaffolding is cached from request one.
 		const initial = await capturePayload<AnthropicPayload>(anthropicNativeModel, {
@@ -261,7 +258,7 @@ describe("transcript system messages", () => {
 
 		expect(payload.betas ?? []).not.toContain("inline-tools-2026-09-15");
 		expect(payload.system?.map((block) => block.text)).toEqual([
-			"base prompt\n\nupdated guidance\n\n<rules>\nnew rules\n</rules>",
+			"base prompt\n\n<rules>\nold rules\n</rules>\n\n<docs>\nread docs\n</docs>",
 		]);
 		expect(payload.tools?.map((value) => value.name)).toEqual(["late_tool"]);
 		expect(payload.messages.map((message) => message.role)).toEqual(["user"]);
@@ -302,7 +299,6 @@ describe("transcript system messages", () => {
 			expect.any(Array),
 			expect.stringContaining("incremental tools update"),
 			"additional_tools",
-			"updated guidance",
 		]);
 	});
 
@@ -343,7 +339,9 @@ describe("transcript system messages", () => {
 
 		expect(payload.tools?.map((value) => value.name)).toEqual(["late_tool"]);
 		expect(payload.input.map((item) => item.type ?? item.role)).toEqual(["developer", "user"]);
-		expect(payload.input[0]?.content).toBe("base prompt\n\nupdated guidance\n\n<rules>\nnew rules\n</rules>");
+		expect(payload.input[0]?.content).toBe(
+			"base prompt\n\n<rules>\nold rules\n</rules>\n\n<docs>\nread docs\n</docs>",
+		);
 	});
 
 	test("announces OpenAI removals as text", async () => {
@@ -354,7 +352,7 @@ describe("transcript system messages", () => {
 			payload.input.filter((item) => item.type === "additional_tools").map((item) => item.tools?.[0]?.name),
 		).toEqual(["base_tool", "late_tool"]);
 		const update = payload.input.at(-1)?.content;
-		expect(update).toContain("updated guidance");
+		expect(update).not.toContain("updated guidance");
 		expect(update).toContain("The following tools are no longer available. Do not call them:\n- base_tool");
 	});
 
@@ -518,7 +516,7 @@ describe("transcript system messages", () => {
 			"late_tool",
 		]);
 		expect(payload.messages.filter((message) => message.role === "system").map((message) => message.content)).toEqual(
-			["base prompt", undefined, "updated guidance"],
+			["base prompt", undefined],
 		);
 	});
 
@@ -582,7 +580,7 @@ describe("transcript system messages", () => {
 		expect(payload.tools?.map((value) => value.function?.name)).toEqual(["base_tool", "late_tool"]);
 		expect(payload.messages.some((message) => message.tools !== undefined)).toBe(false);
 		expect(payload.messages.filter((message) => message.role === "system").map((message) => message.content)).toEqual(
-			["base prompt", "updated guidance"],
+			["base prompt"],
 		);
 	});
 
@@ -602,6 +600,8 @@ describe("transcript system messages", () => {
 
 		expect(payload.tools?.map((value) => value.function?.name)).toEqual(["late_tool"]);
 		expect(payload.messages.map((message) => message.role)).toEqual(["system", "user"]);
-		expect(payload.messages[0]?.content).toBe("base prompt\n\nupdated guidance\n\n<rules>\nnew rules\n</rules>");
+		expect(payload.messages[0]?.content).toBe(
+			"base prompt\n\n<rules>\nold rules\n</rules>\n\n<docs>\nread docs\n</docs>",
+		);
 	});
 });

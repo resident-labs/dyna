@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { detectCapabilities, getTerminalColorMode, type TerminalColorMode } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -10,6 +11,7 @@ export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
+import { ContextFileCache } from "./context-file-cache.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import {
 	clearExtensionCache,
@@ -156,6 +158,7 @@ export interface ResourceLoader {
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
+	refreshPromptResources?(): Promise<void>;
 	getSystemPrompt(): string | undefined;
 	getSystemPromptSource(): { path: string } | undefined;
 	getAppendSystemPrompt(): string[];
@@ -181,11 +184,14 @@ function resolvePromptInput(input: string | undefined, description: string): str
 	return input;
 }
 
-function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
+function loadContextFileFromDir(dir: string, cache?: ContextFileCache): { path: string; content: string } | null {
 	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
-		if (existsSync(filePath)) {
+		if (cache) {
+			const content = cache.readFile(filePath);
+			if (content !== undefined) return { path: filePath, content: stripBom(content) };
+		} else if (existsSync(filePath)) {
 			try {
 				if (!statSync(filePath).isFile()) {
 					continue;
@@ -211,7 +217,7 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
  * file's `gitdir:` target in realpath form while cwd may still be symlinked
  * (macOS `/tmp` -> `/private/tmp`).
  */
-function findShadowedContextFile(cwd: string): string | undefined {
+function findShadowedContextFile(cwd: string, cache?: ContextFileCache): string | undefined {
 	const gitPaths = findGitPaths(cwd);
 	if (!gitPaths) return undefined;
 	const commonGitDir = canonicalizePath(gitPaths.commonGitDir);
@@ -225,13 +231,14 @@ function findShadowedContextFile(cwd: string): string | undefined {
 	// `proj/main`) it is just the directory holding `.bare`, which tracks nothing; a
 	// submodule's gitdir has no `commondir`, so it lands under `.git/modules`.
 	if (canonicalizePath(join(mainRepoRoot, ".git")) !== commonGitDir) return undefined;
-	const worktreeContextFile = loadContextFileFromDir(worktreeRoot);
+	const worktreeContextFile = loadContextFileFromDir(worktreeRoot, cache);
 	return worktreeContextFile ? join(mainRepoRoot, basename(worktreeContextFile.path)) : undefined;
 }
 
 export function loadProjectContextFiles(options: {
 	cwd: string;
 	agentDir: string;
+	cache?: ContextFileCache;
 }): Array<{ path: string; content: string }> {
 	const resolvedCwd = resolvePath(options.cwd);
 	const resolvedAgentDir = resolvePath(options.agentDir);
@@ -239,7 +246,7 @@ export function loadProjectContextFiles(options: {
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
 
-	const globalContext = loadContextFileFromDir(resolvedAgentDir);
+	const globalContext = loadContextFileFromDir(resolvedAgentDir, options.cache);
 	if (globalContext) {
 		contextFiles.push(globalContext);
 		seenPaths.add(globalContext.path);
@@ -247,11 +254,11 @@ export function loadProjectContextFiles(options: {
 
 	const ancestorContextFiles: Array<{ path: string; content: string }> = [];
 
-	const shadowedContextFile = findShadowedContextFile(resolvedCwd);
+	const shadowedContextFile = findShadowedContextFile(resolvedCwd, options.cache);
 	let currentDir = resolvedCwd;
 
 	while (true) {
-		const contextFile = loadContextFileFromDir(currentDir);
+		const contextFile = loadContextFileFromDir(currentDir, options.cache);
 		// Compare the directory's real path, not the file's: a worktree AGENTS.md that
 		// symlinks to the main repo's file resolves to the shadowed path itself.
 		const isShadowed =
@@ -315,6 +322,11 @@ export interface DefaultResourceLoaderOptions {
 export class DefaultResourceLoader implements ResourceLoader {
 	private cwd: string;
 	private agentDir: string;
+	private readonly contextFileCache = new ContextFileCache();
+	private readonly skillFileCache = new ContextFileCache();
+	private skillDirectories = new Set<string>();
+	private skillCandidates = new Set<string>();
+	private skillDiscoveryDirectories = new Set<string>();
 	private settingsManager: SettingsManager;
 	private eventBus: EventBus;
 	private packageManager: DefaultPackageManager;
@@ -444,6 +456,89 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> } {
 		return { agentsFiles: this.agentsFiles };
+	}
+
+	private skillWatchPaths(): string[] {
+		return [
+			...this.lastSkillPaths,
+			...this.skillCandidates,
+			...this.skillDirectories,
+			...this.skillDiscoveryDirectories,
+			...[...this.skillDirectories, ...this.skillDiscoveryDirectories].flatMap((dir) =>
+				[".gitignore", ".ignore", ".fdignore"].map((name) => join(dir, name)),
+			),
+		];
+	}
+
+	private contextWatchPaths(): string[] {
+		const dirs = [this.agentDir];
+		for (let dir = this.cwd; ; dir = dirname(dir)) {
+			dirs.push(dir);
+			if (dirname(dir) === dir) break;
+		}
+		return dirs.flatMap((dir) =>
+			["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"].map((name) => join(dir, name)),
+		);
+	}
+
+	private scanSkillDirectories(): void {
+		const roots = [join(this.agentDir, "skills"), join(process.env.HOME || homedir(), ".agents", "skills")];
+		if (this.settingsManager.isProjectTrusted()) {
+			roots.push(join(this.cwd, CONFIG_DIR_NAME, "skills"));
+			for (let dir = this.cwd; ; dir = dirname(dir)) {
+				roots.push(join(dir, ".agents", "skills"));
+				if (dirname(dir) === dir) break;
+			}
+		}
+		const dirs = new Set<string>();
+		const realDirs = new Set<string>();
+		const visit = (dir: string): void => {
+			if (dirs.has(dir)) return;
+			dirs.add(dir);
+			const stat = statSync(dir, { throwIfNoEntry: false });
+			if (!stat?.isDirectory()) return;
+			const real = canonicalizePath(dir);
+			if (realDirs.has(real)) return;
+			realDirs.add(real);
+			for (const entry of readdirSync(dir, { withFileTypes: true })) {
+				if (
+					!entry.name.startsWith(".") &&
+					entry.name !== "node_modules" &&
+					(entry.isDirectory() || entry.isSymbolicLink())
+				) {
+					visit(join(dir, entry.name));
+				}
+			}
+		};
+		for (const root of roots) visit(root);
+		this.skillDiscoveryDirectories = dirs;
+	}
+
+	async refreshPromptResources(): Promise<void> {
+		if (!this.noContextFiles && this.contextFileCache.changed(this.contextWatchPaths())) {
+			const base = {
+				agentsFiles: loadProjectContextFiles({
+					cwd: this.cwd,
+					agentDir: this.agentDir,
+					cache: this.contextFileCache,
+				}),
+			};
+			this.agentsFiles = (this.agentsFilesOverride ? this.agentsFilesOverride(base) : base).agentsFiles;
+		}
+		if ((!this.noSkills || this.lastSkillPaths.length > 0) && this.skillFileCache.changed(this.skillWatchPaths())) {
+			const resolved = await this.packageManager.resolve();
+			const metadata = this.resourceMetadataByPath;
+			const retained = this.lastSkillPaths.filter((path) => metadata.get(path)?.source !== "auto");
+			const discovered = resolved.skills
+				.filter((resource) => resource.enabled)
+				.map((resource) => {
+					metadata.set(resource.path, resource.metadata);
+					return this.mapSkillPath(resource, metadata);
+				});
+			this.lastSkillPaths = this.noSkills ? retained : this.mergePaths(retained, discovered);
+			this.scanSkillDirectories();
+			this.updateSkillsFromPaths(this.lastSkillPaths, metadata);
+		}
 	}
 
 	getSystemPrompt(): string | undefined {
@@ -601,6 +696,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
 
 		this.lastSkillPaths = skillPaths;
+		this.scanSkillDirectories();
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
 		for (const p of this.additionalSkillPaths) {
 			if (isLocalPath(p)) {
@@ -649,10 +745,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 				: loadProjectContextFiles({
 						cwd: this.cwd,
 						agentDir: this.agentDir,
+						cache: this.contextFileCache,
 					}),
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
+		this.contextFileCache.changed(this.contextWatchPaths());
 
 		const systemPromptSource = this.systemPromptSource ?? this.discoverSystemPromptFile();
 		const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
@@ -839,6 +937,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	private updateSkillsFromPaths(skillPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {
 		let skillsResult: { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
+		const directories = new Set<string>();
+		const candidates = new Set<string>();
 		if (this.noSkills && skillPaths.length === 0) {
 			skillsResult = { skills: [], diagnostics: [] };
 		} else {
@@ -847,6 +947,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				agentDir: this.agentDir,
 				skillPaths,
 				includeDefaults: false,
+				cache: { files: this.skillFileCache, directories, candidates },
 			});
 		}
 		const resolvedSkills = this.skillsOverride ? this.skillsOverride(skillsResult) : skillsResult;
@@ -858,6 +959,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 				this.getDefaultSourceInfoForPath(skill.filePath),
 		}));
 		this.skillDiagnostics = resolvedSkills.diagnostics;
+		this.skillDirectories = directories;
+		this.skillCandidates = candidates;
+		this.skillFileCache.changed(this.skillWatchPaths());
 	}
 
 	private updatePromptsFromPaths(promptPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {

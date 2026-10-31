@@ -19,7 +19,15 @@ import type { SourceInfo } from "../../core/source-info.ts";
 
 export type RpcCommand =
 	// Prompting
-	| { id?: string; type: "prompt"; message?: string; inputs?: { message: string; deliveryId: string }[]; images?: ImageContent[]; deliveryId?: string; streamingBehavior?: "steer" | "followUp" }
+	| {
+			id?: string;
+			type: "prompt";
+			message?: string;
+			inputs?: { message: string; deliveryId: string }[];
+			images?: ImageContent[];
+			deliveryId?: string;
+			streamingBehavior?: "steer" | "followUp";
+	  }
 	| { id?: string; type: "steer"; message: string; images?: ImageContent[]; deliveryId?: string }
 	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[]; deliveryId?: string }
 	| { id?: string; type: "continue" }
@@ -29,6 +37,8 @@ export type RpcCommand =
 
 	// State
 	| { id?: string; type: "get_state" }
+	| { id?: string; type: "set_prompt_sections"; sections: Array<{ key: string; text: string }> }
+	| { id?: string; type: "reload_resources" }
 
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
@@ -138,6 +148,8 @@ export type RpcResponse =
 
 	// State
 	| { id?: string; type: "response"; command: "get_state"; success: true; data: RpcSessionState }
+	| { id?: string; type: "response"; command: "set_prompt_sections"; success: true }
+	| { id?: string; type: "response"; command: "reload_resources"; success: true }
 
 	// Model
 	| {

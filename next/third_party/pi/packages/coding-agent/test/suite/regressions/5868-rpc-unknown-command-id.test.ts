@@ -8,6 +8,8 @@ import { createHarness, type Harness } from "../harness.ts";
 const rpcIo = vi.hoisted(() => ({
 	outputLines: [] as string[],
 	lineHandler: undefined as ((line: string) => void) | undefined,
+	onAttach: undefined as (() => void) | undefined,
+	onOutput: undefined as ((line: string) => void) | undefined,
 }));
 
 vi.mock("../../../src/core/output-guard.js", () => ({
@@ -16,6 +18,7 @@ vi.mock("../../../src/core/output-guard.js", () => ({
 	waitForRawStdoutBackpressure: vi.fn(async () => {}),
 	writeRawStdout: (line: string) => {
 		rpcIo.outputLines.push(line);
+		rpcIo.onOutput?.(line);
 	},
 }));
 
@@ -24,6 +27,7 @@ vi.mock("../../../src/modes/interactive/theme/theme.js", () => ({ theme: {} }));
 vi.mock("../../../src/modes/rpc/jsonl.js", () => ({
 	attachJsonlLineReader: vi.fn((_stream: NodeJS.ReadableStream, onLine: (line: string) => void) => {
 		rpcIo.lineHandler = onLine;
+		rpcIo.onAttach?.();
 		return () => {
 			rpcIo.lineHandler = undefined;
 		};
@@ -84,6 +88,46 @@ describe("RPC unknown command responses (#5868)", () => {
 	afterEach(() => {
 		rpcIo.outputLines = [];
 		rpcIo.lineHandler = undefined;
+		rpcIo.onAttach = undefined;
+		rpcIo.onOutput = undefined;
+	});
+
+	test("validates and applies prompt sections through RPC", async () => {
+		const listenerSnapshot = takeListenerSnapshot();
+		const harness = await createHarness();
+		try {
+			const attached = new Promise<void>((resolve) => {
+				rpcIo.onAttach = resolve;
+			});
+			void runRpcMode(createRuntimeHost(harness));
+			await attached;
+			const send = (command: object) =>
+				new Promise<Record<string, unknown>>((resolve) => {
+					rpcIo.onOutput = (line) => {
+						const response = JSON.parse(line) as Record<string, unknown>;
+						if (response.type === "response") resolve(response);
+					};
+					rpcIo.lineHandler?.(JSON.stringify(command));
+				});
+			expect(
+				await send({
+					type: "set_prompt_sections",
+					sections: [
+						{ key: "goal", text: "one" },
+						{ key: "goal", text: "two" },
+					],
+				}),
+			).toMatchObject({ success: false });
+			expect(await send({ type: "set_prompt_sections", sections: [{ key: "goal", text: "one" }] })).toMatchObject({
+				success: true,
+			});
+			await harness.session.prompt("hello");
+			const head = harness.session.agent.state.messages.find((message) => message.role === "system");
+			expect(head?.sections?.goal).toBe("<goal>\none\n</goal>");
+		} finally {
+			harness.cleanup();
+			restoreListeners(listenerSnapshot);
+		}
 	});
 
 	test("preserves the request id on unknown command errors", async () => {
