@@ -14,6 +14,7 @@ type computerState struct {
 	state      contract.ComputerState
 	room       contract.RoomID
 	watchers   map[chan []byte]struct{}
+	lastFrame  []byte
 }
 
 func (s *Service) computerEvent(ctx context.Context, session contract.SessionID, room contract.RoomID, state contract.ComputerState) error {
@@ -69,6 +70,7 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	}
 	c.state = req.To
 	if req.To == contract.ComputerStopped {
+		c.lastFrame = nil
 		wakeChannel(state.channel)
 		for ch := range c.watchers {
 			close(ch)
@@ -109,7 +111,10 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	if len(c.watchers) == 0 {
 		s.computerGeneration++
 		c.generation = s.computerGeneration
+		c.lastFrame = nil
 		wakeChannel(channel)
+	} else if c.lastFrame != nil {
+		ch <- c.lastFrame
 	}
 	c.watchers[ch] = struct{}{}
 	go func() {
@@ -142,6 +147,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		if computer == nil || channel == nil || state.computer != computer || state.channel != channel || computer.generation != generation {
 			return
 		}
+		computer.lastFrame = nil
 		for ch := range computer.watchers {
 			close(ch)
 			delete(computer.watchers, ch)
@@ -163,6 +169,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		}
 		s.mu.Lock()
 		if c := state.computer; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
+			c.lastFrame = frame
 			for ch := range c.watchers {
 				select {
 				case <-ch:

@@ -61,6 +61,22 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if string(<-second) != "two" || string(<-first) != "two" {
 		t.Fatal("slow watcher did not receive the newest frame")
 	}
+	lateCtx, cancelLate := context.WithCancel(ctx)
+	defer cancelLate()
+	late, err := s.ComputerWatch(lateCtx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case frame := <-late:
+		if string(frame) != "two" {
+			t.Fatalf("cached frame: %q", frame)
+		}
+	default:
+		t.Fatal("late viewer did not receive the cached frame")
+	}
+	cancelLate()
+	<-late
 	cancelFirst()
 	// Cancellation is synchronized by the stopped channel.
 	if _, ok := <-first; ok {

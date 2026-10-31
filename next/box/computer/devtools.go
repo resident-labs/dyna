@@ -26,15 +26,32 @@ type message struct {
 
 // DevTools is a single sequential page connection.
 type DevTools struct {
-	conn   *websocket.Conn
-	id     int
-	loaded bool
+	conn    *websocket.Conn
+	id      int
+	loaded  bool
+	pending []message
 }
+
+// ConnectTimeoutError reports that Chromium did not expose a page in time.
+type ConnectTimeoutError struct{}
+
+func (ConnectTimeoutError) Error() string { return "timed out connecting to Chromium" }
 
 // Connect waits for Chromium to expose its first page target.
 func Connect(ctx context.Context, base string) (*DevTools, error) {
-	var targets []target
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return connect(ctx, base)
+}
+
+func connect(ctx context.Context, base string) (_ *DevTools, resultErr error) {
+	defer func() {
+		if resultErr != nil && ctx.Err() == context.DeadlineExceeded {
+			resultErr = ConnectTimeoutError{}
+		}
+	}()
 	for {
+		var targets []target
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/json/list", nil)
 		if err != nil {
 			return nil, err
@@ -46,7 +63,16 @@ func Connect(ctx context.Context, base string) (*DevTools, error) {
 			if err != nil {
 				return nil, err
 			}
-			break
+			for _, t := range targets {
+				if t.Type == "page" {
+					conn, _, err := websocket.Dial(ctx, t.WebSocket, nil)
+					if err != nil {
+						return nil, err
+					}
+					conn.SetReadLimit(64 << 20)
+					return &DevTools{conn: conn}, nil
+				}
+			}
 		}
 		timer := time.NewTimer(100 * time.Millisecond)
 		select {
@@ -56,17 +82,6 @@ func Connect(ctx context.Context, base string) (*DevTools, error) {
 		case <-timer.C:
 		}
 	}
-	for _, t := range targets {
-		if t.Type == "page" {
-			conn, _, err := websocket.Dial(ctx, t.WebSocket, nil)
-			if err != nil {
-				return nil, err
-			}
-			conn.SetReadLimit(64 << 20)
-			return &DevTools{conn: conn}, nil
-		}
-	}
-	return nil, fmt.Errorf("Chromium has no page target")
 }
 
 func (d *DevTools) Close() { _ = d.conn.Close(websocket.StatusNormalClosure, "") }
@@ -97,6 +112,9 @@ func (d *DevTools) Call(ctx context.Context, method string, params json.RawMessa
 			d.loaded = true
 		}
 		if msg.ID != d.id {
+			if msg.Method == "Page.screencastFrame" {
+				d.pending = append(d.pending, msg)
+			}
 			continue
 		}
 		if msg.Error != nil {
