@@ -71,6 +71,38 @@ func TestReviewCommentsFetchIncompleteSnapshot(t *testing.T) {
 	}
 }
 
+func TestReviewCommentsRevalidatesStalePages(t *testing.T) {
+	e := newEnv(t)
+	r := e.track()
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := "repos/owner/repo/pulls/17/comments?per_page=100"
+	next := first + "&page=2"
+	st.Responses = map[string]map[string]cachedResponse{r.Key: {
+		"github.com/" + first: {ETag: `"v1"`, Stale: true, Body: json.RawMessage(`[{"id":8,"body":"First","user":{"login":"person"}}]`), Next: next},
+	}}
+	e.f.Raw = map[string]string{
+		first: "HTTP/2.0 304 Not Modified\r\n\r\n",
+		next: `HTTP/2.0 200 OK
+
+[{"id":9,"body":"Second","user":{"login":"person"}}]`,
+	}
+	e.write()
+	if err := os.WriteFile(e.calls, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	comments, err := e.s.reviewComments(context.Background(), st, r)
+	if err != nil || len(comments) != 2 || comments[0].ID != 8 || comments[1].ID != 9 {
+		t.Fatalf("revalidated comments: %+v, %v", comments, err)
+	}
+	calls, err := os.ReadFile(e.calls)
+	if err != nil || !strings.Contains(string(calls), "If-None-Match: "+`"v1"`) || !strings.Contains(string(calls), next) {
+		t.Fatalf("missing validator or next page: %s, %v", calls, err)
+	}
+}
+
 func TestLocalReviewTaskDoesNotRequireGitHub(t *testing.T) {
 	e := newEnv(t)
 	r := Record{Kind: "local", Key: "local-test", Head: "assigned-head", Repo: "local", Round: 1}
