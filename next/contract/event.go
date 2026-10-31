@@ -64,6 +64,7 @@ type PostCreated struct {
 	Home        Conversation `json:"home"` // feed or a DM
 	ReplyTo     EventID      `json:"replyTo,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	ClientID    string       `json:"clientId,omitempty"` // the sender's PostRequest.ClientID, so a pending row is replaced exactly
 }
 
 type Attachment struct {
