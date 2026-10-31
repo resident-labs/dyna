@@ -257,6 +257,25 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	}
 }
 
+func TestStopLocalCIWaitsForInterruptedResult(t *testing.T) {
+	s := &Service{Store: &Store{Root: t.TempDir()}}
+	run := &registeredCIRun{
+		Node: "worker", Head: "trial", Cancel: func() {},
+		Stopped: make(chan struct{}), Ended: make(chan struct{}),
+	}
+	close(run.Stopped) // Node teardown finished, but recovery has not saved yet.
+	s.nodeRuns().Add("trial", run)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if left := s.StopLocalCI(ctx); len(left) != 1 {
+		t.Fatalf("stop returned before result recovery finished: %v", left)
+	}
+	close(run.Ended)
+	if left := s.StopLocalCI(t.Context()); len(left) != 0 {
+		t.Fatalf("completed recovery still pending: %v", left)
+	}
+}
+
 // oneSlotRegistry offers one two-CPU machine, so the queue order decides
 // which head runs.
 type oneSlotRegistry struct{ runningCIRegistry }
