@@ -35,14 +35,27 @@ func proxyCommand() *cobra.Command {
 		cliproxy.SetGlobalModelRegistryHook(proxyModelHook{registered})
 		defer cliproxy.SetGlobalModelRegistryHook(nil)
 		go func() {
-			timer := time.NewTimer(5 * time.Second)
-			defer timer.Stop()
-			select {
-			case <-registered:
-			case <-timer.C:
-			case <-ctx.Done():
+			limit := time.NewTimer(5 * time.Second)
+			defer limit.Stop()
+			settle := time.NewTimer(time.Hour)
+			settle.Stop()
+			defer settle.Stop()
+			var quiet <-chan time.Time
+			for {
+				select {
+				case <-registered:
+					settle.Reset(200 * time.Millisecond)
+					quiet = settle.C
+				case <-quiet:
+					close(ready)
+					return
+				case <-limit.C:
+					close(ready)
+					return
+				case <-ctx.Done():
+					return
+				}
 			}
-			close(ready)
 		}()
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
 		service, err := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(gated).Build()
