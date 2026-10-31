@@ -220,18 +220,20 @@ type HostListResponse struct {
 }
 
 type HostSummary struct {
-	Name      HostName        `json:"name"`
-	Reachable bool            `json:"reachable"`
-	Boxes     int             `json:"boxes"`
-	CPUs      int             `json:"cpus"`
-	MemBytes  int64           `json:"memBytes"`
-	CPUUsed   float64         `json:"cpuUsed"`
-	MemUsed   int64           `json:"memUsed"`
-	DiskBytes int64           `json:"diskBytes"`
-	DiskUsed  int64           `json:"diskUsed"`
-	DiskLow   bool            `json:"diskLow"`
-	LastSeen  time.Time       `json:"lastSeen,omitzero"`
-	History   []HostLoadPoint `json:"history"`
+	Name              HostName        `json:"name"`
+	Reachable         bool            `json:"reachable"`
+	Boxes             int             `json:"boxes"`
+	CPUs              int             `json:"cpus"`
+	MemBytes          int64           `json:"memBytes"`
+	CPUUsed           float64         `json:"cpuUsed"`
+	MemUsed           int64           `json:"memUsed"`
+	DiskBytes         int64           `json:"diskBytes"`
+	DiskUsed          int64           `json:"diskUsed"`
+	DiskLow           bool            `json:"diskLow"`
+	BackupCopyAt      time.Time       `json:"backupCopyAt,omitzero"`
+	BackupCopyFailure string          `json:"backupCopyFailure,omitempty"`
+	LastSeen          time.Time       `json:"lastSeen,omitzero"`
+	History           []HostLoadPoint `json:"history"`
 }
 
 type HostLoadPoint struct {
