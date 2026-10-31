@@ -792,6 +792,7 @@
   .more { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .shell.open.tucked, .shell.open:has(:global(.instructions)) { grid-template-columns: 64px 1fr; }
   .shell.open:has(:global(.instructions)) aside.members { display: none; }
+  @media (max-width: 640px) { .shell.open:has(:global(.instructions)) { grid-template-columns: minmax(0, 1fr); } }
   .shell.tucked > aside.members { display: none; }
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
