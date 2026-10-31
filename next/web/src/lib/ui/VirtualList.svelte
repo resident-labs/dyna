@@ -10,11 +10,12 @@
   import { tick, untrack, type Snippet } from "svelte";
   import { shouldPage } from "../paging.ts";
 
-  let { items, key, row, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, element = $bindable() }: {
+  let { items, key, row, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, onbottom, element = $bindable() }: {
     items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string; role?: "feed" | "group"; align?: "top" | "bottom";
     // Chat mode: open at the newest row and follow new rows while the reader is at the bottom.
     follow?: boolean; estimate?: number;
-    onstart?: () => void; onend?: () => void; element?: HTMLDivElement;
+    // onbottom tells whether the end of the rows is within 24 px of the view's bottom edge.
+    onstart?: () => void; onend?: () => void; onbottom?: (shown: boolean) => void; element?: HTMLDivElement;
   } = $props();
 
   const edge = 600;
@@ -112,6 +113,28 @@
     if (page.end) onend?.();
   }
   const measure = (node: HTMLDivElement) => { virtualizer.measureElement(node); };
+  // The browser checks the end mark after its own layout of each frame; the last queued entry is the current state.
+  // A scroll handler that read scrollHeight after the rows changed forced an extra layout on each scroll event:
+  // 637 ms in a 20 second trace.
+  const watch = (shown: (entry: IntersectionObserverEntry) => void, node: HTMLDivElement) => {
+    const observer = new IntersectionObserver(entries => shown(entries.at(-1)!), { root: element, rootMargin: "0px 0px 24px 0px" });
+    observer.observe(node);
+    return observer;
+  };
+  let end: HTMLDivElement | undefined = $state();
+  const bottom = (node: HTMLDivElement) => {
+    if (!element || !onbottom) return;
+    const report = onbottom, observer = watch(entry => report(entry.isIntersecting), node);
+    return () => observer.disconnect();
+  };
+  // Whether the end is in view in the layout the next frame draws. A flag kept from an earlier callback can be stale
+  // after rows were added or grew, so a reader who must not be told "seen" too early asks here.
+  export function atBottom(): Promise<boolean> {
+    return new Promise(resolve => {
+      if (!end || !element) { resolve(false); return; }
+      const observer = watch(entry => { observer.disconnect(); resolve(entry.isIntersecting); }, end);
+    });
+  }
 </script>
 
 <div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}>
@@ -121,6 +144,7 @@
         {@render row(rows[item.index])}
       </div>
     {/each}
+    <div class="end" bind:this={end} {@attach bottom}></div>
   </div>
 </div>
 
@@ -129,4 +153,5 @@
   .space { position: relative; flex: none; margin-top: auto; }
   .space.top { margin-top: 0; }
   .item { position: absolute; top: 0; left: 0; width: 100%; }
+  .end { position: absolute; bottom: 0; height: 0; }
 </style>
