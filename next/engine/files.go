@@ -78,6 +78,50 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 			return
 		}
 		hash := strings.TrimPrefix(r.URL.Path, "/v1/files/")
+		if strings.HasPrefix(hash, "visual/") {
+			id := strings.TrimPrefix(hash, "visual/")
+			var seq int64
+			err := s.store.Read().QueryRowContext(r.Context(), "SELECT seq FROM events WHERE id=? AND (? OR room=?) AND type='post.created'", id, caller.Kind == contract.PrincipalOwner, room).Scan(&seq)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			event, err := s.store.Event(r.Context(), seq)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			post := event.Body.(contract.PostCreated)
+			for _, file := range post.Attachments {
+				if file.Visual == nil {
+					continue
+				}
+				f, err := os.Open(filepath.Join(s.filesDir, file.SHA256))
+				if err != nil {
+					http.NotFound(w, r)
+					return
+				}
+				defer f.Close()
+				info, err := f.Stat()
+				if err != nil {
+					http.NotFound(w, r)
+					return
+				}
+				src, script := "data: blob:", "'unsafe-inline'"
+				if file.Visual.AllowNet {
+					src, script = "https: data: blob:", "'unsafe-inline' https:"
+				}
+				csp := "default-src 'none'; script-src " + script + "; connect-src " + src + "; img-src " + src + "; font-src " + src + "; media-src " + src + "; style-src 'unsafe-inline' " + src + "; frame-src 'none'; child-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts"
+				w.Header().Set("Content-Security-Policy", csp)
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Referrer-Policy", "no-referrer")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				http.ServeContent(w, r, file.Name, info.ModTime(), f)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
 		if !validHash(hash) {
 			http.NotFound(w, r)
 			return

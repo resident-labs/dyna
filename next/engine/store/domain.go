@@ -14,6 +14,7 @@ import (
 
 var ErrParentClosing = errors.New("parent session is closing")
 var ErrSessionClosing = errors.New("session is closing")
+var ErrVisualForbidden = errors.New("visual belongs to another room or author")
 var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigned host")
 
 // Session describes the stored session and its box.
@@ -321,7 +322,7 @@ func (s *Store) PostByClientID(ctx context.Context, room contract.RoomID, from c
 
 // PostOnce appends a post. When the same author already posted the same client ID in the room, it appends
 // nothing and returns that first post.
-func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries []contract.Delivery) (contract.EventID, int64, error) {
+func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries []contract.Delivery, visualUpdate ...contract.EventID) (contract.EventID, int64, error) {
 	var seq int64
 	id := event.ID
 	err := s.Write(ctx, func(tx *sql.Tx) error {
@@ -334,6 +335,35 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			if !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
+		}
+		post, isPost := event.Body.(contract.PostCreated)
+		if isPost {
+			for i := range post.Attachments {
+				v := post.Attachments[i].Visual
+				if v == nil {
+					continue
+				}
+				v.ID, v.Version = event.ID, 1
+				if len(visualUpdate) > 0 && visualUpdate[0] != "" {
+					v.ID = visualUpdate[0]
+					var room, kind, author string
+					if err := tx.QueryRowContext(ctx, "SELECT room,author_kind,author_id,version FROM visuals WHERE id=?", v.ID).Scan(&room, &kind, &author, &v.Version); err != nil {
+						return err
+					}
+					if room != string(event.Room) || (event.From.Kind != contract.PrincipalOwner && (kind != string(event.From.Kind) || author != string(event.From.Session))) {
+						return ErrVisualForbidden
+					}
+					v.Version++
+					if _, err := tx.ExecContext(ctx, "UPDATE visuals SET version=? WHERE id=?", v.Version, v.ID); err != nil {
+						return err
+					}
+				} else {
+					if _, err := tx.ExecContext(ctx, "INSERT INTO visuals(id,room,author_kind,author_id,version) VALUES(?,?,?,?,1)", v.ID, event.Room, event.From.Kind, event.From.Session); err != nil {
+						return err
+					}
+				}
+			}
+			event.Body = post
 		}
 		for _, delivery := range deliveries {
 			if delivery.To.Kind != contract.PrincipalSession {
@@ -355,6 +385,19 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			for _, file := range post.Attachments {
 				if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO event_files(seq,sha256,media) VALUES(?,?,?)", seq, file.SHA256, file.Media); err != nil {
 					return err
+				}
+				if file.Visual != nil {
+					refs := []string{file.Visual.Banner, file.Visual.Thumbnail}
+					for _, shot := range file.Visual.Shots {
+						refs = append(refs, shot.File)
+					}
+					for _, ref := range refs {
+						if ref != "" {
+							if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO event_files(seq,sha256,media) VALUES(?,?,?)", seq, ref, "image/webp"); err != nil {
+								return err
+							}
+						}
+					}
 				}
 			}
 		}
