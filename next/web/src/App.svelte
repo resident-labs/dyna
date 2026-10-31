@@ -775,7 +775,9 @@
   .requests { margin-left: auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0;
     border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
-  main { position: relative; }
+  main { position: relative; container-type: inline-size; }
+  @media (min-width: 761px) { @container (max-width: 900px) { .tool { justify-content: center; width: 28px; padding: 0; } .tool span { display: none; } } }
+  @container (max-width: 600px) { .desktop-tabs { display: none; } .phone-tabs { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--line); } }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
   :global(.jobs ~ .requests) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
@@ -796,8 +798,7 @@
   /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
   .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .heading:has(.word) strong { flex: none; }
-  .crumb { flex: none; white-space: nowrap; }
+  .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
