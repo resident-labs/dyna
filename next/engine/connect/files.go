@@ -1,0 +1,116 @@
+package connect
+
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+type Link struct {
+	Relay   string `json:"relay"`
+	Machine string `json:"machine"`
+	Name    string `json:"name"`
+	Owner   Owner  `json:"owner"`
+	App     string `json:"app"`
+	Cards   string `json:"cards"`
+}
+
+// Files holds Connect credentials and immutable link configuration.
+type Files struct {
+	dir string
+	mu  sync.Mutex
+}
+
+func OpenFiles(data string) (*Files, error) {
+	dir := filepath.Join(data, "connect")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return nil, err
+	}
+	return &Files{dir: dir}, nil
+}
+
+func (f *Files) write(name string, b []byte) error {
+	tmp, err := os.CreateTemp(f.dir, ".connect-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err = tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(f.dir, name))
+}
+
+func (f *Files) Key() (ed25519.PrivateKey, error) {
+	b, err := os.ReadFile(filepath.Join(f.dir, "machine.key"))
+	if err == nil {
+		seed, e := b64.DecodeString(string(b))
+		if e != nil || len(seed) != ed25519.SeedSize {
+			return nil, errors.New("invalid machine key")
+		}
+		return ed25519.NewKeyFromSeed(seed), nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	seed := make([]byte, ed25519.SeedSize)
+	if _, err = rand.Read(seed); err != nil {
+		return nil, err
+	}
+	if err = f.write("machine.key", []byte(b64.EncodeToString(seed))); err != nil {
+		return nil, err
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+// Link reads the configuration. Callers must also check durable linked state.
+func (f *Files) Link() (Link, error) {
+	var link Link
+	b, err := os.ReadFile(filepath.Join(f.dir, "link.json"))
+	if err != nil {
+		return link, err
+	}
+	err = json.Unmarshal(b, &link)
+	return link, err
+}
+
+func (f *Files) Keys() (KeySet, error) {
+	var keys KeySet
+	b, err := os.ReadFile(filepath.Join(f.dir, "jwks.json"))
+	if err != nil {
+		return keys, err
+	}
+	err = json.Unmarshal(b, &keys)
+	return keys, err
+}
+
+func (f *Files) SaveLink(link Link) error {
+	b, err := json.Marshal(link)
+	if err != nil {
+		return err
+	}
+	return f.write("link.json", b)
+}
+func (f *Files) SaveKeys(keys KeySet) error {
+	b, err := json.Marshal(keys)
+	if err != nil {
+		return err
+	}
+	return f.write("jwks.json", b)
+}
+func (f *Files) SaveTunnelToken(token string) error { return f.write("tunnel-token", []byte(token)) }
