@@ -65,7 +65,3 @@ func (p *Proxy) Supervise(ctx context.Context, executable string, st AuthStore, 
 		return done
 	}, func(err error) { log.Printf("model proxy exited: %v", err) })
 }
-
-func supervise(ctx context.Context, now func() time.Time, after func(time.Duration) <-chan time.Time, start func() <-chan error) {
-	child.Run(ctx, nil, now, after, func(context.Context) <-chan error { return start() }, func(error) {})
-}

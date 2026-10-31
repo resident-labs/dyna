@@ -1,4 +1,4 @@
-package model
+package child
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func TestSupervisorBackoffAndStop(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		supervise(ctx, func() time.Time { return time.Time{} }, func(d time.Duration) <-chan time.Time { delays <- d; return tick }, func() <-chan error { c := make(chan error, 1); starts <- c; return c })
+		Run(ctx, nil, func() time.Time { return time.Time{} }, func(d time.Duration) <-chan time.Time { delays <- d; return tick }, func(context.Context) <-chan error { c := make(chan error, 1); starts <- c; return c }, func(error) {})
 	}()
 	first := <-starts
 	first <- errors.New("crash")
