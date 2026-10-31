@@ -225,6 +225,9 @@ func (devService) ComputerWatch(ctx context.Context, _ contract.SessionID) (<-ch
 
 type profiles struct{}
 
+func (profiles) List() []contract.ProfileSummary {
+	return []contract.ProfileSummary{{Name: "fake", Provider: contract.ModelProviderOpenAI, Model: "fake", Thinking: contract.ThinkingOff}}
+}
 func (profiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
 	return contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "fake", Thinking: contract.ThinkingOff}, []string{"fake"}, nil
 }
