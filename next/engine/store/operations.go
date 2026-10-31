@@ -55,6 +55,11 @@ func (s *Store) Operation(ctx context.Context, id contract.OpID) (StoredOperatio
 	return scanOperation(s.read.QueryRowContext(ctx, "SELECT "+operationColumns+" FROM operations WHERE id=?", id))
 }
 
+// ReplayOperation finds a caller's keyed operation in the active write transaction.
+func (s *Store) ReplayOperation(tx *sql.Tx, caller contract.Principal, clientID string) (StoredOperation, error) {
+	return scanOperation(tx.QueryRow("SELECT "+operationColumns+" FROM operations WHERE id=(SELECT operation FROM operation_replays WHERE caller_kind=? AND caller_id=? AND client_id=?)", caller.Kind, caller.Session, clientID))
+}
+
 // Operations lists records in a state. A nonzero due time limits expiry to that time.
 func (s *Store) Operations(ctx context.Context, room contract.RoomID, state contract.OpState, due time.Time) ([]StoredOperation, error) {
 	query := "SELECT " + operationColumns + " FROM operations"
