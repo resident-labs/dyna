@@ -35,24 +35,28 @@ func (s *Service) PostSearch(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return result, failure(err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT e.seq,e.room,e.at,e.from_kind,e.from_id,e.body FROM post_search JOIN events e ON e.seq=post_search.rowid WHERE post_search MATCH ? AND (?='' OR e.room=?) AND (?=0 OR e.seq<?) ORDER BY e.seq DESC LIMIT ?`, query, req.Room, req.Room, req.Before, req.Before, req.Limit)
+	rows, err := tx.QueryContext(ctx, `SELECT e.seq,e.room,e.at,e.from_kind,e.from_id,e.body,COALESCE(s.name,'') FROM post_search JOIN events e ON e.seq=post_search.rowid LEFT JOIN sessions s ON e.from_kind='session' AND s.id=e.from_id WHERE post_search MATCH ? AND (?='' OR e.room=?) AND (?=0 OR e.seq<?) ORDER BY e.seq DESC LIMIT ?`, query, req.Room, req.Room, req.Before, req.Before, req.Limit)
 	if err != nil {
 		return result, failure(err)
 	}
 	defer rows.Close()
 	result.Posts = make([]contract.SearchPost, 0)
+	result.Names = map[contract.SessionID]string{}
 	for rows.Next() {
 		var post contract.SearchPost
 		var at int64
-		var from string
+		var from, name string
 		var body []byte
-		if err = rows.Scan(&post.Seq, &post.Room, &at, &post.Author.Kind, &from, &body); err != nil {
+		if err = rows.Scan(&post.Seq, &post.Room, &at, &post.Author.Kind, &from, &body, &name); err != nil {
 			return result, failure(err)
 		}
 		post.Time = time.UnixMilli(at).UTC()
 		switch post.Author.Kind {
 		case contract.PrincipalSession:
 			post.Author.Session = contract.SessionID(from)
+			if name != "" {
+				result.Names[post.Author.Session] = name
+			}
 		case contract.PrincipalOwner:
 			post.Author.Device = contract.DeviceID(from)
 		}
