@@ -37,9 +37,6 @@ func proxyCommand() *cobra.Command {
 		client := rpc.NewClient(storeConn)
 		defer client.Close()
 		credentials := &proxyStore{client: client}
-		if err := credentials.importLegacy(cmd.Context(), cfg.AuthDir); err != nil {
-			return err
-		}
 		sdkauth.RegisterTokenStore(credentials)
 		cliproxy.EnableDynaMemoryOAuthCallbacks()
 		ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM)

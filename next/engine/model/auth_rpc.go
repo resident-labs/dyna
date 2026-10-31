@@ -33,13 +33,6 @@ func (r *AuthRPC) Save(req AuthSave, _ *struct{}) error {
 	return nil
 }
 
-func (r *AuthRPC) Import(records []store.ImportedProxyAuth, _ *struct{}) error {
-	if err := r.Store.ImportProxyAuths(context.Background(), records); err != nil {
-		return errors.New("proxy import failed")
-	}
-	return nil
-}
-
 func (r *AuthRPC) Delete(req AuthDelete, _ *struct{}) error {
 	if err := r.Store.DeleteProxyAuth(context.Background(), req.ID); err != nil {
 		return errors.New("proxy store unavailable")

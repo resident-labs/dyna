@@ -226,8 +226,8 @@ func compareSchema(db *sql.DB) error {
 			if err := rows.Scan(&t, &n, &s); err != nil {
 				return nil, err
 			}
-			if n == "deliveries" {
-				s = strings.Replace(s, `"deliveries"`, "deliveries", 1)
+			if n == "deliveries" || n == "operations" {
+				s = strings.Replace(s, `"`+n+`"`, n, 1)
 			}
 			out = append(out, t+"\x00"+n+"\x00"+s)
 		}

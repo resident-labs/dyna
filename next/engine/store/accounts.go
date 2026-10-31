@@ -6,6 +6,32 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// Accounts lists owner-visible account fields, never proxy credential IDs.
+func (s *Store) Accounts(ctx context.Context) ([]contract.Account, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT a.id,a.provider,a.label,r.room FROM accounts a LEFT JOIN account_rooms r ON r.account=a.id ORDER BY a.id,r.room`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	accounts := []contract.Account{}
+	for rows.Next() {
+		var account contract.Account
+		var room sql.NullString
+		if err := rows.Scan(&account.ID, &account.Provider, &account.Label, &room); err != nil {
+			return nil, err
+		}
+		if len(accounts) == 0 || accounts[len(accounts)-1].ID != account.ID {
+			account.State = contract.AccountConnected
+			account.Rooms = []contract.RoomID{}
+			accounts = append(accounts, account)
+		}
+		if room.Valid {
+			accounts[len(accounts)-1].Rooms = append(accounts[len(accounts)-1].Rooms, contract.RoomID(room.String))
+		}
+	}
+	return accounts, rows.Err()
+}
+
 // BindAccount associates an opaque account with a private proxy credential.
 func (s *Store) BindAccount(ctx context.Context, id contract.AccountID, proxyID string, provider contract.AccountProvider, label string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
