@@ -33,7 +33,6 @@
     return () => { clearInterval(timer); for (const pending of timers.values()) clearTimeout(pending); };
   });
   const name = (rule: RoomRule) => rule.by.kind === "owner" ? "You" : rule.by.session ? store.names.get(rule.by.session) ?? "A closed session" : "Dyna";
-  const root = (rule: RoomRule) => !!rule.by.session && store.sessions.has(rule.by.session) && !store.sessions.get(rule.by.session)?.parent;
   // Within a day the time is relative, as in the feed; older rules show their date. A rule newer than the
   // half-minute clock reads "just now", never as in the future.
   const when = (at: string) => now - Date.parse(at) < 86_400_000 ? fromNow(at, Math.max(now, Date.parse(at)))
@@ -85,8 +84,9 @@
 
 <svelte:window onpointerdown={event => { if (menuFor !== undefined && event.target instanceof Element && !event.target.closest(".more")) menuFor = undefined; }} />
 <section class="panel" aria-label="Rules" tabindex="-1" bind:this={element}>
-  <div class="top"><button type="button" class="back" onclick={onback}><Icon name="back" />Back</button>
-    <span class="room">{room}</span><strong>Rules</strong>{#if rules.length}<span class="count">{rules.length}</span>{/if}
+  <!-- One way back: the room name in the crumb when wide, a 40 px arrow on a phone. -->
+  <div class="top"><button type="button" class="back" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}><Icon name="back" /></button>
+    <button type="button" class="room" onclick={onback}>{room}</button><span class="slash" aria-hidden="true">/</span><strong>Rules</strong>{#if rules.length}<span class="count">{rules.length}</span>{/if}
     <!-- Filters help only in a long list. -->
     {#if rules.length > 10}<div class="filters" role="group" aria-label="Show rules by">
       {#each [["all", "All", undefined], ["owner", "Yours", owner], ["agents", "Agents", rules.length - owner]] as const as [value, label, total] (value)}
@@ -104,8 +104,8 @@
           {:else}
             <li><span class="number">r{rule.number}</span>
               <div class="body"><p class="text">{rule.text}</p>
-                <p class="meta"><span class="by">{#if rule.by.kind === "owner"}You{:else}<Avatar kind={rule.by.kind} name={name(rule)} root={root(rule)} size={16} />
-                  <span class="who" class:root={root(rule)} style:--hue={hue(name(rule))}>{name(rule)}</span>{/if}</span><span aria-hidden="true">·</span><time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{when(rule.at)}</time></p></div>
+                <p class="meta"><span class="by">{#if rule.by.kind === "owner"}You{:else}<Avatar kind={rule.by.kind} name={name(rule)} size={16} />
+                  <span class="who" style:--hue={hue(name(rule))}>{name(rule)}</span>{/if}</span><span aria-hidden="true">·</span><time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{when(rule.at)}</time></p></div>
               <button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button>
               <span class="more"><button type="button" aria-label={`Rule r${rule.number} actions`} aria-haspopup="menu" aria-expanded={menuFor === rule.number}
                 onclick={async () => { menuFor = menuFor === rule.number ? undefined : rule.number; await tick(); list?.querySelector<HTMLElement>(".menu [role=menuitem]")?.focus(); }}><Icon name="more" /></button>
@@ -129,10 +129,12 @@
 <style>
   .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
   .top { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-  .back { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
-  .back:hover { background: var(--hover); color: var(--text); }
-  .room { color: var(--muted); font-size: 13px; }
-  .room::after { content: " /"; }
+  .back, .room { border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+  .back:hover, .room:hover { background: var(--hover); color: var(--text); }
+  .back { display: none; place-items: center; width: 40px; height: 40px; margin: -8px 0 -8px -12px; padding: 0; }
+  .room { margin-left: -6px; padding: 2px 6px; font-size: 13px; }
+  .slash { color: var(--muted); font-size: 13px; }
+  @media (max-width: 640px) { .back { display: grid; } .room, .slash { display: none; } }
   .count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .filters { margin-left: auto; display: flex; gap: 2px; }
   .filters button { display: flex; gap: 6px; padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
@@ -140,7 +142,7 @@
   .filters button[aria-pressed="true"] { background: var(--selected); color: var(--text); }
   .list { flex: 1; min-height: 0; overflow-y: auto; }
   /* A reading column, as a short document: rules wrap at 920 px and are never cut. */
-  .doc { max-width: 920px; margin: 0 auto; padding: 20px 16px 24px; }
+  .doc { max-width: 920px; margin: 0 auto; padding: 20px 16px 72px; }
   .lead { margin: 0 0 12px 12px; color: var(--muted); font-size: 14px; }
   .none { margin: 0 0 0 12px; color: var(--muted); font-size: 14px; }
   ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
@@ -152,7 +154,6 @@
   .meta { margin: 4px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; }
   .by { display: inline-flex; align-items: center; gap: 6px; }
   .who { color: oklch(var(--id-name) var(--hue)); font-weight: 500; }
-  .who.root { color: var(--text); }
   .gone { align-items: center; color: var(--muted); font-size: 14px; }
   .gone p { margin: 0; grid-column: 2 / -1; }
   .link { padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: var(--focus); font: inherit; font-weight: 500; cursor: pointer; }
@@ -168,7 +169,7 @@
     .more { display: block; }
     li:hover, li:focus-within { background: none; }
   }
-  .more > button { display: grid; place-items: center; width: 40px; height: 40px; margin: -8px -8px -8px 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
+  .more > button { display: grid; place-items: center; width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0; margin: -8px -8px -8px 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
   .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; min-width: 180px; padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
   .menu button { min-height: 44px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--danger); font: inherit; font-size: 14px; text-align: left; }
