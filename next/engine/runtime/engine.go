@@ -98,6 +98,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer st.Close()
+	if err := st.ResetEngineHosts(ctx); err != nil {
+		return fmt.Errorf("reset host identity: %w", err)
+	}
 	profiles, err := engine.LoadProfiles(cfg.Profiles)
 	if err != nil {
 		return err
@@ -137,6 +140,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
+	}
+	if err := service.ExpireHostexecGrantRequests(ctx); err != nil {
+		return fmt.Errorf("expire host grant requests: %w", err)
 	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
