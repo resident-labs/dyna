@@ -45,7 +45,6 @@ func (r *Reconciler) SetRepositories(repos Repositories) {
 	r.repos = repos
 }
 
-// Connected clears the disconnect timer even if the channel closes before the next pass.
 func (r *Reconciler) Connected(id contract.BoxID) {
 	r.pass.Lock()
 	delete(r.disconnected, id)
