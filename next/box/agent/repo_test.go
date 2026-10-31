@@ -23,11 +23,15 @@ func TestSetupRepos(t *testing.T) {
 			var calls [][]string
 			git := func(_ context.Context, d, _ string, args ...string) (string, error) {
 				calls = append(calls, append([]string(nil), args...))
-				if args[0] == "init" {
-					return "", os.MkdirAll(filepath.Join(d, ".git"), 0755)
-				}
-				if args[0] == "show-ref" && (!existingBranch || args[len(args)-1] == "refs/heads/v2/s") {
-					return "", errors.New("not found")
+				switch args[0] {
+				case "clone":
+					return "", os.MkdirAll(filepath.Join(args[len(args)-1], ".git"), 0755)
+				case "show-ref":
+					if !existingBranch {
+						return "", errors.New("not found")
+					}
+				case "reset":
+					return "", os.WriteFile(filepath.Join(d, ".git", "index"), nil, 0600)
 				}
 				return "", nil
 			}
@@ -35,53 +39,102 @@ func TestSetupRepos(t *testing.T) {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(root, "owner/repo")
-			if !reflect.DeepEqual(calls[0], []string{"init", "--quiet"}) {
+			want := []string{"clone", "--no-checkout", "--reference", "/cache/repo", "/cache/repo", dir}
+			if !reflect.DeepEqual(calls[0], want) {
 				t.Fatal(calls[0])
 			}
-			want := []string{"checkout", "-b", "v2/s", "refs/remotes/origin/main"}
+			base := "refs/remotes/origin/main"
 			if existingBranch {
-				want = []string{"checkout", "-b", "v2/s", "refs/remotes/origin/v2/s"}
+				base = "refs/remotes/origin/v2/s"
 			}
-			if !reflect.DeepEqual(calls[len(calls)-1], want) {
+			if want := []string{"update-ref", "refs/heads/v2/s", base}; !reflect.DeepEqual(calls[len(calls)-4], want) {
 				t.Fatal(calls)
 			}
-			if _, err := os.Stat(dir); err != nil {
-				t.Fatal(err)
+			if want := []string{"reset", "--quiet", "--hard"}; !reflect.DeepEqual(calls[len(calls)-1], want) {
+				t.Fatal(calls)
 			}
-			calls = nil
-			if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil || len(calls) != 0 {
-				t.Fatalf("skip: %v %v", calls, err)
+			if _, err := os.Stat(filepath.Join(dir, ".git", "index")); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
 }
 
-func TestSetupRetryAfterCrashKeepsPiWork(t *testing.T) {
+func TestSetupRetryAfterCrashStartsFromEmptyDirectory(t *testing.T) {
 	root := t.TempDir()
 	repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"}
 	dir := filepath.Join(root, string(repo.Name))
 	crash := true
 	git := func(_ context.Context, d, _ string, args ...string) (string, error) {
-		switch {
-		case args[0] == "init":
-			return "", os.MkdirAll(filepath.Join(d, ".git"), 0755)
-		case args[0] == "checkout" && crash:
-			return "", errors.New("crash after fetch")
+		switch args[0] {
+		case "clone":
+			target := args[len(args)-1]
+			entries, err := os.ReadDir(target)
+			if err != nil {
+				return "", err
+			}
+			if len(entries) > 0 {
+				return "", errors.New("destination not empty")
+			}
+			if err := os.MkdirAll(filepath.Join(target, ".git"), 0755); err != nil {
+				return "", err
+			}
+			if !crash {
+				return "", nil
+			}
+			if err := os.WriteFile(filepath.Join(target, ".git", "index.lock"), nil, 0600); err != nil {
+				return "", err
+			}
+			return "", os.WriteFile(filepath.Join(target, "partial.txt"), []byte("half"), 0600)
+		case "reset":
+			if crash {
+				return "", errors.New("crash before reset")
+			}
+			return "", os.WriteFile(filepath.Join(d, ".git", "index"), nil, 0600)
 		}
 		return "", nil
 	}
 	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err == nil {
 		t.Fatal("expected crash")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("pi work"), 0600); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(dir, ".git", "index")); !os.IsNotExist(err) {
+		t.Fatalf("index written before reset: %v", err)
 	}
 	crash = false
 	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".git", setupMarker)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, ".git", "index")); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "partial.txt")); !os.IsNotExist(err) {
+		t.Fatalf("partial file kept: %v", err)
+	}
+}
+
+func TestSetupKeepsFinishedCheckout(t *testing.T) {
+	root := t.TempDir()
+	repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"}
+	dir := filepath.Join(root, string(repo.Name))
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git", "index"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("pi work"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var calls [][]string
+	git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+		calls = append(calls, args)
+		return "", nil
+	}
+	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatal(calls)
 	}
 	if got, err := os.ReadFile(filepath.Join(dir, "notes.txt")); err != nil || string(got) != "pi work" {
 		t.Fatalf("pi work lost: %q %v", got, err)
@@ -97,13 +150,10 @@ func TestSetupRetryFillsRunningProcessDirectory(t *testing.T) {
 	}
 	fail := true
 	git := func(_ context.Context, d, _ string, args ...string) (string, error) {
-		if args[0] == "fetch" && fail {
+		if args[0] == "clone" && fail {
 			return "", errors.New("offline")
 		}
-		if args[0] == "init" {
-			return "", os.MkdirAll(filepath.Join(d, ".git"), 0755)
-		}
-		if args[0] == "checkout" {
+		if args[0] == "reset" {
 			return "", os.WriteFile(filepath.Join(d, "AGENTS.md"), []byte("repository"), 0600)
 		}
 		return "", nil
