@@ -95,7 +95,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			sources, workErr = repos.Get(ctx, b.Session, b.Host, true)
 		}
 		if workErr == nil {
-			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
+			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
 		}
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
@@ -167,7 +167,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				sources, workErr = repos.Get(ctx, b.Session, b.Host, false)
 			}
 			if workErr == nil {
-				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources, Needs: image.Needs}, image.Tag, b.Slice)
+				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources, Needs: image.Needs}, image.Tag, b.Slice)
 			}
 			if workErr == nil {
 				workErr = r.store.SetRecreated(ctx, b.ID, slice, image.Tag)

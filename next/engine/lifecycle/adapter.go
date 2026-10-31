@@ -10,6 +10,7 @@ import (
 type BoxSpec struct {
 	Box     contract.BoxID
 	Session contract.SessionID
+	Room    contract.RoomID
 	Host    contract.HostName
 	Slice   string
 	Size    contract.BoxSize
