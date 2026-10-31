@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -14,8 +15,15 @@ type movingHost struct {
 	fakeBoxes
 	removed   []contract.BoxID
 	recreated []BoxSpec
+	failStop  bool
 }
 
+func (h *movingHost) Stop(context.Context, contract.BoxID) error {
+	if h.failStop {
+		return errors.New("stop failed")
+	}
+	return nil
+}
 func (h *movingHost) RemoveContainer(_ context.Context, id contract.BoxID) error {
 	h.removed = append(h.removed, id)
 	return nil
@@ -91,6 +99,19 @@ func TestMoveIdleSubtree(t *testing.T) {
 	if _, e := s.SessionMove(ctx, owner, contract.SessionMoveRequest{Session: child.Session, NewParent: destination.Session}); e != nil {
 		t.Fatal(e)
 	}
+	events, err := s.store.Events(ctx, room, 0, 256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := 0
+	for _, event := range events {
+		if b, ok := event.Body.(contract.BoxChanged); ok && b.To == contract.BoxStopped && (b.Box == child.Box || b.Box == leaf.Box) {
+			changed++
+		}
+	}
+	if changed != 2 {
+		t.Fatalf("expected two stopped box events, got %d", changed)
+	}
 	if len(host.removed) != 2 || host.removed[0] != leaf.Box || host.removed[1] != child.Box {
 		t.Fatalf("remove order: %v", host.removed)
 	}
@@ -107,5 +128,24 @@ func TestMoveIdleSubtree(t *testing.T) {
 	wantLeaf, _ := box.SliceName([]contract.BoxID{destination.Box, child.Box, leaf.Box})
 	if host.recreated[0].Slice != wantParent || host.recreated[1].Slice != wantLeaf {
 		t.Fatalf("wrong new slices: %+v", host.recreated)
+	}
+}
+
+func TestMoveUnderCallerAfterStopFailure(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	s.boxes = &movingHost{failStop: true}
+	if _, e := s.SessionMove(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.SessionMoveRequest{Session: child.Session, NewParent: parent}); e != nil {
+		t.Fatal(e)
 	}
 }

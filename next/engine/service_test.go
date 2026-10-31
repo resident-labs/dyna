@@ -15,6 +15,9 @@ import (
 
 type fakeBoxes struct{}
 
+func (fakeBoxes) RemoveContainer(context.Context, contract.BoxID) error { return nil }
+func (fakeBoxes) Recreate(context.Context, BoxSpec, string) error       { return nil }
+
 func (fakeBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
 func (fakeBoxes) Remove(context.Context, contract.BoxID) error    { return nil }
 func (fakeBoxes) Start(context.Context, contract.BoxID) error     { return nil }

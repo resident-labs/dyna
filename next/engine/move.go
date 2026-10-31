@@ -2,16 +2,13 @@ package engine
 
 import (
 	"context"
+	"log"
 	"slices"
 	"sort"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
-
-type moveBoxes interface {
-	RemoveContainer(context.Context, contract.BoxID) error
-	Recreate(context.Context, BoxSpec, string) error
-}
 
 // SessionMove moves an idle subtree and leaves its volumes for the next wake.
 func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, req contract.SessionMoveRequest) (contract.SessionMoveResponse, *contract.Error) {
@@ -24,7 +21,7 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return response, failure(err)
 	}
-	if !tree.CanManage(caller, req.Session) || !tree.CanManage(caller, req.NewParent) {
+	if !tree.CanManage(caller, req.Session) || !(tree.CanManage(caller, req.NewParent) || caller.Kind == contract.PrincipalSession && caller.Session == req.NewParent) {
 		return response, forbidden()
 	}
 	if err := tree.CheckMove(req.Session, req.NewParent); err != nil {
@@ -55,7 +52,7 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 	if err != nil || !slices.Equal(current, order) {
 		return response, &contract.Error{Code: contract.ErrConflict, Message: "subtree changed; retry the move"}
 	}
-	if !tree.CanManage(caller, req.Session) || !tree.CanManage(caller, req.NewParent) {
+	if !tree.CanManage(caller, req.Session) || !(tree.CanManage(caller, req.NewParent) || caller.Kind == contract.PrincipalSession && caller.Session == req.NewParent) {
 		return response, forbidden()
 	}
 	if err := tree.CheckMove(req.Session, req.NewParent); err != nil {
@@ -73,16 +70,35 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return response, failure(err)
 	}
-	host, ok := s.boxes.(moveBoxes)
-	if !ok {
-		return response, &contract.Error{Code: contract.ErrUnavailable, Message: "box host cannot move containers"}
+	boxes, err := s.store.Boxes(ctx)
+	if err != nil {
+		return response, failure(err)
 	}
-	busy, err := s.store.MoveSession(ctx, req.Session, req.NewParent, budgetParent, event)
+	var members []box.Box
+	var boxEvents []contract.Event
+	for _, id := range order {
+		for _, b := range boxes {
+			if b.Session == id {
+				members = append(members, b)
+				e, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})
+				if err != nil {
+					return response, failure(err)
+				}
+				boxEvents = append(boxEvents, e)
+				break
+			}
+		}
+	}
+	busy, uncreated, err := s.store.MoveSession(ctx, req.Session, req.NewParent, budgetParent, event, members, boxEvents)
 	if err != nil {
 		return response, failure(err)
 	}
 	if busy != "" {
-		return response, &contract.Error{Code: contract.ErrMoveBusy, Message: "session " + string(busy) + " is busy"}
+		reason := " is busy"
+		if uncreated {
+			reason = " has a box that is not created yet"
+		}
+		return response, &contract.Error{Code: contract.ErrMoveBusy, Message: "session " + string(busy) + reason}
 	}
 	for _, id := range order {
 		member, err := s.store.Session(ctx, id)
@@ -90,10 +106,11 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 			return response, failure(err)
 		}
 		if err := s.boxes.Stop(context.WithoutCancel(ctx), member.Box); err != nil {
-			return response, failure(err)
+			log.Printf("move stop %s: %v", member.Box, err)
+			continue
 		}
-		if err := host.RemoveContainer(context.WithoutCancel(ctx), member.Box); err != nil {
-			return response, failure(err)
+		if err := s.boxes.RemoveContainer(context.WithoutCancel(ctx), member.Box); err != nil {
+			log.Printf("move remove %s: %v", member.Box, err)
 		}
 	}
 	return response, nil
