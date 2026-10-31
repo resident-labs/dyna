@@ -255,7 +255,7 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 		if err != nil {
 			return err
 		}
-		return s.store.InsertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: target.ID}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: outcome == contract.TurnFailed})
+		return s.store.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: target.ID}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: outcome == contract.TurnFailed})
 	})
 	if err != nil {
 		return response, failure(err)
