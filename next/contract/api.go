@@ -552,6 +552,7 @@ type TranscriptItem struct {
 	Attachments []Attachment       `json:"attachments,omitempty"`
 }
 type TranscriptInput struct {
+	At   time.Time `json:"at"`
 	ID   EventID   `json:"id"`
 	Seq  int64     `json:"seq"`
 	Room RoomID    `json:"room"`
