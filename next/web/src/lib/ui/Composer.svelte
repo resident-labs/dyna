@@ -26,18 +26,22 @@
   let token = $derived(sessions.length ? mentionToken(value, caret) : undefined);
   let matches = $derived(token && token.start !== dismissed
     ? sessions.filter(session => session.name.toLowerCase().startsWith(token.query.toLowerCase())).slice(0, 8) : []);
-  $effect(() => { void token?.query; pick = 0; });
+  // A new query or a shorter list starts at the first row, so pick never points past the end.
+  $effect(() => { void token?.query; void matches.length; pick = 0; });
   const track = () => { caret = element?.selectionStart ?? 0; };
   async function complete(name: string) {
     if (!token) return;
-    const text = `@${name} `, at = token.start + text.length;
-    value = value.slice(0, token.start) + text + value.slice(caret);
+    // The pick replaces the whole word, also the part after the caret, and adds a space only when none follows.
+    const rest = value.slice(caret).replace(/^[A-Za-z0-9._:-]*/, "");
+    const text = /^\s/.test(rest) ? `@${name}` : `@${name} `, at = token.start + text.length + (/^\s/.test(rest) ? 1 : 0);
+    value = value.slice(0, token.start) + text + rest;
     caret = at;
     await tick();
     element?.setSelectionRange(at, at);
   }
   function keydown(event: KeyboardEvent) {
-    if (event.isComposing) return;
+    // keyCode 229 is a key that Safari sends while an input method composes.
+    if (event.isComposing || event.keyCode === 229) return;
     if (matches.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
       pick = (pick + (event.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length;
