@@ -119,7 +119,7 @@
   }
   // The requests and rules views show in place of the conversation until Back, Escape or the control that opened them.
   let section: "requests" | "rules" | undefined = $state();
-  let visual: { versions: VisualVersion[]; selected: number; send: (text: string, session: string, event: string) => Promise<void> } | undefined = $state();
+  let visual: { versions: VisualVersion[]; selected: number; send: (text: string, event: string) => Promise<void> } | undefined = $state();
   let visualTrigger: HTMLElement | undefined;
   let requestsButton: HTMLButtonElement | undefined = $state();
   let roomMenu: RoomMenu | undefined = $state();
@@ -673,7 +673,7 @@
     <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
-  {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} names={store.names} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
+  {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
   {:else if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       <!-- Docked, the computer sits above the session list. -->
