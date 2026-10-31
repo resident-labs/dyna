@@ -25,6 +25,9 @@
   import JobsTool from "./lib/ui/JobsTool.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
+  import Palette from "./lib/ui/Palette.svelte";
+  import type { Item } from "./lib/palette.ts";
+  import type { SearchCall } from "./lib/search.svelte.ts";
   import { MediaQuery, SvelteMap, SvelteSet } from "svelte/reactivity";
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
@@ -249,8 +252,38 @@
   let settings: HTMLElement | undefined = $state();
   let settingsMenu: HTMLButtonElement | undefined = $state();
   let dock: HTMLElement | undefined = $state();
+  let palette = $state(false);
+  let paletteOpener: HTMLElement | undefined;
+  let jumpSeq: number | undefined = $state();
+  // This injected boundary is replaced by the generated post.search method when its contract lands.
+  const searchPosts: SearchCall = async () => { throw new Error("Search is not available"); };
+  function closePalette() {
+    palette = false;
+    void tick().then(() => (paletteOpener?.isConnected ? paletteOpener : composer)?.focus());
+  }
+  function paletteOpen(item: Item) {
+    closePalette();
+    if (item.kind === "more") return;
+    if (item.kind === "action") {
+      if (item.action.id === "pause") pause();
+      else if (item.action.id === "requests") { if (inSettings) { history.pushState(null, "", behind); follow(); } section = "requests"; }
+      else { history.pushState(null, "", item.action.id === "theme" ? "/settings/appearance" : "/settings"); follow(); }
+      return;
+    }
+    const targetRoom = item.kind === "room" ? item.room.id : item.kind === "session" ? item.session.room : item.post.room;
+    const targetSession = item.kind === "session" ? item.session.id : item.kind === "message" && item.post.home.kind === "dm" ? item.post.home.session : undefined;
+    jumpSeq = item.kind === "message" ? item.post.seq : undefined;
+    history.pushState(null, "", `/r/${encodeURIComponent(targetRoom)}${targetSession ? `/s/${encodeURIComponent(targetSession)}` : ""}`);
+    follow();
+  }
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      if (!palette) { paletteOpener = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; palette = true; }
+      return;
+    }
+    if (palette) return;
     if (event.key === "Escape" && drawer) void showDrawer(false);
     else if (event.key === "Escape" && panel && !wide.current) void showPanel(false);
     else if (event.key === "Escape" && section && !inSettings) void closeSection();
@@ -477,6 +510,7 @@
 {/snippet}
 
 <svelte:window onkeydown={cycle} onclickcapture={dismissRequests} />
+{#if palette}<Palette {rooms} {room} search={searchPosts} onclose={closePalette} onopen={paletteOpen} />{/if}
 {#snippet sheetHandle(of: string)}
   <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
     onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>
@@ -555,7 +589,7 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate")} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate")} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)} />{/key}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
