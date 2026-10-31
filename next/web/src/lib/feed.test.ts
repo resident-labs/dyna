@@ -76,8 +76,8 @@ test("collapses repeated names in the work line", () => {
 
 test("a stopped turn and a room's pause show as their own lines", () => {
   const stopped = event(1, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "stopped", usage } });
-  const rows = feedRows([stopped, event(2, { type: "room.paused", body: {} }), event(3, { type: "room.resumed", body: {} })], { kind: "feed" });
-  assert.deepEqual(rows.flatMap(row => row.kind === "notice" ? [describe(row.event, id => id)] : []), ["s's turn stopped", "Room paused", "Room resumed"]);
+  const rows = feedRows([stopped, event(2, { type: "room.paused", body: {} }, { kind: "owner" }), event(3, { type: "room.resumed", body: {} }, { kind: "session", session: "root" })], { kind: "feed" });
+  assert.deepEqual(rows.flatMap(row => row.kind === "notice" ? [describe(row.event, id => id)] : []), ["s's turn stopped", "You paused the room", "root resumed the room"]);
   assert.equal(dmOf(stopped), "s");
   assert.equal(decodeEvent({ seq: 2, id: "2", at: "", room: "r", from: { kind: "owner" }, type: "room.paused", body: {} })?.type, "room.paused");
   assert.deepEqual(feedRows([stopped], { kind: "dm", session: "s" }).map(row => row.kind), ["work", "notice"]);
