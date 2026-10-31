@@ -16,7 +16,7 @@ func fixture(t *testing.T) string {
 	if err := os.Mkdir(filepath.Join(dir, "rooms"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	global := contract.GlobalBundle{Version: contract.BundleV1, Rooms: []contract.RoomName{"alpha"}}
+	global := contract.GlobalBundle{Version: contract.BundleV1, Rooms: []contract.RoomName{"alpha"}, Profiles: []contract.ProfileBundle{{}}, Repos: []contract.RepoBundle{{}}, Skills: []contract.SkillBundle{{}}}
 	room := contract.RoomBundle{Version: contract.BundleV1, Name: "alpha", Goals: []contract.GoalBundle{{Items: []contract.GoalItemBundle{{}}}}, Counts: contract.BundleCounts{Goals: 1, GoalItems: 1}}
 	globalData, err := json.Marshal(global)
 	if err != nil {
@@ -39,6 +39,9 @@ func TestDryRun(t *testing.T) {
 	report, err := DryRun(dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if report.Profiles != 1 || report.Repositories != 1 || report.Skills != 1 {
+		t.Fatalf("global record counts: %+v", report)
 	}
 	if got := report.Rooms["alpha"]; got.Goals != 1 || got.GoalItems != 1 {
 		t.Fatalf("counts: %+v", got)

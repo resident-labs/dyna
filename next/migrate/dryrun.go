@@ -11,8 +11,11 @@ import (
 
 // Report contains counts derived from decoded records, not declared counts.
 type Report struct {
-	Global contract.BundleCounts                       `json:"global"`
-	Rooms  map[contract.RoomName]contract.BundleCounts `json:"rooms"`
+	Global       contract.BundleCounts                       `json:"global"`
+	Profiles     int                                         `json:"profiles"`
+	Repositories int                                         `json:"repositories"`
+	Skills       int                                         `json:"skills"`
+	Rooms        map[contract.RoomName]contract.BundleCounts `json:"rooms"`
 }
 
 // DryRun validates every part without opening or writing a store.
@@ -27,6 +30,7 @@ func DryRun(dir string) (Report, error) {
 	if err != nil {
 		return report, fmt.Errorf("global: %w", err)
 	}
+	report.Profiles, report.Repositories, report.Skills = len(global.Profiles), len(global.Repos), len(global.Skills)
 	report.Global = contract.BundleCounts{
 		Rules: len(global.Rules), Hosts: len(global.Hosts), Accounts: len(global.Accounts),
 		Devices: len(global.Devices), Subscriptions: len(global.Subscriptions),
