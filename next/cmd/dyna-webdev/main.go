@@ -269,12 +269,6 @@ type scripted struct {
 
 func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	text := inputs[0].Text
-	for _, in := range inputs { // rule notices ride along with the next turn, so the reply quotes the first message instead
-		if !strings.HasPrefix(in.Text, "Rule r") {
-			text = in.Text
-			break
-		}
-	}
 	for _, in := range inputs { // a turn can batch inputs; one with a marker wins, so the marker works in any order
 		if marked(in.Text, "[fail]") || marked(in.Text, "[jobs]") || marked(in.Text, "[wait]") || marked(in.Text, "[lost]") {
 			text = in.Text
