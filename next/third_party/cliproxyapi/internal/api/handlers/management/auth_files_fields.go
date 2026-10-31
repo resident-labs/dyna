@@ -1010,6 +1010,15 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 			return "", fmt.Errorf("post-auth hook failed: %w", err)
 		}
 	}
+	if h.authManager != nil {
+		if _, ok := h.authManager.GetByID(record.ID); ok {
+			_, err := h.authManager.Replace(ctx, record)
+			if err != nil {
+				return "", err
+			}
+			return record.ID, nil
+		}
+	}
 	savedPath, errSave := store.Save(coreauth.WithAuthCreationIntent(ctx), record)
 	if errSave != nil {
 		return savedPath, errSave
