@@ -78,7 +78,7 @@ test("a failed turn with a final reply keeps its failed row", () => {
     cause: "model_failed", replies: [{ reply: { kind: "final", target: { kind: "owner" } } }] } });
   const rows = feedRows([ended], { kind: "feed" });
   assert.deepEqual(rows.map(row => row.kind), ["post", "failed"]);
-  assert.deepEqual(rows[1], { kind: "failed", key: "f1", session: "l", at: ended.at, label: "Turn failed", cause: "The model provider refused or failed the request" });
+  assert.deepEqual(rows[1], { kind: "failed", key: "f1", seq: 1, session: "l", at: ended.at, label: "Turn failed", cause: "The model provider refused or failed the request" });
 });
 
 test("puts a turn's final reply in its home only", () => {
