@@ -30,6 +30,15 @@ export function lastSeen(h: HostSummary, now: number): string | undefined {
   return "Last seen " + (minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`);
 }
 
+// The off-host backup problem Home marks, if any (spec 4.1): the stored failure, or a copy over 48 hours old. No copy
+// yet, a copy in time and backups that are not configured all show nothing.
+export function backupProblem(h: HostSummary, now: number): { tone: "warning" | "error"; label: string; title?: string } | undefined {
+  if (!h.backupCopyEnabled) return undefined;
+  if (h.backupCopyFailure) return { tone: "error", ...h.backupCopyFailure === "no_space" ? { label: "Backup machine full", title: "The second machine has no room for the backup" } : { label: "Backup failed" } };
+  if (!h.backupCopyAt || now - Date.parse(h.backupCopyAt) <= 48 * 3_600_000) return undefined;
+  return { tone: "warning", label: `Backup ${Math.floor((now - Date.parse(h.backupCopyAt)) / 86_400_000)} days old` };
+}
+
 // The sessions panel's foot: at most 3 hosts. Unreachable hosts come first, then those low on disk, since they need
 // attention; then the reachable ones that report load, busiest first by the higher of CPU and memory.
 export function hostLoads(hosts: HostSummary[]): { name: string; reachable: boolean; diskLow: boolean; meters: Meter[] }[] {
