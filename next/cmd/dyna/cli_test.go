@@ -15,6 +15,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func (f *fakeClient) RoomSetLimits(_ context.Context, q contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error) {
+	f.limits = q
+	return contract.RoomSetLimitsResponse{}, nil
+}
 func (f *fakeClient) RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error) {
 	return contract.RoomPauseResponse{}, nil
 }
@@ -26,6 +30,7 @@ type fakeClient struct {
 	host         contract.HostAddRequest
 	hostNoSwap   bool
 	room         contract.RoomCreateRequest
+	limits       contract.RoomSetLimitsRequest
 	repoAdd      contract.RoomRepoAddRequest
 	repoList     contract.RoomReposRequest
 	start        contract.SessionStartRequest
@@ -390,5 +395,13 @@ func TestHostexecGrantSubmitsOperation(t *testing.T) {
 	args = f.submit.Operation.Args.(contract.HostexecGrantArgs)
 	if args.To.Session != "ses_1" || args.Room != "room_1" || f.submit.Operation.Room != "room_1" {
 		t.Fatalf("%+v", f.submit)
+	}
+}
+
+func TestRoomLimitCommand(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "room", "limit", "room_1", "--cpus", "2", "--mem", "8GiB")
+	if f.limits != (contract.RoomSetLimitsRequest{Room: "room_1", CPUs: 2, MemBytes: 8 << 30}) {
+		t.Fatal(f.limits)
 	}
 }
