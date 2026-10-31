@@ -40,6 +40,16 @@ func TestAccountList(t *testing.T) {
 		t.Fatal("session could list accounts")
 	}
 	response, problem := actions.AccountsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountsListRequest{})
+	flows := map[contract.AccountProvider]contract.ConnectFlow{
+		contract.ProviderAnthropic: contract.ConnectFlowCallback, contract.ProviderOpenAI: contract.ConnectFlowCallback,
+		contract.ProviderKimi: contract.ConnectFlowDevice, contract.ProviderXAI: contract.ConnectFlowDevice,
+		contract.ProviderZAI: contract.ConnectFlowKey, contract.ProviderOpencodeGo: contract.ConnectFlowKey, contract.ProviderDeepSeek: contract.ConnectFlowKey,
+	}
+	for _, provider := range response.Providers {
+		if provider.ConnectFlow != flows[provider.ID] {
+			t.Fatalf("provider %s has wrong connection flow", provider.ID)
+		}
+	}
 	data, err := json.Marshal(response)
 	if err != nil || problem != nil || len(response.Accounts) != 1 || len(response.Providers) != 7 || response.Accounts[0].State != contract.AccountSignInExpired || strings.Contains(string(data), "invented-private-proxy-id") {
 		t.Fatal("unsafe or incomplete account list")
