@@ -92,7 +92,9 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				return contract.OpResult{Error: "grant no longer active"}
 			}
 			started := s.now()
-			out, code, truncated, err := s.hostexec.RunHostexec(ctx, a, op)
+			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
+			out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)
+			cancel()
 			stopped := store.HostexecStop("")
 			if err != nil {
 				stopped = store.HostexecLost
@@ -143,9 +145,12 @@ func (s *Service) StopHostexecs(ctx context.Context) error {
 		return err
 	}
 	for _, r := range runs {
-		// The next tick retries failed stops.
-		_ = s.hostexec.StopHostexec(ctx, r.Host, r.Scope)
-
+		// Stops time out before the next tick, which retries any failed stop.
+		go func() {
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = s.hostexec.StopHostexec(stopCtx, r.Host, r.Scope)
+		}()
 	}
 	return nil
 }
