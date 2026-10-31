@@ -18,6 +18,9 @@ import (
 type streamDeviceStore struct{ live atomic.Bool }
 
 func (s *streamDeviceStore) CreateDevice(context.Context, store.Device) error { return nil }
+func (s *streamDeviceStore) RedeemPairCode(context.Context, string, string, []contract.Scope, time.Time) (string, store.Device, error) {
+	return "", store.Device{}, store.ErrPair
+}
 func (s *streamDeviceStore) AuthenticateDevice(context.Context, [32]byte, time.Time) (store.Device, bool, error) {
 	return store.Device{}, s.live.Load(), nil
 }
