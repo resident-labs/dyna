@@ -46,7 +46,7 @@ func (s *Store) LifecycleBoxes(ctx context.Context) ([]LifecycleBox, error) {
 }
 
 func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]LifecycleBox, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,(SELECT room FROM sessions WHERE id=boxes.session),(SELECT r.cpus FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),(SELECT r.mem_bytes FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY created_at,id", activeOnly)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,(SELECT room FROM sessions WHERE id=boxes.session),(SELECT r.cpus FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),(SELECT r.mem_bytes FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY (SELECT created_at FROM sessions WHERE id=boxes.session),id", activeOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +157,8 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 			host = &next.Host
 		}
 		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=?,failures=? WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop'))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), dueMS, failures, old.ID, old.State, admission, event.Time.UnixMilli(), old.State, next.State, old.State, next.State)
+		// created_at is the allocation time for disk accounting, not the waiter's enqueue time.
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,created_at=CASE WHEN state='pending' AND ?='creating' AND image='' THEN ? ELSE created_at END,updated_at=?,due_at=?,failures=? WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop'))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, next.State, event.Time.UnixMilli(), event.Time.UnixMilli(), dueMS, failures, old.ID, old.State, admission, event.Time.UnixMilli(), old.State, next.State, old.State, next.State)
 		if err != nil {
 			return err
 		}
