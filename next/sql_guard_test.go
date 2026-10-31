@@ -42,7 +42,6 @@ var sqlAllowlist = map[string]int{
 	"engine/service.go":         1,
 	"engine/session_api.go":     4,
 	"engine/session_search.go":  4,
-	"engine/stream.go":          1,
 	"engine/turn_api.go":        4,
 }
 

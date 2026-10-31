@@ -21,8 +21,8 @@ func (s *Service) instructionsPath(ctx context.Context, room contract.RoomID) (s
 	if room == "" {
 		return filepath.Join(root, "global", "AGENTS.md"), nil
 	}
-	var id contract.RoomID
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT id FROM rooms WHERE id=?", room).Scan(&id); err != nil {
+	id, err := s.store.RoomID(ctx, room)
+	if err != nil {
 		return "", failure(err)
 	}
 	return filepath.Join(root, "rooms", string(id), "AGENTS.md"), nil

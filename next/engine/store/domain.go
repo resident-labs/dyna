@@ -39,6 +39,13 @@ type Session struct {
 	NewRoomName string // nonempty only for a new room root
 }
 
+// RoomID returns the canonical ID only when the room exists.
+func (s *Store) RoomID(ctx context.Context, room contract.RoomID) (contract.RoomID, error) {
+	var id contract.RoomID
+	err := s.Read().QueryRowContext(ctx, "SELECT id FROM rooms WHERE id=?", room).Scan(&id)
+	return id, err
+}
+
 func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES(?,?,?,?,?)", id, name, at.UnixMilli(), 0, 0)
