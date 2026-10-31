@@ -22,6 +22,7 @@ const (
 	MethodRoomRepos        Method = "room.repos"
 	MethodSessionStart     Method = "session.start"
 	MethodSessionClose     Method = "session.close"
+	MethodSessionRestart   Method = "session.restart"
 	MethodSessionMove      Method = "session.move"
 	MethodPost             Method = "post"
 	MethodEventsList       Method = "events.list"
@@ -241,6 +242,10 @@ type SessionCloseRequest struct {
 	Discard bool      `json:"discard,omitempty"`
 }
 type SessionCloseResponse struct{}
+type SessionRestartRequest struct {
+	Session SessionID `json:"session"`
+}
+type SessionRestartResponse struct{}
 type PostRequest struct {
 	Room        RoomID       `json:"room"`
 	Text        string       `json:"text"`
