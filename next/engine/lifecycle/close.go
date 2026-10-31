@@ -60,7 +60,6 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 		return err
 	}
 	next := row.Box
-	var due time.Time
 	var cause contract.FailureCause
 	if row.Want == store.WantDiscard || !hadTurns {
 		if err = r.boxes.Remove(ctx, row.ID); err != nil {
@@ -70,11 +69,14 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 		}
 	} else {
 		err = r.boxes.Start(ctx, row.ID)
-		due = r.now().Add(30 * time.Second)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return r.store.SetArchiveRetry(ctx, row.ID, r.now().Add(30*time.Second))
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	_, changeErr := r.change(ctx, row.Box, next, due, row.Failures, cause)
+	_, changeErr := r.change(ctx, row.Box, next, time.Time{}, row.Failures, cause)
 	return changeErr
 }
