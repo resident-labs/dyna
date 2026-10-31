@@ -59,7 +59,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				failures++
 				if failures >= 3 {
 					next.State, cause = contract.BoxFailed, contract.CauseStartFailed
-				} else {
+				} else if failures > 1 {
+					// The first crash restarts at once; the 60 s disconnect wait already passed.
 					due = r.retryAt(failures)
 				}
 			}
