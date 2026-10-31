@@ -233,6 +233,11 @@ func Run(ctx context.Context, cfg Config) error {
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
 	})
+	files, err := connect.OpenFiles(cfg.Data)
+	if err != nil {
+		return err
+	}
+	sessions := connect.NewSessions(files, st, time.Now, nil)
 	appPort := 0
 	if cfg.WebListen != "" {
 		app, err := fs.Sub(web.Dist, "dist")
@@ -243,6 +248,7 @@ func Run(ctx context.Context, cfg Config) error {
 		if err != nil {
 			return err
 		}
+		webServer.SetConnect(sessions)
 		if err := webServer.SetRoutes(cfg.WebRoutes); err != nil {
 			return err
 		}
@@ -259,10 +265,6 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	go cardServer.Serve(card)
 	defer card.Close()
-	files, err := connect.OpenFiles(cfg.Data)
-	if err != nil {
-		return err
-	}
 	connectOps := connect.NewOperations(ctx, files, st, appPort, card.Addr().(*net.TCPAddr).Port)
 	defer connectOps.Close()
 	if err := connectOps.Resume(ctx); err != nil {

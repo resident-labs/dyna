@@ -134,6 +134,45 @@ func (s *Store) RotateConnectSession(ctx context.Context, x ConnectSession, hash
 	})
 }
 
+// ConnectStreamScopes rechecks the live session and current scopes without relying on a rotated cookie.
+func (s *Store) ConnectStreamScopes(ctx context.Context, id string, now time.Time) ([]contract.Scope, bool, error) {
+	tx, err := s.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+	var device string
+	err = tx.QueryRowContext(ctx, `SELECT d.id FROM connect_sessions c JOIN connect_devices m ON m.relay_device=c.relay_device JOIN devices d ON d.id=m.device JOIN connect_link_state l ON l.id=1 WHERE c.id=? AND l.linked=1 AND c.epoch=l.epoch AND d.revoked_at IS NULL AND d.expires_at>? AND c.grant_end>? AND c.access_until>?`, id, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&device)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", device)
+	if err != nil {
+		return nil, false, err
+	}
+	var scopes []contract.Scope
+	for rows.Next() {
+		var scope contract.Scope
+		if err := rows.Scan(&scope); err != nil {
+			rows.Close()
+			return nil, false, err
+		}
+		scopes = append(scopes, scope)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return scopes, true, nil
+}
+
 func (s *Store) EndConnectSession(ctx context.Context, id string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "DELETE FROM connect_sessions WHERE id=?", id)
