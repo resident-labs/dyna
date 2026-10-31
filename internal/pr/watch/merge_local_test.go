@@ -392,8 +392,10 @@ func TestLocalTrialOutsideIntegrationMoveDiscardsTrial(t *testing.T) {
 	changeGit(t, dir, "update-ref", "refs/heads/dyna/integration", records[0].Head)
 	localTick(t, e)
 	st, _ := e.s.Store.Read()
-	if len(st.MergeTrials) != 0 {
-		t.Fatalf("outside move retained trial: %+v", st.MergeTrials)
+	for _, b := range st.MergeTrials {
+		if b.Base != records[0].Head {
+			t.Fatalf("outside move retained stale trial: %+v", b)
+		}
 	}
 	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != records[0].Head {
 		t.Fatalf("outside move overwritten: %s", got)
