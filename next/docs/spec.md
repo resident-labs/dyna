@@ -1022,7 +1022,7 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
-- **Pending input at close.** The engine hands pending deliveries to the parent when a session closes. A post addressed to a closing session fails with `session_closing`.
+- **Pending input at close.** The engine hands pending and unacknowledged deliveries to the parent when a session closes. If the parent already has that event, its own delivery stays and the child's copy is dropped. A post addressed to a closing session fails with `session_closing`.
 - **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. If its box fails, the owner can replace it with the same session ID, box ID, grants and history. Restart discards the old volume, unpushed work and unacknowledged transcript bytes; the feed and acknowledged transcript stay (5.3).
 - **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle and a move to another room. A move changes only the tree: one update of the parent and one `session.moved` event. It touches no box, because a box does not depend on its place in the tree.
 
