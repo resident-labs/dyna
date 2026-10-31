@@ -44,12 +44,13 @@
   let since: number | undefined = $state();
   $effect(() => { if (since === undefined && store.ready && view.ready) since = untrack(() => store.readAt(home)); });
   // The owner has read the conversation up to its newest event once the bottom of the window is on screen while the
-  // page is visible. see() sends only a newer position, so scrolling and new events make one call per change.
-  let bottom = $state(false);
+  // page is visible. see() sends only a newer position, so scrolling and new events make one call per change. A new
+  // event may push the bottom out of view before the browser reports it, so the position is taken from a fresh
+  // observation of the layout that holds that event, not from the last report.
   function markRead() {
-    if (since === undefined || !view.atPresent || !bottom || document.visibilityState !== "visible") return;
+    if (since === undefined || !view.atPresent || document.visibilityState !== "visible") return;
     const newest = view.newest;
-    untrack(() => store.see(home, newest));
+    void list?.atBottom().then(shown => { if (shown) store.see(home, newest); });
   }
   $effect(markRead);
   $effect(() => {
@@ -127,7 +128,7 @@
 {/if}
 {#if items.length}
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={view.atPresent} bind:element
-    onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()} onbottom={shown => { bottom = shown; }}>
+    onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
