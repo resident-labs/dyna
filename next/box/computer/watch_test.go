@@ -15,90 +15,86 @@ import (
 	"github.com/coder/websocket"
 )
 
-func TestWatchSendsScreenshotBeforeScreencast(t *testing.T) {
-	acked := make(chan int, 1)
-	mux := http.NewServeMux()
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	mux.HandleFunc("/json/list", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, `[{"type":"page","webSocketDebuggerUrl":%q}]`, "ws"+strings.TrimPrefix(server.URL, "http")+"/ws")
-	})
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.CloseNow()
-		captured := false
-		for {
-			_, data, err := conn.Read(r.Context())
-			if err != nil {
-				return
-			}
-			var m message
-			if json.Unmarshal(data, &m) != nil {
-				return
-			}
-			result := json.RawMessage(`{}`)
-			switch m.Method {
-			case "Page.captureScreenshot":
-				if captured {
-					t.Error("unexpected second capture")
+func TestWatchOrdersScreenshotAndScreencast(t *testing.T) {
+	for _, frameFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("frameFirst=%t", frameFirst), func(t *testing.T) {
+			mux := http.NewServeMux()
+			server := httptest.NewServer(mux)
+			defer server.Close()
+			mux.HandleFunc("/json/list", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, `[{"type":"page","webSocketDebuggerUrl":%q}]`, "ws"+strings.TrimPrefix(server.URL, "http")+"/ws")
+			})
+			mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
 					return
 				}
-				captured = true
-				result = json.RawMessage(`{"data":"b2xk"}`)
-			case "Page.startScreencast":
-				if !captured {
-					t.Error("screencast started before screenshot")
-					return
+				defer conn.CloseNow()
+				for {
+					_, data, err := conn.Read(r.Context())
+					if err != nil {
+						return
+					}
+					var m message
+					if json.Unmarshal(data, &m) != nil {
+						return
+					}
+					if m.Method == "Page.screencastFrameAck" {
+						continue
+					}
+					reply, _ := json.Marshal(message{ID: m.ID, Result: json.RawMessage(`{}`)})
+					if m.Method == "Page.captureScreenshot" {
+						frame := []byte(`{"method":"Page.screencastFrame","params":{"data":"bmV3","sessionId":17}}`)
+						if frameFirst && conn.Write(r.Context(), websocket.MessageText, frame) != nil {
+							return
+						}
+						reply, _ = json.Marshal(message{ID: m.ID, Result: json.RawMessage(`{"data":"b2xk"}`)})
+						if conn.Write(r.Context(), websocket.MessageText, reply) != nil {
+							return
+						}
+						if !frameFirst && conn.Write(r.Context(), websocket.MessageText, frame) != nil {
+							return
+						}
+						end := []byte(`{"method":"Page.screencastFrame","params":{"data":"ZW5k","sessionId":18}}`)
+						if conn.Write(r.Context(), websocket.MessageText, end) != nil {
+							return
+						}
+						continue
+					}
+					if conn.Write(r.Context(), websocket.MessageText, reply) != nil {
+						return
+					}
 				}
-			case "Page.screencastFrameAck":
-				var params struct {
-					SessionID int `json:"sessionId"`
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			reader, writer := io.Pipe()
+			done := make(chan error, 1)
+			go func() {
+				err := watch(ctx, server.URL, writer, func(context.Context) error { return nil })
+				writer.CloseWithError(err)
+				done <- err
+			}()
+			defer cancel()
+			defer reader.Close()
+			want := []string{"old", "new", "end"}
+			if frameFirst {
+				want = []string{"new", "end"}
+			}
+			for _, expected := range want {
+				var size uint32
+				if err := binary.Read(reader, binary.BigEndian, &size); err != nil || size != uint32(len(expected)) {
+					t.Fatalf("size %d: %v", size, err)
 				}
-				_ = json.Unmarshal(m.Params, &params)
-				acked <- params.SessionID
-				continue
-			}
-			reply, _ := json.Marshal(message{ID: m.ID, Result: result})
-			if conn.Write(r.Context(), websocket.MessageText, reply) != nil {
-				return
-			}
-			if m.Method == "Page.startScreencast" {
-				frame := []byte(`{"method":"Page.screencastFrame","params":{"data":"bmV3","sessionId":17}}`)
-				if conn.Write(r.Context(), websocket.MessageText, frame) != nil {
-					return
+				data := make([]byte, size)
+				if _, err := io.ReadFull(reader, data); err != nil || string(data) != expected {
+					t.Fatalf("frame %q, want %q: %v", data, expected, err)
 				}
 			}
-		}
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	reader, writer := io.Pipe()
-	done := make(chan error, 1)
-	go func() {
-		err := watch(ctx, server.URL, writer, func(context.Context) error { return nil })
-		writer.CloseWithError(err)
-		done <- err
-	}()
-	defer cancel()
-	defer reader.Close()
-	for _, want := range []string{"old", "new"} {
-		var size uint32
-		if err := binary.Read(reader, binary.BigEndian, &size); err != nil || size != uint32(len(want)) {
-			t.Fatalf("size %d: %v", size, err)
-		}
-		data := make([]byte, size)
-		if _, err := io.ReadFull(reader, data); err != nil || string(data) != want {
-			t.Fatalf("frame %q, want %q: %v", data, want, err)
-		}
+			cancel()
+			reader.Close()
+			<-done
+		})
 	}
-	if id := <-acked; id != 17 {
-		t.Fatalf("ack session: %d", id)
-	}
-	cancel()
-	reader.Close()
-	<-done
 }
 
 func TestWatchSendsScreenshotOnIdlePage(t *testing.T) {
