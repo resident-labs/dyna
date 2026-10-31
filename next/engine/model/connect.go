@@ -26,6 +26,7 @@ type connectAttempt struct {
 	generation    uint64
 	status        contract.ConnectStatus
 	account       contract.AccountID
+	proxyID       string
 	callbackSent  bool
 }
 
@@ -133,6 +134,31 @@ func (c *Connections) Callback(ctx context.Context, req contract.AccountsConnect
 }
 
 func (c *Connections) Status(ctx context.Context, req contract.AccountsConnectStatusRequest, commit func(func() error) error) (contract.AccountsConnectStatusResponse, error) {
+	return c.status(ctx, req, "", commit)
+}
+
+// Complete handles a proxy completion even when no browser requests status.
+func (c *Connections) Complete(ctx context.Context, completed OAuthCompletion, commit func(func() error) error) error {
+	c.mu.Lock()
+	var attempt string
+	for id, entry := range c.attempts {
+		if entry.state == completed.State {
+			attempt = id
+			break
+		}
+	}
+	c.mu.Unlock()
+	if attempt == "" {
+		return errConnect
+	}
+	status, err := c.status(ctx, contract.AccountsConnectStatusRequest{Attempt: attempt}, completed.AuthID, commit)
+	if err != nil || status.Status != contract.ConnectConnected {
+		return errConnect
+	}
+	return nil
+}
+
+func (c *Connections) status(ctx context.Context, req contract.AccountsConnectStatusRequest, expected string, commit func(func() error) error) (contract.AccountsConnectStatusResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	a := c.attempts[req.Attempt]
@@ -140,6 +166,9 @@ func (c *Connections) Status(ctx context.Context, req contract.AccountsConnectSt
 		return contract.AccountsConnectStatusResponse{Status: contract.ConnectFailed}, nil
 	}
 	if a.status == contract.ConnectConnected || a.status == contract.ConnectFailed {
+		if expected != "" && a.proxyID != expected {
+			return contract.AccountsConnectStatusResponse{}, errConnect
+		}
 		return contract.AccountsConnectStatusResponse{Status: a.status, AccountID: a.account}, nil
 	}
 	if !c.now().Before(a.expires) {
@@ -162,7 +191,7 @@ func (c *Connections) Status(ctx context.Context, req contract.AccountsConnectSt
 	case "wait":
 		return contract.AccountsConnectStatusResponse{Status: contract.ConnectPending}, nil
 	case "ok":
-		if result.AuthID == "" || !result.Saved {
+		if result.AuthID == "" || !result.Saved || (expected != "" && result.AuthID != expected) {
 			a.status = contract.ConnectFailed
 			break
 		}
@@ -177,7 +206,7 @@ func (c *Connections) Status(ctx context.Context, req contract.AccountsConnectSt
 		if err := commit(func() error { return c.store.BindAccount(ctx, id, result.AuthID, a.provider, a.label) }); err != nil {
 			return contract.AccountsConnectStatusResponse{}, errConnect
 		}
-		a.account, a.status = id, contract.ConnectConnected
+		a.account, a.proxyID, a.status = id, result.AuthID, contract.ConnectConnected
 	default:
 		a.status = contract.ConnectFailed
 	}

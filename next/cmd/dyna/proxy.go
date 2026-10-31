@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/resident-labs/dyna/engine/model"
 	sdkapi "github.com/router-for-me/CLIProxyAPI/v8/sdk/api"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
@@ -39,6 +40,14 @@ func proxyCommand() *cobra.Command {
 		credentials := &proxyStore{client: client}
 		sdkauth.RegisterTokenStore(credentials)
 		cliproxy.EnableDynaMemoryOAuthCallbacks()
+		var service *cliproxy.Service
+		cliproxy.SetDynaOAuthCompletionHook(func(state, id string) {
+			var ignored struct{}
+			if client.Call("Auth.OAuthCompleted", model.OAuthCompletion{State: state, AuthID: id}, &ignored) != nil {
+				// Restart removes unbound credentials before accepting requests.
+				os.Exit(1)
+			}
+		})
 		ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM)
 		defer cancel()
 		ready := make(chan struct{})
@@ -69,7 +78,6 @@ func proxyCommand() *cobra.Command {
 			}
 		}()
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
-		var service *cliproxy.Service
 		service, err = cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
 			proxyKeyRoutes(router, &service, cfg.RemoteManagement.SecretKey)
 		})).Build()

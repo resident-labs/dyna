@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -23,6 +24,7 @@ type AccountActions struct {
 	service     *Service
 	connections *model.Connections
 	quotas      *model.Quotas
+	removeMu    sync.Mutex
 }
 
 func NewAccountActions(service *Service, connections *model.Connections, quotas *model.Quotas) *AccountActions {
@@ -151,6 +153,8 @@ func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Pr
 
 func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Principal, req contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error) {
 	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionRemove, req.AccountID, func(ctx context.Context) accountActionResult {
+		s.removeMu.Lock()
+		defer s.removeMu.Unlock()
 		id, err := s.service.store.AccountProxyID(ctx, req.AccountID)
 		if err == nil {
 			err = s.connections.RemoveCredential(ctx, id)
@@ -181,6 +185,17 @@ func (s *AccountActions) AccountsConnectCallback(ctx context.Context, caller con
 		return accountActionResult{err: s.connections.Callback(ctx, req)}
 	})
 	return contract.AccountsConnectCallbackResponse{}, problem
+}
+
+// CompleteOAuth commits a private proxy completion without a browser request.
+func (s *AccountActions) CompleteOAuth(ctx context.Context, completed model.OAuthCompletion) error {
+	return s.connections.Complete(ctx, completed, func(commit func() error) error {
+		_, problem := s.runAccountAction(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountActionComplete, "", func(context.Context) accountActionResult { return accountActionResult{err: commit()} })
+		if problem != nil {
+			return errAccountAction
+		}
+		return nil
+	})
 }
 
 func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contract.Principal, req contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error) {
