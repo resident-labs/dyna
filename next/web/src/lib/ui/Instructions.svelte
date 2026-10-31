@@ -8,7 +8,8 @@
   let selected = $state<"room" | "global">("room");
   let base = $state(""), hash = $state(""), savedAt = $state<string>(), draft = $state("");
   let other = $state<{ text: string; hash: string; savedAt?: string | null }>();
-  let loading = $state(true), failed = $state(false), saving = $state(false);
+  let peer = $state<{ text: string; savedAt?: string | null }>({ text: "" });
+  let loading = $state(true), failed = $state(false), saveFailed = $state(false), saving = $state(false);
   let mobile = $state<"edit" | "changes">("edit");
   let search = $state("");
   let editor: HTMLTextAreaElement, finder: HTMLInputElement;
@@ -40,10 +41,11 @@
   }
   async function load() {
     const current = ++generation, key = prefix(), req = request();
-    loading = true; failed = false; other = undefined;
+    loading = true; failed = false; saveFailed = false; other = undefined;
     try {
-      const result = await call("instructions.get", req);
+      const [result, companion] = await Promise.all([call("instructions.get", req), call("instructions.get", selected === "room" ? {} : { room })]);
       if (current !== generation) return;
+      peer = companion;
       base = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; draft = result.text;
       const storedKey = Object.keys(localStorage).find(item => item.startsWith(key));
       if (storedKey) {
@@ -61,8 +63,10 @@
   }
   async function refresh() {
     if (loading || failed || saving) return;
+    const current = generation;
     try {
       const result = await call("instructions.get", request());
+      if (current !== generation) return;
       if (result.hash !== hash) {
         if (draft !== base) other = result;
         else { base = draft = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; }
@@ -71,7 +75,7 @@
   }
   async function save(overwrite = false) {
     if (saving || loading || failed || draft === base) return;
-    saving = true;
+    saving = true; saveFailed = false;
     const text = draft;
     try {
       const result = await call("instructions.set", { ...request(), text, base: overwrite && other ? other.hash : hash });
@@ -82,8 +86,8 @@
     } catch (error: unknown) {
       if (error instanceof APIError && error.detail.code === "stale") {
         try { other = await call("instructions.get", request()); }
-        catch { failed = true; }
-      } else failed = true;
+        catch { saveFailed = true; }
+      } else saveFailed = true;
     } finally { saving = false; }
   }
   function useTheirs() {
@@ -128,6 +132,7 @@
   {:else if failed}
     <p class="error">Instructions could not be loaded or saved. <button type="button" onclick={() => void load()}>Retry</button></p>
   {:else}
+    {#if saveFailed}<p class="error" role="status">Your changes were not saved. <button type="button" onclick={() => void save()}>Retry</button></p>{/if}
     <nav class="mobile-tabs" aria-label="Editor view">
       <button type="button" class:active={mobile === "edit"} onclick={() => mobile = "edit"}>Edit</button>
       <button type="button" class:active={mobile === "changes"} onclick={() => mobile = "changes"}>Changes {changed.length || ""}</button>
@@ -168,7 +173,9 @@
         {:else}
           <div class="side-head"><strong>Read by</strong></div>
           <div class="review"><strong>Sessions in {roomName} read, in this order</strong>
-            <ol><li>All rooms</li><li>{roomName}{selected === "room" && !savedAt ? " · No file yet" : ""}</li><li>Each repository’s AGENTS.md</li></ol>
+            <ol><li>All rooms <span>{selected === "global" ? (!savedAt ? "No file yet" : `about ${tokens.toLocaleString()} tokens`) : (!peer.savedAt ? "No file yet" : `about ${Math.ceil(peer.text.length / 4).toLocaleString()} tokens`)}</span></li>
+              <li>{roomName} <span>{selected === "room" ? (!savedAt ? "No file yet" : `about ${tokens.toLocaleString()} tokens`) : (!peer.savedAt ? "No file yet" : `about ${Math.ceil(peer.text.length / 4).toLocaleString()} tokens`)}</span></li>
+              <li>Each repository’s AGENTS.md</li></ol>
             <p>Changes reach running sessions at their next run.</p>
           </div>
         {/if}
@@ -207,7 +214,7 @@
   .editor-foot { margin: 0; font-size: 12.5px; }
   aside { width: 380px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); min-height: 0; }
   .side-head { padding: 16px; border-bottom: 1px solid var(--line); }.side-head span { font-size: 12.5px; margin-left: 4px; }.side-head p { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
-  .review { flex: 1; overflow: auto; padding: 16px; font-size: 12.5px; }.review strong { display: block; margin-bottom: 12px; }.review p { line-height: 1.45; font-variant-numeric: tabular-nums; }.review ol { padding-left: 28px; }.review li { padding: 8px 0; }
+  .review { flex: 1; overflow: auto; padding: 16px; font-size: 12.5px; }.review strong { display: block; margin-bottom: 12px; }.review p { line-height: 1.45; font-variant-numeric: tabular-nums; }.review ol { padding-left: 28px; }.review li { padding: 8px 0; }.review li span { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .line-number { display: block; width: 100%; border-radius: 0; background: var(--hover); color: var(--muted); text-align: left; font-size: 11px; padding: 3px 10px; }
   .diff { display: flex; gap: 8px; padding: 4px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }.diff span { flex: none; }.diff.add { background: color-mix(in srgb, var(--success) 12%, transparent); }.diff.remove { background: color-mix(in srgb, var(--danger) 12%, transparent); }
   .actions { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }.primary { background: var(--focus); color: var(--bg); }.primary:hover { background: var(--focus); opacity: .85; }
