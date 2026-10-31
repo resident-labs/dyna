@@ -1,3 +1,5 @@
+//go:build integration
+
 package podman
 
 import (
@@ -33,9 +35,15 @@ func (r configuredSSH) Run(ctx context.Context, in []byte, args ...string) ([]by
 func TestRealSSHForwardReconnect(t *testing.T) {
 	sshd, err := exec.LookPath("sshd")
 	if err != nil {
+		if os.Getenv("DYNA_REQUIRE_SSHD") == "1" {
+			t.Fatal("sshd is not installed")
+		}
 		t.Skip("sshd is not installed")
 	}
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		if os.Getenv("DYNA_REQUIRE_SSHD") == "1" {
+			t.Fatal("ssh-keygen is not installed")
+		}
 		t.Skip("ssh-keygen is not installed")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

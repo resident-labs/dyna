@@ -184,6 +184,19 @@ checks:
       GOFLAGS: -p=2
     reports: none
 
+  # Run real OpenSSH in an isolated container with a key-only test account.
+  - id: next-ssh
+    image: golang:1.26.10
+    hostUser: true
+    setup: timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq openssh-server >/dev/null && mkdir -p /run/sshd && (getent group "$CI_GID" >/dev/null || groupadd --gid "$CI_GID" dyna-ci) && (getent passwd "$CI_UID" >/dev/null || useradd --no-log-init --uid "$CI_UID" --gid "$CI_GID" --no-create-home --home-dir /tmp/home dyna-ci) && usermod -p 'key-only-no-password' "$(getent passwd "$CI_UID" | cut -d: -f1)"
+    command: cd next && DYNA_REQUIRE_SSHD=1 go test -count=1 -tags integration ./box/podman -run '^TestRealSSHForwardReconnect$' -v
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+
   # next/web is the v2 web app. It needs Node 24, which the golang image lacks,
   # so it gets its own check and image.
   - id: next-web
@@ -419,7 +432,7 @@ suites:
 
   - id: next
     files: ['^next/', '^scripts/ci\.sh$']
-    checks: [next]
+    checks: [next, next-ssh]
 
   - id: next-web
     files: ['^next/web/', '^scripts/ci\.sh$']
