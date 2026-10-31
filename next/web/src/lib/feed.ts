@@ -385,7 +385,7 @@ export function describe(event: Event, name: Name): string {
       return failed(event.body) ? `${who}'s ${job} failed: ${endCause(event.body, who)}` : `${who}'s ${job} finished`;
     }
     case "op.decided": return `${event.body.decision.by.session ? name(event.body.decision.by.session) : "You"} ${event.body.decision.approved ? "approved" : "denied"} a request`;
-    case "op.requested": return `${event.body.by.kind === "owner" ? "You" : event.body.by.session ? name(event.body.by.session) : "Dyna"} ${event.body.card.title}${event.body.card.target.name ? ` · ${event.body.card.target.name}` : ""}`;
+    case "op.requested": return `${event.body.by.kind === "owner" ? "You" : event.body.by.session ? name(event.body.by.session) : "Dyna"} ${event.body.by.kind === "owner" ? event.body.card.title.replace(/^asks\b/, "ask") : event.body.card.title}${event.body.card.target.name ? ` · ${event.body.card.target.name}` : ""}`;
     case "op.ran": return "";
     case "image.built": return `Image ${event.body.name}:${event.body.tag} built in ${event.body.seconds} s`;
     // The reason is raw build output (r8); the build log holds it.
