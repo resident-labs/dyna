@@ -14,6 +14,14 @@ describe("context updates", () => {
 		expect(createContextUpdate(current, current)).toBeUndefined();
 	});
 
+	it("limits unchanged context around section changes", () => {
+		const old = ["distant", "two", "three", "four", "five", "old", "seven", "eight", "nine", "far away"].join("\n");
+		const update = createContextUpdate({ rules: old }, { rules: old.replace("old", "new") });
+		expect(update?.content).toContain("-old\n+new");
+		expect(update?.content).not.toContain("distant");
+		expect(update?.content).not.toContain("far away");
+	});
+
 	it("does no reads, hashes or diffs when file metadata is unchanged", () => {
 		let reads = 0;
 		let hashes = 0;
@@ -44,7 +52,7 @@ describe("context updates", () => {
 				},
 				diff: () => {
 					diffs++;
-					return [];
+					return "";
 				},
 			},
 		);
