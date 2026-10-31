@@ -14,16 +14,19 @@ test("the terminal adapter carries bytes, resizes and the shell's exit over one 
   const output: string[] = [];
   const exits: (number | undefined)[] = [];
   let path = "";
-  const term = openTerminal({ box: "s1" }, { cols: 80, rows: 24 }, { output: bytes => output.push(new TextDecoder().decode(bytes)), exit: code => exits.push(code) },
+  const term = openTerminal({ box: "s1" }, { output: bytes => output.push(new TextDecoder().decode(bytes)), exit: code => exits.push(code) },
     url => { path = url; return socket.socket; });
+  // Keys typed before the first size has opened the socket wait with the frames that follow, in order.
+  term.send("é");
+  term.resize(80, 24);
   assert.equal(path, "/v1/terminal?box=s1&cols=80&rows=24");
   assert.equal(socket.socket.binaryType, "arraybuffer");
-  // Frames sent before the socket opens wait for it.
-  term.send("é");
+  term.send("a");
   term.resize(100, 30);
   assert.equal(socket.sent.length, 0);
   socket.open();
-  assert.deepEqual(socket.sent, [new TextEncoder().encode("é"), '{"cols":100,"rows":30}']);
+  const key = (text: string) => new TextEncoder().encode(text);
+  assert.deepEqual(socket.sent, [key("é"), key("a"), '{"cols":100,"rows":30}']);
   socket.message(new TextEncoder().encode("hi\r\n").buffer);
   assert.deepEqual(output, ["hi\r\n"]);
   // TerminalExit, then the engine's close, ends the tab with that code.
@@ -32,7 +35,7 @@ test("the terminal adapter carries bytes, resizes and the shell's exit over one 
   assert.deepEqual([...exits], [2]);
   // A socket that closes with no TerminalExit, such as on an engine restart, exits with no code.
   const lost = fake();
-  openTerminal({ host: "control-plane" }, { cols: 80, rows: 24 }, { output: () => {}, exit: code => exits.push(code) }, () => lost.socket);
+  openTerminal({ host: "control-plane" }, { output: () => {}, exit: code => exits.push(code) }, () => lost.socket).resize(80, 24);
   lost.close();
   assert.deepEqual(exits, [2, undefined]);
 });
