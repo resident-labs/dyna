@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -72,6 +73,46 @@ func TestWebRemoteWebSocketRejectsWrongOrigin(t *testing.T) {
 	}
 }
 
+func TestWebPairUsesRemoteDefaultScopes(t *testing.T) {
+	now := time.Unix(1000, 0)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	code, err := st.NewPairCode(context.Background(), nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, func() time.Time { return now }, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetRoutes([]string{"https://dyna.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "https://dyna.example.com/v1/pair", strings.NewReader(`{"code":"`+code+`","name":"Phone"}`))
+	r.Header.Set("Origin", "https://dyna.example.com")
+	rec := httptest.NewRecorder()
+	w.ServeHTTP(rec, r)
+	cookies := rec.Result().Cookies()
+	if rec.Code != http.StatusOK || len(cookies) != 1 || !cookies[0].Secure {
+		t.Fatalf("pair: %d, cookies %+v", rec.Code, cookies)
+	}
+	_, valid, err := st.AuthenticateDevice(context.Background(), sha256.Sum256([]byte(cookies[0].Value)), now)
+	if err != nil || !valid {
+		t.Fatalf("paired device authentication: %v %v", valid, err)
+	}
+	r = httptest.NewRequest(http.MethodPost, "https://dyna.example.com/v1/host.add", strings.NewReader("{}"))
+	r.Header.Set("Origin", "https://dyna.example.com")
+	r.AddCookie(cookies[0])
+	rec = httptest.NewRecorder()
+	w.ServeHTTP(rec, r)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("default scopes allow admin: %d", rec.Code)
+	}
+}
+
 func TestWebGuardAndLogin(t *testing.T) {
 	now := time.Unix(1000, 0)
 	dir := t.TempDir()
@@ -85,7 +126,6 @@ func TestWebGuardAndLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.handler = a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
 	request := func(method, host, path, origin string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://"+host+path, strings.NewReader("{}"))
 		r.Host = host

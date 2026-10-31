@@ -183,7 +183,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			http.Error(out, "forbidden", http.StatusForbidden)
 			return
 		}
-		_, valid, err := w.devices.AuthenticateDevice(r.Context(), sha256.Sum256([]byte(cookie.Value)), w.now())
+		device, valid, err := w.devices.AuthenticateDevice(r.Context(), sha256.Sum256([]byte(cookie.Value)), w.now())
 		if err != nil {
 			http.Error(out, "unavailable", http.StatusServiceUnavailable)
 			return
@@ -211,7 +211,11 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}()
-		w.handler.ServeHTTP(out, r.WithContext(ctx))
+		handler := w.handler
+		if handler == nil {
+			handler = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
+		}
+		handler.ServeHTTP(out, r.WithContext(ctx))
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -234,7 +238,6 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Web) Listen() (net.Listener, error) {
-	w.handler = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
 	l, err := net.Listen("tcp", w.address)
 	if err != nil {
 		return nil, err
