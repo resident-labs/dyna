@@ -352,12 +352,13 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
-	Session     SessionID        `json:"session"`
-	Box         BoxID            `json:"box"`
-	Model       ModelChoice      `json:"model"`
-	Repos       []BoxRepo        `json:"repos,omitempty"`
-	Rules       []RoomRule       `json:"rules,omitempty"`
-	Transcripts []TranscriptFile `json:"transcripts,omitempty"`
+	Session       SessionID        `json:"session"`
+	Box           BoxID            `json:"box"`
+	Model         ModelChoice      `json:"model"`
+	CompactTokens int              `json:"compactTokens,omitempty"`
+	Repos         []BoxRepo        `json:"repos,omitempty"`
+	Rules         []RoomRule       `json:"rules,omitempty"`
+	Transcripts   []TranscriptFile `json:"transcripts,omitempty"`
 }
 type TurnOutputRequest struct {
 	ShellJobs int          `json:"shellJobs"`

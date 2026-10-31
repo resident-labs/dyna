@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -26,7 +27,7 @@ const (
 	piDir        = "/box/pi"
 )
 
-func modelArgs(model contract.ModelChoice) ([]string, error) {
+func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
 	switch model.Provider {
 	case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
 	default:
@@ -40,7 +41,11 @@ func modelArgs(model contract.ModelChoice) ([]string, error) {
 	if model.ID == "" {
 		return nil, fmt.Errorf("model ID is empty")
 	}
-	return []string{"--provider", string(model.Provider), "--model", model.ID, "--thinking", string(model.Thinking)}, nil
+	args := []string{"--provider", string(model.Provider), "--model", model.ID, "--thinking", string(model.Thinking)}
+	if compactTokens > 0 {
+		args = append(args, "--compaction-trigger-tokens", strconv.Itoa(compactTokens))
+	}
+	return args, nil
 }
 
 // Run connects the box, serves its model route, and runs the Pi session.
@@ -85,7 +90,7 @@ func Run(ctx context.Context) error {
 	}
 	setup := func(ctx context.Context) error { return setupRepos(ctx, "/box/work", hello.Repos, runGit) }
 	setupErr := setup(ctx)
-	args, err := modelArgs(hello.Model)
+	args, err := modelArgs(hello.Model, hello.CompactTokens)
 	if err != nil {
 		return err
 	}
