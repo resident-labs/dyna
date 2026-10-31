@@ -52,7 +52,9 @@ aside.members { display: flex; flex-direction: column; border-right: 0; border-l
 @container (max-width: 320px) { .card .tiles { gap: 8px; } }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .member:hover { background: var(--hover); }
-header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+/* A pane's top bar: the room header, the side panels' headers and the docked terminals' tabs. A class, so a
+   component's own header, such as a job's in JobsPane, keeps its own height. */
+.bar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 main > header strong { font-size: 16px; }
 /* In a direct message the header leads with its room, a link back to the room's feed. */
 .crumb { color: var(--muted); text-decoration: none; font-size: 16px; }
