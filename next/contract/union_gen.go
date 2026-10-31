@@ -2,6 +2,7 @@
 package contract
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -243,7 +244,9 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 	}
 	var p plain
 	w.plain = &p
-	if err := json.Unmarshal(data, &w); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&w); err != nil {
 		return err
 	}
 	args, err := decodeOpArgs(p.Kind, w.Args)
@@ -258,19 +261,25 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	switch k {
 	case "hostexec.grant":
 		var v HostexecGrantArgs
-		if err := json.Unmarshal(data, &v); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
 			return nil, err
 		}
 		return v, nil
 	case "hostexec.run":
 		var v HostexecRunArgs
-		if err := json.Unmarshal(data, &v); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
 			return nil, err
 		}
 		return v, nil
 	case "pr.open":
 		var v PrOpenArgs
-		if err := json.Unmarshal(data, &v); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
 			return nil, err
 		}
 		return v, nil

@@ -26,6 +26,7 @@ import (
 )
 
 type client interface {
+	ContextSnapshot(context.Context, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error)
 	OpWithdraw(context.Context, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error)
 	RuleEdit(context.Context, contract.RuleEditRequest) (contract.RuleEditResponse, error)
 	ProfileList(context.Context, contract.ProfileListRequest) (contract.ProfileListResponse, error)
@@ -70,7 +71,8 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.OpWithdrawRequest |
+	contract.ContextSnapshotRequest |
+		contract.OpWithdrawRequest |
 		contract.RuleEditRequest |
 		contract.ProfileListRequest |
 		contract.SessionMoveRequest |
@@ -78,7 +80,8 @@ type requestType interface {
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest
 }
 type responseType interface {
-	contract.OpWithdrawResponse |
+	contract.ContextSnapshotResponse |
+		contract.OpWithdrawResponse |
 		contract.RuleEditResponse |
 		contract.ProfileListResponse |
 		contract.SessionMoveResponse |
@@ -127,6 +130,9 @@ func (c *socketClient) RuleEdit(ctx context.Context, q contract.RuleEditRequest)
 }
 func (c *socketClient) OpWithdraw(ctx context.Context, q contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error) {
 	return call[contract.OpWithdrawRequest, contract.OpWithdrawResponse](ctx, c, tools.Method("op", "withdraw"), q)
+}
+func (c *socketClient) ContextSnapshot(ctx context.Context, q contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error) {
+	return call[contract.ContextSnapshotRequest, contract.ContextSnapshotResponse](ctx, c, tools.Method("context", "show"), q)
 }
 func (c *socketClient) RuleAdd(ctx context.Context, q contract.RuleAddRequest) (contract.RuleAddResponse, error) {
 	return call[contract.RuleAddRequest, contract.RuleAddResponse](ctx, c, tools.Method("rules", "add"), q)
@@ -303,6 +309,21 @@ func defaultSocket() string {
 }
 
 func addCLI(root *cobra.Command, getClient func() client) {
+	contextCmd := &cobra.Command{Use: "context"}
+	contextCmd.AddCommand(&cobra.Command{Use: "show SECTION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: args[0]})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result.Sections)
+	}}, &cobra.Command{Use: "usage", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: "dyna_usage"})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result.Sections)
+	}})
+	root.AddCommand(contextCmd)
 	var rulesRoom string
 	rules := &cobra.Command{Use: "rules", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		result, err := getClient().RuleList(cmd.Context(), contract.RuleListRequest{Room: contract.RoomID(rulesRoom)})

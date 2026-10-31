@@ -16,6 +16,10 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func (f *fakeService) OpSubmit(context.Context, contract.Principal, contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+	return contract.OpSubmitResponse{}, nil
+}
+
 func (f *fakeService) RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error) {
 	return contract.RoomListResponse{}, nil
 }

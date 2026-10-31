@@ -18,3 +18,11 @@ func TestRegistryCLIBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedPostHelp(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"post"})
+	if err != nil || cmd.Short != "Send or update a post" {
+		t.Fatalf("post help: %q %v", cmd.Short, err)
+	}
+}

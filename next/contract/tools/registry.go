@@ -13,7 +13,8 @@ type Access uint8
 
 const (
 	Session Access = iota + 1
-	Ancestor
+	Tree
+	Grant
 	Owner
 )
 
@@ -32,6 +33,7 @@ const (
 type Route struct {
 	Method contract.Method
 	Box    BoxHandler
+	Op     contract.OpKind
 }
 type Entry struct {
 	Tool, Action string
@@ -59,6 +61,9 @@ type TypeRequest struct {
 func entry(tool, action string, method contract.Method, req reflect.Type, access Access, help string, cli ...string) Entry {
 	return Entry{Tool: tool, Action: action, Route: Route{Method: method}, Request: req, Access: access, Help: help, CLI: cli}
 }
+func operation(tool, action string, kind contract.OpKind, req reflect.Type, access Access, help, cli string) Entry {
+	return Entry{Tool: tool, Action: action, Route: Route{Op: kind}, Request: req, Access: access, Help: help, CLI: []string{cli}}
+}
 func local(tool, action string, handler BoxHandler, req reflect.Type, help, cli string) Entry {
 	return Entry{Tool: tool, Action: action, Route: Route{Box: handler}, Request: req, Access: Session, Help: help, CLI: []string{cli}}
 }
@@ -68,44 +73,20 @@ func typ[T any]() reflect.Type { return reflect.TypeFor[T]() }
 
 // Entries returns a fresh copy so callers cannot change the registry.
 func Entries() []Entry {
-	return []Entry{
-		entry("post", "send", contract.MethodPost, typ[contract.PostRequest](), Session, "Send a post", "post"),
-		entry("post", "update_visual", contract.MethodPost, typ[contract.PostRequest](), Session, "Update a visual post", "post"),
-		entry("session", "start", contract.MethodSessionStart, typ[contract.SessionStartRequest](), Ancestor, "Start a child session", "session start"),
-		entry("session", "list", contract.MethodSessionList, typ[contract.SessionListRequest](), Session, "List sessions", "session list"),
-		entry("session", "stop", contract.MethodSessionStop, typ[contract.SessionStopRequest](), Ancestor, "Stop a session turn", "session stop"),
-		entry("session", "close", contract.MethodSessionClose, typ[contract.SessionCloseRequest](), Ancestor, "Close a session", "session close"),
-		entry("session", "restart", contract.MethodSessionRestart, typ[contract.SessionRestartRequest](), Owner, "Replace a failed box", "session restart"),
-		entry("session", "set_profile", contract.MethodSessionSetProfile, typ[contract.SessionSetProfileRequest](), Ancestor, "Set a session profile", "session set-profile"),
-		entry("session", "move", contract.MethodSessionMove, typ[contract.SessionMoveRequest](), Ancestor, "Move a session", "session move"),
-		entry("session", "profiles", contract.MethodProfileList, typ[contract.ProfileListRequest](), Ancestor, "List profiles", "session profiles"),
-		entry("room", "log", contract.MethodEventsList, typ[contract.EventsListRequest](), Session, "Read room events", "room log"),
-		entry("room", "repos", contract.MethodRoomRepos, typ[contract.RoomReposRequest](), Owner, "List room repositories", "room repo list"),
-		entry("room", "pause", contract.MethodRoomPause, typ[contract.RoomPauseRequest](), Ancestor, "Pause or resume a room", "room pause", "room resume"),
-		entry("rules", "list", contract.MethodRuleList, typ[contract.RuleListRequest](), Session, "List room rules", "rules"),
-		entry("rules", "add", contract.MethodRuleAdd, typ[contract.RuleAddRequest](), Ancestor, "Add a room rule", "rules add"),
-		entry("rules", "edit", contract.MethodRuleEdit, typ[contract.RuleEditRequest](), Ancestor, "Edit a room rule", "rules edit"),
-		entry("rules", "remove", contract.MethodRuleRemove, typ[contract.RuleRemoveRequest](), Ancestor, "Remove a room rule", "rules rm"),
-		entry("op", "list", contract.MethodOpList, typ[contract.OpListRequest](), Session, "List operations", "op list"),
-		entry("op", "decide", contract.MethodOpDecide, typ[contract.OpDecideRequest](), Ancestor, "Decide an operation", "op approve", "op deny"),
-		entry("op", "withdraw", contract.MethodOpWithdraw, typ[contract.OpWithdrawRequest](), Session, "Withdraw an operation", "op withdraw"),
-		entry("hostexec", "run", contract.MethodHostexecRun, typ[contract.HostexecRunRequest](), Session, "Run a host command", "hostexec run"),
-		local("visual", "check", VisualCheck, typ[FileRequest](), "Check a visual", "visual check"),
-		local("computer", "open", ComputerOpen, typ[OpenRequest](), "Open a page", "computer open"),
-		local("computer", "click", ComputerClick, typ[SelectorRequest](), "Click an element", "computer click"),
-		local("computer", "type", ComputerType, typ[TypeRequest](), "Type into an element", "computer type"),
-		local("computer", "text", ComputerText, typ[SelectorRequest](), "Read page text", "computer text"),
-		local("computer", "screenshot", ComputerScreenshot, typ[FileRequest](), "Take a screenshot", "computer screenshot"),
-		entry("device", "pair", contract.MethodDevicePair, typ[contract.DevicePairRequest](), Owner, "Pair a device", "device pair"),
-		entry("device", "list", contract.MethodDeviceList, typ[contract.DeviceListRequest](), Owner, "List devices", "device list"),
-		entry("device", "revoke", contract.MethodDeviceRevoke, typ[contract.DeviceRevokeRequest](), Owner, "Revoke a device", "device revoke"),
-		entry("device", "set_scopes", contract.MethodDeviceSetScopes, typ[contract.DeviceSetScopesRequest](), Owner, "Set device scopes", "device set-scopes"),
-		entry("room", "add_repo", contract.MethodRoomRepoAdd, typ[contract.RoomRepoAddRequest](), Owner, "Add a repository", "room repo add"),
-		entry("hostexec", "revoke", contract.MethodHostexecRevoke, typ[contract.HostexecRevokeRequest](), Owner, "Revoke a host grant", "hostexec revoke"),
-		entry("host", "add", contract.MethodHostAdd, typ[contract.HostAddRequest](), Owner, "Add a host", "host add"),
-		entry("room", "create", contract.MethodRoomCreate, typ[contract.RoomCreateRequest](), Owner, "Create a room", "room create"),
-		entry("room", "limit", contract.MethodRoomSetLimits, typ[contract.RoomSetLimitsRequest](), Owner, "Set room limits", "room limit"),
-	}
+	var entries []Entry
+	entries = append(entries, postEntries()...)
+	entries = append(entries, sessionEntries()...)
+	entries = append(entries, roomEntries()...)
+	entries = append(entries, rulesEntries()...)
+	entries = append(entries, opEntries()...)
+	entries = append(entries, hostexecEntries()...)
+	entries = append(entries, prEntries()...)
+	entries = append(entries, contextEntries()...)
+	entries = append(entries, visualEntries()...)
+	entries = append(entries, computerEntries()...)
+	entries = append(entries, deviceEntries()...)
+	entries = append(entries, hostEntries()...)
+	return entries
 }
 
 // Validate catches registry mistakes before a schema is advertised.
@@ -114,7 +95,7 @@ func Validate(entries []Entry) error {
 	fields := make(map[string]map[string]string)
 	for _, e := range entries {
 		key := e.Tool + "/" + e.Action
-		if e.Tool == "" || e.Action == "" || e.Help == "" || len(e.CLI) == 0 || e.Access < Session || e.Access > Owner || e.Request == nil || e.Request.Kind() != reflect.Struct || (e.Route.Method == "") == (e.Route.Box == NoBoxHandler) || e.Route.Box > ComputerScreenshot {
+		if e.Tool == "" || e.Action == "" || e.Help == "" || len(e.CLI) == 0 || e.Access < Session || e.Access > Owner || e.Request == nil || e.Request.Kind() != reflect.Struct || routeCount(e.Route) != 1 || e.Route.Box > ComputerScreenshot || (e.Route.Op != "" && e.Route.Op != (contract.PrOpenArgs{}).OpKind() && e.Route.Op != (contract.HostexecGrantArgs{}).OpKind()) {
 			return fmt.Errorf("invalid entry %s", key)
 		}
 		for _, binding := range e.CLI {
@@ -185,4 +166,18 @@ func Method(tool, action string) contract.Method {
 		}
 	}
 	panic("unknown engine action " + tool + "/" + action)
+}
+
+func routeCount(r Route) int {
+	n := 0
+	if r.Method != "" {
+		n++
+	}
+	if r.Box != NoBoxHandler {
+		n++
+	}
+	if r.Op != "" {
+		n++
+	}
+	return n
 }

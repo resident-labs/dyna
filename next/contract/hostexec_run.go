@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"time"
@@ -43,7 +44,9 @@ func (a HostexecRunArgs) OperationRoom() RoomID { return a.Room }
 func (a *HostexecRunArgs) UnmarshalJSON(data []byte) error {
 	type plain HostexecRunArgs
 	var v plain
-	if err := json.Unmarshal(data, &v); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
 		return err
 	}
 	if v.Room == "" || v.Host == "" || len(v.Argv) == 0 || v.Argv[0] == "" || v.Timeout <= 0 || v.Timeout > DurationMS((2*time.Hour).Milliseconds()) || v.Grant == "" {
