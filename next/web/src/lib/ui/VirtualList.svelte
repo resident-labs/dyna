@@ -20,16 +20,20 @@
   const edge = 600;
   let visible: VirtualItem[] = $state([]);
   let total = $state(0);
+  // The rows the virtualizer and the template use. A new items value marks the rendered rows dirty before the effect
+  // below moves visible, so a row read from items could point past its end. rows and visible change together.
+  // svelte-ignore state_referenced_locally
+  let rows = $state.raw(items);
   const options = (): VirtualizerOptions<HTMLDivElement, HTMLDivElement> => ({
-    count: items.length, getScrollElement: () => element ?? null, estimateSize: () => estimate,
-    getItemKey: index => key(items[index]), overscan: 8, anchorTo: "end", followOnAppend: follow,
+    count: rows.length, getScrollElement: () => element ?? null, estimateSize: () => estimate,
+    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow,
     scrollToFn: elementScroll, observeElementRect, observeElementOffset, measureElement,
     onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); },
   });
   const virtualizer = new Virtualizer(options());
 
-  // Visible rows follow the new items before the rows render, so no row points past the end.
   $effect.pre(() => {
+    rows = items;
     virtualizer.setOptions(options());
     visible = virtualizer.getVirtualItems();
     total = virtualizer.getTotalSize();
@@ -94,7 +98,7 @@
   <div class="space" class:top={align === "top"} style:height="{total}px">
     {#each visible as item (item.key)}
       <div class="item" data-index={item.index} style:transform="translateY({item.start}px)" {@attach measure}>
-        {@render row(items[item.index])}
+        {@render row(rows[item.index])}
       </div>
     {/each}
   </div>
