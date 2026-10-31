@@ -43,12 +43,29 @@ func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
 }
 
-// The fake box's jobs: the agent counts real jobs only, so after a turn whose final quotes [jobs], each turn of
+// A builder types [wait], [jobs] or [fail] in a post to script the fake turn. Seed posts read like owner messages,
+// so each seed text acts as its marker instead.
+var seeded = map[string]string{
+	"Build the feed rows.":                          "[fail]",
+	"Exercise the failed turn view":                 "[fail]",
+	"Start the dev server and run the engine tests": "[jobs]",
+}
+
+func marked(text, marker string) bool {
+	for seed, m := range seeded {
+		if m == marker && strings.Contains(text, seed) {
+			return true
+		}
+	}
+	return strings.Contains(text, marker)
+}
+
+// The fake box's jobs: the agent counts real jobs only, so after a turn whose final quotes a [jobs] post, each turn of
 // that session reports two here, as a box whose jobs keep running would.
 var withJobs sync.Map
 
 func (d devService) TurnOutput(ctx context.Context, p contract.Principal, req contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error) {
-	if _, ok := withJobs.Load(p.Session); ok || strings.Contains(req.Final, "[jobs]") {
+	if _, ok := withJobs.Load(p.Session); ok || marked(req.Final, "[jobs]") {
 		withJobs.Store(p.Session, true)
 		req.ShellJobs = 2
 	}
@@ -84,18 +101,18 @@ type scripted struct {
 
 func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	text := inputs[0].Text
-	for _, in := range inputs { // a turn can batch inputs; one with a [marker] wins, so the marker works in any order
-		if strings.Contains(in.Text, "[") {
+	for _, in := range inputs { // a turn can batch inputs; one with a marker wins, so the marker works in any order
+		if marked(in.Text, "[fail]") || marked(in.Text, "[jobs]") || marked(in.Text, "[wait]") {
 			text = in.Text
 		}
 	}
 	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(text, "\n", "\n> ")}
-	if strings.Contains(text, "[fail]") {
+	if marked(text, "[fail]") {
 		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure", Cause: contract.CauseModelFailed}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
 	// A [wait] turn runs until it is stopped, so the working state and its activity labels can be seen.
-	if strings.Contains(text, "[wait]") {
+	if marked(text, "[wait]") {
 		h.Turns[0].Release = make(chan struct{})
 		begin := started
 		started = func() {
@@ -235,7 +252,7 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e1 := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 	lead, e2 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "lead-web", Profile: "fake", Goal: "Build the room view"})
-	child, e3 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "builder-feed", Parent: lead.Session, Profile: "fake", Goal: "Build the feed", Brief: "[fail] Build the feed rows."})
+	child, e3 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "builder-feed", Parent: lead.Session, Profile: "fake", Goal: "Build the feed", Brief: "Build the feed rows."})
 	for _, e := range []*contract.Error{e1, e2, e3} {
 		if e != nil {
 			log.Fatal(e.Message)
@@ -251,8 +268,8 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "The feed and session tree are ready for review."})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "I am checking the attachment previews."})
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
-	post(owner, contract.PostRequest{Text: "[fail] Exercise the failed turn view", Mentions: []string{"builder-feed"}})
-	post(owner, contract.PostRequest{Text: "[jobs] Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
+	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
+	post(owner, contract.PostRequest{Text: "Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
 	upload := func(name, media, body string) (a contract.Attachment) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+name, strings.NewReader(body))
 		req.Header.Set("Content-Type", media)

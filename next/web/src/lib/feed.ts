@@ -1,9 +1,12 @@
 import type { Attachment, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[] }
+  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[] };
+
+// An owner's post the engine has not confirmed yet, with its mentions as sessions.
+export type Pending = { id: number; at: string; text: string; attachments: Attachment[]; to: Principal[]; failed: boolean };
 
 type Name = (session: string) => string;
 
@@ -41,7 +44,8 @@ function subject(event: Event): string | undefined {
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn is its own row, and all other events between them fold into one work row.
-export function feedRows(events: Event[], home: Conversation): Row[] {
+// Pending owner posts follow as post rows, so they group like the posts that replace them.
+export function feedRows(events: Event[], home: Conversation, pending: Pending[] = []): Row[] {
   const rows: Row[] = [];
   let work: Event[] = [];
   const flush = () => {
@@ -49,12 +53,12 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
     work = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
-  const post = (key: string, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = []) => {
+  const post = (key: string, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending) => {
     flush();
     const previous = rows.at(-1);
     const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) ||
       previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
-    rows.push({ kind: "post", key, from, at, text, attachments, first, to });
+    rows.push({ kind: "post", key, from, at, text, attachments, first, to, ...pending && { pending } });
   };
   for (const event of events) {
     if (event.type === "post.created") {
@@ -92,6 +96,7 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
     }
     work.push(event);
   }
+  for (const sent of pending) post(`n${sent.id}`, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
   flush();
   return rows;
 }
