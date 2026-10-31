@@ -2,7 +2,9 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -34,6 +36,137 @@ func unwatchedCalls(t *testing.T, e *testEnv) string {
 		t.Fatal(err)
 	}
 	return string(calls)
+}
+
+func TestUnwatchedBatchUsesOneHeadQuery(t *testing.T) {
+	e := newEnv(t)
+	key := seedUnwatched(t, e)
+	if err := e.s.Store.update(func(st *State) error {
+		r := st.Records[key]
+		r.Polling.Next = e.clock
+		other := *r
+		other.Number = 18
+		other.Key = "github.com/owner/repo#18"
+		st.Records[other.Key] = &other
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	batches, rest := 0, 0
+	e.s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		for _, arg := range cmd.Args {
+			if arg == "graphql" {
+				batches++
+				query := strings.Join(cmd.Args, " ")
+				if strings.Contains(query, "statusCheckRollup") || strings.Contains(query, "reviewThreads") || strings.Contains(query, "workflows:") {
+					t.Errorf("unwatched query fetched CI or discussion: %s", query)
+				}
+				_, err := fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n"+`{"data":{"r0":{"p17":{"number":17,"state":"OPEN","headRefOid":"%s"},"p18":{"number":18,"state":"MERGED","headRefOid":"%s"}}}}`, strings.Repeat("a", 40), strings.Repeat("b", 40))
+				return err
+			}
+			if strings.Contains(arg, "/pulls/") {
+				rest++
+				return writeFakeJSON(cmd.Stdout, e.f.Pull)
+			}
+		}
+		return fmt.Errorf("unexpected request")
+	}
+	for _, k := range []string{key, "github.com/owner/repo#18"} {
+		if err := e.s.refreshUnwatched(t.Context(), k, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rest != 2 || batches != 0 {
+		t.Fatalf("baseline: batches=%d REST=%d", batches, rest)
+	}
+	rest = 0
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[key].Polling.Next = e.clock
+		st.Records["github.com/owner/repo#18"].Polling.Next = e.clock
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.refreshUnwatchedBatch(t.Context(), tickKeys(st), nil); err != nil {
+		t.Fatal(err)
+	}
+	st, err = e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batches != 1 || rest != 0 || st.Records[key].State != "open" || st.Records["github.com/owner/repo#18"].State != "merged" || !st.Records[key].Polling.Next.Equal(e.clock.Add(time.Hour)) {
+		t.Fatalf("batches=%d REST=%d open=%+v merged=%+v", batches, rest, st.Records[key], st.Records["github.com/owner/repo#18"])
+	}
+}
+
+func TestUnwatchedBatchUsesFreshQuota(t *testing.T) {
+	e := newEnv(t)
+	key := seedUnwatched(t, e)
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[key].Polling.Next = e.clock
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	old, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := tickKeys(old)
+	if err := e.s.Store.update(func(st *State) error {
+		scope := RateLimitScope{Host: "github.com", Resource: "graphql"}
+		st.RateLimits[scope.Key()] = RateLimit{PauseUntil: e.clock.Add(time.Hour), PauseScope: scope}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.s.GH.run = func(_ context.Context, _ *exec.Cmd) error {
+		t.Error("batch ignored newly saved quota pause")
+		return nil
+	}
+	if err := e.s.refreshUnwatchedBatch(t.Context(), keys, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !e.record().Polling.Next.Equal(e.clock) {
+		t.Fatal("paused watch changed schedule")
+	}
+}
+
+func TestUnwatchedBatchFallsBackWhenHeadMissing(t *testing.T) {
+	e := newEnv(t)
+	key := seedUnwatched(t, e)
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[key].Polling.Next = e.clock
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var batches, rest int
+	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		for _, arg := range cmd.Args {
+			if arg == "graphql" {
+				batches++
+				_, err := fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n"+`{"data":{"r0":{}}}`)
+				return err
+			}
+		}
+		rest++
+		return writeFakeJSON(cmd.Stdout, e.f.Pull)
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.refreshUnwatchedBatch(t.Context(), tickKeys(st), nil); err != nil {
+		t.Fatal(err)
+	}
+	if batches != 1 || rest != 1 || !e.record().Polling.Next.Equal(e.clock.Add(time.Hour)) {
+		t.Fatalf("batches=%d REST=%d record=%+v", batches, rest, e.record())
+	}
 }
 
 func TestUnwatchedStateRefreshLifecycle(t *testing.T) {
