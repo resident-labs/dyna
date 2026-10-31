@@ -13,7 +13,7 @@
   import type { Rect } from "../float.ts";
   import PhoneKeys from "./PhoneKeys.svelte";
   import { LiveStream, type Phase } from "../live.ts";
-  import { Finger, PhoneKeys as PhoneState, buttonOf, escTwice, keyboardInput, screenPoint, type KeyInput, type Modifiers, type PointerInput } from "../computerInput.ts";
+  import { Finger, PhoneKeys as PhoneState, buttonOf, escTwice, keyboardInput, pictureScale, screenPoint, type ComputerInput, type Modifiers, type Size } from "../computerInput.ts";
   import { softKeyboard } from "../softKeyboard.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
@@ -22,7 +22,7 @@
   // input sends the owner's keys and pointer to the computer. A device that may not control computers passes none,
   // and the view then has no Take control step.
   let { session, name, root, activity, steps, docked, full = false, rect = $bindable(), element = $bindable(), input, onclose, ondock, onfit }: {
-    session: string; name: string; root: boolean; activity?: string; steps: string[]; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; input?: (event: KeyInput | PointerInput) => void; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
+    session: string; name: string; root: boolean; activity?: string; steps: string[]; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; input?: (events: ComputerInput[], frame: Size) => Promise<void>; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
     onfit: (ratio: number, chrome: number) => void;
   } = $props();
   let screen: HTMLElement | undefined = $state();
@@ -68,7 +68,18 @@
   let field: HTMLTextAreaElement | undefined = $state();
   const phoneKeys = new PhoneState(state => { held = state; });
   const twice = escTwice();
-  const send = (inputs: KeyInput[]) => { for (const event of inputs) input?.(event); };
+  // A batch goes with the size of the picture the owner sees, which its positions are in. A batch the engine refuses
+  // for another reason than a full queue shows as a notice under the screen; the next batch that lands clears it.
+  let stuck = $state(false);
+  async function send(events: ComputerInput[]) {
+    if (!input || !picture || !events.length) return;
+    try {
+      await input(events, { width: picture.naturalWidth, height: picture.naturalHeight });
+      stuck = false;
+    } catch {
+      stuck = true;
+    }
+  }
   async function take() { control = true; await tick(); screen?.focus(); }
   function release() { control = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
@@ -78,21 +89,22 @@
     else field?.blur();
   }
   // A hardware key goes to the computer while the owner controls it, Esc and Alt with an arrow key included.
-  function press(event: KeyboardEvent) {
+  function press(event: KeyboardEvent, down: boolean) {
     if (!control) return;
     event.stopPropagation();
     event.preventDefault();
-    if (event.key === "Escape" && twice(performance.now())) { release(); return; }
-    const stroke = keyboardInput(event);
-    if (stroke) input?.(stroke);
+    if (down && event.key === "Escape" && twice(performance.now())) { release(); return; }
+    void send(keyboardInput(event, down));
   }
   // The pointer: a mouse is sent as it moves, once per frame; a finger taps or scrolls. The picture sits inside the
   // screen at its own shape, so a pointer on a bar lands nowhere.
   function pointing(node: HTMLElement) {
     const finger = new Finger();
-    let pending: PointerInput | undefined;
+    let pending: ComputerInput | undefined;
     let frame = 0;
-    const at = (event: MouseEvent) => picture && screenPoint(picture.getBoundingClientRect(), { width: picture.naturalWidth, height: picture.naturalHeight }, event.clientX, event.clientY);
+    const size = () => picture && { width: picture.naturalWidth, height: picture.naturalHeight };
+    const at = (event: MouseEvent) => { const shape = size(); return picture && shape && screenPoint(picture.getBoundingClientRect(), shape, event.clientX, event.clientY); };
+    const scale = () => { const shape = size(); return picture && shape ? pictureScale(picture.getBoundingClientRect(), shape) : 1; };
     const touching = (event: PointerEvent) => event.pointerType === "touch";
     const down = (event: PointerEvent) => {
       if (!control) return;
@@ -101,27 +113,28 @@
       const point = at(event);
       if (!point) return;
       if (touching(event)) finger.down({ x: event.clientX, y: event.clientY }, point);
-      else { input?.({ type: "move", ...point }); input?.({ type: "down", ...point, button: buttonOf(event.button) }); }
+      else void send([{ kind: "mouse.move", ...point }, { kind: "mouse.down", ...point, button: buttonOf(event.button) }]);
     };
+    // A mouse moves at most once per frame: one batch of the latest position.
     const move = (event: PointerEvent) => {
       if (!control) return;
       const point = at(event);
       if (!point) return;
-      if (touching(event)) { for (const scroll of finger.move({ x: event.clientX, y: event.clientY }, point)) input?.(scroll); return; }
-      pending = { type: "move", ...point };
-      frame ||= requestAnimationFrame(() => { frame = 0; if (pending) input?.(pending); pending = undefined; });
+      if (touching(event)) { void send(finger.move({ x: event.clientX, y: event.clientY }, point, scale())); return; }
+      pending = { kind: "mouse.move", ...point };
+      frame ||= requestAnimationFrame(() => { frame = 0; if (pending) void send([pending]); pending = undefined; });
     };
     const up = (event: PointerEvent) => {
       if (!control) return;
-      if (touching(event)) { for (const tap of finger.up()) input?.(tap); return; }
+      if (touching(event)) { void send(finger.up()); return; }
       const point = at(event);
-      if (point) input?.({ type: "up", ...point, button: buttonOf(event.button) });
+      if (point) void send([{ kind: "mouse.up", ...point, button: buttonOf(event.button) }]);
     };
     const wheel = (event: WheelEvent) => {
       if (!control) return;
       event.preventDefault();
       const point = at(event);
-      if (point) input?.({ type: "wheel", ...point, dx: event.deltaX, dy: event.deltaY });
+      if (point) void send([{ kind: "wheel", ...point, deltaX: event.deltaX / scale(), deltaY: event.deltaY / scale() }]);
     };
     const menu = (event: Event) => { if (control) event.preventDefault(); };
     node.addEventListener("pointerdown", down);
@@ -152,7 +165,7 @@
   <!-- While the owner controls it, the screen takes the keyboard and the pointer; its outline says so. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (the screen is a keyboard and pointer target only while the owner controls it) -->
   <div class="screen" class:docked class:full class:control class:foot={foot} style:--ratio={ratio} bind:this={screen} tabindex={control ? 0 : undefined}
-    role={control ? "application" : undefined} aria-label={control ? `Controlling ${name}'s computer` : undefined} onkeydown={press} {@attach pointing}>
+    role={control ? "application" : undefined} aria-label={control ? `Controlling ${name}'s computer` : undefined} onkeydown={event => press(event, true)} onkeyup={event => press(event, false)} {@attach pointing}>
     {#if visible}{#key attempt}<img alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
@@ -160,7 +173,7 @@
        stays between steps, so the screen keeps the shape the window was fitted to. Where the owner may control the
        computer, the line carries the Take control step; in control it says how to return. -->
   {#if foot}<div class="activity">
-    <span class="line">{control ? "You are in control. Esc twice returns it." : activity ? `${name} · ${activity}` : name}</span>
+    <span class="line">{control ? stuck ? "Your input did not reach the computer." : "You are in control. Esc twice returns it." :activity ? `${name} · ${activity}` : name}</span>
     {#if input && control}
       <button type="button" class="tool" class:on={keyboardOpen} aria-label="Phone keyboard" aria-pressed={keyboardOpen} title="Phone keyboard" onpointerdown={event => event.preventDefault()} onclick={toggleKeyboard}><Icon name="keyboard" size={18} /></button>
       <button type="button" class="take" onclick={release}>Return control</button>
