@@ -84,7 +84,7 @@
 </script>
 
 {#snippet jobRow(session: string, job: ShellJob)}
-  <button type="button" class="job" aria-current={shown?.job === job && shown.session === session} title={job.command}
+  <button type="button" class="job" aria-current={shown?.job === job && shown.session === session}
     onclick={() => { chosen = keyOf(session, job); if (failed(job)) opened.add(chosen); }}>
     <span class="dot">{#if job.running}<StatusPill tone="working" dot label="Running" />{:else if failed(job)}<StatusPill tone="failed" dot label="Failed" />
       {:else}<i></i>{/if}</span>
