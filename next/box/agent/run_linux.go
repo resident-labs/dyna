@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box/computer"
+	"github.com/resident-labs/dyna/box/dynamcp"
 	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
@@ -144,6 +145,11 @@ func Run(ctx context.Context) error {
 	defer jobs.Close()
 	client.shellJobs = jobs.Running
 	mux := http.NewServeMux()
+	dynaTools, err := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"))
+	if err != nil {
+		return err
+	}
+	mux.Handle("/dyna/", dynaTools)
 	mux.Handle("/shell/", http.StripPrefix("/shell", jobs.Handler()))
 	mux.Handle("/", ModelRoute(engineSocket))
 	mcpPath := filepath.Join(piDir, "mcp.json")
