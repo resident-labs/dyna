@@ -12,16 +12,20 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/rpc"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	engstore "github.com/resident-labs/dyna/engine/store"
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -116,7 +120,7 @@ func TestCompletionsProxyGate(t *testing.T) {
 	cfg.AuthDir = dir
 	cfg.APIKeys = []string{"client"}
 	cfg.ForceModelPrefix = true
-	entry := config.OpenAICompatibility{Name: "fixture", Prefix: "fixture", BaseURL: upstream.URL + "/v1", DynaCatalogOnly: true, Headers: map[string]string{"X-Static": "fixed"}, Models: []config.OpenAICompatibilityModel{{Name: "same", Alias: "same"}, {Name: "redirect", Alias: "redirect"}}}
+	entry := config.OpenAICompatibility{Name: "fixture", Prefix: "fixture", BaseURL: upstream.URL + "/v1", DynaCatalogOnly: true, Headers: map[string]string{"X-Static": "fixed"}, Models: []config.OpenAICompatibilityModel{{Name: "same", Alias: "same"}, {Name: "redirect", Alias: "redirect"}, {Name: "plan_equal", Alias: "plan_equal"}}}
 	equal := config.OpenAICompatibility{Name: "equal", Prefix: "equal", BaseURL: upstream.URL + "/v1", DynaCatalogOnly: true, Models: []config.OpenAICompatibilityModel{{Name: "equal", Alias: "equal"}}}
 	cfg.OpenAICompatibility = []config.OpenAICompatibility{entry, equal}
 	data, err := yaml.Marshal(cfg)
@@ -155,7 +159,7 @@ func TestCompletionsProxyGate(t *testing.T) {
 	}{
 		{"one", "plan_one", "one-secret", "same", entry},
 		{"two", "plan_two", "two-secret", "same", entry},
-		{"key", "fixture", "key-secret", "same", entry},
+		{"plan-equal", "plan_equal", "plan-equal-secret", "plan_equal", entry},
 		{"equal", "equal", "equal-secret", "equal", equal},
 	} {
 		auth := keyAuth(item.entry, item.id, item.key)
@@ -167,7 +171,35 @@ func TestCompletionsProxyGate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	plan := &coreauth.Auth{ID: "real-plan", Provider: "claude", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL}, Metadata: map[string]any{"access_token": "sk-ant-oat-fixture"}}
+	// Add and activate the key through the real management routes.
+	keyID := "dyna-key-00000000000000000000000000000001"
+	rpcServer := rpc.NewServer()
+	if err := rpcServer.RegisterName("Auth", &catalogAuthRPC{records: []engstore.ProxyAuth{{ID: keyID, Bound: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	serverConn, clientConn := net.Pipe()
+	go rpcServer.ServeConn(serverConn)
+	credentials := &proxyStore{client: rpc.NewClient(clientConn), catalog: []config.OpenAICompatibility{entry}}
+	defer credentials.client.Close()
+	hash, err := bcrypt.GenerateFromPassword([]byte("management"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	proxyKeyRoutes(router, &service, credentials, string(hash))
+	manage := func(path, body string) {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer management")
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatalf("management %s: %d", path, response.Code)
+		}
+	}
+	manage("/dyna/keys", `{"id":"`+keyID+`","provider":"fixture","key":"key-secret"}`)
+	manage("/dyna/credentials/activate", `{"id":"`+keyID+`","model":"fixture/same","prefix":"fixture"}`)
+	plan := &coreauth.Auth{ID: "real-plan", Provider: "claude", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL}, Metadata: map[string]any{"access_token": "sk-ant-oat-fixture", "account_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}}
 	if err := service.RegisterDynaCredential(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +235,7 @@ func TestCompletionsProxyGate(t *testing.T) {
 		data, _ := io.ReadAll(response.Body)
 		return response.StatusCode, string(data)
 	}
-	for _, tc := range []struct{ model, key, bare string }{{"plan_one/same", "one-secret", "same"}, {"plan_two/same", "two-secret", "same"}, {"fixture/same", "key-secret", "same"}, {"equal/equal", "equal-secret", "equal"}} {
+	for _, tc := range []struct{ model, key, bare string }{{"plan_one/same", "one-secret", "same"}, {"plan_two/same", "two-secret", "same"}, {"fixture/same", "key-secret", "same"}, {"equal/equal", "equal-secret", "equal"}, {"plan_equal/plan_equal", "plan-equal-secret", "plan_equal"}} {
 		status, data := call(tc.model)
 		if status != 200 || !strings.Contains(data, "hello") || gotPath != "/v1/chat/completions" || gotAuth != "Bearer "+tc.key || gotModel != tc.bare {
 			t.Fatalf("%s: status=%d body=%q path=%q auth=%q model=%q", tc.model, status, data, gotPath, gotAuth, gotModel)
@@ -211,6 +243,12 @@ func TestCompletionsProxyGate(t *testing.T) {
 		if tc.model == "fixture/same" && gotHeader != "fixed" {
 			t.Fatalf("static header=%q", gotHeader)
 		}
+	}
+	if status, _ := call("fixture/equal"); status == 200 {
+		t.Fatal("model from another provider routed")
+	}
+	if status, _ := call("plan_equal"); status == 200 {
+		t.Fatal("bare plan prefix-equal model routed")
 	}
 	if status, _ := call("equal"); status == 200 {
 		t.Fatal("bare prefix-equal model routed")
