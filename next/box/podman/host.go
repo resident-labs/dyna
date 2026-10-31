@@ -38,6 +38,7 @@ func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, e
 
 type Host struct {
 	buildGate           chan struct{}
+	shortGate           chan struct{}
 	gate                chan struct{}
 	destination, socket string
 	runner              Runner
@@ -74,7 +75,7 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
+	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 8), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
 }
 func (h *Host) lock(ctx context.Context) error {
 	select {
@@ -123,7 +124,7 @@ func (h *Host) ensure(ctx context.Context) error {
 		if err := os.Remove(h.socket); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		args := []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "StreamLocalBindUnlink=yes", h.destination}
+		args := []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-o", "StreamLocalBindUnlink=yes", h.destination}
 		if _, err := h.runner.Run(ctx, nil, args...); err != nil {
 			return err
 		}
@@ -264,6 +265,15 @@ func (h *Host) run(ctx context.Context, argv ...string) ([]byte, error) {
 	return h.runInput(ctx, nil, argv...)
 }
 func (h *Host) runInput(ctx context.Context, input []byte, argv ...string) ([]byte, error) {
+	select {
+	case h.shortGate <- struct{}{}:
+		defer func() { <-h.shortGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return h.runUnbounded(ctx, input, argv...)
+}
+func (h *Host) runUnbounded(ctx context.Context, input []byte, argv ...string) ([]byte, error) {
 	if err := h.lock(ctx); err != nil {
 		return nil, err
 	}
