@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 type Web struct {
@@ -24,17 +25,22 @@ type Web struct {
 	handler http.Handler
 	now     func() time.Time
 	tokens  map[[32]byte]time.Time
-	cookies map[[32]byte]struct{}
+	devices DeviceStore
 	app     fs.FS
 	api     *API
 }
 
-func NewWeb(a *API, address string, app fs.FS, now func() time.Time) (*Web, error) {
+type DeviceStore interface {
+	CreateDevice(context.Context, store.Device) error
+	AuthenticateDevice(context.Context, [32]byte, time.Time) (store.Device, bool, error)
+}
+
+func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices DeviceStore) (*Web, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil || host != "127.0.0.1" || port == "" {
 		return nil, fmt.Errorf("web listener must bind 127.0.0.1 with a port")
 	}
-	w := &Web{address: address, host: "dyna.localhost:" + port, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), cookies: make(map[[32]byte]struct{})}
+	w := &Web{address: address, host: "dyna.localhost:" + port, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), devices: devices}
 	a.web = w
 	return w, nil
 }
@@ -86,26 +92,37 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			http.Error(out, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		w.mu.Lock()
-		w.cookies[sha256.Sum256([]byte(value))] = struct{}{}
-		w.mu.Unlock()
-		http.SetCookie(out, &http.Cookie{Name: "dyna_web", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+		id, err := secret()
+		if err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		now := w.now()
+		d := store.Device{ID: id, Name: "Local web", TokenHash: sha256.Sum256([]byte(value)), PairedAt: now, LastSeenAt: now, ExpiresAt: now.Add(store.DeviceLife), Scopes: store.FullDeviceScopes}
+		if err := w.devices.CreateDevice(r.Context(), d); err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(store.DeviceLife / time.Second)})
 		http.Redirect(out, r, "/", http.StatusSeeOther)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/") {
-		cookie, err := r.Cookie("dyna_web")
-		valid := false
-		if err == nil {
-			hash := sha256.Sum256([]byte(cookie.Value))
-			w.mu.Lock()
-			_, valid = w.cookies[hash]
-			w.mu.Unlock()
+		cookie, err := r.Cookie("dyna_device")
+		if err != nil {
+			http.Error(out, "forbidden", http.StatusForbidden)
+			return
+		}
+		_, valid, err := w.devices.AuthenticateDevice(r.Context(), sha256.Sum256([]byte(cookie.Value)), w.now())
+		if err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
 		}
 		if !valid {
 			http.Error(out, "forbidden", http.StatusForbidden)
 			return
 		}
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: cookie.Value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(store.DeviceLife / time.Second)})
 		w.handler.ServeHTTP(out, r)
 		return
 	}
