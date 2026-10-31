@@ -25,6 +25,7 @@ type Service interface {
 	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error
 	RuleAdd(context.Context, contract.Principal, contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error)
 	RuleRemove(context.Context, contract.Principal, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error)
+	RuleEdit(context.Context, contract.Principal, contract.RuleEditRequest) (contract.RuleEditResponse, *contract.Error)
 	RuleList(context.Context, contract.Principal, contract.RuleListRequest) (contract.RuleListResponse, *contract.Error)
 	RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error)
 	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)

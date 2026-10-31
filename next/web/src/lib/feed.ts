@@ -56,7 +56,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "session.profile_changed": return undefined;
+    case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -268,7 +268,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
       case "pr.opened": prs++; break;
       case "box.pressure": memory++; break;
       case "grant.expired": grants++; break;
-      case "rule.added": case "rule.removed": rules++; break;
+      case "rule.added": case "rule.removed": case "rule.edited": rules++; break;
     }
   }
   if (until) last = Math.max(last, Date.parse(until));
@@ -313,6 +313,7 @@ export function describe(event: Event, name: Name): string {
     case "grant.expired": return "A host execution grant expired";
     case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
     case "rule.removed": return `Rule r${event.body.number} removed`;
+    case "rule.edited": return `Rule r${event.body.number} changed: ${event.body.text}`;
     case "session.profile_changed": return ""; // feedRows shows no row for it.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
