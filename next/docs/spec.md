@@ -578,7 +578,7 @@ type Host struct {
 
 The host check sets schedulable `MemBytes` to `MemTotal` minus the memory floor, and `CPUs` to online CPUs minus one, with a minimum of one CPU.
 
-**Admission** is the only placement code. A box's request is its size, and its limit is its `memory.max`. A box goes on a `ready` host only when the sum of requests on that host, plus this one, fits in `CPUs` and `MemBytes`, and free disk stays above the floor. Otherwise the box waits in `pending`, and `box.changed` names the reason. Only running boxes count for CPU and memory. A stopped (dormant) box counts only its disk. The measured free disk already includes boxes placed at or before the host's last check. Subtract the disk requests of boxes placed since that check and the new request; the result must remain at or above the floor.
+**Admission** is the only placement code. A placement root's request is its size, and its limit is its `memory.max`. A placement root goes on a `ready` host only when the sum of placement root requests on that host, plus this one, fits in `CPUs` and `MemBytes`, and free disk stays above the floor. A child counts only for disk, and must run on its parent's host. Otherwise the box waits in `pending`, and `box.changed` names the reason. Only running placement roots count for CPU and memory. A stopped (dormant) box counts only its disk. The measured free disk already includes boxes placed at or before the host's last check. Subtract the disk requests of boxes placed since that check and the new request; the result must remain at or above the floor.
 
 Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `checked_at`) and `host_labels` (`host`, `label`).
 
@@ -608,7 +608,7 @@ const (
 )
 
 type BoxSize struct {
-	Name     string // "small" | "medium" | "large"
+	Name     string // "agent" | "small" | "medium" | "large"
 	CPUs     int    // cpu.max in whole CPUs
 	MemBytes int64  // memory.high; memory.max is 1.5 times this
 	Pids     int    // pids.max
@@ -659,6 +659,7 @@ Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `s
 
 | Size | CPUs | memory.high | memory.max | pids.max | disk request |
 |---|---|---|---|---|---|
+| agent | 1 | 2 GiB | 3 GiB | 1024 | 5 GiB |
 | small | 2 | 4 GiB | 6 GiB | 2048 | 10 GiB |
 | medium | 4 | 8 GiB | 12 GiB | 4096 | 20 GiB |
 | large | 8 | 16 GiB | 24 GiB | 8192 | 40 GiB |
@@ -666,7 +667,7 @@ Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `s
 Disk requests are for admission accounting only; they do not set a volume quota.
 
 - The limits apply to the budget slice, which holds the box and all its descendants. A short peak slows the tree down instead of killing a harness.
-- Defaults: root `small`, a lead `medium`, a child the size its parent picks, up to the parent's own size. A repository can set a default in `.dyna/images/<name>/size`.
+- Defaults: root `agent`, a lead `medium`, a child its parent's size. A repository can set a default in `.dyna/images/<name>/size`.
 - **Pressure.** Each host's heartbeat reads its dyna budget slices' `memory.events` on every 10 s probe, in one host command, and the engine emits `box.pressure` once per episode, when `memory.events` shows `high` throttling for 60 s, or when a process reaches `max`. It is a room event that wakes nobody. It shows whether boxes need growth.
 - **No growth until after the cutover** (owner, 2026-10-30, q40). Budgets already allow bursts to 1.5 times the size, and throttling slows a box down instead of killing it. A session that needs a larger box closes it and starts a new one at a larger size. `box.grow` comes later, when the pressure events show the need.
 
@@ -674,13 +675,13 @@ Disk requests are for admission accounting only; they do not set a volume quota.
 
 Budget slices follow the tree with systemd's naming, where each dash adds a level: a lead is `dyna-<l>.slice`, its child `dyna-<l>-<c>.slice`, a grandchild `dyna-<l>-<c>-<g>.slice`. Each part is the first 12 lowercase hex characters of SHA-256(BoxID), and admission checks that it is unique on the host. A unit name has at most 255 characters, so this allows about 18 levels. A child's box starts with `podman run --cgroup-parent=<child slice>`, so its use counts against every ancestor below the lead.
 
-Every budget sits under the host slice `dyna.slice`, whose `memory.max` is the host's `MemBytes`. Admission counts sizes, but budgets may grow to 1.5 times their size. The host limit keeps any memory kill inside Dyna's boxes, away from sshd and the master.
+Every budget sits under the host slice `dyna.slice`, whose `memory.max` is the host's `MemBytes`. Admission counts only placement root sizes against host CPU and memory; each child counts only for disk. Budgets may grow to 1.5 times their size. The host limit keeps any memory kill inside Dyna's boxes, away from sshd and the master.
 
 A cgroup nests only inside one kernel, so a child runs on its parent's host. Therefore:
 
-- **Root's box** is small and runs on any host.
-- **Each lead** (a direct child of root) is a placement root. It gets a top-level slice on the host with the most free memory. The engine counts the requests of root and all leads against the room limit (`rooms.cpus`, `rooms.mem_bytes`). The room still has one budget, enforced by accounting at the top and by cgroups below each lead.
-- **A lead's subtree never splits across hosts.** A child that does not fit on its lead's host waits in `pending`.
+- **Root's box** is agent and runs on any host.
+- **Each lead** (a direct child of root) is a placement root. It gets a top-level slice on the host with the most free memory. Room limits (`rooms.cpus`, `rooms.mem_bytes`) are not built yet. When built, the engine will count root and lead requests against the room limit; cgroups enforce each lead budget below it.
+- **A lead's subtree never splits across hosts.** A child waits in `pending` if its parent host is unavailable or lacks disk.
 - **M1** uses one host, hermeslab.
 
 ### 5.6 Repository copy and shared caches (M2)

@@ -201,6 +201,7 @@ const (
 type BoxSizeName string
 
 const (
+	BoxSizeAgent  BoxSizeName = "agent"
 	BoxSizeSmall  BoxSizeName = "small"
 	BoxSizeMedium BoxSizeName = "medium"
 	BoxSizeLarge  BoxSizeName = "large"
