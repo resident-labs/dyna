@@ -18,6 +18,8 @@ export class RoomStore {
   readonly failed = new SvelteSet<string>();
   // Sessions whose box runs a computer the owner can watch.
   readonly computers = new SvelteSet<string>();
+  // Background shell jobs still running when each session's last turn ended.
+  readonly shellJobs = new SvelteMap<string, number>();
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
   // Names outlive closed sessions, so old posts still show who wrote them.
@@ -71,6 +73,7 @@ export class RoomStore {
       if (session.turn && session.activity) this.activity.set(session.id, session.activity);
       if (session.lastOutcome === "failed") this.failed.add(session.id);
       if (session.computer === "running") this.computers.add(session.id);
+      this.shellJobs.set(session.id, session.shellJobs ?? 0);
     }
     for (const { id, kind, by, class: level, card, expires, state } of listed.operations ?? []) {
       this.requests.set(id, { id, kind, by, class: level, card, expires, state });
@@ -139,6 +142,7 @@ export class RoomStore {
         // Only a completed turn clears the Failed pill; a stopped turn did not succeed.
         if (event.body.outcome === "failed") this.failed.add(event.body.session);
         else if (event.body.outcome === "completed") this.failed.delete(event.body.session);
+        this.shellJobs.set(event.body.session, event.body.shellJobs ?? 0);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
       case "op.decided": case "op.ran": {
