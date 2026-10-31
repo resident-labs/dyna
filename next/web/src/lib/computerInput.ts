@@ -168,13 +168,13 @@ export class Finger {
 }
 
 // One request in flight: the engine keeps order only inside a batch, so a later request could pass an earlier one. Events
-// that come while one is in flight wait and go together as the next batch (at most 256, the route's limit).
+// that come while one is in flight wait and go together as the next batch (at most 256, the route's limit). A refused
+// batch pauses the queue and stays first, with everything after it in order, until retry: a key up never goes before its down.
 export class InputQueue {
   private waiting: ComputerInput[] = [];
   private frame: Size = { width: 0, height: 0 };
   private busy = false;
-  // The last batch the engine refused, kept so the owner can send it again.
-  private refused: ComputerInput[] = [];
+  private paused = false;
   private readonly deliver: (events: ComputerInput[], frame: Size) => Promise<void>;
   private readonly settled: (ok: boolean) => void;
   constructor(deliver: (events: ComputerInput[], frame: Size) => Promise<void>, settled: (ok: boolean) => void) {
@@ -184,22 +184,42 @@ export class InputQueue {
   push(events: ComputerInput[], frame: Size): void {
     this.waiting.push(...events);
     this.frame = frame;
-    if (!this.busy) void this.run();
+    if (!this.busy && !this.paused) void this.run();
   }
   private async run(): Promise<void> {
     this.busy = true;
-    while (this.waiting.length) {
+    while (this.waiting.length && !this.paused) {
       const batch = this.waiting.splice(0, 256);
       const ok = await this.deliver(batch, this.frame).then(() => true, () => false);
-      if (!ok) this.refused = batch;
+      if (!ok) {
+        this.waiting.unshift(...batch);
+        this.paused = true;
+      }
       this.settled(ok);
     }
     this.busy = false;
   }
-  // Sends the refused batch again, ahead of anything that waits.
+  // Sends the refused batch and what came after it, in order.
   retry(): void {
-    this.waiting.unshift(...this.refused);
-    this.refused = [];
+    this.paused = false;
     if (!this.busy) void this.run();
+  }
+  // Drops what waits behind a refused batch, when the owner gives control back.
+  clear(): void {
+    this.waiting = [];
+    this.paused = false;
+  }
+}
+
+// A mouse button the owner holds on the computer. Control or the pointer may end outside the picture, so the release
+// goes where the pointer last was inside it, and control never ends with a button held there.
+export class MouseHold {
+  private held: { button: MouseButton; at: Point } | undefined;
+  down(button: MouseButton, at: Point): void { this.held = { button, at }; }
+  move(at: Point): void { if (this.held) this.held.at = at; }
+  release(): ComputerInput[] {
+    const held = this.held;
+    this.held = undefined;
+    return held ? [{ kind: "mouse.up", ...held.at, button: held.button }] : [];
   }
 }
