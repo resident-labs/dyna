@@ -121,6 +121,7 @@
   });
   const toggle = (key: string) => { list?.hold(); if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
+  // Measured row heights keep the deferred correction small when new rows first enter the view.
   const estimate = (item: Item): number => {
     if (item.kind === "post") return 40 + 20 * Math.max(1, item.text.split("\n").length);
     if (item.kind === "day" || item.kind === "new" || item.kind === "notice" || item.kind === "restarted") return 28;
