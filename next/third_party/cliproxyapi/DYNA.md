@@ -24,7 +24,7 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 - OAuth completion notification: 11 product lines added. A private hook tells the engine when a saved OAuth session completes, so unpolled attempts cannot leave a routable orphan. The 2026-10-31 upstream searches found no fitting completion hook; PR #6715 adds a Codex login route rather than a store handoff.
 - Private credential discovery and typed runtime status: 83 product lines added. The SDK exposes pathless credentials and bounded numeric quota signals to the local adapter. `RequiresSignIn` is runtime-only, so an unverified credential stays unknown. Upstream issue #4585 confirms file-path listing gaps; #6201 remains open, and no checked upstream patch covers this adapter.
 
-- Atomic OAuth grant replacement for existing credentials: 43 product lines added and 5 removed, plus regression tests. It uses the existing per-auth mutation gate and credential version to discard a stale refresh. `engine/model` uses it for safe account reconnect. The upstream search on 2026-10-31 found issue #6288 on retry and #4945 on relogin metadata, but no matching atomic refresh-versus-login patch; upstream #4734 addresses targeted Codex recovery.
+- Atomic OAuth grant replacement for existing credentials: 57 product lines added and 4 removed, plus regression tests. It uses the existing per-auth mutation gate and registration epoch to discard refreshes from an older grant, while preserving upstream partition merges. `engine/model` uses it for safe account reconnect. The upstream search on 2026-10-31 found issue #6288 on retry and #4945 on relogin metadata, but no matching atomic refresh-versus-login patch; upstream #4734 addresses targeted Codex recovery.
 
 ## Update
 
