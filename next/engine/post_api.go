@@ -18,6 +18,9 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.PostResponse{}, e
 	}
+	if len(req.ToolCallID) > 4096 || (req.ToolCallID != "" && caller.Kind != contract.PrincipalSession) {
+		return contract.PostResponse{}, invalid("invalid tool call ID")
+	}
 	if len(req.ClientID) > 64 {
 		return contract.PostResponse{}, invalid("clientId is longer than 64 characters")
 	}
@@ -182,7 +185,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if surface == contract.SurfaceDM {
 		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID})
+	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID})
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
