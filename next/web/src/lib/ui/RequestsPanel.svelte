@@ -3,7 +3,7 @@
   import { requestDecision } from "../request-decision.ts";
   import { hue } from "../identity.ts";
   import { closedSession, fromNow } from "../feed.ts";
-  import { requestGroups } from "../request-groups.ts";
+  import { requestGroups, requestOrder } from "../request-groups.ts";
   import type { Request, RoomStore } from "../room.svelte.ts";
   import Avatar from "./Avatar.svelte";
   import RequestCard from "./RequestCard.svelte";
@@ -19,11 +19,11 @@
     .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
   let shared = $derived(requests.filter(item => item.state === "pending" && item.class !== "owner")
     .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
-  let pending = $derived([...waiting, ...shared]);
+  let groups = $derived(requestGroups(waiting));
+  let pending = $derived(requestOrder(waiting, shared, groups, waiting.length > groupThreshold));
   let decided = $derived(requests.filter(item => item.decision && new Date(item.decision.at).toDateString() === new Date(now).toDateString())
     .sort((a, b) => (b.decision?.at ?? "").localeCompare(a.decision?.at ?? "")));
-  let groups = $derived(requestGroups(waiting));
-  let current = $derived(pending.some(item => item.id === chosen) ? chosen : waiting.length > groupThreshold ? groups[0]?.[1][0]?.id : pending[0]?.id);
+  let current = $derived(pending.some(item => item.id === chosen) ? chosen : pending[0]?.id);
   function keys(event: KeyboardEvent) {
     if (event.target instanceof HTMLInputElement || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !current) return;
     const at = pending.findIndex(item => item.id === current), key = event.key.toLowerCase();

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { deepStrictEqual } from "node:assert";
-import { requestGroups } from "./request-groups.ts";
+import { requestGroups, requestOrder } from "./request-groups.ts";
 import type { Request } from "./room.svelte.ts";
 
 test("groups requests by session, largest first, retaining expiry order", () => {
@@ -10,5 +10,8 @@ test("groups requests by session, largest first, retaining expiry order", () => 
     expires: "2026-01-01T00:00:00Z", state: "pending",
   });
   const a = item("a", "one"), b = item("b", "two"), c = item("c", "two");
-  deepStrictEqual(requestGroups([a, b, c]), [["two", [b, c]], ["one", [a]]]);
+  const groups = requestGroups([a, b, c]);
+  deepStrictEqual(groups, [["two", [b, c]], ["one", [a]]]);
+  deepStrictEqual(requestOrder([a, b, c], [item("d", "three")], groups, true).map(request => request.id), ["b", "c", "a", "d"]);
+  deepStrictEqual(requestOrder([a, b, c], [], groups, false).map(request => request.id), ["a", "b", "c"]);
 });
