@@ -16,7 +16,6 @@
   import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
-  import ShellView from "./lib/ui/ShellView.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
@@ -189,9 +188,7 @@
   let dock: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
-    // Escape closes the jobs view only from inside the panel, so Escape in the composer or a section keeps it.
     if (event.key === "Escape" && drawer) void showDrawer(false);
-    else if (event.key === "Escape" && jobsOf && members?.contains(document.activeElement)) void closeJobs();
     else if (event.key === "Escape" && panel) void showPanel(false);
     else if (event.key === "Escape" && section) void closeSection();
     if (event.key !== "F6") return;
@@ -208,14 +205,15 @@
   // The tree is virtual, so the next row may not be rendered yet: the list scrolls to it first. A held key's presses
   // that come meanwhile move on from that row, and only the newest one focuses.
   let walkingTo: number | undefined;
-  // Focus goes back to a row's icon when a view over the list closes. The list mounts again at its top, so the row is
-  // scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus before the icon.
-  async function focusRowIcon(id: string, icon: string) {
+  // Focus goes back to a row's computer icon when the docked computer closes. The list mounts again at its top, so
+  // the row is scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus
+  // before the icon. With the icon gone, focus stays on the link.
+  async function focusRowIcon(id: string) {
     const index = tree.findIndex(entry => entry.kind === "session" && entry.session.session === id);
     if (index >= 0) await sessionList?.reveal(index);
-    const button = members?.querySelector<HTMLElement>(`[${icon}="${CSS.escape(id)}"]`);
-    button?.closest(".row")?.querySelector<HTMLElement>("a.member")?.focus();
-    (button ?? members)?.focus();
+    const link = members?.querySelector<HTMLElement>(`a.member[data-key="${CSS.escape(id)}"]`);
+    link?.focus();
+    (members?.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? link ?? members)?.focus();
   }
   async function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !members) return;
@@ -275,19 +273,16 @@
     await tick();
     if (!held) return;
     if (!members?.getClientRects().length) toggle?.focus();
-    else await focusRowIcon(id, "data-watch");
+    else await focusRowIcon(id);
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
-  // The session whose jobs the panel shows instead of the list, while its box is ready; it closes as the computer does.
-  let jobsOf: string | undefined = $state();
+  // A session's running background jobs while its box is ready. The dock's Jobs tab lists every session that had
+  // jobs during this page view, since a finished job's output stays in its box.
   const jobs = (id: string) => store?.boxes.get(id) === "ready" ? store.shellJobs.get(id) ?? 0 : 0;
-  async function closeJobs() {
-    const id = jobsOf ?? "", held = members?.contains(document.activeElement);
-    jobsOf = undefined;
-    await tick();
-    if (held) await focusRowIcon(id, "data-jobs");
-  }
-  $effect.pre(() => { if (jobsOf && store?.boxes.get(jobsOf) !== "ready") void closeJobs(); });
+  const hadJobs = new SvelteSet<string>();
+  $effect(() => { for (const [id, count] of store?.shellJobs ?? []) if (count > 0) hadJobs.add(id); });
+  let jobSessions = $derived([...store?.sessions.values() ?? []].filter(item => hadJobs.has(item.session) && store?.boxes.get(item.session) === "ready")
+    .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: jobs(item.session) })));
   const wide = new MediaQuery("min-width: 761px");
   // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
   // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open or
@@ -426,14 +421,11 @@
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} />
     {/if}{/if}
-    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()}
+    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} jobs={jobSessions}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
-      {#if jobsOf}
-        {#if wide.current || panel}<ShellView session={jobsOf} name={store?.names.get(jobsOf) ?? "Session"} onback={() => void closeJobs()} />{/if}
-      {:else}
+    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
       {#if phone.current}<button type="button" class="handle" aria-label={sheetFull ? "Shrink the sessions sheet" : "Expand the sessions sheet"}
@@ -455,15 +447,14 @@
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
-          {#if jobs(item.session)}<button type="button" class="watch" class:open={jobsOf === item.session} data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
-            title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
+          {#if jobs(item.session)}<button type="button" class="watch" data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
+            title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { terminals?.showJobs(item.session); if (!wide.current) void showPanel(false); }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
         {/snippet}</VirtualList></div>
       {:else}<p class="hint">No sessions yet.</p>{/if}
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
       {#if wide.current || panel}<HostFoot {navigate} />{/if}
-      {/if}
     </aside>
     {#if watching && !docked}{@render computerView(watching)}{/if}
   {/if}
@@ -544,8 +535,8 @@
   .watch:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   /* The name wins: a pointer shows a row's icons on hover, and the keyboard on focus; an open view keeps its icon. */
   @media (hover: hover) { .row:not(:hover, :focus-within) .watch:not(.open) { display: none; } }
-  /* The docked computer and the jobs view need 420 px. They dock beside the feed from 1024 px, where the
-     feed keeps 540 px; below that they cover the feed, and Back or Escape closes them. */
+  /* The docked computer needs 420 px. It docks beside the feed from 1024 px, where the feed keeps 540 px; below
+     that it covers the feed, and Back or Escape closes it. */
   @media (min-width: 1024px) { .shell.open:has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
   @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); } }
   @media (max-width: 760px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
