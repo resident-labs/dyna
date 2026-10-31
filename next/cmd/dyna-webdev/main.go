@@ -326,6 +326,7 @@ func main() {
 	fmt.Println(login.URL)
 	<-ctx.Done()
 }
+
 // seedAgents spreads n sessions with invented names over six more rooms: every third one works until stopped,
 // every seventeenth fails, and the rest are idle, so Home's room activity has a crowd to sum.
 func seedAgents(ctx context.Context, s *engine.Service, n int) {
