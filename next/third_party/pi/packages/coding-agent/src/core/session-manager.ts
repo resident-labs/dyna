@@ -504,7 +504,15 @@ export function buildContextEntries(
 		if (entry.id === compaction.firstKeptEntryId) {
 			foundFirstKept = true;
 		}
-		if (foundFirstKept && !(entry.type === "message" && entry.message.role === "system")) {
+		if (
+			foundFirstKept &&
+			!(entry.type === "message" && entry.message.role === "system") &&
+			!(
+				compaction.systemMessage?.sections &&
+				entry.type === "custom_message" &&
+				entry.customType === "context_update"
+			)
+		) {
 			contextEntries.push(entry);
 		}
 	}
