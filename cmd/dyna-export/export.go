@@ -124,7 +124,7 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 	}
 	g = contract.GlobalBundle{Version: contract.BundleV1, Rooms: names, Exported: time.Now().UTC(),
 		Source:       contract.BundleSource{Commit: commit, Backup: filepath.Base(backup), BackupSHA256: hex.EncodeToString(hash.Sum(nil))},
-		Instructions: contract.Instructions{Global: globalInstructions}, Settings: settings, Profiles: profiles, Hosts: hosts, Accounts: accounts, Devices: devices,
+		Instructions: globalInstructions, Settings: settings, Profiles: profiles, Hosts: hosts, Accounts: accounts, Devices: devices,
 		Repos: repos.Repos, Skills: skills}
 	g.Counts = globalBundleCounts(g)
 	report.Profiles, report.Repos, report.Skills = len(profiles), len(repos.Repos), len(skills)
@@ -151,7 +151,6 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 		if err != nil {
 			return g, nil, report, err
 		}
-		g.Instructions.Rooms = append(g.Instructions.Rooms, contract.RoomInstructions{Room: contract.RoomID(rec.ID), Text: instructions})
 		goals, err := readGoals(db, rec.ID, roomAuthor)
 		if err != nil {
 			return g, nil, report, err
@@ -217,7 +216,7 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 		}
 		b := contract.RoomBundle{Version: contract.BundleV1, Name: name, Repos: repos.RoomRepos[name], Limits: limits, Color: string(rec.Color),
 			Paused: rec.SessionPause.Paused, RootProfile: contract.ProfileName(rec.RootProfile), Upstreams: handoffUpstreams,
-			Goals: goals, Issues: issues, NextIssue: nextIssue, PRs: prs, Questions: questions,
+			Instructions: instructions, Goals: goals, Issues: issues, NextIssue: nextIssue, PRs: prs, Questions: questions,
 			Handoff: handoff, HookHandoff: hooks[name], RepoHandoff: repos.RoomHandoffs[name], LimitHandoff: warnings}
 		b.Counts = roomBundleCounts(b)
 		parts = append(parts, b)
