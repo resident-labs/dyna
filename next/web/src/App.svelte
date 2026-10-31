@@ -449,7 +449,7 @@
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
-            title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { terminals?.showJobs(item.session); if (!wide.current) void showPanel(false); }}><Icon name="terminal" /></button>{/if}
+            title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); terminals?.showJobs(item.session); }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
         {/snippet}</VirtualList></div>
