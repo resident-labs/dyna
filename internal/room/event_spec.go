@@ -208,6 +208,11 @@ var eventSpecs = []EventSpec{
 		Audience:  AudienceSession,
 		Producers: []EventProducer{ProducerParentCheckin},
 	},
+	{
+		Family: FamilyGitHubQuota, Type: TypeQuotaLow, Renderer: "GitHubQuotaCard",
+		Payload: reflect.TypeOf(GitHubQuotaEvent{}), Quiet: true, Wake: WakeNever, Once: true,
+		Text: "GitHub quota is low for {host} ({resource}). Caller attribution is unavailable.",
+	},
 	// A slow test is a quiet CI health line in the owner feed.
 	{
 		Family:   FamilyCIHealth,
