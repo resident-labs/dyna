@@ -31,10 +31,79 @@
   import { fileSize, formatTime, isImage, isThumb, type Row } from "../feed.ts";
   import type { Attachment, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
-  let { row, author, to, root, onretry, ondiscard, onforward, newest, onvisual }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void;
+  import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
+  import { canForwardPost } from "../forward-state.ts";
+  import { SwipeForward } from "../swipe-forward.ts";
+  let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, onvisual }: {
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void;
   } = $props();
   let html = $derived(render(row.text));
+  let distance = $state(0), dragging = $state(false), ready = $state(false);
+  function swipe(node: HTMLElement) {
+    let state: Swipe | null = null, id = -1, suppress = 0;
+    let viewportListener: (() => void) | undefined;
+    const delayedForward = new SwipeForward();
+    function reset() { state = null; dragging = false; distance = 0; ready = false; }
+    function start(event: TouchEvent) {
+      reset();
+      if (event.touches.length !== 1 || !onforward || swipeDisabled || (!row.text.trim() && !row.attachments.length)) return;
+      const touch = event.touches[0], target = event.target;
+      if (!(target instanceof Element)) return;
+      state = beginSwipe(touch.clientX, touch.clientY, performance.now(), matchMedia("(pointer: coarse)").matches,
+        !!target.closest(ignoredSwipeTarget), !!getSelection()?.toString());
+      id = touch.identifier;
+    }
+    function move(event: TouchEvent) {
+      if (!state) return;
+      const touch = event.touches[0];
+      if (event.touches.length !== 1 || touch.identifier !== id) { reset(); return; }
+      const result = moveSwipe(state, touch.clientX, touch.clientY, performance.now(), event.cancelable, !!getSelection()?.toString());
+      state = result.swipe;
+      if (!state) { reset(); return; }
+      if (!state.dragging) return;
+      event.preventDefault();
+      dragging = true;
+      distance = row.pending ? Math.min(12, result.distance) : result.distance;
+      ready = !row.pending && touch.clientX - state.x >= 64;
+      if (result.tick && !row.pending) navigator.vibrate?.(10);
+    }
+    function end(event: TouchEvent) {
+      if (!state) return;
+      const touch = [...event.changedTouches].find(item => item.identifier === id);
+      const forward = touch && canForwardPost(!!row.pending, swipeDisabled, row.text, row.attachments.length) && event.touches.length === 0 && releaseSwipe(state, touch.clientX);
+      if (state.dragging) { suppress = Date.now() + 500; if (event.cancelable) event.preventDefault(); }
+      reset();
+      if (forward) delayedForward.start(() => {
+        onforward?.();
+        const view = node.closest(".virtual"), viewport = visualViewport;
+        if (view instanceof HTMLElement) {
+          const reveal = () => {
+            const bottom = Math.min(view.getBoundingClientRect().bottom, viewport ? viewport.offsetTop + viewport.height : innerHeight);
+            const overflow = node.getBoundingClientRect().bottom - bottom;
+            if (overflow > 0) view.scrollTop += overflow;
+          };
+          if (viewportListener) viewport?.removeEventListener("resize", viewportListener);
+          viewportListener = reveal;
+          viewport?.addEventListener("resize", reveal, { once: true });
+          requestAnimationFrame(reveal);
+        }
+      }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 150);
+    }
+    function click(event: MouseEvent) { if (Date.now() < suppress) { event.preventDefault(); event.stopImmediatePropagation(); } }
+    node.addEventListener("touchstart", start, { passive: true });
+    node.addEventListener("touchmove", move, { passive: false });
+    node.addEventListener("touchend", end, { passive: false });
+    node.addEventListener("touchcancel", reset);
+    node.addEventListener("contextmenu", reset);
+    node.addEventListener("click", click, true);
+    return { destroy() {
+      node.removeEventListener("touchstart", start); node.removeEventListener("touchmove", move);
+      node.removeEventListener("touchend", end); node.removeEventListener("touchcancel", reset);
+      node.removeEventListener("contextmenu", reset); node.removeEventListener("click", click, true);
+      delayedForward.cancel();
+      if (viewportListener) visualViewport?.removeEventListener("resize", viewportListener);
+    } };
+  }
   // Copy text answers in the bar for 2 seconds, as in v1.
   let copied = $state("");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -80,8 +149,10 @@
   let others = $derived(row.attachments.filter(file => !file.visual && !isThumb(file, failed)));
 </script>
 
-<!-- A pointer or the keyboard shows the bar; a long press on a touch screen opens a bottom sheet with the same two actions. -->
-<article class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
+<!-- A long press opens the action sheet; a right swipe forwards on release. -->
+<div class="swipe" use:swipe>
+  {#if dragging && !row.pending}<div class="cue" class:ready class:first={row.first} aria-hidden="true"><Icon name="forward" /></div>{/if}
+<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
   style:--lift="{lift}px" onpointerenter={event => raise(event, event.currentTarget)} onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
@@ -112,8 +183,17 @@
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>
+</div>
 
 <style>
+  .swipe { position: relative; }
+  @media (pointer: coarse) { .swipe { overflow-x: clip; } }
+  .cue { position: absolute; left: 12px; top: 29px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
+  .cue:not(.first) { top: 15px; }
+  .cue.ready { background: var(--focus); color: var(--bg); opacity: 1; transform: scale(1.15); }
+  .post { transition: transform 150ms ease; }
+  .post.dragging { transition: none; }
+  @media (prefers-reduced-motion: reduce) { .post { transition: none; } }
   /* The avatar sits in a 32 px gutter; later posts of a run align under the first one's text. */
   .post { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 1px 16px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
@@ -138,7 +218,7 @@
   .status { color: var(--muted); font-size: 12px; }
   .status:not(:empty) { padding: 0 6px; }
   .post > :global(.avatar) { grid-row: 1 / span 3; margin-top: 2px; }
-  .first { padding-top: 14px; }
+  .post.first { padding-top: 14px; }
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
   .pending > :global(:not(.unsent, .sheet)) { opacity: 0.5; }
   .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }

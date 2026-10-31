@@ -15,9 +15,9 @@
   import type { VisualVersion } from "../visual.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, home, admin, operate, intro, unsent, onunsent, onsettled, onforward, onclosed, onjobs, onvisual, target, ontarget, element = $bindable() }: {
+  let { store, home, admin, operate, intro, unsent, onunsent, onsettled, onforward, waiting, onclosed, onjobs, onvisual, target, ontarget, element = $bindable() }: {
     store: RoomStore; home: Conversation; admin: boolean; operate: boolean; intro: Snippet<[boolean]>; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onclosed: () => void; onjobs: (session: string) => void; onvisual: (versions: VisualVersion[], selected: number) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; waiting?: Quote; onclosed: () => void; onjobs: (session: string) => void; onvisual: (versions: VisualVersion[], selected: number) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -169,7 +169,7 @@
     onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow row={item} {newest} onvisual={openVisual} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
-        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
+        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
       {:else if item.kind === "notice"}<p class="hint">{describe(item.event, name)} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></p>
       {:else if item.kind === "restarted"}<p class="hint">{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone.</p>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
