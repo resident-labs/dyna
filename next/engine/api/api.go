@@ -126,6 +126,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodAccountsConnect, c, contract.ScopeAdmin, owner, a.service.AccountsConnect)
 	call(mux, contract.MethodAccountsConnectCallback, c, contract.ScopeAdmin, owner, a.service.AccountsConnectCallback)
 	call(mux, contract.MethodAccountsConnectStatus, c, contract.ScopeRead, owner, a.service.AccountsConnectStatus)
+	call(mux, contract.MethodAccountsSetKey, c, contract.ScopeAdmin, owner, a.service.AccountsSetKey)
 	call(mux, contract.MethodAccountsQuota, c, contract.ScopeRead, owner, a.service.AccountsQuota)
 	call(mux, contract.MethodRoomCreate, c, contract.ScopeAdmin, owner, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, contract.ScopeAdmin, owner, a.service.RoomRepoAdd)
