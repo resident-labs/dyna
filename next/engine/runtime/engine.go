@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,11 +27,23 @@ import (
 
 type hostRegistrar interface {
 	AddHost(context.Context, contract.HostAddRequest) error
+	HostLoad(context.Context, []contract.HostSummary) error
 }
 
 type serviceWithHosts struct {
 	*engine.Service
 	boxes hostRegistrar
+}
+
+func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
+	result, problem := s.Service.HostList(ctx, caller, req)
+	if problem != nil {
+		return result, problem
+	}
+	if err := s.boxes.HostLoad(ctx, result.Hosts); err != nil {
+		return contract.HostListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+	}
+	return result, nil
 }
 
 func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principal, req contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
@@ -123,6 +136,15 @@ func Run(ctx context.Context, cfg Config) error {
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service
+	hosts, err := st.Hosts(ctx)
+	if err != nil {
+		return fmt.Errorf("list hosts: %w", err)
+	}
+	for _, host := range hosts {
+		if _, err := boxes.host(ctx, host.Name); err != nil {
+			log.Printf("host %s: start heartbeat: %v", host.Name, err)
+		}
+	}
 	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
 	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
