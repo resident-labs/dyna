@@ -264,14 +264,17 @@
   $effect.pre(() => { if (jobsOf && store?.boxes.get(jobsOf) !== "ready") void closeJobs(); });
   const wide = new MediaQuery("min-width: 761px");
   // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
-  // them. A pick closes it; the scrim and Escape close it and return focus to the menu button.
+  // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open focuses
+  // the current page with its ring; a tap focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
-  async function showDrawer(open: boolean, refocus = true) {
+  async function showDrawer(open: boolean, refocus = true, tapped = false) {
     drawer = open;
     await tick();
-    if (open) (rail.querySelector<HTMLElement>(".pages [aria-current=page]") ?? rail.querySelector<HTMLElement>(".pages a"))?.focus(); else if (refocus) menuButton?.focus();
+    if (open && tapped) rail.focus({ focusVisible: false });
+    else if (open) (rail.querySelector<HTMLElement>(".pages [aria-current=page]") ?? rail.querySelector<HTMLElement>(".pages a"))?.focus();
+    else if (refocus) menuButton?.focus({ focusVisible: false });
   }
   $effect(() => { if (!phone.current) drawer = false; });
   let toggle: HTMLButtonElement | undefined = $state();
@@ -317,11 +320,11 @@
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
-      <!-- A room's badge counts the requests that wait for the owner, as v1 and Discord count unread messages. -->
+      <!-- A room with requests that wait for the owner gets an amber dot on its corner, with no number (spec 5.13). -->
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
         aria-label={waiting ? `${item.name}, ${count(waiting, "request")} waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
+        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}</nav>
     <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
     <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
@@ -346,13 +349,13 @@
   {#if drawer}<button type="button" class="scrim" tabindex="-1" aria-label="Close the menu" onclick={() => void showDrawer(false)}></button>{/if}
   <main inert={drawer}>
     <header><button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
-        onclick={() => void showDrawer(true)}><Icon name="menu" /></button>
+        onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>
       {#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       <span class="heading"><strong>{title}</strong>
         {#if closed}<span class="count">· closed</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}</span>
-      {#if store && !unavailable}<button type="button" class="requests" bind:this={requestsButton} aria-pressed={section === "requests"}
+      {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <span class="room-menu"><RoomMenu onterminal={() => void terminals?.pick()} /></span>{/if}
@@ -417,12 +420,13 @@
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
   aside.members > header strong { font-size: 16px; }
   /* Requests is a header icon, as the menu and the panel toggle are: 16 px in a 28 px hit area. While requests wait for
-     the owner, StatusPill's count sits on its corner, as on the rail. */
-  .requests { position: relative; margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
-    background: none; color: var(--muted); cursor: pointer; }
+     the owner it is one 40 px chip: the icon and StatusPill's count on the warning wash. */
+  .requests { margin-left: auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0;
+    border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+  .requests.waiting { height: 40px; padding: 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
+  .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
-  .requests > :global(.count) { top: -5px; right: -7px; }
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
   .heading, .room-menu { display: contents; }
@@ -436,8 +440,8 @@
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
     .heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .heading .count { font-size: 12.5px; }
-    .requests { width: 40px; height: 40px; }
-    .requests:not([aria-pressed="true"]):not(:has(:global(.count))) { display: none; }
+    .requests { min-width: 40px; height: 40px; }
+    .requests:not([aria-pressed="true"], .waiting) { display: none; }
     main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 4px; min-width: 40px; height: 40px; padding: 0 8px; }
     .phone { display: inline; }
     .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: rgb(0 0 0 / 50%); }
