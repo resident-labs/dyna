@@ -25,16 +25,22 @@ test("a session whose box failed with its turn open is broken, not working, unti
   } finally { globalThis.fetch = original; }
 });
 
-test("a room's hostless count loads which sessions wait for a host that takes the room, until the box leaves pending", async () => {
+test("a room's hostless count loads which sessions wait for a host that takes the room, after a failed read, until the box leaves pending", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const original = globalThis.fetch;
+  let offline = true;
   globalThis.fetch = async input => {
     const method = String(input).replace("/v1/", "");
     if (method === "room.list") return new Response(JSON.stringify({ seq: 3, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: ["s1"], failed: 0, hostless: 1 }] }));
+    if (offline) throw new Error("offline");
     return new Response(JSON.stringify({ seq: 3, sessions: [{ id: "s1", boxState: "pending", boxReason: "room-host" }, { id: "s2", boxState: "pending", boxReason: "cpu" }] }));
   };
   try {
     const attention = new Attention(() => () => {});
     await attention.open();
+    await new Promise(setImmediate);
+    offline = false;
+    t.mock.timers.tick(1000);
     await new Promise(setImmediate);
     assert.deepEqual([[...attention.hostless.get("a")!], attention.busy("a")], [["s1"], []]);
     attention.apply(event(4, "a", { type: "box.changed", body: { box: "b", session: "s1", from: "pending", to: "creating" } }));
