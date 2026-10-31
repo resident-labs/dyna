@@ -33,6 +33,7 @@
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
+  import { SwipeForward } from "../swipe-forward.ts";
   let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, onvisual }: {
     row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void;
   } = $props();
@@ -41,6 +42,7 @@
   function swipe(node: HTMLElement) {
     let state: Swipe | null = null, id = -1, suppress = 0;
     let viewportListener: (() => void) | undefined;
+    const delayedForward = new SwipeForward();
     function reset() { state = null; dragging = false; distance = 0; ready = false; }
     function start(event: TouchEvent) {
       reset();
@@ -71,7 +73,7 @@
       const forward = touch && canForwardPost(!!row.pending, swipeDisabled, row.text, row.attachments.length) && event.touches.length === 0 && releaseSwipe(state, touch.clientX);
       if (state.dragging) { suppress = Date.now() + 500; if (event.cancelable) event.preventDefault(); }
       reset();
-      if (forward) setTimeout(() => {
+      if (forward) delayedForward.start(() => {
         onforward?.();
         const view = node.closest(".virtual"), viewport = visualViewport;
         if (view instanceof HTMLElement) {
@@ -98,6 +100,7 @@
       node.removeEventListener("touchstart", start); node.removeEventListener("touchmove", move);
       node.removeEventListener("touchend", end); node.removeEventListener("touchcancel", reset);
       node.removeEventListener("contextmenu", reset); node.removeEventListener("click", click, true);
+      delayedForward.cancel();
       if (viewportListener) visualViewport?.removeEventListener("resize", viewportListener);
     } };
   }
