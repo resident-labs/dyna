@@ -252,10 +252,13 @@ type BoxChanged struct {
 	Session SessionID `json:"session"`
 	Host    HostName  `json:"host,omitempty"`
 	From    BoxState  `json:"from"`
-	To      BoxState  `json:"to"`
-	Reason  string    `json:"reason,omitempty"`
+	To      BoxState     `json:"to"`
+	Cause   FailureCause `json:"cause,omitempty"` // a failed box, or a close that could not archive
+	Reason  string       `json:"reason,omitempty"`
 }
 ```
+
+A failed box and a failed operation carry a typed `FailureCause`, such as `create_failed`, `no_hello`, `host_lost`, `github_failed`, `stale` or `interrupted`. The `Reason` or `Error` text beside it is detail for agents and the log. Owner views show only the cause, in owner words (r8).
 
 ### 3.4 Delivery and reply channels
 
@@ -380,8 +383,9 @@ type Decision struct {
 }
 
 type OpResult struct {
-	ExitCode   int    `json:"exitCode"`
-	Error      string `json:"error,omitempty"`
+	ExitCode   int          `json:"exitCode"`
+	Cause      FailureCause `json:"cause,omitempty"` // set with Error
+	Error      string       `json:"error,omitempty"`
 	Output     string `json:"output,omitempty"`     // up to 64 KiB inline
 	OutputFile string `json:"outputFile,omitempty"` // the rest, by hash
 }
