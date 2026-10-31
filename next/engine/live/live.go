@@ -11,12 +11,14 @@ import (
 // precede mu; mu is innermost. Code under mu takes no other lock and sends no
 // channel messages. wakeMu is never held with mu.
 type Live struct {
-	mu          sync.Mutex
-	subscribers map[*Subscription]contract.RoomID
-	wakeMu      sync.Mutex
-	wakePending map[contract.SessionID]bool
-	wakeSignal  chan struct{}
-	deliver     func(map[contract.SessionID]bool)
+	mu           sync.Mutex
+	activityMu   sync.Mutex
+	activityLast map[contract.SessionID]uint64
+	subscribers  map[*Subscription]contract.RoomID
+	wakeMu       sync.Mutex
+	wakePending  map[contract.SessionID]bool
+	wakeSignal   chan struct{}
+	deliver      func(map[contract.SessionID]bool)
 }
 
 // Subscription uses mu to serialize sends with close.
@@ -27,7 +29,7 @@ type Subscription struct {
 }
 
 func New(deliver func(map[contract.SessionID]bool)) *Live {
-	return &Live{subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
+	return &Live{activityLast: make(map[contract.SessionID]uint64), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
 }
 
 func (l *Live) Subscribe(room contract.RoomID, capacity int) (*Subscription, chan contract.Event) {
@@ -73,6 +75,17 @@ func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly boo
 			l.Unsubscribe(sub)
 		}
 	}
+}
+
+// PublishActivity drops an older update if a newer update reached publication first.
+func (l *Live) PublishActivity(room contract.RoomID, session contract.SessionID, order uint64, event contract.Event) {
+	l.activityMu.Lock()
+	defer l.activityMu.Unlock()
+	if order <= l.activityLast[session] {
+		return
+	}
+	l.activityLast[session] = order
+	l.Publish(room, event, false)
 }
 
 // Wake queues store notifications without taking mu.
