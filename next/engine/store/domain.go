@@ -57,7 +57,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			return err
 		}
 		if session.NewRoomName != "" {
-			g := contract.Grant{ID: contract.GrantID("grant_" + string(session.ID)), Kind: contract.GrantHostExec, Room: session.Room, To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Hosts: []contract.HostName{contract.AllHosts}, Commands: []contract.CommandRule{{Program: "*", Prefix: true}}, Mode: contract.GrantModePreapproved, By: contract.Principal{Kind: contract.PrincipalEngine}, Created: event.Time}
+			g := contract.Grant{ID: contract.GrantID("grant_" + string(session.ID)), Kind: contract.GrantHostExec, Room: session.Room, To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Hosts: []contract.HostName{contract.AllHosts}, By: contract.Principal{Kind: contract.PrincipalEngine}, Created: event.Time}
 			if err := s.InsertGrant(tx, g); err != nil {
 				return err
 			}
