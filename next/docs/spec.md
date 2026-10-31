@@ -184,7 +184,7 @@ Event types by milestone:
 | M2 | `op.requested`, `op.decided`, `op.ran`, `grant.created`, `grant.revoked`, `grant.expired`, `session.moved`, `box.pressure`, `image.built`, `image.failed`, `pr.opened`, `turn.activity` |
 | M3 | `goal.*`, `issue.*`, `question.asked`, `question.answered`, `rule.changed`, `pr.approved`, `pr.merged`, `pr.closed`, `ci.finished`, `repo.main_updated`, `hook.finished`, `checkin.due`, `notice.posted`, `account.quota_low`, `account.failed`, `migrate.handoff` |
 
-`turn.activity` is the only live event. It says what a running turn does now, such as `read spec.md`, so a session row can show it. The box agent reports the latest tool call at most once a second. The engine keeps the label in memory, sends it on the room stream and the owner stream with seq 0, and never stores it, so `events.list` never returns it and it does not move a resume point. `session.list` carries the same label, and `turn.ended` clears it.
+`turn.activity` is a live event. It says what a running turn does now, such as `read spec.md`, so a session row can show it. The box agent reports the latest tool call at most once a second. The engine keeps the label in memory, sends it on the room stream and the owner stream with seq 0, and never stores it, so `events.list` never returns it and it does not move a resume point. `session.list` carries the same label, and `turn.ended` clears it.
 
 `notice.posted` carries a typed `NoticeKind` (such as `host.unreachable` or `account.exhausted`), so every owner-facing notice has a designed card (r8).
 
@@ -463,6 +463,7 @@ type BundleSource struct {
 - **Identity.** The listener decides the caller: the owner socket is the owner, a box socket is its session, and a device session is the owner with the device's scopes (section 7). A request body never names its own caller.
 - **Calls.** `POST /v1/<method>` with a contract request struct. The response is the contract response struct, or `Error{Code, Message}`. Each method is a `Method` constant with its request and response types, so the generated TypeScript client is typed.
 - **Events.** `GET /v1/events?room=<id>&after=<seq>` streams `Event` values as server-sent events. The web app and `dyna room log --follow` use it.
+- **Read position.** `conversation.read` lets only the owner advance a room feed or session DM read position. The engine keeps the maximum sequence and broadcasts a live `conversation.read` event. Room and session lists include `lastRead`.
 - **Owner tools.** `GET /v1/shell/watch?session=<id>` streams a session's shell job output, and `GET /v1/terminal` opens an owner terminal over a WebSocket (5.15). Only the owner can call them.
 - **Owner stream.** `GET /v1/events?after=<seq>` without a room serves the owner only. It streams `op.requested`, `op.decided`, `op.ran`, `turn.started`, `turn.ended` and `session.closed` from every room, so the web app keeps each room's attention state with one connection. `room.list` gives each room's `waiting` operations (pending, owner class) and `working` sessions (a running turn), and the `seq` that this stream resumes after.
 - **Box model.** `box.hello` returns a `ModelChoice` with a `ModelProvider` (`anthropic` or `openai` in M1), model ID, and `ThinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`). The engine gets this choice from the session profile. M1 does not change it per turn.
@@ -512,6 +513,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 
 | Milestone | Table | Columns (key first) |
 |---|---|---|
+| M3 | `conversation_reads` | (`room`, `conversation`) PK, `seq` (the owner’s highest read sequence) |
 | M1 | `meta` | `key` PK, `value` (`format`, `schema_version`, `store_id`, `created_commit`) |
 | M1 | `rooms` | `id` PK, `name` UNIQUE, `created_at`, `cpus`, `mem_bytes` (room limit), `paused_at` |
 | M1 | `sessions` | `id` PK, `room`, `name`, `parent` NULL, `profile`, `state` (open, dormant, closed), `goal`, `created_at`, `closed_at`; UNIQUE (`room`, `name`) WHERE `closed_at` IS NULL |
@@ -772,6 +774,8 @@ The owner manages every model account on one page of the v2 web app. It has the 
 - **Methods.** `accounts.list`, `accounts.connect`, `accounts.set_key`, `accounts.remove` and `accounts.set_limits` are owner-class operations (3.5). The quota view reads `accounts.quota`.
 
 ### 5.13 Web design
+
+The web keeps no read state of its own; it uses the engine’s conversation read positions.
 
 The v2 web app stays Svelte 5 and is ported view by view. Each ported or new view follows T3 Code's design approach: quiet and dense, with few borders and few badges. T3 Code is a reference for the approach only; no code is copied.
 
