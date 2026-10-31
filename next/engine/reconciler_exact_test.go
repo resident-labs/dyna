@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -163,28 +164,42 @@ type earlyHelloHost struct {
 	fakeBoxes
 	service *Service
 	problem *contract.Error
+	err     error
 }
 
 func (h *earlyHelloHost) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
 	_, h.problem = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: spec.Session}, contract.BoxHelloRequest{})
-	return "image", nil
+	return "image", h.err
 }
 
 func TestHelloBeforeCreateReturns(t *testing.T) {
-	s, room, _, ctx := setup(t)
-	host := &earlyHelloHost{service: s}
-	s.boxes = host
-	resetLifecycle(s)
-	started, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "early", Profile: "test"})
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	passLifecycle(t, s, ctx)
-	if host.problem != nil {
-		t.Fatal(host.problem)
-	}
-	b, err := s.store.Box(ctx, started.Box)
-	if err != nil || b.State != contract.BoxReady {
-		t.Fatalf("box state=%s error=%v, want ready", b.State, err)
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
+			s, room, _, ctx := setup(t)
+			host := &earlyHelloHost{service: s}
+			if fail {
+				host.err = errors.New("create failed")
+			}
+			s.boxes = host
+			resetLifecycle(s)
+			started, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "early", Profile: "test"})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			passLifecycle(t, s, ctx)
+			if host.problem != nil {
+				t.Fatal(host.problem)
+			}
+			b, err := s.store.Box(ctx, started.Box)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fail && (b.State != contract.BoxFailed || b.Reason != "create failed") {
+				t.Fatalf("failed create: %+v", b)
+			}
+			if !fail && (b.State != contract.BoxReady || b.Image != "image") {
+				t.Fatalf("successful create: %+v", b)
+			}
+		})
 	}
 }

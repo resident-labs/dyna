@@ -683,8 +683,17 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	if current.State == contract.BoxStarting {
-		if _, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", ""); err != nil {
+	if current.State == contract.BoxCreating || current.State == contract.BoxStarting {
+		_, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", "")
+		if errors.Is(err, sql.ErrNoRows) && current.State == contract.BoxCreating {
+			current, err = s.store.Box(ctx, session.Box)
+			if err == nil && current.State == contract.BoxStarting {
+				_, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", "")
+			} else if err == nil && current.State != contract.BoxReady {
+				err = sql.ErrNoRows
+			}
+		}
+		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
 	} else if current.State != contract.BoxReady && current.State != contract.BoxClosing {
