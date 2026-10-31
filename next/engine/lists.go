@@ -8,9 +8,6 @@ import (
 )
 
 func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ contract.RoomListRequest) (contract.RoomListResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.RoomListResponse{}, forbidden()
-	}
 	var seq int64
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&seq); err != nil {
 		return contract.RoomListResponse{}, failure(err)

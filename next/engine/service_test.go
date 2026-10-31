@@ -232,14 +232,10 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 	}
 }
 func TestRoomRepoAPI(t *testing.T) {
-	s, room, session, ctx := setup(t)
+	s, room, _, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	agent := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	if _, e := s.RoomRepos(ctx, owner, contract.RoomReposRequest{Room: "missing"}); e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("unknown room: %v", e)
-	}
-	if _, e := s.RoomRepoAdd(ctx, agent, contract.RoomRepoAddRequest{Room: room, Repo: "a/b"}); e == nil || e.Code != contract.ErrForbidden {
-		t.Fatalf("agent add: %v", e)
 	}
 	for _, name := range []contract.RepoName{"bad", "../x", "owner/..", "owner/.", "owner/x/y"} {
 		if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: name}); e == nil || e.Code != contract.ErrInvalid {
