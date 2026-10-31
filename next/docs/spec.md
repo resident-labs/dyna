@@ -158,7 +158,6 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `boxes` |
 | `operations` |
 | `client_replays` |
-| `operation_replays` |
 | `archives` |
 | `transcript_offsets` |
 | `transcript_turns` |
