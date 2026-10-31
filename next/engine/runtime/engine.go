@@ -93,6 +93,7 @@ func loadPi(executable string) ([]byte, error) {
 type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
 	ApprovalsExpiry                            time.Duration
+	SessionMaxDepth                            int
 	WebListen                                  string
 	WebRoutes                                  []string
 	BackupDest, BackupRecipient                string
@@ -162,6 +163,7 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
+	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)

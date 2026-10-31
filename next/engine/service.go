@@ -32,6 +32,7 @@ type Repositories interface {
 
 type Service struct {
 	gitName, gitEmail  string
+	maxDepth           int
 	store              *store.Store
 	dispatch           func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes              lifecycle.BoxAdapter
@@ -43,6 +44,7 @@ type Service struct {
 	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	now                func() time.Time
 	mu                 sync.Mutex
+	treeMu             sync.Mutex // serializes depth checks with tree changes
 	wakeMu             sync.Mutex
 	wakePending        map[contract.SessionID]bool
 	wakeSignal         chan struct{}
@@ -94,6 +96,9 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 
 // SetGitIdentity configures the commit identity sent to boxes.
 func (s *Service) SetGitIdentity(name, email string) { s.gitName, s.gitEmail = name, email }
+
+// SetMaxDepth sets the session depth limit before the service starts; zero disables it.
+func (s *Service) SetMaxDepth(depth int) { s.maxDepth = depth }
 
 // SetRepositories configures repository lookup before the service starts.
 func (s *Service) SetRepositories(repos Repositories) {
