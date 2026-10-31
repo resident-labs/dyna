@@ -43,7 +43,7 @@
 
 <!-- While it waits, a request is a card with the exact text that runs; an owner-class card has the attention edge. Decided, it is a quiet row. -->
 <article class="request" class:decided={request.state !== "pending"} class:card={request.state === "pending"} class:yours={request.state === "pending" && request.class === "owner"}>
-  <p class="title"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={20} />
+  <p class="title"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={24} />
     <span class="who {request.by.kind}" class:root style:--hue={hue(name(request.by))}>{name(request.by)}</span><span class="asks">requests</span>{request.card.title}
     {#if request.card.target.kind !== "room"}<span class="asks">on {request.card.target.kind} {request.card.target.name}</span>{/if}</p>
   {#if request.card.body || request.card.command?.length || request.card.changes?.length}<div class="exact">
