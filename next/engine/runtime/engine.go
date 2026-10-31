@@ -116,7 +116,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	defer proxy.Shutdown(context.Background())
+	defer proxy.Listener.Close()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
 	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
@@ -188,8 +188,10 @@ func Run(ctx context.Context, cfg Config) error {
 	if problem := service.ResumeClosures(ctx); problem != nil {
 		return fmt.Errorf("resume close: %s", problem.Message)
 	}
-	done := make(chan error, 1)
-	go func() { done <- proxy.Run(ctx) }()
+	proxyCtx, stopProxy := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); proxy.Supervise(proxyCtx, executable) }()
+	defer func() { stopProxy(); <-done }()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -212,11 +214,6 @@ func Run(ctx context.Context, cfg Config) error {
 			if err := service.FailStaleStarts(ctx); err != nil {
 				return fmt.Errorf("hello timeout sweep: %w", err)
 			}
-		case err := <-done:
-			if err != nil {
-				return fmt.Errorf("model proxy: %w", err)
-			}
-			return fmt.Errorf("model proxy stopped")
 		}
 	}
 }
