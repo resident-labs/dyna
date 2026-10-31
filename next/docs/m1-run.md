@@ -57,20 +57,18 @@ M1 does not upgrade a running box across engine versions. Close all boxes
 before an engine upgrade. The proxy must already have a valid sign-in in its
 auth directory.
 
-## Trial deployment and rollback
+## Trial deployment and fix forward
 
 Run `next/scripts/deploy-trial.sh --dry-run` on the trial host to build and
-check the pair without installing it. Run it without `--dry-run` to install
-and check it. The script accepts `--prefix`, `--node-bin`, `--socket`, `--unit`,
-`--web-url`, `--web-host` and `--data` for other installations. It never
-restarts a second time after a failure. After recovery, remove
-`<prefix>/bin/.deploy-pending` before another deploy. The marker preserves
-the rollback pair until an owner resolves the failure.
+check the pair without installing it. The script accepts `--prefix`, `--node-bin`,
+`--socket`, `--unit`, `--web-url` and `--web-host` for other installations.
+A schedule hook can run:
 
-An older binary cannot open a store after a schema step. To roll back that
-step, stop the unit first. Restore `bin/dyna-prev` and `bin/pi-prev.tgz` to
-`bin/dyna` and `bin/pi.tgz`. Restore the matching engine copy from
-`<data>/backups/pre-upgrade-v<old>-<time>.db` as `<data>/store.db`, and remove
-`<data>/store.db-wal` and `<data>/store.db-shm` before starting the unit.
-This discards store changes made since that copy. Check the unit start limit
-before restarting. Without a schema step, the previous pair alone can be used.
+```sh
+dyna job run --node hermeslab --commit <origin/main sha> --io heavy -- next/scripts/deploy-trial.sh
+```
+
+The trial never rolls back. Fix failures forward on main. An older binary
+cannot open a store after a schema step. The engine keeps
+`backups/pre-upgrade-v*.db` for an emergency restore; only the owner decides
+whether to restore one.
