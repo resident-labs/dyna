@@ -110,10 +110,9 @@ func (s *Service) CancelLocalCI() {
 }
 
 // StopLocalCI cancels the local CI runs this process started and waits for their
-// work on the machine to end, bounded by ctx. A run that outlives its engine
-// leaves a detached keeper on the machine, and that keeper holds the cache lock
-// for hours, so an engine that stops ends its runs first. It returns the runs
-// that were still working when ctx ended, for the caller to report.
+// node work and result recovery to end, bounded by ctx. Waiting for recovery
+// preserves the engine-stop result that lets the next engine retry the trial.
+// It returns the runs still ending when ctx expires, for the caller to report.
 func (s *Service) StopLocalCI(ctx context.Context) []string {
 	targets := s.closeLocalCIAdmission()
 	for _, target := range targets {
@@ -121,7 +120,7 @@ func (s *Service) StopLocalCI(ctx context.Context) []string {
 	}
 	for i, target := range targets {
 		select {
-		case <-target.Stopped:
+		case <-target.Ended:
 		case <-ctx.Done():
 			left := make([]string, 0, len(targets)-i)
 			for _, working := range targets[i:] {
@@ -803,8 +802,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	// not know this, so the marker is set here, before any save or recovery.
 	result.Resumed = resumed
 	if ctx.Err() != nil {
-		// Nothing is left on the node, so a stopping engine does not wait for the
-		// recovery that follows.
+		// Node work is over; shutdown waits separately for result recovery.
 		run.MarkStopped()
 		if err := s.recoverInterruptedCI(ctx, job, repo, node, result); err != nil {
 			log.Printf("restore interrupted local CI: %v", err)
