@@ -258,6 +258,8 @@ export const clause = (text: string) => text.replace(/\.$/, "");
 
 // Files the browser shows inline as a thumbnail; other types get a file card.
 export const isImage = (file: Attachment) => /^image\/(png|jpeg|gif|webp)$/.test(file.media);
+// An image shows as a thumbnail until it fails to load, such as on a device without the files scope; then it becomes a file card.
+export const isThumb = (file: Attachment, failed: readonly string[]) => isImage(file) && !failed.includes(file.sha256);
 
 // A file size as v1 shows it, such as "512 B", "12.4 KB" or "3.1 MB".
 export function fileSize(bytes: number): string {
