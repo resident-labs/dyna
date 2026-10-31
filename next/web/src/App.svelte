@@ -306,8 +306,8 @@
     else await focusRowIcon(id, tapped);
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
-  // A session's running background jobs while its box is ready. The dock's Jobs tab lists every session that had
-  // jobs during this page view, since a finished job's output stays in its box.
+  // A session's running background jobs while its box is ready. The dock's Jobs tab and About's Jobs row keep every
+  // session that had jobs during this page view, since a finished job's output stays in its box.
   const jobs = (id: string) => store?.boxes.get(id) === "ready" ? store.shellJobs.get(id) ?? 0 : 0;
   const hadJobs = new SvelteSet<string>();
   $effect(() => { for (const [id, count] of store?.shellJobs ?? []) if (count > 0) hadJobs.add(id); });
@@ -486,7 +486,7 @@
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
       {:else}<header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); terminals?.showJobs(session); }} />
+      {#if about && session && store}<AboutPanel {store} room={room} {session} hadJobs={hadJobs.has(session)} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); terminals?.showJobs(session); }} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
