@@ -1,4 +1,4 @@
-import { allowedOrigin, deviceKey, getPin, hello, proof, putPin, random, thumbprint, verifyHello, type Hello, type Pin } from "./connect.ts";
+import { allowedOrigin, deviceKey, getOriginPin, getPin, hello, proof, putPin, random, thumbprint, verifyHello, type Hello, type Pin } from "./connect.ts";
 
 const stateKey = "dyna-connect-state";
 const returnKey = "dyna-connect-return";
@@ -10,6 +10,7 @@ export type Landing = { kind: "ok" } | { kind: "stop"; pin: Pin; offered: string
 export async function checkPin(greeting: Hello, pin: Pin | undefined): Promise<Landing | undefined> {
   if (!await verifyHello(greeting, greeting.key)) return pin ? { kind: "stop", pin, offered: "", field: "proof" } : { kind: "failed", problem: "unreachable" };
   if (!pin) return;
+  if (greeting.machine !== pin.machine) return { kind: "stop", pin, offered: "", field: "proof" };
   if (greeting.key !== pin.key) return { kind: "stop", pin, offered: greeting.key, field: "key" };
   if (greeting.relay !== pin.relay) return { kind: "stop", pin, offered: greeting.relay, field: "relay" };
 }
@@ -37,8 +38,9 @@ export async function finishConnect(fragment: string, onPin: (pin: Pin | undefin
     return { kind: "failed", problem: "state" };
   }
   sessionStorage.removeItem(stateKey);
-  const pin = await getPin(machine);
+  const pin = await getOriginPin(location.origin) ?? await getPin(machine);
   onPin(pin);
+  if (pin && pin.machine !== machine) return { kind: "stop", pin, offered: "", field: "proof", returning: true };
   if (pin && pin.key !== key) return { kind: "stop", pin, offered: key, field: "key", returning: true };
   let greeting: Hello | null;
   try { greeting = await hello(location.origin); } catch { return { kind: "failed", problem: "unreachable" }; }
