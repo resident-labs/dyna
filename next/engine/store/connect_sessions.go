@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"time"
@@ -57,7 +58,9 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 			}
 			previous := device
 			device = x.Device
-			if _, err := tx.ExecContext(ctx, "INSERT INTO devices(id,name,token_sha256,paired_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)", device, "Connect browser", token[:], x.Created.UnixMilli(), x.Created.UnixMilli(), x.End.UnixMilli()); err != nil {
+			// Connect uses its own cookie; the paired-device token is never issued.
+			tokenHash := sha256.Sum256(token[:])
+			if _, err := tx.ExecContext(ctx, "INSERT INTO devices(id,name,token_sha256,paired_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)", device, "Connect browser", tokenHash[:], x.Created.UnixMilli(), x.Created.UnixMilli(), x.End.UnixMilli()); err != nil {
 				return err
 			}
 			if newDevice {
