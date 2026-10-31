@@ -7,9 +7,6 @@ import (
 )
 
 func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.HostListResponse{}, forbidden()
-	}
 	hosts, err := s.store.Hosts(ctx)
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
