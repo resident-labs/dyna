@@ -17,7 +17,24 @@ export class TurnTranscripts {
     const { turns, key } = rowTurns(events);
     if (!turns.length || (this.#reads.has(key) && !again)) return;
     this.#reads.set(key, "loading");
-    Promise.all(turns.map(turn => call("transcript.read", { session: this.#session, turn }))).then(
+    Promise.all(turns.map(async turn => {
+      const steps: TranscriptStep[] = [];
+      let itemIndex = 0;
+      let afterItem: string | undefined;
+      let truncated = false;
+      while (steps.length < 200) {
+        const read = await call("transcript.read", { session: this.#session, turn, itemIndex, afterItem });
+        steps.push(...(read.steps ?? []));
+        const page = read.turns?.[0];
+        if (!page?.more || page.tail) break;
+        if (page.after) { afterItem = page.after; continue; }
+        if (steps.length >= 200) { truncated = true; break; }
+        if (page.nextItem == null || page.nextItem <= itemIndex) { truncated = true; break; }
+        itemIndex = page.nextItem;
+      }
+      if (steps.length > 200) { steps.length = 200; truncated = true; }
+      return { steps, truncated };
+    })).then(
       reads => this.#reads.set(key, { steps: reads.flatMap(read => read.steps ?? []), truncated: reads.some(read => read.truncated) }),
       () => this.#reads.set(key, "failed"),
     );

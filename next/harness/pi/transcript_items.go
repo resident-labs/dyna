@@ -158,17 +158,25 @@ func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 }
 
 // TranscriptHasPost checks whether a bash result exactly identifies a post.
-func TranscriptHasPost(r io.ReadSeeker, id contract.EventID) (bool, error) {
-	var call string
-	for pass := 0; pass < 2; pass++ {
-		if _, err := r.Seek(0, io.SeekStart); err != nil {
-			return false, err
-		}
-		reader := bufio.NewReaderSize(r, 64<<10)
+func TranscriptHasPost(r *io.SectionReader, id contract.EventID) (bool, error) {
+	type message struct {
+		Type    string `json:"type"`
+		Message struct {
+			Role       string `json:"role"`
+			ToolCallID string `json:"toolCallId"`
+			Content    []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	scan := func(visit func(message) bool) (bool, error) {
+		reader := bufio.NewReaderSize(io.NewSectionReader(r, 0, r.Size()), 64<<10)
 		for {
 			var line []byte
 			oversized := false
-			eof := false
 			for {
 				part, err := reader.ReadSlice('\n')
 				if !oversized && len(line)+len(part) <= 16<<20 {
@@ -181,61 +189,58 @@ func TranscriptHasPost(r io.ReadSeeker, id contract.EventID) (bool, error) {
 					continue
 				}
 				if err == io.EOF {
-					eof = true
-					break
+					return false, nil
 				}
 				if err != nil {
 					return false, err
 				}
 				break
 			}
-			if eof {
-				break
-			}
 			if oversized {
 				continue
 			}
-			var entry struct {
-				Type    string `json:"type"`
-				Message struct {
-					Role       string `json:"role"`
-					ToolCallID string `json:"toolCallId"`
-					Content    []struct {
-						Type string `json:"type"`
-						Text string `json:"text"`
-						ID   string `json:"id"`
-						Name string `json:"name"`
-					} `json:"content"`
-				} `json:"message"`
+			var entry message
+			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && visit(entry) {
+				return true, nil
 			}
-			if json.Unmarshal(line, &entry) != nil || entry.Type != "message" {
-				continue
-			}
-			if pass == 0 && entry.Message.Role == "toolResult" {
-				var parts []string
-				for _, b := range entry.Message.Content {
-					if b.Type == "text" {
-						parts = append(parts, b.Text)
-					}
-				}
-				if strings.TrimSpace(strings.Join(parts, "\n")) == string(id) {
-					call = entry.Message.ToolCallID
-					break
-				}
-			}
-			if pass == 1 && entry.Message.Role == "assistant" {
-				for _, b := range entry.Message.Content {
-					if b.Type == "toolCall" && b.ID == call && b.Name == "bash" {
-						return true, nil
-					}
-				}
-			}
-		}
-		if call == "" {
-			return false, nil
 		}
 	}
-	return false, nil
+	var scanErr error
+	found, err := scan(func(entry message) bool {
+		if entry.Message.Role != "toolResult" {
+			return false
+		}
+		var parts []string
+		for _, b := range entry.Message.Content {
+			if b.Type == "text" {
+				parts = append(parts, b.Text)
+			}
+		}
+		if strings.TrimSpace(strings.Join(parts, "\n")) != string(id) {
+			return false
+		}
+		call := entry.Message.ToolCallID
+		matched, e := scan(func(candidate message) bool {
+			if candidate.Message.Role != "assistant" {
+				return false
+			}
+			for _, b := range candidate.Message.Content {
+				if b.Type == "toolCall" && b.ID == call && b.Name == "bash" {
+					return true
+				}
+			}
+			return false
+		})
+		scanErr = e
+		return matched || e != nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if scanErr != nil {
+		return false, scanErr
+	}
+	return found, nil
 }
 
 // TranscriptStep keeps the Work tab compatible until the thread replaces it.

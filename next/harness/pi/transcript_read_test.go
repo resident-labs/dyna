@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -42,5 +43,17 @@ func TestTranscriptItemIndexContinuesInOrder(t *testing.T) {
 	next, _, more, err := ReadTranscript(strings.NewReader(data), deliveries, "x", "", 2, 2)
 	if err != nil || more || len(next) != 1 || next[0].Text != "c" {
 		t.Fatalf("next=%+v more=%v err=%v", next, more, err)
+	}
+}
+
+func TestTranscriptPostClaimRequiresMatchingBash(t *testing.T) {
+	data := `{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"other","name":"read"},{"type":"toolCall","id":"right","name":"bash"}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"other","content":[{"type":"text","text":"evt"}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"right","content":[{"type":"text","text":"evt"}]}}
+`
+	reader := strings.NewReader(data)
+	found, err := TranscriptHasPost(io.NewSectionReader(reader, 0, int64(len(data))), "evt")
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
 	}
 }
