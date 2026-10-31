@@ -154,21 +154,22 @@
     <div class="body">
       <section class:mobile-hidden={mobile !== "edit"} class="edit" aria-label="Instruction editor">
         <p class="facts">{selected === "room" ? `Every session in ${roomName} reads this file at its next run, after the file for all rooms.` : "Every session reads this file first."}
-          <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens <span>·</span> {savedLabel.toLowerCase()}</p>
-        <label class="find">Find in file <input bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); void find(); } }} placeholder="Find text" /></label>
+          <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens <span>·</span> {draft !== base ? "not saved" : savedLabel.toLowerCase()}</p>
+        <label class="find"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input aria-label="Find in file" bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); void find(); } }} placeholder="Find in file" /><kbd>/</kbd></label>
         <textarea bind:this={editor} value={draft} oninput={event => { draft = event.currentTarget.value; keepDraft(); }} spellcheck="false"
           placeholder={selected === "room" ? `Write instructions for every session in ${roomName}` : "Write instructions for every session"} aria-label="Markdown instructions"></textarea>
       </section>
       <aside class:mobile-hidden={mobile !== "changes"} aria-label="Instruction review">
         {#if other}
           <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
+          <div class="side-head review-title"><strong>What sessions get</strong> <span>· {changed.length} lines changed</span></div>
           <div class="review"><strong>Their change</strong>
             {@render diffView(instructionDiff(base, other.text))}
             <strong>Yours</strong>
             {@render diffView(changes)}
           </div>
         {:else if changed.length}
-          <div class="side-head"><strong>What sessions get</strong> <span>{changed.length} lines changed</span></div>
+          <div class="side-head review-title"><strong>What sessions get</strong> <span>{changed.length} lines changed</span></div>
           <div class="review">
             <p>{delta >= 0 ? "Adds" : "Removes"} about {Math.abs(delta).toLocaleString()} tokens {delta >= 0 ? "to" : "from"} every prompt · {sessions} open sessions in {roomName}</p>
             {@render diffView(changes)}
@@ -177,21 +178,22 @@
         {:else}
           <div class="side-head"><strong>Read by</strong></div>
           <div class="review"><strong>Sessions in {roomName} read, in this order</strong>
-            <ol><li><b>All rooms</b> <span>about {(selected === "global" ? tokens : peerTokens).toLocaleString()} tokens</span><small>Every session in {rooms} {rooms === 1 ? "room" : "rooms"}</small></li>
-              <li><b>{roomName}</b> <span>about {(selected === "room" ? tokens : peerTokens).toLocaleString()} tokens</span><small>{sessions} open sessions</small></li>
+            <ol><li class:current={selected === "global"}><b>All rooms</b> <span>about {(selected === "global" ? tokens : peerTokens).toLocaleString()} tokens</span><small>Every session in {rooms} {rooms === 1 ? "room" : "rooms"}</small></li>
+              <li class:current={selected === "room"}><b>{roomName}</b> <span>about {(selected === "room" ? tokens : peerTokens).toLocaleString()} tokens</span><small>{sessions} open sessions</small></li>
               <li><b>Each repository’s AGENTS.md</b><small>Read from the checkout and edited in the repository</small></li></ol>
             <p>A change reaches each running session as a diff at its next run, and it becomes part of the system prompt at the next compaction.</p>
           </div>
         {/if}
+        {#if other}<p class="overwrite-note">Save mine over it replaces their change with your file.</p>{/if}
         <div class="actions">
-          {#if other}<button type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine over it</button>
-          {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button><button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
+          {#if other}<button class="outlined" type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine over it</button>
+          {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button><button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{#if draft !== base}<kbd>Ctrl S</kbd>{/if}{/if}
         </div>
       </aside>
     </div>
     <div class="mobile-save">
       <span>{draft === base ? savedLabel : `${changed.length} lines changed`}</span>
-      {#if other}<button type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine</button>
+      {#if other}<button class="outlined" type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine</button>
       {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button><button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
     </div>
   {/if}
@@ -210,22 +212,23 @@
   .edit { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8px; padding: 16px 24px; }
   .facts { margin: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .facts span { padding: 0 4px; }.facts b { color: var(--text); }
-  .find { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+  .find { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; }
+  .find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; } kbd { font: inherit; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; }
   input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
   textarea { flex: 1; resize: none; width: 100%; min-height: 0; box-sizing: border-box; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; font: inherit; line-height: 1.45; }
   textarea:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
   aside { width: 380px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); min-height: 0; }
   .side-head { padding: 16px; border-bottom: 1px solid var(--line); }.side-head span { font-size: 12.5px; margin-left: 4px; }.side-head p { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
-  .review { flex: 1; overflow: auto; padding: 16px; font-size: 12.5px; }.review strong { display: block; margin-bottom: 12px; }.review p { line-height: 1.45; font-variant-numeric: tabular-nums; }.review ol { padding-left: 28px; }.review li { padding: 8px 0; }.review li span { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .review { flex: 1; overflow: auto; padding: 16px; font-size: 12.5px; }.review strong { display: block; margin-bottom: 12px; }.review p { line-height: 1.45; font-variant-numeric: tabular-nums; }.review ol { padding: 0; list-style: none; counter-reset: layers; }.review li { counter-increment: layers; position: relative; padding: 10px 8px 10px 38px; border-radius: 6px; }.review li::before { content: counter(layers); position: absolute; left: 8px; width: 20px; height: 20px; border: 1px solid var(--line); border-radius: 50%; text-align: center; line-height: 20px; color: var(--muted); }.review li.current { background: var(--selected); }.review li span { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .review li small { display: block; color: var(--muted); margin-top: 4px; }
   .line-number { display: block; width: 100%; border-radius: 0; background: var(--hover); color: var(--muted); text-align: left; font-size: 11px; padding: 3px 10px; }
   .diff { display: flex; gap: 8px; padding: 4px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }.diff span { flex: none; width: 8px; }.diff.same { color: var(--muted); }.diff.add { background: color-mix(in srgb, var(--success) 12%, transparent); }.diff.remove { background: color-mix(in srgb, var(--danger) 12%, transparent); }
-  .actions { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }.primary { background: var(--focus); color: var(--bg); }.primary:hover { background: var(--focus); opacity: .85; }
+  .overwrite-note { margin: 0; padding: 12px 16px 0; color: var(--muted); font-size: 12.5px; }.outlined { border: 1px solid var(--line); }.actions kbd { align-self: center; margin-left: 6px; }.actions { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }.primary { background: var(--focus); color: var(--bg); }.primary:hover { background: var(--focus); opacity: .85; }
   .mobile-tabs, .mobile-save { display: none; }.loading { padding: 24px; display: grid; gap: 12px; }.loading span { display: block; height: 14px; width: 70%; background: var(--hover); border-radius: 6px; }.loading span:nth-child(2) { width: 90%; }.error { color: var(--muted); padding: 16px; }
   @media (max-width: 700px) {
-    header { padding: 0 8px; }.crumb, .slash { display: none; }.files button { min-height: 40px; }
-    .mobile-tabs { display: flex; padding: 4px 8px; border-bottom: 1px solid var(--line); }.mobile-tabs button { min-height: 40px; }
+    header { height: auto; min-height: 52px; padding: 0 8px; flex-wrap: wrap; }.crumb, .slash { display: none; }.files { order: 2; flex-basis: 100%; margin-left: 0; border-top: 1px solid var(--line); }.files button { min-height: 40px; }
+    .mobile-tabs { display: flex; padding: 4px 8px; border-bottom: 1px solid var(--line); }.mobile-tabs button { min-height: 40px; border-radius: 0; }.mobile-tabs button.active { background: transparent; border-bottom: 2px solid var(--focus); }.review-title { display: none; }.review { font-size: 13px; }
     .mobile-hidden { display: none !important; }.edit { padding: 12px; }.facts { line-height: 1.4; }.find input { min-height: 40px; }.body aside { width: 100%; border: 0; }.actions { display: none; }
     .mobile-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }.mobile-save span { margin-right: auto; }.mobile-save button, .line-number, .error button { min-height: 40px; }.back { min-width: 40px; min-height: 40px; }
   }
