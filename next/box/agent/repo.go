@@ -106,15 +106,28 @@ func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRep
 }
 
 // writeSetupState replaces the state file with an atomic rename, so a crash leaves the old or the new state.
+// The temporary file gets a unique name in the same folder, so no repository name can collide with it.
 func writeSetupState(path, value string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(value), 0644); err != nil {
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	_, err = f.WriteString(value)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 func archiveRepo(ctx context.Context, root string, session contract.SessionID, repo contract.BoxRepo, git gitRunner) (result contract.ArchiveDoneRequest) {
