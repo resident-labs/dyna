@@ -88,7 +88,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	// An explicit retry refreshes this room's full PR facts before using the
 	// same queue builder. The background worker keeps its normal poll schedule.
 	automatic, _ := ctx.Value(automaticMergeRoom{}).(bool)
-	if roomID != "" && !automatic {
+	refreshRoom := func() error {
 		for key, probe := range probes {
 			r := st.Records[key]
 			if r == nil || r.RoomID != roomID || without[key] || probe.Err != nil || !currentTrialMember(r, state.MergeTrialChange{Key: key, Head: probe.Pull.Head.SHA}) {
@@ -96,17 +96,23 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			}
 			snap, err := s.github(r.RoomID).snapshotFromPull(ctx, refRecord(*r), probe.Pull, nil)
 			if err != nil {
-				return retry(err)
+				return err
 			}
 			snap.ciProbe = probe.CI
 			snap, err = s.withRegisteredCI(ctx, *r, snap, EffectivePolicy(st, *r))
 			if err != nil {
-				return retry(err)
+				return err
 			}
 			ci, key, jobs, _ := s.ciStatus(snap, *r, EffectivePolicy(st, *r))
 			if err := s.process(ctx, r.Key, snap, ci, key, jobs, nil, false); err != nil {
-				return retry(err)
+				return err
 			}
+		}
+		return nil
+	}
+	if roomID != "" && !automatic {
+		if err := refreshRoom(); err != nil {
+			return retry(err)
 		}
 		st, err = s.readTickState(ctx)
 		if err != nil {
@@ -114,6 +120,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		}
 	}
 	seen := map[string]bool{}
+	moved := map[string]bool{}
 	var repos []string
 	for repo := range st.MergeTrials {
 		repos = append(repos, repo)
@@ -131,13 +138,44 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			failures = append(failures, err)
 			continue
 		}
-		if err := s.advanceMergeTrial(ctx, repo, *st.MergeTrials[repo]); err != nil {
+		b := st.MergeTrials[repo]
+		moved[repo] = b.Phase != state.MergeTrialPhasePublishing && b.Phase != state.MergeTrialPhasePublished && st.RepositoryFacts[repo].Head != b.Base
+		if err := s.advanceMergeTrial(ctx, repo, *b); err != nil {
 			failures = append(failures, err)
 		}
 	}
 	st, err = s.readTickState(ctx)
 	if err != nil {
 		return retry(errors.Join(append(failures, err)...))
+	}
+	// A discarded trial no longer owns its repository. Select a replacement
+	// in this pass instead of waiting for another wake.
+	discarded := false
+	for repo := range seen {
+		if moved[repo] && st.MergeTrials[repo] == nil {
+			delete(seen, repo)
+			discarded = true
+		}
+	}
+	// A restart can find no trial but retain PRs whose cheap CI observation
+	// invalidated the saved result. Refresh those before the queue goes idle.
+	needsRefresh := discarded
+	if !needsRefresh && len(st.MergeTrials) == 0 {
+		for key, probe := range probes {
+			if r := st.Records[key]; r != nil && r.RoomID == roomID && r.CI == state.CIPending && probe.CI == "SUCCESS" {
+				needsRefresh = true
+				break
+			}
+		}
+	}
+	if needsRefresh && automatic {
+		if err := refreshRoom(); err != nil {
+			return retry(err)
+		}
+		st, err = s.readTickState(ctx)
+		if err != nil {
+			return retry(err)
+		}
 	}
 	groups := map[string][]Record{}
 	// A fast landing publishes its PR on this tick, so the repository takes no
@@ -411,6 +449,16 @@ func (s *Service) discardMergeTrial(ctx context.Context, repo string, r Record, 
 	})
 }
 
+func (s *Service) discardMovedTrial(ctx context.Context, st State, repo string, r Record, b state.MergeTrial) error {
+	if err := s.discardMergeTrial(ctx, repo, r, b); err != nil {
+		return err
+	}
+	ev := mergeTrialEvent(st, b, room.MergeCancelled)
+	ev.Reason = "main moved; the queue will select a new trial"
+	s.noteTrialEvent(ctx, st, b, ev)
+	return nil
+}
+
 func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.MergeTrial) error {
 	st, err := s.readTickState(ctx)
 	if err != nil {
@@ -454,7 +502,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 	}
 	if b.Phase != state.MergeTrialPhasePublishing && b.Phase != state.MergeTrialPhasePublished {
 		if st.RepositoryFacts[repo].Head != b.Base {
-			return s.discardMergeTrial(ctx, repo, *r, b)
+			return s.discardMovedTrial(ctx, st, repo, *r, b)
 		}
 		for _, change := range b.Changes {
 			member := st.Records[change.Key]
@@ -661,7 +709,7 @@ func (s *Service) publishTrialBatch(ctx context.Context, st State, repo string, 
 	}
 	if err := client.Publish(ctx, batch, b.Head); err != nil {
 		if errors.Is(err, trial.ErrMainMoved) {
-			return false, s.discardMergeTrial(ctx, repo, *r, *b)
+			return false, s.discardMovedTrial(ctx, st, repo, *r, *b)
 		}
 		b.Reason = err.Error()
 		return false, errors.Join(err, s.saveMergeTrial(repo, *b))
