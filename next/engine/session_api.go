@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -135,28 +136,47 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if !tree.CanManage(caller, session.ID) {
 		return contract.SessionCloseResponse{}, forbidden()
 	}
+	if e := s.closeSession(ctx, session, req.Discard, false); e != nil {
+		return contract.SessionCloseResponse{}, e
+	}
+	return contract.SessionCloseResponse{}, nil
+}
+
+func (s *Service) closeSession(ctx context.Context, session store.Session, discard, dormant bool) *contract.Error {
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return failure(err)
+	}
 	order, err := tree.CloseOrder(session.ID)
 	if err != nil {
-		return contract.SessionCloseResponse{}, forbidden()
+		return forbidden()
 	}
-	if err := s.store.MarkClosing(ctx, session.ID, req.Discard); err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
+	if dormant {
+		changed, err := s.store.MarkDormantClosing(ctx, session.ID, s.now().Add(-7*24*time.Hour))
+		if err != nil {
+			return failure(err)
+		}
+		if !changed {
+			return nil
+		}
+	} else if err := s.store.MarkClosing(ctx, session.ID, discard); err != nil {
+		return failure(err)
 	}
-	if !req.Discard {
+	if !discard {
 		boxes, err := s.store.LifecycleBoxes(ctx)
 		if err != nil {
-			return contract.SessionCloseResponse{}, failure(err)
+			return failure(err)
 		}
 		for _, b := range boxes {
 			if slices.Contains(order, b.Session) && b.Want == store.WantClose && b.State == contract.BoxClosing && b.Reason != "" {
 				if err := s.archiveReason(ctx, session.Room, b.Box, ""); err != nil {
-					return contract.SessionCloseResponse{}, failure(err)
+					return failure(err)
 				}
 			}
 		}
 	}
 	s.reconciler.Kick()
-	return contract.SessionCloseResponse{}, nil
+	return nil
 }
 
 // SessionRestart retries an open session whose box has failed.
