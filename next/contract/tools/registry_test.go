@@ -110,9 +110,8 @@ func TestAgentActionsHideOwnerMethods(t *testing.T) {
 }
 
 func TestPhaseOneActionCoverage(t *testing.T) {
-	// session/restart and room/repos stay owner-only until the authorization PR opens them.
 	required := map[string]string{
-		"post": "send", "session": "start list stop close set_profile move", "room": "log pause", "op": "withdraw", "hostexec": "run request_grant", "pr": "open", "visual": "check", "computer": "open click type text screenshot",
+		"post": "send", "session": "start list stop close restart set_profile move", "room": "log repos pause", "op": "withdraw", "hostexec": "run request_grant", "pr": "open", "visual": "check", "computer": "open click type text screenshot",
 	}
 	found := map[string]bool{}
 	for _, a := range AgentActions() {
