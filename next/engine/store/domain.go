@@ -32,7 +32,7 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, budgetParent contract.BoxID, goal string, event, boxEvent contract.Event, reason string) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, budgetParent contract.BoxID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if parent != "" {
 			var state string
@@ -62,7 +62,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,parent,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, nullableBox(budgetParent), "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,parent,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, nullableBox(budgetParent), "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
