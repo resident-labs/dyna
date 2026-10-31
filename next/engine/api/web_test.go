@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -141,6 +142,38 @@ func TestWebPairUsesRemoteDefaultScopes(t *testing.T) {
 	w.ServeHTTP(rec, r)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("default scopes allow admin: %d", rec.Code)
+	}
+}
+
+func TestPairAnswersGoneWithNoLiveCode(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, time.Now, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "http://dyna.localhost:7790/v1/pair", strings.NewReader(`{"code":"ABCDE23456","name":"Phone"}`))
+	r.Header.Set("Origin", "http://dyna.localhost:7790")
+	rec := httptest.NewRecorder()
+	w.ServeHTTP(rec, r)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("pair with no live code: %d", rec.Code)
+	}
+}
+
+func TestPublicRoutesLeaveOutLoopback(t *testing.T) {
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, time.Now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetRoutes([]string{"https://b.example.com", "https://a.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.publicRoutes(); !slices.Equal(got, []string{"https://a.example.com", "https://b.example.com"}) {
+		t.Fatalf("routes: %v", got)
 	}
 }
 
