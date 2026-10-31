@@ -453,6 +453,19 @@ Content`,
 			expect(loader.getSkills().skills.map((entry) => entry.name)).toContain("new-skill");
 		});
 
+		it("discovers a skill repaired in place on the next refresh", async () => {
+			const dir = join(agentDir, "skills", "repaired");
+			mkdirSync(dir, { recursive: true });
+			const path = join(dir, "SKILL.md");
+			writeFileSync(path, "---\nname: [invalid\n---\n");
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+			expect(loader.getSkills().skills.some((skill) => skill.filePath === path)).toBe(false);
+			writeFileSync(path, "---\nname: repaired\ndescription: A repaired skill\n---\n");
+			await loader.refreshPromptResources();
+			expect(loader.getSkills().skills.some((skill) => skill.filePath === path)).toBe(true);
+		});
+
 		it("should discover AGENTS.md context files", async () => {
 			writeFileSync(join(cwd, "AGENTS.md"), "# Project Guidelines\n\nBe helpful.");
 

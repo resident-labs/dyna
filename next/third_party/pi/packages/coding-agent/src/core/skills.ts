@@ -17,7 +17,7 @@ const MAX_DESCRIPTION_LENGTH = 1024;
 const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
 
 type IgnoreMatcher = ReturnType<typeof ignore>;
-type SkillCache = { files: ContextFileCache; directories: Set<string> };
+type SkillCache = { files: ContextFileCache; directories: Set<string>; candidates: Set<string> };
 
 function toPosixPath(p: string): string {
 	return p.split(sep).join("/");
@@ -285,6 +285,7 @@ function loadSkillFromFile(
 	cache?: SkillCache,
 ): { skill: Skill | null; diagnostics: ResourceDiagnostic[] } {
 	const diagnostics: ResourceDiagnostic[] = [];
+	cache?.candidates.add(filePath);
 	const isDeclaredSkill = basename(filePath) === "SKILL.md";
 
 	let rawContent: string;
