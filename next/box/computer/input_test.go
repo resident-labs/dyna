@@ -73,7 +73,7 @@ func TestInputMapsFramePixelsToCSSPixels(t *testing.T) {
 		{Kind: contract.InputMouseDown, Button: contract.ButtonLeft, X: 640, Y: 400},
 		{Kind: contract.InputKeyDown, Key: "a"},
 	}}
-	if err := in.Send(context.Background(), batch); err != nil {
+	if err := in.Send(context.Background(), false, batch); err != nil {
 		t.Fatal(err)
 	}
 	defer in.d.Close()
@@ -99,15 +99,18 @@ func TestInputReleasesHeldInputAfterOverflow(t *testing.T) {
 		{Kind: contract.InputMouseDown, Button: contract.ButtonLeft, X: 640, Y: 400},
 		{Kind: contract.InputKeyDown, Key: "a"},
 	}}
-	if err := in.Send(context.Background(), press); err != nil {
+	if err := in.Send(context.Background(), false, press); err != nil {
 		t.Fatal(err)
 	}
 	defer in.d.Close()
-	for range 65 {
+	// A press is queued, then its release is dropped because the queue is full.
+	in.Enqueue(press)
+	for range 64 {
 		in.Enqueue(contract.ComputerInputBatch{})
 	}
 	*sent = nil
-	if err := in.Send(context.Background(), contract.ComputerInputBatch{}); err != nil {
+	batches, release := in.collect(<-in.queue)
+	if err := in.Send(context.Background(), release, batches...); err != nil {
 		t.Fatal(err)
 	}
 	var got []string
@@ -115,6 +118,9 @@ func TestInputReleasesHeldInputAfterOverflow(t *testing.T) {
 		got = append(got, m.Method+" "+string(m.Params))
 	}
 	want := []string{
+		"Page.getLayoutMetrics ",
+		`Input.dispatchMouseEvent {"type":"mousePressed","x":320,"y":200,"button":"left","buttons":1,"clickCount":1,"deltaX":0,"deltaY":0}`,
+		`Input.dispatchKeyEvent {"type":"keyDown","key":"a","text":"a","windowsVirtualKeyCode":65}`,
 		`Input.dispatchKeyEvent {"type":"keyUp","key":"a","windowsVirtualKeyCode":65}`,
 		`Input.dispatchMouseEvent {"type":"mouseReleased","x":320,"y":200,"button":"left","buttons":0,"clickCount":1,"deltaX":0,"deltaY":0}`,
 	}
