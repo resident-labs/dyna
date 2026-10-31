@@ -20,7 +20,6 @@
   let changed = $derived(changes.filter(line => line.kind !== "same"));
   let tokens = $derived(Math.ceil(draft.length / 4));
   let delta = $derived(tokens - Math.ceil(base.length / 4));
-  let count = $derived(draft.split("\n").filter(line => /^\s*[-*] /.test(line)).length);
   let savedLabel = $derived(savedAt ? `Saved ${relative(savedAt)}` : "Not saved yet");
   function relative(value: string) {
     const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
@@ -148,7 +147,7 @@
     <div class="body">
       <section class:mobile-hidden={mobile !== "edit"} class="edit" aria-label="Instruction editor">
         <p class="facts">{selected === "room" ? `Every session in ${roomName} reads this file after the file for all rooms.` : "Every session reads this file first."}
-          <span>·</span> <b>{count}</b> items <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens <span>·</span> {savedLabel.toLowerCase()}</p>
+          <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens <span>·</span> {savedLabel.toLowerCase()}</p>
         <label class="find">Find in file <input bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); void find(); } }} placeholder="Find text" /></label>
         <textarea bind:this={editor} value={draft} oninput={event => { draft = event.currentTarget.value; keepDraft(); }} spellcheck="false"
           placeholder={selected === "room" ? `Write instructions for every session in ${roomName}` : "Write instructions for every session"} aria-label="Markdown instructions"></textarea>
