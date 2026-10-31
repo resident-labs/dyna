@@ -31,6 +31,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Force-prefix isolation: remove the exception that registered a bare model when its ID equaled the credential prefix. `engine/model` uses this to isolate provider and billing namespaces. Upstream PR #5350 hides bare names from listings but keeps them routable, so it does not meet this security boundary. Drop this patch when upstream force-prefix mode never registers bare names.
 
+- Activation namespace: set the credential prefix within staged activation before model registration. `cmd/dyna` uses this for plan and key isolation. The upstream credential activation search found no fitting staged activation patch; #6715 adds a login route rather than this Dyna handoff. Drop this patch with the staged activation bridge.
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:
