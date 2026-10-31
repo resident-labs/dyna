@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Icon from "./Icon.svelte";
+  import PageCrumb from "./PageCrumb.svelte";
   import RequestCard from "./RequestCard.svelte";
   import type { Request, RoomStore } from "../room.svelte.ts";
   let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: () => void; element?: HTMLElement } = $props();
@@ -62,9 +62,7 @@
 <!-- The page takes focus and its keys are shortcuts for the buttons on each row, which stay the accessible way to decide. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section class="panel" aria-label="Requests" tabindex="-1" bind:this={element} onkeydown={keys}>
-  <!-- One way back, as Rules: the room name in the crumb when wide, a 40 px arrow on a phone. -->
-  <div class="top"><button type="button" class="back" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}><Icon name="back" /></button>
-    <button type="button" class="room" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}>{room}</button><span class="slash" aria-hidden="true">/</span><strong>Requests</strong>
+  <div class="top"><PageCrumb {room} page="Requests" {onback} />
     {#if pending.length}<span class="hints" aria-hidden="true"><span><kbd>A</kbd> approve</span><span><kbd>D</kbd> deny</span><span><kbd>J</kbd><kbd>K</kbd> move</span></span>{/if}</div>
   <div class="list"><div class="column">
     <h2>Waiting for you{#if waiting.length}<span class="count">{waiting.length}</span>{/if}</h2>
@@ -87,12 +85,6 @@
   /* The page holds focus for its keys; the current row's background shows where they act, so the page needs no ring. */
   .panel:focus-visible { outline: none; }
   .top { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-  .back, .room { border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; cursor: pointer; }
-  .back:hover, .room:hover { background: var(--hover); color: var(--text); }
-  .back { display: none; place-items: center; width: 40px; height: 40px; margin: -8px 0 -8px -12px; padding: 0; }
-  .room { margin-left: -6px; padding: 2px 6px; font-size: 13px; }
-  .slash { color: var(--muted); font-size: 13px; }
-  @media (max-width: 640px) { .back { display: grid; } .room, .slash { display: none; } }
   /* Key hints only where a keyboard is likely: wide screens that can hover. */
   .hints { margin-left: auto; display: none; align-items: center; gap: 12px; color: var(--muted); font-size: 12.5px; }
   .hints span { display: flex; align-items: center; gap: 4px; }
