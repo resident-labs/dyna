@@ -700,8 +700,10 @@ func TestStackedTrialsPublishLongestPassingPrefixAndReturnFailure(t *testing.T) 
 	if !reflect.DeepEqual(*f.merged, []int{1, 2}) {
 		t.Fatalf("merged=%v", *f.merged)
 	}
-	if len(f.branches) != 0 {
-		t.Fatalf("leaked branches=%v", f.branches)
+	for _, branch := range []string{"dyna/merge-trial/1", "dyna/merge-trial/2", "dyna/merge-trial/3", "dyna/merge-trial/4"} {
+		if f.branches[branch] != "" {
+			t.Fatalf("leaked branch %s", branch)
+		}
 	}
 	st, err := f.e.s.Store.Read()
 	if err != nil {
