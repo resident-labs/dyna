@@ -62,3 +62,46 @@ func TestCleanupScanReusesInspectionButRecheckReadsFresh(t *testing.T) {
 		t.Fatal("single-tree recheck reused a stale inspection")
 	}
 }
+
+// A moving default branch refreshes git state without another full file walk.
+// The removal recheck must still read the current files.
+func TestCleanupReusesUsageAcrossDefaultBranchMoves(t *testing.T) {
+	repo := gcRepo(t)
+	path := gcTree(t, repo, "usage-cache", "closed")
+	gitDir := git(t, repo, "rev-parse", "--absolute-git-dir")
+	f, err := os.OpenFile(filepath.Join(gitDir, "info", "exclude"), os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.WriteString("\nignored-output\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(path, "ignored-output")
+	if err := os.WriteFile(output, []byte("a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	head := git(t, path, "rev-parse", "HEAD")
+	opts := &GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }}
+	now := time.Now()
+	one := Tree{Path: path, head: head, sessionID: "closed"}
+	inspectCached(t.Context(), repo, "refs/remotes/origin/main", "old-default", opts, &one, now)
+	if one.protected != "" || one.Size == 0 {
+		t.Fatalf("first inspection: %+v", one)
+	}
+	if err := os.WriteFile(output, make([]byte, 4096), 0600); err != nil {
+		t.Fatal(err)
+	}
+	two := Tree{Path: path, head: head, sessionID: "closed"}
+	inspectCached(t.Context(), repo, "refs/remotes/origin/main", "new-default", opts, &two, now.Add(time.Second))
+	if two.Size != one.Size {
+		t.Fatalf("branch move repeated usage walk: %d, want %d", two.Size, one.Size)
+	}
+	fresh := Tree{Path: path, head: head, sessionID: "closed"}
+	inspectCached(t.Context(), repo, "refs/remotes/origin/main", "new-default", &GCOptions{Path: path, OwnerClosed: opts.OwnerClosed}, &fresh, now.Add(time.Second))
+	if fresh.Size <= two.Size {
+		t.Fatalf("removal recheck missed updated files: %d <= %d", fresh.Size, two.Size)
+	}
+}
