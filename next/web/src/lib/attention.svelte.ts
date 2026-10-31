@@ -84,14 +84,15 @@ export class Attention {
   // The sessions that really work in a room.
   busy(room: string): string[] { return [...this.working.get(room) ?? []].filter(id => !this.broken.get(room)?.has(id)); }
 
-  // A room's failed turns the owner has not read past, with their causes. A session with a broken box is left out.
-  unseen(room: string): { id: string; cause?: FailureCause }[] {
-    const feed = this.rooms.get(room)?.lastRead ?? 0;
-    return [...this.failed.get(room) ?? []].filter(([id, { seq }]) => Math.max(feed, this.read.get(id) ?? 0) < seq && !this.broken.get(room)?.has(id)).map(([id, { cause }]) => ({ id, cause }));
+  // A room's failed sessions, as RoomStore.status counts them: a broken box, or a failed turn the owner has not read
+  // past. The rail mark and Home's Needs you and Active now all read this, so they clear together.
+  down(room: string): { id: string; box?: BoxFailure; cause?: FailureCause }[] {
+    const feed = this.rooms.get(room)?.lastRead ?? 0, broken = this.broken.get(room);
+    const turns = [...this.failed.get(room) ?? []].filter(([id, { seq }]) => Math.max(feed, this.read.get(id) ?? 0) < seq && !broken?.has(id));
+    return [...[...broken ?? []].map(([id, box]) => ({ id, box })), ...turns.map(([id, { cause }]) => ({ id, cause }))];
   }
 
-  // A room's failed sessions, as RoomStore.status counts them: a broken box, or a failed turn the owner has not read past.
-  failing(room: string): number { return (this.broken.get(room)?.size ?? 0) + this.unseen(room).length; }
+  failing(room: string): number { return this.down(room).length; }
 
   // A room's sessions for Home, which seed the room's set once. A failed call keeps no buffer.
   listSessions(room: string): Promise<SessionListResponse> {
