@@ -745,7 +745,7 @@ A box's repository is made in the box volume:
 2. `origin` is set to `dyna::<repo>` (5.7).
 3. The session branch is checked out: an existing branch from the bundle or the parent, or a new `dyna/<session>` from the base.
 
-New objects go into the box volume, so a box cannot change the cache. Shared dependency caches are per host and per image hash, mounted read-write: `GOMODCACHE`, `GOCACHE`, the pnpm store and the cargo registry. One box can spoil a shared cache for the others; this is an accepted risk on hosts that only we use.
+New objects go into the box volume, so a box cannot change the cache. Shared dependency caches are per host, mounted read-write: `GOMODCACHE`, `GOCACHE`, the pnpm store and the cargo registry. One box can spoil a shared cache for the others; this is an accepted risk on hosts that only we use.
 
 ### 5.7 Box socket, model route and git
 
@@ -1242,7 +1242,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | local-ci | M3 as GitHub Actions with self-hosted runners in boxes; act dropped | merges need a CI result |
 | local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
-| maintenance | M3, only the daily backups (5.2) and the 14-day expiry of archive refs (5.9) | boxes are deleted on close, so nothing else needs pruning |
+| maintenance | daily backups (4.1), 14-day expiry of archive refs (5.9), and daily host maintenance | Each ready host prunes dangling Podman images and runs `git gc --no-prune` on bare repository caches. The latter preserves objects borrowed by boxes. |
 | remote-access, connect, device-scopes | M3, right after the box reconciler and before workflows (root, 2026-10-31) | phone access must work on cutover day, and the desktop is a client of the always-on engine (decision 14) |
 | settings-accounts, settings-devices | M3 | sign in again and pair devices after the cutover |
 | skills | M3 | small catalog; fl-rea uses it |

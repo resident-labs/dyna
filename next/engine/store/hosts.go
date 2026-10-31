@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -19,6 +21,23 @@ func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 // RecordHostHeartbeat records reachability and a disk sample when available.
 func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName, reachable bool, freeDisk *int64, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if reachable && freeDisk != nil && *freeDisk < 20*box.GiB {
+			var previous int64
+			err := tx.QueryRowContext(ctx, "SELECT disk_bytes FROM hosts WHERE name=? AND state!='removed'", name).Scan(&previous)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			if err == nil && previous >= 20*box.GiB {
+				var id [16]byte
+				if _, err := rand.Read(id[:]); err != nil {
+					return err
+				}
+				event := contract.Event{ID: contract.EventID("ev_" + hex.EncodeToString(id[:])), Time: at, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.HostDiskLow{Host: name, FreeBytes: *freeDisk, FloorBytes: 20 * box.GiB}}
+				if _, err := s.AppendEvent(tx, event); err != nil {
+					return err
+				}
+			}
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE hosts SET
 			state=CASE WHEN ? AND state='unreachable' THEN 'ready' WHEN NOT ? AND state='ready' THEN 'unreachable' ELSE state END,
 			disk_bytes=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE disk_bytes END,
@@ -28,8 +47,29 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 	})
 }
 
+func (s *Store) ClaimHostMaintenance(ctx context.Context, name contract.HostName, now time.Time) (bool, error) {
+	var claimed bool
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE hosts SET maintained_at=? WHERE name=? AND state='ready' AND maintained_at<=?", now.Add(-23*time.Hour).UnixMilli(), name, now.Add(-24*time.Hour).UnixMilli())
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		claimed = n == 1
+		return err
+	})
+	return claimed, err
+}
+
+func (s *Store) FinishHostMaintenance(ctx context.Context, name contract.HostName, now time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET maintained_at=? WHERE name=?", now.UnixMilli(), name)
+		return err
+	})
+}
+
 func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at FROM hosts ORDER BY name")
+	rows, err := s.Read().QueryContext(ctx, "SELECT name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, maintained_at FROM hosts ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -37,11 +77,14 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 	var hosts []box.Host
 	for rows.Next() {
 		var h box.Host
-		var checked int64
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &checked); err != nil {
+		var checked, maintained int64
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &checked, &maintained); err != nil {
 			return nil, err
 		}
 		h.CheckedAt = time.UnixMilli(checked)
+		if maintained != 0 {
+			h.MaintainedAt = time.UnixMilli(maintained)
+		}
 		hosts = append(hosts, h)
 	}
 	return hosts, rows.Err()

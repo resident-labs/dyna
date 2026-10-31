@@ -23,6 +23,7 @@ type Host struct {
 	State               HostState
 	CPUs                int
 	MemBytes, DiskBytes int64
+	MaintainedAt        time.Time
 	Labels              []string
 	CheckedAt           time.Time
 }
