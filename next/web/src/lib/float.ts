@@ -19,10 +19,10 @@ export function fitted(rect: Rect, ratio: number, chrome: number, bottom: number
   return { ...rect, w, h, x: rect.x + rect.w - w };
 }
 
-// A computer's first place: against the app's right edge, 416 px wide, over the sessions panel. clear says that it
-// leaves the cards alone, whose right edge is cards.
-export function computerPlace(width: number, top: number, cards: number): { rect: Rect; clear: boolean } {
-  const rect = { x: width - 432, y: top, w: 416, h: 300 };
+// A computer's first place: 400 px wide, 16 px inside the feed's right edge, so the sessions panel stays in view. clear
+// says that it leaves the cards alone, whose right edge is cards.
+export function computerPlace(right: number, top: number, cards: number): { rect: Rect; clear: boolean } {
+  const rect = { x: right - 416, y: top, w: 400, h: 300 };
   return { rect, clear: rect.x >= cards + 8 };
 }
 
