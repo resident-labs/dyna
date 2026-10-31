@@ -507,6 +507,13 @@ func Remove(rec Record, force bool) error {
 	if err != nil {
 		return err
 	}
+	protected, err = SessionProtected(context.Background(), registered)
+	if err != nil {
+		return fmt.Errorf("check worktree session ownership: %w", err)
+	}
+	if protected {
+		return fmt.Errorf("worktree %s is used by an open session or goal", registered.Path)
+	}
 	state, err := Inspect(registered)
 	if err != nil {
 		if !force {
