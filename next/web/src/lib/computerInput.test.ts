@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Alt, Ctrl, Finger, PhoneKeys, Shift, escTwice, keyboardInput, pictureScale, screenPoint, textInputs, type ComputerInput, type Modifiers } from "./computerInput.ts";
+import { Alt, Ctrl, Finger, PhoneKeys, Shift, InputQueue, escTwice, keyboardInput, pictureScale, screenPoint, textInputs, type ComputerInput, type Modifiers } from "./computerInput.ts";
 
 const none: Modifiers = { ctrl: false, alt: false };
 const tap = (key: string, code: string, modifiers = 0): ComputerInput[] => [
@@ -59,4 +59,21 @@ test("a short touch clicks, and a drag scrolls in picture pixels without clickin
 test("Esc twice within the gap returns control, and a third press starts over", () => {
   const twice = escTwice(600);
   assert.deepEqual([twice(0), twice(500), twice(600), twice(1300)], [false, true, false, false]);
+});
+
+test("one request is in flight, and the events that wait go together after it", async () => {
+  const sent: string[][] = [];
+  const gates: (() => void)[] = [];
+  const results: boolean[] = [];
+  const queue = new InputQueue(events => { sent.push(events.map(event => event.key ?? "")); return new Promise<void>(resolve => gates.push(resolve)); }, ok => results.push(ok));
+  const frame = { width: 10, height: 10 };
+  const key = (name: string): ComputerInput[] => tap(name, name);
+  queue.push(key("a"), frame);
+  queue.push(key("b"), frame);
+  queue.push(key("c"), frame);
+  assert.deepEqual(sent, [["a", "a"]]);
+  gates[0]();
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(sent.slice(1), [["b", "b", "c", "c"]]);
+  assert.deepEqual(results, [true]);
 });
