@@ -33,6 +33,114 @@ func (h *retryHost) Recreate(context.Context, lifecycle.BoxSpec, string, string)
 	return h.startErr
 }
 
+type failingCreateHost struct {
+	fakeBoxes
+	id      contract.BoxID
+	creates int
+	removes int
+}
+
+func (h *failingCreateHost) Create(context.Context, lifecycle.BoxSpec) (string, error) {
+	h.creates++
+	return "", errors.New("create unavailable")
+}
+
+func (h *failingCreateHost) Remove(_ context.Context, id contract.BoxID) error {
+	if id == h.id {
+		h.removes++
+	}
+	return nil
+}
+
+func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
+	s, room, sid, ctx := setup(t)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=0, failures=0 WHERE id=?", session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
+	host := &failingCreateHost{id: session.Box}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
+	for i, delay := range []time.Duration{30 * time.Second, time.Minute, 0} {
+		if err := r.Pass(ctx); err != nil {
+			t.Fatal(err)
+		}
+		r.Wait()
+		rows, err := s.store.LifecycleBoxes(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, row := range rows {
+			if row.ID != session.Box {
+				continue
+			}
+			found = true
+			want := contract.BoxPending
+			if i == 2 {
+				want = contract.BoxFailed
+			}
+			if row.State != want || row.Failures != i+1 || (delay != 0 && !row.DueAt.Equal(now.Add(delay))) {
+				t.Fatalf("attempt %d: state=%s failures=%d due=%s", i+1, row.State, row.Failures, row.DueAt)
+			}
+		}
+		if !found || host.creates != i+1 || host.removes != i+1 {
+			t.Fatalf("attempt %d: found=%v creates=%d removes=%d", i+1, found, host.creates, host.removes)
+		}
+		if delay != 0 {
+			if err := r.Pass(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.Wait()
+			if host.creates != i+1 {
+				t.Fatal("create retried before deadline")
+			}
+			now = now.Add(delay)
+		}
+	}
+	events, err := s.store.Events(ctx, room, 0, 1000, []contract.EventType{"box.changed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		change := event.Body.(contract.BoxChanged)
+		if change.Box == session.Box && change.To == contract.BoxFailed && change.Cause == contract.CauseCreateFailed {
+			return
+		}
+	}
+	t.Fatal("third failure did not publish create_failed")
+}
+
+func TestReconcilerCleansPinnedPendingCreate(t *testing.T) {
+	s, _, sid, ctx := setup(t)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='pending', image='', want='run', due_at=0, failures=0 WHERE id=?", session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host := &failingCreateHost{id: session.Box}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, s.now)
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	if host.creates != 1 || host.removes != 1 {
+		t.Fatalf("pinned create: creates=%d removes=%d", host.creates, host.removes)
+	}
+}
+
 type retryView struct{}
 
 func (retryView) OpenTerminal(contract.SessionID) bool { return false }
@@ -228,5 +336,158 @@ func TestReconcilerArchiveStartFailureAndRetry(t *testing.T) {
 	current, err = s.store.Box(ctx, session.Box)
 	if err != nil || host.starts != 2 || current.State != contract.BoxClosing || current.Reason != "" {
 		t.Fatalf("successful archive retry: starts=%d box=%+v err=%v", host.starts, current, err)
+	}
+}
+
+type pendingRetryHost struct {
+	fakeBoxes
+	service          *Service
+	session          contract.SessionID
+	creates, removes int
+	hello            *contract.Error
+}
+
+func (h *pendingRetryHost) Remove(context.Context, contract.BoxID) error {
+	h.removes++
+	return nil
+}
+
+func (h *pendingRetryHost) Create(ctx context.Context, _ lifecycle.BoxSpec) (string, error) {
+	h.creates++
+	if h.creates == 1 {
+		return "", errors.New("create failed")
+	}
+	_, h.hello = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: h.session}, contract.BoxHelloRequest{})
+	return "image", nil
+}
+
+func TestPendingCreateRetry(t *testing.T) {
+	for _, closeDuringBackoff := range []bool{false, true} {
+		name := "retry reaches ready"
+		if closeDuringBackoff {
+			name = "close during backoff"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, _, sid, ctx := setup(t)
+			session, err := s.store.Session(ctx, sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=0, failures=0 WHERE id=?", session.Box)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Unix(1000, 0)
+			s.now = func() time.Time { return now }
+			host := &pendingRetryHost{service: s, session: sid}
+			r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
+			if err := r.Pass(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.Wait()
+			rows, err := s.store.LifecycleBoxes(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pending bool
+			for _, row := range rows {
+				if row.ID == session.Box {
+					pending = row.State == contract.BoxPending && row.Host == "host" && row.Failures == 1 && row.DueAt.Equal(now.Add(30*time.Second))
+				}
+			}
+			if !pending {
+				t.Fatalf("failed create did not retain its host in pending backoff: %+v", rows)
+			}
+			if _, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.BoxHelloRequest{}); problem == nil {
+				t.Fatal("old box hello succeeded during pending backoff")
+			}
+			if closeDuringBackoff {
+				if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid, Discard: true}); problem != nil {
+					t.Fatal(problem)
+				}
+			} else {
+				now = now.Add(30 * time.Second)
+			}
+			if err := r.Pass(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.Wait()
+			b, err := s.store.Box(ctx, session.Box)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if closeDuringBackoff {
+				if host.creates != 1 || b.State != contract.BoxDeleted {
+					t.Fatalf("closed pending box: creates=%d box=%+v", host.creates, b)
+				}
+			} else if host.creates != 2 || host.removes != 2 || host.hello != nil || b.State != contract.BoxReady {
+				t.Fatalf("retry: creates=%d removes=%d hello=%v box=%+v", host.creates, host.removes, host.hello, b)
+			}
+		})
+	}
+}
+
+type closeRetryCleanupHost struct {
+	fakeBoxes
+	service      *Service
+	reconciler   *lifecycle.Reconciler
+	session      contract.SessionID
+	removes      int
+	container    bool
+	closeProblem *contract.Error
+	passErr      error
+}
+
+func (h *closeRetryCleanupHost) Create(context.Context, lifecycle.BoxSpec) (string, error) {
+	h.container = true // A failed create can leave a partial container.
+	return "", errors.New("create failed")
+}
+
+func (h *closeRetryCleanupHost) Remove(ctx context.Context, _ contract.BoxID) error {
+	h.removes++
+	if h.removes == 2 {
+		_, h.closeProblem = h.service.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: h.session, Discard: true})
+		h.passErr = h.reconciler.Pass(ctx)
+		return ctx.Err()
+	}
+	h.container = false
+	return nil
+}
+
+func TestCloseDuringRetryCleanupRemovesContainer(t *testing.T) {
+	s, _, sid, ctx := setup(t)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=0, failures=0 WHERE id=?", session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
+	host := &closeRetryCleanupHost{service: s, session: sid}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
+	host.reconciler = r
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	now = now.Add(30 * time.Second)
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	b, err := s.store.Box(ctx, session.Box)
+	if err != nil || b.State != contract.BoxDeleted || host.container || host.closeProblem != nil || host.passErr != nil {
+		t.Fatalf("close after retry cleanup: box=%+v container=%v close=%v pass=%v err=%v", b, host.container, host.closeProblem, host.passErr, err)
 	}
 }

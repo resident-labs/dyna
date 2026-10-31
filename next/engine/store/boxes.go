@@ -195,7 +195,7 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 }
 
 // FinishCreate records the host result without overwriting a concurrent hello.
-func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, event contract.Event) error {
+func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var state contract.BoxState
 		if err := tx.QueryRowContext(ctx, `SELECT state FROM boxes WHERE id=?`, b.ID).Scan(&state); err != nil {
@@ -206,24 +206,33 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		}
 		b.State = state
 		to := state
+		reason := ""
 		if failure != "" {
-			to = contract.BoxFailed
+			image = b.Image
+			if state != contract.BoxCreating || failures >= 3 {
+				to, reason = contract.BoxFailed, failure
+			} else {
+				to, reason = contract.BoxPending, string(box.PendingCreateRetry)
+			}
 		} else if state == contract.BoxCreating {
 			to = contract.BoxStarting
 		}
 		if to != state {
-			_, body, err := box.Transition(b, to, failure, event.Time)
+			_, body, err := box.Transition(b, to, reason, event.Time)
 			if err != nil {
 				return err
 			}
 			body.Cause = event.Body.(contract.BoxChanged).Cause
+			if to == contract.BoxFailed {
+				body.Cause = contract.CauseCreateFailed
+			}
 			event.Body = body
 		}
 		dueMS := int64(0)
-		if to == contract.BoxStarting && !due.IsZero() {
+		if (to == contract.BoxStarting || to == contract.BoxPending) && !due.IsZero() {
 			dueMS = due.UnixMilli()
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=? WHERE id=? AND state=?`, image, to, failure, dueMS, b.ID, state)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=? WHERE id=? AND state=?`, image, to, reason, dueMS, failures, b.ID, state)
 		if err != nil {
 			return err
 		}

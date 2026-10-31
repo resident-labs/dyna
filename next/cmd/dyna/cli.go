@@ -35,6 +35,7 @@ type client interface {
 	RoomRepos(context.Context, contract.RoomReposRequest) (contract.RoomReposResponse, error)
 	SessionStart(context.Context, contract.SessionStartRequest) (contract.SessionStartResponse, error)
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
+	SessionRestart(context.Context, contract.SessionRestartRequest) (contract.SessionRestartResponse, error)
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
 	EventsList(context.Context, contract.EventsListRequest) (contract.EventsListResponse, error)
 	Events(context.Context, contract.RoomID, int64, func(contract.Event) error) error
@@ -52,10 +53,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
+	contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
 }
 type responseType interface {
-	contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
+	contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -166,6 +167,9 @@ func (c *socketClient) SessionStart(ctx context.Context, q contract.SessionStart
 }
 func (c *socketClient) SessionClose(ctx context.Context, q contract.SessionCloseRequest) (contract.SessionCloseResponse, error) {
 	return call[contract.SessionCloseRequest, contract.SessionCloseResponse](ctx, c, contract.MethodSessionClose, q)
+}
+func (c *socketClient) SessionRestart(ctx context.Context, q contract.SessionRestartRequest) (contract.SessionRestartResponse, error) {
+	return call[contract.SessionRestartRequest, contract.SessionRestartResponse](ctx, c, contract.MethodSessionRestart, q)
 }
 func (c *socketClient) Post(ctx context.Context, q contract.PostRequest) (contract.PostResponse, error) {
 	return call[contract.PostRequest, contract.PostResponse](ctx, c, contract.MethodPost, q)
@@ -426,7 +430,11 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return err
 	}}
 	closeCmd.Flags().BoolVar(&discard, "discard", false, "Close without archiving")
-	session.AddCommand(start, closeCmd)
+	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. If the old host is unavailable, its resources may remain there.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
+		return err
+	}}
+	session.AddCommand(start, closeCmd, restart)
 	root.AddCommand(session)
 	var postRoom string
 	var mentions, paths []string

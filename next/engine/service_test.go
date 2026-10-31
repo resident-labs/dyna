@@ -673,6 +673,8 @@ func (unavailableBoxes) Remove(context.Context, contract.BoxID) error { return n
 
 func TestStartErrorReturnsReachableFailedSession(t *testing.T) {
 	s, room, _, ctx := setup(t)
+	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
 	s.boxes = unavailableBoxes{}
 	resetLifecycle(s)
 	response, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "pending", Profile: "test"})
@@ -680,12 +682,23 @@ func TestStartErrorReturnsReachableFailedSession(t *testing.T) {
 		t.Fatalf("got %+v, %v", response, e)
 	}
 	passLifecycle(t, s, ctx)
+	now = now.Add(30 * time.Second)
+	passLifecycle(t, s, ctx)
+	now = now.Add(time.Minute)
+	passLifecycle(t, s, ctx)
 	list, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	last := list.Events[len(list.Events)-1].Body.(contract.BoxChanged)
-	if last.Session != response.Session || last.To != contract.BoxFailed || last.Reason != "host unavailable" || last.Cause != contract.CauseCreateFailed {
+	var last contract.BoxChanged
+	var found bool
+	for _, event := range list.Events {
+		change := event.Body.(contract.BoxChanged)
+		if change.Box == response.Box {
+			last, found = change, true
+		}
+	}
+	if !found || last.Session != response.Session || last.To != contract.BoxFailed || last.Reason != "host unavailable" || last.Cause != contract.CauseCreateFailed {
 		t.Fatalf("unexpected placement: %+v", last)
 	}
 }

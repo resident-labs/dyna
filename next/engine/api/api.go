@@ -96,6 +96,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionStart, c, owner, a.service.SessionStart)
 	call(mux, contract.MethodSessionMove, c, user, a.service.SessionMove)
 	call(mux, contract.MethodSessionClose, c, user, a.service.SessionClose)
+	call(mux, contract.MethodSessionRestart, c, owner, a.service.SessionRestart)
 	call(mux, contract.MethodPost, c, user, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 		if box(c) {
 			if req.Room == "" {
