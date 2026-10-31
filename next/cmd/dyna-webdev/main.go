@@ -43,6 +43,10 @@ func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
 }
 
+func (devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
+	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}, nil
+}
+
 // A builder types [wait], [jobs] or [fail] in a post to script the fake turn. Seed posts read like owner messages,
 // so each seed text acts as its marker instead.
 var seeded = map[string]string{

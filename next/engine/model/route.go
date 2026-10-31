@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const maxRequestBytes = 32 << 20
@@ -24,14 +25,22 @@ type RouteError struct {
 // Handler returns a route bound to one session and its allowed models.
 // socket is the proxy listener; clientKey never leaves the engine.
 func Handler(socket string, clientKey, sessionID string, allowedModels []string) http.Handler {
+	return handler(unixClient(socket), clientKey, sessionID, allowedModels)
+}
+
+func unixClient(socket string) *http.Client {
+	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}, Timeout: 30 * time.Second}
+}
+
+func handler(client *http.Client, clientKey, sessionID string, allowedModels []string) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
 	}
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
-	proxy.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	}}
+	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

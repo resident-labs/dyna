@@ -1,5 +1,7 @@
 package contract
 
+import "time"
+
 type Method string
 
 const (
@@ -10,6 +12,7 @@ const (
 	MethodDeliveryDone     Method = "delivery.done"
 	MethodHostAdd          Method = "host.add"
 	MethodHostList         Method = "host.list"
+	MethodAccountsQuota    Method = "accounts.quota"
 	MethodRoomCreate       Method = "room.create"
 	MethodRoomRepoAdd      Method = "room.repo.add"
 	MethodRoomRepos        Method = "room.repos"
@@ -86,6 +89,32 @@ type SessionListResponse struct {
 type WebLoginRequest struct{}
 type WebLoginResponse struct {
 	URL string `json:"url"`
+}
+
+type AccountsQuotaRequest struct{}
+type AccountsQuotaResponse struct {
+	Accounts []AccountUsage `json:"accounts"`
+}
+
+// UsageCause is empty when usage was read successfully.
+type UsageCause string
+
+const (
+	UsageSignInExpired UsageCause = "sign_in_expired"
+	UsageUnreachable   UsageCause = "unreachable"
+)
+
+type AccountUsage struct {
+	Provider string        `json:"provider"`
+	Label    string        `json:"label"`
+	Windows  []UsageWindow `json:"windows"`
+	Cause    UsageCause    `json:"cause"`
+}
+type UsageWindow struct {
+	Name        string    `json:"name"`
+	UsedPercent float64   `json:"usedPercent"`
+	Seconds     int64     `json:"seconds"`
+	ResetsAt    time.Time `json:"resetsAt"`
 }
 
 type HostAddRequest struct {
