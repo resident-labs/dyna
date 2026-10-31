@@ -1,9 +1,15 @@
 <script lang="ts">
   import Icon, { type IconName } from "./Icon.svelte";
   // Why the page shows no rooms, centred in the feed: an icon, what happened, and what the owner can do about it.
-  let { kind, onretry }: { kind: "unreachable" | "no-rooms"; onretry?: () => void } = $props();
-  const states: Record<"unreachable" | "no-rooms", { icon: IconName; title: string; line: string; command?: string }> = {
+  // A link to something that does not exist gets one line and a way back; navigate keeps the back link inside the app.
+  type Kind = "unreachable" | "no-rooms" | "no-room" | "no-session" | "no-page";
+  let { kind, onretry, back, navigate }: { kind: Kind; onretry?: () => void; back?: { href: string; label: string };
+    navigate?: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
+  const states: Record<Kind, { icon: IconName; title: string; line: string; command?: string }> = {
     unreachable: { icon: "plug", title: "Dyna is not reachable.", line: "This page tries again by itself. Check that the Dyna engine is running." },
+    "no-room": { icon: "room", title: "This room does not exist.", line: "The link may be old, or the room may be gone. Pick a room on the left." },
+    "no-session": { icon: "chat", title: "This session does not exist.", line: "The link may be old, or the session may be gone." },
+    "no-page": { icon: "room", title: "This page does not exist.", line: "The link may be old or mistyped." },
     "no-rooms": { icon: "room", title: "Create your first room", line: "Run this on the computer where Dyna runs. The room shows here as soon as it exists.",
       command: "dyna room create <name> --root-profile <profile>" },
   };
@@ -26,6 +32,7 @@
     <!-- A narrow card wraps the command between words, never inside an option such as --root-profile. -->
     <div class="command"><code>{#each command.split(" ") as word, index}{index ? " " : ""}<span>{word}</span>{/each}</code><button type="button" onclick={() => copy(command)} aria-live="polite">{copied || "Copy"}</button></div>{/if}
   {#if onretry}<button type="button" class="again" onclick={onretry}>Try again</button>{/if}
+  {#if back}<a class="again" href={back.href} onclick={navigate}>{back.label}</a>{/if}
 </section>
 
 <style>
@@ -37,9 +44,9 @@
   .command { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
   code { flex: 1; min-width: 0; text-align: left; font: 12.5px var(--mono); font-variant-ligatures: none; }
   code span { white-space: nowrap; }
-  button { flex: none; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text);
-    font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
-  button:hover { background: var(--hover); }
+  button, a.again { flex: none; display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text);
+    font: inherit; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; }
+  button:hover, a.again:hover { background: var(--hover); }
   .again { margin-top: 8px; }
-  button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:focus-visible, a.again:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
