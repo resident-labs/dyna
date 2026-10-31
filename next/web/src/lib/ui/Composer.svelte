@@ -31,8 +31,9 @@
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
   // v1's order (attach.ts pastedFiles): the files, else file items, else an image from the async clipboard. Files win over
   // text, since Finder also puts the file name in text/plain; WebKitGTK may leave both empty for a screenshot.
+  // The draft and its forwarded files are read before the clipboard wait, so a paste lands in the conversation it began in.
   async function paste(event: ClipboardEvent) {
-    const data = event.clipboardData, pasted = [...data?.files ?? []];
+    const data = event.clipboardData, pasted = [...data?.files ?? []], draft = files, reserved = forwarded;
     if (!pasted.length) for (const item of data?.items ?? []) { const file = item.kind === "file" ? item.getAsFile() : null; if (file) pasted.push(file); }
     if (!pasted.length && data?.getData("text/plain")) return;
     event.preventDefault();
@@ -40,7 +41,9 @@
       const type = item.types.find(kind => /^image\/(png|jpeg|gif|webp)$/.test(kind));
       if (type) pasted.push(new File([await item.getType(type)], `image.${type.split("/")[1]}`, { type }));
     }
-    if (pasted.length) note = files.add(pasted, forwarded);
+    if (!pasted.length) return;
+    const message = draft.add(pasted, reserved);
+    if (draft === files) note = message;
   }
   const id = $props.id();
   let caret = $state(0);
