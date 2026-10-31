@@ -63,6 +63,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodOpList, c, user, a.service.OpList)
 	call(mux, contract.MethodHostAdd, c, owner, a.service.HostAdd)
 	call(mux, contract.MethodHostList, c, owner, a.service.HostList)
+	call(mux, contract.MethodAccountsQuota, c, owner, a.service.AccountsQuota)
 	call(mux, contract.MethodRoomCreate, c, owner, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, owner, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, owner, a.service.RoomRepos)
