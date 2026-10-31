@@ -55,7 +55,7 @@ func (d devService) AccountsList(context.Context, contract.Principal, contract.A
 	if !d.empty {
 		accounts = []contract.Account{{ID: "studio", Provider: "claude", Label: "Claude · studio", State: contract.AccountConnected}, {ID: "team", Provider: "codex", Label: "ChatGPT · team", State: contract.AccountConnected}, {ID: "spare", Provider: "kimi", Label: "Kimi · spare", State: contract.AccountSignInExpired}}
 	}
-	return contract.AccountsListResponse{Providers: []contract.AccountProviderInfo{}, Accounts: accounts}, nil
+	return contract.AccountsListResponse{Providers: []contract.AccountProviderInfo{{ID: "claude", DisplayName: "Claude", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCallback}, {ID: "codex", DisplayName: "ChatGPT", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, {ID: "kimi", DisplayName: "Kimi", ConnectMethod: contract.ConnectKey, ConnectFlow: contract.ConnectFlowKey}}, Accounts: accounts}, nil
 }
 func (devService) AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
 	return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
@@ -86,14 +86,14 @@ func (d devService) AccountsQuota(context.Context, contract.Principal, contract.
 	}
 	at := func(d time.Duration) time.Time { return time.Now().Add(d) }
 	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{
-		{Provider: "claude", Label: "Claude · studio", Windows: []contract.UsageWindow{
+		{AccountID: "studio", Provider: "claude", Label: "Claude · studio", Windows: []contract.UsageWindow{
 			{Name: "five_hour", Kind: contract.UsageWindowFiveHour, UsedPercent: 62, Seconds: 18000, ResetsAt: at(2*time.Hour + 10*time.Minute)},
 			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 91, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
 			{Name: "Fable Weekly", Kind: contract.UsageWindowWeekly, Model: "Fable", UsedPercent: 0, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
 			{Name: "Opus Weekly", Kind: contract.UsageWindowWeekly, Model: "Opus", UsedPercent: 35, Seconds: 604800, ResetsAt: at(76 * time.Hour)}}},
-		{Provider: "codex", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
+		{AccountID: "team", Provider: "codex", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
 			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 35, Seconds: 604800, ResetsAt: at(100 * time.Hour)}}},
-		{Provider: "kimi", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
+		{AccountID: "spare", Provider: "kimi", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
 	}}, nil
 }
 
@@ -489,7 +489,7 @@ func main() {
 	} else if *fixture == "empty" {
 		_, problem := svc.RoomCreate(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 		if problem != nil {
-			fatal(problem)
+			fatal(fmt.Errorf("create empty fixture room: %s", problem.Message))
 		}
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -570,7 +570,7 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 		}
 	}
 	post(owner, contract.PostRequest{Text: "Welcome to the web studio. Please build a clear room view."})
-	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "The feed and session tree are ready for review."})
+	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "The **feed** and session tree are ready for review.\n\n- Check the layout\n- Review `inline code` and [the guide](https://example.com/guide)\n\n```typescript\nconst example = 'A long line that should stay inside its code block without making the whole page scroll sideways';\n```\n\n| Item | Description | Owner | Status |\n| --- | --- | --- | --- |\n| Responsive layout | A deliberately long description for a wide table with several columns | Web team | Ready for review |"})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "I am checking the attachment previews."})
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
 	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
