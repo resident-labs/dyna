@@ -50,3 +50,10 @@ test "$(grep -c restart "$TEST_LOG")" = 1
 "$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Failed tree was accepted' >&2; exit 1; }
 grep -q 'already failed' "$tmp/out"
 test "$(grep -c restart "$TEST_LOG")" = 1
+# Dry runs build even with markers and do not change them on failure.
+echo old-tree > "$tmp/install/failed-next"
+echo tree123 > "$tmp/install/deployed-next"
+FAKE_BINARY=empty "$script" "${args[@]}" --dry-run >"$tmp/out" 2>&1 && { echo 'Dry run missed bad binary' >&2; exit 1; }
+test "$(<"$tmp/install/failed-next")" = old-tree
+"$script" "${args[@]}" --dry-run >"$tmp/out" 2>&1
+grep -q 'Dry run passed' "$tmp/out"
