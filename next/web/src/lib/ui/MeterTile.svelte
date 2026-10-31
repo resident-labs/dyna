@@ -22,4 +22,12 @@
   .text { overflow: hidden; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
   .busy strong, .busy .text { color: var(--attention); }
   .busy .fill { background: var(--attention); }
+  /* A narrow card, such as on a phone, keeps three tiles in one row: smaller figures, and the text may take two lines
+     instead of being cut. */
+  @container (max-width: 320px) {
+    strong { font-size: 19px; }
+    .name { font-size: 10px; }
+    .unit, .text { font-size: 11.5px; }
+    .text { white-space: normal; }
+  }
 </style>
