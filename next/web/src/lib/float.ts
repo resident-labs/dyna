@@ -11,6 +11,14 @@ export function clamp(rect: Rect, width: number, height: number): Rect {
   return { w, h, x: Math.min(Math.max(rect.x, 0), width - w), y: Math.min(Math.max(rect.y, 0), height - h) };
 }
 
+// A window that shows its content's whole frame, keeping its top right corner: the height follows the width, and a
+// window that would pass bottom narrows instead. chrome is the height of its title bar and footer.
+export function fitted(rect: Rect, ratio: number, chrome: number, bottom: number): Rect {
+  const h = Math.max(MIN.h, Math.min(Math.round(rect.w / ratio) + chrome, bottom - rect.y));
+  const w = Math.max(MIN.w, Math.min(rect.w, Math.round((h - chrome) * ratio)));
+  return { ...rect, w, h, x: rect.x + rect.w - w };
+}
+
 // The rect after a drag of (dx, dy) on the given edges, from the rect when the drag began.
 // A left or top resize that reaches the minimum size stops there instead of pushing the window.
 export function dragged(start: Rect, [left, top, right, bottom]: Edges, dx: number, dy: number): Rect {

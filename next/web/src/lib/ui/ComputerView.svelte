@@ -13,9 +13,12 @@
   import { LiveStream, type Phase } from "../live.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
-  let { session, name, root, activity, docked, full = false, rect = $bindable(), element = $bindable(), onclose, ondock }: {
+  // onfit gives each frame's ratio and the height around the screen, so a floating window can show no black bars.
+  let { session, name, root, activity, docked, full = false, rect = $bindable(), element = $bindable(), onclose, ondock, onfit }: {
     session: string; name: string; root: boolean; activity?: string; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
+    onfit: (ratio: number, chrome: number) => void;
   } = $props();
+  let screen: HTMLElement | undefined = $state();
   let visible = $state(document.visibilityState === "visible");
   // A stopped computer closes this view, so a failure here is a broken or silent stream. The owner's retry or the
   // page becoming visible again tries once more; nothing retries on a timer.
@@ -29,7 +32,10 @@
   function watch(image: HTMLImageElement) {
     const { frame, fail } = stream.start();
     image.src = `/v1/computers/watch?session=${encodeURIComponent(session)}&n=${++opened}`;
-    image.addEventListener("load", () => { frame(); if (image.naturalHeight > 1) ratio = image.naturalWidth / image.naturalHeight; });
+    image.addEventListener("load", () => { frame(); if (image.naturalHeight > 1) {
+      ratio = image.naturalWidth / image.naturalHeight;
+      if (!docked && !full && element && screen) onfit(ratio, element.offsetHeight - screen.offsetHeight);
+    } });
     image.addEventListener("error", fail);
     return () => { stream.stop(); image.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="; };
   }
@@ -51,12 +57,13 @@
       <Icon name={docked ? "undock" : "dock"} /></button>{/if}
     <button type="button" class:first={full} aria-label="Close" title="Close" onclick={event => onclose(event.detail > 0)}><Icon name="close" /></button>{/snippet}
   <!-- The image streams only while the owner can see it: this view open, the page visible. -->
-  <div class="screen" class:docked class:full class:foot={activity} style:--ratio={ratio}>
+  <div class="screen" class:docked class:full class:foot={activity || (!docked && !full)} style:--ratio={ratio} bind:this={screen}>
     {#if visible}{#key attempt}<img alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
-  <!-- The current step, one muted line under the screen: "qa-runner · reading the review state". -->
-  {#if activity}<p class="activity">{name} · {activity}</p>{/if}
+  <!-- The current step, one muted line under the screen: "qa-runner · reading the review state". Floating, the line
+       stays between steps, so the screen keeps the shape the window was fitted to. -->
+  {#if activity || (!docked && !full)}<p class="activity">{activity ? `${name} · ${activity}` : name}</p>{/if}
 </FloatWindow>
 
 <style>
