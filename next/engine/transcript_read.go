@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
 )
@@ -48,9 +47,6 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			return response, failure(err)
 		}
 		response.Truncated = response.Truncated || truncated
-		for i := range steps {
-			steps[i].Label = shell.Mask(steps[i].Label)
-		}
 		response.Steps = append(response.Steps, steps...)
 		sort.SliceStable(response.Steps, func(i, j int) bool { return response.Steps[i].Started.Before(response.Steps[j].Started) })
 		if len(response.Steps) > 200 {
