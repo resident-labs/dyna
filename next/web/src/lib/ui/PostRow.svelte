@@ -111,7 +111,8 @@
   .name { margin: 0; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
   strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
   time { flex: none; }
-  .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* The recipient list shrinks first, so a short name such as "You" stays whole. */
+  .to { min-width: 0; flex: 0 100 auto; overflow: hidden; text-overflow: ellipsis; }
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }
   time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
