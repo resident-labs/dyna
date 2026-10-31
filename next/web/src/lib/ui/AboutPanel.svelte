@@ -2,7 +2,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import { boxReason, count } from "../feed.ts";
+  import { boxReason, count, fromNow, fullTime } from "../feed.ts";
   import { failed } from "../jobs.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
@@ -29,6 +29,9 @@
     const stop = watchShell(session, listed, closed => { if (closed) listed.clear(); });
     return () => { stop(); listed.clear(); };
   });
+  // The two relative times stay roughly true while the panel stays open.
+  let now = $state(Date.now());
+  $effect(() => { const timer = setInterval(() => { now = Date.now(); }, 30_000); return () => clearInterval(timer); });
   let running = $derived([...listed.values()].filter(job => job.running).length);
   let failures = $derived([...listed.values()].filter(failed).length);
 </script>
@@ -41,6 +44,8 @@
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else}{boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
+    {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, now)}</time></dd>{/if}
+    {#if open?.lastTurnAt}<dt>Last turn</dt><dd class="muted"><time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>{fromNow(open.lastTurnAt, now)}</time></dd>{/if}
   </dl>
 </div>
 
@@ -51,6 +56,7 @@
   dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
   dt { color: var(--muted); font-size: 12.5px; line-height: 20px; }
   dd { margin: 0; line-height: 20px; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
   a:hover, button:hover { text-decoration: underline; }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

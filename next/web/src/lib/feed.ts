@@ -172,6 +172,9 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
 }
 
 // The muted time on a row's name line: the clock today, else the date and the clock.
+// A full moment for a title, such as "Oct 31, 2026, 4:48 AM".
+export const fullTime = (value: string): string => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
 export function formatTime(value: string): string {
   const at = new Date(value);
   const clock = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });

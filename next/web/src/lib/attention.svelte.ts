@@ -1,7 +1,7 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { call, retryDelay } from "./client.ts";
 import { stream } from "./stream.ts";
-import { boxFailures, type BoxFailure } from "./status.ts";
+import { boxFailures, turnFailures, type BoxFailure } from "./status.ts";
 import type { Event, RoomSummary, SessionListResponse, SessionSummary } from "./contract.gen.ts";
 
 // The rooms, and per room the requests waiting for the owner and the sessions with an open turn. room.list
@@ -18,6 +18,11 @@ export class Attention {
   // Per room, the sessions whose box failed or was lost. A session.list answer seeds them, since room.list has no box
   // states. Such a session is not working, even with its turn open (status.ts).
   readonly broken = new SvelteMap<string, SvelteMap<string, BoxFailure>>();
+  // Per room, the sessions whose last turn failed, with that turn.ended's seq. room.list gives only a count, so a room
+  // with one reads its sessions when it loads; the stream keeps every room current.
+  readonly failed = new SvelteMap<string, SvelteMap<string, number>>();
+  // Each session's DM read position, for the same rule as RoomStore.unseen.
+  private readonly read = new SvelteMap<string, number>();
   // Per room asked but not yet seeded, the session events the stream sent meanwhile; seeding replays the newer ones.
   private readonly pending = new Map<string, Event[]>();
   // Each working session's current turn, as far as known; a label of another turn is stale.
@@ -40,6 +45,8 @@ export class Attention {
     this.waiting.set(room.id, new SvelteSet(room.waiting));
     this.working.set(room.id, new SvelteSet(room.working));
     this.broken.set(room.id, new SvelteMap());
+    this.failed.set(room.id, new SvelteMap());
+    if (room.failed) void this.listSessions(room.id).catch(() => {});
     if (room.latest && !this.activity.has(room.latest.session)) this.activity.set(room.latest.session, room.latest.label);
   }
 
@@ -77,10 +84,23 @@ export class Attention {
   // The sessions that really work in a room.
   busy(room: string): string[] { return [...this.working.get(room) ?? []].filter(id => !this.broken.get(room)?.has(id)); }
 
+  // A room's failed sessions, as RoomStore.status counts them: a broken box, or a failed turn the owner has not read past.
+  failing(room: string): number {
+    const feed = this.rooms.get(room)?.lastRead ?? 0;
+    const unseen = [...this.failed.get(room) ?? []].filter(([id, at]) => Math.max(feed, this.read.get(id) ?? 0) < at).map(([id]) => id);
+    return new Set([...this.broken.get(room)?.keys() ?? [], ...unseen]).size;
+  }
+
   // A room's sessions for Home, which seed the room's set once. A failed call keeps no buffer.
   listSessions(room: string): Promise<SessionListResponse> {
     if (!this.sessions.has(room)) this.pending.set(room, this.pending.get(room) ?? []);
-    return call("session.list", { room }).then(list => {
+    return call("session.list", { room }).then(async list => {
+      for (const { id, lastRead } of list.sessions ?? []) if (lastRead > (this.read.get(id) ?? 0)) this.read.set(id, lastRead);
+      if (!this.sessions.has(room)) {
+        const failing = (list.sessions ?? []).filter(session => session.lastOutcome === "failed").map(session => session.id);
+        const placed = await turnFailures(room, list.seq + 1, failing);
+        for (const id of failing) this.failed.get(room)?.set(id, placed.get(id)?.seq ?? list.seq);
+      }
       this.seed(list.sessions ?? [], { id: room, seq: list.seq });
       const broken = this.broken.get(room);
       if (broken?.size) void boxFailures(room, list.seq + 1).then(found => {
@@ -121,6 +141,8 @@ export class Attention {
     if (event.type === "conversation.read") {
       const room = this.rooms.get(event.body.room);
       if (room && event.body.conversation.kind === "feed" && event.body.seq > room.lastRead) this.rooms.set(room.id, { ...room, lastRead: event.body.seq });
+      const dm = event.body.conversation.session;
+      if (dm && event.body.seq > (this.read.get(dm) ?? 0)) this.read.set(dm, event.body.seq);
       return;
     }
     if (event.seq <= this.head) return;
@@ -154,6 +176,11 @@ export class Attention {
     if (event.type === "session.closed") sessions?.delete(event.body.session);
     const broken = this.broken.get(event.room ?? "");
     if (event.type === "session.closed") broken?.delete(event.body.session);
+    const failed = this.failed.get(event.room ?? "");
+    if (event.type === "session.closed") failed?.delete(event.body.session);
+    // Only a completed turn clears the failure, as in RoomStore; a stopped turn did not succeed.
+    if (event.type === "turn.ended" && event.body.outcome === "failed") failed?.set(event.body.session, event.seq);
+    if (event.type === "turn.ended" && event.body.outcome === "completed") failed?.delete(event.body.session);
     if (event.type === "box.changed") {
       const { session, to, cause } = event.body;
       if (to === "failed" || to === "lost") broken?.set(session, { box: to, cause: cause ?? broken.get(session)?.cause, at: event.at }); else broken?.delete(session);

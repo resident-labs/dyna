@@ -96,3 +96,26 @@ test("a room created after the page loaded shows, with the events that came whil
     globalThis.fetch = original;
   }
 });
+
+test("a room counts a session as failed until the owner reads past its failure, and a completed turn clears it", async () => {
+  const fetched = globalThis.fetch;
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("room.list")
+    ? { seq: 5, rooms: [{ id: "a", name: "A", created: "", lastRead: 0, waiting: null, working: null, failed: 1 }] }
+    : String(input).endsWith("session.list")
+      ? { seq: 5, sessions: [{ id: "s1", lastRead: 0, boxState: "ready", lastOutcome: "failed" }, { id: "s2", lastRead: 4, boxState: "ready", lastOutcome: "failed" }] }
+      : { events: [turn(3, "s1", "failed"), turn(4, "s2", "failed")] }));
+  const turn = (seq: number, session: string, outcome: "failed" | "completed") =>
+    event(seq, "a", { type: "turn.ended", body: { session, turn: "t", outcome, usage: { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } });
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    await new Promise(resolve => setImmediate(resolve));
+    await attention.listSessions("a");
+    assert.equal(attention.failing("a"), 1); // s2's DM has read past its failure
+    attention.apply(turn(6, "s2", "failed"));
+    assert.equal(attention.failing("a"), 2);
+    attention.apply(turn(7, "s2", "completed"));
+    attention.apply(event(0, "a", { type: "conversation.read", body: { room: "a", conversation: { kind: "dm", session: "s1" }, seq: 3 } }));
+    assert.equal(attention.failing("a"), 0);
+  } finally { globalThis.fetch = fetched; }
+});
