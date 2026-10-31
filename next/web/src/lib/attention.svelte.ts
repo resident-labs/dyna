@@ -189,6 +189,7 @@ export class Attention {
     // Only a completed turn clears the failure, as in RoomStore; a stopped turn did not succeed.
     if (event.type === "turn.ended" && event.body.outcome === "failed") failed?.set(event.body.session, { seq: event.seq, cause: event.body.cause });
     if (event.type === "turn.ended" && event.body.outcome === "completed") failed?.delete(event.body.session);
+    // Room-host waits join this store in #1620, on room.list's hostless count (lead-rewrite, 2026-10-31).
     if (event.type === "box.changed") {
       const { session, to, cause } = event.body;
       if (to === "failed" || to === "lost") broken?.set(session, { box: to, cause: cause ?? broken.get(session)?.cause, at: event.at }); else broken?.delete(session);
