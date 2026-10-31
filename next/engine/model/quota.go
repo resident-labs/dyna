@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/store"
 )
 
 type quotaEntry struct {
@@ -21,14 +20,14 @@ type quotaEntry struct {
 
 type Quotas struct {
 	management managementClient
-	store      *store.Store
+	store      AccountStore
 	now        func() time.Time
 	mu         sync.Mutex
 	cache      map[string]quotaEntry
 	generation uint64
 }
 
-func (p *Proxy) Quotas(key string, st *store.Store, now func() time.Time) *Quotas {
+func (p *Proxy) Quotas(key string, st AccountStore, now func() time.Time) *Quotas {
 	return &Quotas{management: managementClient{client: p.client, key: key}, store: st, now: now, cache: make(map[string]quotaEntry)}
 }
 

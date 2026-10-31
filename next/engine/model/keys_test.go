@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,65 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
+
+type failingAccountCleanup struct{ *store.Store }
+
+func (f failingAccountCleanup) RemoveAccount(context.Context, contract.AccountID) error {
+	return errors.New("invented store failure")
+}
+
+func TestKeyActivationFailureRollbackIsRecoverable(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dyna/keys":
+			var input struct {
+				ID string `json:"id"`
+			}
+			if json.NewDecoder(r.Body).Decode(&input) != nil {
+				t.Error("invalid key")
+				return
+			}
+			if err := st.SaveProxyAuth(context.Background(), store.ProxyAuth{ID: input.ID, Provider: "zai", Record: []byte("{}")}, true); err != nil {
+				t.Error(err)
+			}
+			_, _ = w.Write([]byte("{}"))
+		case "/dyna/credentials/activate":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/dyna/credentials/remove":
+			var input struct {
+				ID string `json:"id"`
+			}
+			if json.NewDecoder(r.Body).Decode(&input) != nil {
+				t.Error("invalid removal")
+				return
+			}
+			if err := st.DeleteProxyAuth(context.Background(), input.ID); err != nil {
+				t.Error(err)
+			}
+			_, _ = w.Write([]byte("{}"))
+		default:
+			t.Error("unexpected request")
+		}
+	}))
+	defer server.Close()
+	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	c := p.Connections("key", failingAccountCleanup{st}, time.Now)
+	if result, err := c.SetKey(context.Background(), contract.AccountsSetKeyRequest{Provider: contract.ProviderZAI, Label: "Invented", Key: "invented-key"}); err == nil || result.AccountID != "" {
+		t.Fatal("partial rollback reported success")
+	}
+	accounts, err := st.Accounts(context.Background())
+	if err != nil || len(accounts) != 1 {
+		t.Fatal("failed cleanup did not retain a removable account")
+	}
+	if err := st.RemoveAccount(context.Background(), accounts[0].Account.ID); err != nil {
+		t.Fatal("retry could not remove the account")
+	}
+}
 
 func TestKeyActivationFailureRollsBack(t *testing.T) {
 	st, err := store.Open(t.TempDir())

@@ -4,13 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/private"
 )
 
 // AccountBinding keeps the private proxy identity inside the engine.
-type AccountBinding struct {
-	Account contract.Account
-	ProxyID string
-}
+type AccountBinding = private.AccountBinding
 
 // Accounts lists accounts and their private proxy bindings.
 func (s *Store) Accounts(ctx context.Context) ([]AccountBinding, error) {

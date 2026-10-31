@@ -8,12 +8,10 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
-
-	"github.com/resident-labs/dyna/engine/store"
 )
 
 // Supervise restarts the proxy until the engine stops.
-func (p *Proxy) Supervise(ctx context.Context, executable string, st *store.Store, complete func(context.Context, OAuthCompletion) error) {
+func (p *Proxy) Supervise(ctx context.Context, executable string, st AuthStore, complete func(context.Context, OAuthCompletion) error) {
 	file, err := p.Listener.File()
 	if err != nil {
 		log.Printf("model proxy listener: %v", err)
