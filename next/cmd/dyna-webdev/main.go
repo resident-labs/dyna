@@ -94,6 +94,9 @@ func (b *boxes) Stop(_ context.Context, id contract.BoxID) error {
 	b.mu.Unlock()
 	return nil
 }
+func (b *boxes) Recreate(ctx context.Context, spec engine.BoxSpec, _, _ string) error {
+	return b.Start(ctx, spec.Box)
+}
 func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	if err := b.Stop(ctx, id); err != nil {
 		return err

@@ -27,3 +27,25 @@ func (closingInterleaveBox) Start(context.Context, contract.BoxID) error  { retu
 func (closingInterleaveBox) Stop(context.Context, contract.BoxID) error   { return nil }
 func (heldRemoveBox) Start(context.Context, contract.BoxID) error         { return nil }
 func (heldRemoveBox) Stop(context.Context, contract.BoxID) error          { return nil }
+
+func (checkingBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (*recoveryBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (*retryTimeoutBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (*blockingTimeoutBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (unavailableBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (blockingBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (cancelOnRemove) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (*recordingBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (*heldParentBox) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (closingInterleaveBox) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (heldRemoveBox) Recreate(context.Context, BoxSpec, string, string) error { return nil }

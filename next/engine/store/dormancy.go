@@ -55,6 +55,11 @@ func (s *Store) Wake(ctx context.Context, b box.Box, to contract.BoxState, reaso
 	return s.dormancyTransition(ctx, b, to, reason, event, state, condition, event.Time)
 }
 
+// WakeAncestor starts a budget parent for a child's pending wake.
+func (s *Store) WakeAncestor(ctx context.Context, b box.Box, event contract.Event) (bool, error) {
+	return s.dormancyTransition(ctx, b, contract.BoxStarting, "", event, "open", "1", event.Time)
+}
+
 func (s *Store) dormancyTransition(ctx context.Context, b box.Box, to contract.BoxState, reason string, event contract.Event, state, condition string, cutoff time.Time) (bool, error) {
 	next, body, err := box.Transition(b, to, reason, event.Time)
 	if err != nil {
