@@ -19,6 +19,7 @@ const (
 	MethodEventsList       Method = "events.list"
 	MethodBoxHello         Method = "box.hello"
 	MethodTurnOutput       Method = "turn.output"
+	MethodTurnActivity     Method = "turn.activity"
 	MethodTranscriptAppend Method = "transcript.append"
 	MethodShellJobEnded    Method = "shell.job.ended"
 )
@@ -64,6 +65,7 @@ type SessionSummary struct {
 	BoxState    BoxState    `json:"boxState"`
 	Goal        string      `json:"goal"`
 	Turn        TurnID      `json:"turn,omitempty"`        // the running turn
+	Activity    string      `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
 	LastOutcome TurnOutcome `json:"lastOutcome,omitempty"` // of the last ended turn
 }
 type SessionListResponse struct {
@@ -204,6 +206,14 @@ type TurnOutputRequest struct {
 	Usage     Usage       `json:"usage"`
 }
 type TurnOutputResponse struct{}
+
+// TurnActivityRequest reports the running turn's latest tool call. The box agent sends at most
+// one a second; the engine drops a report for a turn that is not running.
+type TurnActivityRequest struct {
+	Turn  TurnID `json:"turn"`
+	Label string `json:"label"`
+}
+type TurnActivityResponse struct{}
 type TranscriptAppendRequest struct {
 	Path   string `json:"path"`
 	Offset int64  `json:"offset"`
