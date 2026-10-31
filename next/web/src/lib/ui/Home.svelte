@@ -128,15 +128,15 @@
   $effect(() => {
     void call("accounts.quota", {}).then(list => { accounts = list.accounts ?? []; loadedAt = Date.now(); }, () => { accountsFailed = true; });
   });
-  // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums machines
-  // and the busiest usage window; a part with nothing to say is left out.
+  // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
+  // machines and the busiest usage window; a part with nothing to say is left out.
   let asks = $derived(total(attention.waiting));
   let needs = $derived(asks + failures.length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
   let summary = $derived([
-    needs && low.length && lowDisk,
+    low.length && lowDisk,
     !active.length && "No room is working",
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
     accounts && busiestWindow(accounts),
@@ -146,7 +146,7 @@
 <div class="home">
   <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
   {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
-  {:else}<p class="hero">{needs ? `${count(needs, "thing")} need${needs === 1 ? "s" : ""} you.` : low.length ? `${lowDisk}.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
+  {:else}<p class="hero">{needs ? `${count(needs, "thing")} need${needs === 1 ? "s" : ""} you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Needs you shows while anything does, as one card with one column of rows. -->
   {#if needs || decided.size}<div class="top"><section class="card"><h2 tabindex="-1" bind:this={needsHeading}>Needs you{#if needs}<span>{needs}</span>{/if}</h2>
     <div class="list">{#each groups as { room, count } (room.id)}<a class="item fold" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
