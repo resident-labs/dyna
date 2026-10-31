@@ -41,18 +41,17 @@ type BundleSource struct {
 }
 
 type BundleCounts struct {
-	Rules          int `json:"rules"`
-	Goals          int `json:"goals"`
-	GoalItems      int `json:"goalItems"`
-	Issues         int `json:"issues"`
-	PRs            int `json:"prs"`
-	Questions      int `json:"questions"`
-	LibraryEntries int `json:"libraryEntries"`
-	Subscriptions  int `json:"subscriptions"`
-	Hosts          int `json:"hosts"`
-	Accounts       int `json:"accounts"`
-	Devices        int `json:"devices"`
-	Sessions       int `json:"sessions"`
+	Rules         int `json:"rules"`
+	Goals         int `json:"goals"`
+	GoalItems     int `json:"goalItems"`
+	Issues        int `json:"issues"`
+	PRs           int `json:"prs"`
+	Questions     int `json:"questions"`
+	Subscriptions int `json:"subscriptions"`
+	Hosts         int `json:"hosts"`
+	Accounts      int `json:"accounts"`
+	Devices       int `json:"devices"`
+	Sessions      int `json:"sessions"`
 }
 
 // GlobalBundle is global.json.
@@ -106,7 +105,6 @@ type SettingsBundle struct {
 	SubagentMaxDepth int         `json:"subagentMaxDepth"`
 	CheckInInterval  DurationMS  `json:"checkInInterval"`
 	ShellSilence     DurationMS  `json:"shellSilence"`
-	LibraryProfile   ProfileName `json:"libraryProfile"`
 }
 
 type ProfileBundle struct {
@@ -188,36 +186,13 @@ type AttributionLine struct {
 	Line string          `json:"line"`
 }
 
-type LibraryKind string
-
-const (
-	LibraryFeature LibraryKind = "feature"
-	LibraryChild   LibraryKind = "child"
-)
-
-// LibraryEntry is one live feature of a repository's map.
-type LibraryEntry struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Kind       LibraryKind `json:"kind"`
-	Parent     string      `json:"parent,omitempty"`
-	Summary    string      `json:"summary"`
-	Differs    string      `json:"differs,omitempty"`
-	Owns       []string    `json:"owns"`
-	Docs       []string    `json:"docs,omitempty"`
-	Tests      []string    `json:"tests,omitempty"`
-	Relates    []string    `json:"relates,omitempty"`
-	VerifiedAt string      `json:"verifiedAt,omitempty"` // the commit it was checked at
-}
-
-// RepoBundle carries a repository's shared settings and library map.
+// RepoBundle carries a repository's shared settings.
 type RepoBundle struct {
 	Repo        RepoName          `json:"repo"`
 	DefaultRoom RoomName          `json:"defaultRoom"`
 	MergePolicy MergePolicy       `json:"mergePolicy"`
 	CIMode      CIMode            `json:"ciMode"`
 	Attribution []AttributionLine `json:"attribution,omitempty"`
-	Library     []LibraryEntry    `json:"library"`
 }
 
 // SkillBundle has exactly one of Body (an owner-made SKILL.md) and Package
