@@ -323,9 +323,10 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	issuesWatched, issueErr := s.pollIssueWatches(issueCtx)
 	remember(issueErr)
 	stopIssues()
-	// A watched issue keeps the tick due even when no PR is watched.
+	// Issue-only rooms need less frequent checks than active PRs. Other PR
+	// work can still bring the next tick forward.
 	if issuesWatched && next.IsZero() {
-		next = s.now().Add(pollEvery)
+		next = s.now().Add(5 * time.Minute)
 	}
 	pollErr := errors.Join(first, ctx.Err(), s.cleanupPublicationGates())
 	// Discovery uses this poll's existing repository observation. Tracking a
