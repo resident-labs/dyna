@@ -55,7 +55,7 @@ test("names failed image builds and computers in the work line", () => {
 test("keeps box changes out of the feed except a failed or lost box or a failed close, in the owner's words", () => {
   const box = (seq: number, to: BoxState, cause?: FailureCause) => event(seq, { type: "box.changed", body: { box: "b", session: "l", to, cause, reason: "podman: exit 125" } });
   const rows = feedRows([box(1, "ready"), box(2, "lost"), box(3, "failed", "no_hello"), box(4, "closing"), box(5, "closing", "archive_failed")], { kind: "feed" });
-  assert.deepEqual(rows.map(row => row.kind === "failed" && [row.label, row.error]), [["Stopped unexpectedly", ""],
+  assert.deepEqual(rows.map(row => row.kind === "failed" && [row.label, row.cause]), [["Stopped unexpectedly", ""],
     ["Could not start", "Its workspace did not connect in time"], ["Could not close", "Dyna could not save the session's branch"]]);
 });
 
