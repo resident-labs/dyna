@@ -49,6 +49,7 @@ func TestUpgradeGrantsExistingRoot(t *testing.T) {
  INSERT INTO meta VALUES ('schema_version','12');
  CREATE TABLE rooms (id TEXT PRIMARY KEY);
  CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL, parent TEXT, created_at INTEGER NOT NULL, closed_at INTEGER);
+ CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, type TEXT NOT NULL, body BLOB NOT NULL);
  INSERT INTO rooms VALUES ('room');
  INSERT INTO sessions VALUES ('root','room',NULL,1000,NULL),('child','room','root',1000,NULL);`)
 	if err != nil {

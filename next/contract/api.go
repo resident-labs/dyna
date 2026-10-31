@@ -56,16 +56,20 @@ type SessionListRequest struct {
 	Room RoomID `json:"room"`
 }
 type SessionSummary struct {
-	ID       SessionID   `json:"id"`
-	Name     string      `json:"name"`
-	Parent   SessionID   `json:"parent"`
-	Profile  ProfileName `json:"profile"`
-	Box      BoxID       `json:"box"`
-	BoxState BoxState    `json:"boxState"`
-	Goal     string      `json:"goal"`
+	ID          SessionID   `json:"id"`
+	Name        string      `json:"name"`
+	Parent      SessionID   `json:"parent"`
+	Profile     ProfileName `json:"profile"`
+	Box         BoxID       `json:"box"`
+	BoxState    BoxState    `json:"boxState"`
+	Goal        string      `json:"goal"`
+	Turn        TurnID      `json:"turn,omitempty"`        // the running turn
+	LastOutcome TurnOutcome `json:"lastOutcome,omitempty"` // of the last ended turn
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
+	// Seq is the room's newest event when the list was read; live events after it update the list.
+	Seq int64 `json:"seq"`
 }
 
 type WebLoginRequest struct{}
@@ -141,6 +145,8 @@ type EventsListRequest struct {
 	BeforeSeq int64       `json:"beforeSeq,omitempty"`
 	Limit     int         `json:"limit"`
 	Types     []EventType `json:"types,omitempty"`
+	// Home, a DM, keeps only events whose home is that DM: its posts and the turns that answered in it.
+	Home *Conversation `json:"home,omitempty"`
 }
 type EventsListResponse struct {
 	Events []Event              `json:"events"`
