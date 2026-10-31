@@ -190,7 +190,7 @@ func TestNoPRWorkflowsAndGraceWindow(t *testing.T) {
 	reset := func(t *testing.T) {
 		t.Helper()
 		e.f = defaultFixture()
-		e.clock = time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+		e.clock = time.Now().UTC().Truncate(time.Second)
 		e.s.Store = &Store{Root: filepath.Join(t.TempDir(), "prs")}
 		// The workflow capability is cached per executable and repository, so a
 		// case with another answer must not read the previous case's result.
