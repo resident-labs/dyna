@@ -130,8 +130,8 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		}
 		if parent != "" {
 			result, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,handoff_from)
-SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries WHERE to_kind='session' AND to_id=? AND state='pending'
-ON CONFLICT(to_kind,to_id,seq) DO UPDATE SET wake=1,surface='session',reply_kind='post',reply_target_kind='',reply_target_id='',reply_home='',reply_to='',handoff_from=excluded.handoff_from WHERE deliveries.state='pending'`, parent, id, id)
+SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries WHERE to_kind='session' AND to_id=? AND state IN ('pending','taken')
+ON CONFLICT(to_kind,to_id,seq) DO NOTHING`, parent, id, id)
 			if err != nil {
 				return err
 			}
@@ -145,7 +145,7 @@ ON CONFLICT(to_kind,to_id,seq) DO UPDATE SET wake=1,surface='session',reply_kind
 				}
 				s.wakePending = append(s.wakePending, parent)
 			}
-			if _, err := tx.ExecContext(ctx, "DELETE FROM deliveries WHERE to_kind='session' AND to_id=? AND state='pending'", id); err != nil {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM deliveries WHERE to_kind='session' AND to_id=? AND state IN ('pending','taken')", id); err != nil {
 				return err
 			}
 		}
