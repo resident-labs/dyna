@@ -183,7 +183,8 @@
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
     // Escape closes the jobs view only from inside the panel, so Escape in the composer or a section keeps it.
-    if (event.key === "Escape" && jobsOf && members?.contains(document.activeElement)) void closeJobs();
+    if (event.key === "Escape" && drawer) void showDrawer(false);
+    else if (event.key === "Escape" && jobsOf && members?.contains(document.activeElement)) void closeJobs();
     else if (event.key === "Escape" && panel) void showPanel(false);
     else if (event.key === "Escape" && section) void closeSection();
     if (event.key !== "F6") return;
@@ -262,6 +263,20 @@
   }
   $effect.pre(() => { if (jobsOf && store?.boxes.get(jobsOf) !== "ready") void closeJobs(); });
   const wide = new MediaQuery("min-width: 761px");
+  // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
+  // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open or
+  // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
+  const phone = new MediaQuery("max-width: 640px");
+  let drawer = $state(false);
+  let menuButton: HTMLButtonElement | undefined = $state();
+  async function showDrawer(open: boolean, refocus = true, tapped = false) {
+    drawer = open;
+    await tick();
+    if (open && tapped) rail.focus({ focusVisible: false });
+    else if (open) (rail.querySelector<HTMLElement>(".pages [aria-current=page]") ?? rail.querySelector<HTMLElement>(".pages a"))?.focus();
+    else if (refocus) menuButton?.focus({ focusVisible: !tapped });
+  }
+  $effect(() => { if (!phone.current) drawer = false; });
   let toggle: HTMLButtonElement | undefined = $state();
   async function showPanel(open: boolean) {
     const held = members?.contains(document.activeElement);
@@ -301,29 +316,51 @@
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
-<div class="shell" class:open={room}>
-  <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail}>
+<div class="shell" class:open={room} class:drawer>
+  <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
+    onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
-      <!-- A room's badge counts the requests that wait for the owner, as v1 and Discord count unread messages. -->
+      <!-- A room with requests that wait for the owner gets an amber dot on its corner, with no number (spec 5.13). -->
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
         aria-label={waiting ? `${item.name}, ${count(waiting, "request")} waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
+        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}</nav>
     <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
     <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
+    <!-- The drawer's second column: the open room's pages, or on Home every room by name. Counts are muted; only Requests
+         uses the warning tone. -->
+    {#if phone.current}<nav class="pages" aria-label={room ? `${roomName} pages` : "Rooms by name"}><strong>{room ? roomName : "Home"}</strong>
+      {#if room}
+        <a href={"/r/" + encodeURIComponent(room)} onclick={navigate} aria-current={!session && !section ? "page" : undefined}><Icon name="chat" />Chat</a>
+        {#if store && !unavailable}
+          <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
+            {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
+          <button type="button" onclick={() => void showPanel(true)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
+          <button type="button" onclick={() => void terminals?.pick()}><Icon name="terminal" />Terminal</button>
+        {/if}
+      {:else}
+        {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
+          <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate}><Avatar kind="room" name={item.name} label={initials.get(item.name)} size={28} />{item.name}
+            {#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
+        {/each}
+      {/if}</nav>{/if}
   </aside>
-  <main>
-    <header>{#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
-      {:else if room}<Icon name="room" />{/if}<strong>{title}</strong>
-      {#if closed}<span class="count">· closed</span>{/if}
-      {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}
-      {#if store && !unavailable}<button type="button" class="requests" bind:this={requestsButton} aria-pressed={section === "requests"}
+  {#if drawer}<button type="button" class="scrim" tabindex="-1" aria-label="Close the menu" onclick={() => void showDrawer(false, true, true)}></button>{/if}
+  <main inert={drawer}>
+    <header><button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
+        onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>
+      {#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
+      {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
+      <span class="heading"><strong>{title}</strong>
+        {#if closed}<span class="count">· closed</span>{/if}
+        {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}</span>
+      {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
-        <RoomMenu onterminal={() => void terminals?.pick()} />{/if}
+        <span class="room-menu"><RoomMenu onterminal={() => void terminals?.pick()} /></span>{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.counts.failed ? "Sessions, a session failed" : "Sessions"}
-        title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
+        title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}
         {#if store?.counts.failed && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={requests} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
@@ -344,7 +381,7 @@
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" bind:this={members}>
+    <aside class="members" id="sessions" class:shown={panel} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" bind:this={members} inert={drawer}>
       {#if jobsOf}
         {#if wide.current || panel}<ShellView session={jobsOf} name={store?.names.get(jobsOf) ?? "Session"} onback={() => void closeJobs()} />{/if}
       {:else}
@@ -383,14 +420,42 @@
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
   aside.members > header strong { font-size: 16px; }
   /* Requests is a header icon, as the menu and the panel toggle are: 16 px in a 28 px hit area. While requests wait for
-     the owner, StatusPill's count sits on its corner, as on the rail. */
-  .requests { position: relative; margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
-    background: none; color: var(--muted); cursor: pointer; }
+     the owner it is one 40 px chip: the icon and StatusPill's count on the warning wash. */
+  .requests { margin-left: auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0;
+    border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+  .requests.waiting { height: 40px; padding: 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
+  .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
-  .requests > :global(.count) { top: -5px; right: -7px; }
-  .narrow { display: none; }
+  .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
+  .heading, .room-menu { display: contents; }
+  /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
+     targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
+  @media (max-width: 640px) {
+    .menu-toggle { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin-left: -10px; padding: 0; border: 0; border-radius: 8px;
+      background: none; color: var(--muted); cursor: pointer; }
+    /* Touch screens keep :hover after a tap, so the wash waits for a real pointer. */
+    @media (hover: hover) { .menu-toggle:hover { background: var(--hover); color: var(--text); } }
+    .hash, .room-menu { display: none; }
+    .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
+    .heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .heading .count { font-size: 12.5px; }
+    .requests { min-width: 40px; height: 40px; }
+    .requests:not([aria-pressed="true"], .waiting) { display: none; }
+    main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 4px; min-width: 40px; height: 40px; padding: 0 8px; }
+    .phone { display: inline; }
+    .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: rgb(0 0 0 / 50%); }
+  }
+  .pages { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 12px 8px; border-left: 1px solid var(--line); overflow-y: auto; }
+  .pages strong { padding: 6px 10px 10px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pages a, .pages button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 8px;
+    color: var(--muted); font-size: 15px; cursor: pointer; }
+  @media (hover: hover) { .pages a:hover, .pages button:hover { background: var(--hover); box-shadow: none; color: var(--text); } }
+  .pages a[aria-current="page"], .pages button[aria-pressed="true"] { background: var(--selected); color: var(--text); font-weight: 500; }
+  .pages a::before { content: none; }
+  .pages a:focus-visible, .pages button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .pages .count, .pages :global(.count) { position: static; margin-left: auto; }
   a.member[aria-current="page"] { background: var(--selected); }
   .row { position: relative; display: flex; align-items: center; }
   /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same

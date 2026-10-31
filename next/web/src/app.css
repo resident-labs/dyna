@@ -43,8 +43,8 @@ aside.members { display: flex; flex-direction: column; border-right: 0; border-l
 .rail a.home:hover, .rail a.home[aria-current="page"] { color: var(--text); }
 /* The selected room gets a short pill on the rail's edge; the focus ring stays for focus only. */
 .rail a[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: calc(50% - 14px); width: 4px; height: 28px; border-radius: 0 4px 4px 0; background: var(--text); }
-/* Requests wait for the owner: a count pill in StatusPill's attention color, ringed so it reads on any room color. */
-.rail a > .count { right: -6px; bottom: -6px; --ring: var(--sidebar); --ring-size: 3px; }
+/* Requests wait for the owner: StatusPill's amber dot on the square's corner, ringed so it reads on any room color. */
+.rail a > .status { position: absolute; right: -4px; bottom: -4px; border-radius: 50%; background: var(--sidebar); }
 .rail footer { margin-top: auto; padding: 12px 0; }
 .rail footer span { display: flex; }
 .label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
@@ -80,12 +80,17 @@ main > header strong { font-size: 16px; }
   .shell > aside.members { display: none; }
   .shell > aside.members.shown { display: flex; position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; padding-bottom: max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)); width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
 }
-/* A phone shows the rooms as one scrolling row above the feed. */
+/* A phone: the rail is a drawer from the left, as in Discord's phone app, with the open room's pages beside the rooms. */
 @media (max-width: 640px) {
-  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); --panel-top: 117px; }
-  .rail { border: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
-  .rail nav { flex-direction: row; align-self: stretch; padding: 12px 16px; }
-  .rail footer { display: none; }
-  .rail a[aria-current="page"]::before { left: calc(50% - 14px); top: auto; bottom: -12px; width: 28px; height: 4px; border-radius: 4px 4px 0 0; }
+  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: fixed; z-index: 3; top: 0; bottom: 0; left: 0; width: min(88vw, 340px); display: grid; grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto; align-items: stretch; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); overflow: hidden;
+    transform: translateX(-100%); visibility: hidden; transition: transform 160ms ease-out, visibility 0s 160ms; }
+  /* Visible at once on open, so focus can move in; hidden only after the slide out. */
+  .shell.drawer .rail { transform: none; visibility: visible; transition: transform 160ms ease-out; box-shadow: 8px 0 24px rgb(0 0 0 / 30%); }
+  /* A tap focuses the dialog itself; its rows keep their own rings. */
+  .shell.drawer .rail:focus { outline: none; }
+  .rail > nav:first-child { grid-column: 1; align-items: center; overflow-y: auto; }
+  .rail footer { grid-column: 1; display: flex; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
