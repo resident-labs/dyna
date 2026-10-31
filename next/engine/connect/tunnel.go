@@ -35,6 +35,7 @@ func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPo
 		case <-wake:
 		case <-timer.C:
 		case <-done:
+			cancel()
 			cancel, done = nil, nil
 		}
 		linked, err := state.ConnectLinked(ctx)
