@@ -26,14 +26,15 @@ type promptInput struct {
 }
 
 type command struct {
-	ID         string        `json:"id"`
-	Type       string        `json:"type"`
-	Message    string        `json:"message,omitempty"`
-	DeliveryID string        `json:"deliveryId,omitempty"`
-	Inputs     []promptInput `json:"inputs,omitempty"`
-	Provider   string        `json:"provider,omitempty"`
-	ModelID    string        `json:"modelId,omitempty"`
-	Level      string        `json:"level,omitempty"`
+	ID         string                     `json:"id"`
+	Type       string                     `json:"type"`
+	Message    string                     `json:"message,omitempty"`
+	DeliveryID string                     `json:"deliveryId,omitempty"`
+	Inputs     []promptInput              `json:"inputs,omitempty"`
+	Provider   string                     `json:"provider,omitempty"`
+	ModelID    string                     `json:"modelId,omitempty"`
+	Level      string                     `json:"level,omitempty"`
+	Sections   *[]contract.ContextSection `json:"sections,omitempty"`
 }
 
 type contentBlock struct {
@@ -292,6 +293,14 @@ func (h *Harness) SetModel(ctx context.Context, model contract.ModelChoice) erro
 		return err
 	}
 	_, err := h.requestCommand(ctx, command{Type: "set_thinking_level", Level: string(model.Thinking)})
+	return err
+}
+
+// SetPromptSections sends the ordered turn context before the next prompt or continuation.
+func (h *Harness) SetPromptSections(ctx context.Context, sections []contract.ContextSection) error {
+	// A nil slice must still be sent as an empty array, so Pi can clear prior sections.
+	ordered := append([]contract.ContextSection{}, sections...)
+	_, err := h.requestCommand(ctx, command{Type: "set_prompt_sections", Sections: &ordered})
 	return err
 }
 
