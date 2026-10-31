@@ -548,7 +548,8 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 	refreshPatchBeforeSave := auth.CodexRefreshPatch
 	persistMetaMint := (mode == updateModePrepare || mode == updateModeRefresh) && strings.EqualFold(strings.TrimSpace(auth.Provider), "meta")
 	if errPersist := m.persistLocked(ctx, auth); errPersist != nil {
-		if durable, ok := m.store.(DurableAuthStore); ok && durable.RequireDurableAuth() {
+		durable, requiresDurability := m.store.(DurableAuthStore)
+		if HasAuthCreationIntent(ctx) || (requiresDurability && durable.RequireDurableAuth()) {
 			m.mu.Unlock()
 			return nil, false, false, ErrCredentialNotDurable
 		}
