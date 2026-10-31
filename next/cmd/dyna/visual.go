@@ -23,7 +23,7 @@ func visualCommand() *cobra.Command {
 		if _, _, err = visual.Meta(args[0], data); err != nil {
 			return err
 		}
-		result, err := visual.Inspect(cmd.Context(), data, visualCSP(allowNet), allowNet)
+		result, err := visual.Inspect(cmd.Context(), data, visual.CSP(allowNet), allowNet)
 		if err != nil {
 			return err
 		}
@@ -62,16 +62,6 @@ func printVisualChecks(w io.Writer, checks []contract.VisualCheck) {
 	for _, check := range checks {
 		fmt.Fprintf(w, "%s: %s %s\n", check.Name, check.Status, check.Detail)
 	}
-}
-
-func visualCSP(net bool) string {
-	src, script := "data: blob:", "'unsafe-inline'"
-	if net {
-		src, script = "https: data: blob:", "'unsafe-inline' https:"
-	}
-	return "default-src 'none'; script-src " + script + "; connect-src " + src + "; img-src " + src +
-		"; font-src " + src + "; media-src " + src + "; style-src 'unsafe-inline' " + src +
-		"; frame-src 'none'; child-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 }
 
 func visualImages(ctx context.Context, c client, result visual.Result, card *contract.VisualCard) error {
