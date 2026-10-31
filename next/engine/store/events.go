@@ -30,6 +30,8 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 	// home is the session whose DM holds the event: a DM post, or a turn that answered in a DM.
 	var home *contract.SessionID
 	switch body := event.Body.(type) {
+	case contract.SessionRestarted:
+		home = &body.Session
 	case contract.PostCreated:
 		if body.Home.Kind == contract.ConversationDM {
 			home = &body.Home.Session

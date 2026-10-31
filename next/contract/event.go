@@ -66,6 +66,10 @@ type SessionStarted struct {
 	Brief   string      `json:"brief,omitempty"`
 }
 
+type SessionRestarted struct {
+	Session SessionID `json:"session"`
+}
+
 type SessionMoved struct {
 	Session   SessionID `json:"session"`
 	NewParent SessionID `json:"newParent"`
@@ -258,6 +262,9 @@ func (PostCreated) isEventBody()         {}
 
 func (SessionStarted) EventType() EventType { return "session.started" }
 func (SessionStarted) isEventBody()         {}
+
+func (SessionRestarted) EventType() EventType { return "session.restarted" }
+func (SessionRestarted) isEventBody()         {}
 
 func (SessionMoved) EventType() EventType { return "session.moved" }
 func (SessionMoved) isEventBody()         {}

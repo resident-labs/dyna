@@ -125,6 +125,7 @@
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
+      {:else if item.kind === "restarted"}<p class="hint">{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone.</p>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>
         {#if item.key === "box-failed" && failure?.box === "failed"}<BoxRestart session={item.session} {onclosed} />{/if}</FailedTurnRow>

@@ -5,7 +5,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -90,6 +92,13 @@ func Run(ctx context.Context) error {
 	sessions := filepath.Join(piDir, "sessions")
 	if err = os.MkdirAll(sessions, 0700); err != nil {
 		return err
+	}
+	if err := restoreTranscripts(ctx, sessions, hello.Transcripts, client.TranscriptFetch); err != nil {
+		var rejected apiError
+		if !errors.As(err, &rejected) || rejected.code != contract.ErrConflict {
+			return err
+		}
+		log.Printf("transcript restore: %v", err)
 	}
 	models, err := json.Marshal(Models())
 	if err != nil {

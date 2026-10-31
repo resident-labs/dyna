@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,4 +255,84 @@ func TestTranscriptTickSendsNewBytes(t *testing.T) {
 	if last.Offset != 3 || string(last.Bytes) != "def" {
 		t.Fatalf("tick request = %+v, want offset 3 and bytes def", last)
 	}
+}
+
+func TestRestoreTranscripts(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	files := []contract.TranscriptFile{{Path: "a.jsonl", Bytes: 3}, {Path: "b.jsonl", Bytes: 3}}
+	calls := 0
+	fetch := func(_ context.Context, req contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, error) {
+		calls++
+		return contract.TranscriptFetchResponse{Bytes: []byte(req.Path[0:1] + "bc")[req.Offset:]}, nil
+	}
+	if err := restoreTranscripts(ctx, dir, files, fetch); err != nil {
+		t.Fatal(err)
+	}
+	a, err := os.ReadFile(filepath.Join(dir, files[0].Path))
+	if err != nil || string(a) != "abc" {
+		t.Fatalf("first file %q %v", a, err)
+	}
+	b, err := os.Stat(filepath.Join(dir, files[1].Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ai, err := os.Stat(filepath.Join(dir, files[0].Path))
+	if err != nil || !b.ModTime().After(ai.ModTime()) {
+		t.Fatal("session order lost")
+	}
+	if err := restoreTranscripts(ctx, dir, files, fetch); err != nil || calls != 2 {
+		t.Fatalf("existing files fetched again: %d %v", calls, err)
+	}
+	preserved, err := os.ReadFile(filepath.Join(dir, files[0].Path))
+	if err != nil || string(preserved) != "abc" {
+		t.Fatalf("existing content changed: %q %v", preserved, err)
+	}
+}
+
+func TestRestoreFailureRemovesTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	files := []contract.TranscriptFile{{Path: "a.jsonl", Bytes: 1}, {Path: "b.jsonl", Bytes: 1}}
+	fetch := func(_ context.Context, req contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, error) {
+		if req.Path == "b.jsonl" {
+			return contract.TranscriptFetchResponse{}, errors.New("interrupted")
+		}
+		return contract.TranscriptFetchResponse{Bytes: []byte("a")}, nil
+	}
+	if err := restoreTranscripts(context.Background(), dir, files, fetch); err == nil {
+		t.Fatal("expected interruption")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("restore left files: %v %v", entries, err)
+	}
+}
+
+func TestTranscriptFetchPreservesConflictCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code":"conflict","message":"short"}`))
+	}))
+	defer server.Close()
+	c := &Client{http: server.Client()}
+	c.http.Transport = rewriteTransport{base: server.URL, next: c.http.Transport}
+	_, err := c.post(context.Background(), contract.MethodTranscriptFetch, nil)
+	var api apiError
+	if !errors.As(err, &api) || api.code != contract.ErrConflict {
+		t.Fatalf("expected typed conflict: %v", err)
+	}
+}
+
+type rewriteTransport struct {
+	base string
+	next http.RoundTripper
+}
+
+func (r rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.URL.Scheme = "http"
+	req.URL.Host = r.base[len("http://"):]
+	if r.next == nil {
+		return http.DefaultTransport.RoundTrip(req)
+	}
+	return r.next.RoundTrip(req)
 }
