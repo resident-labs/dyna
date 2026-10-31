@@ -135,8 +135,9 @@ type EventsListRequest struct {
 	Types     []EventType `json:"types,omitempty"`
 }
 type EventsListResponse struct {
-	Events []Event `json:"events"`
-	Next   int64   `json:"next"`
+	Events []Event              `json:"events"`
+	Names  map[SessionID]string `json:"names"`
+	Next   int64                `json:"next"`
 }
 type BoxHelloRequest struct {
 	Version string `json:"version"`
