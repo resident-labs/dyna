@@ -11,7 +11,7 @@
 
 <section class="card" aria-label={providerName(account.provider)}>
   <h3>{providerName(account.provider)}</h3>
-  {#if account.cause}<p><StatusPill tone={causeText[account.cause].tone} label={causeText[account.cause].pill} /></p>
+  {#if account.cause}{#if causeText[account.cause].tone}<p><StatusPill tone="warning" label={causeText[account.cause].pill} /></p>{:else}<p class="aside">{causeText[account.cause].pill}</p>{/if}
     <p class="aside">{causeText[account.cause].line}</p>
   {:else if windows.length}<div class="tiles">{#each windows as w (w.name)}<MeterTile meter={windowMeter(w, now)} />{/each}</div>
   {:else}<p class="aside">No usage limits reported.</p>{/if}
