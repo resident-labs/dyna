@@ -8,7 +8,6 @@ type Fixture struct {
 	Room, Lead, A, B, C, AName, BName, Profile string
 	Operation, Host, File, Visual, Page        string
 	ReadValue, FileSHA256                      string
-	Task11Fallback                             bool
 }
 
 // Validate rejects incomplete fixtures before a model can act.
