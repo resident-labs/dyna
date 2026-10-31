@@ -189,6 +189,7 @@ type HostSummary struct {
 	MemUsed   int64           `json:"memUsed"`
 	DiskBytes int64           `json:"diskBytes"`
 	DiskUsed  int64           `json:"diskUsed"`
+	DiskLow   bool            `json:"diskLow"`
 	LastSeen  time.Time       `json:"lastSeen,omitzero"`
 	History   []HostLoadPoint `json:"history"`
 }

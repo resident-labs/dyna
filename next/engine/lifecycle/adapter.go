@@ -17,6 +17,7 @@ type BoxSpec struct {
 }
 
 type BoxAdapter interface {
+	MaintainHost(context.Context, contract.HostName) error
 	Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error)
 	TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error)
 	Create(context.Context, BoxSpec) (string, error)
