@@ -52,7 +52,16 @@ func (s *Service) InstructionsGet(ctx context.Context, caller contract.Principal
 	if err != nil {
 		return out, failure(err)
 	}
-	return contract.InstructionsGetResponse{Text: text, Hash: hash}, nil
+	out = contract.InstructionsGetResponse{Text: text, Hash: hash}
+	info, err := os.Stat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return out, failure(err)
+	}
+	if err == nil {
+		saved := info.ModTime().UTC()
+		out.SavedAt = &saved
+	}
+	return out, nil
 }
 
 func (s *Service) InstructionsSet(ctx context.Context, caller contract.Principal, req contract.InstructionsSetRequest) (contract.InstructionsSetResponse, *contract.Error) {

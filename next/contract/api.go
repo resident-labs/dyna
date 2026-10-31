@@ -9,8 +9,9 @@ type InstructionsGetRequest struct {
 	Room RoomID `json:"room,omitempty"`
 }
 type InstructionsGetResponse struct {
-	Text string `json:"text"`
-	Hash string `json:"hash"`
+	Text    string     `json:"text"`
+	Hash    string     `json:"hash"`
+	SavedAt *time.Time `json:"savedAt,omitempty"`
 }
 type InstructionsSetRequest struct {
 	Room RoomID `json:"room,omitempty"`
