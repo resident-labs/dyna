@@ -146,7 +146,11 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	page, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session})
-	if problem != nil || len(page.Turns) != 1 || len(page.Turns[0].Inputs) != 1 || page.Turns[0].Inputs[0].Seq != delivery || len(page.Turns[0].Items) != 3 || page.Turns[0].Items[1].Event != post.Event || page.Turns[0].Items[2].Event != unclaimed.Event || !page.Turns[0].Items[0].More || len(page.Turns[0].Items[0].Output) != 1024 {
+	inputEvent, err := s.store.Event(ctx, delivery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problem != nil || len(page.Turns) != 1 || len(page.Turns[0].Inputs) != 1 || !page.Turns[0].Inputs[0].At.Equal(inputEvent.Time) || page.Turns[0].Inputs[0].Seq != delivery || len(page.Turns[0].Items) != 3 || page.Turns[0].Items[1].Event != post.Event || page.Turns[0].Items[2].Event != unclaimed.Event || !page.Turns[0].Items[0].More || len(page.Turns[0].Items[0].Output) != 1024 {
 		t.Fatalf("page=%+v error=%v", page, problem)
 	}
 	full, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Item: "call1"})
