@@ -19,7 +19,7 @@ type Live struct {
 	deliver     func(map[contract.SessionID]bool)
 }
 
-// Subscription keeps sends and closure ordered after the subscriber list is copied.
+// Subscription uses mu to serialize sends with close.
 type Subscription struct {
 	mu     sync.Mutex
 	ch     chan contract.Event
