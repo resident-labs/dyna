@@ -311,6 +311,9 @@ func main() {
 	runtime := filepath.Join(data, "runtime")
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{}, time.Now)
+	ticks := time.NewTicker(time.Second) // boxes start through the reconciler, as in the engine
+	defer ticks.Stop()
+	go svc.Reconciler().Run(ctx, ticks.C)
 	grant := svc.HostexecGrant() // a test grant is agent class here, so the Requests panel shows both classes
 	grant.Class = func(a contract.OpArgs, _ contract.Principal) contract.Class {
 		if a.(contract.HostexecGrantArgs).Reason == "Run Go tests on the host" {
