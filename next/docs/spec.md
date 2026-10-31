@@ -545,6 +545,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M1 | `boxes` | section 5.3; schema step 19 adds `want` (`run`, `stop`, `close`, `discard`; default `run`) and `due_at` (Unix ms, 0 for none) |
 | M2 | `transcripts` | (`session`, `path`) PK, `acked_offset`, `file` |
 | M2 | `images` | section 5.2 |
+| M3 | `room_shared` | (`room`, `host`) PK, `bytes`, `measured_at` (5.6) |
 | M2 | `operations` | `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
 | M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `hosts` JSON, `commands` JSON, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at`, `expired_at` |
 | M2 | `hostexec_runs` | section 6.3 |
@@ -741,7 +742,8 @@ Every box slice sits under the host slice `dyna.slice`, whose `memory.max` is th
 
 - **Placement.** A new box goes to the `ready` host with the most free memory. A box that has a host stays there, because its volume is there.
 - **Root's box** is `agent` and runs on any host.
-- **Children** run on any host. A child needs no running parent, and a parent can go dormant while its children run.
+- **Children** run on any host. A child needs no running parent, and a parent can go dormant while its children run. `session.start` with `sameHost` places the child's box on its parent's host, and that box waits there in `pending` if it does not fit.
+- **Depth.** `session.start` refuses a session deeper than the engine setting `--session.max-depth`, with a typed error. The default is v1's 3, zero means no limit, and a room's root is depth 1 as in v1.
 - **Room limit.** The sum of placed box requests in a room, across all hosts, plus this request, must fit `rooms.cpus` and `rooms.mem_bytes`. Zero means no limit, and zero is the default. A box over the limit waits with the reason `room-limit`.
 - **Device needs do not affect admission.** Creation fails if the selected host lacks a required device (5.2).
 - **Admission retries every reason.** The reconciler (5.3) runs admission on each pass for every `pending` or `stopped` box with `want=run`. It does this for every reason a box waits on: `cpu`, `memory`, `disk` or `room-limit`. A box therefore starts once that resource frees. A `pending` box whose reason changes records a `pending → pending` transition, so the owner sees the new reason.
@@ -761,6 +763,12 @@ A box's repository is made in the box volume:
 3. The session branch is checked out: an existing branch from the bundle or the parent, or a new `dyna/<session>` from the base.
 
 New objects go into the box volume, so a box cannot change the cache. Shared dependency caches are per host, mounted read-write: `GOMODCACHE`, `GOCACHE`, the pnpm store and the cargo registry. One box can spoil a shared cache for the others; this is an accepted risk on hosts that only we use.
+
+**Room shared folder** (hour 9 review, root, 2026-10-31). Every box of a room mounts `<hostdata>/rooms/<room>` read-write at `/box/shared`. Agents use it for files that are too big for an attachment and do not belong in git, such as job artifacts and data sets. v1's fl-rea runs keep 16 GiB this way. Only boxes of that room see the folder, so rooms stay apart.
+
+- The folder is per host. A child that needs its parent's folder starts with `sameHost` (5.5).
+- It has no backup, and it stays when a session or box closes. A lost host loses its copy.
+- Rootless bind mounts have no quota, so the folder has no hard size limit. Daily host maintenance measures each room's folder into `room_shared`, and `host.list` returns the sizes. Home warns when one folder passes a quarter of its host's disk. `host.disk_low` still guards a folder that fills faster than that.
 
 ### 5.7 Box socket, model route and git
 
@@ -914,7 +922,7 @@ Owner, 2026-10-30: v2 ports v1's workspace tools. The engine side has two parts,
 
 **Owner terminal.** A tabbed terminal in the web app opens a shell in a box, on a capacity host, or on the control-plane host.
 
-- `host.list` returns `control-plane` first, then each added host with reachability, the count of starting or ready boxes, CPU and memory capacity, CPU cores and memory in use, disk capacity and use, and the time of its last successful heartbeat. Each host has up to one hour of minute-averaged CPU and memory history, oldest first. Load and history come from the 10 s heartbeat and reset after an engine restart; a lost host keeps its last figures and last-seen time. Until the first heartbeat, reachability uses the host's last stored check. Only the owner calls it.
+- `host.list` returns `control-plane` first, then each added host with reachability, the count of starting or ready boxes, CPU and memory capacity, CPU cores and memory in use, disk capacity and use, and the time of its last successful heartbeat, and the size of each room's shared folder (5.6). Each host has up to one hour of minute-averaged CPU and memory history, oldest first. Load and history come from the 10 s heartbeat and reset after an engine restart; a lost host keeps its last figures and last-seen time. Until the first heartbeat, reachability uses the host's last stored check. Only the owner calls it.
 - `GET /v1/terminal?box=<session>` or `?host=<name>`, with `cols` and `rows`, upgrades to a WebSocket. The engine keeps the WebSocket library's same-origin check, so another site cannot open a terminal with the owner's cookie. Binary frames carry the terminal's bytes both ways. The client's JSON text frame, `TerminalResize`, sets the size. The engine's last text frame, `TerminalExit`, gives the shell's exit code.
 - The engine starts one command under a local PTY for every target:
   - a box: `ssh -tt` through its host's master, running `podman exec -it <box> bash -l` as the box user;
@@ -1122,7 +1130,7 @@ type GlobalBundle struct {
 	Exported      time.Time      `json:"exported"`
 	Source        BundleSource   `json:"source"`
 	Rules         []Rule         `json:"rules"`         // global rules
-	Settings      SettingsBundle `json:"settings"`      // cleaned settings.json
+	Settings      SettingsBundle `json:"settings"`      // cleaned settings.json; subagentMaxDepth becomes --session.max-depth at cutover
 	Profiles      []ProfileBundle `json:"profiles"`
 	Hosts         []HostBundle   `json:"hosts"`         // from machines
 	Accounts      []AccountLabel `json:"accounts"`      // provider, label, limits; no credential
@@ -1274,7 +1282,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | local-ci | M3 as GitHub Actions with self-hosted runners in boxes; act dropped | merges need a CI result |
 | local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
-| maintenance | daily backups (4.1), 14-day expiry of archive refs (5.9), and daily host maintenance | Each ready host prunes dangling Podman images and runs `git gc --no-prune` on bare repository caches. The latter preserves objects borrowed by boxes. |
+| maintenance | daily backups (4.1), 14-day expiry of archive refs (5.9), the 7-day dormant close, and daily host maintenance | A session whose box stayed stopped for 7 days closes through the normal close path, with its archive, if it has no open PR, goal, open child or pending input. Root never closes this way (hour 9 review; v1 `internal/subagent/dormant.go`). A child closes first, so its parent can close on a later pass. Each ready host prunes dangling Podman images and runs `git gc --no-prune` on bare repository caches. The latter preserves objects borrowed by boxes. |
 | remote-access, connect, device-scopes | M3, right after the box reconciler and before workflows (root, 2026-10-31) | phone access must work on cutover day, and the desktop is a client of the always-on engine (decision 14) |
 | web-push | M3, a port after the Devices page (root, 2026-10-31; 7.8) | a phone client needs alerts; a paired device can use it with no Connect link |
 | settings-accounts, settings-devices | M3 | sign in again and pair devices after the cutover |
@@ -1324,10 +1332,12 @@ The owner chose this design on 2026-10-30. Workflows are ported before the cutov
 
 - **Scripts** stay v1's plain-JavaScript files.
 - **A run is a session with its own small box.** It is a child of the session that starts it. A runner in the box runs the script and reaches the engine only through the box API, as any session does. Scripts are user code, so they never run in the engine. The engine only stores the step events and starts sessions, as it does for any caller.
-- **Agent steps.** Each agent step starts a normal child session of the run, in its own box. The step returns that child's final response.
+- **Agent steps.** Each agent step starts a normal child session of the run, in its own box. The step returns that child's final response. The runner closes that session when the result is stored, so a finished step frees its box at once.
+- **One host per run** (hour 9 review, root, 2026-10-31). All of a run's steps stay on the run's host, so they share `/box/shared` (5.6). The runner starts each step with `sameHost` (5.5). A step that does not fit there waits in `pending`; it does not move to another host.
 - **Command steps.** `run()` runs its command in the run's box. Detached steps (`job()`) run on a host through host exec (section 6), under the run's grants.
 - **Progress is saved as store events.** Each step's start and result is an event. A run therefore continues after an engine restart or update, or after its box starts again. The runner runs the script again from the start, and each step that already has a result returns it without running again. Scripts must stay deterministic, as in v1.
 - **Admission bounds fan-out.** Each step has its own box with its own size (5.4), and the room limit bounds the whole tree. A step that does not fit waits in `pending`.
+- **Profile limits bound model calls** (v1's limits, root, 2026-10-31). `maxConcurrent` holds an agent step while that many steps of its profile run in this run. `maxCallsPerRun` fails the run with a typed error past that many agent calls to the profile. Zero means no limit. Both live on the profile and in `ProfileBundle`, and the import keeps them.
 - **Budget:** about 1,000 to 1,500 product lines.
 - **Open for the M3 design check:** the script runtime. It is Node from `dyna-base`, or an interpreter in `dyna box-agent` as v1 embeds goja.
 
@@ -1461,7 +1471,7 @@ Acceptance:
 15. unit: one simulated hour of polling one repository with 20 open PRs makes under 300 GitHub requests, with one GraphQL query per poll and no REST call per PR. REST reads send `If-None-Match`. The interval doubles while nothing changes, resets on a change, and waits at least 10 minutes when less than 20% of the quota is left (fake GitHub client, injected clock).
 16. unit: through the box's GitHub route, a call reaches GitHub with the token added, and no response or request that the box sees carries the token. A merge call gets the typed error. With less than 20% of the quota left, a box call fails with the reset time (fake GitHub client). Then, in a real box, the pinned `gh` runs `auth status`, `pr list`, `pr view`, `pr create` (also without `--head` on a fresh branch) and `gh api` through that route against a fake upstream, and one manual pass does the same against a sandbox repository.
 17. manual: every active repository has its `.dyna/images/` folder merged. Each room's root does this work.
-18. manual: fl-rea and horizon each finish one real task in a v2 trial room.
+18. manual: horizon finishes one real task in a v2 trial room, and fl-rea finishes one real workflow run with more than one agent step, ported from a v1 script, sharing its files through `/box/shared`.
 
 ## 12. Team and ownership
 
