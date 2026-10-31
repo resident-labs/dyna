@@ -138,7 +138,7 @@ func retryClose(ctx context.Context, after func(time.Duration) <-chan time.Time,
 }
 
 // waitRun ends Run when the box channel or server fails, or when ctx ends. A runner error ends Run only before a close starts. After that, closeBox decides when Run ends, so a failed turn report cannot cancel the transcript retry.
-func waitRun(ctx context.Context, errs <-chan error, runnerErrs <-chan error, closing *atomic.Bool) error {
+func waitRun(ctx context.Context, errs <-chan error, runnerErrs <-chan error, piDone <-chan struct{}, closing *atomic.Bool) error {
 	for {
 		select {
 		case err := <-errs:
@@ -148,6 +148,11 @@ func waitRun(ctx context.Context, errs <-chan error, runnerErrs <-chan error, cl
 				return err
 			}
 			log.Printf("runner error after close started: %v", err)
+		case <-piDone:
+			if !closing.Load() {
+				return errors.New("pi RPC stream closed")
+			}
+			piDone = nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}

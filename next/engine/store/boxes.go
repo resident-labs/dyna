@@ -101,7 +101,7 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 		if next.Host != "" {
 			host = &next.Host
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END,failures=CASE WHEN ?='ready' THEN 0 ELSE failures END WHERE id=? AND state=? AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.State, next.ID, b.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END WHERE id=? AND state=? AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.ID, b.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -232,7 +232,8 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if (to == contract.BoxStarting || to == contract.BoxPending) && !due.IsZero() {
 			dueMS = due.UnixMilli()
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=? WHERE id=? AND state=?`, image, to, reason, dueMS, failures, b.ID, state)
+		// A completed turn after an early hello may have reset the current failure count.
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, image, to, reason, dueMS, state, failures, b.ID, state)
 		if err != nil {
 			return err
 		}
