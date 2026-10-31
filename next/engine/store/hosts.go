@@ -50,7 +50,7 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 func (s *Store) ClaimHostMaintenance(ctx context.Context, name contract.HostName, now time.Time) (bool, error) {
 	var claimed bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE hosts SET maintained_at=? WHERE name=? AND state='ready' AND maintained_at<=?", now.UnixMilli(), name, now.Add(-24*time.Hour).UnixMilli())
+		result, err := tx.ExecContext(ctx, "UPDATE hosts SET maintained_at=? WHERE name=? AND state='ready' AND maintained_at<=?", now.Add(-23*time.Hour).UnixMilli(), name, now.Add(-24*time.Hour).UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -59,6 +59,13 @@ func (s *Store) ClaimHostMaintenance(ctx context.Context, name contract.HostName
 		return err
 	})
 	return claimed, err
+}
+
+func (s *Store) FinishHostMaintenance(ctx context.Context, name contract.HostName, now time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET maintained_at=? WHERE name=?", now.UnixMilli(), name)
+		return err
+	})
 }
 
 func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
