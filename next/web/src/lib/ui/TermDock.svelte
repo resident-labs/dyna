@@ -6,6 +6,7 @@
   import type { TerminalTarget } from "../terminal.ts";
   import FloatWindow from "./FloatWindow.svelte";
   import Icon from "./Icon.svelte";
+  import Avatar from "./Avatar.svelte";
   import JobsPane from "./JobsPane.svelte";
   import StatusPill from "./StatusPill.svelte";
   import TermPane from "./TermPane.svelte";
@@ -67,7 +68,7 @@
     if (key === JOBS) jobsPane?.focus(); else panes[key]?.focus();
   }
   // Opens a session's shell directly, for the DM header's Terminal button.
-  export function shell(id: string, name: string) { open({ box: id }, `${name} · bash`); }
+  export function shell(id: string, name: string) { open({ box: id }, name); }
   function open(target: TerminalTarget, label: string) {
     picking = false;
     const tab = { key: next++, target, label };
@@ -122,8 +123,8 @@
   {#snippet header()}
     <div class="tabs" role="tablist" aria-label="Terminals">
       {#each tabs as tab (tab.key)}<span class="tab" class:active={tab.key === active}>
-        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{tab.label}
-          {#if tab.exited}<span class="muted">exited</span>{/if}</button>
+        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{#if "box" in tab.target}<Avatar kind="session" name={tab.label} size={16} />{/if}{tab.label}
+          {#if tab.exited}<span class="muted">exited{tab.exited.code === undefined ? "" : ` ${tab.exited.code}`}</span>{/if}</button>
         <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => void close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
       {#if jobs.length}<span class="tab" class:active={active === JOBS}>
         <button type="button" role="tab" class="jobs" aria-selected={active === JOBS} onclick={() => { only = undefined; void show(JOBS); }}>Jobs
