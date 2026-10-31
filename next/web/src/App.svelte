@@ -81,15 +81,15 @@
   const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
   let room = $derived(segment(/^\/r\/([^/]+)/));
   let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
-  let store: RoomStore | undefined = $state();
+  // Derived, not set in the effect below: the room's views render with the store of the room they show.
+  let store = $derived(room ? new RoomStore(room) : undefined);
   // The same rule per room for its open sessions.
   let sessionInitials = $derived(distinctInitials([...store?.sessions.values() ?? []].map(item => item.name)));
   setSessionLabels(() => sessionInitials);
   $effect(() => {
     // Home has no room, so no room controls or panels may show one.
-    if (!room) { store = undefined; return; }
-    const current = new RoomStore(room);
-    store = current;
+    const current = store;
+    if (!current) return;
     const opening = retrying(() => current.open().then(() => current.ready ? undefined : blockedBy(current.error)));
     reopen = opening.run;
     opening.run();
