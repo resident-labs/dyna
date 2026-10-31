@@ -4,6 +4,7 @@ import type { Request } from "./room.svelte.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
+  | { kind: "restarted"; key: string; session: string; at: string }
   | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[]; until?: string }
   | { kind: "request"; key: string; request: Request }
@@ -120,6 +121,11 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
     // shows as a failed row with its cause in the owner's words.
+    if (event.type === "session.restarted") {
+      flush(); dated(event.at);
+      rows.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
+      continue;
+    }
     if (event.type === "box.changed") {
       const { to, cause } = event.body;
       // A lost box that then fails has said why already.
@@ -287,6 +293,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
 // One plain line for an event inside an opened work row.
 export function describe(event: Event, name: Name): string {
   switch (event.type) {
+    case "session.restarted": return `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
     case "session.started": return `${name(event.body.session)} started`;
     case "session.closed": return `${name(event.body.session)} closed`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;

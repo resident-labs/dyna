@@ -31,6 +31,7 @@ const (
 	MethodComputerChanged   Method = "computer.changed"
 	MethodTurnOutput        Method = "turn.output"
 	MethodTurnActivity      Method = "turn.activity"
+	MethodTranscriptFetch   Method = "transcript.fetch"
 	MethodTranscriptAppend  Method = "transcript.append"
 	MethodTranscriptRead    Method = "transcript.read"
 	MethodShellJobEnded     Method = "shell.job.ended"
@@ -313,11 +314,12 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
-	Session SessionID   `json:"session"`
-	Box     BoxID       `json:"box"`
-	Model   ModelChoice `json:"model"`
-	Repos   []BoxRepo   `json:"repos,omitempty"`
-	Rules   []RoomRule  `json:"rules,omitempty"`
+	Session     SessionID        `json:"session"`
+	Box         BoxID            `json:"box"`
+	Model       ModelChoice      `json:"model"`
+	Repos       []BoxRepo        `json:"repos,omitempty"`
+	Rules       []RoomRule       `json:"rules,omitempty"`
+	Transcripts []TranscriptFile `json:"transcripts,omitempty"`
 }
 type TurnOutputRequest struct {
 	ShellJobs int          `json:"shellJobs"`
@@ -488,3 +490,16 @@ func (TurnSteer) BoxMessageType() BoxMessageType { return "turn.steer" }
 func (TurnSteer) isBoxMessageBody()              {}
 func (TurnStop) BoxMessageType() BoxMessageType  { return "turn.stop" }
 func (TurnStop) isBoxMessageBody()               {}
+
+type TranscriptFetchRequest struct {
+	Path   string `json:"path"`
+	Offset int64  `json:"offset"`
+}
+type TranscriptFetchResponse struct {
+	Bytes []byte `json:"bytes"`
+}
+
+type TranscriptFile struct {
+	Path  string `json:"path"`
+	Bytes int64  `json:"bytes"`
+}
