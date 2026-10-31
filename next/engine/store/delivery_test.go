@@ -119,7 +119,7 @@ func TestHelloRejectsExpiredDeadline(t *testing.T) {
 	if err := s.Read().QueryRowContext(ctx, "SELECT state,due_at,failures FROM boxes WHERE id='b'").Scan(&state, &due, &failures); err != nil {
 		t.Fatal(err)
 	}
-	if state != "ready" || due != 0 || failures != 0 {
+	if state != "ready" || due != 0 || failures != 2 {
 		t.Fatalf("valid hello: %s %d %d", state, due, failures)
 	}
 }

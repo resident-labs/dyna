@@ -214,5 +214,5 @@ func Run(ctx context.Context) error {
 			}
 		})
 	}()
-	return waitRun(ctx, errs, runner.Errors(), &closing)
+	return waitRun(ctx, errs, runner.Errors(), h.Done(), &closing)
 }
