@@ -8,7 +8,7 @@
   {#if row.error}<span class="error">{row.error}</span>{/if}</p>
 
 <style>
-  .failed { margin: 0; padding: 8px 16px 2px 60px;display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  .failed { margin: 0; padding: 8px 16px 2px var(--gutter);display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
   .error { color: var(--muted); }
   time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 </style>
