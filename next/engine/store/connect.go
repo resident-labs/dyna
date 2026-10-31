@@ -52,6 +52,17 @@ func (s *Store) InitializeConnectLink(ctx context.Context, epoch int64) error {
 	})
 }
 
+// UnlinkConnect invalidates the link and all replay nonces atomically.
+func (s *Store) UnlinkConnect(ctx context.Context) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "UPDATE connect_link_state SET linked=0 WHERE id=1"); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM connect_nonces")
+		return err
+	})
+}
+
 // ConsumeConnectNonce advances the epoch and consumes the nonce in one transaction.
 func (s *Store) ConsumeConnectNonce(ctx context.Context, epoch int64, nonce string, now, expires time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
