@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
-  import { blockedBy, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
+  import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
   import Blocked from "./lib/ui/Blocked.svelte";
   import Feed from "./lib/ui/Feed.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
@@ -180,6 +180,19 @@
   const fileDrafts = new Map<string, FileDraft>();
   const files = (key: string) => { let draft = fileDrafts.get(key); if (!draft) fileDrafts.set(key, draft = new FileDraft()); return draft; };
   let key = $derived(`${room}/${session ?? ""}`);
+  // Pausing stops new turns in the room; attention keeps the state current from the stream.
+  let paused = $derived(attention.rooms.get(room ?? "")?.paused ?? false);
+  let pauseFailed = $state(false);
+  function pause() {
+    pauseFailed = false;
+    if (room) void call("room.pause", { room, paused: !paused }).catch(() => { pauseFailed = true; });
+  }
+  // A DM's running turn, which the composer can stop.
+  let stop = $derived.by(() => {
+    const running = session, current = store;
+    if (!running || !current?.turns.has(running)) return undefined;
+    return { stopping: current.stopping.has(running), failed: current.stopFailed.has(running), run: () => current.stop(running) };
+  });
   function send() {
     if (!store || !room) return;
     const text = drafts[key] ?? "", quote = quotes[key], draft = files(key);
@@ -418,6 +431,7 @@
           <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
           <button type="button" onclick={() => void terminals?.pick()}><Icon name="terminal" />Terminal</button>
           <button type="button" aria-pressed={section === "rules"} onclick={() => { section = "rules"; }}><Icon name="rules" />Rules<span class="count">{store.rules.size}</span></button>
+          <button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>
         {/if}
       {:else}
         {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
@@ -445,7 +459,7 @@
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
         {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title="Open a terminal in this session's box" onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
-        <span class="room-menu"><RoomMenu bind:this={roomMenu} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} /></span>{/if}
+        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
         title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
@@ -467,8 +481,10 @@
     </div>
     {#if room && !unavailable}
       {#if store}<WorkingLine {store} {home} />{/if}
+      {#if paused || pauseFailed}<p class="paused" role="status">{#if pauseFailed}The room did not change. Try again.{:else}Room paused. No session starts a new turn.{/if}
+        {#if paused}<button type="button" class="retry" onclick={pause}>Resume</button>{/if}</p>{/if}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
-        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} />
+        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} {stop} />
     {/if}{/if}
     <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} jobs={jobSessions} failures={jobFailures}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
@@ -538,6 +554,8 @@
   .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
+  /* One quiet line on the working line's edge; only its Resume acts. */
+  .paused { flex: none; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; }
   .faces { display: flex; }
   /* Faces side by side, ringed in the page color, so no face covers another's initials, which stay on the type scale. */
   .faces > :global(.avatar) { box-shadow: 0 0 0 2px var(--bg); font-size: 11px; letter-spacing: 0; }

@@ -2,6 +2,8 @@
   // Hand-drawn 16 px line icons on a 24-unit grid.
   const paths = {
     send: "M5 12h13M12 5l7 7-7 7",
+    stop: "M7 7h10v10H7z",
+    pause: "M9 5v14M15 5v14",
     monitor: "M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM8 20h8M12 16v4",
     home: "M4 10.5 12 4l8 6.5V20h-5v-6H9v6H4z",
     room: "M9 4 7 20M17 4l-2 16M4 9h16M3 15h16",
