@@ -3,6 +3,7 @@ package pi
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -300,6 +301,16 @@ func (h *Harness) SessionFile() string { return h.session }
 
 // Done closes when Pi's RPC stream ends.
 func (h *Harness) Done() <-chan struct{} { return h.done }
+
+func completeLines(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), nil, nil
+	}
+	return 0, nil, nil
+}
 
 func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	h.deliveryMu.Lock()
