@@ -111,7 +111,8 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		var result contract.TurnEnded
 		var err error
 		cause := contract.CauseHarnessFailed
-		// A turn that runs keeps its model; the next turn applies a changed one.
+		// A running turn keeps its model, and a plain reconnect changes nothing. The next turn applies a changed model.
+		// A turn that resumes after a box restart runs on the session's current profile, because box.hello starts Pi on it.
 		applyModel := func() error {
 			if start.Model.ID == "" || start.Model == r.Model {
 				return nil
