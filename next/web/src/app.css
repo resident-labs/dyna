@@ -2,7 +2,7 @@
   color-scheme: light dark;
   /* Warm off-white. --focus is the one accent, for focus rings, selection and links. */
   --bg: #fbf9f6; --sidebar: #f3efe9; --raised: #ffffff; --line: rgb(60 40 20 / 11%); --selected: rgb(60 40 20 / 8%);
-  --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #63605a; --attention: #a45500; --danger: #b3332e;
+  --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #63605a; --attention: #a45500; --danger: #b3332e; --success: #2f7d4a;
   /* Identity colors: the hue comes from the name, these set lightness and chroma per theme. */
   --id-name: 47% 0.13; --id-face: 89% 0.05; --id-initials: 38% 0.1;
   /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
@@ -16,7 +16,7 @@ strong, b, h1, h2, h3, h4 { font-weight: 600; }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #23201d; --sidebar: #1a1816; --raised: #2d2926; --line: rgb(255 235 210 / 8%); --selected: rgb(255 235 210 / 9%);
-    --hover: rgb(255 235 210 / 4%); --focus: #93a6f5; --text: #ece6de; --muted: #a39b91; --attention: #efb66d; --danger: #e67a76;
+    --hover: rgb(255 235 210 / 4%); --focus: #93a6f5; --text: #ece6de; --muted: #a39b91; --attention: #efb66d; --danger: #e67a76; --success: #86c79b;
     --id-name: 78% 0.11; --id-face: 40% 0.08; --id-initials: 92% 0.04;
   }
 }
