@@ -154,3 +154,27 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	s.reconciler.Kick()
 	return contract.SessionCloseResponse{}, nil
 }
+
+// SessionRestart retries an open session whose box has failed.
+func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal, req contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.SessionRestartResponse{}, forbidden()
+	}
+	session, err := s.store.Session(ctx, req.Session)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	event, err := s.event(session.Room, caller, contract.BoxChanged{})
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	restarted, err := s.store.RestartSession(ctx, req.Session, event)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	if !restarted {
+		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "session is closing or its box has not failed"}
+	}
+	s.reconciler.Kick()
+	return contract.SessionRestartResponse{}, nil
+}

@@ -11,6 +11,7 @@ import (
 type PendingReason string
 
 const (
+	PendingCreateRetry    PendingReason = "create-retry"
 	PendingNoReadyHost    PendingReason = "no-ready-host"
 	PendingCPU            PendingReason = "cpu"
 	PendingMemory         PendingReason = "memory"
