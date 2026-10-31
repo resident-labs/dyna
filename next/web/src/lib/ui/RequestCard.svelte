@@ -50,7 +50,7 @@
     <li><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</li>{/each}</ul>{/if}
   {#if request.state === "pending"}
     <div class="actions">
-      <input type="text" bind:value={reason} placeholder="Reason (optional)" aria-label="Reason for Deny (optional)" disabled={busy} />
+      <input type="text" bind:value={reason} placeholder="Note (optional)" aria-label="Note to the session (optional)" disabled={busy} />
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
       <button type="button" class="approve" onclick={() => void decide(true)} disabled={busy}>Approve</button>
     </div>
