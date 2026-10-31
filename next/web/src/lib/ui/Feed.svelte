@@ -35,7 +35,7 @@
       {:else}<p class="pending">{item.text}</p>{/if}
     {/snippet}
   </VirtualList>
-{:else}
+{:else if store.ready}
   <p class="empty">{empty}</p>
 {/if}
 {#if !store.atPresent}

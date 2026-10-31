@@ -1,10 +1,20 @@
+<script lang="ts" module>
+  import DOMPurify from "dompurify";
+  // Links in posts open in a new tab without access to this page.
+  DOMPurify.addHook("afterSanitizeAttributes", node => {
+    if (node instanceof HTMLAnchorElement) {
+      node.target = "_blank";
+      node.rel = "noopener noreferrer";
+    }
+  });
+</script>
+
 <script lang="ts">
   import { marked } from "marked";
-  import DOMPurify from "dompurify";
   import { formatTime, type Row } from "../feed.ts";
   let { row, author }: { row: Extract<Row, { kind: "post" }>; author: string } = $props();
-  // Markdown from any author is sanitized before it reaches the page.
-  let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true })));
+  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view.
+  let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] }));
 </script>
 
 <article class="post" class:first={row.first}>

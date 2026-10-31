@@ -6,7 +6,7 @@
     Virtualizer, elementScroll, measureElement, observeElementOffset, observeElementRect,
     type VirtualItem, type VirtualizerOptions,
   } from "@tanstack/virtual-core";
-  import { untrack, type Snippet } from "svelte";
+  import { tick, untrack, type Snippet } from "svelte";
 
   let { items, key, row, label, follow = false, estimate = 44, onstart, onend, element = $bindable() }: {
     items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string;
@@ -38,6 +38,13 @@
     virtualizer._willUpdate();
     if (untrack(() => follow)) virtualizer.scrollToEnd();
     return cleanup;
+  });
+  // A jump back to the present lands on the newest row once the new rows render;
+  // scrollToEnd keeps retargeting as they are measured.
+  let following = untrack(() => follow);
+  $effect(() => {
+    if (follow && !following) void tick().then(() => virtualizer.scrollToEnd());
+    following = follow;
   });
 
   function scrolled() {
