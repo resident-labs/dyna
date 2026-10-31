@@ -7,6 +7,17 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func TestTranscriptNewestAndIncomplete(t *testing.T) {
+	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}
+{"type":"message","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"old"},{"type":"toolCall","id":"b","name":"new"}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"b","content":[{"type":"text","text":"ok"}]}}
+{"type":"message"`
+	steps, truncated, err := ReadSteps(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "turn_a"}, "", 1)
+	if err != nil || !truncated || len(steps) != 1 || steps[0].Tool != "new" || steps[0].Preview != "ok" {
+		t.Fatalf("steps=%+v truncated=%v err=%v", steps, truncated, err)
+	}
+}
+
 func TestTranscriptSteps(t *testing.T) {
 	data := `{"type":"message","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"1","content":"start"}}
 {"type":"message","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"/tmp/a.go"}}]}}
