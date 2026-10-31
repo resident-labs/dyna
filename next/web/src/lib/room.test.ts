@@ -247,20 +247,19 @@ test("session.list gives running turns and failures, and a live DM answer lands 
   } finally { server.restore(); }
 });
 
-test("a failed turn marks its session until the owner sees it, in this and later page views, until it fails again", () => {
-  const saved = new Map<string, string>();
-  const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value); } };
+test("a failed turn marks its session until the owner reads past it in the feed or the DM, and a later failure marks it again", () => {
   const failed = (seq: number) => event(seq, { type: "turn.ended", body: { session: "s", turn: String(seq), outcome: "failed", usage } });
-  const room = new RoomStore("r", () => () => {}, storage);
+  const read = (conversation: Conversation, seq: number) => event(0, { type: "conversation.read", body: { room: "r", conversation, seq } });
+  const room = new RoomStore("r", () => () => {});
   room.apply(failed(1));
   assert.equal(room.unseen("s"), true);
-  room.see("s");
+  room.apply(read(dm, 1));
   assert.equal(room.unseen("s"), false);
-  const later = new RoomStore("r", () => () => {}, storage);
-  later.apply(failed(1));
-  assert.equal(later.unseen("s"), false);
-  later.apply(failed(2));
-  assert.equal(later.unseen("s"), true);
+  room.apply(failed(2));
+  room.apply(read(dm, 1));
+  assert.equal(room.unseen("s"), true);
+  room.apply(read(feed, 2));
+  assert.equal(room.unseen("s"), false);
 });
 
 test("session.list and later events set and clear the running computers", async () => {

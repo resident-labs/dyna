@@ -45,7 +45,7 @@
   $effect(() => {
     // Home has no room, so no room controls or panels may show one.
     if (!room) { store = undefined; return; }
-    const current = new RoomStore(room, undefined, localStorage);
+    const current = new RoomStore(room);
     store = current;
     void current.open();
     return () => current.close();
@@ -210,8 +210,9 @@
   let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
-  // Opening a session's DM shows the owner its failure, which clears the mark.
-  $effect(() => { if (session && store?.unseen(session)) store.see(session); });
+  // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
+  $effect(() => { const read = attention.rooms.get(room ?? "")?.lastRead; if (store && read) store.noteRead({ kind: "feed" }, read); });
+  $effect(() => { if (session && store?.unseen(session)) store.see({ kind: "dm", session }, store.failed.get(session) ?? 0); });
   const trouble = (id: string) => {
     const box = store?.boxes.get(id);
     // A failed turn shows until the owner sees it or the session's next turn succeeds.
