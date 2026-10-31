@@ -148,11 +148,11 @@ func (in *Input) releaseAll(ctx context.Context, d *DevTools) error {
 		if in.buttons&bit == 0 {
 			continue
 		}
-		in.buttons &^= bit
-		raw, _ := json.Marshal(mouseParams{Type: "mouseReleased", X: in.lastX, Y: in.lastY, Button: string(button), Buttons: in.buttons, ClickCount: 1})
+		raw, _ := json.Marshal(mouseParams{Type: "mouseReleased", X: in.lastX, Y: in.lastY, Button: string(button), Buttons: in.buttons &^ bit, ClickCount: 1})
 		if _, err := d.Call(ctx, "Input.dispatchMouseEvent", raw); err != nil {
 			return err
 		}
+		in.buttons &^= bit
 	}
 	return nil
 }
