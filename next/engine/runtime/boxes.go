@@ -199,6 +199,12 @@ func (b *Boxes) record(name contract.HostName, ok bool, sample podman.Load, now 
 	b.loads[name] = state
 }
 
+func (b *Boxes) hostMemory(name contract.HostName) int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.loads[name].summary.MemUsed
+}
+
 // controlPlane samples the engine host on the same schedule as remote hosts.
 func (b *Boxes) controlPlane(data string) {
 	root := b.Proc
@@ -303,33 +309,33 @@ func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegi
 	return h, b.HostData, err
 }
 
-func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error {
+func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool, error) {
 	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	check := h.Check(ctx, podman.CheckOptions{HostData: b.HostData, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin})
 	if !check.Ready() {
 		for _, item := range check.Items {
 			if !item.OK {
 				if item.Name == podman.CheckPodman {
-					return podman.RequiredError{}
+					return false, podman.RequiredError{}
 				}
-				return fmt.Errorf("host check %s: %s", item.Name, item.Reason)
+				return false, fmt.Errorf("host check %s: %s", item.Name, item.Reason)
 			}
 		}
-		return fmt.Errorf("host check failed")
+		return false, fmt.Errorf("host check failed")
 	}
 	if err := b.installBinary(ctx, h); err != nil {
-		return err
+		return false, err
 	}
 	same, err := engineHost(ctx, h)
 	if err != nil {
-		return err
+		return false, err
 	}
 	record := box.Host{Rooms: req.Rooms, EngineHost: &same, Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
 	if err := b.Store.AddHost(ctx, record); err != nil {
-		return err
+		return false, err
 	}
 	b.mu.Lock()
 	if b.loads == nil {
@@ -338,7 +344,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 	b.loads[req.Name] = hostLoad{summary: contract.HostSummary{Reachable: true}}
 	b.cache(req.Name, h)
 	b.mu.Unlock()
-	return nil
+	return check.NoSwap, nil
 }
 
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
@@ -624,8 +630,8 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 	return r.StopHostexec(ctx, scope)
 }
 
-// Recreate replaces a moved container without touching its volume.
-func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, oldSlice string) error {
+// Recreate replaces a container without touching its volume or a legacy parent slice.
+func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ string) error {
 	if err := b.restoreHost(ctx, spec.Host); err != nil {
 		return err
 	}
@@ -638,11 +644,6 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, old
 	}
 	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
 		return err
-	}
-	if oldSlice != "" && oldSlice != spec.Slice {
-		if err := h.RemoveSlice(ctx, oldSlice); err != nil {
-			return err
-		}
 	}
 	slice, c := b.container(spec, image)
 	if err := h.EnsureSlice(ctx, slice); err != nil {

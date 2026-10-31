@@ -32,7 +32,7 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, budgetParent contract.BoxID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if parent != "" {
 			var state string
@@ -62,7 +62,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,parent,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, nullableBox(budgetParent), "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -83,13 +83,6 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		_, err = s.AppendEvent(tx, boxEvent)
 		return err
 	})
-}
-
-func nullableBox(id contract.BoxID) *contract.BoxID {
-	if id == "" {
-		return nil
-	}
-	return &id
 }
 
 func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {
@@ -249,10 +242,7 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d con
 		return err
 	}
 	if d.Wake && d.To.Kind == contract.PrincipalSession {
-		_, err = tx.ExecContext(ctx, `WITH RECURSIVE ancestors(id,parent) AS (
-			SELECT b.id,b.parent FROM boxes b JOIN sessions s ON s.id=b.session JOIN rooms r ON r.id=s.room WHERE b.session=? AND r.paused_at IS NULL
-			UNION SELECT b.id,b.parent FROM boxes b JOIN ancestors a ON b.id=a.parent
-		) UPDATE boxes SET want='run' WHERE id IN (SELECT id FROM ancestors) AND want='stop'`, d.To.Session)
+		_, err = tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE session=? AND want='stop' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NULL)`, d.To.Session)
 		if err != nil {
 			return err
 		}

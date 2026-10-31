@@ -19,4 +19,3 @@ func (closingInterleaveBox) MaintainHost(context.Context, contract.HostName) err
 func (heldRemoveBox) MaintainHost(context.Context, contract.HostName) error         { return nil }
 func (*movingHost) MaintainHost(context.Context, contract.HostName) error           { return nil }
 func (*retryHost) MaintainHost(context.Context, contract.HostName) error            { return nil }
-func (*orderedRecreateHost) MaintainHost(context.Context, contract.HostName) error  { return nil }
