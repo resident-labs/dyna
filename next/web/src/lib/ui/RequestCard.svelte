@@ -11,7 +11,10 @@
     pending: "", approved: "Approved", denied: "Denied", expired: "Expired", withdrawn: "Withdrawn", done: "Approved and ran", failed: "Approved",
   };
   // The root session is the open session with no parent.
-  let root = $derived.by(() => { const open = request.by.session ? store.sessions.get(request.by.session) : undefined; return open !== undefined && !open.parent; });
+  let open = $derived(request.by.session ? store.sessions.get(request.by.session) : undefined);
+  let root = $derived(open !== undefined && !open.parent);
+  // An agent-class request may also be decided by the requester's parent session.
+  let parent = $derived(open?.parent && store.names.get(open.parent));
   let target = $derived(request.card.target.kind === "room" ? "this room" : `${request.card.target.kind} ${request.card.target.name}`);
   let reason = $state("");
   let busy = $state(false);
@@ -30,7 +33,8 @@
 <article class="request" class:decided={request.state !== "pending"}>
   <strong>{request.card.title}</strong>
   <p class="meta"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={20} /><span class="who">{name(request.by)}</span>
-    <span>· {target}</span>{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>{/if}</p>
+    <span>· {target}</span>{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>
+      {#if request.class === "agent" && parent}<span>· {parent} can also decide</span>{/if}{/if}</p>
   {#if request.card.body}<p class="body">{request.card.body}</p>{/if}
   {#if request.card.command?.length}<pre>{request.card.command.join(" ")}</pre>{/if}
   {#if request.card.changes?.length}<ul class="changes">{#each request.card.changes as change (change.field)}

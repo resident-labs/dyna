@@ -49,10 +49,11 @@ test("folds sessions, box, turns and pending operations", () => {
   assert.equal(room.sessions.has("s"), false);
 });
 
-test("the waiting count starts from op.list, follows op events and ignores events at or before the baseline", async () => {
+test("the waiting count holds pending owner-class operations from op.list and op events after the baseline", async () => {
   const card = { title: "Open a pull request", target: { kind: "repo", name: "web" } } as const;
-  const listed = { id: "a", kind: "pr.open", room: "r", by: { kind: "session", session: "s" }, class: "agent", card, args: { title: "", body: "", base: "main", draft: false },
+  const listed = { id: "a", kind: "pr.open", room: "r", by: { kind: "session", session: "s" }, class: "owner", card, args: { title: "", body: "", base: "main", draft: false },
     state: "pending", created: "", expires: "" } as const;
+  const requested = (seq: number, id: string, level: "agent" | "owner") => event(seq, { type: "op.requested", body: { id, kind: "pr.open", by: listed.by, class: level, card, expires: "" } });
   const original = globalThis.fetch;
   globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("op.list") ? { operations: [listed] } : { sessions: [], seq: 10 }));
   try {
@@ -61,10 +62,11 @@ test("the waiting count starts from op.list, follows op events and ignores event
     assert.equal(room.waiting, 1);
     const decided = (seq: number, id: string) => event(seq, { type: "op.decided", body: { id, state: "approved", decision: { by: { kind: "owner" }, approved: true, at: "" } } });
     room.apply(decided(10, "a"));
-    room.apply(event(11, { type: "op.requested", body: { id: "b", kind: "pr.open", by: listed.by, class: "agent", card, expires: "" } }));
-    assert.equal(room.waiting, 2);
-    room.apply(decided(12, "a"));
-    room.apply(event(13, { type: "op.ran", body: { id: "a", state: "failed", result: { exitCode: 1, error: "push failed" } } }));
+    room.apply(requested(11, "b", "agent"));
+    room.apply(requested(12, "c", "owner"));
+    assert.deepEqual([room.waiting, room.requests.get("b")?.state], [2, "pending"]);
+    room.apply(decided(13, "a"));
+    room.apply(event(14, { type: "op.ran", body: { id: "a", state: "failed", result: { exitCode: 1, error: "push failed" } } }));
     assert.deepEqual([room.waiting, room.requests.get("a")?.state, room.requests.get("a")?.result?.error], [1, "failed", "push failed"]);
   } finally { globalThis.fetch = original; }
 });
