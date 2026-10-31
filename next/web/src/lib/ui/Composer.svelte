@@ -153,7 +153,7 @@
   .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
   /* v1's draft chip: a left rule in the focus color, the label, and the post folded to three lines. */
   .quote { margin-bottom: 8px; padding: 6px 10px; border: 1px solid var(--line); border-left: 3px solid var(--focus); border-radius: 6px; background: var(--sidebar); }
-  .label { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .label { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 400; }
   .label span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .label strong { color: var(--text); font-weight: 600; }
   .quote button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px; color: var(--muted); cursor: pointer; }
