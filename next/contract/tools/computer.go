@@ -6,6 +6,6 @@ func computerActions() []BoxAction {
 		{Tool: "computer", Name: "click", Handler: ComputerClick, Request: typ[SelectorRequest](), Help: "Click the element at selector.", CLI: []string{"computer click"}},
 		{Tool: "computer", Name: "type", Handler: ComputerType, Request: typ[TypeRequest](), Help: "Type text into the element at selector.", CLI: []string{"computer type"}},
 		{Tool: "computer", Name: "text", Handler: ComputerText, Request: typ[SelectorRequest](), Help: "Read page text. Omit selector to read the whole page.", CLI: []string{"computer text"}},
-		{Tool: "computer", Name: "screenshot", Handler: ComputerScreenshot, Request: typ[FileRequest](), Help: "Save a screenshot to file.", CLI: []string{"computer screenshot"}},
+		{Tool: "computer", Name: "screenshot", Handler: ComputerScreenshot, Request: typ[struct{}](), Help: "Return a screenshot image.", CLI: []string{"computer screenshot"}},
 	}
 }
