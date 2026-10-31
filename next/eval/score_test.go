@@ -26,3 +26,15 @@ func TestScoreTaskUsesObservedCallsAndState(t *testing.T) {
 		t.Fatalf("forbidden side effect passed: %+v", got)
 	}
 }
+
+func TestReadScoreUsesUniqueAnswerNotCalls(t *testing.T) {
+	want := Expectation{ReadValue: "invented-4f31"}
+	got := ScoreTask(want, Observation{Complete: true, Answer: "invented-4f31"})
+	if !got.Correct {
+		t.Fatal("unique value was not credited")
+	}
+	got = ScoreTask(want, Observation{Complete: true, Calls: []Call{{Operation: "events.list"}}, Answer: "not found"})
+	if got.Correct {
+		t.Fatal("calls alone passed a read")
+	}
+}
