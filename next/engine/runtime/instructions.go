@@ -8,105 +8,69 @@ import (
 	"path/filepath"
 
 	"github.com/resident-labs/dyna/box/podman"
-	"github.com/resident-labs/dyna/contract"
 )
 
-// PublishInstructions repairs every reachable host after a local save. A later
-// heartbeat retries failures; the committed local save remains authoritative.
+type instructionVersion struct{ generation, saves uint64 }
+
+// PublishInstructions marks the local commit before starting remote work.
 func (b *Boxes) PublishInstructions(ctx context.Context) {
-	hosts, err := b.Store.Hosts(ctx)
-	if err != nil {
-		log.Printf("instructions: list hosts: %v", err)
-		return
-	}
-	for _, record := range hosts {
-		h, err := b.host(ctx, record.Name)
-		if err == nil {
-			err = b.syncInstructions(ctx, h)
-		}
+	b.instructionSaves.Add(1)
+	go func() {
+		hosts, err := b.Store.Hosts(ctx)
 		if err != nil {
-			b.mu.Lock()
-			if b.instructionFailures == nil {
-				b.instructionFailures = make(map[contract.HostName]uint64)
-			}
-			b.instructionFailures[record.Name]++
-			b.mu.Unlock()
-			log.Printf("host %s: instructions: %v", record.Name, err)
+			log.Printf("instructions: list hosts: %v", err)
+			return
 		}
-	}
+		for _, record := range hosts {
+			h, err := b.host(ctx, record.Name)
+			if err == nil {
+				err = b.syncInstructions(ctx, h)
+			}
+			if err != nil {
+				log.Printf("host %s: instructions: %v", record.Name, err)
+			}
+		}
+	}()
 }
 
-func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host, extra ...contract.RoomID) error {
+func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
 	if b.InstructionsDir == "" {
 		return nil
 	}
 	b.instructionsMu.Lock()
 	defer b.instructionsMu.Unlock()
-	rooms := make(map[contract.RoomID]bool)
-	for _, room := range extra {
-		rooms[room] = true
+	version := instructionVersion{h.Generation(), b.instructionSaves.Load()}
+	if version.generation != 0 && b.instructionSynced[h] == version {
+		return nil
 	}
-	records, err := b.Store.Boxes(ctx)
-	if err != nil {
-		return err
-	}
-	for _, record := range records {
-		session, err := b.Store.Session(ctx, record.Session)
-		if err != nil {
-			return err
-		}
-		rooms[session.Room] = true
-	}
+	paths := []string{filepath.Join("global", "AGENTS.md")}
 	entries, err := os.ReadDir(filepath.Join(b.InstructionsDir, "rooms"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			rooms[contract.RoomID(entry.Name())] = true
+			paths = append(paths, filepath.Join("rooms", entry.Name(), "AGENTS.md"))
 		}
 	}
-	paths := []string{filepath.Join("global", "AGENTS.md")}
-	for room := range rooms {
-		if room == "" || filepath.Base(string(room)) != string(room) || room == "." || room == ".." {
-			return errors.New("invalid instruction room ID")
-		}
-		paths = append(paths, filepath.Join("rooms", string(room), "AGENTS.md"))
-	}
+	var files []podman.InstructionFile
 	for _, path := range paths {
 		data, err := os.ReadFile(filepath.Join(b.InstructionsDir, path))
 		if errors.Is(err, os.ErrNotExist) {
-			data, err = []byte{}, nil
+			continue
 		}
 		if err != nil {
 			return err
 		}
-		if err := h.SyncInstruction(ctx, filepath.Join(b.HostData, "instructions", path), data); err != nil {
-			return err
-		}
+		files = append(files, podman.InstructionFile{Path: filepath.Join(b.HostData, "instructions", path), Data: data})
 	}
+	if err := h.SyncInstructions(ctx, files); err != nil {
+		return err
+	}
+	if b.instructionSynced == nil {
+		b.instructionSynced = make(map[*podman.Host]instructionVersion)
+	}
+	version.generation = h.Generation()
+	b.instructionSynced[h] = version
 	return nil
-}
-
-// instructionHeartbeat retries failed repairs and skips unchanged masters.
-func (b *Boxes) instructionHeartbeat(ctx context.Context, name contract.HostName, h *podman.Host) func(bool) {
-	var repaired, repairedFailures uint64
-	return func(ok bool) {
-		if !ok {
-			return
-		}
-		generation := h.Generation()
-		b.mu.Lock()
-		failures := b.instructionFailures[name]
-		b.mu.Unlock()
-		if generation != 0 && generation == repaired && failures == repairedFailures {
-			return
-		}
-		if err := b.syncInstructions(ctx, h); err != nil {
-			log.Printf("host %s: instructions: %v", name, err)
-			return
-		}
-		repaired = generation
-		repairedFailures = failures
-	}
 }

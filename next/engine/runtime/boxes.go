@@ -14,6 +14,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -44,31 +45,32 @@ type heartbeatStore interface {
 }
 
 type Boxes struct {
-	HeartbeatStore      heartbeatStore
-	Store               boxStore
-	Sockets             *api.Sockets
-	Runtime             string
-	HostData            string
-	InstructionsDir     string
-	instructionsMu      sync.Mutex
-	hostRunner          podman.Runner
-	machineIDFile       string
-	instructionFailures map[contract.HostName]uint64
-	Version             string
-	PiTarball           []byte
-	Mirror              *enginegit.Mirror
-	Images              *engineimages.Builder
-	Context             context.Context
-	Pressure            *engine.Service
-	Proc                string // Proc is the folder with stat and meminfo; empty means /proc.
-	mu                  sync.Mutex
-	hosts               map[contract.HostName]*podman.Host
-	restored            map[contract.HostName]bool
-	loads               map[contract.HostName]hostLoad
-	cpuPrev             *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
-	binOnce             sync.Once
-	binSum              string
-	binErr              error
+	HeartbeatStore    heartbeatStore
+	Store             boxStore
+	Sockets           *api.Sockets
+	Runtime           string
+	HostData          string
+	InstructionsDir   string
+	instructionsMu    sync.Mutex
+	hostRunner        podman.Runner
+	machineIDFile     string
+	instructionSaves  atomic.Uint64
+	instructionSynced map[*podman.Host]instructionVersion
+	Version           string
+	PiTarball         []byte
+	Mirror            *enginegit.Mirror
+	Images            *engineimages.Builder
+	Context           context.Context
+	Pressure          *engine.Service
+	Proc              string // Proc is the folder with stat and meminfo; empty means /proc.
+	mu                sync.Mutex
+	hosts             map[contract.HostName]*podman.Host
+	restored          map[contract.HostName]bool
+	loads             map[contract.HostName]hostLoad
+	cpuPrev           *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+	binOnce           sync.Once
+	binSum            string
+	binErr            error
 }
 
 type hostLoad struct {
@@ -121,10 +123,13 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
-		repair := b.instructionHeartbeat(b.Context, name, h)
 		h.Heartbeat(b.Context, ticker.C, b.HostData, func(ok bool, load podman.Load) {
 			now := time.Now()
-			repair(ok)
+			if ok {
+				if err := b.syncInstructions(b.Context, h); err != nil {
+					log.Printf("host %s: instructions: %v", name, err)
+				}
+			}
 			b.record(name, ok, load, now)
 			b.reportHeartbeat(b.Context, name, ok, load, now)
 		}, b.pressure(name))
@@ -363,7 +368,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	if err != nil {
 		return "", err
 	}
-	if err := b.syncInstructions(ctx, h, spec.Room); err != nil {
+	if err := b.syncInstructions(ctx, h); err != nil {
 		return "", err
 	}
 	session, err := b.Store.Session(ctx, spec.Session)
@@ -664,7 +669,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 	if err != nil {
 		return err
 	}
-	if err := b.syncInstructions(ctx, h, spec.Room); err != nil {
+	if err := b.syncInstructions(ctx, h); err != nil {
 		return err
 	}
 	if err := h.StopContainer(ctx, spec.Box); err != nil {
