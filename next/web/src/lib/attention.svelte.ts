@@ -9,7 +9,8 @@ export class Attention {
   readonly rooms = new SvelteMap<string, RoomSummary>();
   readonly waiting = new SvelteMap<string, SvelteSet<string>>();
   readonly working = new SvelteMap<string, SvelteSet<string>>();
-  // A working session's latest activity label, such as "read spec.md", as the engine sends it.
+  // A working session's latest activity label, such as "read spec.md", as the engine sends it. The newest label is
+  // last, so a room's busiest agent is its last working entry; room.list seeds each room's newest one.
   readonly activity = new SvelteMap<string, string>();
   // Per room, the open sessions, once a session.list answer seeds the room; the stream keeps them current.
   readonly sessions = new SvelteMap<string, SvelteSet<string>>();
@@ -34,6 +35,7 @@ export class Attention {
     this.rooms.set(room.id, room);
     this.waiting.set(room.id, new SvelteSet(room.waiting));
     this.working.set(room.id, new SvelteSet(room.working));
+    if (room.latest && !this.activity.has(room.latest.session)) this.activity.set(room.latest.session, room.latest.label);
   }
 
   // A room created after the page loaded first shows as an event from a room the page does not know, such as its
@@ -94,7 +96,10 @@ export class Attention {
     // A live activity label has seq 0, so it comes before the seq check.
     if (event.type === "turn.activity") {
       const { session, turn, label } = event.body;
-      if (this.working.get(event.room ?? "")?.has(session) && (this.turns.get(session) ?? turn) === turn) this.activity.set(session, label);
+      if (this.working.get(event.room ?? "")?.has(session) && (this.turns.get(session) ?? turn) === turn) {
+        this.activity.delete(session);
+        this.activity.set(session, label);
+      }
       return;
     }
     // A read position also has seq 0. The feed's moves only forward, so a room store opened later starts from it.
