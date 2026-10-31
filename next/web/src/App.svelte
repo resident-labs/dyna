@@ -526,7 +526,7 @@
       <span class="heading"><strong>{title}</strong>
         {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
-      {#if store && !unavailable}{#if room}<JobsTool bind:this={jobsTool} sessions={toolSessions} failures={toolFailures} phone={phone.current}
+      {#if store && !unavailable}{#if room}<JobsTool bind:this={jobsTool} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} allFailures={[...store.failedJobs]} phone={phone.current}
         onopen={(item, job) => terminals?.openJob(item, job)} onseen={key => store?.failedJobs.delete(key)} />{/if}
         <button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>

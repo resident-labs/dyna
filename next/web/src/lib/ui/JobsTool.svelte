@@ -12,8 +12,8 @@
   // it, or a sheet on a phone, with the jobs grouped by session; a job opens as a dock tab (onopen), or on a phone as
   // a full-height sheet. The lists watch each session's jobs only while they are open and the page is visible.
   type JobSession = { id: string; name: string; root: boolean; running: number };
-  let { sessions, failures, phone, onopen, onseen }: {
-    sessions: JobSession[]; failures: string[]; phone: boolean;
+  let { sessions, allSessions, failures, allFailures, phone, onopen, onseen }: {
+    sessions: JobSession[]; allSessions: JobSession[]; failures: string[]; allFailures: string[]; phone: boolean;
     onopen: (session: JobSession, job: ShellJob) => void; onseen: (key: string) => void;
   } = $props();
 
@@ -25,12 +25,13 @@
   let root: HTMLElement | undefined = $state();
   let visible = $state(document.visibilityState === "visible");
   const watches = new ShellWatches();
-  $effect(() => { watches.sync(new Set(open && visible ? sessions.map(session => session.id) : [])); });
+  let listSessions = $derived(only && !sessions.some(session => session.id === only) ? allSessions.filter(session => session.id === only) : sessions);
+  $effect(() => { watches.sync(new Set(open && visible ? listSessions.map(session => session.id) : [])); });
   $effect(() => () => watches.sync(new Set()));
 
   let running = $derived(sessions.reduce((sum, session) => sum + session.running, 0));
   let summary = $derived([running && `${running} running`, failures.length && `${failures.length} failed`].filter(Boolean).join(", ") || "No jobs running");
-  let names = $derived(new Map(sessions.map(session => [session.id, session])));
+  let names = $derived(new Map(listSessions.map(session => [session.id, session])));
   let groups = $derived(jobGroups([...watches.jobs].filter(([id]) => !only || id === only).map(([id, jobs]) => ({ id, jobs: jobs.values() }))));
   let listed = $derived(groups.flatMap(group => group.jobs.concat(group.older)));
   let listedRunning = $derived(listed.filter(job => job.running).length);
@@ -54,7 +55,7 @@
   }
   function pick(session: JobSession, job: ShellJob) {
     const key = `${session.id}/${job.job}`;
-    if (failures.includes(key)) onseen(key);
+    if (allFailures.includes(key)) onseen(key);
     if (phone) { shown = { session, job: job.job }; return; }
     open = false;
     onopen(session, job);
@@ -100,17 +101,17 @@
       {:else}
         {#if phone}<span class="grab"></span>{/if}
         <div class="head"><strong>Jobs</strong>{#if counts}<span class="counts">{counts}</span>{/if}<span class="space"></span>
-          {#if sessions.length > 1}<label class="filter"><span class="hidden">Show the jobs of</span><select bind:value={only}>
-            <option value={undefined}>All sessions</option>{#each sessions as session (session.id)}<option value={session.id}>{session.name}</option>{/each}</select>
+          {#if listSessions.length > 1}<label class="filter"><span class="hidden">Show the jobs of</span><select bind:value={only}>
+            <option value={undefined}>All sessions</option>{#each listSessions as session (session.id)}<option value={session.id}>{session.name}</option>{/each}</select>
             <Icon name="chevron" size={12} /></label>{/if}</div>
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (the list takes the arrow keys) -->
         <div class="list" role="group" aria-label="Background jobs" tabindex="-1" bind:this={list}>
           {#each groups as group (group.session)}{@const session = names.get(group.session)}{#if session}
-            {#if sessions.length > 1}<p class="session"><Avatar kind="session" name={session.name} root={session.root} size={16} />{session.name}</p>{/if}
+            {#if listSessions.length > 1}<p class="session"><Avatar kind="session" name={session.name} root={session.root} size={16} />{session.name}</p>{/if}
             {#each group.jobs as job (job.job)}{@render row(session, job)}{/each}
             {#if older.has(group.session)}{#each group.older as job (job.job)}{@render row(session, job)}{/each}
             {:else if group.older.length}<button type="button" class="older" onclick={() => older.add(group.session)}>Show older</button>{/if}
-          {/if}{:else}<p class="none">{sessions.length ? "No job output yet." : "No session has run a background job."}</p>{/each}
+          {/if}{:else}<p class="none">{listSessions.length ? "No job output yet." : "No session has run a background job."}</p>{/each}
         </div>
       {/if}
     </div>
