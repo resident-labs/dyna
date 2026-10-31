@@ -77,7 +77,7 @@
     const text = pending;
     await send(text, recipient, current.event.id).then(() => { pending = null; reply(true); }, error => {
       const result = visualReplyFailure(error);
-      if (result.kind === "superseded") { superseded = result.visual; pending = null; reply(false, "superseded"); }
+      if (result.kind === "superseded") { superseded = result.visual; pending = result.pending; reply(false, "superseded"); }
       else sendFailed = true;
     });
     sending = false;
