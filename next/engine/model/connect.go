@@ -306,7 +306,7 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 		if !result.Adopted {
 			if a.saved {
 				a.status, a.reason = contract.ConnectFailed, contract.ConnectAdoptionFailed
-				return contract.AccountsConnectStatusResponse{}, errConnect
+				return contract.AccountsConnectStatusResponse{Status: a.status, AccountID: a.account, Reason: a.reason}, nil
 			}
 			if expected != "" {
 				a.status = contract.ConnectFailed
