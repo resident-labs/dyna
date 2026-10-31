@@ -16,6 +16,7 @@ const (
 	PendingMemory      PendingReason = "memory"
 	PendingDisk        PendingReason = "disk"
 	PendingRoomHost    PendingReason = "room-host"
+	PendingRoomLimit   PendingReason = "room-limit"
 	PendingInvalidSize PendingReason = "invalid-size"
 )
 
