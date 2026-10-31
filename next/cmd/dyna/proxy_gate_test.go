@@ -69,7 +69,7 @@ func (l *gateListener) Accept() (net.Conn, error) {
 
 // TestCompletionsProxyGate runs the real proxy with only TLS loopback upstreams.
 func TestCompletionsProxyGate(t *testing.T) {
-	var gotPath, gotAuth, gotModel, gotHeader string
+	var gotPath, gotAuth, gotModel, gotHeader, gotSystem string
 	redirectAuth := make(chan string, 1)
 	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirectAuth <- r.Header.Get("Authorization")
@@ -78,10 +78,11 @@ func TestCompletionsProxyGate(t *testing.T) {
 	defer redirect.Close()
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Model string `json:"model"`
+			Model  string          `json:"model"`
+			System json.RawMessage `json:"system"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		gotPath, gotAuth, gotModel, gotHeader = r.URL.Path, r.Header.Get("Authorization"), body.Model, r.Header.Get("X-Static")
+		gotPath, gotAuth, gotModel, gotHeader, gotSystem = r.URL.Path, r.Header.Get("Authorization"), body.Model, r.Header.Get("X-Static"), string(body.System)
 		if body.Model == "redirect" {
 			http.Redirect(w, r, strings.Replace(redirect.URL, "127.0.0.1", "localhost", 1), http.StatusTemporaryRedirect)
 			return
@@ -216,7 +217,7 @@ func TestCompletionsProxyGate(t *testing.T) {
 	}
 	planData, _ := io.ReadAll(planResponse.Body)
 	planResponse.Body.Close()
-	if planResponse.StatusCode != http.StatusOK || !strings.Contains(string(planData), "hello") || gotPath != "/v1/messages" || gotModel != "claude-sonnet-4-6" || gotAuth != "Bearer sk-ant-oat-fixture" {
+	if planResponse.StatusCode != http.StatusOK || !strings.Contains(string(planData), "hello") || gotPath != "/v1/messages" || gotModel != "claude-sonnet-4-6" || gotAuth != "Bearer sk-ant-oat-fixture" || !strings.Contains(gotSystem, "You are Claude Code") {
 		t.Fatalf("Claude plan status=%d body=%q path=%q model=%q", planResponse.StatusCode, planData, gotPath, gotModel)
 	}
 	call := func(model string) (int, string) {
