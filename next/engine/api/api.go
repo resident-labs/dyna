@@ -97,7 +97,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodDevicePair, c, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {
 		out, problem := a.service.DevicePair(ctx, p, req)
 		if a.web != nil {
-			out.Routes = a.web.publicRoutes()
+			out.Routes = a.web.PublicRoutes()
 		}
 		return out, problem
 	})
