@@ -441,7 +441,7 @@
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<SessionFace name={title} root={!store?.sessions.get(session)?.parent} dot={shown} size={24} />{/if}
       <span class="heading"><strong>{title}</strong>
-        {#if closed}<span class="count">· closed</span>{:else if word}<span class="count">{word}</span>{/if}
+        {#if closed}<span class="count">· closed</span>{:else if word}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
@@ -551,6 +551,11 @@
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
   .heading, .room-menu { display: contents; }
+  /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
+  .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .heading:has(.word) strong { flex: none; }
+  .crumb { flex: none; white-space: nowrap; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
   @media (max-width: 640px) {
@@ -560,8 +565,7 @@
     @media (hover: hover) { .menu-toggle:hover { background: var(--hover); color: var(--text); } }
     .hash, .room-menu { display: none; }
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
-    .heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .heading .count { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .heading .count { font-size: 12.5px; }
     .requests { min-width: 40px; height: 40px; }
     .requests:not([aria-pressed="true"], .waiting) { display: none; }
     main > header :global(.panel-toggle) { gap: 4px; min-width: 40px; height: 40px; padding: 0 8px; }

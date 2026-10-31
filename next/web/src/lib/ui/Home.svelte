@@ -116,7 +116,7 @@
   }
   // A list shows while the store has items, as in v1's Home a failed load is never "all clear";
   // its count is the rows shown.
-  const total = (sets: Map<string, Set<string>>) => [...sets.values()].reduce((sum, set) => sum + set.size, 0);
+  const total = (sets: Map<string, { size: number }>) => [...sets.values()].reduce((sum, set) => sum + set.size, 0);
   let missing = $derived(waiting.length < total(attention.waiting)
     || [...attention.rooms.keys()].some(room => !listed.has(room)));
   const roomHref = (room: string) => "/r/" + encodeURIComponent(room);
@@ -145,7 +145,9 @@
   let workingCounts = $derived([...attention.rooms.keys()].map(room => attention.busy(room).length));
   let roomsWorking = $derived(workingCounts.filter(Boolean).length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
+  let failing = $derived(total(attention.broken));
   let summary = $derived([
+    asks && failing && `${count(failing, "session")} failed`,
     roomsWorking && `${count(roomsWorking, "room")} working`,
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
     accounts && busiestWindow(accounts),
@@ -155,7 +157,7 @@
 <div class="home">
   <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
   {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
-  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
+  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : failing ? `${count(failing, "session")} failed.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
     {#if asks || decided.size}<section class="card requests"><h2 tabindex="-1" bind:this={requestsHeading}>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
@@ -178,8 +180,8 @@
       {#snippet row({ room, working, failed, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{#if failed}<StatusPill tone="failed" word label={failed} />{line && " · "}{/if}{line}</span></span>
-        <!-- Who works, from two sessions on (one is named in the line): three small avatars at most, then a count. -->
-        {#if working.length > 1}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} label={sessionInitials.get(id)} root={sessions.get(id)?.root ?? false} size={20} />{/each}
+        <!-- Who works, from two sessions on (one is named in the line, unless a failure cuts it): three small avatars at most, then a count. -->
+        {#if working.length > 1 || failed && working.length}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} label={sessionInitials.get(id)} root={sessions.get(id)?.root ?? false} size={20} />{/each}
           {#if working.length > 3}<span class="more-count">+{working.length - 3}</span>{/if}</span>{/if}</a>{/snippet}
       <div class="list">{#each active as item (item.room.id)}{@render row(item)}{/each}
         {#if quiet.length}<button type="button" class="item fold quiet" aria-expanded={showQuiet} onclick={() => { showQuiet = !showQuiet; }}>
