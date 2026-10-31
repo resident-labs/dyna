@@ -359,7 +359,7 @@
 
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
-  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} activity={store?.activity.get(id)} {docked} bind:rect bind:element={computer}
+  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} {docked} bind:rect bind:element={computer}
     onclose={() => void stopWatching()} ondock={event => { docked = !docked; if (docked && !wide.current) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
