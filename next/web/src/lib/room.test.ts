@@ -299,7 +299,7 @@ test("activity labels follow the running turn and never reach a window", async (
   } finally { server.restore(); }
 });
 
-test("a session counts once: waiting for the owner before working, and working again once the owner decides", () => {
+test("a session counts once: a broken box, then waiting, then a running turn, then a failed turn not yet seen", () => {
   const store = new RoomStore("r");
   store.apply(event(1, { type: "session.started", body: { session: "a", name: "A", profile: "p" } }));
   store.apply(event(2, { type: "session.started", body: { session: "b", name: "B", profile: "p" } }));
@@ -308,6 +308,15 @@ test("a session counts once: waiting for the owner before working, and working a
   store.apply(event(5, { type: "op.requested", body: { id: "o", kind: "hostexec", by: { kind: "session", session: "a" }, class: "owner",
     card: { title: "Run", target: { kind: "host", name: "h" } }, expires: "" } }));
   assert.deepEqual([store.status("a"), store.counts], ["waiting", { sessions: 2, waiting: 1, failed: 0, working: 1, idle: 0 }]);
-  store.apply(event(6, { type: "op.decided", body: { id: "o", state: "approved", decision: { by: { kind: "owner" }, approved: true, at: "" } } }));
+  // Approving does not repair a box that was lost, so the failure shows while the request still waits.
+  store.apply(event(6, { type: "box.changed", body: { box: "x", session: "a", to: "lost" } }));
+  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 1, working: 1, idle: 0 });
+  store.apply(event(7, { type: "box.changed", body: { box: "x", session: "a", to: "ready" } }));
+  store.apply(event(8, { type: "op.decided", body: { id: "o", state: "approved", decision: { by: { kind: "owner" }, approved: true, at: "" } } }));
+  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
+  // A failed turn shows until seen, but a new turn moves on from it.
+  store.apply(event(9, { type: "turn.ended", body: { session: "b", turn: "t2", outcome: "failed", usage } }));
+  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 1, working: 1, idle: 0 });
+  store.apply(event(10, { type: "turn.started", body: { session: "b", turn: "t3", inputs: [] } }));
   assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
 });
