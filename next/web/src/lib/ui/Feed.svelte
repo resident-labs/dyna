@@ -104,9 +104,14 @@
     await view.fill(filled);
     short = !(await filled());
   }
-  // Pages that fill adds go above the view, and their measured height pushes the newest row down, so an open at the
-  // present lands on it again.
-  $effect(() => { if (view.ready) void grow().then(() => { if (view.atPresent) void list?.toEnd(); }); });
+  // Pages that fill adds go above the view, and their measured height pushes the newest row down, so the open lands on
+  // it again. Only the open: this effect also reruns after each later load, and a reader paging up stays where they are.
+  let landed = false;
+  $effect(() => {
+    if (view.ready) void grow().then(() => {
+      if (!landed && view.atPresent) { landed = true; void list?.toEnd(); }
+    });
+  });
   async function older() {
     await view.loadOlder();
     await grow();
