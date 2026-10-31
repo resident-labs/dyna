@@ -114,3 +114,16 @@ test("puts one New row before the first later post by someone else, and none wit
   assert.deepEqual(kinds(1), ["1", "2", "3", "new", "4", "5"]);
   assert.deepEqual(kinds(0), ["1", "2", "3", "4", "5"]);
 });
+
+test("a request is its own row where it happened, and its decision updates that row instead of folding into work", () => {
+  const card = { title: "Grant host access", target: { kind: "room" as const, name: "r" } };
+  const decision = { by: { kind: "owner" as const }, approved: true, at: "" };
+  const rows = feedRows([
+    event(1, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }),
+    event(2, { type: "op.requested", body: { id: "op1", kind: "hostexec.grant", by: lead, class: "owner", card, expires: "" } }, lead),
+    event(3, { type: "op.decided", body: { id: "op1", state: "approved", decision } }, { kind: "owner" }),
+    event(4, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage } }),
+  ], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind), ["work", "request", "work"]);
+  assert.deepEqual(rows[1].kind === "request" && rows[1].request, { id: "op1", kind: "hostexec.grant", by: lead, class: "owner", card, expires: "", state: "approved", decision });
+});
