@@ -163,7 +163,7 @@
         <Avatar kind={value.by.kind} name={who} label={value.by.session ? sessionInitials.get(value.by.session) : undefined} {root} size={28} />
         <!-- The title is the phrase after the asker's name, as on the request card; a request not for a host keeps its body's first line, such as a PR title. -->
         <span class="lines"><span class="title"><b class="who {value.by.kind}" class:root style:--hue={hue(who)}>{who}</b> {value.title}</span>
-          <span class="line">{#if value.target.kind === "host"}on <code>{value.target.name}</code> · {:else if value.body}{value.body} · {:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name} · {/if}{room.name} ·
+          <span class="line">{#if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{value.body}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name} ·
             {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
           {#if failures.has(id)}<span class="line" role="alert">{failures.get(id)}</span>{/if}</span>
         <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
