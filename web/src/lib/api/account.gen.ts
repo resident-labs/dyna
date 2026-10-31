@@ -8,6 +8,10 @@ export interface Plan {
   id: string;
   label: string;
 }
+/**
+ * ModelWindowPrefix marks a window limited to one model family, such as Fable.
+ */
+export const ModelWindowPrefix = "scoped:";
 export interface Window {
   reason?: WindowReason;
   period?: string;
