@@ -252,12 +252,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case contract.ShellJobEnded:
 					text = shellJobText(body)
 				default:
-					log.Printf("box channel: skip unhandled delivery type %s", event.Body.EventType())
-					if err := s.store.DeliveryDone(ctx, session.ID, delivery.Seq); err != nil {
-						log.Printf("box channel: mark unhandled delivery read: %v", err)
-						return
-					}
-					continue
+					log.Printf("box channel: unsupported delivery type %s", event.Body.EventType())
+					text = fmt.Sprintf("Unsupported event: %s", event.Body.EventType())
 				}
 				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: text}
 				if delivery.Queue == nil {
