@@ -34,6 +34,10 @@ func TestLoadCatalogBounds(t *testing.T) {
 	if err != nil || len(skipped) != 1 || skipped[0] != "bad: a header value cannot start with $" {
 		t.Fatalf("unsafe header: skipped=%v err=%v", skipped, err)
 	}
+	_, skipped, err = LoadCatalog(pack(`{"version":1,"providers":[{"id":"equal","models":[{"id":"equal"}]}]}`))
+	if err != nil || len(skipped) != 1 || skipped[0] != "equal: invalid model ID" {
+		t.Fatalf("prefix-equal ID: skipped=%v err=%v", skipped, err)
+	}
 	if _, _, err := LoadCatalog(pack(`{"version":2,"providers":[]}`)); err == nil {
 		t.Fatal("accepted invalid catalog")
 	}

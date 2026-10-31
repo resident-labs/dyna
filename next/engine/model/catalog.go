@@ -109,7 +109,7 @@ func invalidCatalogProvider(p CatalogProvider) string {
 		}
 	}
 	for _, m := range p.Models {
-		if len(m.ID) == 0 || len(m.ID) > 200 {
+		if len(m.ID) == 0 || len(m.ID) > 200 || m.ID == p.ID {
 			return "invalid model ID"
 		}
 		for _, c := range m.ID {

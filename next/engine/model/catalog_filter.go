@@ -14,7 +14,7 @@ func (c Catalog) CompletionProviders() []CatalogProvider {
 		var base string
 		valid := true
 		for _, m := range p.Models {
-			if m.API != "openai-completions" || m.ID == p.ID {
+			if m.API != "openai-completions" {
 				continue
 			}
 			if !fixedCatalogURL(m.BaseURL) || (base != "" && base != m.BaseURL) {
