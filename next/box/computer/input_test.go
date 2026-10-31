@@ -172,3 +172,36 @@ func TestInputRetriesReleaseAfterDispatchFailure(t *testing.T) {
 		t.Fatal("release succeeded, so no retry is owed")
 	}
 }
+
+// A mouse release that fails stays owed: the retry sends it again instead of treating the button as lifted.
+func TestInputRetriesFailedMouseRelease(t *testing.T) {
+	failed := false
+	url, sent := fakePage(t, func(m message) bool {
+		if m.Method != "Input.dispatchMouseEvent" || !strings.Contains(string(m.Params), `"mouseReleased"`) || failed {
+			return false
+		}
+		failed = true
+		return true
+	})
+	in := NewInput(url)
+	press := contract.ComputerInputBatch{Frame: contract.FrameSize{Width: 1280, Height: 800}, Events: []contract.ComputerInput{
+		{Kind: contract.InputMouseDown, Button: contract.ButtonLeft, X: 640, Y: 400},
+	}}
+	if err := in.Send(context.Background(), false, press); err != nil {
+		t.Fatal(err)
+	}
+	*sent = nil
+	if err := in.Send(context.Background(), true); err == nil {
+		t.Fatal("want the failed release reported")
+	}
+	defer in.d.Close()
+	releases := 0
+	for _, m := range *sent {
+		if strings.Contains(string(m.Params), `"mouseReleased"`) {
+			releases++
+		}
+	}
+	if releases != 2 || in.buttons != 0 {
+		t.Fatalf("%d release calls, buttons %d; want 2 and 0", releases, in.buttons)
+	}
+}
