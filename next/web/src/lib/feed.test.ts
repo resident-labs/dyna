@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { decodeEvent } from "./event.ts";
 import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
-import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
+import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -201,4 +201,10 @@ test("a decoded restart appears as a quiet row in the session DM", () => {
   assert.ok(notice);
   assert.equal(dmOf(notice), "l");
   assert.deepEqual(feedRows([notice], { kind: "dm", session: "l" }, [], 1).map(row => row.kind), ["restarted"]);
+});
+
+test("an image that failed to load becomes a file card, and the others stay thumbnails", () => {
+  const image = (sha256: string) => ({ name: `${sha256}.png`, media: "image/png", bytes: 10, sha256 });
+  const files = [image("a"), image("b"), { name: "notes.txt", media: "text/plain", bytes: 10, sha256: "c" }];
+  assert.deepEqual(files.filter(file => isThumb(file, ["b"])).map(file => file.sha256), ["a"]);
 });
