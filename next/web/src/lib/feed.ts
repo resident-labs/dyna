@@ -279,14 +279,20 @@ const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 qui
 // "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns". A DM's saved steps give the start
 // that a reloaded window lacks.
 export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
-  const started: string[] = [], moved: string[] = [], closed: string[] = [], quiet: string[] = [], opened: string[] = [], shut: string[] = [];
+  const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
+  // Sessions the engine closed, by why.
+  const closedFor = new Map<SessionCloseReason, string[]>();
   const turns = new Map<string, Set<string>>();
   let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0, first = Infinity, last = -Infinity;
   for (const event of events) {
     switch (event.type) {
       case "session.started": started.push(name(event.body.session)); break;
       case "session.moved": moved.push(name(event.body.session)); break;
-      case "session.closed": (event.body.reason ? quiet : closed).push(name(event.body.session)); break;
+      case "session.closed": {
+        const reason = event.body.reason;
+        if (reason) closedFor.set(reason, [...closedFor.get(reason) ?? [], name(event.body.session)]); else closed.push(name(event.body.session));
+        break;
+      }
       case "computer.changed": (event.body.to === "running" ? opened : shut).push(name(event.body.session)); break;
       case "turn.started": case "turn.ended":
         turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn));
@@ -316,7 +322,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
     memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
     rules && count(rules, "rule change"),
     opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
-    quiet.length && `${who(quiet)} closed ${closeReasons.dormant}`,
+    ...[...closedFor].map(([reason, sessions]) => `${who(sessions)} closed ${closeReasons[reason]}`),
   ].filter(part => typeof part === "string");
   return parts.length ? parts.join(" · ") : count(events.length, "update");
 }
