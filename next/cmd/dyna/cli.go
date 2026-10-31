@@ -524,6 +524,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			return err
 		}
 		printVisualChecks(cmd.ErrOrStderr(), checks)
+		request.ToolCallID = os.Getenv(contract.ToolCallIDEnv)
 		r, err := c.Post(cmd.Context(), request)
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Event)

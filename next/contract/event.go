@@ -59,6 +59,7 @@ type PostCreated struct {
 	ReplyTo     EventID      `json:"replyTo,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 	ClientID    string       `json:"clientId,omitempty"` // the sender's PostRequest.ClientID, so a pending row is replaced exactly
+	ToolCallID  string       `json:"toolCallId,omitempty"`
 }
 
 type Attachment struct {
