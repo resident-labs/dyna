@@ -14,6 +14,7 @@ const (
 	MethodRoomRepos        Method = "room.repos"
 	MethodSessionStart     Method = "session.start"
 	MethodSessionClose     Method = "session.close"
+	MethodSessionMove      Method = "session.move"
 	MethodPost             Method = "post"
 	MethodEventsList       Method = "events.list"
 	MethodBoxHello         Method = "box.hello"
@@ -29,6 +30,7 @@ const (
 	ErrNotFound      ErrorCode = "not_found"
 	ErrForbidden     ErrorCode = "forbidden"
 	ErrConflict      ErrorCode = "conflict"
+	ErrMoveBusy      ErrorCode = "move-busy"
 	ErrHasChildren   ErrorCode = "has_children"
 	ErrParentClosing ErrorCode = "parent_closing"
 	ErrStale         ErrorCode = "stale"
@@ -54,16 +56,20 @@ type SessionListRequest struct {
 	Room RoomID `json:"room"`
 }
 type SessionSummary struct {
-	ID       SessionID   `json:"id"`
-	Name     string      `json:"name"`
-	Parent   SessionID   `json:"parent"`
-	Profile  ProfileName `json:"profile"`
-	Box      BoxID       `json:"box"`
-	BoxState BoxState    `json:"boxState"`
-	Goal     string      `json:"goal"`
+	ID          SessionID   `json:"id"`
+	Name        string      `json:"name"`
+	Parent      SessionID   `json:"parent"`
+	Profile     ProfileName `json:"profile"`
+	Box         BoxID       `json:"box"`
+	BoxState    BoxState    `json:"boxState"`
+	Goal        string      `json:"goal"`
+	Turn        TurnID      `json:"turn,omitempty"`        // the running turn
+	LastOutcome TurnOutcome `json:"lastOutcome,omitempty"` // of the last ended turn
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
+	// Seq is the room's newest event when the list was read; live events after it update the list.
+	Seq int64 `json:"seq"`
 }
 
 type WebLoginRequest struct{}
@@ -110,6 +116,12 @@ type SessionStartResponse struct {
 	Session SessionID `json:"session"`
 	Box     BoxID     `json:"box"`
 }
+type SessionMoveRequest struct {
+	Session   SessionID `json:"session"`
+	NewParent SessionID `json:"newParent"`
+}
+type SessionMoveResponse struct{}
+
 type SessionCloseRequest struct {
 	Session SessionID `json:"session"`
 	Discard bool      `json:"discard,omitempty"`
@@ -133,6 +145,8 @@ type EventsListRequest struct {
 	BeforeSeq int64       `json:"beforeSeq,omitempty"`
 	Limit     int         `json:"limit"`
 	Types     []EventType `json:"types,omitempty"`
+	// Home, a DM, keeps only events whose home is that DM: its posts and the turns that answered in it.
+	Home *Conversation `json:"home,omitempty"`
 }
 type EventsListResponse struct {
 	Events []Event              `json:"events"`

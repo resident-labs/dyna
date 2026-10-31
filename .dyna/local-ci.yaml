@@ -3,7 +3,7 @@ version: 1
 # Pull requests select only the trial suites whose file patterns match. Merge
 # trials run every suite in this list. The other suites remain available to
 # `dyna git ci run --suite` for focused manual runs.
-trial: [relay, pi, go, cross, computer-smoke, next]
+trial: [relay, pi, go, cross, computer-smoke, next, next-web]
 
 caches:
   - name: go-build
@@ -182,6 +182,15 @@ checks:
       GOMAXPROCS: "2"
       GOMEMLIMIT: 3GiB
       GOFLAGS: -p=2
+    reports: none
+
+  # next/web is the v2 web app. It needs Node 24, which the golang image lacks,
+  # so it gets its own check and image.
+  - id: next-web
+    name: next-web
+    image: node:24
+    command: bash scripts/ci.sh next-web
+    caches: [npm]
     reports: none
 
   # The desktop module is a nested module, so the root Go commands never reach
@@ -411,6 +420,10 @@ suites:
   - id: next
     files: ['^next/', '^scripts/ci\.sh$']
     checks: [next]
+
+  - id: next-web
+    files: ['^next/web/', '^scripts/ci\.sh$']
+    checks: [next-web]
 
   - id: cross
     group: cross-build

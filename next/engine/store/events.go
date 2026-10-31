@@ -27,7 +27,22 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 		value := string(event.Room)
 		room = &value
 	}
-	result, err := tx.Exec("INSERT INTO events(id,at,room,type,from_kind,from_id,body) VALUES(?,?,?,?,?,?,?)", event.ID, event.Time.UnixMilli(), room, event.Body.EventType(), event.From.Kind, id, body)
+	// home is the session whose DM holds the event: a DM post, or a turn that answered in a DM.
+	var home *contract.SessionID
+	switch body := event.Body.(type) {
+	case contract.PostCreated:
+		if body.Home.Kind == contract.ConversationDM {
+			home = &body.Home.Session
+		}
+	case contract.TurnEnded:
+		for _, reply := range body.Replies {
+			if reply.Reply.Home.Kind == contract.ConversationDM {
+				home = &reply.Reply.Home.Session
+				break
+			}
+		}
+	}
+	result, err := tx.Exec("INSERT INTO events(id,at,room,type,from_kind,from_id,body,home) VALUES(?,?,?,?,?,?,?,?)", event.ID, event.Time.UnixMilli(), room, event.Body.EventType(), event.From.Kind, id, body, home)
 	if err != nil {
 		return 0, err
 	}
@@ -42,14 +57,12 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 
 // Events returns matching events in sequence order.
 func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64, limit int, types []contract.EventType) ([]contract.Event, error) {
-	return s.events(ctx, room, afterSeq, 0, limit, types)
+	return s.EventsPage(ctx, room, afterSeq, 0, limit, types, "")
 }
 
-func (s *Store) EventsBefore(ctx context.Context, room contract.RoomID, beforeSeq int64, limit int, types []contract.EventType) ([]contract.Event, error) {
-	return s.events(ctx, room, 0, beforeSeq, limit, types)
-}
-
-func (s *Store) events(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType) ([]contract.Event, error) {
+// EventsPage returns one page after afterSeq, or before beforeSeq when it is set, in sequence order.
+// A dm session keeps only the events whose home is that session's DM.
+func (s *Store) EventsPage(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType, dm contract.SessionID) ([]contract.Event, error) {
 	query := "SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE "
 	// database/sql requires a heterogeneous variadic slice for query arguments.
 	var args []interface{}
@@ -63,6 +76,10 @@ func (s *Store) events(ctx context.Context, room contract.RoomID, afterSeq, befo
 	if beforeSeq > 0 {
 		query += " AND seq<?"
 		args = append(args, beforeSeq)
+	}
+	if dm != "" {
+		query += " AND home=?"
+		args = append(args, dm)
 	}
 	if len(types) > 0 {
 		query += " AND type IN (" + strings.TrimRight(strings.Repeat("?,", len(types)), ",") + ")"

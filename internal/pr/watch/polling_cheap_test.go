@@ -144,7 +144,7 @@ func TestTickNewHeadPriorityEndsAfterAttempt(t *testing.T) {
 	}
 }
 
-func TestTickFortyOneQuietPRsUseOneBatch(t *testing.T) {
+func TestTickFortyOneQuietPRsUseBoundedBatches(t *testing.T) {
 	e := newEnv(t)
 	e.f.Pull.Updated = "2026-10-17T12:00:00Z"
 	e.setCI("success", 1)
@@ -181,8 +181,8 @@ func TestTickFortyOneQuietPRsUseOneBatch(t *testing.T) {
 	if _, err := e.s.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 1 {
-		t.Fatalf("41 unchanged PRs made %d calls", calls.Load())
+	if calls.Load() != 3 {
+		t.Fatalf("41 unchanged PRs made %d calls; want 3", calls.Load())
 	}
 	st, err := e.s.Store.Read()
 	if err != nil {
@@ -194,7 +194,7 @@ func TestTickFortyOneQuietPRsUseOneBatch(t *testing.T) {
 			t.Fatalf("PR %d: checked %s, stale %v; want an unchanged quiet record", r.Number, r.Checked, r.HeadStale)
 		}
 	}
-	t.Logf("41 unchanged PRs in one batch: %s", time.Since(started))
+	t.Logf("41 unchanged PRs in bounded batches: %s", time.Since(started))
 }
 
 func TestTickNewCommentOnSettledPRTriggersFullPoll(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,8 +64,59 @@ func (p headProbe) ciVersion() string {
 	return p.CI + ":" + p.ChecksAt.UTC().Format(time.RFC3339Nano)
 }
 
-// readHeads confirms all tracked heads before any per-PR snapshot requests.
+var withHeadChunkTimeout = context.WithTimeout
+
+// readHeads bounds each query and retries failed records in two halves once.
 func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]headProbe, map[string]RateLimit, error) {
+	const headBatchSize = 20
+	if g.requests == nil {
+		g.requests = &requestCache{rates: map[string]RateLimit{}, now: g.now}
+	}
+	out := map[string]headProbe{}
+	var failures []error
+	for start := 0; start < len(records); start += headBatchSize {
+		chunk := records[start:min(start+headBatchSize, len(records))]
+		heads, _, err := g.readHeadChunk(ctx, chunk)
+		var rateErr *rateLimitError
+		if err != nil && !errors.As(err, &rateErr) && len(chunk) > 1 && ctx.Err() == nil {
+			// Preserve successful observations; only retry records that failed.
+			failed := make([]*Record, 0, len(chunk))
+			for _, r := range chunk {
+				if p, ok := heads[r.Key]; !ok || p.Err != nil {
+					failed = append(failed, r)
+				} else {
+					out[r.Key] = p
+				}
+			}
+			if len(failed) > 0 {
+				mid := (len(failed) + 1) / 2
+				for _, half := range [][]*Record{failed[:mid], failed[mid:]} {
+					if len(half) == 0 {
+						continue
+					}
+					retried, _, retryErr := g.readHeadChunk(ctx, half)
+					for k, p := range retried {
+						out[k] = p
+					}
+					if retryErr != nil {
+						failures = append(failures, retryErr)
+					}
+				}
+			}
+			continue
+		}
+		for k, p := range heads {
+			out[k] = p
+		}
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return out, g.requests.rates, errors.Join(failures...)
+}
+
+// readHeadChunk confirms heads before per-PR snapshot requests.
+func (g GitHub) readHeadChunk(ctx context.Context, records []*Record) (map[string]headProbe, map[string]RateLimit, error) {
 	if g.Rooms != nil {
 		ctx = ghclient.WithRooms(ctx, g.Rooms)
 	}
@@ -160,7 +212,20 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 		}
 		query.WriteString("}")
 		g.requests.account = group.login
-		body, _, callErr := g.requestMethod(ghclient.WithRoom(ctx, grouped[repos[0]][0].RoomID), Ref{Host: host, Repo: repos[0]}, "graphql", "POST", "-f", "query="+query.String())
+		requestCtx, cancel := withHeadChunkTimeout(ctx, 3*time.Second)
+		body, _, callErr := g.requestMethod(ghclient.WithRoom(requestCtx, grouped[repos[0]][0].RoomID), Ref{Host: host, Repo: repos[0]}, "graphql", "POST", "-f", "query="+query.String())
+		cancel()
+		if errors.Is(callErr, context.DeadlineExceeded) || (callErr != nil && strings.Contains(callErr.Error(), "GitHub HTTP status 504")) {
+			reason := "http_504"
+			if errors.Is(callErr, context.DeadlineExceeded) {
+				reason = "deadline"
+			}
+			count := 0
+			for _, rs := range grouped {
+				count += len(rs)
+			}
+			slog.Warn("GitHub head request timed out", "request", "graphql heads", "batch_size", count, "reason", reason)
+		}
 		var response struct {
 			Data map[string]json.RawMessage `json:"data"`
 		}
@@ -427,11 +492,20 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 			if r.Head != pull.Head.SHA || !headVerified(*r) || r.HeadVerifiedAt.IsZero() {
 				r.HeadVerifiedAt = s.now()
 			}
-			if r.Polling.PullVersion != pullVersion(pull, EffectivePolicy(*current, *r)) || pull.DiscussionVersion == "" || r.Polling.DiscussionVersion != pull.DiscussionVersion {
-				for path := range current.Responses[key] {
-					if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
-						delete(current.Responses[key], path)
+			version := pullVersion(pull, EffectivePolicy(*current, *r))
+			if r.Polling.PullVersion != version || pull.DiscussionVersion == "" || r.Polling.DiscussionVersion != pull.DiscussionVersion {
+				invalidation := digest(version + "/" + pull.DiscussionVersion)
+				changed := r.Polling.DiscussionInvalidation != invalidation
+				for path, response := range current.Responses[key] {
+					if discussionResponse(path) && !response.Stale {
+						response.Stale = true
+						current.Responses[key][path] = response
+						changed = true
 					}
+				}
+				if changed {
+					r.Polling.DiscussionInvalidation = invalidation
+					r.Polling.DiscussionGeneration++
 				}
 			}
 			if r.Head != pull.Head.SHA {

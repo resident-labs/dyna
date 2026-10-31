@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 12
+const schemaVersion = 16
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -25,6 +25,23 @@ var steps = map[int][]string{
 		`CREATE INDEX operations_state_expires ON operations(state, expires_at)`,
 	},
 	11: {"ALTER TABLE turns ADD COLUMN shell_jobs INTEGER NOT NULL DEFAULT -1"},
+	12: {
+		`CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, hosts BLOB NOT NULL, commands BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);`,
+		`CREATE INDEX grants_expiry ON grants(expires_at) WHERE expired_at IS NULL AND revoked_at IS NULL;`,
+		`CREATE INDEX grants_room_principal ON grants(room, to_id);`,
+		`INSERT INTO grants(id,kind,room,to_kind,to_id,mode,hosts,commands,by_kind,by_id,created_at) SELECT 'grant_'||id,'hostexec',room,'session',id,'preapproved','["*"]','[{"program":"*","prefix":true}]','engine','',created_at FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
+	},
+	13: {
+		`CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY REFERENCES operations(id), grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, scope TEXT NOT NULL, started_at INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, ended_at INTEGER, output_bytes INTEGER NOT NULL DEFAULT 0, stopped TEXT NOT NULL DEFAULT '');`,
+		`CREATE INDEX hostexec_runs_grant ON hostexec_runs(grant_id, ended_at);`,
+	},
+	14: {`ALTER TABLE hostexec_runs ADD COLUMN lost_at INTEGER`, `CREATE INDEX hostexec_runs_pending ON hostexec_runs(ended_at) WHERE ended_at IS NULL`, `UPDATE hostexec_runs SET ended_at=NULL,lost_at=unixepoch()*1000 WHERE stopped='lost' AND started_at+timeout_ms+10000>unixepoch()*1000`},
+	15: {
+		"ALTER TABLE events ADD COLUMN home TEXT",
+		`UPDATE events SET home=json_extract(CAST(body AS TEXT),'$.home.session') WHERE type='post.created' AND json_extract(CAST(body AS TEXT),'$.home.kind')='dm'`,
+		`UPDATE events SET home=(SELECT json_extract(value,'$.reply.home.session') FROM json_each(CAST(events.body AS TEXT),'$.replies') WHERE json_extract(value,'$.reply.home.kind')='dm' LIMIT 1) WHERE type='turn.ended'`,
+		"CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL",
+	},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.

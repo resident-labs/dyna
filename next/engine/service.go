@@ -33,19 +33,23 @@ type Repositories interface {
 }
 
 type Service struct {
-	store     *store.Store
-	boxes     BoxAdapter
-	profiles  Profiles
-	repos     Repositories
-	approvals *approve.Service
-	now       func() time.Time
-	mu        sync.Mutex
-	channels  map[contract.SessionID]*boxChannel
-	admit     sync.Mutex
-	boxLockMu sync.Mutex
-	boxLocks  map[contract.SessionID]*sync.Mutex
-	boxRuns   map[contract.SessionID]*boxRun
-	dormancy  dormancy
+	store           *store.Store
+	boxes           BoxAdapter
+	profiles        Profiles
+	repos           Repositories
+	approvals       *approve.Service
+	hostexec        HostexecRunner
+	hostexecTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	now             func() time.Time
+	mu              sync.Mutex
+	channels        map[contract.SessionID]*boxChannel
+	admit           sync.Mutex
+	boxLockMu       sync.Mutex
+	boxLocks        map[contract.SessionID]*sync.Mutex
+	boxRuns         map[contract.SessionID]*boxRun
+	moveMu          sync.Mutex
+	moveStops       []contract.BoxID
+	dormancy        dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu  sync.Mutex
 	transcriptDir string
@@ -58,7 +62,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+	return &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -310,19 +314,13 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 				return contract.SessionStartResponse{}, invalid("parent box is closing")
 			}
 		}
-		for id := p.Box; id != ""; {
-			ancestry = append([]contract.BoxID{id}, ancestry...)
-			var found bool
-			for _, b := range boxes {
-				if b.ID == id {
-					id = b.BudgetParent
-					found = true
-					break
-				}
-			}
-			if !found {
-				break
-			}
+		path, err := s.store.BoxAncestry(ctx, p.Box)
+		if err != nil {
+			s.admit.Unlock()
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		for _, b := range path {
+			ancestry = append(ancestry, b.ID)
 		}
 	}
 	placement, err := s.place(ctx, current, boxes)
@@ -450,21 +448,14 @@ func (s *Service) retryChild(ctx context.Context, id contract.SessionID) error {
 		s.admit.Unlock()
 		return nil
 	}
+	path, err := s.store.BoxAncestry(ctx, current.ID)
+	if err != nil {
+		s.admit.Unlock()
+		return err
+	}
 	var ancestry []contract.BoxID
-	for id := current.ID; id != ""; {
-		ancestry = append([]contract.BoxID{id}, ancestry...)
-		if id == current.ID {
-			id = current.BudgetParent
-			continue
-		}
-		next := contract.BoxID("")
-		for _, b := range boxes {
-			if b.ID == id {
-				next = b.BudgetParent
-				break
-			}
-		}
-		id = next
+	for _, b := range path {
+		ancestry = append(ancestry, b.ID)
 	}
 	current.Slice, err = box.SliceName(ancestry)
 	if err != nil {
@@ -757,13 +748,14 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	if req.Limit < 0 || req.AfterSeq < 0 || req.BeforeSeq < 0 || (req.BeforeSeq > 0 && req.AfterSeq > 0) {
 		return contract.EventsListResponse{}, invalid("invalid event range")
 	}
-	var events []contract.Event
-	var err error
-	if req.BeforeSeq > 0 {
-		events, err = s.store.EventsBefore(ctx, req.Room, req.BeforeSeq, req.Limit, req.Types)
-	} else {
-		events, err = s.store.Events(ctx, req.Room, req.AfterSeq, req.Limit, req.Types)
+	var dm contract.SessionID
+	if req.Home != nil {
+		if req.Home.Kind != contract.ConversationDM || req.Home.Session == "" {
+			return contract.EventsListResponse{}, invalid("home must be a DM")
+		}
+		dm = req.Home.Session
 	}
+	events, err := s.store.EventsPage(ctx, req.Room, req.AfterSeq, req.BeforeSeq, req.Limit, req.Types, dm)
 	if err != nil {
 		return contract.EventsListResponse{}, failure(err)
 	}
