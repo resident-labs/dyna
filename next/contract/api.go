@@ -159,6 +159,8 @@ type RoomListResponse struct {
 type SessionListRequest struct {
 	Room RoomID `json:"room"`
 }
+type BoxReason string // The stored reason for the current box state, including admission waits and failures.
+
 type SessionSummary struct {
 	LastRead    int64         `json:"lastRead"`
 	ID          SessionID     `json:"id"`
@@ -167,6 +169,7 @@ type SessionSummary struct {
 	Profile     ProfileName   `json:"profile"`
 	Box         BoxID         `json:"box"`
 	BoxState    BoxState      `json:"boxState"`
+	BoxReason   BoxReason     `json:"boxReason,omitempty"`
 	Computer    ComputerState `json:"computer"`
 	Goal        string        `json:"goal"`
 	Turn        TurnID        `json:"turn,omitempty"`        // the running turn
