@@ -36,14 +36,6 @@ export async function lastBoxChanges(room: string, beforeSeq: number, sessions: 
   return found;
 }
 
-export async function boxFailures(room: string, beforeSeq: number, sessions: Iterable<string>): Promise<Map<string, BoxFailure & { seq: number }>> {
-  const found = new Map<string, BoxFailure & { seq: number }>();
-  for (const [session, { seq, at, body: { to, cause } }] of await lastBoxChanges(room, beforeSeq, sessions)) {
-    if (to === "failed" || to === "lost") found.set(session, { box: to, cause, at, seq });
-  }
-  return found;
-}
-
 // session.list does not say which jobs failed, so this reads the newest job ends once.
 export async function failedJobs(room: string, beforeSeq: number): Promise<{ session: string; job: string; seq: number }[]> {
   const page = await call("events.list", { room, afterSeq: 0, beforeSeq, limit: 200, types: ["shell.job.ended"] }).catch(() => undefined);
