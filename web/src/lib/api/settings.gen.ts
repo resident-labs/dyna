@@ -94,6 +94,7 @@ export const ResultPending: RunResult = "pending";
  * ResultPass is a run whose hook exited cleanly.
  */
 export const ResultPass: RunResult = "pass";
+export const ResultDeferred: RunResult = "deferred";
 /**
  * ResultError is a run that failed to start, timed out or lost its runner.
  */
