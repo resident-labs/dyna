@@ -113,7 +113,10 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, ""); err != nil {
+	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost); err != nil {
+		if errors.Is(err, store.ErrParentHostAbsent) {
+			return contract.SessionStartResponse{}, invalid(err.Error())
+		}
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	return contract.SessionStartResponse{Session: session.ID, Box: session.Box}, nil
