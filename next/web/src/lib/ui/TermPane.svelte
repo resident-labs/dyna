@@ -44,7 +44,9 @@
       const made = await Surface.create(host, {
         theme: theme(dark.current), font: font(),
         onData: data => socket?.send(data),
+        // dispose() flushes a pending resize, so a pane that has gone opens no shell.
         onResize: (cols, rows) => {
+          if (gone) return;
           if (socket) socket.resize(cols, rows);
           else socket = openTerminal($state.snapshot(target), { cols, rows }, { output: bytes => surface?.write(bytes), exit: code => { if (!gone) onexit(code); } });
         },
@@ -56,7 +58,7 @@
       surface = made;
       made.focus();
     }).catch(() => { failed = true; });
-    return () => { gone = true; socket?.close(); surface?.dispose(); surface = undefined; };
+    return () => { gone = true; surface?.dispose(); surface = undefined; socket?.close(); };
   });
 </script>
 
