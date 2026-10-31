@@ -413,9 +413,11 @@ func box(c Caller) bool {
 }
 func user(c Caller) bool { return owner(c) || box(c) }
 
+// op.submit checks its own scope by operation kind. device.scopes answers every owner device, whatever it holds, so a client can learn
+// what it may use.
 func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, scope contract.Scope, allowed func(Caller) bool, fn func(context.Context, contract.Principal, Req) (Resp, *contract.Error)) {
 	mux.HandleFunc("POST /v1/"+string(method), func(w http.ResponseWriter, r *http.Request) {
-		if !allowed(c) || (method != contract.MethodOpSubmit && !hasScope(c, scope)) {
+		if !allowed(c) || (method != contract.MethodOpSubmit && method != contract.MethodDeviceScopes && !hasScope(c, scope)) {
 			writeError(w, forbidden())
 			return
 		}
