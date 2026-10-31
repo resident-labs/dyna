@@ -71,7 +71,7 @@
           {#if unrated(profile)}
             <span class="unrated">Not rated · <button type="button" onclick={() => { close(); editing = profile.name; }}>Rate</button></span>
           {:else}
-            {#each [["Taste", profile.taste], ["Diagnostics", profile.diagnostics], ["Intelligence", profile.intelligence], ["Thrift", profile.cost]] as [label, value]}
+            {#each ([["Taste", profile.taste], ["Diagnostics", profile.diagnostics], ["Intelligence", profile.intelligence], ["Thrift", profile.cost]] as const) as [label, value]}
               <span class="number"><span class="rating-label">{label} </span>{rating(value)}</span>
             {/each}
           {/if}
