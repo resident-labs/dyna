@@ -14,6 +14,34 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestReconnectUnavailableBeforeLogin(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: "anonymous", Provider: "kimi", Record: []byte(`{"metadata":{"type":"kimi"}}`)}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindAccount(ctx, "account", "anonymous", contract.ProviderXAI, "label"); err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := model.NewProxy(t.TempDir(), "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := New(st, nil, nil, time.Now)
+	actions := NewAccountActions(core, proxy.Connections("key", st, time.Now), proxy.Quotas("key", st, time.Now))
+	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	_, problem := actions.AccountsReconnect(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountsReconnectRequest{AccountID: "account"})
+	if problem == nil || problem.Code != contract.ErrReconnectUnavailable {
+		t.Fatalf("got error %v, want reconnect_unavailable", problem)
+	}
+}
+
 func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
