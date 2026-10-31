@@ -1221,7 +1221,7 @@ Caps count characters, at 4 per token, so the renderer needs no tokenizer and te
 #### Skills and room MCP servers
 
 - **Skills (M3, with the skills port).** At box start, the box agent writes the global catalog into Pi's skills folder. Pi lists each skill's name, description and path, and the model reads `SKILL.md` on demand. A changed skill reaches a session at its next box start, and a quiet box stops after 10 minutes (5.8).
-- **Room MCP servers stay after the cutover** (section 9). When they are ported, the box agent registers each as `deferred` at a loopback URL that forwards over the box socket. The engine holds their credentials and scans their arguments, as v1 does.
+- **Room MCP servers stay after the cutover** (section 9). When they are ported, the box agent registers each with `codemode` exposure (owner, q62) at a loopback URL that forwards over the box socket. The engine holds their credentials and scans their arguments, as v1 does.
 
 #### Where T3 Code's choices do not fit Dyna
 
@@ -1263,10 +1263,11 @@ One run, before `agentSurface` becomes the default.
 - **Measures.** A correct engine call with correct arguments, wrong calls, extra calls (including searches), uncached input and output tokens, cache-read share, and time.
 - **Checks.** Cloaked tool names map back, and the model finds and calls the aliased `tool_search`. A call over 60 seconds completes.
 - **Cache check.** Five tasks change the snapshot mid-session: a rule added, a rule removed, a child finished, a request answered, and usage pace changed. One more task compacts. Per provider, the run reports cache-read share on the request after each delta and on the second request after compaction, and whether the model obeys the changed rule and drops the removed one. It measures the one path; it decides no fallback.
+- **Tool-load cost** (owner, q62). Per provider, the run reports the cache misses that `tool_search` loads cause on models without native tool changes: the loads per task, and the uncached input tokens on the request after each load. Dyna tools stay deferred either way; the report shows the real cost.
 - **Gate.** On every provider, MCP accuracy is at least the CLI arm's, and tokens per task fall by at least 20%. Profiles on a provider that fails keep the setting off until a fix lands, and the setting stays until then. The better MCP shape wins.
 - **Cost.** 300 task runs, at about 30,000 input tokens (mostly cache reads) and 1,000 output tokens each: about 9 million input and 0.3 million output tokens over 5 accounts. The cache check adds 30 runs (6 tasks, 5 providers): about 0.9 million input and 30,000 output tokens.
 
-**Who benefits (r9).** Any owner on any provider pays fewer prompt tokens per turn and gets typed tools with typed errors. Owners with many integrations keep room MCP servers deferred. Scripts and the owner keep the full CLI with the same help text.
+**Who benefits (r9).** Any owner on any provider pays fewer prompt tokens per turn and gets typed tools with typed errors. Owners with many integrations keep room MCP servers behind codemode. Scripts and the owner keep the full CLI with the same help text.
 
 ## 8. Migration bundle and cutover
 
