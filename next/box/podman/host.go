@@ -310,9 +310,24 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 }
 
 // Maintain removes dangling images and compacts caches without deleting borrowed objects.
-func (h *Host) Maintain(ctx context.Context, hostData string) error {
-	_, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f || exit; for repo in "$1"/git/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done`, "dyna-maintain", hostData)
-	return err
+func (h *Host) Maintain(ctx context.Context, hostData string) ([]contract.RoomShared, error) {
+	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/git/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done; for dir in "$1"/rooms/*; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; printf '%s\0%s\0' "${dir##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", hostData)
+	if err != nil {
+		return nil, err
+	}
+	var sizes []contract.RoomShared
+	parts := strings.Split(string(out), "\x00")
+	if len(parts)%2 != 1 || parts[len(parts)-1] != "" {
+		return nil, errors.New("invalid room size output")
+	}
+	for i := 0; i < len(parts)-1; i += 2 {
+		bytes, err := strconv.ParseInt(parts[i+1], 10, 64)
+		if err != nil || bytes < 0 || parts[i] == "" {
+			return nil, errors.New("invalid room size output")
+		}
+		sizes = append(sizes, contract.RoomShared{Room: contract.RoomID(parts[i]), Bytes: bytes})
+	}
+	return sizes, nil
 }
 
 func (h *Host) EnsureSlice(ctx context.Context, s box.Slice) error {

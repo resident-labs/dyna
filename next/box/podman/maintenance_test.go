@@ -24,7 +24,7 @@ func TestMaintenanceCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Maintain(context.Background(), "/data"); err != nil {
+	if _, err := h.Maintain(context.Background(), "/data"); err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{"podman image prune -f", "git -C", "gc --no-prune", "/data"} {

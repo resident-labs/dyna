@@ -297,10 +297,10 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 	return nil, fmt.Errorf("host %q: %w", name, sql.ErrNoRows)
 }
 
-func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) error {
+func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) ([]contract.RoomShared, error) {
 	h, err := b.host(ctx, name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	return h.Maintain(ctx, b.HostData)
 }
