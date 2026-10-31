@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { diffLines } from "diff";
+import { structuredPatch } from "diff";
 import type { CustomMessage } from "./messages.ts";
 import type { SessionEntry } from "./session-manager.ts";
 
@@ -47,9 +47,15 @@ function isContextDetails(details: unknown): details is { sections: ContextSecti
 export function createContextUpdate(
 	previous: ContextSections,
 	current: ContextSections,
-	operations: { hash: (text: string) => string; diff: typeof diffLines } = {
+	operations: { hash: (text: string) => string; diff: (old: string, text: string) => string } = {
 		hash: (text) => createHash("sha256").update(text).digest("hex"),
-		diff: diffLines,
+		diff: (old, text) =>
+			structuredPatch("section", "section", old, text, "", "", { context: 3 })
+				.hunks.map(
+					(hunk) =>
+						`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@\n${hunk.lines.join("\n")}`,
+				)
+				.join("\n"),
 	},
 ): CustomMessage | undefined {
 	const changes: string[] = [];
@@ -61,17 +67,7 @@ export function createContextUpdate(
 			changes.push(`New section ${key}:\n${text}`);
 			continue;
 		}
-		const diff = operations
-			.diff(old, text)
-			.map((part) => {
-				const prefix = part.added ? "+" : part.removed ? "-" : " ";
-				return part.value
-					.split("\n")
-					.filter((line, i, lines) => i < lines.length - 1 || line !== "")
-					.map((line) => prefix + line)
-					.join("\n");
-			})
-			.join("\n");
+		const diff = operations.diff(old, text);
 		changes.push(`Changed section ${key}:\n${diff}`);
 	}
 	for (const key of Object.keys(previous)) {
