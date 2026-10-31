@@ -11,6 +11,8 @@ type Caller struct {
 	Principal contract.Principal
 	Box       contract.BoxID
 	Room      contract.RoomID
+	Device    string
+	Scopes    []contract.Scope
 	Web       bool
 }
 
