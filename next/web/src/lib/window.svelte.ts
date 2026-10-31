@@ -23,6 +23,10 @@ export class EventWindow {
   readonly events = new SvelteMap<number, Event>();
   readonly seqs: number[] = [];
   readonly pendingPosts = new SvelteMap<number, PendingPost>();
+  // A failed send outlives the window: onunsent hands it to the app, which gives it back to the next window of
+  // this conversation; onsettled says Retry or Discard took it back. Both run after the window has closed too.
+  onunsent: (request: PostRequest) => void = () => {};
+  onsettled: (request: PostRequest) => void = () => {};
   private sent = 0;
   private present = true;
   private older = false;
@@ -177,26 +181,32 @@ export class EventWindow {
     return id;
   }
 
-  // Sends a post; it shows as pending until its event is in the window. It resolves false when the send
-  // failed: the post then stays as a failed row for retry or discard.
-  post(request: PostRequest): Promise<boolean> { return this.retry(this.unsent(request)); }
+  // Sends a post; it shows as pending until its event is in the window. A failed send stays as a failed row for
+  // retry or discard.
+  post(request: PostRequest): Promise<void> { return this.retry(this.unsent(request)); }
 
   // Only a failed post sends again, so a second click never sends it twice.
-  async retry(id: number): Promise<boolean> {
+  async retry(id: number): Promise<void> {
     const known = this.pendingPosts.get(id);
-    if (!known?.failed) return true;
+    if (!known?.failed) return;
     const pending = { ...known, failed: false };
     this.pendingPosts.set(id, pending);
+    this.onsettled(pending.request);
     // The owner's post shows at the present, so the window moves there while it sends.
     const jumped = this.jumpToPresent();
     // The row says "Not sent"; the error text is raw (r8).
     const response = await call("post", pending.request).catch(() => undefined);
-    if (!response) this.pendingPosts.set(id, { ...pending, failed: true });
-    else if (this.events.has(response.seq)) this.pendingPosts.delete(id);
+    if (!response) {
+      this.pendingPosts.set(id, { ...pending, failed: true });
+      this.onunsent(pending.request);
+    } else if (this.events.has(response.seq)) this.pendingPosts.delete(id);
     else this.pendingPosts.set(id, { ...pending, seq: response.seq });
     await jumped;
-    return response !== undefined;
   }
 
-  discard(id: number): void { this.pendingPosts.delete(id); }
+  discard(id: number): void {
+    const request = this.pendingPosts.get(id)?.request;
+    this.pendingPosts.delete(id);
+    if (request) this.onsettled(request);
+  }
 }

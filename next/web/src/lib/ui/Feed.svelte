@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick, type Snippet } from "svelte";
+  import { onDestroy, tick, untrack, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { APIError } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
@@ -11,8 +11,7 @@
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
-  // A failed send outlives the view: onunsent hands it to the app, which passes it back in unsent when the
-  // conversation opens again. onsettled tells the app that Retry or Discard took it back.
+  // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
   let { store, home, intro, unsent, onunsent, onsettled, element = $bindable() }: {
     store: RoomStore; home: Conversation; intro: Snippet; unsent: PostRequest[];
     onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; element?: HTMLDivElement;
@@ -21,20 +20,14 @@
   // The view is keyed by its conversation, so its window lives as long as the view.
   // svelte-ignore state_referenced_locally
   const view = store.window(home);
-  // svelte-ignore state_referenced_locally
-  for (const request of unsent) view.unsent(request);
+  view.onunsent = request => onunsent(request);
+  view.onsettled = request => onsettled(request);
+  // A send that fails after the owner left and came back arrives here later, so each new one shows at once.
+  $effect(() => {
+    const shown = new Set(untrack(() => [...view.pendingPosts.values()].map(post => post.request)));
+    for (const request of unsent) if (!shown.has(request)) view.unsent(request);
+  });
   onDestroy(() => store.leave(view));
-  function retry(id: number) {
-    const request = view.pendingPosts.get(id)?.request;
-    if (!request) return;
-    onsettled(request);
-    void view.retry(id).then(sent => { if (!sent) onunsent(request); });
-  }
-  function discard(id: number) {
-    const request = view.pendingPosts.get(id)?.request;
-    view.discard(id);
-    if (request) onsettled(request);
-  }
   type Item = Row | { kind: "working"; key: string; session: string } | { kind: "intro"; key: string };
   // A pending post's mentions are names; its row shows them as the sessions the engine will resolve.
   const mentioned = (names: string[]) => names.flatMap(name => {
@@ -64,7 +57,7 @@
   export async function send(request: PostRequest): Promise<void> {
     const sending = view.post(request);
     void list?.toEnd();
-    if (!(await sending)) onunsent(request);
+    await sending;
     await list?.toEnd();
   }
   // Rows that do not fill the view cannot be scrolled up, so older pages load until they do.
@@ -96,7 +89,7 @@
     onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
-        onretry={retry} ondiscard={discard} />
+        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>
