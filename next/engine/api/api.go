@@ -66,6 +66,8 @@ func (a *API) handler(c Caller) http.Handler {
 		return a.service.RuleList(ctx, p, req)
 	})
 	call(mux, contract.MethodConversationRead, c, owner, a.service.ConversationRead)
+	call(mux, contract.MethodRoomPause, c, user, a.service.RoomPause)
+	call(mux, contract.MethodSessionStop, c, user, a.service.SessionStop)
 	call(mux, contract.MethodRoomList, c, owner, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, user, a.service.SessionList)
 	call(mux, contract.MethodHostexecRun, c, box, a.service.HostexecRun)

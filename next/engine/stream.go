@@ -136,6 +136,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		defer close(out)
 		replay := true
 		archiveSent := false
+		var stopSent contract.TurnID
 		for {
 			s.mu.Lock()
 			if channel.archiveRetry {
@@ -275,6 +276,18 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				}
 				select {
 				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model}}:
+				case <-ctx.Done():
+					return
+				}
+			}
+			stopTurn, err := s.store.StopRequested(ctx, session.ID)
+			if err != nil {
+				return
+			}
+			if stopTurn != "" && stopTurn != stopSent {
+				select {
+				case out <- contract.BoxMessage{Body: contract.TurnStop{Turn: stopTurn, Reason: "Stopped by request"}}:
+					stopSent = stopTurn
 				case <-ctx.Done():
 					return
 				}
