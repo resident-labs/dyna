@@ -28,7 +28,7 @@
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
-  import type { Rect } from "./lib/float.ts";
+  import { fitted, type Rect } from "./lib/float.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
@@ -392,6 +392,7 @@
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
   {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} {docked} full={phone.current && !docked} bind:rect bind:element={computer}
+    onfit={(ratio, chrome) => { if (!places.has(id)) rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16); }}
     onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
