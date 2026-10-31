@@ -189,7 +189,7 @@
   .muted { color: var(--muted); font-weight: 400; }
   .jobs { padding-right: 8px; }
   .x { width: 20px; height: 20px; margin-right: 3px; }
-  .where { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
+  .where { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12.5px; font-weight: 400; white-space: nowrap; text-overflow: ellipsis; }
   @media (max-width: 640px) { .where { display: none; } }
   /* The dock's own controls sit at the right, 28 px like a floating window's. */
   .tool { width: 28px; height: 28px; }
