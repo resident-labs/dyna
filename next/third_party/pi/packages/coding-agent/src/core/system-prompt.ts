@@ -55,6 +55,9 @@ export type NormalizedBuildSystemPromptOptions = BuildSystemPromptOptions & {
  */
 export type SystemPromptSections = Record<string, string>;
 
+export const RESERVED_SYSTEM_PROMPT_SECTIONS: ReadonlySet<string> = new Set([
+	"preamble", "tools", "rules", "docs", "addendum", "skills", "cwd",
+]);
 const SYSTEM_PROMPT_SECTION_NAME = /^[a-z][a-z0-9_-]*$/;
 /** Normalize prompt input into the mutable, collection-complete shape exposed to extensions. */
 export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOptions): NormalizedBuildSystemPromptOptions {
