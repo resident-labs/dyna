@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -162,4 +163,87 @@ func TestConnectTimesOutWithoutPage(t *testing.T) {
 	if !errors.As(err, &timeout) {
 		t.Fatalf("got %v, want ConnectTimeoutError", err)
 	}
+}
+
+func TestWatchSettlesAfterAFrameDuringCapture(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	mux.HandleFunc("/json/list", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `[{"type":"page","webSocketDebuggerUrl":%q}]`, "ws"+strings.TrimPrefix(server.URL, "http")+"/ws")
+	})
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		shots := 0
+		for {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			var m message
+			if json.Unmarshal(data, &m) != nil {
+				return
+			}
+			if m.Method == "Page.screencastFrameAck" {
+				continue
+			}
+			result := json.RawMessage(`{}`)
+			if m.Method == "Page.captureScreenshot" {
+				shots++
+				if shots == 1 {
+					frame := []byte(`{"method":"Page.screencastFrame","params":{"data":"YQ==","sessionId":1}}`)
+					if conn.Write(r.Context(), websocket.MessageText, frame) != nil {
+						return
+					}
+				}
+				result = json.RawMessage(`{"data":"Yg=="}`)
+			}
+			reply, _ := json.Marshal(message{ID: m.ID, Result: result})
+			if conn.Write(r.Context(), websocket.MessageText, reply) != nil {
+				return
+			}
+			if m.Method == "Page.captureScreenshot" && shots == 1 {
+				marker := []byte(`{"method":"Page.screencastFrame","params":{"data":"YQ==","sessionId":2}}`)
+				if conn.Write(r.Context(), websocket.MessageText, marker) != nil {
+					return
+				}
+			}
+		}
+	})
+	tick := make(chan time.Time, 1)
+	armed := make(chan struct{}, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := watchWithTimer(ctx, server.URL, writer, func(context.Context) error { return nil }, func() (<-chan time.Time, func()) { armed <- struct{}{}; return tick, func() {} })
+		writer.CloseWithError(err)
+		done <- err
+	}()
+	defer cancel()
+	defer reader.Close()
+	read := func(want string) {
+		t.Helper()
+		var n uint32
+		if err := binary.Read(reader, binary.BigEndian, &n); err != nil || n != uint32(len(want)) {
+			t.Fatalf("length %d: %v", n, err)
+		}
+		data := make([]byte, n)
+		if _, err := io.ReadFull(reader, data); err != nil || string(data) != want {
+			t.Fatalf("frame %q, want %q: %v", data, want, err)
+		}
+	}
+	read("a")
+	read("a")
+	<-armed
+	<-armed
+	tick <- time.Time{}
+	read("b")
+	cancel()
+	reader.Close()
+	<-done
 }
