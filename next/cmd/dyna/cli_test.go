@@ -166,6 +166,10 @@ func TestSessionRestartMapsID(t *testing.T) {
 	if _, err := execCLI(f, "session", "restart"); err == nil {
 		t.Fatal("restart accepted a missing session")
 	}
+	help := runCLI(t, f, "session", "restart", "--help")
+	if !strings.Contains(help, "old volume and unpushed work are lost") || !strings.Contains(help, "old host is unavailable") {
+		t.Fatalf("restart help does not explain data loss and orphaned resources: %q", help)
+	}
 }
 func TestSessionCloseDiscard(t *testing.T) {
 	f := &fakeClient{}
