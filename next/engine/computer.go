@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"sync"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -140,23 +141,42 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	return ch, nil
 }
 
-// ComputerInput queues owner events for the box's computer. It does not touch the session's turn.
 type computerInputHandle struct {
+	mu    sync.Mutex
 	queue chan contract.ComputerInputBatch
-	done  <-chan struct{}
+	done  chan struct{}
 }
 
-func (h computerInputHandle) send(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {
+// send and close serialize so an old queue cannot accept input after replacement.
+func (h *computerInputHandle) send(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	select {
 	case <-h.done:
 		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
+	default:
+	}
+	select {
 	case <-ctx.Done():
 		return failure(ctx.Err())
 	case h.queue <- batch:
 		return nil
+	default:
+		return &contract.Error{Code: contract.ErrConflict, Message: "input queue is full"}
 	}
 }
 
+func (h *computerInputHandle) close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	select {
+	case <-h.done:
+	default:
+		close(h.done)
+	}
+}
+
+// ComputerInput queues owner events for the box's computer. It does not touch the session's turn.
 func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.ComputerInputResponse{}, forbidden()

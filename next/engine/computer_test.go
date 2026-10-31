@@ -356,20 +356,26 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	t.Fatal("box channel closed before stop")
 }
 
-// Input blocked on a replaced box returns a conflict instead of hanging.
+// A replaced box rejects input even when its old queue has space.
 func TestComputerInputReplacement(t *testing.T) {
-	done := make(chan struct{})
-	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch), done: done}
-	entered := make(chan struct{})
-	result := make(chan *contract.Error, 1)
-	go func() {
-		close(entered)
-		result <- handle.send(context.Background(), contract.ComputerInputBatch{})
-	}()
-	<-entered
-	close(done)
-	problem := <-result
+	handle := &computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
+	handle.close()
+	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
 	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "box replaced" {
 		t.Fatalf("replacement: %v", problem)
+	}
+	select {
+	case <-handle.queue:
+		t.Fatal("replaced box accepted input")
+	default:
+	}
+}
+
+func TestComputerInputFullQueue(t *testing.T) {
+	handle := &computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
+	handle.queue <- contract.ComputerInputBatch{}
+	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
+	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "input queue is full" {
+		t.Fatalf("full queue: %v", problem)
 	}
 }
