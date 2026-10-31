@@ -176,11 +176,7 @@ func (admissionTransport) Run(ctx context.Context, input []byte, args ...string)
 		}
 		body = match[1]
 	case strings.Contains(command, "'/etc/machine-id'"):
-		data, err := os.ReadFile("/etc/machine-id")
-		if err != nil {
-			return nil, err
-		}
-		body = string(data)
+		body = "0123456789abcdef0123456789abcdef"
 	}
 	return []byte(fmt.Sprintf("%sDYNA-END %020d 000\n", body, len(body))), nil
 }
@@ -196,7 +192,11 @@ func TestAddHostCopiesPreviouslySavedInstructions(t *testing.T) {
 	if err := os.WriteFile(source, []byte("saved before host"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), HostData: remote, InstructionsDir: data, Version: "dev", Context: ctx, hostRunner: admissionTransport{}}
+	machineID := filepath.Join(t.TempDir(), "machine-id")
+	if err := os.WriteFile(machineID, []byte("0123456789abcdef0123456789abcdef"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), HostData: remote, InstructionsDir: data, Version: "dev", Context: ctx, hostRunner: admissionTransport{}, machineIDFile: machineID}
 	b.binOnce.Do(func() { b.binSum = "test-sum" })
 	if _, err := b.AddHost(ctx, contract.HostAddRequest{Name: "host", SSH: "user@host", OwnerOnlyAdmin: true}); err != nil {
 		t.Fatal(err)
