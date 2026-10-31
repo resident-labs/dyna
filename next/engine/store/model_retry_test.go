@@ -46,6 +46,30 @@ func TestModelFailureRetries(t *testing.T) {
 		}
 	}
 	post("initial")
+	finish(100, contract.TurnFailed, contract.CauseModelFailed)
+	post("owner-intervenes")
+	started := contract.Event{ID: "manual-start", Room: "r", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
+	turn, inputs, _, err := s.Dispatch(ctx, "s", "manual-turn", started, false)
+	if err != nil || turn != "manual-turn" || len(inputs) != 2 {
+		t.Fatalf("manual dispatch: %q %d %v", turn, len(inputs), err)
+	}
+	// A timer that becomes due while this new turn runs cannot wake it again.
+	due := now.Add(5 * time.Minute)
+	if err := s.WakeModelRetries(ctx, due); err != nil {
+		t.Fatal(err)
+	}
+	ended := contract.Event{ID: "manual-end", Room: "r", Time: now, From: principal, Body: contract.TurnEnded{Session: "s", Turn: turn, Outcome: contract.TurnCompleted}}
+	if err := s.EndTurn(ctx, "s", contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted}, ended); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WakeModelRetries(ctx, due); err != nil {
+		t.Fatal(err)
+	}
+	var pending int
+	if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id='s' AND state='pending' AND wake=1").Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("old timer woke completed work: %d %v", pending, err)
+	}
+	post("again")
 	delays := []time.Duration{5, 10, 20, 40, 60, 60, 60, 60}
 	for i, mins := range delays {
 		finish(i, contract.TurnFailed, contract.CauseModelFailed)
