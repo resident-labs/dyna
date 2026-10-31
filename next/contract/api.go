@@ -234,6 +234,7 @@ type HostSummary struct {
 	DiskBytes         int64             `json:"diskBytes"`
 	DiskUsed          int64             `json:"diskUsed"`
 	DiskLow           bool              `json:"diskLow"`
+	BackupCopyEnabled bool              `json:"backupCopyEnabled"`
 	BackupCopyAt      time.Time         `json:"backupCopyAt,omitzero"`
 	BackupCopyFailure BackupCopyFailure `json:"backupCopyFailure,omitempty"`
 	LastSeen          time.Time         `json:"lastSeen,omitzero"`

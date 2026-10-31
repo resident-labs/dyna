@@ -33,8 +33,9 @@ type hostRegistrar interface {
 
 type serviceWithHosts struct {
 	*engine.Service
-	boxes  hostRegistrar
-	quotas *model.Quotas
+	boxes         hostRegistrar
+	quotas        *model.Quotas
+	backupEnabled bool
 }
 
 func (s *serviceWithHosts) AccountsQuota(ctx context.Context, caller contract.Principal, _ contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
@@ -53,6 +54,7 @@ func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Princip
 	if err := s.boxes.HostLoad(ctx, result.Hosts); err != nil {
 		return contract.HostListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
 	}
+	result.Hosts[0].BackupCopyEnabled = s.backupEnabled
 	return result, nil
 }
 
@@ -172,7 +174,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
-	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, time.Now)}, func(c api.Caller) http.Handler {
+	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, time.Now), backupEnabled: recipient != nil}, func(c api.Caller) http.Handler {
 		return drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := st.Session(r.Context(), c.Principal.Session)
 			if err != nil {
