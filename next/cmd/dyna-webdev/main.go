@@ -226,7 +226,10 @@ func (devService) ComputerWatch(ctx context.Context, _ contract.SessionID) (<-ch
 type profiles struct{}
 
 func (profiles) List() []contract.ProfileSummary {
-	return []contract.ProfileSummary{{Name: "fake", Provider: contract.ModelProviderOpenAI, Model: "fake", Thinking: contract.ThinkingOff}}
+	// Invented models, so the session profile menu has choices. Model still runs every profile on the fake harness.
+	return []contract.ProfileSummary{{Name: "fake", Provider: contract.ModelProviderAnthropic, Model: "claude-sonnet-5-5", Thinking: contract.ThinkingMedium},
+		{Name: "deep", Provider: contract.ModelProviderAnthropic, Model: "claude-opus-5-5", Thinking: contract.ThinkingXHigh},
+		{Name: "quick", Provider: contract.ModelProviderOpenAI, Model: "gpt-6.1-mini", Thinking: contract.ThinkingOff}}
 }
 func (profiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
 	return contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "fake", Thinking: contract.ThinkingOff}, []string{"fake"}, nil
