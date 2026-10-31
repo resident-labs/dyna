@@ -244,6 +244,9 @@ export function requestLine(card: Pick<Card, "body" | "target">): { text: string
   return at < 0 ? { text, named: "", after: "" } : { text: text.slice(0, at), named: name, after: text.slice(at + name.length) };
 }
 
+// A sentence that continues after a middle dot loses its period.
+export const clause = (text: string) => text.replace(/\.$/, "");
+
 // Files the browser shows inline as a thumbnail; other types get a file card.
 export const isImage = (file: Attachment) => /^image\/(png|jpeg|gif|webp)$/.test(file.media);
 
