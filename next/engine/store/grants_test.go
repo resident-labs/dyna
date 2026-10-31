@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"github.com/resident-labs/dyna/contract"
 	"testing"
 	"time"
@@ -27,6 +28,20 @@ func TestGrantRoundTripAndExpiry(t *testing.T) {
 	got, err := s.ListActiveGrants(ctx, "room", who, now)
 	if err != nil || len(got) != 1 || len(got[0].Hosts) != 2 || len(got[0].Commands) != 2 || len(got[0].Commands[0].Args) != 2 || got[0].Commands[1].Args[0] != "-c" {
 		t.Fatalf("round trip: %+v %v", got, err)
+	}
+	if err = s.RevokeGrant(ctx, g.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.ListActiveGrants(ctx, "room", who, now)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("revoked grant remains active: %+v %v", got, err)
+	}
+	if err = s.RevokeGrant(ctx, g.ID, now); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("second revoke: %v", err)
+	}
+	g.ID = "expiry"
+	if err = s.Write(ctx, func(tx *sql.Tx) error { return s.InsertGrant(tx, g) }); err != nil {
+		t.Fatal(err)
 	}
 	due := now.Add(time.Hour)
 	event := func(room contract.RoomID, id contract.GrantID) (contract.Event, error) {
