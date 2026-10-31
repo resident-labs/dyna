@@ -25,6 +25,10 @@ func TestVisualFlagsAndMetadata(t *testing.T) {
 			}
 		})
 	}
+	title, _, err := visualMeta("test.html", []byte("<title>"+strings.Repeat("漢", 86)+"</title>"))
+	if err != nil || title != strings.Repeat("漢", 85) {
+		t.Fatalf("multibyte title: %q, err=%v", title, err)
+	}
 	for _, args := range [][]string{
 		{"post", "text", "--update", "ev_1"},
 		{"post", "text", "--allow-net"},
