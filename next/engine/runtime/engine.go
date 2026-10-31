@@ -251,12 +251,15 @@ func Run(ctx context.Context, cfg Config) error {
 	defer card.Close()
 	appPort := 0
 	webRoutes := func(context.Context) []string { return nil }
+	var webServer *api.Web
+	var connectOps *connect.Operations
+	ready := make(chan struct{})
 	if cfg.WebListen != "" {
 		app, err := fs.Sub(web.Dist, "dist")
 		if err != nil {
 			return err
 		}
-		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now, st)
+		webServer, err = api.NewWeb(apiServer, cfg.WebListen, app, time.Now, st)
 		if err != nil {
 			return err
 		}
@@ -264,22 +267,29 @@ func Run(ctx context.Context, cfg Config) error {
 		if err := webServer.SetRoutes(cfg.WebRoutes); err != nil {
 			return err
 		}
-		refresh := func(ctx context.Context, port int) []string {
-			if route := connect.TailscaleRoute(ctx, port); route != "" {
-				_ = webServer.SetRoutes([]string{route})
+		webServer.SetDiscovery(func(ctx context.Context) string {
+			<-ready
+			return connect.TailscaleRoute(ctx, appPort)
+		}, func() {
+			select {
+			case connectOps.Wake() <- struct{}{}:
+			default:
 			}
-			return webServer.PublicRoutes()
-		}
-		listener, err := webServer.Listen(func(port int) { refresh(ctx, port) })
+		})
+		listener, err := webServer.Listen()
 		if err != nil {
 			return err
 		}
 		defer listener.Close()
 		appPort = listener.Addr().(*net.TCPAddr).Port
-		webRoutes = func(ctx context.Context) []string { return refresh(ctx, appPort) }
 	}
-	connectOps := connect.NewOperations(ctx, files, st, appPort, card.Addr().(*net.TCPAddr).Port)
+	connectOps = connect.NewOperations(ctx, files, st, appPort, card.Addr().(*net.TCPAddr).Port)
 	defer connectOps.Close()
+	close(ready)
+	if webServer != nil {
+		webRoutes = webServer.RefreshRoutes
+	}
+
 	if err := connectOps.Resume(ctx); err != nil {
 		return err
 	}
