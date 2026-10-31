@@ -105,6 +105,8 @@ Third-party Go dependencies are allowed only with a reason in the PR. Expected: 
 
 ### 3.2 Identifiers and principals
 
+Room and session names are 1–64 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit.
+
 ```go
 type (
 	RoomID         string // "room_<ulid>"
