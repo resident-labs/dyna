@@ -91,6 +91,27 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 	})
 }
 
+// HandoffConnectSession replaces only the still-live source session, retaining its grant and device.
+func (s *Store) HandoffConnectSession(ctx context.Context, source string, x ConnectSession, now time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		r, err := tx.ExecContext(ctx, `UPDATE connect_sessions SET id=?,origin=?,jkt=?,token_hash=?,old1=NULL,old2=NULL,old3=NULL,prev_until=0
+ WHERE id=? AND relay_device=? AND epoch=? AND generation=? AND access_until>? AND grant_end>?
+ AND EXISTS(SELECT 1 FROM connect_link_state WHERE id=1 AND linked=1 AND epoch=? AND generation=?)
+ AND EXISTS(SELECT 1 FROM connect_devices m JOIN devices d ON d.id=m.device WHERE m.relay_device=connect_sessions.relay_device AND d.revoked_at IS NULL AND d.expires_at>?)`, x.ID, x.Origin, x.JKT, x.Hash[:], source, x.RelayDevice, x.Epoch, x.Generation, now.UnixMilli(), now.UnixMilli(), x.Epoch, x.Generation, now.UnixMilli())
+		if err != nil {
+			return err
+		}
+		n, err := r.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrConnectEpoch
+		}
+		return nil
+	})
+}
+
 // AuthenticateConnect reads session, device state and scopes in one snapshot.
 // Old cookies identify a session for proof-based renewal but cannot log out.
 func (s *Store) AuthenticateConnect(ctx context.Context, hash [32]byte, origin string, now time.Time) (ConnectSession, []contract.Scope, bool, error) {
