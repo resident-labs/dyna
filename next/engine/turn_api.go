@@ -84,6 +84,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		"Run these with your shell tool.\n" +
 		"Use dyna post TEXT --mention NAME only when someone must act. The box selects your room.\n" +
 		"Use dyna session start --room ROOM --name NAME --profile PROFILE --goal GOAL --brief BRIEF to start a child. It prints the child session ID for stop and close.\n" +
+		"Add --size agent, small, medium or large to a start only when you are root; a session you start under root defaults to medium, and a child of that session keeps its parent's size.\n" +
 		"Use dyna session stop SESSION or dyna session close SESSION to manage a child.\n" +
 		"Use dyna rules to read room rules and dyna room log ROOM to read the feed.\n" +
 		"Use dyna op list ROOM, dyna op approve ID, or dyna op deny ID --reason WHY for requests.\n" +
