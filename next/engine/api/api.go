@@ -296,6 +296,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodTranscriptAppend, c, contract.ScopeRead, box, a.service.TranscriptAppend)
 	call(mux, contract.MethodTranscriptFetch, c, contract.ScopeRead, box, a.service.TranscriptFetch)
 	call(mux, contract.MethodTranscriptRead, c, contract.ScopeRead, owner, a.service.TranscriptRead)
+	call(mux, contract.MethodSessionWork, c, contract.ScopeRead, owner, a.service.SessionWork)
 	call(mux, contract.MethodShellJobEnded, c, contract.ScopeRead, box, a.service.ShellJobEnded)
 	mux.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
 		if !user(c) || !hasScope(c, contract.ScopeRead) {

@@ -30,7 +30,7 @@ export type ProfileRemoveResponse = { };
 export type AccountFailureReason = "sign_in_rejected" | "refresh_failed" | "proxy_failed" | "credential_missing";
 export type AccountFailed = { accountId: AccountID; reason: AccountFailureReason; };
 export type AccountQuotaLow = { accountId: AccountID; window: string; remainingPercent: number; floor: number; };
-export type Method = "rule.add" | "rule.remove" | "rule.edit" | "rule.list" | "web.login" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "shell.job.ended" | "shell.output" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.run" | "hostexec.revoke" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
+export type Method = "rule.add" | "rule.remove" | "rule.edit" | "rule.list" | "web.login" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.run" | "hostexec.revoke" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
 export type RoomRule = { number: number; text: string; by: Principal; at: string; };
 export type RuleAddRequest = { room: RoomID; text: string; };
 export type RuleAddResponse = { number: number; };
@@ -113,6 +113,9 @@ export type TurnOutputRequest = { shellJobs: number; error?: string; cause?: Fai
 export type TurnOutputResponse = { };
 export type TurnActivityRequest = { turn: TurnID; label: string; };
 export type TurnActivityResponse = { };
+export type SessionWorkRequest = { session: SessionID; before?: TurnID; limit?: number; };
+export type SessionWorkTurn = { started: Event; ended?: Event | null; inputs: Array<Event> | null; posts: Array<Event> | null; };
+export type SessionWorkResponse = { turns: Array<SessionWorkTurn> | null; more: boolean; total: number; };
 export type TranscriptReadRequest = { session: SessionID; turn?: TurnID; };
 export type TranscriptStep = { turn: TurnID; tool: string; label: string; started: string; ended?: string | null; failed: boolean; preview: string; };
 export type TranscriptReadResponse = { steps: Array<TranscriptStep> | null; truncated: boolean; };
@@ -406,6 +409,7 @@ export interface MethodMap {
   "transcript.fetch": { request: TranscriptFetchRequest; response: TranscriptFetchResponse };
   "transcript.append": { request: TranscriptAppendRequest; response: TranscriptAppendResponse };
   "transcript.read": { request: TranscriptReadRequest; response: TranscriptReadResponse };
+  "session.work": { request: SessionWorkRequest; response: SessionWorkResponse };
   "shell.job.ended": { request: ShellJobEndedRequest; response: ShellJobEndedResponse };
   "shell.output": { request: ShellOutputRequest; response: ShellOutputResponse };
   "device.pair": { request: DevicePairRequest; response: DevicePairResponse };
