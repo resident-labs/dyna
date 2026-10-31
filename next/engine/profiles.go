@@ -16,6 +16,7 @@ type profile struct {
 	Model         string                 `json:"model"`
 	AllowedModels []string               `json:"allowedModels"`
 	Thinking      contract.ThinkingLevel `json:"thinking"`
+	CompactTokens int                    `json:"compactTokens,omitempty"`
 }
 
 type ProfileConfig map[contract.ProfileName]profile
@@ -37,6 +38,9 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 		return nil, fmt.Errorf("profiles: no profiles")
 	}
 	for name, p := range profiles {
+		if p.CompactTokens < 0 {
+			return nil, fmt.Errorf("profile %q: compactTokens must be non-negative", name)
+		}
 		if name == "" || p.Model == "" || !slices.Contains(p.AllowedModels, p.Model) {
 			return nil, fmt.Errorf("profile %q: model must be allowed", name)
 		}
@@ -68,6 +72,10 @@ func (s *Service) ProfileList(_ context.Context, who contract.Principal, _ contr
 		return contract.ProfileListResponse{}, forbidden()
 	}
 	return contract.ProfileListResponse{Profiles: s.profiles.List()}, nil
+}
+
+func (p ProfileConfig) CompactionTokens(name contract.ProfileName) int {
+	return p[name].CompactTokens
 }
 
 func (p ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, []string, error) {
