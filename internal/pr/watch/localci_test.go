@@ -152,7 +152,7 @@ func (r *relocationRegistry) Nodes(context.Context) ([]localci.Node, error) {
 	}, nil
 }
 
-func TestRegisteredCIRelocationDoesNotReturnToVisitedNode(t *testing.T) {
+func TestRegisteredCIRelocationCoolsDownVisitedNode(t *testing.T) {
 	registry := &relocationRegistry{}
 	dir := t.TempDir()
 	machinesStore := machines.Store{DataDir: dir}
@@ -165,7 +165,8 @@ func TestRegisteredCIRelocationDoesNotReturnToVisitedNode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s := &Service{Store: &Store{Root: filepath.Join(dir, "prs")}, LocalCIRegistry: registry}
+	now := time.Unix(100, 0)
+	s := &Service{Store: &Store{Root: filepath.Join(dir, "prs")}, LocalCIRegistry: registry, Now: func() time.Time { return now }}
 	job := registeredCIJob{record: Record{Kind: "local"}, head: strings.Repeat("a", 40), trial: true}
 	starts := 0
 	s.RunNodeCI = func(ctx context.Context, node localci.Node, req localci.Request) (localci.Result, error) {
@@ -178,7 +179,11 @@ func TestRegisteredCIRelocationDoesNotReturnToVisitedNode(t *testing.T) {
 			return localci.Result{}, &localci.RelocateError{Node: *next}
 		}
 		if next := req.OnQueue(ctx); next != nil {
-			t.Fatalf("relocation returned to visited node %s", next.Name)
+			t.Fatalf("relocation returned too soon to %s", next.Name)
+		}
+		now = now.Add(time.Minute)
+		if next := req.OnQueue(ctx); next == nil || next.Name != "first" {
+			t.Fatalf("relocation after cooldown = %v, want first", next)
 		}
 		return localci.Result{Status: "passed"}, nil
 	}
