@@ -64,7 +64,7 @@
   .menu { position: relative; }
   .open { display: inline-flex; align-items: start; gap: 4px; max-width: 100%; margin: 0 -4px; padding: 0 4px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
   .open :global(svg) { flex: none; width: 14px; height: 14px; margin-top: 3px; color: var(--muted); }
-  .names { display: grid; min-width: 0; }
+  .names { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
   small { color: var(--muted); font-size: 12.5px; line-height: 18px; }
   .open:hover:not([aria-disabled="true"]), .open[aria-expanded="true"] { background: var(--hover); }
   .open[aria-disabled="true"] { opacity: 0.6; cursor: default; }
