@@ -10,11 +10,13 @@
   let error = $derived(tone === "error" || tone === "blocked" || tone === "failed");
 </script>
 {#if count !== undefined}<span class="count" class:error aria-hidden="true">{count > 99 ? "99+" : count}</span>
-{:else}<span class="status" class:dot class:error class:working={tone === "working"} {title} role={dot ? "img" : undefined}
+{:else}<span class="status" class:dot class:word class:error class:working={tone === "working"} {title} role={dot ? "img" : undefined}
   aria-label={dot ? title : undefined}>{#if !word}<i></i>{/if}{#if !dot}{label}{/if}</span>{/if}
 <style>
   .status { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--attention); opacity: 0.9;
     font-size: 12.5px; font-weight: 500; line-height: 1.25; white-space: nowrap; }
+  /* A word sits in its muted line's text, so the line's ellipsis can cut it. */
+  .word { display: inline; }
   .error { color: var(--danger); }
   .working { color: var(--success); }
   .count { flex: none; color: var(--attention); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
