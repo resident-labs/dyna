@@ -1060,7 +1060,7 @@ var eventEnums = []eventEnum{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
 	}},
 	{Type: reflect.TypeOf(HookState("")), Values: []string{
-		string(HookRunning), string(HookPassed), string(HookFailed), string(HookError),
+		string(HookRunning), string(HookPassed), string(HookFailed), string(HookError), string(HookDeferred),
 	}},
 	{Type: reflect.TypeOf(MergeReasonKind("")), Values: enumValues(mergeReasonKinds)},
 	{Type: reflect.TypeOf(ReviewKind("")), Values: enumValues(reviewKinds)},
