@@ -63,10 +63,22 @@ func (s *Store) Events(ctx context.Context, room contract.RoomID, afterSeq int64
 // EventsPage returns one page after afterSeq, or before beforeSeq when it is set, in sequence order.
 // A dm session keeps only the events whose home is that session's DM.
 func (s *Store) EventsPage(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType, dm contract.SessionID) ([]contract.Event, error) {
+	return s.eventsPage(ctx, room, afterSeq, beforeSeq, limit, types, dm, false)
+}
+
+// OwnerEvents pages the cross-room attention events.
+func (s *Store) OwnerEvents(ctx context.Context, afterSeq int64, limit int) ([]contract.Event, error) {
+	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "turn.started", "turn.ended", "session.closed"}, "", true)
+}
+
+func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType, dm contract.SessionID, allRooms bool) ([]contract.Event, error) {
 	query := "SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE "
 	// database/sql requires a heterogeneous variadic slice for query arguments.
 	var args []interface{}
-	if room == "" {
+	if allRooms {
+		query += "room IS NOT NULL AND seq>?"
+		args = append(args, afterSeq)
+	} else if room == "" {
 		query += "room IS NULL AND seq>?"
 		args = append(args, afterSeq)
 	} else {
