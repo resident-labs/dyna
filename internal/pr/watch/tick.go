@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"maps"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -445,7 +444,7 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 		live := current.Records[key]
 		if live != nil && (err != nil || live.Polling.DiscussionGeneration != r.Polling.DiscussionGeneration) {
 			for path, response := range entries {
-				if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
+				if discussionResponse(path) {
 					response.Stale = true
 					entries[path] = response
 				}

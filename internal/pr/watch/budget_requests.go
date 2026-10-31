@@ -9,11 +9,14 @@ import (
 )
 
 func sameResponse(a, b cachedResponse) bool {
-	return a.ETag == b.ETag && a.Next == b.Next && bytes.Equal(a.Body, b.Body)
+	return a.ETag == b.ETag && a.Next == b.Next && a.Stale == b.Stale && bytes.Equal(a.Body, b.Body)
 }
 
 func budgetResponsesChanged(entries, used map[string]cachedResponse) bool {
 	for path, response := range used {
+		if discussionResponse(path) {
+			continue
+		}
 		if previous, ok := entries[path]; !ok || !sameResponse(previous, response) {
 			return true
 		}
@@ -77,6 +80,9 @@ func (s *Service) saveBudgetRequests(result pollResult, r Record, policy ChangeP
 			entries = map[string]cachedResponse{}
 		}
 		for path, response := range requests.used {
+			if discussionResponse(path) {
+				continue
+			}
 			entries[path] = response
 		}
 		current.Responses[result.key] = entries
