@@ -64,6 +64,8 @@ func (p headProbe) ciVersion() string {
 	return p.CI + ":" + p.ChecksAt.UTC().Format(time.RFC3339Nano)
 }
 
+var withHeadChunkTimeout = context.WithTimeout
+
 // readHeads bounds each query and retries failed records in two halves once.
 func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]headProbe, map[string]RateLimit, error) {
 	const headBatchSize = 20
@@ -72,9 +74,14 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 	}
 	out := map[string]headProbe{}
 	var failures []error
+	read := func(chunk []*Record) (map[string]headProbe, map[string]RateLimit, error) {
+		chunkCtx, cancel := withHeadChunkTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return g.readHeadChunk(chunkCtx, chunk)
+	}
 	for start := 0; start < len(records); start += headBatchSize {
 		chunk := records[start:min(start+headBatchSize, len(records))]
-		heads, _, err := g.readHeadChunk(ctx, chunk)
+		heads, _, err := read(chunk)
 		if err != nil && len(chunk) > 1 && ctx.Err() == nil {
 			// Preserve successful observations; only retry records that failed.
 			failed := make([]*Record, 0, len(chunk))
@@ -91,7 +98,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					if len(half) == 0 {
 						continue
 					}
-					retried, _, retryErr := g.readHeadChunk(ctx, half)
+					retried, _, retryErr := read(half)
 					for k, p := range retried {
 						out[k] = p
 					}
