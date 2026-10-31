@@ -569,9 +569,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			}
 			card := &contract.VisualCard{Title: title, Height: height, AllowNet: allowNet}
 			result := visual.Preview(cmd.Context(), data, visualCSP(allowNet), allowNet)
-			for _, check := range result.Checks {
-				fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s %s\n", check.Name, check.Status, check.Detail)
-			}
+			printVisualChecks(cmd.ErrOrStderr(), result.Checks)
 			if err := visualImages(cmd.Context(), c, result, card); err != nil {
 				return err
 			}
