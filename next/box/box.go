@@ -73,6 +73,8 @@ const GiB int64 = 1 << 30
 
 func Size(name contract.BoxSizeName) (contract.BoxSize, bool) {
 	switch name {
+	case contract.BoxSizeAgent:
+		return contract.BoxSize{Name: name, CPUs: 1, MemBytes: 2 * GiB, Pids: 1024}, true
 	case contract.BoxSizeSmall:
 		return contract.BoxSize{Name: name, CPUs: 2, MemBytes: 4 * GiB, Pids: 2048}, true
 	case contract.BoxSizeMedium:
@@ -85,6 +87,8 @@ func Size(name contract.BoxSizeName) (contract.BoxSize, bool) {
 }
 func diskRequest(name contract.BoxSizeName) int64 {
 	switch name {
+	case contract.BoxSizeAgent:
+		return 5 * GiB
 	case contract.BoxSizeSmall:
 		return 10 * GiB
 	case contract.BoxSizeMedium:
