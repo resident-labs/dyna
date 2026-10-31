@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { APIError, call } from "./lib/client.ts";
   import Feed from "./lib/ui/Feed.svelte";
@@ -71,10 +72,12 @@
   let members: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
-    if (event.key === "Escape") panel = false;
+    if (event.key === "Escape" && panel) void showPanel(false);
     if (event.key !== "F6") return;
     event.preventDefault();
-    const areas = [rail, feed, composer, members].filter(area => area !== undefined);
+    // Only areas on screen take part; below 900 px the closed sessions panel has no boxes.
+    const areas = [rail, feed, composer, members].filter(area => area !== undefined)
+      .filter(area => area.getClientRects().length > 0);
     const index = areas.findIndex(area => area.contains(document.activeElement));
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
   }
@@ -87,7 +90,14 @@
     return `${store?.turns.has(id) ? "working" : box && box !== "ready" ? `box ${box}` : "idle"} · ${profile}`;
   };
   // Below 900 px the sessions panel is hidden; a header button opens it over the feed.
+  // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
+  let toggle: HTMLButtonElement | undefined = $state();
+  async function showPanel(open: boolean) {
+    const held = members?.contains(document.activeElement);
+    panel = open;
+    if (open) { await tick(); members?.focus(); } else if (held) toggle?.focus();
+  }
   let title = $derived(!room ? "Welcome" : session ? store?.sessions.get(session)?.name ?? "Session" : roomName);
 </script>
 
@@ -105,8 +115,9 @@
   <main>
     <header>{#if room && !session}<Icon name="room" />{/if}<strong>{title}</strong>
       {#if !session && counts}<span class="count">{counts}</span>{/if}
-      {#if room}<button type="button" class="panel-toggle" aria-label="Sessions" title="Sessions" aria-controls="sessions"
-        aria-expanded={panel} onclick={() => { panel = !panel; }}><Icon name="people" /></button>{/if}</header>
+      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.failed.size ? "Sessions, a turn failed" : "Sessions"}
+        title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
+        {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     <div class="feed">
       {#if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
