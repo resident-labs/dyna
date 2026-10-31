@@ -1,8 +1,9 @@
 <script lang="ts">
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
+  import StatusPill from "./StatusPill.svelte";
   // The room's less frequent actions. Requests has its own header button.
-  let { paused, operate, admin, onpause, oninstructions }: { paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void } = $props();
+  let { paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, onsessions, jobFailed = false, waiting = 0 }: { onsessions?: () => void; onrequests?: () => void; onjobs?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
@@ -14,6 +15,8 @@
   }
   // A page the menu opened returns focus here when it closes.
   export function focus(options?: FocusOptions) { button.focus(options); }
+  let waitingLabel = $derived(`${waiting} ${waiting === 1 ? "request" : "requests"} waiting`);
+  let menuLabel = $derived(["Room menu", waiting ? waitingLabel : "", jobFailed ? "a job failed" : ""].filter(Boolean).join(", "));
   // Up and Down move between entries, Home and End jump, Escape closes and Tab leaves.
   function move(event: KeyboardEvent) {
     const all = items();
@@ -28,11 +31,16 @@
 <svelte:window onpointerdown={event => { if (open && event.target instanceof Node && !root.contains(event.target)) void show(false); }} />
 <div class="menu" bind:this={root}>
   <button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
-    aria-label="Room menu" title="Room menu"
+    aria-label={menuLabel} title={menuLabel}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <Icon name="more" /></button>
+    <Icon name="more" />{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
+      {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
+      {#if onsessions}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onsessions(); }}>Sessions</button>{/if}
+      {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>{/if}
+      {#if onterminal}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onterminal(); }}>Terminal</button>{/if}
+      {#if oncomputer}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oncomputer(); }}>Computer</button>{/if}
       {#if admin}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oninstructions(); }}>Instructions</button>{/if}
       {#if operate}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onpause(); }}>{paused ? "Resume room" : "Pause room"}</button>{/if}
     </div>
@@ -41,7 +49,7 @@
 
 <style>
   .menu { position: relative; }
-  .open { display: flex; align-items: center; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  .open { display: flex; align-items: center; gap: 4px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .open:hover, .open[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; min-width: 180px; padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }
