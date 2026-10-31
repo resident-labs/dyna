@@ -1,3 +1,9 @@
+<script lang="ts" module>
+  // Every image mount gets its own stream URL. Chromium can show a reused multipart URL from its image cache
+  // without a new request: a frozen frame under "Live" after a retry, the page showing again, or the view reopening.
+  let opened = 0;
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
@@ -21,6 +27,7 @@
   // so the view ignores it. A failed image stays, so the browser keeps showing the last frame under the notice, as in v1.
   function watch(image: HTMLImageElement) {
     const { frame, fail } = stream.start();
+    image.src = `/v1/computers/watch?session=${encodeURIComponent(session)}&n=${++opened}`;
     image.addEventListener("load", () => { frame(); if (image.naturalHeight > 1) ratio = image.naturalWidth / image.naturalHeight; });
     image.addEventListener("error", fail);
     return () => { stream.stop(); image.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="; };
@@ -31,8 +38,7 @@
   function key(event: KeyboardEvent) {
     if (event.key === "Escape") { event.stopPropagation(); onclose(); }
   }
-  // Try again loads a new stream: the key remounts the image, and the attempt in its URL keeps Chromium from showing
-  // the old stream from its image cache without a new request.
+  // Try again loads a new stream: the key remounts the image.
   let attempt = $state(0);
 </script>
 
@@ -45,7 +51,7 @@
     <button type="button" aria-label="Close" title="Close" onclick={onclose}><Icon name="close" /></button>{/snippet}
   <!-- The image streams only while the owner can see it: this view open, the page visible. -->
   <div class="screen" class:docked style:--ratio={ratio}>
-    {#if visible}{#key attempt}<img src={`/v1/computers/watch?session=${encodeURIComponent(session)}&attempt=${attempt}`} alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
+    {#if visible}{#key attempt}<img alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
   {#if docked && activity}<p class="activity">{activity}</p>{/if}
