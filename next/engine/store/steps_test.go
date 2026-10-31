@@ -57,7 +57,7 @@ func TestUpgradeGrantsExistingRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{12: steps[12], 13: steps[13], 14: steps[14], 15: steps[15], 16: steps[16], 17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{12: steps[12], 13: steps[13], 14: steps[14], 15: steps[15], 16: steps[16], 17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}, 41: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	s := &Store{read: db}
@@ -83,7 +83,7 @@ func TestUpgradeSetsOpenTurnStartSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}, 18: steps[18], 19: {}, 20: steps[20], 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}, 18: steps[18], 19: {}, 20: steps[20], 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}, 41: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var seq sql.NullInt64
@@ -115,7 +115,7 @@ func TestUpgradeRevokesOldGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}, 41: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.Query(`SELECT id,revoked_at,reason FROM grants ORDER BY id`)
@@ -165,7 +165,7 @@ func TestUpgradeBoxIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := upgrade(db, 1, "", map[int][]string{21: steps[21], 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}}, nil); err != nil {
+	if err := upgrade(db, 1, "", map[int][]string{21: steps[21], 22: {}, 23: {}, 24: {}, 25: {}, 26: {}, 27: {}, 28: {}, 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}, 41: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.Query(`SELECT b.want,s.state,b.due_at,b.failures FROM boxes b JOIN sessions s ON s.id=b.session ORDER BY b.id`)
@@ -206,7 +206,7 @@ func TestUpgradeRecoversPRBranchAfterHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := upgrade(db, 1, "", map[int][]string{28: steps[28], 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}}, nil); err != nil {
+	if err := upgrade(db, 1, "", map[int][]string{28: steps[28], 29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {}, 38: {}, 39: {}, 40: {}, 41: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var branch, unknown string
@@ -236,7 +236,7 @@ func TestUpgradeIndexesExistingPosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{37: steps[37], 38: {}, 39: {}, 40: {}}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{37: steps[37], 38: {}, 39: {}, 40: {}, 41: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -255,7 +255,7 @@ func TestUpgradeMarksLegacyApprovedAsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := upgrade(db, 1, "", map[int][]string{38: steps[38], 39: {}, 40: {}}, nil); err != nil {
+	if err := upgrade(db, 1, "", map[int][]string{38: steps[38], 39: {}, 40: {}, 41: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var running, done int
