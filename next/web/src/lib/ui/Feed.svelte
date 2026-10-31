@@ -7,7 +7,6 @@
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
   import RequestCard from "./RequestCard.svelte";
-  import WorkingDot from "./WorkingDot.svelte";
   import { dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
@@ -29,7 +28,7 @@
     for (const request of unsent) if (!shown.has(request)) view.unsent(request);
   });
   onDestroy(() => store.leave(view));
-  type Item = Row | { kind: "working"; key: string; session: string } | { kind: "intro"; key: string };
+  type Item = Row | { kind: "intro"; key: string };
   // A pending post's mentions are names; its row shows them as the sessions the engine will resolve.
   const mentioned = (names: string[]) => names.flatMap(name => {
     const session = [...store.sessions.values()].find(open => open.name === name)?.session;
@@ -57,12 +56,10 @@
     return () => { list?.removeEventListener("scroll", markRead); document.removeEventListener("visibilitychange", markRead); };
   });
   // The intro opens the conversation once the window reaches its first event; it also stands in for an empty feed.
-  // A DM ends with one muted line while its session runs a turn, only when the window shows the present.
   // Requests stay in the room feed and the Requests panel: a DM reads only its posts and the turns that answered in it (spec 5.13).
   let items: Item[] = $derived([
     ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
     ...feedRows(view.ordered, home, pending, since),
-    ...(home.session && view.atPresent && store.turns.has(home.session) ? [{ kind: "working" as const, key: "working", session: home.session }] : []),
   ]);
   // Opened work rows stay open while the list recycles their elements.
   const opened = new SvelteSet<string>();
@@ -125,7 +122,6 @@
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
-      {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>
       {:else}{@render intro()}{/if}
     {/snippet}
   </VirtualList>
@@ -140,7 +136,6 @@
 {/if}
 
 <style>
-  .working { margin: 0; padding: 6px 16px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
   /* A centred muted date on a hairline, as in Discord. */
   .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
