@@ -6,6 +6,7 @@
   import Feed from "./lib/ui/Feed.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
+  import WorkingLine from "./lib/ui/WorkingLine.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
   import HostFoot from "./lib/ui/HostFoot.svelte";
   import VirtualList from "./lib/ui/VirtualList.svelte";
@@ -421,6 +422,7 @@
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
     {#if room && !unavailable}
+      {#if store}<WorkingLine {store} {home} />{/if}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} />
     {/if}{/if}
