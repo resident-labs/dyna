@@ -175,6 +175,7 @@
   h2, h3 { margin: 0; font-size: 14px; font-weight: 600; } h2 { display: flex; align-items: center; gap: 8px; }
   .initial { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; }
   .connect-button, .heading > .ghost { margin-left: auto; }
+  .heading > .muted { white-space: nowrap; }
   .list, .add { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
   .row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
   .row + .row, .connect { border-top: 1px solid var(--line); }
