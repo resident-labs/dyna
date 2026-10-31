@@ -477,8 +477,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return err
 	}})
 	var roomID, name, profile, goal, brief, sessionRepo, parent, size string
+	var sameHost bool
 	start := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, Brief: brief, Size: contract.BoxSizeName(size)})
+		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, Brief: brief, Size: contract.BoxSizeName(size), SameHost: sameHost})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Session)
 		}
@@ -492,6 +493,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&goal, "goal", "", "Goal")
 	start.Flags().StringVar(&brief, "brief", "", "Brief")
 	start.Flags().StringVar(&size, "size", "", "Box size for a lead: agent, small, medium or large")
+	start.Flags().BoolVar(&sameHost, "same-host", false, "Place the box on its parent’s host")
 	var discard bool
 	closeCmd := &cobra.Command{Use: "close SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().SessionClose(cmd.Context(), contract.SessionCloseRequest{Session: contract.SessionID(args[0]), Discard: discard})

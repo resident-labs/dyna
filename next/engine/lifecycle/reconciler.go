@@ -259,7 +259,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			rows[i].Box = next
 			rows[i].DueAt = time.Time{}
 			all[i] = next
-			if next.State == contract.BoxCreating && b.Host == "" {
+			if next.State == contract.BoxCreating && row.Failures == 0 {
 				r.mu.Lock()
 				r.fresh[b.ID] = true
 				r.mu.Unlock()
