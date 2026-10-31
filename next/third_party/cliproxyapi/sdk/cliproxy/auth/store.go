@@ -1,6 +1,15 @@
 package auth
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrCredentialNotDurable means the replacement was not committed to the store.
+var ErrCredentialNotDurable = errors.New("credential persistence failed")
+
+// DurableAuthStore opts into refusing uncommitted credential changes.
+type DurableAuthStore interface{ RequireDurableAuth() bool }
 
 // Store abstracts persistence of Auth state across restarts.
 type Store interface {
