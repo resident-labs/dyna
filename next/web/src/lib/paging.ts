@@ -1,3 +1,4 @@
+// Fetch three screens ahead so a page can wait for scrolling to settle before the reader reaches it.
 export const pagingEdge = (client: number): number => Math.max(600, 3 * client);
 
 // The ends of a scrolling list to page at. moved is how far scrollTop changed in a scroll event:
