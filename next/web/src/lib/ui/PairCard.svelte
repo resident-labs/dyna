@@ -11,15 +11,18 @@
   let { devices, reload, onclose }: { devices: readonly Device[]; reload: () => void; onclose: (paired: boolean) => void } = $props();
   const known = new Set(untrack(() => devices).map(device => device.id));
   let chosen = $state(startingScopes(location.hostname));
-  let live: DevicePairResponse | undefined = $state.raw();
+  // The live code and the scopes it carries. While a new code is on its way, the old one is hidden, as it grants other scopes.
+  let live: { code: DevicePairResponse; scopes: Scope[] } | undefined = $state.raw();
+  let changing = $state(false);
   let route = $state("");
   let failed = $state(false);
   let now = $state(Date.now());
   let element: HTMLElement | undefined = $state();
 
-  // Scopes live on the code, and a new code replaces the old one. So each change makes a code, and closing makes one that
-  // nobody sees, which ends the shown one. Calls run one at a time, so the code shown is always the engine's live one.
-  let closing = false, running = false, again = false;
+  // Scopes live on the code, and a new code replaces the old one. So each change makes a code, and every exit (close,
+  // or leaving the pane) makes one that nobody sees, which ends the shown one, even one still on its way. Calls run one
+  // at a time, so the code shown is always the engine's live one.
+  let closing = false, gone = false, running = false, again = false;
   async function make() {
     again = true;
     if (running) return;
@@ -30,14 +33,18 @@
       const discard = closing;
       const scopes: Scope[] = discard ? ["read"] : chosen;
       await call("device.pair", { scopes }).then(made => {
-        if (discard) onclose(false);
-        else { live = made; now = Date.now(); }
-      }, () => { failed = true; closing = false; });
+        if (discard) { if (!gone) onclose(false); }
+        else { live = { code: made, scopes }; now = Date.now(); changing = false; }
+      }, () => {
+        // A failed change keeps the old code, so the boxes show its scopes again.
+        failed = true; closing = false; changing = false;
+        if (live) chosen = live.scopes;
+      });
     }
     running = false;
   }
   function close() {
-    if (!live || left === 0) { onclose(false); return; }
+    if (!running && left === 0) { onclose(false); return; }
     closing = true;
     void make();
   }
@@ -46,15 +53,21 @@
     element?.focus();
     const ticks = setInterval(() => { now = Date.now(); }, 1000);
     const reads = setInterval(() => { if (left > 0 && addresses.length) reload(); }, 2000);
-    return () => { clearInterval(ticks); clearInterval(reads); };
+    return () => {
+      clearInterval(ticks); clearInterval(reads);
+      gone = true;
+      if (!closing && (running || left > 0)) { closing = true; void make(); }
+    };
   });
   $effect(() => { if (devices.some(device => !known.has(device.id))) onclose(true); });
 
-  let left = $derived(live ? secondsLeft(live.expiresAt, now) : 0);
-  let addresses = $derived(pairAddresses(location.origin, location.hostname, live?.routes ?? []));
+  let left = $derived(live ? secondsLeft(live.code.expiresAt, now) : 0);
+  let addresses = $derived(pairAddresses(location.origin, location.hostname, live?.code.routes ?? []));
   let address = $derived(addresses.includes(route) ? route : addresses[0]);
-  let link = $derived(live && address ? pairLink(address, live.code) : "");
+  let link = $derived(live && address && !changing ? pairLink(address, live.code.code) : "");
   let qr = $derived(link ? qrPath(link) : undefined);
+  // The tile keeps its place while a new code is on its way, so the card does not jump.
+  let blank = $derived(changing && addresses.length > 0);
 
   // Copy answers in place for 2 seconds, as a post's Copy does. A plain http page has no navigator.clipboard, so its throw becomes a rejection.
   let copied = $state("");
@@ -67,21 +80,22 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions: Escape closes the card from any control inside it. -->
-<section class="pair" class:plain={!qr} aria-label="Pair a device" tabindex="-1" bind:this={element} onkeydown={event => { if (event.key === "Escape") close(); }}>
+<section class="pair" class:plain={!qr && !blank} aria-label="Pair a device" tabindex="-1" bind:this={element} onkeydown={event => { if (event.key === "Escape") close(); }}>
   {#if qr}<div class="tile"><svg class:dead={left === 0} viewBox={`0 0 ${qr.size} ${qr.size}`} role="img" aria-label="QR code of the pairing link" shape-rendering="crispEdges"><path d={qr.d} /></svg>
-    {#if left === 0}<button type="button" class="btn fill" onclick={() => void make()}>Make a new code</button>{/if}</div>{/if}
+    {#if left === 0}<button type="button" class="btn fill" onclick={() => void make()}>Make a new code</button>{/if}</div>
+  {:else if blank}<div class="tile blank" aria-hidden="true"></div>{/if}
   <div class="side">
     <h3>Pair a device<button type="button" class="close" aria-label="Close and end this code" title="Close" onclick={close}><Icon name="close" /></button></h3>
     {#if failed}<p class="problem" role="alert">{live ? "The code did not change." : "The code was not made."} <button type="button" class="retry" onclick={() => void make()}>Try again</button></p>{/if}
     {#if live && !addresses.length}<p>No web address is set, so another device cannot reach this engine. Start the engine with <code>--web.route</code>, then pair again.</p>
     {:else if live}
-      <div><div class="code" class:dead={left === 0}>{showCode(live.code)}</div><div class="left" role="timer">{left ? `Works once, for ${clock(left)}` : "Expired"}</div></div>
+      <div><div class="code" class:dead={left === 0 || changing}>{changing ? "·····-·····" : showCode(live.code.code)}</div><div class="left" role="timer">{changing ? "Making a new code…" : left ? `Works once, for ${clock(left)}` : "Expired"}</div></div>
       {#if addresses.length > 1}<span class="address"><select aria-label="Web address" bind:value={() => address, value => { route = value; }}>
         {#each addresses as item (item)}<option value={item}>{item}</option>{/each}</select><Icon name="chevron" size={14} /></span>{/if}
       <p>Scan it with the device's camera, or type the code there. A paired device acts as you.</p>
-      <ScopeBoxes value={chosen} onchange={next => { chosen = next; void make(); }} />
+      <ScopeBoxes value={chosen} onchange={next => { chosen = next; changing = true; void make(); }} />
       <p class="note">Changing the access makes a new code.</p>
-      <div><button type="button" class="btn" disabled={left === 0} onclick={copy} aria-live="polite">{copied || "Copy link"}</button></div>
+      <div><button type="button" class="btn" disabled={left === 0 || changing} onclick={copy} aria-live="polite">{copied || "Copy link"}</button></div>
     {/if}
   </div>
 </section>
@@ -94,6 +108,7 @@
   .tile svg { position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%; padding: 10px; background: var(--qr-paper); fill: var(--qr-ink); }
   .tile svg.dead { opacity: 0.28; }
   .tile .btn { position: relative; }
+  .tile.blank { background: var(--selected); }
   .side { display: grid; gap: 12px; align-content: start; min-width: 0; }
   h3 { display: flex; align-items: center; margin: 0; font-size: 16px; line-height: 1.25; }
   .close { display: grid; place-items: center; width: 28px; height: 28px; margin: -4px -6px -4px auto; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
