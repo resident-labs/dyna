@@ -1,3 +1,6 @@
+import { call } from "./client.ts";
+import type { FailureCause } from "./contract.gen.ts";
+
 // One status per session, in one priority order, so the room header and the session panel count the same way. A box
 // that failed or was lost comes first, since approving a request does not repair it. Then what waits for the owner,
 // then a running turn: a new turn moves on from an earlier failed turn the owner has not seen yet, which comes next.
@@ -9,6 +12,22 @@ export const urgency = (status: Status): number => ["failed", "waiting", "workin
 
 export const statusOf = ({ broken, waiting, working, failed }: { broken: boolean; waiting: boolean; working: boolean; failed: boolean }): Status =>
   broken ? "failed" : waiting ? "waiting" : working ? "working" : failed ? "failed" : "idle";
+
+// A box that needs the owner. A failed box keeps its open turn, since session.restart resumes it, so an open turn does not mean work.
+export type BoxFailure = { box: "failed" | "lost"; cause?: FailureCause; at?: string };
+
+// session.list gives box states but not causes, so these come from each session's newest failed or lost box.changed.
+// One page is enough, as boxes change seldom. A failed read leaves the causes unknown.
+export async function boxFailures(room: string, beforeSeq: number): Promise<Map<string, BoxFailure & { seq: number }>> {
+  const page = await call("events.list", { room, afterSeq: 0, beforeSeq, limit: 200, types: ["box.changed"] }).catch(() => undefined);
+  const found = new Map<string, BoxFailure & { seq: number }>();
+  for (const event of page?.events ?? []) {
+    if (event.type !== "box.changed" || event.seq < (found.get(event.body.session)?.seq ?? 0)) continue;
+    const { session, to, cause } = event.body;
+    if (to === "failed" || to === "lost") found.set(session, { box: to, cause, at: event.at, seq: event.seq });
+  }
+  return found;
+}
 
 export type Counts = Record<Status, number> & { sessions: number };
 

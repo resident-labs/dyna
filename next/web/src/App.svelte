@@ -15,7 +15,7 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import { causes, count, quoted, type Quote } from "./lib/feed.ts";
+  import { boxReason, causes, count, quoted, type Quote } from "./lib/feed.ts";
   import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
@@ -252,21 +252,23 @@
   // after "Failed", which the row draws; an idle one says Starting while its box starts, else Idle. Its profile is the
   // row's hover title.
   const status = (id: string) => {
-    const box = store?.boxes.get(id), cause = store?.causes.get(id);
+    const box = store?.boxes.get(id), broken = store?.boxFailures.get(id), cause = store?.causes.get(id);
     switch (store?.status(id)) {
       case "waiting": return "Waiting for your approval";
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
       case "failed": {
-        const reason = box === "failed" ? "could not start" : box === "lost" ? "stopped unexpectedly" : cause ? causes[cause] : "the last turn failed";
+        if (broken) return boxReason(broken);
+        const reason = cause ? causes[cause] : "the last turn failed";
         return reason[0].toLowerCase() + reason.slice(1);
       }
       default: return starting(id) ? "Starting" : "Idle";
     }
   };
-  // A DM's header says only the status word; the live line and About say what the session does.
+  // A DM's header says only the status word; the live line and About say what the session does. A failed session has
+  // no live line, so the header gives its reason.
   const stateWords = { waiting: "Waiting", failed: "Failed", working: "Working" };
   let shown = $derived(session ? store?.status(session) ?? "idle" : "idle");
-  let word = $derived(session ? (shown === "idle" ? status(session) : stateWords[shown]) : "");
+  let word = $derived(session ? (shown === "idle" ? status(session) : shown === "failed" ? `Failed · ${status(session)}` : stateWords[shown]) : "");
   // The right panel opens on About in a DM and on Sessions in a room, and remembers the last choice per conversation.
   const tabs = new SvelteMap<string, "sessions" | "about">();
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
@@ -440,7 +442,7 @@
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<SessionFace name={title} root={!store?.sessions.get(session)?.parent} dot={shown} size={24} />{/if}
       <span class="heading"><strong>{title}</strong>
-        {#if closed}<span class="count">· closed</span>{:else if word}<span class="count">{word}</span>{/if}
+        {#if closed}<span class="count">· closed</span>{:else if word}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
@@ -550,6 +552,11 @@
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
   .heading, .room-menu { display: contents; }
+  /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
+  .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .heading:has(.word) strong { flex: none; }
+  .crumb { flex: none; white-space: nowrap; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
   @media (max-width: 640px) {
@@ -559,7 +566,6 @@
     @media (hover: hover) { .menu-toggle:hover { background: var(--hover); color: var(--text); } }
     .hash, .room-menu { display: none; }
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
-    .heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .heading .count { font-size: 12.5px; }
     .requests { min-width: 40px; height: 40px; }
     .requests:not([aria-pressed="true"], .waiting) { display: none; }

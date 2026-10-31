@@ -1,4 +1,5 @@
 import type { Attachment, Card, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
+import type { BoxFailure } from "./status.ts";
 import type { Request } from "./room.svelte.ts";
 
 export type Row =
@@ -15,6 +16,12 @@ export type Pending = { id: number; at: string; text: string; attachments: Attac
 type Name = (session: string) => string;
 
 // Why a box or a request failed, in the owner's words. The engine's reason and error texts are raw (r8), so they never show.
+// Why a failed or lost box stopped, to follow "Failed". A box's cause is known from its event; without it, the state says what it can.
+export const boxReason = ({ box, cause }: BoxFailure): string => {
+  const reason = cause ? causes[cause] : box === "lost" ? "stopped unexpectedly" : "could not start";
+  return reason[0].toLowerCase() + reason.slice(1);
+};
+
 export const causes: Record<FailureCause, string> = {
   create_failed: "Its workspace could not be created on the host",
   start_failed: "Its workspace could not start on the host",
@@ -108,7 +115,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     // shows as a failed row with its cause in the owner's words.
     if (event.type === "box.changed") {
       const { to, cause } = event.body;
-      if (to === "failed" || to === "lost" || cause) {
+      // A lost box that then fails has said why already.
+      if ((to === "failed" || to === "lost" || cause) && !(to === "failed" && event.body.from === "lost")) {
         flush();
         dated(event.at);
         fresh(event.seq, { kind: "session", session: event.body.session });
