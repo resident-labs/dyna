@@ -35,7 +35,9 @@ export class RoomStore {
   private initialBoxes = new Map<string, BoxState>();
   private present = true;
   private older = false;
-  private loading = false;
+  private loaded = false;
+  // The page request in flight; a jump to the present waits for it instead of being dropped.
+  private busy: Promise<void> | undefined;
   private latest = 0;
   private stopStream = () => {};
   private closed = false;
@@ -55,9 +57,11 @@ export class RoomStore {
   get ordered(): Event[] { return this.events.size ? this.seqs.map(seq => this.events.get(seq)!) : []; }
   // True while the window ends at the newest event, so live events append to it.
   get atPresent(): boolean { this.subscribe(); return this.present; }
+  // True once the first page has loaded, so an empty feed is really empty.
+  get ready(): boolean { this.subscribe(); return this.loaded; }
 
   async open(): Promise<void> {
-    await this.loadLatest();
+    await this.run(() => this.loadLatest());
     const sessionList = await call("session.list", { room: this.room });
     this.sessionBaseline = this.latest;
     this.initialSessions = new Map((sessionList.sessions ?? []).map(session => [session.id, {
@@ -83,34 +87,43 @@ export class RoomStore {
       this.release("oldest");
     } else if (event.seq <= this.latest) return;
     this.latest = Math.max(this.latest, event.seq);
-    for (const post of this.pendingPosts) {
-      if (post.seq === event.seq) this.pendingPosts.delete(post);
-    }
     this.step(event, this);
   }
 
   // Loads the page before the window and releases the newest end beyond WINDOW.
   async loadOlder(): Promise<void> {
-    if (this.loading || !this.older) return;
-    const page = await this.page({ beforeSeq: this.oldest });
-    for (const event of page.events) this.insert(event);
-    this.older = page.full;
-    this.release("newest");
-    this.changed();
+    if (this.busy || !this.older) return;
+    await this.run(async () => {
+      const page = await this.page({ beforeSeq: this.oldest });
+      for (const event of page.events) this.insert(event);
+      this.older = page.full;
+      this.release("newest");
+    });
   }
 
   // Loads the page after the window, fetched again by its boundary seq, until it reaches the newest event.
   async loadNewer(): Promise<void> {
-    if (this.loading || this.present) return;
-    const page = await this.page({ afterSeq: this.newest });
-    for (const event of page.events) this.insert(event);
-    this.release("oldest");
-    if (!page.full && this.newest >= this.latest) this.present = true;
-    this.changed();
+    if (this.busy || this.present) return;
+    await this.run(async () => {
+      const page = await this.page({ afterSeq: this.newest });
+      for (const event of page.events) this.insert(event);
+      this.release("oldest");
+      if (!page.full && this.newest >= this.latest) this.present = true;
+    });
   }
 
   async jumpToPresent(): Promise<void> {
-    if (!this.loading && !this.present) await this.loadLatest();
+    while (this.busy) await this.busy.catch(() => {});
+    if (!this.present) await this.run(() => this.loadLatest());
+  }
+
+  private run(task: () => Promise<void>): Promise<void> {
+    const busy = task().finally(() => {
+      if (this.busy === busy) this.busy = undefined;
+      this.changed();
+    });
+    this.busy = busy;
+    return busy;
   }
 
   private async loadLatest(): Promise<void> {
@@ -128,13 +141,11 @@ export class RoomStore {
     }
     this.release("oldest");
     this.present = true;
-    this.changed();
+    this.loaded = true;
   }
 
   private async page(range: { beforeSeq: number } | { afterSeq: number }): Promise<{ events: Event[]; full: boolean }> {
-    this.loading = true;
-    const page = await call("events.list", { room: this.room, afterSeq: 0, ...range, limit: PAGE })
-      .finally(() => { this.loading = false; });
+    const page = await call("events.list", { room: this.room, afterSeq: 0, ...range, limit: PAGE });
     const values = page.events ?? [];
     return { events: values.map(decodeEvent).filter(event => event !== undefined), full: values.length === PAGE };
   }
@@ -155,6 +166,10 @@ export class RoomStore {
     if (index < 0) this.seqs.push(event.seq);
     else this.seqs.splice(index, 0, event.seq);
     if (event.type === "session.started") this.names.set(event.body.session, event.body.name);
+    // A sent post stays pending until its event is in the window, so it never disappears.
+    for (const post of this.pendingPosts) {
+      if (post.seq === event.seq) this.pendingPosts.delete(post);
+    }
     return true;
   }
 
@@ -206,10 +221,12 @@ export class RoomStore {
   async post(request: PostRequest): Promise<void> {
     const pending: PendingPost = { text: request.text, home: request.home ?? { kind: "feed" } };
     this.pendingPosts.add(pending);
-    void this.jumpToPresent();
+    // The owner's post shows at the present, so the window moves there while it sends.
+    const jumped = this.jumpToPresent();
     const response = await call("post", request)
       .catch((error: unknown) => { this.pendingPosts.delete(pending); throw error; });
     pending.seq = response.seq;
     if (this.events.has(response.seq)) this.pendingPosts.delete(pending);
+    await jumped;
   }
 }
