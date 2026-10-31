@@ -301,6 +301,7 @@
   let dockChosen = false;
   // The header's Computer button when it opened the view; focus goes back to it, as the row's icon has no place under About.
   let opener: HTMLElement | undefined;
+  const centered = (box: DOMRect) => (box.left + box.right + 744) / 2;
   function watch(id: string, from?: HTMLElement) {
     if (watching) places.set(watching, rect);
     const box = (section ? page : feed)?.getBoundingClientRect();
@@ -308,7 +309,7 @@
     if (place) rect = place;
     else if (box) {
       // Feed cards start at the feed's left; the Requests page centers its 744 px cards.
-      const first = computerPlace(box.right, box.top + 16, section ? (box.left + box.right + 744) / 2 : box.left + 680);
+      const first = computerPlace(box.right, box.top + 16, section ? centered(box) : box.left + 680);
       rect = first.rect;
       if (!dockChosen && !phone.current) {
         docked = !first.clear;
@@ -318,6 +319,17 @@
     opener = from;
     watching = id;
   }
+  // Requests opened under a floating window docks it if it would hide the cards; a window the owner moved clear stays,
+  // and focus stays on the page, whose keys decide requests.
+  $effect(() => {
+    if (!section || !page || !watching || docked || phone.current) return;
+    const box = page.getBoundingClientRect();
+    untrack(() => {
+      if (dockChosen || rect.x >= centered(box) + 8) return;
+      docked = true;
+      void (panelShown ? tick() : showPanel(true)).then(() => page?.focus());
+    });
+  });
   // The view closes when its computer stops or the room changes, before the DOM updates, so it never
   // streams again unasked. Focus that was in the view returns to the row's button, or to the panel;
   // below 761 px with the panel closed, it returns to the panel's toggle button.
