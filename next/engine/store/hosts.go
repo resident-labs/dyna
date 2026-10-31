@@ -14,7 +14,15 @@ import (
 func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, engine_host) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost)
-		return err
+		if err != nil {
+			return err
+		}
+		for _, room := range h.Rooms {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO host_rooms(host,room) VALUES(?,?)", h.Name, room); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -69,7 +77,7 @@ func (s *Store) FinishHostMaintenance(ctx context.Context, name contract.HostNam
 }
 
 func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, maintained_at, engine_host FROM hosts ORDER BY name")
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.checked_at, h.maintained_at, h.engine_host, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -78,14 +86,20 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 	for rows.Next() {
 		var h box.Host
 		var checked, maintained int64
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &checked, &maintained, &h.EngineHost); err != nil {
+		var room sql.NullString
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &checked, &maintained, &h.EngineHost, &room); err != nil {
 			return nil, err
 		}
-		h.CheckedAt = time.UnixMilli(checked)
-		if maintained != 0 {
-			h.MaintainedAt = time.UnixMilli(maintained)
+		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
+			h.CheckedAt = time.UnixMilli(checked)
+			if maintained != 0 {
+				h.MaintainedAt = time.UnixMilli(maintained)
+			}
+			hosts = append(hosts, h)
 		}
-		hosts = append(hosts, h)
+		if room.Valid {
+			hosts[len(hosts)-1].Rooms = append(hosts[len(hosts)-1].Rooms, contract.RoomID(room.String))
+		}
 	}
 	return hosts, rows.Err()
 }

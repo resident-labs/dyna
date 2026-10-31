@@ -566,7 +566,7 @@ Drafted by dyna:node-shell.
 
 The control plane runs on an always-on host (decision 14). The engine itself runs no boxes, but its machine may also be a capacity host, as hermeslab is; the engine then reaches it over SSH like any other host. It opens one SSH master to each host and does all host work over it. v2 keeps the v1 design from #1250: one Dyna-owned `ControlMaster` per host with `ControlPersist`, and framed replies. Input starts with a `DYNA-IN <bytes>` header, and output ends with a fixed-width `DYNA-END <bytes> <status>` trailer. A reply without a valid trailer is a transport failure, never a success.
 
-The owner adds a host with `dyna host add <name> --ssh user@addr`. The engine then runs the **host check** over the master. A host is `ready` only when every item passes:
+The owner adds a host with `dyna host add <name> --ssh user@addr`. Repeat `--room <room ID>` to restrict placement to those rooms. Without rooms, the host serves every room. The engine then runs the **host check** over the master. A host is `ready` only when every item passes:
 
 - cgroup v2, with `Delegate=yes` for the user manager and the cpu, memory and pids controllers delegated; io joins when v2 limits disk IO;
 - rootless Podman 5 or later, with the systemd cgroup manager and `--userns=keep-id:uid=1000,gid=1000` support (introduced in Podman 4.3);
@@ -594,7 +594,7 @@ The host check sets schedulable `MemBytes` to `MemTotal` minus the memory floor,
 
 **Admission** is the only placement code. A placement root's request is its size, and its limit is its `memory.max`. A placement root goes on a `ready` host only when the sum of placement root requests on that host, plus this one, fits in `CPUs` and `MemBytes`, and free disk stays above the floor. A child counts only for disk, and must run on its parent's host. Otherwise the box waits in `pending`, and `box.changed` names the reason. Only running placement roots count for CPU and memory. A stopped (dormant) box counts only its disk. The measured free disk already includes boxes placed at or before the host's last check. Subtract the disk requests of boxes placed since that check and the new request; the result must remain at or above the floor.
 
-Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `checked_at`) and `host_labels` (`host`, `label`).
+Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `checked_at`), `host_labels` (`host`, `label`) and `host_rooms` (`host`, `room`). Admission waits with reason `room-host` when no eligible host serves the room.
 
 ### 5.2 Images
 
