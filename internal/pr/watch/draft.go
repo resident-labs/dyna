@@ -59,9 +59,31 @@ func (s *Service) SetDraft(ctx context.Context, key string, draft bool, reason s
 	// release for one PR run one at a time and their GitHub calls cannot cross.
 	unlock := lockDraft(key)
 	defer unlock()
+	// A hold and the final merge checks and push must not cross.
+	gate, err := s.requirementLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer gate()
 	r, err := s.Store.Get(key)
 	if err != nil {
 		return err
+	}
+	if draft {
+		st, err := s.Store.Read()
+		if err != nil {
+			return err
+		}
+		for _, batch := range st.MergeTrials {
+			if !batch.PushPublished && batch.Phase != state.MergeTrialPhasePublished {
+				continue
+			}
+			for _, change := range batch.Changes {
+				if change.Key == key {
+					return fmt.Errorf("PR already landed in a published merge trial")
+				}
+			}
+		}
 	}
 	if !r.Watching || r.State != state.PROpen || changeKind(r) != "github" {
 		return fmt.Errorf("PR is not open and tracked")

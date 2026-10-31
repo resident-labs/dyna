@@ -242,6 +242,54 @@ func TestBatchQueueWaitsForDependency(t *testing.T) {
 	}
 }
 
+func TestHoldDuringTrialPublicationReportsLanded(t *testing.T) {
+	f := mergeTrialEnv(t, 2, 1)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.ci = "completed"
+	st, err := f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := "github.com/owner/repo"
+	b := *st.MergeTrials[repo]
+	r := st.Records[b.Changes[0].Key]
+	client := f.e.s.trialClient(*r)
+	run := client.Run
+	pushing, proceed := make(chan struct{}), make(chan struct{})
+	client.Run = func(ctx context.Context, cmd *exec.Cmd) error {
+		if len(cmd.Args) > 1 && cmd.Args[1] == "push" {
+			close(pushing)
+			<-proceed
+		}
+		return run(ctx, cmd)
+	}
+	published := make(chan error, 1)
+	go func() {
+		ok, err := f.e.s.publishTrialBatch(t.Context(), st, repo, r, &b, trialBatch(*r, b), client)
+		if err == nil && !ok {
+			err = errors.New("trial was not published")
+		}
+		published <- err
+	}()
+	<-pushing
+	holdStarted := make(chan struct{})
+	held := make(chan error, 1)
+	go func() {
+		close(holdStarted)
+		held <- f.e.s.SetDraft(t.Context(), r.Key, true, "wait")
+	}()
+	<-holdStarted
+	close(proceed)
+	if err := <-published; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-held; err == nil || !strings.Contains(err.Error(), "landed") {
+		t.Fatalf("hold after publication = %v, want landed error", err)
+	}
+}
+
 func TestAutomaticMergeWaitsForExactBatchTrial(t *testing.T) {
 	f := mergeTrialEnv(t, 3, 2, 1)
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {

@@ -452,6 +452,7 @@ type MergeTrial struct {
 	DefaultBranch string             `json:"defaultBranch"`
 	Head          string             `json:"head,omitempty"`
 	Phase         MergeTrialPhase    `json:"phase"`
+	PushPublished bool               `json:"pushPublished,omitempty"`
 	Reason        string             `json:"reason,omitempty"`
 	Changes       []MergeTrialChange `json:"changes"`
 	Created       time.Time          `json:"created"`
