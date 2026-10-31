@@ -7,7 +7,7 @@ import (
 )
 
 func TestNamespaceRejectsModelsOutsideCurrentCatalog(t *testing.T) {
-	p := &Proxy{keyProviders: []KeyProvider{{Provider: "example", Models: []contract.CatalogModel{{ID: "current"}}}}}
+	p := &Proxy{planModels: testPlanModels(), keyProviders: []KeyProvider{{Provider: "example", Models: []contract.CatalogModel{{ID: "current"}}}}}
 	for _, tc := range []struct {
 		choice  contract.ModelChoice
 		allowed []string

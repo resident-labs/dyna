@@ -165,7 +165,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer proxy.Listener.Close()
-	proxy.SetPlanModels(catalog)
+	if err := proxy.SetPlanModels(catalog); err != nil {
+		return fmt.Errorf("load pinned proxy catalog: %w", err)
+	}
 	proxyCtx, stopProxy := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopProxy()
 	done := make(chan struct{})

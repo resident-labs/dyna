@@ -20,6 +20,7 @@ import (
 type Proxy struct {
 	keyProviders []KeyProvider
 	planModels   map[contract.AccountProvider][]contract.CatalogModel
+	planDefaults map[contract.AccountProvider]string
 	Listener     *net.UnixListener
 	Config       string
 	Socket       string
@@ -117,16 +118,6 @@ func NewProxy(dataDir, managementKey string, providers ...KeyProvider) (*Proxy, 
 	}
 	owned = false
 	return &Proxy{keyProviders: providers, Listener: listener, Config: path, Socket: socket, clientKey: key, client: unixClient(socket)}, nil
-}
-
-// SetPlanModels records the pinned Pi models used to verify plan activation.
-func (p *Proxy) SetPlanModels(c Catalog) {
-	p.planModels = make(map[contract.AccountProvider][]contract.CatalogModel)
-	for _, provider := range c.Providers {
-		for _, model := range provider.Models {
-			p.planModels[contract.AccountProvider(provider.ID)] = append(p.planModels[contract.AccountProvider(provider.ID)], contract.CatalogModel{ID: model.ID, Name: model.Name})
-		}
-	}
 }
 
 // Handler binds a route to a session and its permitted models.

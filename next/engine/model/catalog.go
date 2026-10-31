@@ -21,11 +21,12 @@ type Catalog struct {
 }
 
 type CatalogProvider struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	KeyName string            `json:"keyName"`
-	Headers map[string]string `json:"headers"`
-	Models  []CatalogModel    `json:"models"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	DefaultModel string            `json:"defaultModel"`
+	KeyName      string            `json:"keyName"`
+	Headers      map[string]string `json:"headers"`
+	Models       []CatalogModel    `json:"models"`
 }
 
 type CatalogModel struct {

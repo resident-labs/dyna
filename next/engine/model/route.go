@@ -124,7 +124,7 @@ func handler(client *http.Client, clientKey, sessionID, namespace string, allowe
 				refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
 				return
 			}
-			encoded, _ := json.Marshal(namespace + "/" + model)
+			encoded, _ := json.Marshal(namespace + "/" + proxyModel(namespace, model))
 			body = append(append(append([]byte(nil), body[:valueStart]...), encoded...), body[valueEnd:]...)
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
