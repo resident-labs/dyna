@@ -180,6 +180,17 @@ test("releases the far end of the window and refetches it by the boundary seq", 
   } finally { server.restore(); }
 });
 
+test("a search jump waits for an in-flight page before seeking the post", async () => {
+  const server = engine(PAGE * 2 + 1);
+  try {
+    const window = await opened();
+    const loading = window.loadOlder();
+    await window.seek(1);
+    await loading;
+    assert.equal(window.events.has(1), true);
+  } finally { server.restore(); }
+});
+
 test("holds live events while the window is away from the present", async () => {
   const server = engine(1500);
   try {
