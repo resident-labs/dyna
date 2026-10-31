@@ -63,6 +63,7 @@ type RoomListRequest struct{}
 type RoomSummary struct {
 	ID       RoomID      `json:"id"`
 	Name     string      `json:"name"`
+	Created  time.Time   `json:"created"`
 	LastRead int64       `json:"lastRead"`
 	Waiting  []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides
 	Working  []SessionID `json:"working"` // open sessions with a running turn

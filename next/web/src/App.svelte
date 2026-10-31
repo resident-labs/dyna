@@ -214,7 +214,8 @@
 
 {#snippet intro()}
   {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`This is the start of your direct messages with ${title}.`} />
-  {:else}<RoomIntro kind="room" name={roomName} line={`This is the start of #${roomName}.`} />{/if}
+  {:else}{@const created = attention.rooms.get(room ?? "")?.created}
+    <RoomIntro kind="room" name={roomName} line={`This is the beginning of #${roomName}.${created ? ` It started ${new Date(created).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}.` : ""}`} />{/if}
 {/snippet}
 
 {#snippet computerView(id: string)}
