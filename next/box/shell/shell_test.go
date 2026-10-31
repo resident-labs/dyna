@@ -173,7 +173,7 @@ func TestMaskHidesSecretsOnly(t *testing.T) {
 		"token: 9f86d081884c7d659a2feaa0c55ad015":                      "9f86d081",
 	} {
 		got := Mask("before " + text + "\nafter")
-		if strings.Contains(got, secret) || !strings.Contains(got, masked) || !strings.HasSuffix(got, "\nafter") {
+		if strings.Contains(got, secret) || !strings.Contains(got, "[masked]") || !strings.HasSuffix(got, "\nafter") {
 			t.Errorf("secret %q not masked: %q", text, got)
 		}
 	}
@@ -299,7 +299,7 @@ func TestReportTailMasksATokenAcrossTheCut(t *testing.T) {
 	j.background = true
 	j.mu.Unlock()
 	r.server.report(j)
-	if tail := (<-r.reports).Tail; strings.Contains(tail, "a1a1") || !strings.Contains(tail, masked) {
+	if tail := (<-r.reports).Tail; strings.Contains(tail, "a1a1") || !strings.Contains(tail, "[masked]") {
 		t.Fatalf("tail leaks or lost the mask: %q", tail[len(tail)-60:])
 	}
 }
