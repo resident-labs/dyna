@@ -283,6 +283,14 @@ test("session.list and later events set and clear the running computers", async 
   } finally { server.restore(); }
 });
 
+test("a job that ends counts as ended at once, even while a turn holds the running count", () => {
+  const room = new RoomStore("r", () => () => {});
+  room.apply(event(1, { type: "turn.started", body: { session: "s", turn: "t", inputs: [] } }));
+  room.apply(event(2, { type: "shell.job.ended", body: { session: "s", job: "j", exitCode: 0, tail: "" } }));
+  assert.deepEqual([...room.endedJobs], ["s/j"]);
+  assert.equal(room.failedJobs.size, 0);
+});
+
 test("activity labels follow the running turn and never reach a window", async () => {
   const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
   const server = engine(1, [{ id: "s", ...listed, turn: "t", activity: "read spec.md" }]);
