@@ -40,9 +40,11 @@ aside.members { border-right: 0; border-left: 1px solid var(--line); }
 .rail a.home:hover, .rail a.home[aria-current="page"] { color: var(--text); }
 /* The selected room gets a short pill on the rail's edge; the focus ring stays for focus only. */
 .rail a[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: calc(50% - 14px); width: 4px; height: 28px; border-radius: 0 4px 4px 0; background: var(--text); }
-/* A request waits for the owner: StatusPill's attention color, ringed so it reads on any room color. */
-.waiting { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--attention); box-shadow: 0 0 0 3px var(--sidebar); }
+/* Requests wait for the owner: a count pill in StatusPill's attention color, ringed so it reads on any room color. */
+.waiting { position: absolute; right: -6px; bottom: -6px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; display: grid; place-items: center;
+  border-radius: 9px; background: var(--attention); color: var(--bg); box-shadow: 0 0 0 3px var(--sidebar); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
 .rail footer { margin-top: auto; padding: 12px 0; }
+.rail footer span { display: flex; }
 .label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .member:hover { background: var(--hover); }
