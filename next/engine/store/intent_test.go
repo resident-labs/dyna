@@ -10,11 +10,12 @@ import (
 
 func TestDispatchRechecksLifecycle(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(t.TempDir())
+	dir := t.TempDir()
+	s, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
 INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
 INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','','agent','ready','','',0,0)`)
@@ -44,7 +45,20 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	if _, err := s.writer.Exec("UPDATE sessions SET state='open'"); err != nil {
 		t.Fatal(err)
 	}
+	s.DrainDispatch()
 	turn, inputs, _, err := s.Dispatch(ctx, "s", "turn", start, false)
+	if err != nil || turn != "" || len(inputs) != 0 {
+		t.Fatalf("dispatch during drain: %q %v %v", turn, inputs, err)
+	}
+	// A new engine opens a new store and may dispatch the pending input.
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, inputs, _, err = s.Dispatch(ctx, "s", "turn", start, false)
 	if err != nil || turn != "turn" || len(inputs) != 1 {
 		t.Fatalf("eligible dispatch: %q %v %v", turn, inputs, err)
 	}
