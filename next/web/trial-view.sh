@@ -8,6 +8,8 @@ cookie=$HOME/.config/dyna-next/web-qa.cookie
 trial=dyna.localhost:7790
 if ! grep -qs dyna_device "$cookie"; then
   umask 077
+  mkdir -p "${cookie%/*}"
+  rm -f "$cookie"
   code=$("$HOME/.local/opt/dyna-next/bin/dyna" --socket "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/dyna-next/owner.sock" device pair --scope read | cut -d' ' -f1)
   printf '{"code":"%s","name":"Web QA"}' "$code" | curl -fsS -o /dev/null -c "$cookie" -H "Host: $trial" -H "Origin: http://$trial" \
     -H "Content-Type: application/json" --data-binary @- http://127.0.0.1:7790/v1/pair
