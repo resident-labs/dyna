@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -92,5 +95,31 @@ func TestRemoveHostBoxCleansPartialCreation(t *testing.T) {
 				t.Fatalf("resources remain: %+v", host)
 			}
 		})
+	}
+}
+
+// TestHostLoadControlPlaneCPUAndMemory reads two /proc/stat samples and one /proc/meminfo from a temp folder.
+func TestHostLoadControlPlaneCPUAndMemory(t *testing.T) {
+	proc := t.TempDir()
+	write := func(name, text string) {
+		if err := os.WriteFile(filepath.Join(proc, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("meminfo", "MemTotal:       8388608 kB\nMemFree:        1024 kB\nMemAvailable:   2097152 kB\n")
+	b := &Boxes{Store: listStore{}, Proc: proc}
+	write("stat", "cpu  100 0 100 800 0 0 0 0\ncpu0 50 0 50 400 0 0 0 0\n")
+	hosts := []contract.HostSummary{{Name: contract.ControlPlane}, {Name: "host"}}
+	if err := b.HostLoad(context.Background(), hosts); err != nil {
+		t.Fatal(err)
+	}
+	write("stat", "cpu  200 0 200 1000 0 0 0 0\ncpu0 100 0 100 500 0 0 0 0\n")
+	if err := b.HostLoad(context.Background(), hosts); err != nil {
+		t.Fatal(err)
+	}
+	cp := hosts[0]
+	wantCPU := 0.5 * float64(goruntime.NumCPU())
+	if !cp.Reachable || cp.CPUs != goruntime.NumCPU() || cp.CPUUsed != wantCPU || cp.MemBytes != 8388608*1024 || cp.MemUsed != 6291456*1024 {
+		t.Fatalf("control plane: %+v, want cores %v", cp, wantCPU)
 	}
 }
