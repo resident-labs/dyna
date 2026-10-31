@@ -41,10 +41,14 @@ if ! "$dry_run" && [[ -f $prefix/deployed-next && $(<"$prefix/deployed-next") ==
 fi
 step=build
 failure() {
-  if ! "$dry_run"; then printf '%s\n' "$tree" > "$prefix/failed-next"; fi
-  echo "Deploy of $sha failed: $step. The trial keeps the new binary; fix forward on main." >&2
+  printf '%s\n' "$tree" > "$prefix/failed-next"
+  if [[ $step == build ]]; then
+    echo "Deploy of $sha failed: $step. Nothing was installed." >&2
+  else
+    echo "Deploy of $sha failed: $step. The trial keeps the new binary; fix forward on main." >&2
+  fi
 }
-trap failure ERR
+if ! "$dry_run"; then trap failure ERR; fi
 stage="$prefix/stage/$sha"
 bin="$prefix/bin"
 export PATH="$node_bin:$PATH"
