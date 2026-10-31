@@ -19,7 +19,7 @@ CREATE TABLE goals (room TEXT, id TEXT, state TEXT);
 CREATE TABLE goal_items (room TEXT, goal TEXT);
 CREATE TABLE room_issues (room_id TEXT, state TEXT);
 CREATE TABLE questions (room TEXT, state TEXT);
-CREATE TABLE pr_records (room TEXT, closed INTEGER, body TEXT);
+CREATE TABLE pr_rows (room TEXT, closed INTEGER, body TEXT);
 CREATE TABLE session_records (room_id TEXT, closed INTEGER, history_only INTEGER, service INTEGER, meta TEXT);
 INSERT INTO goals VALUES ('r','g1','active'),('r','g2','done'),('other','g1','active');
 INSERT INTO goal_items VALUES ('r','g1'),('r','g1'),('r','g2'),('other','g1');

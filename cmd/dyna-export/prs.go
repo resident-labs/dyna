@@ -16,7 +16,7 @@ type skippedPR struct {
 }
 
 func readPRs(db *sql.DB, room string, author func(string) (contract.ImportedAuthor, error)) ([]contract.TrackedPR, []skippedPR, error) {
-	rows, err := db.Query("SELECT repo,number,body FROM pr_records WHERE room=? AND closed=0 ORDER BY repo,number", room)
+	rows, err := db.Query("SELECT repo,number,body FROM pr_rows WHERE room=? AND closed=0 ORDER BY repo,number", room)
 	if err != nil {
 		return nil, nil, err
 	}
