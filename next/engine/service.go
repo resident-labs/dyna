@@ -14,6 +14,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/lifecycle"
+	"github.com/resident-labs/dyna/engine/live"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -46,11 +47,8 @@ type Service struct {
 	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	now                func() time.Time
 	mu                 sync.Mutex
-	wakeMu             sync.Mutex
-	wakePending        map[contract.SessionID]bool
-	wakeSignal         chan struct{}
+	live               *live.Live
 	sessions           map[contract.SessionID]*sessionState
-	live               map[chan contract.Event]contract.RoomID
 	computerGeneration uint64
 	activityCount      uint64
 	shellGeneration    uint64
@@ -88,12 +86,11 @@ func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
 }
 
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	s := &Service{sessions: make(map[contract.SessionID]*sessionState), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
+	s := &Service{sessions: make(map[contract.SessionID]*sessionState), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
-	s.wakePending = make(map[contract.SessionID]bool)
-	s.wakeSignal = make(chan struct{}, 1)
+	s.live = live.New(s.deliverWakes)
 	st.SetWake(s.queueWakes)
-	go s.wakeSessions(st.Done())
+	go s.live.Run(st.Done())
 	return s
 }
 

@@ -70,18 +70,7 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 		if err != nil {
 			return contract.TranscriptAppendResponse{}, failure(err)
 		}
-		s.mu.Lock()
-		for ch, room := range s.live {
-			if room == "" {
-				select {
-				case ch <- event:
-				default:
-					close(ch)
-					delete(s.live, ch)
-				}
-			}
-		}
-		s.mu.Unlock()
+		s.live.Publish(session.Room, event, true)
 	}
 
 	return contract.TranscriptAppendResponse{AckedOffset: end}, nil
