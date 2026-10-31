@@ -81,6 +81,45 @@ func TestWebStreamEndsAfterScopeRemoval(t *testing.T) {
 	<-ended
 }
 
+type streamConnect struct{ read atomic.Bool }
+
+func (*streamConnect) ManagedOrigin(context.Context) string { return "" }
+func (*streamConnect) ServePublic(http.ResponseWriter, *http.Request, string, []string) bool {
+	return false
+}
+func (*streamConnect) ServePrivate(http.ResponseWriter, *http.Request, string, []string, store.ConnectSession) {
+}
+func (*streamConnect) Authenticate(context.Context, *http.Request, string) (store.ConnectSession, []contract.Scope, bool, error) {
+	return store.ConnectSession{ID: "session", Device: "device"}, []contract.Scope{contract.ScopeRead}, true, nil
+}
+func (s *streamConnect) StreamScopes(context.Context, string) ([]contract.Scope, bool, error) {
+	if s.read.Load() {
+		return []contract.Scope{contract.ScopeRead}, true, nil
+	}
+	return nil, true, nil
+}
+
+func TestWebConnectStreamRechecksScope(t *testing.T) {
+	devices := &streamDeviceStore{}
+	sessions := &streamConnect{}
+	sessions.read.Store(true)
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, time.Now, devices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetConnect(sessions)
+	tick := make(chan time.Time)
+	w.ticks = func() (<-chan time.Time, func()) { return tick, func() {} }
+	started, ended := make(chan struct{}), make(chan struct{})
+	w.handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { close(started); <-r.Context().Done() })
+	r := httptest.NewRequest(http.MethodGet, "http://dyna.localhost:7790/v1/events", nil)
+	go func() { w.ServeHTTP(httptest.NewRecorder(), r); close(ended) }()
+	<-started
+	sessions.read.Store(false)
+	tick <- time.Time{}
+	<-ended
+}
+
 func TestWebRemoteWebSocketRejectsWrongOrigin(t *testing.T) {
 	devices := &streamDeviceStore{}
 	devices.live.Store(true)
