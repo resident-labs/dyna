@@ -110,7 +110,7 @@ func (s *Server) call(cancel <-chan struct{}, call toolCall) (string, error) {
 		if strings.TrimSpace(args.Command) == "" {
 			return "", fmt.Errorf("command is required")
 		}
-		j, err := s.run(cancel, args.Command, args.Cwd)
+		j, err := s.run(cancel, args.Command, args.Cwd, args.Description)
 		if err != nil {
 			return "", err
 		}

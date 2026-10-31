@@ -1291,14 +1291,14 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 	if _, ok := (<-channel).Body.(contract.TurnStart); !ok {
 		t.Fatal("expected start")
 	}
-	ended := contract.ShellJobEndedRequest{Job: "job_1", ExitCode: 2, Tail: "boom"}
+	ended := contract.ShellJobEndedRequest{Job: "job_1", Description: "Build the bundle", End: &contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}, ExitCode: -1, Tail: "boom"}
 	for range 2 { // the box agent retries after a lost reply
 		if _, e = s.ShellJobEnded(ctx, caller, ended); e != nil {
 			t.Fatal(e)
 		}
 	}
 	steer, ok := (<-channel).Body.(contract.TurnSteer)
-	if !ok || steer.Queue != contract.QueueSteer || inputBody(steer.Input.Text) != "Shell job job_1 ended with exit code 2. Last output:\nboom" {
+	if !ok || steer.Queue != contract.QueueSteer || inputBody(steer.Input.Text) != "Background job 'Build the bundle' ended by a signal (SIGTERM). Last output:\nboom" {
 		t.Fatalf("unexpected steer: %+v", steer)
 	}
 	var wakes int
