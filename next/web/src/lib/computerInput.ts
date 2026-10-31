@@ -173,6 +173,8 @@ export class InputQueue {
   private waiting: ComputerInput[] = [];
   private frame: Size = { width: 0, height: 0 };
   private busy = false;
+  // The last batch the engine refused, kept so the owner can send it again.
+  private refused: ComputerInput[] = [];
   private readonly deliver: (events: ComputerInput[], frame: Size) => Promise<void>;
   private readonly settled: (ok: boolean) => void;
   constructor(deliver: (events: ComputerInput[], frame: Size) => Promise<void>, settled: (ok: boolean) => void) {
@@ -186,7 +188,18 @@ export class InputQueue {
   }
   private async run(): Promise<void> {
     this.busy = true;
-    while (this.waiting.length) this.settled(await this.deliver(this.waiting.splice(0, 256), this.frame).then(() => true, () => false));
+    while (this.waiting.length) {
+      const batch = this.waiting.splice(0, 256);
+      const ok = await this.deliver(batch, this.frame).then(() => true, () => false);
+      if (!ok) this.refused = batch;
+      this.settled(ok);
+    }
     this.busy = false;
+  }
+  // Sends the refused batch again, ahead of anything that waits.
+  retry(): void {
+    this.waiting.unshift(...this.refused);
+    this.refused = [];
+    if (!this.busy) void this.run();
   }
 }
