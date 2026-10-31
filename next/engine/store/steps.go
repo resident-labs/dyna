@@ -48,6 +48,7 @@ var steps = map[int][]string{
 		`UPDATE turns SET started_seq=(SELECT seq FROM events WHERE type='turn.started' AND json_extract(CAST(body AS TEXT),'$.turn')=turns.id) WHERE ended_at IS NULL`,
 	},
 	17: {
+		`UPDATE operations SET state='expired', decision=CAST(json_object('by',json_object('kind','engine'),'approved',json('false'),'reason','Host access requests changed; ask again','at',strftime('%Y-%m-%dT%H:%M:%SZ','now')) AS BLOB) WHERE kind='hostexec.grant' AND state='pending' AND json_type(CAST(args AS TEXT),'$.commands') IS NOT NULL`,
 		`UPDATE grants SET revoked_at=unixepoch()*1000 WHERE revoked_at IS NULL AND expired_at IS NULL AND NOT (kind='hostexec' AND by_kind='engine' AND by_id='' AND to_kind='session' AND id='grant_'||to_id AND EXISTS (SELECT 1 FROM sessions WHERE id=grants.to_id AND room=grants.room AND parent IS NULL))`,
 		`UPDATE hostexec_runs SET stopped='revoked' WHERE ended_at IS NULL AND stopped='' AND grant_id IN (SELECT id FROM grants WHERE revoked_at IS NOT NULL)`,
 		`ALTER TABLE grants ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
