@@ -74,7 +74,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Make Carbon, a neutral dark, the default theme, and open dark even when the OS asks for light. Name every theme, and build it from the one token set. Use a pure black page only in the OLED theme, and pure white as the page in no theme. [owner, 2026-10-31]
 - Build surfaces from three levels: sidebar (sunk), page, and raised (card or popover). [v1] [T3 `--sidebar`, `--background`, `--card`]
 - Draw borders as low-alpha lines (about 8%; 13% in the OLED theme, because its page is black). Use a firmer line (about 14%) only for inputs. [v1 `--border`] [T3 dark `--border` white 8%]
-- Draw hover and selection as washes of the text color (about 4% and 8%), so that they work on every surface. [v1] [T3 `--accent` white 4%]
+- Draw hover and selection as washes of the text color (about 4% and 8%; 7% and 12% on OLED), so that they work on every surface. [v1] [T3 `--accent` white 4%]
 - Use one accent (`--focus`) for focus rings, selection and links. Do not use it for data. [v1 `--iris`] [T3 `--ring`]
 - Use the tones success, warning, danger, info and neutral. Each tone has a dot or bar color, a text color, a wash (about 14%) and an edge (about 28%). [v1 `tone.ts`] [T3 badge `bg-warning/8`]
 - Show nothing for a healthy, online or idle state: no green dot, no "OK" and no "Idle" mark. [root, 2026-10-31, owner found the pills and green dots ugly] [T3 `Sidebar.logic.ts` `resolveThreadStatusPill` returns null]
