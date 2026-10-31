@@ -248,13 +248,13 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 						result.Cause = contract.CauseOutputLimit
 					}
 				} else if m.StopReason == "aborted" {
-					result.Outcome = contract.TurnOutcome("stopped")
+					result.Outcome, result.Error, result.Cause = contract.TurnOutcome("stopped"), "", ""
 				} else {
 					result.Outcome, result.Error, result.Cause = contract.TurnOutcome("completed"), "", ""
 				}
 			case "agent_settled":
 				if e.Aborted {
-					result.Outcome = contract.TurnOutcome("stopped")
+					result.Outcome, result.Error, result.Cause = contract.TurnOutcome("stopped"), "", ""
 				}
 				return result, nil
 			}
