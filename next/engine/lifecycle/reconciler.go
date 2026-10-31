@@ -96,7 +96,7 @@ func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Tim
 	if err != nil {
 		return false, err
 	}
-	if old.State == contract.BoxCreating {
+	if old.State == contract.BoxCreating && (next.State == contract.BoxStarting || next.State == contract.BoxFailed) {
 		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, event)
 	}
 	return r.store.SetBoxLifecycle(ctx, old, next, due, failures, event)
