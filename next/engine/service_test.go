@@ -44,7 +44,19 @@ func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.
 			t.Fatal(problem)
 		}
 	}
-	return s.BoxChannel(ctx, caller)
+	ctx, cancel := context.WithCancel(ctx)
+	channel, problem := s.BoxChannel(ctx, caller)
+	if problem != nil {
+		cancel()
+		return nil, problem
+	}
+	// The channel goroutine reads the store. End it before the store closes and the temp dir is removed.
+	t.Cleanup(func() {
+		cancel()
+		for range channel {
+		}
+	})
+	return channel, nil
 }
 
 type fakeProfiles struct{}
