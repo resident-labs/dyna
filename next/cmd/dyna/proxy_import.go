@@ -77,11 +77,12 @@ func (s *proxyStore) importLegacy(ctx context.Context, dir string) error {
 		if err != nil {
 			return err
 		}
-		if !entry.IsDir() && strings.EqualFold(filepath.Ext(path), ".json") && !paths[filepath.Clean(path)] {
-			return errors.New("unreadable credential")
-		}
 		if !entry.IsDir() && strings.HasPrefix(entry.Name(), ".oauth-") {
 			callbacks = append(callbacks, path)
+			return nil
+		}
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(path), ".json") && !paths[filepath.Clean(path)] {
+			return errors.New("unreadable credential")
 		}
 		return nil
 	})
