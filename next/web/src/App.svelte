@@ -466,7 +466,7 @@
       {:else if unavailable && unavailable !== "room"}<Blocked kind={unavailable} onretry={unavailable === "unreachable" ? reopen : undefined} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
-          onforward={quote => { quotes[key] = quote; composer?.focus(); }} onrestarted={() => composer?.focus()} />{/key}
+          onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} />{/key}
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
     {#if room && !unavailable}

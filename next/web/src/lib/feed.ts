@@ -1,10 +1,10 @@
-import type { Attachment, Card, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
+import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { Request } from "./room.svelte.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
-  | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
+  | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Failed" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[]; until?: string }
   | { kind: "request"; key: string; request: Request }
   | { kind: "day"; key: string; at: string }
@@ -21,6 +21,12 @@ export const boxReason = ({ box, cause }: BoxFailure): string => {
   const reason = cause ? causes[cause] : box === "lost" ? "stopped unexpectedly" : "could not start";
   return reason[0].toLowerCase() + reason.slice(1);
 };
+
+// A box's failed row, in the feed and at the end of a DM.
+export const boxRow = (box: BoxState, cause?: FailureCause) => ({
+  label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" as const : box === "lost" ? "Stopped unexpectedly" as const : "Failed" as const,
+  cause: cause ? causes[cause] : box === "failed" ? "Could not start" : "",
+});
 
 export const causes: Record<FailureCause, string> = {
   create_failed: "Its workspace could not be created on the host",
@@ -120,8 +126,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
         flush();
         dated(event.at);
         fresh(event.seq, { kind: "session", session: event.body.session });
-        rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, cause: cause ? causes[cause] : "",
-          label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" : to === "lost" ? "Stopped unexpectedly" : "Could not start" });
+        rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, ...boxRow(to, cause) });
       }
       continue;
     }
