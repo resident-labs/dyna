@@ -1,28 +1,24 @@
 package model
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 
-	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
-// Proxy owns the in-process CLIProxyAPI service and its private client key.
+// Proxy owns the proxy listener and its private client key.
 type Proxy struct {
-	service   *cliproxy.Service
-	listener  net.Listener
-	upstream  *url.URL
+	Listener  *net.UnixListener
+	Config    string
+	Socket    string
 	clientKey string
 }
 
@@ -41,6 +37,12 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	dir := filepath.Join(dataDir, "cliproxy")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return nil, err
+	}
 	authDir := filepath.Join(dir, "auth")
 	if err := os.MkdirAll(authDir, 0700); err != nil {
 		return nil, err
@@ -48,11 +50,20 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	if err := os.Chmod(authDir, 0700); err != nil {
 		return nil, err
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	socket := filepath.Join(dir, "proxy.sock")
+	// store.Open holds the data folder lock. A socket here is stale, or belongs to a dying child that no client can reach once it is unlinked.
+	if info, err := os.Lstat(socket); err == nil && info.Mode()&os.ModeSocket == 0 {
+		return nil, fmt.Errorf("proxy path is not a socket: %s", socket)
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 	if err != nil {
 		return nil, err
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
 	owned := true
 	defer func() {
 		if owned {
@@ -63,10 +74,10 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.Host = "127.0.0.1"
-	cfg.Port = port
 	cfg.AuthDir = authDir
 	cfg.APIKeys = []string{key}
+	// Unix clients have no loopback IP; the private socket limits access.
+	cfg.RemoteManagement.AllowRemote = true
 	cfg.RemoteManagement.SecretKey = string(managementHash)
 	cfg.RemoteManagement.DisableControlPanel = true
 	cfg.Routing.SessionAffinity = true
@@ -89,28 +100,11 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	service, err := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(listener).Build()
-	if err != nil {
-		return nil, err
-	}
 	owned = false
-	return &Proxy{service: service, listener: listener, upstream: &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}, clientKey: key}, nil
-}
-
-// Run runs until ctx is cancelled or the proxy stops.
-func (p *Proxy) Run(ctx context.Context) error {
-	defer p.listener.Close()
-	return p.service.Run(ctx)
-}
-
-// Shutdown stops the proxy.
-func (p *Proxy) Shutdown(ctx context.Context) error {
-	err := p.service.Shutdown(ctx)
-	_ = p.listener.Close()
-	return err
+	return &Proxy{Listener: listener, Config: path, Socket: socket, clientKey: key}, nil
 }
 
 // Handler binds a route to a session and its permitted models.
 func (p *Proxy) Handler(sessionID string, allowedModels []string) http.Handler {
-	return Handler(p.upstream, p.clientKey, sessionID, allowedModels)
+	return Handler(p.Socket, p.clientKey, sessionID, allowedModels)
 }
