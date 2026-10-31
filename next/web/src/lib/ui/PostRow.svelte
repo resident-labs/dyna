@@ -55,9 +55,9 @@
   .post > :not(:global(.avatar)) { grid-column: 2; }
   .post > :global(.avatar) { grid-row: 1 / span 3; margin-top: 2px; }
   .first { padding-top: 14px; }
-  /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast. */
+  /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
   .pending > :global(:not(.unsent)) { opacity: 0.5; }
-  .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--muted); font-size: 12px; }
+  .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }
   .unsent button { all: unset; cursor: pointer; color: var(--focus); border-radius: 3px; }
   .unsent button:hover { text-decoration: underline; }
   .unsent button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
