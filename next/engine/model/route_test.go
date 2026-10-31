@@ -16,7 +16,7 @@ import (
 
 func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
 	up := unixServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("X-Api-Key") != "secret" || r.Header.Get("X-Claude-Code-Session-Id") != "session" {
+		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("X-Api-Key") != "secret" || r.Header.Get("X-Claude-Code-Session-Id") != "session" || r.Header.Get("X-Dyna-Eligible-Auth") != "Y3JlZGVudGlhbA" {
 			t.Errorf("wrong request: %s %v", r.URL.Path, r.Header)
 		}
 		w.WriteHeader(204)
@@ -24,10 +24,11 @@ func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	req := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`))
+	req.Header.Set("X-Dyna-Eligible-Auth", "spoof")
 	req.Header.Set("X-Api-Key", "box")
 	req.Header.Set("Authorization", "Bearer box")
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, req)
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, req)
 	if w.Code != 204 {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -39,7 +40,7 @@ func TestRouteRefusesForbiddenModel(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", nil).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
+	Handler(target, "secret", "session", nil, nil).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
 	if w.Code != 403 || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -58,7 +59,7 @@ func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
 	if calls != 1 || w.Code != 503 || w.Body.String() != "data: one\n\ndata: two\n\n" || !w.Flushed {
 		t.Fatalf("calls %d status %d body %q flushed %v", calls, w.Code, w.Body.String(), w.Flushed)
 	}
@@ -70,7 +71,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
 	if w.Code != http.StatusNotFound || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -79,7 +80,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 func TestRouteRejectsAmbiguousModel(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "unused.sock")
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", w.Code)
 	}
