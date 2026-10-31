@@ -33,6 +33,9 @@ func readRules(db *sql.DB, room string, author func(string) (contract.ImportedAu
 			return nil, errors.New("rule is null")
 		}
 		by, err := author(rule.Setter)
+		if err != nil && rule.SetterName != "" {
+			by, err = author(rule.SetterName)
+		}
 		if err != nil {
 			return nil, err
 		}
