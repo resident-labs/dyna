@@ -15,6 +15,10 @@ import (
 func TestLegacyProxyImportRemovesFilesAfterCommit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "invented.json")
+	callback := filepath.Join(dir, ".oauth-invented.json")
+	if err := os.WriteFile(callback, []byte(`{"code":"invented"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(`{"type":"claude","access_token":"invented-token"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +43,9 @@ func TestLegacyProxyImportRemovesFilesAfterCommit(t *testing.T) {
 	}
 	if err := p.importLegacy(context.Background(), dir); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(callback); !os.IsNotExist(err) {
+		t.Fatal("import left callback file")
 	}
 	auths, err := p.List(context.Background())
 	if err != nil || len(auths) != 1 || auths[0].Metadata["access_token"] != "invented-token" {
