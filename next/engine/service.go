@@ -63,6 +63,7 @@ type Service struct {
 
 // sessionState is the engine's in-memory state for one session. s.mu guards its fields.
 // computerLock serializes computer transitions and channel replacement.
+// Take computerLock before s.mu, never the reverse.
 type sessionState struct {
 	computerLock sync.Mutex
 	channel      *boxChannel
