@@ -32,20 +32,12 @@ func parseTailscaleServe(out []byte, appPort int) string {
 	if json.Unmarshal(out, &status) != nil {
 		return ""
 	}
-	find := func(port int) (string, string) {
-		for hp, web := range status.Web {
-			proxy := strings.TrimSuffix(web.Handlers["/"].Proxy, "/")
-			p := strconv.Itoa(port)
-			if proxy == "http://127.0.0.1:"+p || proxy == "http://localhost:"+p || proxy == "127.0.0.1:"+p {
-				host, _, _ := strings.Cut(hp, ":")
-				return host, hp
-			}
+	port := strconv.Itoa(appPort)
+	for hostPort, web := range status.Web {
+		switch strings.TrimSuffix(web.Handlers["/"].Proxy, "/") {
+		case "http://127.0.0.1:" + port, "http://localhost:" + port, "127.0.0.1:" + port:
+			return "https://" + strings.TrimSuffix(hostPort, ":443")
 		}
-		return "", ""
 	}
-	appHost, app := find(appPort)
-	if appHost == "" {
-		return ""
-	}
-	return "https://" + strings.TrimSuffix(app, ":443")
+	return ""
 }
