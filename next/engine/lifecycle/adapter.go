@@ -21,6 +21,7 @@ type BoxAdapter interface {
 	Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error)
 	TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error)
 	Create(context.Context, BoxSpec) (string, error)
+	CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error)
 	Remove(context.Context, contract.BoxID) error
 	Start(context.Context, contract.BoxID) error
 	Stop(context.Context, contract.BoxID) error

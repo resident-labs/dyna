@@ -161,7 +161,7 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 		body.Cause = event.Body.(contract.BoxChanged).Cause
 		event.Body = body
 	} else if changed {
-		if old.State != contract.BoxPending {
+		if old.State != contract.BoxPending && old.State != contract.BoxStarting {
 			return false, box.TransitionError{From: old.State, To: next.State}
 		}
 		cause := event.Body.(contract.BoxChanged).Cause
