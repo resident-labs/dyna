@@ -360,13 +360,18 @@ const HookCheckoutUnverified HookHandoffReason = "checkoutUnverified"
 
 // SessionHandoff tells root about one session that was open in v1.
 type SessionHandoff struct {
-	Name       V1Address `json:"name"`
-	Profile    string    `json:"profile"`
-	Parent     V1Address `json:"parent,omitempty"`
-	Goals      []GoalID  `json:"goals,omitempty"`
-	ArchiveRef string    `json:"archiveRef,omitempty"` // refs/dyna/archive/<session>
-	LastPost   string    `json:"lastPost"`             // cut to 2,000 characters
+	Name           V1Address            `json:"name"`
+	Profile        string               `json:"profile"`
+	ProfileWarning ProfileHandoffReason `json:"profileWarning,omitempty"`
+	Parent         V1Address            `json:"parent,omitempty"`
+	Goals          []GoalID             `json:"goals,omitempty"`
+	ArchiveRef     string               `json:"archiveRef,omitempty"` // refs/dyna/archive/<session>
+	LastPost       string               `json:"lastPost"`             // cut to 2,000 characters
 }
+
+type ProfileHandoffReason string
+
+const ProfileUnsupportedMuse ProfileHandoffReason = "unsupportedMuse"
 
 type SubscriptionScope string
 
