@@ -175,11 +175,13 @@
     links[Math.max(0, Math.min(links.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
   }
   let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
-  // A session's muted status line shows only state that matters: a running turn with its latest activity, or a
-  // starting box. An idle session has none; its profile is the row's hover title.
+  // A session's muted status line shows only state that matters, from its one status (status.ts): a request that
+  // waits for the owner, or a running turn with its latest activity; else a starting box. An idle session has none;
+  // its profile is the row's hover title.
   const status = (id: string) => {
-    const box = store?.boxes.get(id);
-    if (store?.turns.has(id)) { const label = store.activity.get(id); return label ? `working · ${label}` : "working"; }
+    const box = store?.boxes.get(id), state = store?.status(id);
+    if (state === "waiting") return "waiting for your approval";
+    if (state === "working") { const label = store?.activity.get(id); return label ? `working · ${label}` : "working"; }
     return box === "pending" || box === "creating" || box === "starting" ? "starting" : "";
   };
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
@@ -288,9 +290,9 @@
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <RoomMenu onterminal={() => void terminals?.pick()} />{/if}
-      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.unseenCount ? "Sessions, a turn failed" : "Sessions"}
+      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.counts.failed ? "Sessions, a session failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
-        {#if store?.unseenCount && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
+        {#if store?.counts.failed && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={requests} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
       {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
@@ -326,8 +328,9 @@
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
-          {#if trouble(item.session)}<StatusPill tone="failed" dot label={trouble(item.session)} />
-          {:else if hiddenTrouble}<StatusPill tone="failed" dot label="A folded session failed" />{/if}</a>
+          {#if store?.status(item.session) === "failed"}<StatusPill tone="failed" dot label={trouble(item.session)} />
+          {:else if hiddenTrouble}<StatusPill tone="failed" dot label="A folded session failed" />
+          {:else if store?.status(item.session) === "waiting"}<StatusPill tone="warning" dot label="Waiting for your approval" />{/if}</a>
           {#if jobs(item.session)}<button type="button" class="watch" class:open={jobsOf === item.session} data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
