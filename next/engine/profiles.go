@@ -12,6 +12,7 @@ import (
 )
 
 type profile struct {
+	AgentSurface   contract.AgentSurface  `json:"agentSurface,omitempty"`
 	Description    string                 `json:"description"`
 	Taste          int                    `json:"taste"`
 	Diagnostics    int                    `json:"diagnostics"`
@@ -45,6 +46,11 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 		return nil, fmt.Errorf("profiles: no profiles")
 	}
 	for name, p := range profiles {
+		switch p.AgentSurface {
+		case "", contract.AgentSurfaceOff, contract.AgentSurfaceCaller, contract.AgentSurfaceDeclared:
+		default:
+			return nil, fmt.Errorf("profile %q: invalid agentSurface", name)
+		}
 		for _, rating := range []int{p.Taste, p.Diagnostics, p.Intelligence, p.Cost} {
 			if rating < 0 || rating > 10 {
 				return nil, fmt.Errorf("profile %q: ratings must be 0..10", name)
@@ -87,6 +93,14 @@ func (s *Service) ProfileList(_ context.Context, who contract.Principal, _ contr
 		return contract.ProfileListResponse{}, forbidden()
 	}
 	return contract.ProfileListResponse{Profiles: s.profiles.List()}, nil
+}
+
+func (p ProfileConfig) Surface(name contract.ProfileName) contract.AgentSurface {
+	surface := p[name].AgentSurface
+	if surface == "" {
+		return contract.AgentSurfaceOff
+	}
+	return surface
 }
 
 func (p ProfileConfig) CompactionTokens(name contract.ProfileName) int {

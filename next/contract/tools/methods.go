@@ -26,7 +26,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodConnectStart, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodConnectStatus, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodConnectUnlink, contract.ScopeAdmin, OwnerAccess),
-	method(contract.MethodContextSnapshot, contract.ScopeRead, UserAccess),
+	method(contract.MethodContextSnapshot, contract.ScopeRead, UserAccess, act("context", "show", typ[contract.ContextSnapshotRequest](), "Show one context section in full.", "context show")),
 	method(contract.MethodConversationRead, contract.ScopeOperate, OwnerAccess),
 	method(contract.MethodDeliveryDone, contract.ScopeRead, BoxAccess),
 	method(contract.MethodDeviceList, contract.ScopeAdmin, OwnerAccess,

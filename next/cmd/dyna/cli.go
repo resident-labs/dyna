@@ -25,6 +25,7 @@ import (
 )
 
 type client interface {
+	ContextSnapshot(context.Context, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error)
 	OpWithdraw(context.Context, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error)
 	SessionMove(context.Context, contract.SessionMoveRequest) (contract.SessionMoveResponse, error)
 	SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error)
@@ -57,6 +58,10 @@ type client interface {
 
 type socketClient struct{ http *http.Client }
 
+func (c *socketClient) ContextSnapshot(ctx context.Context, req contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error) {
+	return call[contract.ContextSnapshotRequest, contract.ContextSnapshotResponse](ctx, c, contract.MethodContextSnapshot, req)
+}
+
 func newClient(socket string) *socketClient {
 	return &socketClient{http: &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
@@ -64,13 +69,15 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.OpWithdrawRequest |
+	contract.ContextSnapshotRequest |
+		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
-	contract.OpWithdrawResponse |
+	contract.ContextSnapshotResponse |
+		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
 		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
@@ -601,6 +608,20 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	post.Flags().StringVar(&postRoom, "room", "", "Room ID")
 	post.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
 	root.AddCommand(post, visualCommand())
+	contextCmd := &cobra.Command{Use: "context"}
+	contextCmd.AddCommand(&cobra.Command{Use: "show SECTION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: args[0]})
+		if err != nil {
+			return err
+		}
+		for _, section := range result.Sections {
+			if _, err = fmt.Fprintln(cmd.OutOrStdout(), section.Text); err != nil {
+				return err
+			}
+		}
+		return nil
+	}})
+	root.AddCommand(contextCmd)
 
 	op := &cobra.Command{Use: "op"}
 	opList := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
