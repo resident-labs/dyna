@@ -18,14 +18,26 @@ import (
 // window is how often the counted requests are written to the journal.
 const window = 10 * time.Minute
 
+// RunPhase identifies the source of an exact-head workflow run list.
+type RunPhase uint8
+
+const (
+	RunOther RunPhase = iota
+	RunWatchSnapshot
+	RunCancellation
+	RunBudgetRecovery
+)
+
 // quotaLog counts completed requests and writes a summary for each window.
 type quotaLog struct {
-	mu      sync.Mutex
-	since   time.Time
-	counted map[string]int
-	free    map[string]int
-	now     func() time.Time
-	logf    func(format string, args ...any)
+	mu            sync.Mutex
+	since         time.Time
+	counted       map[string]int
+	free          map[string]int
+	runPhases     map[RunPhase]int
+	runPhasesFree map[RunPhase]int
+	now           func() time.Time
+	logf          func(format string, args ...any)
 }
 
 // engineGHQuota is shared by every engine request. Tests replace it.
@@ -33,7 +45,12 @@ var engineGHQuota = &quotaLog{}
 
 // Record counts one completed request, classified by its API path.
 func Record(path string, notModified bool) {
-	engineGHQuota.record(ghQuotaCaller(path), notModified)
+	RecordRunPhase(path, RunOther, notModified)
+}
+
+// RecordRunPhase preserves endpoint totals and adds a fixed phase for exact-head lists.
+func RecordRunPhase(path string, phase RunPhase, notModified bool) {
+	engineGHQuota.recordPhase(ghQuotaCaller(path), phase, notModified)
 }
 
 // RecordCaller counts one request from a named caller that has no API path,
@@ -44,6 +61,10 @@ func RecordCaller(caller string, notModified bool) {
 
 // record adds one completed request and writes a summary every window.
 func (q *quotaLog) record(caller string, notModified bool) {
+	q.recordPhase(caller, RunOther, notModified)
+}
+
+func (q *quotaLog) recordPhase(caller string, phase RunPhase, notModified bool) {
 	if q == nil {
 		return
 	}
@@ -58,6 +79,16 @@ func (q *quotaLog) record(caller string, notModified bool) {
 	}
 	if q.counted == nil {
 		q.counted, q.free = map[string]int{}, map[string]int{}
+	}
+	if caller == "runs-head-sha" {
+		if q.runPhases == nil {
+			q.runPhases, q.runPhasesFree = map[RunPhase]int{}, map[RunPhase]int{}
+		}
+		if notModified {
+			q.runPhasesFree[phase]++
+		} else {
+			q.runPhases[phase]++
+		}
 	}
 	if notModified {
 		q.free[caller]++
@@ -84,7 +115,12 @@ func (q *quotaLog) summary(now time.Time) {
 		logf = log.Printf
 	}
 	logf("GitHub quota: %d counted and %d free (304) requests in %s%s", counted, free, now.Sub(q.since).Round(time.Minute), countedCallers(q.counted))
-	q.counted, q.free, q.since = map[string]int{}, map[string]int{}, now
+	if len(q.runPhases) > 0 || len(q.runPhasesFree) > 0 {
+		logf("GitHub exact-head run lists: snapshot %d counted %d free; cancellation %d counted %d free; budget-recovery %d counted %d free; other %d counted %d free",
+			q.runPhases[RunWatchSnapshot], q.runPhasesFree[RunWatchSnapshot], q.runPhases[RunCancellation], q.runPhasesFree[RunCancellation],
+			q.runPhases[RunBudgetRecovery], q.runPhasesFree[RunBudgetRecovery], q.runPhases[RunOther], q.runPhasesFree[RunOther])
+	}
+	q.counted, q.free, q.runPhases, q.runPhasesFree, q.since = map[string]int{}, map[string]int{}, nil, nil, now
 }
 
 // countedCallers names the callers that spend quota, largest first.
