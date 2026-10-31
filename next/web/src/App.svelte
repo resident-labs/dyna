@@ -10,7 +10,8 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import { count, quoted, type Quote } from "./lib/feed.ts";
+  import { causes, count, quoted, type Quote } from "./lib/feed.ts";
+  import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import ShellView from "./lib/ui/ShellView.svelte";
@@ -91,18 +92,39 @@
   let home: Conversation = $derived(session ? { kind: "dm", session } : { kind: "feed" });
   // The sessions panel lists each child under its parent. Closed sessions leave it. As in v1, a session with
   // children folds its subtree, and its row counts the hidden sessions; folds last for this page view.
+  // Siblings sort by the most urgent status in their subtree: what needs the owner, then working, then idle. Two or
+  // more idle siblings fold into one "N idle" row that opens in place, so a room of 100 sessions shows its work first.
   const folded = new SvelteSet<string>();
+  const openIdle = new SvelteSet<string>();
+  type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
+    | { kind: "idle"; key: string; depth: number; count: number; open: boolean };
+  const folds: Record<Status, string> = { waiting: "A folded session waits for you", failed: "A folded session failed", working: "A folded session is working", idle: "" };
   let tree = $derived.by(() => {
     const sessions = [...(store?.sessions.values() ?? [])];
     const ids = new Set(sessions.map(item => item.session));
     const children = (parent: string | undefined) => sessions.filter(item => (item.parent && ids.has(item.parent) ? item.parent : undefined) === parent);
     const under = (parent: string): string[] => children(parent).flatMap(item => [item.session, ...under(item.session)]);
-    const rows: { session: SessionStarted; depth: number; parent: boolean; hidden: number; hiddenTrouble: boolean }[] = [];
+    const own = new Map(sessions.map(item => [item.session, store?.status(item.session) ?? "idle"]));
+    const most = (list: string[]) => list.reduce<Status>((best, id) => urgency(own.get(id) ?? "idle") < urgency(best) ? own.get(id) ?? "idle" : best, "idle");
+    const top = new Map(sessions.map(item => [item.session, most([item.session, ...under(item.session)])]));
+    // The open DM's row and its ancestors never fold away as idle.
+    const keep = new Set<string>();
+    for (let id = session; id && ids.has(id); id = store?.sessions.get(id)?.parent) keep.add(id);
+    const rows: TreeRow[] = [];
     const walk = (parent: string | undefined, depth: number) => {
-      for (const item of children(parent)) {
+      const kids = children(parent).sort((a, b) => urgency(top.get(a.session) ?? "idle") - urgency(top.get(b.session) ?? "idle"));
+      const idle = kids.filter(item => top.get(item.session) === "idle" && !keep.has(item.session));
+      const key = parent ?? "";
+      const open = idle.length < 2 || openIdle.has(key);
+      for (const item of kids) {
+        if (item === idle[0] && idle.length >= 2) rows.push({ kind: "idle", key, depth, count: idle.length, open });
+        if (!open && idle.includes(item)) continue;
         const hidden = folded.has(item.session) ? under(item.session) : [];
-        // A folded row keeps the failure of a session it hides in sight, with the same rule as the row mark.
-        rows.push({ session: item, depth, parent: children(item.session).length > 0, hidden: hidden.length, hiddenTrouble: hidden.some(id => trouble(id)) });
+        // A folded row shows the most urgent status it hides when that is more urgent than its own.
+        const inside = most(hidden), state = own.get(item.session) ?? "idle";
+        const shown = urgency(inside) < urgency(state) ? inside : state;
+        rows.push({ kind: "session", session: item, depth, parent: children(item.session).length > 0, hidden: hidden.length, state, dot: shown,
+          mark: shown === state ? undefined : folds[shown] });
         if (!hidden.length) walk(item.session, depth + 1);
       }
     };
@@ -167,23 +189,29 @@
     const index = areas.findIndex(area => area.contains(document.activeElement));
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
   }
-  // Up and Down move between the sessions in the tree; Enter opens one.
-  function walkTree(event: KeyboardEvent & { currentTarget: HTMLAnchorElement }) {
+  // Up and Down move between the sessions in the tree and its idle folds; Enter opens one.
+  function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !members) return;
     event.preventDefault();
-    const links = Array.from(members.querySelectorAll<HTMLAnchorElement>("a.member"));
+    const links = Array.from(members.querySelectorAll<HTMLElement>("a.member, button.idle"));
     const index = links.indexOf(event.currentTarget);
     links[Math.max(0, Math.min(links.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
   }
   let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
-  // A session's muted status line shows only state that matters, from its one status (status.ts): a request that
-  // waits for the owner, or a running turn with its latest activity; else a starting box. An idle session has none;
-  // its profile is the row's hover title.
+  // A session's line says what it does, from its one status (status.ts). A failed session's line is the reason
+  // after "Failed", which the row draws; an idle one says Starting while its box starts, else Idle. Its profile is the
+  // row's hover title.
   const status = (id: string) => {
-    const box = store?.boxes.get(id), state = store?.status(id);
-    if (state === "waiting") return "waiting for your approval";
-    if (state === "working") { const label = store?.activity.get(id); return label ? `working · ${label}` : "working"; }
-    return box === "pending" || box === "creating" || box === "starting" ? "starting" : "";
+    const box = store?.boxes.get(id), cause = store?.causes.get(id);
+    switch (store?.status(id)) {
+      case "waiting": return "Waiting for your approval";
+      case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
+      case "failed": {
+        const reason = box === "failed" ? "could not start" : box === "lost" ? "stopped unexpectedly" : cause ? causes[cause] : "the last turn failed";
+        return reason[0].toLowerCase() + reason.slice(1);
+      }
+      default: return box === "pending" || box === "creating" || box === "starting" ? "Starting" : "Idle";
+    }
   };
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
@@ -235,7 +263,8 @@
   }
   // The sessions the feed composer offers after @: the root first, then by name. A DM offers none.
   let mentions = $derived(session ? [] : [...store?.sessions.values() ?? []].filter(mentionable)
-    .map(item => ({ name: item.name, root: !item.parent, status: status(item.session) }))
+    .map(item => { const state = store?.status(item.session);
+      return { name: item.name, root: !item.parent, status: state === "idle" ? "" : state === "failed" ? `Failed · ${status(item.session)}` : status(item.session) }; })
     .sort((a, b) => Number(b.root) - Number(a.root) || a.name.localeCompare(b.name)));
   // The panel's header counts, and the room header's below 761 px where the panel is hidden.
   // One count source (status.ts): a session that waits for the owner is waiting, not working.
@@ -250,11 +279,6 @@
     const open = session, current = store;
     if (open && current?.ready) untrack(() => { if (current.unseen(open)) current.see({ kind: "dm", session: open }, current.failed.get(open) ?? 0); });
   });
-  const trouble = (id: string) => {
-    const box = store?.boxes.get(id);
-    // A failed turn shows until the owner sees it or the session's next turn succeeds.
-    return store?.unseen(id) ? "Last turn failed" : box === "failed" ? "Could not start" : box === "lost" ? "Stopped unexpectedly" : "";
-  };
 </script>
 
 {#snippet intro()}
@@ -320,7 +344,10 @@
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
       <header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>
-      {#each tree as { session: item, depth, parent, hidden, hiddenTrouble } (item.session)}
+      {#each tree as row (row.kind === "idle" ? `idle ${row.key}` : row.session.session)}
+        {#if row.kind === "idle"}<button type="button" class="idle" aria-expanded={row.open} style:padding-left="{row.depth * 14}px" onkeydown={walkTree}
+          onclick={() => { if (!openIdle.delete(row.key)) openIdle.add(row.key); }}><Icon name="chevron" size={12} />{count(row.count, "idle session")}</button>
+        {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = row}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
@@ -329,14 +356,11 @@
           onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false); }}
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
-          <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
-          {#if store?.status(item.session) === "failed"}<StatusPill tone="failed" dot label={trouble(item.session)} />
-          {:else if hiddenTrouble}<StatusPill tone="failed" dot label="A folded session failed" />
-          {:else if store?.status(item.session) === "waiting"}<StatusPill tone="warning" dot label="Waiting for your approval" />{/if}</a>
+          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" class:open={jobsOf === item.session} data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
-            title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>
+            title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
       {:else}<p class="hint">No sessions yet.</p>{/each}
       {/if}
     </aside>
@@ -345,8 +369,8 @@
 </div>
 
 <style>
-  /* v1's density: 40 px rows around the 28 px avatar. */
-  a.member { min-height: 40px; color: var(--text); text-decoration: none; }
+  /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
+  a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
   aside.members > header strong { font-size: 16px; }
   /* Requests is a header icon, as the menu and the panel toggle are: 16 px in a 28 px hit area. While requests wait for
@@ -363,13 +387,21 @@
   /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same
      button, but it sits on the row line beside the chevron. */
   .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); min-width: 16px; min-height: 24px; display: flex; align-items: center; justify-content: center;
-    padding: 0 1px; border-radius: 4px; color: var(--muted); font-size: 10px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
+    padding: 0 1px; border-radius: 4px; color: var(--muted); font-size: 11px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
   .fold:hover { background: var(--hover); color: var(--text); }
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .fold[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
   /* A thumb gets v1's taller target, so a near miss does not open the DM. */
   @media (hover: none) { .fold { width: 24px; min-height: 44px; } }
   .row a.member { flex: 1; min-width: 0; }
+  /* "N idle sessions" stands for idle siblings until opened. Its chevron sits in the fold gutter and its words line
+     up with the names. */
+  .idle { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; height: 32px; color: var(--muted);
+    font-size: 12.5px; cursor: pointer; }
+  .idle :global(svg) { flex: none; width: 16px; }
+  .idle[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
+  .idle:hover { background: var(--hover); color: var(--text); }
+  .idle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .watch { all: unset; display: grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   .watch:hover { background: var(--hover); color: var(--text); }
   .watch:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
