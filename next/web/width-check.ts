@@ -1,7 +1,8 @@
 // The browser and its Playwright client are the same system tools used by scripts/qa-branch.sh.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { chromium } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.js";
+import playwright from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.js";
+const { chromium } = playwright;
 import { roomRoute, settingsPanes, settingsRoute } from "./src/lib/routes.ts";
 import { knownWidthFailures } from "./known-width-failures.ts";
 
@@ -60,15 +61,15 @@ try {
             const style = getComputedStyle(el);
             const text = el.textContent?.trim() ?? "";
             if (!text || !el.getClientRects().length || !["hidden", "clip"].includes(style.overflowX) || el.scrollWidth <= el.clientWidth) continue;
-            const labelledBy = (el.getAttribute("aria-labelledby") ?? "").split(/\\s+/).map(id => document.getElementById(id)?.textContent ?? "").join(" ").trim();
+            const labelledBy = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).map(id => document.getElementById(id)?.textContent ?? "").join(" ").trim();
             const label = el.getAttribute("title") || el.getAttribute("aria-label") || labelledBy;
             if (style.textOverflow === "ellipsis" && label.includes(text)) continue;
-            found.push(`${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\\s+/g, ".") : ""}: ${text.slice(0, 100)}`);
+            found.push(`${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""}: ${text.slice(0, 100)}`);
           }
           return found;
         });
         const roomMatch = roomRoute.exec(route);
-        const baselineRoute = roomMatch ? (roomMatch[2] ? "/r/:room/s/:session" : "/r/:room") : route.replace(/^\\/settings\\/accounts\\/account\\/[^/]+$/, "/settings/accounts/account/:account");
+        const baselineRoute = roomMatch ? (roomMatch[2] ? "/r/:room/s/:session" : "/r/:room") : route.replace(/^\/settings\/accounts\/account\/[^/]+$/, "/settings/accounts/account/:account");
         for (const issue of issues) {
           const line = `${fixture} ${route} ${width}px: ${issue}`;
           if (knownWidthFailures[baselineRoute]?.includes(width)) console.warn(`Known: ${line}`);
