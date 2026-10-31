@@ -87,16 +87,13 @@ var methodTable = []MethodEntry{
 	method(contract.MethodRoomRepoAdd, contract.ScopeAdmin, OwnerAccess,
 		act("room", "add_repo", typ[contract.RoomRepoAddRequest](), "Add a repository", "room repo add"),
 	),
-	// The engine serves room.repos to the owner only until the authorization
-	// PR pins a box to its own room; the action stays CLI-bound until then.
-	method(contract.MethodRoomRepos, contract.ScopeRead, OwnerAccess,
+	method(contract.MethodRoomRepos, contract.ScopeRead, UserAccess,
 		act("room", "repos", typ[contract.RoomReposRequest](), "List repositories in room.", "room repo list"),
 	),
 	method(contract.MethodRoomSetLimits, contract.ScopeAdmin, OwnerAccess,
 		act("room", "limit", typ[contract.RoomSetLimitsRequest](), "Set room limits", "room limit"),
 	),
-	// The restart service rejects every non-owner caller today; the row says so.
-	method(contract.MethodSessionRestart, contract.ScopeOperate, OwnerAccess,
+	method(contract.MethodSessionRestart, contract.ScopeOperate, UserAccess,
 		act("session", "restart", typ[contract.SessionRestartRequest](), "Replace the failed box for session; unpushed work is lost.", "session restart"),
 	),
 	method(contract.MethodSessionClose, contract.ScopeOperate, UserAccess,

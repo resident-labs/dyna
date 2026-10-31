@@ -48,6 +48,9 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 }
 
 func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error) {
+	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
+		return contract.RoomReposResponse{}, e
+	}
 	repos, err := s.store.RoomRepos(ctx, req.Room)
 	if errors.Is(err, store.ErrRoomNotFound) {
 		return contract.RoomReposResponse{}, invalid("unknown room")
