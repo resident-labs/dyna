@@ -192,5 +192,5 @@
   .step.done { background: transparent; border: 1px solid var(--line); }
   .connect a { text-decoration: none; font-weight: 500; }
   .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-family: var(--mono); font-size: 24px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
-  @media (max-width: 640px) { .row { flex-wrap: wrap; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { margin-left: -10px; } .expired, .remove-confirm { flex-basis: 100%; margin: 0; } .body { padding: 12px 16px; } .connect { padding: 16px; } .key-fields { flex-direction: column; align-items: stretch; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
+  @media (max-width: 640px) { .row { flex-wrap: wrap; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { margin-left: 0; padding: 0 12px; border: 1px solid var(--line); } .expired, .remove-confirm { flex-basis: 100%; margin: 0; } .body { padding: 12px 16px; } .connect { padding: 16px; } .key-fields { flex-direction: column; align-items: stretch; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
 </style>
