@@ -139,7 +139,7 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
 	req.Label = strings.TrimSpace(req.Label)
-	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n") {
+	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") {
 		return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account label"}
 	}
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionConnect, "", func(ctx context.Context) accountActionResult {
@@ -166,7 +166,7 @@ func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Pri
 
 func (s *AccountActions) AccountsSetKey(ctx context.Context, caller contract.Principal, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, *contract.Error) {
 	req.Label = strings.TrimSpace(req.Label)
-	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n") || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
+	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 		return contract.AccountsSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
 	}
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetKey, "", func(ctx context.Context) accountActionResult {
