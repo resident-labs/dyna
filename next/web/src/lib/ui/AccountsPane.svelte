@@ -24,6 +24,7 @@
     void call("accounts.list", {}).then(result => {
       if (ticket !== loadGeneration) return;
       providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; loadFailed = false;
+      if (reconnectId && !accounts.some(account => account.id === reconnectId)) close();
     }, (error: unknown) => { if (ticket !== loadGeneration) return; if (error instanceof SignedOut) signedout(); else if (!loaded) loadFailed = true; });
   }
   onMount(() => {
