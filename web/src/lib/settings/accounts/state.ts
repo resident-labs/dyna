@@ -189,7 +189,8 @@ export function allowanceLabel(window?: Partial<UsageWindow> | null): string {
 // "Gemini weekly". A label with no known period stays as it is.
 const PERIODS: [RegExp, string][] = [[/\b(5h|5-hour|five hour)\b/i, '5-hour'], [/\b(weekly|7-day|week)\b/i, 'weekly']]
 export function shortLabel(label: string): string {
-  const [group = '', rest = ''] = label.includes(':') ? label.split(/:\s*/, 2) : ['', label]
+  const dot = label.split(' · ')
+  const [group = '', rest = ''] = label.includes(':') ? label.split(/:\s*/, 2) : dot.length === 2 ? [dot[1], dot[0]] : ['', label]
   const period = PERIODS.find(([re]) => re.test(rest))
   if (!period) return label
   const name = (group || rest.replace(/\(.*?\)/g, '').replace(new RegExp(period[0].source, 'gi'), '').replace(/\b(session|limit|remaining|usage)\b/gi, ''))

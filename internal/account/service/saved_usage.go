@@ -87,7 +87,7 @@ func (s *Service) AccountUsageCached() Snapshot {
 		}
 		applyStatedFailoverLimits(out.Accounts, s.o.Store, now)
 		ApplyBlockingQuota(out.Accounts, now)
-		return out
+		return visibleSnapshot(out)
 	}
 	return CachedUsage(s.o.Store, now)
 }
@@ -119,7 +119,7 @@ func CachedUsage(store *accountstore.Store, now time.Time) Snapshot {
 	}
 	applyStatedFailoverLimits(out.Accounts, store, now)
 	ApplyBlockingQuota(out.Accounts, now)
-	return out
+	return visibleSnapshot(out)
 }
 
 // applyStatedFailoverLimits reflects a z.ai 1308 response in the saved account
