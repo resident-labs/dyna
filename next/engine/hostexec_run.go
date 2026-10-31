@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -97,7 +96,7 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			a := args.(contract.HostexecRunArgs)
 			run := store.HostexecRun{Op: op, Grant: a.Grant, Host: a.Host, Scope: "dyna-hostexec-" + string(op) + ".scope", Timeout: a.Timeout}
 			if err := s.store.StartHostexec(ctx, run, who, a.Room, s.now()); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, store.ErrGrantInactive) {
 					return contract.OpResult{Cause: contract.CauseGrantInactive, Error: "grant no longer active"}
 				}
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
