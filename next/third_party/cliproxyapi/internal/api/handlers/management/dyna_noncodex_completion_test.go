@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,67 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
+
+type dynaDurableProviderStore struct{ dynaFakeProviderStore }
+
+func (dynaDurableProviderStore) RequireDurableAuth() bool { return true }
+
+type dynaIdentityStore struct{ dynaDurableProviderStore }
+
+func (dynaIdentityStore) Save(ctx context.Context, auth *coreauth.Auth) (string, error) {
+	info := coreauth.GetRequestInfo(ctx)
+	if info.OAuthIdentity != nil {
+		if info.OAuthIdentity.Email == "" {
+			return "", errors.New("missing identity")
+		}
+	} else if auth.Metadata["email"] == nil {
+		return "", errors.New("missing identity")
+	}
+	return auth.ID, nil
+}
+
+func TestDynaReconnectRejectsInheritedIdentity(t *testing.T) {
+	ctx := coreauth.WithRequestInfo(context.Background(), &coreauth.RequestInfo{})
+	st := dynaIdentityStore{}
+	manager := coreauth.NewManager(st, nil, nil)
+	if _, err := manager.Register(coreauth.WithSkipPersist(ctx), &coreauth.Auth{ID: "same", Provider: "claude", Metadata: map[string]any{"email": "invented@example.test", "access_token": "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{}, manager)
+	h.tokenStore = st
+	newGrant := &coreauth.Auth{ID: "same", Provider: "claude", Metadata: map[string]any{"access_token": "new"}}
+	if _, err := h.saveTokenRecord(ctx, newGrant); err == nil {
+		t.Fatal("accepted identity inherited from old metadata")
+	}
+}
+
+func TestDynaReconnectAdoptsEnabledGrant(t *testing.T) {
+	previousEnabled, previousHook := DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook
+	defer func() { DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook = previousEnabled, previousHook }()
+	DynaMemoryOAuthCallbacks = true
+	ctx := context.Background()
+	st := dynaDurableProviderStore{}
+	manager := coreauth.NewManager(st, nil, nil)
+	if _, err := manager.Register(coreauth.WithSkipPersist(ctx), &coreauth.Auth{ID: "reconnect", Provider: "kimi", Metadata: map[string]any{"access_token": "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{}, manager)
+	h.tokenStore = st
+	h.postAuthHook = func(_ context.Context, a *coreauth.Auth) error { a.Disabled = true; return nil }
+	const state = "invented-reconnect-state"
+	RegisterOAuthSession(state, "kimi")
+	t.Cleanup(func() { oauthSessions.mu.Lock(); delete(oauthSessions.sessions, state); oauthSessions.mu.Unlock() })
+	accepted := false
+	DynaOAuthCompletionHook = func(state, _ string) { session, _ := oauthSessions.Get(state); accepted = session.Adopted }
+	record := &coreauth.Auth{ID: "reconnect", Provider: "kimi", Storage: &kimi.KimiTokenStorage{AccessToken: "new", RefreshToken: "new-refresh"}}
+	if _, err := h.saveTokenRecord(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	h.dynaCompleteOAuth(state, record)
+	if !accepted {
+		t.Fatal("enabled bound grant was not adopted")
+	}
+}
 
 type dynaFakeProviderStore struct{}
 
