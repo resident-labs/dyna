@@ -25,12 +25,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			} else if !a.Expires.IsZero() {
 				expiry = "until " + a.Expires.UTC().Format(time.RFC3339)
 			}
-			mode := "asking you before each run"
-			if a.Mode == contract.GrantModePreapproved {
-				mode = "without asking each time"
-			}
-
-			var hosts, commands []string
+			var hosts []string
 			for _, host := range a.Hosts {
 				if host == contract.AllHosts {
 					hosts = append(hosts, "every host, including the control plane")
@@ -38,25 +33,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 					hosts = append(hosts, quoteHostexec(string(host)))
 				}
 			}
-			for _, command := range a.Commands {
-				var argv []string
-				for _, arg := range append([]string{command.Program}, command.Args...) {
-					argv = append(argv, quoteHostexec(arg))
-				}
-				if command.Program == "*" {
-					argv[0] = "any program"
-					if command.Prefix && len(command.Args) == 0 {
-						commands = append(commands, "any command")
-						continue
-					}
-				}
-				line := strings.Join(argv, " ")
-				if command.Prefix {
-					line += ", with any arguments"
-				}
-				commands = append(commands, line)
-			}
-			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run these commands on %s, %s, %s:\n%s", session.Name, strings.Join(hosts, ", "), expiry, mode, strings.Join(commands, "\n"))}
+			return contract.Card{Title: "Grant host access", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run any command on %s, %s.\nReason: %s", session.Name, strings.Join(hosts, ", "), expiry, a.Reason)}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)
@@ -85,7 +62,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if !a.Never && expiry.IsZero() {
 				expiry = now.Add(24 * time.Hour)
 			}
-			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Commands: a.Commands, Mode: a.Mode, Expires: expiry, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
+			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, Expires: expiry, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
 			err = s.store.Write(ctx, func(tx *sql.Tx) error { return s.store.InsertGrant(tx, g) })
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
