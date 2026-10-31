@@ -123,6 +123,25 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	hostState := make(map[contract.HostName]box.HostState, len(hosts))
 	for _, host := range hosts {
 		hostState[host.Name] = host.State
+		if host.State == box.HostReady && !host.MaintainedAt.After(r.now().Add(-24*time.Hour)) {
+			if maintainer, ok := r.boxes.(interface {
+				MaintainHost(context.Context, contract.HostName) error
+			}); ok {
+				claimed, err := r.store.ClaimHostMaintenance(ctx, host.Name, r.now())
+				if err != nil {
+					return err
+				}
+				if claimed {
+					r.wg.Add(1)
+					go func(name contract.HostName) {
+						defer r.wg.Done()
+						if err := maintainer.MaintainHost(ctx, name); err != nil && ctx.Err() == nil {
+							log.Printf("host %s: maintenance: %v", name, err)
+						}
+					}(host.Name)
+				}
+			}
+		}
 	}
 	all := make([]box.Box, len(rows))
 	for i := range rows {

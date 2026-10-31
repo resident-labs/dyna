@@ -183,6 +183,15 @@ const (
 )
 
 // BoxPressure reports memory pressure in a box. It wakes nobody.
+type HostDiskLow struct {
+	Host       HostName `json:"host"`
+	FreeBytes  int64    `json:"freeBytes"`
+	FloorBytes int64    `json:"floorBytes"`
+}
+
+func (HostDiskLow) EventType() EventType { return "host.disk_low" }
+func (HostDiskLow) isEventBody()         {}
+
 type BoxPressure struct {
 	Box  BoxID        `json:"box"`
 	Kind PressureKind `json:"kind"`

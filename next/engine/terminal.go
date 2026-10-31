@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -13,7 +14,7 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	}
 	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, CPUs: host.CPUs, MemBytes: host.MemBytes})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: host.DiskBytes > 0 && host.DiskBytes < 20*box.GiB})
 	}
 	return result, nil
 }
