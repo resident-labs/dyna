@@ -86,7 +86,10 @@ func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID, force
 	if s.dormancy.unconfirmed[current.ID] || s.dormancy.failedStarts[current.ID] {
 		return nil
 	}
-	if current.State == contract.BoxReady && force {
+	s.mu.Lock()
+	open := s.terminals[id] > 0
+	s.mu.Unlock()
+	if current.State == contract.BoxReady && (force || open) {
 		return nil
 	}
 	if current.State == contract.BoxReady {

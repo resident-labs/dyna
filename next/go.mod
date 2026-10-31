@@ -4,6 +4,7 @@ go 1.26.10
 
 require (
 	github.com/coder/websocket v1.8.14
+	github.com/creack/pty v1.1.24
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.57.0
 )
