@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,12 +14,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
 )
 
 type client interface {
+	HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error)
+	HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error)
+	File(context.Context, string, io.Writer) error
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
 	RoomRepoAdd(context.Context, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error)
@@ -42,10 +47,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
+	contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
 }
 type responseType interface {
-	contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
+	contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -74,6 +79,33 @@ func call[Q requestType, R responseType](ctx context.Context, c *socketClient, m
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	return result, err
 }
+
+func (c *socketClient) HostexecRun(ctx context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
+	return call[contract.HostexecRunRequest, contract.HostexecRunResponse](ctx, c, contract.MethodHostexecRun, q)
+}
+func (c *socketClient) HostexecRevoke(ctx context.Context, q contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error) {
+	return call[contract.HostexecRevokeRequest, contract.HostexecRevokeResponse](ctx, c, contract.MethodHostexecRevoke, q)
+}
+func (c *socketClient) File(ctx context.Context, hash string, out io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/files/"+hash, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("output file: %s", resp.Status)
+	}
+	_, err = io.Copy(out, resp.Body)
+	return err
+}
+
+type commandExit int
+
+func (e commandExit) Error() string { return fmt.Sprintf("command exited with status %d", e) }
 func (c *socketClient) HostAdd(ctx context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	return call[contract.HostAddRequest, contract.HostAddResponse](ctx, c, contract.MethodHostAdd, q)
 }
@@ -148,6 +180,51 @@ func defaultSocket() string {
 }
 
 func addCLI(root *cobra.Command, getClient func() client) {
+	hostexec := &cobra.Command{Use: "hostexec"}
+	var runHost, cwd string
+	var timeout time.Duration
+	run := &cobra.Command{Use: "run --host HOST -- COMMAND [ARG...]", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient()
+		res, err := c.HostexecRun(cmd.Context(), contract.HostexecRunRequest{Host: contract.HostName(runHost), Argv: args, Cwd: cwd, Timeout: contract.DurationMS(timeout.Milliseconds())})
+		if err != nil {
+			return err
+		}
+		op := res.Operation
+		if op.Result == nil {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), op.ID)
+			return err
+		}
+		if _, err = io.WriteString(cmd.OutOrStdout(), op.Result.Output); err != nil {
+			return err
+		}
+		if op.Result.OutputFile != "" {
+			if err = c.File(cmd.Context(), op.Result.OutputFile, cmd.OutOrStdout()); err != nil {
+				return err
+			}
+		}
+		if op.Result.Truncated {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Output truncated at 8 MiB.")
+		}
+		if op.Result.Error != "" {
+			return fmt.Errorf("%s", op.Result.Error)
+		}
+		if op.Result.ExitCode != 0 {
+			cmd.SilenceErrors = true
+			return commandExit(op.Result.ExitCode)
+		}
+		return nil
+	}}
+	run.Flags().StringVar(&runHost, "host", "", "Host name")
+	run.Flags().StringVar(&cwd, "cwd", "", "Working directory")
+	run.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Run timeout")
+	_ = run.MarkFlagRequired("host")
+	revoke := &cobra.Command{Use: "revoke GRANT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().HostexecRevoke(cmd.Context(), contract.HostexecRevokeRequest{Grant: contract.GrantID(args[0])})
+		return err
+	}}
+	hostexec.AddCommand(run, revoke)
+	root.AddCommand(hostexec)
+
 	host := &cobra.Command{Use: "host"}
 	var ssh string
 	var admin bool
