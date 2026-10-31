@@ -87,6 +87,14 @@ func TestRouteRejectsAmbiguousModel(t *testing.T) {
 
 func TestProxyConfig(t *testing.T) {
 	dir := t.TempDir()
+	oldAuth := filepath.Join(dir, "cliproxy", "auth")
+	if err := os.MkdirAll(oldAuth, 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldFile := filepath.Join(oldAuth, "invented.json")
+	if err := os.WriteFile(oldFile, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	proxy, err := NewProxy(dir, "management-key")
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +116,10 @@ func TestProxyConfig(t *testing.T) {
 	if bcrypt.CompareHashAndPassword([]byte(cfg.RemoteManagement.SecretKey), []byte("management-key")) != nil {
 		t.Fatal("management key does not authenticate")
 	}
-	info, err = os.Stat(filepath.Join(dir, "cliproxy", "auth"))
+	if _, err := os.Stat(oldFile); err != nil || cfg.AuthDir == oldAuth {
+		t.Fatal("old credentials were touched or loaded")
+	}
+	info, err = os.Stat(filepath.Join(dir, "cliproxy", "auth-v2"))
 	if err != nil || info.Mode().Perm() != 0700 {
 		t.Fatalf("auth mode: %v, %v", info, err)
 	}
