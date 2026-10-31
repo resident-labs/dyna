@@ -115,12 +115,11 @@ func Run(ctx context.Context, cfg Config) error {
 	defer st.Close()
 	backupCtx, stopBackup := context.WithCancel(ctx)
 	backupDone := make(chan struct{})
-	backupTicks := time.NewTicker(24 * time.Hour)
 	go func() {
 		defer close(backupDone)
-		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup}).start(backupCtx, backupTicks.C)
+		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup}).start(backupCtx)
 	}()
-	defer func() { stopBackup(); backupTicks.Stop(); <-backupDone }()
+	defer func() { stopBackup(); <-backupDone }()
 	if err := st.ResetEngineHosts(ctx); err != nil {
 		return fmt.Errorf("reset host identity: %w", err)
 	}

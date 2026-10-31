@@ -13,13 +13,14 @@ The backup key can add archives. It cannot do anything else:
 - A short copy or a bad name is refused, and the partial file is removed.
 - The receiver never sends a file back. Only the owner reads the archives, on that machine.
 
-Each archive is an encrypted `tar.gz`. It holds `store.db`, `files/`, `transcripts/` and `cliproxy/auth/`.
+Each archive is an encrypted `tar.gz`. It holds `store.db`, `files/`, `transcripts/`, `archive/`, `connect/` and `cliproxy/auth/`, when those folders exist.
 
 ## Set up the age key pair
 
 Make the key pair on the owner's own machine. Do not make it on the engine host or the second machine.
 
 ```sh
+mkdir -p ~/dyna-backup
 age-keygen -o ~/dyna-backup/age-key.txt
 age-keygen -y ~/dyna-backup/age-key.txt
 ```
@@ -90,7 +91,7 @@ mkdir -p ~/restore
 age -d -i ~/dyna-backup/age-key.txt ~/restore/dyna-<stamp>.tar.gz.age | tar xz -C ~/restore
 ```
 
-Check the restored database:
+Confirm that `archive/` and `connect/` returned if the engine had them. Then check the restored database:
 
 ```sh
 sqlite3 ~/restore/store.db "PRAGMA integrity_check;"
@@ -98,4 +99,4 @@ sqlite3 ~/restore/store.db "PRAGMA integrity_check;"
 
 The output must be `ok`. If the check does not print `ok`, do not use that archive. Try the next newest archive.
 
-A local copy in `<data>/backups` holds only `store.db`, named `dyna-<stamp>.db`. It has no `files/`, `transcripts/` or `cliproxy/auth/`. Check it with the same `PRAGMA integrity_check`.
+A local copy in `<data>/backups` holds only `store.db`, named `store-<stamp>.db`. It has no files, transcripts, archives, Connect state or proxy sign-ins. Check it with the same `PRAGMA integrity_check`.
