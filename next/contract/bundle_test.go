@@ -73,6 +73,7 @@ func filledRoomBundle() RoomBundle {
 		Subscriptions: []Subscription{{
 			ID: "sub_2", Scope: ScopeRoom, On: []EventType{"pr.merged"}, Run: &RunSpec{Command: []string{"true"}, Image: "dyna-base", Size: "small"},
 		}},
+		HookHandoff: []HookHandoff{{Name: "manual-hook", Fields: []string{"command", "cwd"}}},
 		Handoff: []SessionHandoff{{
 			Name: "dyna:builder", Profile: "terra", Parent: "dyna:lead", Goals: []GoalID{"g1084"},
 			ArchiveRef: "refs/dyna/archive/builder", LastPost: "done",
