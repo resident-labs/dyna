@@ -8,11 +8,11 @@
   // The dock's Jobs tab (round 2 winners, Jobs design B): the room's background jobs on the left, the chosen job's
   // output on the right. It watches each session's jobs only while it is mounted and the page is visible, so closing
   // the tab closes every watch (fix 1). only narrows the list to one session, as its row's jobs icon asks.
-  // onfailures reports the failed jobs it sees, and opened gets each one the owner picks, for the tab's dot. A job
-  // shown first does not count: on a reset, a failed job can lead the list for a moment before the running ones arrive.
-  let { sessions, only = $bindable(), opened, onfailures }: {
+  // onrunning reports how many of its rows run, none until the first job comes, and opened gets each failed job the
+  // owner picks, for the tab's dot.
+  let { sessions, only = $bindable(), opened, onrunning }: {
     sessions: { id: string; name: string; root: boolean }[]; only?: string;
-    opened: Set<string>; onfailures: (keys: string[]) => void;
+    opened: Set<string>; onrunning: (count: number | undefined) => void;
   } = $props();
 
   const outputs = new SvelteMap<string, SvelteMap<string, ShellJob>>();
@@ -38,7 +38,8 @@
   let grouped = $derived(groups.length > 1);
   const keyOf = (session: string, job: ShellJob) => `${session}/${job.job}`;
   $effect(() => {
-    onfailures([...outputs].flatMap(([id, jobs]) => [...jobs.values()].filter(failed).map(job => keyOf(id, job))));
+    const seen = [...outputs.values()].flatMap(jobs => [...jobs.values()]);
+    onrunning(seen.length ? seen.filter(job => job.running).length : undefined);
   });
 
   // The first job shows until the owner picks one: running jobs come first.
@@ -61,7 +62,7 @@
     const key = keyOf(shown.session, shown.job);
     if (key !== openedKey) {
       openedKey = key;
-      following = !failing;
+      following = !fail;
       void tick().then(() => { if (failing) failing.scrollIntoView({ block: "start" }); });
     }
     void shown.job.text;
@@ -104,7 +105,8 @@
     {#if shown}
       <header><code class="command">{shown.job.command}</code>
         <span class="meta">{names.get(shown.session)?.name} · {#if failed(shown.job)}<StatusPill tone="failed" word label={outcome(shown.job)} />{:else}{outcome(shown.job)}{/if}</span></header>
-      <pre bind:this={output} tabindex="-1" aria-label={`Output of ${shown.job.command}`}
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (the keyboard scrolls the output) -->
+      <pre bind:this={output} tabindex="0" aria-label={`Output of ${shown.job.command}`}
         onscroll={() => { if (output) following = output.scrollHeight - output.scrollTop - output.clientHeight < 40; }}
         >{#if fail}{shown.job.text.slice(0, fail.start)}<mark bind:this={failing}>{shown.job.text.slice(fail.start, fail.end)}</mark>{shown.job.text.slice(fail.end)}{:else}{shown.job.text || "No output yet."}{/if}</pre>
       {#if !following && shown.job.running}<button type="button" class="retry resume" onclick={() => { following = true; }}>Resume following</button>{/if}
@@ -119,7 +121,7 @@
   .list { min-height: 0; overflow-y: auto; padding: 6px; border-right: 1px solid var(--line); }
   .list:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .only { display: flex; align-items: baseline; gap: 8px; margin: 2px 6px 6px; color: var(--muted); font-size: 12.5px; }
-  .session { display: flex; align-items: center; gap: 6px; margin: 8px 6px 2px; color: var(--muted); font-size: 12px; font-weight: 600; }
+  .session { display: flex; align-items: center; gap: 6px; margin: 8px 6px 2px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
   .session:first-child { margin-top: 2px; }
   .job { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border-radius: 6px;
     color: var(--muted); font-size: 12.5px; cursor: pointer; }
@@ -133,11 +135,11 @@
   .output { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .output header { display: grid; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
   .command { font: 12.5px/1.4 var(--mono); overflow-wrap: anywhere; }
-  .meta { color: var(--muted); font-size: 12px; }
-  pre { flex: 1; min-height: 0; margin: 0; padding: 8px 12px; overflow-y: auto; font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  pre { flex: 1; min-height: 0; margin: 0; padding: 8px 12px; overflow-y: auto; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
   pre:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   mark { display: inline-block; width: 100%; background: color-mix(in srgb, var(--danger) 14%, transparent); color: inherit; scroll-margin-top: 8px; }
-  .resume { align-self: center; margin: 6px 0; font-size: 12px; }
+  .resume { align-self: center; margin: 6px 0; font-size: 12.5px; }
   @container (max-width: 560px) {
     .jobs { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); }
     .list { border-right: 0; border-bottom: 1px solid var(--line); }
