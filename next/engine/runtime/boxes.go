@@ -32,6 +32,7 @@ import (
 type boxStore interface {
 	Hosts(context.Context) ([]box.Host, error)
 	AddHost(context.Context, box.Host) error
+	SetEngineHost(context.Context, contract.HostName, bool) error
 	Session(context.Context, contract.SessionID) (store.Session, error)
 	Box(context.Context, contract.BoxID) (box.Box, error)
 	Boxes(context.Context) ([]box.Box, error)
@@ -271,6 +272,13 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			if err != nil {
 				return nil, err
 			}
+			same, err := engineHost(ctx, h)
+			if err != nil {
+				return nil, err
+			}
+			if err := b.Store.SetEngineHost(ctx, name, same); err != nil {
+				return nil, err
+			}
 			if b.loads == nil {
 				b.loads = make(map[contract.HostName]hostLoad)
 			}
@@ -312,7 +320,11 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 	if err := b.installBinary(ctx, h); err != nil {
 		return err
 	}
-	record := box.Host{Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
+	same, err := engineHost(ctx, h)
+	if err != nil {
+		return err
+	}
+	record := box.Host{EngineHost: &same, Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
 	if err := b.Store.AddHost(ctx, record); err != nil {
 		return err
 	}
@@ -635,4 +647,17 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
 	}
 	return slice, c
+}
+
+func engineHost(ctx context.Context, h *podman.Host) (bool, error) {
+	local, err := os.ReadFile("/etc/machine-id")
+	if err != nil {
+		return false, err
+	}
+	id := strings.TrimSpace(string(local))
+	if len(id) != 32 || strings.Trim(id, "0123456789abcdef") != "" {
+		return false, fmt.Errorf("invalid engine machine-id")
+	}
+	remote, err := h.MachineID(ctx)
+	return id == remote, err
 }
