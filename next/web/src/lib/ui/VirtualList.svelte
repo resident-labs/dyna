@@ -24,9 +24,12 @@
   // below moves visible, so a row read from items could point past its end. rows and visible change together.
   // svelte-ignore state_referenced_locally
   let rows = $state.raw(items);
+  // True from hold until the list's height changes. The virtualizer follows growth at the end by itself, so a threshold
+  // no distance can meet turns that off.
+  let held = false;
   const options = (): VirtualizerOptions<HTMLDivElement, HTMLDivElement> => ({
     count: rows.length, getScrollElement: () => element ?? null, estimateSize: () => estimate,
-    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow,
+    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow, scrollEndThreshold: held ? -1 : 1,
     scrollToFn: elementScroll, observeElementRect, observeElementOffset, measureElement,
     onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); },
   });
@@ -68,6 +71,13 @@
     await tick();
   }
 
+  // The reader opened something at the newest row, so its growth stays where they are looking until they scroll.
+  export function hold(): void {
+    atEnd = false;
+    held = true;
+    virtualizer.setOptions(options());
+  }
+
   // True once the rows overflow the view far enough to scroll up to older ones.
   export function full(): boolean {
     return element !== undefined && virtualizer.getTotalSize() > element.clientHeight + edge;
@@ -75,6 +85,16 @@
 
   // Reads the element itself: the scroll handler runs before the virtualizer sees the new offset.
   let last = 0, atEnd = true;
+  // Rows taller than their estimate grow the list after scrollToEnd has landed, so a reader at the newest row stays there.
+  $effect(() => {
+    void total;
+    if (held) void tick().then(() => {
+      held = false;
+      virtualizer.setOptions(options());
+      if (element) atEnd = element.scrollTop + element.clientHeight >= element.scrollHeight - 2;
+    });
+    else if (element && atEnd && untrack(() => follow)) element.scrollTop = element.scrollHeight;
+  });
   // A view that shrinks, as when a phone's keyboard opens, keeps its scrollTop; a reader at the newest row stays there.
   $effect(() => {
     if (!element || !follow) return;
