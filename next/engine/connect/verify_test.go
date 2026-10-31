@@ -30,9 +30,16 @@ func TestRelayVectorAndReplay(t *testing.T) {
 	if err := state.InitializeConnectLink(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
-	v := Verifier{Relay: "https://relay.test", Machine: "m_vector", Keys: KeySet{Keys: []JWK{{Kid: "compat-1", Kty: "OKP", Crv: "Ed25519", X: vector.RelayPublic}}}, Store: state}
+	keys := KeySet{Keys: []JWK{{Kid: "compat-1", Kty: "OKP", Crv: "Ed25519", X: vector.RelayPublic}}}
 	now := time.Unix(1700000000, 0)
-	c, err := v.Verify(context.Background(), vector.RelayRequest.JWS, "mint", now)
+	verify := func() (RelayClaims, error) {
+		c, err := VerifyRelay(vector.RelayRequest.JWS, "mint", "https://relay.test", "m_vector", keys, now)
+		if err != nil {
+			return c, err
+		}
+		return c, state.ConsumeConnectNonceForLink(context.Background(), c.Epoch, 1, c.Nonce, now, time.Unix(c.Exp, 0).Add(time.Minute))
+	}
+	c, err := verify()
 	if err != nil || c.Epoch != 2 {
 		t.Fatalf("claims = %+v, error = %v", c, err)
 	}
@@ -44,8 +51,7 @@ func TestRelayVectorAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer state.Close()
-	v.Store = state
-	if _, err = v.Verify(context.Background(), vector.RelayRequest.JWS, "mint", now); err == nil {
+	if _, err = verify(); err == nil {
 		t.Fatal("replay accepted after restart")
 	}
 }

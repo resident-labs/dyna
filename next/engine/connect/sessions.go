@@ -127,7 +127,7 @@ func (s *Sessions) StreamScopes(ctx context.Context, id string) ([]contract.Scop
 var browserKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var helloNoncePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 
-func (s *Sessions) relay(ctx context.Context, l Link) (*Relay, error) {
+func (s *Sessions) relay(l Link) (*Relay, error) {
 	if _, err := os.Stat(filepath.Join(s.files.dir, "machine.key")); err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (s *Sessions) relayClaims(r *http.Request, op string) (Link, RelayClaims, e
 	if !retry {
 		return l, RelayClaims{}, errors.New("relay keys unavailable")
 	}
-	relay, err := s.relay(r.Context(), l)
+	relay, err := s.relay(l)
 	if err != nil {
 		return l, RelayClaims{}, err
 	}
@@ -195,7 +195,7 @@ func (s *Sessions) proof(ctx context.Context, token, origin, path, want string, 
 	if err != nil {
 		return err
 	}
-	if want != "" && p.JKT != want {
+	if p.JKT != want {
 		return errors.New("proof is from another key")
 	}
 	return s.store.ConsumeConnectNonceForLink(ctx, epoch, generation, "proof:"+p.JTI, s.now(), s.now().Add(2*time.Minute))
@@ -220,7 +220,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			fail(w, 400, "bad nonce")
 			return true
 		}
-		relay, err := s.relay(r.Context(), l)
+		relay, err := s.relay(l)
 		if err != nil {
 			fail(w, 503, "unavailable")
 			return true
@@ -256,7 +256,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			fail(w, 503, "unavailable")
 			return true
 		}
-		relay, err := s.relay(r.Context(), l)
+		relay, err := s.relay(l)
 		if err != nil {
 			fail(w, 503, "unavailable")
 			return true
