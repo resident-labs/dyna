@@ -31,7 +31,7 @@ func (s *Service) SessionStop(ctx context.Context, caller contract.Principal, re
 }
 
 func (s *Service) RoomPause(ctx context.Context, caller contract.Principal, req contract.RoomPauseRequest) (contract.RoomPauseResponse, *contract.Error) {
-	if e := s.ruleWriter(ctx, caller, req.Room); e != nil {
+	if e := s.roomAdmin(ctx, caller, req.Room); e != nil {
 		return contract.RoomPauseResponse{}, e
 	}
 	var body contract.EventBody = contract.RoomResumed{}

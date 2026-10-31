@@ -42,14 +42,6 @@ func (RoomPaused) isEventBody()          {}
 func (RoomResumed) EventType() EventType { return "room.resumed" }
 func (RoomResumed) isEventBody()         {}
 
-type RuleAdded struct {
-	Number int    `json:"number"`
-	Text   string `json:"text"`
-}
-type RuleRemoved struct {
-	Number int `json:"number"`
-}
-
 // SessionProfileChanged tells a session that its profile, and so its model, changed.
 type SessionProfileChanged struct {
 	Session SessionID   `json:"session"`
@@ -58,18 +50,6 @@ type SessionProfileChanged struct {
 
 func (SessionProfileChanged) EventType() EventType { return "session.profile_changed" }
 func (SessionProfileChanged) isEventBody()         {}
-
-type RuleEdited struct {
-	Number int    `json:"number"`
-	Text   string `json:"text"`
-}
-
-func (RuleEdited) EventType() EventType  { return "rule.edited" }
-func (RuleEdited) isEventBody()          {}
-func (RuleAdded) EventType() EventType   { return "rule.added" }
-func (RuleAdded) isEventBody()           {}
-func (RuleRemoved) EventType() EventType { return "rule.removed" }
-func (RuleRemoved) isEventBody()         {}
 
 type PostCreated struct {
 	Text        string       `json:"text"`

@@ -33,10 +33,6 @@ type Service interface {
 	ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
 	ComputerInput(context.Context, contract.Principal, contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error)
 	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error
-	RuleAdd(context.Context, contract.Principal, contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error)
-	RuleRemove(context.Context, contract.Principal, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error)
-	RuleEdit(context.Context, contract.Principal, contract.RuleEditRequest) (contract.RuleEditResponse, *contract.Error)
-	RuleList(context.Context, contract.Principal, contract.RuleListRequest) (contract.RuleListResponse, *contract.Error)
 	RoomSetLimits(context.Context, contract.Principal, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, *contract.Error)
 	RoomPause(context.Context, contract.Principal, contract.RoomPauseRequest) (contract.RoomPauseResponse, *contract.Error)
 	SessionStop(context.Context, contract.Principal, contract.SessionStopRequest) (contract.SessionStopResponse, *contract.Error)

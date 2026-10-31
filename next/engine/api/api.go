@@ -61,30 +61,6 @@ func (a *API) handler(c Caller) http.Handler {
 	})
 	call(mux, contract.MethodDeviceRevoke, c, contract.ScopeAdmin, owner, a.service.DeviceRevoke)
 	call(mux, contract.MethodDeviceSetScopes, c, contract.ScopeAdmin, owner, a.service.DeviceSetScopes)
-	call(mux, contract.MethodRuleAdd, c, contract.ScopeAdmin, user, func(ctx context.Context, p contract.Principal, req contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error) {
-		if box(c) && req.Room == "" {
-			req.Room = c.Room
-		}
-		return a.service.RuleAdd(ctx, p, req)
-	})
-	call(mux, contract.MethodRuleRemove, c, contract.ScopeAdmin, user, func(ctx context.Context, p contract.Principal, req contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error) {
-		if box(c) && req.Room == "" {
-			req.Room = c.Room
-		}
-		return a.service.RuleRemove(ctx, p, req)
-	})
-	call(mux, contract.MethodRuleEdit, c, contract.ScopeAdmin, user, func(ctx context.Context, p contract.Principal, req contract.RuleEditRequest) (contract.RuleEditResponse, *contract.Error) {
-		if box(c) && req.Room == "" {
-			req.Room = c.Room
-		}
-		return a.service.RuleEdit(ctx, p, req)
-	})
-	call(mux, contract.MethodRuleList, c, contract.ScopeRead, user, func(ctx context.Context, p contract.Principal, req contract.RuleListRequest) (contract.RuleListResponse, *contract.Error) {
-		if box(c) && req.Room == "" {
-			req.Room = c.Room
-		}
-		return a.service.RuleList(ctx, p, req)
-	})
 	call(mux, contract.MethodConversationRead, c, contract.ScopeOperate, owner, a.service.ConversationRead)
 	call(mux, contract.MethodRoomSetLimits, c, contract.ScopeAdmin, owner, a.service.RoomSetLimits)
 	call(mux, contract.MethodRoomPause, c, contract.ScopeOperate, user, a.service.RoomPause)

@@ -15,6 +15,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	defer db.Close()
 	for _, statement := range []string{
 		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+		"CREATE TABLE rules (room TEXT, number INTEGER)",
 		"INSERT INTO meta VALUES ('schema_version','42')",
 		"CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, from_kind TEXT, from_id TEXT, type TEXT, body BLOB)",
 		"CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER)",
@@ -66,5 +67,23 @@ func TestUpgradeRunsOneStep(t *testing.T) {
 	var count int
 	if err := db.QueryRow("SELECT count(*) FROM probe").Scan(&count); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpgradeDropsRules(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45'); CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade(db, 45, "", steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='rules'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("rules table count = %d: %v", count, err)
 	}
 }
