@@ -1,0 +1,135 @@
+<script lang="ts">
+  import { tick } from "svelte";
+  import { call } from "../client.ts";
+  import type { TerminalTarget } from "../terminal.ts";
+  import FloatWindow from "./FloatWindow.svelte";
+  import Icon from "./Icon.svelte";
+  import TermPane from "./TermPane.svelte";
+  // The owner's terminals, one tab per shell, docked at the bottom of the main column or floating over
+  // the app. The dock is app-wide: hosts are not room objects, so tabs stay across rooms and on Home.
+  // A tab lives while the page is open (no reattach in M2); × closes its socket, and the engine ends
+  // the shell. The new-tab menu lists the room's sessions whose box is ready, then the hosts.
+  let { sessions, element = $bindable() }: { sessions: { id: string; name: string }[]; element?: HTMLElement } = $props();
+  type Tab = { key: number; target: TerminalTarget; label: string; exited?: { code?: number } };
+  let tabs: Tab[] = $state([]);
+  let active = $state(0);
+  let next = 1;
+  let picking = $state(false);
+  let hosts: string[] = $state([]);
+  let floating = $state(false);
+  let rect = $state({ x: window.innerWidth - 744, y: window.innerHeight - 464, w: 720, h: 440 });
+  // The docked height, kept for the page view.
+  let height = $state(280);
+  let menu: HTMLElement | undefined = $state();
+  let plus: HTMLButtonElement | undefined = $state();
+  const panes: Record<number, TermPane | undefined> = $state({});
+
+  // Opens the new-tab menu; the room menu's "New terminal" comes here too.
+  export async function pick() {
+    picking = true;
+    void call("host.list", {}).then(list => { hosts = list.hosts ?? []; }, () => { hosts = []; });
+    await tick();
+    menu?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }
+  function open(target: TerminalTarget, label: string) {
+    picking = false;
+    const tab = { key: next++, target, label };
+    tabs.push(tab);
+    active = tab.key;
+  }
+  // A new shell for an exited tab reopens its target under a new key, so its pane starts over.
+  function renew(tab: Tab) {
+    const index = tabs.findIndex(item => item.key === tab.key);
+    tabs[index] = { key: next++, target: tab.target, label: tab.label };
+    active = tabs[index].key;
+  }
+  function close(key: number) {
+    const index = tabs.findIndex(tab => tab.key === key);
+    tabs.splice(index, 1);
+    if (active === key) active = tabs[Math.min(index, tabs.length - 1)]?.key ?? 0;
+    if (!tabs.length) floating = false;
+  }
+  // Up and Down move in the menu, Escape closes it and returns to "+".
+  function walk(event: KeyboardEvent) {
+    const items = Array.from(menu?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
+    const at = items.findIndex(item => item === document.activeElement);
+    const to = { ArrowDown: at + 1, ArrowUp: at - 1 }[event.key];
+    if (to !== undefined) { event.preventDefault(); items[(to + items.length) % items.length]?.focus(); }
+    if (event.key === "Escape") { event.stopPropagation(); picking = false; plus?.focus(); }
+  }
+  // Dragging the top edge sets the docked height, between 120 px and the main column minus 200 px.
+  const fit = (value: number) => Math.max(120, Math.min(value, (element?.parentElement?.clientHeight ?? 600) - 200));
+  function drag(event: PointerEvent) {
+    const start = height, y = event.clientY;
+    event.preventDefault();
+    const move = (next: PointerEvent) => { height = fit(start + y - next.clientY); };
+    const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+  }
+  const hostLabel = (host: string) => host === "control-plane" ? "This computer" : host;
+</script>
+
+{#if tabs.length || picking}
+<FloatWindow label="Terminals" kind="terminals" docked={!floating} bind:rect bind:element>
+  {#snippet header()}
+    <div class="tabs" role="tablist" aria-label="Terminals">
+      {#each tabs as tab (tab.key)}<span class="tab" class:active={tab.key === active}>
+        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => { active = tab.key; void tick().then(() => panes[tab.key]?.focus()); }}>{tab.label}
+          {#if tab.exited}<span class="muted">exited</span>{/if}</button>
+        <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
+    </div>
+    <span class="menu">
+      <button type="button" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
+        onclick={() => { if (picking) picking = false; else void pick(); }}><Icon name="plus" /></button>
+      {#if picking}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
+        {#if sessions.length}<p class="label">Sessions</p>{/if}
+        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ box: session.id }, session.name)}>{session.name}</button>{/each}
+        <p class="label">Hosts</p>
+        {#each hosts as host (host)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host }, hostLabel(host))}>{hostLabel(host)}</button>{/each}
+      </div>{/if}
+    </span>
+    {#if tabs.length}<button type="button" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
+      onclick={() => { floating = !floating; }}><Icon name={floating ? "dockBottom" : "undock"} /></button>{/if}
+  {/snippet}
+  {#if !floating && tabs.length}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a separator that the arrow keys move is focusable) -->
+    <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Terminal height" aria-valuenow={height} tabindex="0" onpointerdown={drag}
+      onkeydown={event => { const step = { ArrowUp: 24, ArrowDown: -24 }[event.key]; if (step) { event.preventDefault(); height = fit(height + step); } }}></div>{/if}
+  <!-- Keys typed into a shell stay there, so Escape closes no panel and Alt with an arrow key moves no window; F6 still moves between areas. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="body" style:height={floating ? null : `${height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
+    {#each tabs as tab (tab.key)}<div class="tabpanel" hidden={tab.key !== active}>
+      {#if tab.exited}<p class="exited">{tab.exited.code ? `Exited with code ${tab.exited.code}` : "The shell exited."}
+        <button type="button" class="retry" onclick={() => renew(tab)}>New shell</button></p>{/if}
+      <TermPane bind:this={panes[tab.key]} target={tab.target} label={tab.label} onexit={code => { tab.exited = { code }; }} />
+    </div>{/each}
+  </div>
+</FloatWindow>
+{/if}
+
+<style>
+  :global(.terminals) { flex: none; border-top: 1px solid var(--line); background: var(--bg); }
+  :global(.terminals:not(.floating) > header) { height: 36px; padding-left: 8px; }
+  .tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .tab { display: flex; align-items: center; flex: none; border-radius: 6px; }
+  .tab:hover, .tab.active { background: var(--selected); }
+  .tabs [role="tab"] { display: flex; align-items: center; width: auto; padding: 0 4px 0 8px; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 500; }
+  .tab.active [role="tab"] { color: var(--text); }
+  .tabs [role="tab"]:hover { background: none; }
+  .muted { color: var(--muted); font-weight: 400; }
+  .x { width: 20px; height: 20px; margin-right: 2px; }
+  .menu { position: relative; margin-right: auto; }
+  .list { position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 4; min-width: 200px; padding: 4px; display: grid;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
+  :global(.floating) .list { bottom: auto; top: calc(100% + 4px); }
+  .list .label { margin: 6px 8px 2px; }
+  .list [role="menuitem"] { width: auto; height: auto; justify-content: start; display: flex; padding: 6px 8px; color: var(--text); font-size: 14px; }
+  .list [role="menuitem"]:focus { background: var(--hover); outline: none; }
+  .grip { position: absolute; top: -3px; left: 0; right: 0; height: 6px; z-index: 1; cursor: ns-resize; touch-action: none; }
+  .grip:hover, .grip:focus-visible { background: var(--focus); opacity: 0.6; outline: none; }
+  .body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .tabpanel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .tabpanel[hidden] { display: none; }
+  .exited { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  .exited .retry { margin-left: 8px; }
+</style>

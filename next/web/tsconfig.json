@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
     "strict": true, "noEmit": true, "allowImportingTsExtensions": true,
-    "lib": ["ES2022", "DOM"], "types": ["node"], "skipLibCheck": true
+    "lib": ["ES2024", "DOM", "DOM.Iterable"], "types": ["node", "vite/client"], "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
 }
