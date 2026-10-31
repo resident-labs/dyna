@@ -11,8 +11,8 @@
   import { pagingEdge, shouldPage } from "../paging.ts";
   import { SCROLL_QUIET_MS, ScrollHold } from "../scrollHold.ts";
 
-  let { items, key, row, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, onbottom, element = $bindable() }: {
-    items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string; role?: "feed" | "group"; align?: "top" | "bottom";
+  let { items, key, row, sticky, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, onbottom, element = $bindable() }: {
+    items: T[]; key: (item: T) => string; row: Snippet<[T]>; sticky?: Snippet<[T]>; label: string; role?: "feed" | "group"; align?: "top" | "bottom";
     // Chat mode: open at the newest row and follow new rows while the reader is at the bottom.
     follow?: boolean; estimate?: number | ((item: T) => number);
     // onbottom tells whether the end of the rows is within 24 px of the view's bottom edge.
@@ -176,6 +176,7 @@
   onwheel={() => activity()} ontouchstart={() => activity(true)} ontouchmove={() => activity()}
   ontouchend={() => activity(false)} ontouchcancel={() => activity(false)}
   onkeydown={event => { if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) activity(); }}>
+  {#if sticky && visible.length}{@const first = visible.find(item => item.end > (virtualizer.scrollOffset ?? 0)) ?? visible[0]}<div class="sticky">{@render sticky(rows[first.index])}</div>{/if}
   <div class="space" class:top={align === "top"} style:height="{total}px">
     {#each visible as item (item.key)}
       <div class="item" data-index={item.index} style:transform="translateY({item.start}px)" {@attach measure}>
@@ -188,6 +189,7 @@
 
 <style>
   .virtual { height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
+  .sticky { position: sticky; top: 0; height: 0; z-index: 1; }
   .space { position: relative; flex: none; margin-top: auto; }
   .space.top { margin-top: 0; }
   .end { position: absolute; bottom: 0; height: 0; }
