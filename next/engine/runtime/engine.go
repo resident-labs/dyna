@@ -180,6 +180,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
 	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
+	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {
