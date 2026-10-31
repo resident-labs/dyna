@@ -105,8 +105,8 @@ func TestReplaceDiscardsInflightRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(e.release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if err := <-done; err == nil {
+		t.Fatal("stale refresh was not rejected")
 	}
 	current, ok := m.GetByID(old.ID)
 	if !ok || current.Metadata["access_token"] != "new" {
