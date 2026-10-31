@@ -200,7 +200,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Name    string `json:"name"`
 				Version string `json:"version"`
 			} `json:"serverInfo"`
-		}{ProtocolVersion: p.ProtocolVersion, ServerInfo: struct {
+			Instructions string `json:"instructions"`
+		}{ProtocolVersion: p.ProtocolVersion, Instructions: s.Description(), ServerInfo: struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		}{"dyna", "1"}})
