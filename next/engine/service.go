@@ -31,6 +31,7 @@ type Repositories interface {
 }
 
 type Service struct {
+	gitName, gitEmail  string
 	store              *store.Store
 	dispatch           func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes              lifecycle.BoxAdapter
@@ -90,6 +91,9 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 	go s.wakeSessions(st.Done())
 	return s
 }
+
+// SetGitIdentity configures the commit identity sent to boxes.
+func (s *Service) SetGitIdentity(name, email string) { s.gitName, s.gitEmail = name, email }
 
 // SetRepositories configures repository lookup before the service starts.
 func (s *Service) SetRepositories(repos Repositories) {
