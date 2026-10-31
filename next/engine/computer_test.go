@@ -369,6 +369,21 @@ func TestComputerInputReplacement(t *testing.T) {
 		t.Fatal("replaced box accepted input")
 	default:
 	}
+	handle = &computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
+	start := make(chan struct{})
+	result := make(chan *contract.Error, 1)
+	go func() {
+		<-start
+		result <- handle.send(context.Background(), contract.ComputerInputBatch{})
+	}()
+	close(start)
+	handle.close()
+	if problem := <-result; problem != nil && (problem.Code != contract.ErrConflict || problem.Message != "box replaced") {
+		t.Fatalf("racing replacement: %v", problem)
+	}
+	if problem := handle.send(context.Background(), contract.ComputerInputBatch{}); problem == nil || problem.Message != "box replaced" {
+		t.Fatalf("after replacement: %v", problem)
+	}
 }
 
 func TestComputerInputFullQueue(t *testing.T) {
