@@ -287,6 +287,26 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return nil
 	}}
+	var grantHost, grantRoom, grantTo, grantReason string
+	var grantHours int
+	grant := &cobra.Command{Use: "grant --host HOST --hours N --reason WHY", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		args := contract.HostexecGrantArgs{Room: contract.RoomID(grantRoom), Hosts: []contract.HostName{contract.HostName(grantHost)}, Reason: grantReason, Expires: time.Now().Add(time.Duration(grantHours) * time.Hour)}
+		if grantTo != "" {
+			args.To = contract.Principal{Kind: contract.PrincipalSession, Session: contract.SessionID(grantTo)}
+		}
+		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{Room: args.Room, Args: args}})
+		if err == nil {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Operation.ID)
+		}
+		return err
+	}}
+	grant.Flags().StringVar(&grantHost, "host", "", "Host name")
+	grant.Flags().IntVar(&grantHours, "hours", 24, "Hours the grant lasts")
+	grant.Flags().StringVar(&grantReason, "reason", "", "Why the session needs access")
+	grant.Flags().StringVar(&grantTo, "to", "", "Session that gets the grant (owner only)")
+	grant.Flags().StringVar(&grantRoom, "room", "", "Room ID (owner only)")
+	_ = grant.MarkFlagRequired("host")   // fails only for an undefined flag
+	_ = grant.MarkFlagRequired("reason") // fails only for an undefined flag
 	run.Flags().StringVar(&runHost, "host", "", "Host name")
 	run.Flags().StringVar(&cwd, "cwd", "", "Working directory")
 	run.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Run timeout")
@@ -295,7 +315,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		_, err := getClient().HostexecRevoke(cmd.Context(), contract.HostexecRevokeRequest{Grant: contract.GrantID(args[0])})
 		return err
 	}}
-	hostexec.AddCommand(run, revoke)
+	hostexec.AddCommand(run, revoke, grant)
 	root.AddCommand(hostexec)
 
 	host := &cobra.Command{Use: "host"}
