@@ -18,40 +18,40 @@ type dormancy struct {
 
 // ReconcileDormancy is level-triggered. The runtime serializes its calls.
 func (s *Service) ReconcileDormancy(ctx context.Context, startup, retry bool) {
-	if retry {
+	if startup || retry {
 		clear(s.dormancy.failedStarts)
-	}
-	boxes, err := s.store.Boxes(ctx)
-	if err != nil {
-		log.Printf("dormancy: %v", err)
-		return
-	}
-	for _, b := range boxes {
-		if startup && b.State == contract.BoxStopped {
-			s.dormancy.unconfirmed[b.ID] = true
+		boxes, err := s.store.Boxes(ctx)
+		if err != nil {
+			log.Printf("dormancy: %v", err)
+			return
 		}
-		if startup && b.State == contract.BoxStarting {
+		for _, b := range boxes {
+			if startup && b.State == contract.BoxStopped {
+				s.dormancy.unconfirmed[b.ID] = true
+			}
+			if startup && b.State == contract.BoxStarting {
+				unlock := s.lockBox(b.Session)
+				current, err := s.store.Box(ctx, b.ID)
+				if err == nil && current.State == contract.BoxStarting {
+					err = s.startBox(ctx, current)
+				}
+				unlock()
+				if err != nil {
+					log.Printf("dormancy start: %v", err)
+				}
+			}
+			if !retry || !s.dormancy.unconfirmed[b.ID] {
+				continue
+			}
 			unlock := s.lockBox(b.Session)
 			current, err := s.store.Box(ctx, b.ID)
-			if err == nil && current.State == contract.BoxStarting {
-				err = s.startBox(ctx, current)
+			if err == nil && current.State == contract.BoxStopped {
+				err = s.stopBox(ctx, b.ID)
 			}
 			unlock()
 			if err != nil {
-				log.Printf("dormancy start: %v", err)
+				log.Printf("dormancy stop: %v", err)
 			}
-		}
-		if !retry || !s.dormancy.unconfirmed[b.ID] {
-			continue
-		}
-		unlock := s.lockBox(b.Session)
-		current, err := s.store.Box(ctx, b.ID)
-		if err == nil && current.State == contract.BoxStopped {
-			err = s.stopBox(ctx, b.ID)
-		}
-		unlock()
-		if err != nil {
-			log.Printf("dormancy stop: %v", err)
 		}
 	}
 	ids, err := s.store.DormancyCandidates(ctx, s.now().Add(-quietPeriod))
