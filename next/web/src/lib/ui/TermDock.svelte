@@ -27,7 +27,7 @@
   // Opens the new-tab menu; the room menu's "New terminal" comes here too.
   export async function pick() {
     picking = true;
-    void call("host.list", {}).then(list => { hosts = list.hosts.map(h => h.name); }, () => { hosts = []; });
+    void call("host.list", {}).then(list => { hosts = (list.hosts ?? []).map(h => h.name); }, () => { hosts = []; });
     await tick();
     // With no item yet (no ready session, hosts still loading), the menu itself takes the keys.
     (menu?.querySelector<HTMLElement>("[role=menuitem]") ?? menu)?.focus();
