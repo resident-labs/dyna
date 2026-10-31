@@ -15,8 +15,10 @@ import (
 
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/jobs"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/procident"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/updatedrain"
 )
 
 // attachmentTTL is how long a machine keeps a run's folder after the engine that
@@ -133,6 +135,44 @@ func (s Store) reserveAttachment(ctx context.Context, repo, sha, node string, at
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: AttachEventKey(sha).String()}, func(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(ctx, attachmentSchema); err != nil {
 			return err
+		}
+		active, err := updatedrain.Active(ctx, conn)
+		if err != nil {
+			return err
+		}
+		if active {
+			// Only a head of an already admitted trial may start while draining.
+			// Read the trial in this transaction, not from the scheduler snapshot.
+			if !att.Source.Trial {
+				return updatedrain.ErrDraining
+			}
+			var raw []byte
+			if err := conn.QueryRowContext(ctx, `SELECT body FROM pr_state WHERE id=1`).Scan(&raw); err != nil {
+				return err
+			}
+			var metadata struct {
+				MergeTrials map[string]*prstate.MergeTrial `json:"mergeTrials"`
+			}
+			if err := json.Unmarshal(raw, &metadata); err != nil {
+				return err
+			}
+			allowed := false
+			for _, trial := range metadata.MergeTrials {
+				if trial == nil || !prstate.TrialActive(trial.Phase) {
+					continue
+				}
+				if trial.Head == sha {
+					allowed = true
+				}
+				for _, stack := range trial.Stacks {
+					if stack.Head == sha {
+						allowed = true
+					}
+				}
+			}
+			if !allowed {
+				return updatedrain.ErrDraining
+			}
 		}
 		result, err := conn.ExecContext(ctx, `INSERT INTO local_ci_attachments(repo,sha,node,run_id,payload,owner_pid,owner_start,saved_at)
 SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM local_ci_attachments WHERE repo=? AND sha=?)`, repo, sha, node, att.RunID, raw, pid, start, resultClock().Unix(), repo, sha)

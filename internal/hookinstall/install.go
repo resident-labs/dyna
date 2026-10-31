@@ -5,10 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/sha512"
+	"database/sql"
+	"dyna-agent/internal/hub"
+	statewrite "dyna-agent/internal/state"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
+	stdlog "log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +24,7 @@ import (
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/updatedrain"
 	"dyna-agent/internal/updaterservice"
 )
 
@@ -59,6 +64,38 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 	if err != nil {
 		return err
 	}
+	preserveLease := false
+	var releaseFence func() error
+	if j.Hook == updaterservice.RunName && !j.Force {
+		db, err := s.Jobs.db()
+		if err != nil {
+			return err
+		}
+		releaseFence, err = updatedrain.AcquireExisting(ctx, db)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if releaseFence != nil {
+				var err error
+				if preserveLease {
+					err = updatedrain.Suspend(context.Background(), db)
+				} else {
+					err = releaseFence()
+				}
+				if err != nil {
+					stdlog.Printf("finish update drain: %v", err)
+				}
+				return
+			}
+			if preserveLease {
+				return
+			}
+			if err := statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error { return updatedrain.ClearAbandoned(context.Background(), conn) }); err != nil {
+				stdlog.Printf("clear abandoned update drain: %v", err)
+			}
+		}()
+	}
 	c := j.Config
 	if log != "" {
 		if err = s.Jobs.Update(id, func(j *Job) error { j.WorkerLog = log; return nil }); err != nil {
@@ -66,6 +103,7 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		}
 	}
 	if skip, err := s.skipSuperseded(j, out); err != nil || skip {
+		preserveLease = skip
 		return err
 	}
 	state, err := s.Jobs.installState(c.State)
@@ -170,8 +208,26 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 			return guardErr
 		}
 		if !ready {
+			ready, guardErr = s.updateMayBuild(ctx, s.now())
+			if guardErr != nil {
+				return guardErr
+			}
+			if ready && releaseFence == nil {
+				db, err := s.Jobs.db()
+				if err != nil {
+					return err
+				}
+				releaseFence, err = updatedrain.Acquire(ctx, db)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if !ready {
 			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
-			return s.Jobs.Update(id, func(j *Job) error { j.Result = ResultDeferred; return nil })
+			err := s.Jobs.Update(id, func(j *Job) error { j.Result = ResultDeferred; return nil })
+			preserveLease = err == nil
+			return err
 		}
 	}
 	restartComputers, err := d.computersChanged(ctx, state.Installed, head)
@@ -223,16 +279,46 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 	// Merges can queue newer work while this build is running. Do not publish
 	// binaries or restart services for a build that has already been replaced.
 	if skip, err := s.skipSuperseded(j, out); err != nil || skip {
+		preserveLease = skip
 		return err
 	}
 	if j.Hook == updaterservice.RunName && !j.Force {
+		db, err := s.Jobs.db()
+		if err != nil {
+			return err
+		}
+		if releaseFence == nil {
+			releaseFence, err = updatedrain.Acquire(ctx, db)
+			if err != nil {
+				return err
+			}
+		}
+		budget := 10 * time.Minute
+		if !j.StartedAt.IsZero() {
+			remaining := j.StartedAt.Add(timeout - 2*time.Minute).Sub(s.now())
+			if remaining < budget {
+				budget = remaining
+			}
+		}
+		drained, err := waitForDrain(ctx, db, budget)
+		if err != nil {
+			return err
+		}
+		if !drained {
+			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
+			err := s.Jobs.Update(id, func(j *Job) error { j.Result = ResultDeferred; return nil })
+			preserveLease = err == nil
+			return err
+		}
 		ready, guardErr := s.updateGuard(ctx, s.now(), c.Main)
 		if guardErr != nil {
 			return guardErr
 		}
 		if !ready {
 			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
-			return s.Jobs.Update(id, func(j *Job) error { j.Result = ResultDeferred; return nil })
+			err := s.Jobs.Update(id, func(j *Job) error { j.Result = ResultDeferred; return nil })
+			preserveLease = err == nil
+			return err
 		}
 	}
 	if err = os.MkdirAll(c.Bin, 0755); err != nil {
