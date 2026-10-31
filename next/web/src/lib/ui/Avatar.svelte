@@ -14,17 +14,20 @@
   let { kind, name, label, root = false, size = 32 }: { kind: PrincipalKind | "room"; name: string; label?: string; root?: boolean; size?: number } = $props();
   const labels = sessionLabels();
   let fixed = $derived(kind === "owner" ? "owner" : kind === "engine" || root ? "root" : undefined);
+  // Initials stay on the type scale.
+  let type = $derived(size >= 64 ? "20px" : size >= 40 ? "14px" : size >= 24 ? "11px" : "var(--type-face)");
 </script>
 
-<span class="avatar {fixed}" class:room={kind === "room"} style:--hue={hue(name)} style:--size="{size}px" aria-hidden="true">
+<span class="avatar {fixed}" class:room={kind === "room"} style:--hue={hue(name)} style:--size="{size}px" style:font-size={type} aria-hidden="true">
   {#if fixed}<Icon name={fixed === "owner" ? "person" : "root"} size={size / 2} />{:else}{label ?? (kind === "session" ? labels().get(name) : undefined) ?? initials(name)}{/if}
 </span>
 
 <style>
   .avatar {
     flex: none; display: inline-grid; place-items: center; width: var(--size); height: var(--size); border-radius: 50%;
-    background: oklch(var(--id-face) var(--hue)); color: oklch(var(--id-initials) var(--hue));
-    font-size: calc(var(--size) * 0.36); font-weight: 600; letter-spacing: 0.02em; user-select: none;
+    /* Glass: a tint of the hue. A stack sets --under to its surface, so overlapping faces do not mix. */
+    background: linear-gradient(oklch(var(--id-face) var(--hue) / var(--id-alpha)) 0 0), var(--under, transparent); color: oklch(var(--id-initials) var(--hue));
+    font-weight: 600; letter-spacing: 0.02em; user-select: none;
   }
   .room { border-radius: 30%; }
   .owner { background: var(--focus); color: var(--bg); }

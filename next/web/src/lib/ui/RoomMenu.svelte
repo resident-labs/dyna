@@ -45,7 +45,7 @@
   .open { display: flex; align-items: center; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .open:hover, .open[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; min-width: 180px; padding: 4px; display: grid;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }
   [role="menuitem"] { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
   /* Items have no border or ring of their own; a fill marks the hovered or focused one. */
   [role="menuitem"]:hover, [role="menuitem"]:focus { background: var(--selected); outline: none; }
