@@ -265,7 +265,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					log.Printf("box channel: unsupported delivery type %s", event.Body.EventType())
 					text = fmt.Sprintf("Unsupported event: %s", event.Body.EventType())
 				}
-				frame, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply})
+				frame, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, HandoffFrom: delivery.HandoffFrom})
 				if err != nil {
 					return
 				}

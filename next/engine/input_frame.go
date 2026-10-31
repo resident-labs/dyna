@@ -51,6 +51,13 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		surface = "as a system notice"
 	}
 	frame := fmt.Sprintf("[Dyna] From %s, %s.", sender, surface)
+	if delivery.HandoffFrom != "" {
+		origin, err := s.framePrincipal(ctx, viewer, contract.Principal{Kind: contract.PrincipalSession, Session: delivery.HandoffFrom})
+		if err != nil {
+			return "", err
+		}
+		frame += fmt.Sprintf(" This input was handed over when %s closed.", origin)
+	}
 	if post, ok := event.Body.(contract.PostCreated); ok && len(post.Attachments) > 0 {
 		names := make([]string, 0, len(post.Attachments))
 		for _, file := range post.Attachments {
