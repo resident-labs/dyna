@@ -25,7 +25,7 @@ func (a *activity) set(turn contract.TurnID, label string) {
 	a.mu.Unlock()
 }
 
-func (a *activity) run(ctx context.Context, ticks <-chan time.Time, send func(context.Context, contract.TurnActivityRequest)) {
+func (a *activity) run(ctx context.Context, ticks <-chan time.Time, send func(context.Context, contract.TurnActivityRequest) error) {
 	var sent contract.TurnActivityRequest
 	for {
 		select {
@@ -35,15 +35,15 @@ func (a *activity) run(ctx context.Context, ticks <-chan time.Time, send func(co
 			a.mu.Lock()
 			latest := a.latest
 			a.mu.Unlock()
-			if latest.Turn != "" && latest != sent {
-				send(ctx, latest)
+			if latest.Turn != "" && latest != sent && send(ctx, latest) == nil {
 				sent = latest
 			}
 		}
 	}
 }
 
-func (c *Client) turnActivity(ctx context.Context, req contract.TurnActivityRequest) {
+func (c *Client) turnActivity(ctx context.Context, req contract.TurnActivityRequest) error {
 	body, _ := json.Marshal(req)
-	_, _ = c.post(ctx, contract.MethodTurnActivity, body)
+	_, err := c.post(ctx, contract.MethodTurnActivity, body)
+	return err
 }
