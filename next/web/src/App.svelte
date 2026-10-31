@@ -96,7 +96,7 @@
     drafts[sent] = "";
     failed = undefined;
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
-    const post = session ? { text, mentions: [] } : parseMentions(text, roomName, new Set([...store.sessions.values()].map(item => item.name)));
+    const post = session ? { text, mentions: [] } : parseMentions(text, new Set([...store.sessions.values()].map(item => item.name)));
     view?.send({ room, text: post.text, mentions: post.mentions.length ? post.mentions : undefined, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
   }
   let view: Feed | undefined = $state();
