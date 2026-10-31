@@ -1,6 +1,6 @@
 <script lang="ts" module>
   // Each room view behind the menu is one entry; a new view adds one line here.
-  const entries = [{ id: "requests", label: "Requests" }] as const;
+  const entries = [{ id: "requests", label: "Requests" }, { id: "terminal", label: "New terminal" }] as const;
   export type Section = (typeof entries)[number]["id"];
 </script>
 
@@ -10,7 +10,7 @@
   import StatusPill from "./StatusPill.svelte";
   let { waiting, onchoose }: { waiting: number; onchoose: (section: Section) => void } = $props();
   // The count each entry shows at its right, only while it is above zero.
-  let counts: Record<Section, number> = $derived({ requests: waiting });
+  let counts: Record<Section, number> = $derived({ requests: waiting, terminal: 0 });
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
