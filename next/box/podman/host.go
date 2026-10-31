@@ -105,6 +105,14 @@ func (h *Host) ensure(ctx context.Context) error {
 	}
 	if h.control(ctx, "check") != nil {
 		h.restored = false
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// A master killed without cleanup leaves its socket. A new master keeps that socket and runs
+		// without multiplexing, so every later check fails and starts one more master.
+		if err := os.Remove(h.socket); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		args := []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "StreamLocalBindUnlink=yes", h.destination}
 		if _, err := h.runner.Run(ctx, nil, args...); err != nil {
 			return err
