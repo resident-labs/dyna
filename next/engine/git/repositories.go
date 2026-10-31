@@ -24,6 +24,10 @@ type Repositories struct {
 	Mirror *Mirror
 }
 
+func (r *Repositories) Size(ctx context.Context, repo contract.RepoName) (contract.BoxSizeName, error) {
+	return r.Mirror.Size(ctx, repo)
+}
+
 func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref string) (string, error) {
 	return r.Mirror.Ref(ctx, repo, ref)
 }

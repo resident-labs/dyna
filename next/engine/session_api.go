@@ -90,6 +90,17 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, invalid("a child keeps its parent's size")
 		}
 		sizeName = req.Size
+	} else if repo != "" && s.repos != nil && (parent == "" || parent == tree.Root()) {
+		size, err := s.repos.Size(ctx, repo)
+		if err != nil {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		if _, ok := box.Size(size); size != "" && !ok {
+			return contract.SessionStartResponse{}, invalid("the repository size file is not a size")
+		}
+		if size != "" {
+			sizeName = size
+		}
 	}
 	if parent != "" && parent != tree.Root() {
 		p, err := s.store.Session(ctx, parent)

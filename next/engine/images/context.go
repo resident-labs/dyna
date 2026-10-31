@@ -14,20 +14,46 @@ var ErrImageChoice = errors.New("choosing an image is not supported yet")
 
 // Context reads the sole toolchain image from the mirrored default branch.
 func Context(ctx context.Context, runner Runner, mirror string) (string, TreeID, []byte, error) {
-	root, err := runner.Run(ctx, nil, "--git-dir", mirror, "ls-tree", "HEAD", ".dyna/images")
-	if err != nil {
+	name, tree, err := soleImage(ctx, runner, mirror)
+	if err != nil || name == "" {
 		return "", "", nil, err
 	}
+	data, err := runner.Run(ctx, nil, "--git-dir", mirror, "archive", "--format=tar", string(tree))
+	return name, tree, data, err
+}
+
+// DefaultSize reads the size file of the sole toolchain image. It returns "" when there is none.
+func DefaultSize(ctx context.Context, runner Runner, mirror string) (string, error) {
+	name, tree, err := soleImage(ctx, runner, mirror)
+	if errors.Is(err, ErrImageChoice) {
+		return "", nil // several images: no repository default
+	}
+	if err != nil || name == "" {
+		return "", err
+	}
+	out, err := runner.Run(ctx, nil, "--git-dir", mirror, "ls-tree", string(tree), "size")
+	if err != nil || len(out) == 0 {
+		return "", err
+	}
+	data, err := runner.Run(ctx, nil, "--git-dir", mirror, "show", string(tree)+":size")
+	return strings.TrimSpace(string(data)), err
+}
+
+func soleImage(ctx context.Context, runner Runner, mirror string) (string, TreeID, error) {
+	root, err := runner.Run(ctx, nil, "--git-dir", mirror, "ls-tree", "HEAD", ".dyna/images")
+	if err != nil {
+		return "", "", err
+	}
 	if len(root) == 0 {
-		return "", "", nil, nil
+		return "", "", nil
 	}
 	fields := strings.Fields(string(root))
 	if len(fields) != 4 || fields[1] != "tree" {
-		return "", "", nil, errors.New("invalid image directory")
+		return "", "", errors.New("invalid image directory")
 	}
 	entries, err := runner.Run(ctx, nil, "--git-dir", mirror, "ls-tree", fields[2])
 	if err != nil {
-		return "", "", nil, err
+		return "", "", err
 	}
 	var name string
 	var tree TreeID
@@ -37,22 +63,18 @@ func Context(ctx context.Context, runner Runner, mirror string) (string, TreeID,
 		}
 		fields := strings.Fields(line)
 		if len(fields) != 4 {
-			return "", "", nil, errors.New("invalid image entry")
+			return "", "", errors.New("invalid image entry")
 		}
 		if fields[1] != "tree" {
 			continue
 		}
 		if name != "" {
-			return "", "", nil, ErrImageChoice
+			return "", "", ErrImageChoice
 		}
 		name, tree = fields[3], TreeID(fields[2])
 		if name == "" || strings.Trim(name, "abcdefghijklmnopqrstuvwxyz0123456789_.-") != "" {
-			return "", "", nil, errors.New("invalid image name")
+			return "", "", errors.New("invalid image name")
 		}
 	}
-	if name == "" {
-		return "", "", nil, nil
-	}
-	data, err := runner.Run(ctx, nil, "--git-dir", mirror, "archive", "--format=tar", string(tree))
-	return name, tree, data, err
+	return name, tree, nil
 }
