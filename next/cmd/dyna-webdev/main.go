@@ -330,6 +330,9 @@ func main() {
 // seedAgents spreads n sessions with invented names over six more rooms: every third one works until stopped,
 // every seventeenth fails, and the rest are idle, so Home's room activity has a crowd to sum.
 func seedAgents(ctx context.Context, s *engine.Service, n int) {
+	if n == 0 {
+		return
+	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	names := []string{"engine-core", "docs-site", "mobile-app", "data-pipeline", "billing", "design-system"}
 	roles := []string{"builder", "reviewer", "tester", "writer", "scout"}

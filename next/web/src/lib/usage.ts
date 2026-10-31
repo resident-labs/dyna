@@ -22,10 +22,10 @@ function until(at: string, now: number): string | undefined {
   return (d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`).replaceAll(" ", "\u00a0");
 }
 
-// A usage window as a meter: "5 hours", "62%" large with "used" after it, and "38% left · resets in 2 h 10 min".
+// A usage window as a meter: "5 hours", "62%" large with "used" after it, and "38% left · 2 h 10 min" until the reset, short enough for one line.
 // It is busy at 90% used or more.
 export function windowMeter(w: UsageWindow, now: number): Meter {
   const used = Math.min(100, Math.max(0, Math.round(w.usedPercent)));
   const resets = until(w.resetsAt, now);
-  return { label: span(w.seconds), percent: used, unit: "used", busy: used >= 90, text: `${100 - used}% left` + (resets ? ` · resets in ${resets}` : "") };
+  return { label: span(w.seconds), percent: used, unit: "used", busy: used >= 90, text: `${100 - used}% left` + (resets ? ` · ${resets}` : "") };
 }
