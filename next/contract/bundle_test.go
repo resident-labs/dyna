@@ -75,6 +75,7 @@ func filledRoomBundle() RoomBundle {
 		}},
 		HookHandoff:  []HookHandoff{{Name: "manual-hook", Fields: []string{"command", "cwd"}}},
 		LimitHandoff: []RoomLimitGap{RoomLimitMemoryMaxWithoutHigh},
+		RepoHandoff:  []RepoHandoff{{Identity: "example.org/team/repo", Reason: RepoUnsupportedForge}},
 		Handoff: []SessionHandoff{{
 			Name: "dyna:builder", Profile: "terra", Parent: "dyna:lead", Goals: []GoalID{"g1084"},
 			ArchiveRef: "refs/dyna/archive/builder", LastPost: "done",
