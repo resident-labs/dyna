@@ -90,6 +90,12 @@ export function fromNow(value: string, now: number): string {
   return Math.abs(hours) < 24 ? relative.format(hours, "hour") : relative.format(Math.round(hours / 24), "day");
 }
 
+// A command line the owner can read back exactly: an argument with anything but plain
+// characters, or an empty one, is single-quoted as a POSIX shell would read it.
+export function commandLine(argv: string[]): string {
+  return argv.map(arg => /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`).join(" ");
+}
+
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
