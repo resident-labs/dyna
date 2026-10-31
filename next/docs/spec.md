@@ -173,6 +173,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `accounts` |
 | `account_rooms` |
 | `account_alerts` |
+| `proxy_auths` |
 
 ## 5. Machines and box lifecycle
 

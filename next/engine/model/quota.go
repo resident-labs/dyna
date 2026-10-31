@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"math"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,84 +19,86 @@ type quotaEntry struct {
 }
 
 type Quotas struct {
-	client *http.Client
-	key    string
-	now    func() time.Time
-	mu     sync.Mutex
-	cache  map[string]quotaEntry
+	management managementClient
+	store      AccountStore
+	now        func() time.Time
+	mu         sync.Mutex
+	cache      map[string]quotaEntry
+	generation uint64
 }
 
-func (p *Proxy) Quotas(key string, now func() time.Time) *Quotas {
-	return &Quotas{client: p.client, key: key, now: now, cache: make(map[string]quotaEntry)}
+func (p *Proxy) Quotas(key string, st AccountStore, now func() time.Time) *Quotas {
+	return &Quotas{management: managementClient{client: p.client, key: key}, store: st, now: now, cache: make(map[string]quotaEntry)}
 }
 
-// request never returns management response headers or errors that could contain credentials.
+// Clear drops observations after an account is removed.
+func (q *Quotas) Clear() {
+	q.mu.Lock()
+	clear(q.cache)
+	q.generation++
+	q.mu.Unlock()
+}
+
+// ObservedState uses the existing bounded usage cache; it never starts a usage read.
+func (q *Quotas) ObservedState(index string) CredentialState {
+	q.mu.Lock()
+	entry, ok := q.cache[index]
+	q.mu.Unlock()
+	if !ok || q.now().Sub(entry.at) >= 5*time.Minute {
+		return CredentialUnknown
+	}
+	if entry.usage.Cause == contract.UsageSignInExpired {
+		return CredentialExpired
+	}
+	if entry.usage.Cause == "" {
+		return CredentialConnected
+	}
+	return CredentialUnknown
+}
+
 func (q *Quotas) request(ctx context.Context, path string) (json.RawMessage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://cliproxy/v0/management/"+path, nil)
-	if err != nil {
-		return nil, errors.New("management request failed")
-	}
-	req.Header.Set("Authorization", "Bearer "+q.key)
-	res, err := q.client.Do(req)
-	if err != nil {
-		return nil, errors.New("management request failed")
-	}
-	defer res.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if res.StatusCode != http.StatusOK {
-		return nil, errors.New("management request failed")
-	}
-	if err != nil || !json.Valid(data) {
-		return nil, errors.New("management response invalid")
-	}
-	return data, nil
+	return q.management.request(ctx, http.MethodGet, "/v0/management/"+path, nil)
 }
 
 func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, error) {
-	data, err := q.request(ctx, "auth-files")
+	list, err := q.management.credentials(ctx)
 	if err != nil {
 		return contract.AccountsQuotaResponse{}, err
 	}
-	var list struct {
-		Files []struct {
-			Index    string `json:"auth_index"`
-			Provider string `json:"provider"`
-			Label    string `json:"label"`
-			Quota    struct {
-				ObservedAt *time.Time        `json:"observed_at"`
-				Signals    map[string]string `json:"signals"`
-			} `json:"quota"`
-		} `json:"files"`
+	bindings, err := q.store.Accounts(ctx)
+	if err != nil {
+		return contract.AccountsQuotaResponse{}, errors.New("accounts unavailable")
 	}
-	if json.Unmarshal(data, &list) != nil {
-		return contract.AccountsQuotaResponse{}, errors.New("management response invalid")
+	byID := make(map[string]contract.Account, len(bindings))
+	for _, binding := range bindings {
+		byID[binding.ProxyID] = binding.Account
 	}
 	result := contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}
-	for _, file := range list.Files {
-		usage := contract.AccountUsage{Provider: file.Provider, Label: file.Label, Windows: []contract.UsageWindow{}}
+	for _, file := range list {
+		account, ok := byID[file.ID]
+		if !ok {
+			continue
+		}
+		usage := contract.AccountUsage{AccountID: account.ID, Provider: file.Provider, Label: account.Label, Windows: []contract.UsageWindow{}}
 		if file.Provider == "codex" && file.Quota.ObservedAt != nil && !file.Quota.ObservedAt.IsZero() {
 			usage.ObservedAt = file.Quota.ObservedAt
-			headers := http.Header{}
-			for key, value := range file.Quota.Signals {
-				headers.Set(key, value)
-			}
-			for _, name := range []string{"primary", "secondary"} {
-				prefix := "X-Codex-" + name + "-"
-				used, err := strconv.ParseFloat(headers.Get(prefix+"Used-Percent"), 64)
-				if err != nil || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 100 {
+			for _, item := range []struct {
+				name string
+				data CredentialQuotaWindow
+			}{{"primary", file.Quota.Primary}, {"secondary", file.Quota.Secondary}} {
+				if item.data.UsedPercent == nil {
 					continue
 				}
-				var seconds int64
-				if minutes, err := strconv.ParseInt(headers.Get(prefix+"Window-Minutes"), 10, 32); err == nil && minutes > 0 {
-					seconds = minutes * 60
+				window := contract.UsageWindow{Name: item.name, UsedPercent: *item.data.UsedPercent}
+				if item.data.WindowMinutes != nil {
+					window.Seconds = int64(*item.data.WindowMinutes) * 60
 				}
-				var reset time.Time
-				if n, err := strconv.ParseInt(headers.Get(prefix+"Reset-At"), 10, 64); err == nil && n > 0 {
-					reset = time.Unix(n, 0).UTC()
-				} else if n, err := strconv.ParseInt(headers.Get(prefix+"Reset-After-Seconds"), 10, 32); err == nil && n >= 0 {
-					reset = file.Quota.ObservedAt.Add(time.Duration(n) * time.Second)
+				if item.data.ResetAt != nil {
+					window.ResetsAt = time.Unix(*item.data.ResetAt, 0).UTC()
+				} else if item.data.ResetAfterSeconds != nil {
+					window.ResetsAt = file.Quota.ObservedAt.Add(time.Duration(*item.data.ResetAfterSeconds) * time.Second)
 				}
-				usage.Windows = append(usage.Windows, contract.UsageWindow{Name: name, UsedPercent: used, Seconds: seconds, ResetsAt: reset})
+				usage.Windows = append(usage.Windows, window)
 			}
 		}
 		if file.Provider != "claude" {
@@ -108,10 +107,12 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 		}
 		q.mu.Lock()
 		entry, ok := q.cache[file.Index]
+		generation := q.generation
 		q.mu.Unlock()
 		if ok && q.now().Sub(entry.at) < 5*time.Minute {
 			usage = entry.usage
-			usage.Label = file.Label
+			usage.Label = account.Label
+			usage.AccountID = account.ID
 			result.Accounts = append(result.Accounts, usage)
 			continue
 		}
@@ -171,7 +172,9 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			}
 		}
 		q.mu.Lock()
-		q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage}
+		if q.generation == generation {
+			q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage}
+		}
 		q.mu.Unlock()
 		result.Accounts = append(result.Accounts, usage)
 	}
