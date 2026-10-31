@@ -1,13 +1,16 @@
 <script lang="ts">
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
-  import { call } from "../client.ts";
+  import { APIError, call } from "../client.ts";
   import type { Attention } from "../attention.svelte.ts";
-  import type { AccountUsage, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
+  import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
+  import { fromNow } from "../feed.ts";
   import { hostMeters } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
+  import Icon from "./Icon.svelte";
+  import StatusPill from "./StatusPill.svelte";
   import UsageCard from "./UsageCard.svelte";
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   // onrequests opens the Requests panel once the link has moved to that room. loaded is false until room.list answers.
@@ -15,7 +18,7 @@
   // Each room's sessions load once while Home is open, for Activity's counts and names. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
-  const requests = new SvelteMap<string, { title: string; by: Principal }>();
+  const requests = new SvelteMap<string, { title: string; by: Principal; target: Card["target"]; expires: string }>();
   const sessions = new SvelteMap<string, { name: string; root: boolean }>();
   // Requester IDs a session.list answered for; one it did not name is a closed session.
   const answered = new SvelteSet<string>();
@@ -40,7 +43,7 @@
     for (const room of attention.rooms.keys()) {
       load([room], listed, () => attention.listSessions(room), keepSessions(room));
       load(attention.waiting.get(room) ?? [], requests, () => call("op.list", { room }), list => {
-        for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, by: op.by });
+        for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, by: op.by, target: op.card.target, expires: op.expires });
       });
       // A requester that started after the room's list loads it again.
       const by = [...attention.waiting.get(room) ?? []].flatMap(id => requests.get(id)?.by.session ?? []);
@@ -49,8 +52,8 @@
   });
   const rows = <T,>(sets: Map<string, Set<string>>, known: SvelteMap<string, T>) => [...attention.rooms.values()].flatMap(room =>
     [...sets.get(room.id) ?? []].flatMap(id => { const value = known.get(id); return value === undefined ? [] : [{ id, room, value }]; }));
-  // A request shows once its requester is named, as in the Requests panel.
-  let waiting = $derived(rows(attention.waiting, requests).flatMap(row => {
+  // A request shows once its requester is named, as in the Requests panel. One decided here stays out while its event comes.
+  let waiting = $derived(rows(attention.waiting, requests).filter(row => !decided.has(row.id)).flatMap(row => {
     const { by } = row.value;
     if (by.kind !== "session" || !by.session) return [{ ...row, who: by.kind === "owner" ? "You" : "Dyna", root: false }];
     const session = sessions.get(by.session);
@@ -69,6 +72,19 @@
     return working || idle ? [{ room, line: [working && `${working} working`, idle && `${idle} idle`].filter(Boolean).join(" · "), working }] : [];
   }).sort((a, b) => b.working - a.working || a.room.name.localeCompare(b.room.name)));
   let allRooms = $state(false);
+  // Approve and Deny decide in place. The engine's op.decided event takes the row out of waiting; the owner's own
+  // decision stays as one muted line until Home closes, so the row does not just vanish under the pointer.
+  const decided = new SvelteMap<string, string>();
+  const deciding = new SvelteSet<string>();
+  const failures = new SvelteMap<string, string>();
+  async function decide(id: string, title: string, approve: boolean) {
+    deciding.add(id);
+    failures.delete(id);
+    await call("op.decide", { id, approve }).then(() => { decided.set(id, `${approve ? "Approved" : "Denied"} · ${title}`); }, (error: unknown) => {
+      failures.set(id, error instanceof APIError && error.detail.code === "conflict" ? "This request is no longer waiting." : "Your decision was not saved. Try again.");
+    });
+    deciding.delete(id);
+  }
   // A list shows while the store has items, as in v1's Home a failed load is never "all clear";
   // its count is the rows shown.
   const total = (sets: Map<string, Set<string>>) => [...sets.values()].reduce((sum, set) => sum + set.size, 0);
@@ -81,10 +97,13 @@
   let hosts: HostSummary[] | undefined = $state();
   let hostsFailed = $state(false);
   let hostsAt = $state(0);
+  // The hosts timer also moves the clock that request expiry counts from.
+  let now = $state(Date.now());
   $effect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
     let loading = false;
     const tick = () => {
+      now = Date.now();
       if (loading) return;
       loading = true;
       // A control plane that reports no load shows no card, never an empty one.
@@ -122,14 +141,20 @@
   {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
-    {#if asks}<section class="card"><h2>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
-      <div class="rows">{#each groups as { room, count } (room.id)}<a class="item" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
-        <Avatar kind="room" name={room.name} size={28} />
+    {#if asks || decided.size}<section class="card requests"><h2>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
+      <div class="list">{#each groups as { room, count } (room.id)}<a class="item fold" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
+        <Icon name="chevron" /><Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
-      {:else}{#each waiting as { id, room, value, who, root } (id)}<a class="item" href={roomHref(room.id)}
-        onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
+      {:else}{#each waiting as { id, room, value, who, root } (id)}{@const soon = Date.parse(value.expires) - now < 5 * 60_000}<div class="item request">
         <Avatar kind={value.by.kind} name={who} {root} size={28} />
-        <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/each}</div>
+        <span class="lines"><span class="title">{value.title}</span>
+          <span class="line"><b class="who {value.by.kind}" class:root style:--hue={hue(who)}>{who}</b> · {#if value.target.kind === "host"}on <code>{value.target.name}</code> · {:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name} · {/if}{room.name} ·
+            {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
+          {#if failures.has(id)}<span class="line" role="alert">{failures.get(id)}</span>{/if}</span>
+        <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={() => void decide(id, value.title, true)}>Approve</button>
+          <button type="button" disabled={deciding.has(id)} onclick={() => void decide(id, value.title, false)}>Deny</button>
+          <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}{/each}
+        {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
       </section>{/if}
     <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
       <div class="rows">{#each allRooms ? busy : busy.slice(0, 6) as { room, line } (room.id)}<a class="item" href={roomHref(room.id)} onclick={navigate}>
@@ -175,5 +200,32 @@
   .title { font-weight: 600; font-size: 14px; }
   .line { color: var(--muted); font-size: 12px; }
   .room { color: oklch(var(--id-name) var(--hue)); }
+  /* Requests are one column: each row carries its actions. A decided request is one muted line. */
+  .list { display: grid; margin: 0 -8px; }
+  .request { flex-wrap: wrap; }
+  .who { font-weight: 500; color: oklch(var(--id-name) var(--hue)); }
+  .who.owner { color: var(--focus); }
+  .who.engine, .who.root { color: var(--text); }
+  /* Only the host is mono, as it is a name the owner may type. */
+  code { font: 12px var(--mono); color: var(--text); }
+  .line :global(.status) { font-size: 12px; }
+  .acts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .acts button, .open { display: inline-grid; place-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: none;
+    color: var(--text); font: inherit; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; }
+  .acts button:hover:not(:disabled), .open:hover { background: var(--hover); }
+  .acts .approve { background: var(--focus); color: var(--bg); border-color: var(--focus); }
+  .acts .approve:hover:not(:disabled) { background: var(--focus); filter: brightness(1.08); }
+  .open { border-color: transparent; color: var(--muted); }
+  /* The ring sits outside a filled button, so it shows on the fill's own color. */
+  .acts button:focus-visible, .open:focus-visible { outline-offset: 2px; }
+  .acts :disabled { opacity: 0.6; cursor: default; }
+  /* A folded room's row starts with a chevron, as every fold line does. */
+  .fold :global(svg) { flex: none; color: var(--muted); transform: rotate(-90deg); }
+  .decided { margin: 0; padding: 8px; color: var(--muted); font-size: 13px; }
+  /* On a narrow card, Approve and Deny fill the width at 40 px, an easy touch target. */
+  @container (max-width: 480px) {
+    .acts { width: 100%; margin-left: 38px; }
+    .acts button { flex: 1; height: 40px; }
+  }
   .more { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 13px; }
 </style>
