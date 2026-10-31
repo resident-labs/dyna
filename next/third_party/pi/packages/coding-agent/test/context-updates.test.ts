@@ -33,8 +33,23 @@ describe("context updates", () => {
 		const first = cache.readFile("file");
 		expect(cache.changed(["file"])).toBe(false);
 		const second = cache.readFile("file");
-		expect([reads, hashes]).toEqual([1, 1]);
-		expect(createContextUpdate({ file: first ?? "" }, { file: second ?? "" })).toBeUndefined();
+		let diffs = 0;
+		const update = createContextUpdate(
+			{ file: first ?? "" },
+			{ file: second ?? "" },
+			{
+				hash: (value) => {
+					hashes++;
+					return value;
+				},
+				diff: () => {
+					diffs++;
+					return [];
+				},
+			},
+		);
+		expect(update).toBeUndefined();
+		expect([reads, hashes, diffs]).toEqual([1, 1, 0]);
 	});
 
 	it("removes retained pre-compaction updates already folded into the head", () => {
