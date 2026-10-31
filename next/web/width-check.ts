@@ -40,7 +40,7 @@ try {
     }
     await login.close();
     const tasks = [...routes].flatMap(route => widths.map(width => ({ route, width })));
-    await Promise.all(Array.from({ length: 6 }, async () => {
+    await Promise.all(Array.from({ length: 3 }, async () => {
       for (;;) {
         const task = tasks.pop();
         if (!task) break;
@@ -48,8 +48,8 @@ try {
       const page = await context.newPage();
       await page.setViewportSize({ width, height: 900 });
       try {
-        await page.goto(origin + route).catch((error: unknown) => {
-          if (error instanceof Error && error.message.includes("net::ERR_NETWORK_CHANGED")) return page.goto(origin + route);
+        await page.goto(origin + route, { waitUntil: "domcontentloaded" }).catch((error: unknown) => {
+          if (error instanceof Error && error.message.includes("net::ERR_NETWORK_CHANGED")) return page.goto(origin + route, { waitUntil: "domcontentloaded" });
           throw error;
         });
         await page.locator('[data-app-ready="true"]').waitFor();
@@ -81,7 +81,9 @@ try {
           else failures.push(line);
         }
       } catch (error: unknown) {
-        failures.push(`${fixture} ${route} ${width}px: page did not finish: ${error instanceof Error ? error.message : String(error)}`);
+        const line = `${fixture} ${route} ${width}px: page did not finish: ${error instanceof Error ? error.message : String(error)}`;
+        console.error(line);
+        failures.push(line);
       } finally { await page.close(); }
       }
     }));
