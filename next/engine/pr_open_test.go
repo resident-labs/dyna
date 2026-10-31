@@ -168,4 +168,8 @@ func TestPrOpenTransfersAfterSessionClose(t *testing.T) {
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT session FROM pr_owners WHERE repo=? AND number=?", "owner/repo", 42).Scan(&owner); err != nil || owner != parent {
 		t.Fatalf("owner %q error %v", owner, err)
 	}
+	var notifications int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='pr.opened' AND d.to_id=? AND d.wake=1", parent).Scan(&notifications); err != nil || notifications != 1 {
+		t.Fatalf("notifications %d error %v", notifications, err)
+	}
 }
