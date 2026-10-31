@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1328,5 +1330,50 @@ func TestOwnerAttention(t *testing.T) {
 		if room.ID == a && len(room.Working) != 0 {
 			t.Fatalf("closed session still working: %+v", room)
 		}
+	}
+}
+
+func TestPostWakesOnlyTargetBox(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	a, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "a", Profile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	b, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "b", Profile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	ready := make(chan contract.SessionID, 16)
+	var bCalls atomic.Int32
+	s.dispatch = func(ctx context.Context, id contract.SessionID, turn contract.TurnID, event contract.Event, replay bool) (contract.TurnID, []store.FeedInput, error) {
+		if id == b.Session {
+			bCalls.Add(1)
+		}
+		result, inputs, err := s.store.Dispatch(ctx, id, turn, event, replay)
+		ready <- id
+		return result, inputs, err
+	}
+	aMessages, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: a.Session})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	_, problem = testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: b.Session})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	<-ready
+	<-ready
+	before := bCalls.Load()
+	_, problem = s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "hello", Mentions: []string{"a"}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if start, ok := (<-aMessages).Body.(contract.TurnStart); !ok || len(start.Inputs) != 1 || start.Inputs[0].Text != "hello" {
+		t.Fatalf("unexpected start: %+v", start)
+	}
+	runtime.Gosched()
+	if got := bCalls.Load(); got != before {
+		t.Fatalf("untargeted box dispatched %d times", got-before)
 	}
 }

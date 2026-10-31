@@ -60,6 +60,8 @@ type Store struct {
 	first         error
 	currentTx     *sql.Tx
 	pending       []contract.Event
+	wakePending   []contract.SessionID
+	wake          func([]contract.SessionID, []contract.Event)
 	subMu         sync.Mutex
 	subs          map[chan contract.Event]struct{}
 }
@@ -268,6 +270,7 @@ func (s *Store) writeLoop() {
 		if err == nil {
 			s.currentTx = tx
 			s.pending = nil
+			s.wakePending = nil
 			err = r.fn(tx)
 			if err != nil {
 				_ = tx.Rollback()
@@ -286,6 +289,9 @@ func (s *Store) writeLoop() {
 		s.currentTx = nil
 		if err == nil {
 			s.publish(s.pending)
+			if s.wake != nil {
+				s.wake(s.wakePending, s.pending)
+			}
 		}
 		s.pending = nil
 		if writerErr != nil && !errors.Is(writerErr, context.Canceled) && !errors.Is(writerErr, context.DeadlineExceeded) {
@@ -328,3 +334,9 @@ func (s *Store) Close() error {
 	}
 	return err
 }
+
+// SetWake installs the session notification callback before writes begin.
+func (s *Store) SetWake(wake func([]contract.SessionID, []contract.Event)) { s.wake = wake }
+
+// Done closes when the store writer stops.
+func (s *Store) Done() <-chan struct{} { return s.done }
