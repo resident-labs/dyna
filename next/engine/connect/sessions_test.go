@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,18 @@ import (
 
 	"github.com/resident-labs/dyna/engine/store"
 )
+
+type relayTransport struct {
+	base http.RoundTripper
+	down atomic.Bool
+}
+
+func (t *relayTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if t.down.Load() {
+		return nil, errors.New("relay offline")
+	}
+	return t.base.RoundTrip(r)
+}
 
 func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	now := time.Unix(1900000000, 0)
@@ -66,7 +79,10 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	if err = st.InitializeConnectLink(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
-	service := NewSessions(files, st, func() time.Time { return now }, relay.Client())
+	client := relay.Client()
+	transport := &relayTransport{base: client.Transport}
+	client.Transport = transport
+	service := NewSessions(files, st, func() time.Time { return now }, client)
 	browser, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -120,6 +136,13 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		service.ServePublic(w, r, origin, []string{origin})
 		return w
 	}
+	bad := httptest.NewRequest("POST", origin+"/api/connect/session", bytes.NewBufferString("{}"))
+	bad.Header.Set("Origin", origin)
+	badResult := httptest.NewRecorder()
+	service.ServePublic(badResult, bad, origin, []string{origin})
+	if badResult.Code != http.StatusForbidden {
+		t.Fatalf("missing CSRF header: %d", badResult.Code)
+	}
 	code := mint("abcdefghijklmnop")
 	p := proof("/api/connect/session", "abcdefghijklmnop")
 	w := exchange(code, p)
@@ -153,6 +176,41 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	}
 	rotated := out.Result().Cookies()[0]
 	now = now.Add(2 * time.Minute)
+	transport.down.Store(true)
+	r = httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnopg")+`"}`))
+	r.Header.Set("Origin", origin)
+	r.Header.Set("X-Dyna", "1")
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(rotated)
+	x, _, ok, err = service.Authenticate(r.Context(), r, origin)
+	if err != nil || !ok {
+		t.Fatalf("grace auth: %v %v", ok, err)
+	}
+	out = httptest.NewRecorder()
+	service.ServePrivate(out, r, origin, []string{origin}, x)
+	var renewal struct {
+		Grace bool `json:"grace"`
+	}
+	if err := json.Unmarshal(out.Body.Bytes(), &renewal); err != nil || out.Code != 200 || !renewal.Grace {
+		t.Fatalf("grace: %d %s %v", out.Code, out.Body.String(), err)
+	}
+	rotated = out.Result().Cookies()[0]
+	now = now.Add(14 * time.Minute)
+	r = httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnoph")+`"}`))
+	r.Header.Set("Origin", origin)
+	r.Header.Set("X-Dyna", "1")
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(rotated)
+	x, _, ok, err = service.Authenticate(r.Context(), r, origin)
+	if err != nil || !ok {
+		t.Fatalf("expired grace auth: %v %v", ok, err)
+	}
+	out = httptest.NewRecorder()
+	service.ServePrivate(out, r, origin, []string{origin}, x)
+	if out.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expired grace: %d", out.Code)
+	}
+	transport.down.Store(false)
 	refused.Store(true)
 	r = httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnops")+`"}`))
 	r.Header.Set("Origin", origin)
