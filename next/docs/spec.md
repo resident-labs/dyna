@@ -688,12 +688,14 @@ The table below lists the transitions. Each row is one observed change, and it e
 | pending, creating, starting, ready, stopped, failed | closing | the session closes, or its parent closes |
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
 | creating, starting, ready | failed | create failed (including after an early hello), or `hello` timed out |
-| ready, stopped, closing | lost | the host is unreachable (5.10) |
+| ready, stopped, closing | lost | the host is unreachable (5.10), or a `ready` box's channel stays down for 60 s on a reachable host |
 | lost | closing | the session closes while its host is unreachable; closing waits for the host or its removal |
 | closing | failed | the host returns without the container, or the owner removes the host; there is no archive |
 | lost | ready | the host is back, the container still runs, and the box agent reconnected |
-| lost | stopped | the host is back and the container has exited |
+| lost | stopped | the host is back and the container has exited, or the container exited on a reachable host |
 | lost | failed | the host is back without the container, or the owner removes the host |
+
+**A crash.** When a container exits on a reachable host, its channel drops. After 60 s the box goes `ready` → `lost`, the engine inspects the container, and the box goes `lost` → `stopped`. The volume and the session stay. With `want=run`, the first crash restarts at once and the second waits for the retry delay. The third crash without a completed turn ends in `failed`, and `session.restart` then replaces the box.
 
 The owner can close a session in any box state. A close cancels a step in progress first. Removal treats a part that is already gone (forward, container, slice) as done, so a close during `creating` or `starting` removes only what exists. A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way has no archive: work that was not pushed is lost.
 
@@ -730,7 +732,7 @@ Every box slice sits under the host slice `dyna.slice`, whose `memory.max` is th
   1. **At 80% of `MemBytes`, admission stops.** A new or waking box waits with reason `memory`. Running boxes keep running. This step reads real use: `anon` and `shmem` from `memory.stat`, plus `memory.swap.current`, on `dyna.slice` at each 10 s heartbeat. `memory.current` also counts page cache, which the kernel can drop, so it would close admission on a host that only caches files.
   2. **At 90%, the kernel slows allocation.** `dyna.slice` has `memory.high` at 90%, so the kernel reclaims and delays every allocating box in the slice.
   3. **At `MemBytes`, the kernel swaps.** `dyna.slice` has `memory.max` at `MemBytes`, and boxes may use the host's swap, so the kernel moves memory to swap before it kills anything. `dyna host add` warns when a host has no swap.
-- **Accepted kill (settled: root for the owner, 2026-10-31, option A on #1538).** When RAM and swap are both full, the kernel kills the largest process in `dyna.slice`. That is nearly always a build or a test. The box and the session stay, the agent sees exit 137 and can rerun the step, and `box.pressure` records it. Only a cap on the sum of limits would prevent this, and that cap takes back most of the capacity of decision 2. Engine pauses were rejected: a paused box keeps its memory, so paused boxes can stall a host until someone stops one. Add pauses only if `box.pressure` shows real kills. A process can also still die at its own box's `memory.max`, as before.
+- **Accepted kill (settled: root for the owner, 2026-10-31, option A on #1538).** When RAM and swap are both full, the kernel kills the process with the highest OOM score in `dyna.slice`, which is normally the one that uses the most memory. That is nearly always a build or a test: the box and the session stay, and the agent sees exit 137 and can rerun the step. The victim can also be Pi, the box agent or the container's init. Then the box follows the crash path (5.3): the volume and the session stay, and the box restarts. `box.pressure` records the kill in both cases. Only a cap on the sum of limits would prevent this, and that cap takes back most of the capacity of decision 2. Engine pauses were rejected: a paused box keeps its memory, so paused boxes can stall a host until someone stops one. Add pauses only if `box.pressure` shows real kills. A process can also still die at its own box's `memory.max`, as before.
 - **QA.** Several boxes run big builds at once. RAM fills and swap takes over, the builds slow down and finish, no box or session dies, and sshd and the master stay up.
 
 - **Placement.** A new box goes to the `ready` host with the most free memory. A box that has a host stays there, because its volume is there.
