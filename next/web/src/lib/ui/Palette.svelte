@@ -13,6 +13,7 @@
   } = $props();
   let input: HTMLInputElement;
   let list: HTMLDivElement;
+  let dialog: HTMLElement;
   let text = $state(""), scope: Scope | undefined = $state(), local = $state(false), pick = $state(0);
   let people: Person[] = $state.raw([]);
   let recent: Visit[] = $state.raw([]);
@@ -60,7 +61,14 @@
     onopen(item);
   }
   function keys(event: KeyboardEvent) {
-    if (event.key === "Escape") {
+    if (event.key === "Tab") {
+      const controls = [...dialog.querySelectorAll<HTMLElement>("input, button:not([disabled])")];
+      const index = controls.findIndex(control => control === document.activeElement);
+      if ((event.shiftKey && index <= 0) || (!event.shiftKey && index === controls.length - 1)) {
+        event.preventDefault();
+        controls[event.shiftKey ? controls.length - 1 : 0]?.focus();
+      }
+    } else if (event.key === "Escape") {
       event.preventDefault(); event.stopPropagation();
       const result = escape({ scope, text });
       if (result.close) onclose(); else { scope = result.mode.scope; text = result.mode.text; }
@@ -82,7 +90,7 @@
 </script>
 
 <div class="shade" role="presentation" onclick={event => { if (event.target === event.currentTarget) onclose(); }}>
-  <section class="palette" role="dialog" aria-modal="true" aria-label="Search and actions" onkeydown={keys}>
+  <section class="palette" role="dialog" aria-modal="true" aria-label="Search and actions" bind:this={dialog} onkeydown={keys}>
     <div class="input"><Icon name="search" size={20} />
       {#if scope}<button class="chip" onclick={() => { scope = undefined; input.focus(); }}>{scope} <Icon name="close" size={12} /></button>{/if}
       <input bind:this={input} bind:value={text} placeholder="Search rooms, sessions, messages and actions" aria-label="Search rooms, sessions, messages and actions"
@@ -144,7 +152,7 @@
   .group span { color: var(--muted); font-weight: 400; margin-left: 6px; }
   .row { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); text-align: left; }
   .row.chosen { background: var(--selected); }
-  .name { flex: 0 0 auto; overflow-wrap: anywhere; font-weight: 500; }
+  .name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
   .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
   .icon { width: 22px; flex: none; display: grid; place-items: center; color: var(--muted); }
   .keys { margin-left: auto; display: flex; gap: 4px; }

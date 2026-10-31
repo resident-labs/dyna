@@ -277,9 +277,11 @@
     }
     const targetRoom = item.kind === "room" ? item.room.id : item.kind === "session" ? item.session.room : item.post.room;
     const targetSession = item.kind === "session" ? item.session.id : item.kind === "message" && item.post.home.kind === "dm" ? item.post.home.session : undefined;
-    jumpSeq = item.kind === "message" ? item.post.seq : undefined;
+    const seq = item.kind === "message" ? item.post.seq : undefined;
+    jumpSeq = undefined;
     history.pushState(null, "", `/r/${encodeURIComponent(targetRoom)}${targetSession ? `/s/${encodeURIComponent(targetSession)}` : ""}`);
     follow();
+    if (seq !== undefined) void tick().then(() => { jumpSeq = seq; });
   }
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
