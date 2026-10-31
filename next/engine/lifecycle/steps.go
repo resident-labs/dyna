@@ -86,6 +86,13 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			sources, workErr = repos.Get(ctx, b.Session, b.Host, true)
 		}
 		if workErr == nil {
+			begun, err := r.store.BeginCreate(ctx, b.ID, row.DueAt)
+			if err != nil {
+				return err
+			}
+			if !begun {
+				return nil
+			}
 			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
 		}
 		if workErr != nil {
