@@ -35,7 +35,7 @@ func TestRegistryValidation(t *testing.T) {
 
 func TestPhaseOneActionCoverage(t *testing.T) {
 	required := map[string]string{
-		"post": "send update_visual", "session": "start list stop close restart set_profile move profiles", "room": "log repos pause", "rules": "list add edit remove", "op": "list withdraw", "hostexec": "run request_grant", "pr": "open", "visual": "check", "computer": "open click type text screenshot", "context": "show usage",
+		"post": "send update_visual", "session": "start list stop close restart set_profile move", "room": "log repos pause", "op": "withdraw", "hostexec": "run request_grant", "pr": "open", "visual": "check", "computer": "open click type text screenshot", "context": "show",
 	}
 	found := map[string]bool{}
 	for _, entry := range AgentEntries() {

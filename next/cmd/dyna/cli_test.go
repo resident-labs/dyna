@@ -32,12 +32,6 @@ func (f *fakeClient) SessionList(context.Context, contract.SessionListRequest) (
 func (f *fakeClient) SessionMove(context.Context, contract.SessionMoveRequest) (contract.SessionMoveResponse, error) {
 	return contract.SessionMoveResponse{}, nil
 }
-func (f *fakeClient) ProfileList(context.Context, contract.ProfileListRequest) (contract.ProfileListResponse, error) {
-	return contract.ProfileListResponse{}, nil
-}
-func (f *fakeClient) RuleEdit(context.Context, contract.RuleEditRequest) (contract.RuleEditResponse, error) {
-	return contract.RuleEditResponse{}, nil
-}
 func (f *fakeClient) OpWithdraw(context.Context, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error) {
 	return contract.OpWithdrawResponse{}, nil
 }

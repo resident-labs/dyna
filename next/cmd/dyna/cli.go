@@ -28,8 +28,6 @@ import (
 type client interface {
 	ContextSnapshot(context.Context, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error)
 	OpWithdraw(context.Context, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error)
-	RuleEdit(context.Context, contract.RuleEditRequest) (contract.RuleEditResponse, error)
-	ProfileList(context.Context, contract.ProfileListRequest) (contract.ProfileListResponse, error)
 	SessionMove(context.Context, contract.SessionMoveRequest) (contract.SessionMoveResponse, error)
 	SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error)
 	RuleAdd(context.Context, contract.RuleAddRequest) (contract.RuleAddResponse, error)
@@ -73,8 +71,6 @@ func newClient(socket string) *socketClient {
 type requestType interface {
 	contract.ContextSnapshotRequest |
 		contract.OpWithdrawRequest |
-		contract.RuleEditRequest |
-		contract.ProfileListRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest
@@ -82,8 +78,6 @@ type requestType interface {
 type responseType interface {
 	contract.ContextSnapshotResponse |
 		contract.OpWithdrawResponse |
-		contract.RuleEditResponse |
-		contract.ProfileListResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
 		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse
@@ -122,12 +116,6 @@ func (c *socketClient) SessionList(ctx context.Context, q contract.SessionListRe
 func (c *socketClient) SessionMove(ctx context.Context, q contract.SessionMoveRequest) (contract.SessionMoveResponse, error) {
 	return call[contract.SessionMoveRequest, contract.SessionMoveResponse](ctx, c, tools.Method("session", "move"), q)
 }
-func (c *socketClient) ProfileList(ctx context.Context, q contract.ProfileListRequest) (contract.ProfileListResponse, error) {
-	return call[contract.ProfileListRequest, contract.ProfileListResponse](ctx, c, tools.Method("session", "profiles"), q)
-}
-func (c *socketClient) RuleEdit(ctx context.Context, q contract.RuleEditRequest) (contract.RuleEditResponse, error) {
-	return call[contract.RuleEditRequest, contract.RuleEditResponse](ctx, c, tools.Method("rules", "edit"), q)
-}
 func (c *socketClient) OpWithdraw(ctx context.Context, q contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error) {
 	return call[contract.OpWithdrawRequest, contract.OpWithdrawResponse](ctx, c, tools.Method("op", "withdraw"), q)
 }
@@ -135,13 +123,13 @@ func (c *socketClient) ContextSnapshot(ctx context.Context, q contract.ContextSn
 	return call[contract.ContextSnapshotRequest, contract.ContextSnapshotResponse](ctx, c, tools.Method("context", "show"), q)
 }
 func (c *socketClient) RuleAdd(ctx context.Context, q contract.RuleAddRequest) (contract.RuleAddResponse, error) {
-	return call[contract.RuleAddRequest, contract.RuleAddResponse](ctx, c, tools.Method("rules", "add"), q)
+	return call[contract.RuleAddRequest, contract.RuleAddResponse](ctx, c, contract.MethodRuleAdd, q)
 }
 func (c *socketClient) RuleRemove(ctx context.Context, q contract.RuleRemoveRequest) (contract.RuleRemoveResponse, error) {
-	return call[contract.RuleRemoveRequest, contract.RuleRemoveResponse](ctx, c, tools.Method("rules", "remove"), q)
+	return call[contract.RuleRemoveRequest, contract.RuleRemoveResponse](ctx, c, contract.MethodRuleRemove, q)
 }
 func (c *socketClient) RuleList(ctx context.Context, q contract.RuleListRequest) (contract.RuleListResponse, error) {
-	return call[contract.RuleListRequest, contract.RuleListResponse](ctx, c, tools.Method("rules", "list"), q)
+	return call[contract.RuleListRequest, contract.RuleListResponse](ctx, c, contract.MethodRuleList, q)
 }
 func (c *socketClient) HostexecRun(ctx context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return call[contract.HostexecRunRequest, contract.HostexecRunResponse](ctx, c, tools.Method("hostexec", "run"), q)
@@ -239,7 +227,7 @@ func (c *socketClient) EventsList(ctx context.Context, q contract.EventsListRequ
 	return call[contract.EventsListRequest, contract.EventsListResponse](ctx, c, tools.Method("room", "log"), q)
 }
 func (c *socketClient) OpList(ctx context.Context, q contract.OpListRequest) (contract.OpListResponse, error) {
-	return call[contract.OpListRequest, contract.OpListResponse](ctx, c, tools.Method("op", "list"), q)
+	return call[contract.OpListRequest, contract.OpListResponse](ctx, c, contract.MethodOpList, q)
 }
 func (c *socketClient) OpDecide(ctx context.Context, q contract.OpDecideRequest) (contract.OpDecideResponse, error) {
 	return call[contract.OpDecideRequest, contract.OpDecideResponse](ctx, c, tools.Method("op", "decide"), q)
@@ -316,12 +304,6 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result.Sections)
-	}}, &cobra.Command{Use: "usage", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: "dyna_usage"})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result.Sections)
 	}})
 	root.AddCommand(contextCmd)
 	var rulesRoom string
@@ -351,14 +333,6 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			return err
 		}
 		_, err = getClient().RuleRemove(cmd.Context(), contract.RuleRemoveRequest{Room: contract.RoomID(rulesRoom), Number: number})
-		return err
-	}})
-	rules.AddCommand(&cobra.Command{Use: "edit NUMBER TEXT", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		number, err := strconv.Atoi(strings.TrimPrefix(args[0], "r"))
-		if err != nil {
-			return err
-		}
-		_, err = getClient().RuleEdit(cmd.Context(), contract.RuleEditRequest{Room: contract.RoomID(rulesRoom), Number: number, Text: args[1]})
 		return err
 	}})
 	root.AddCommand(rules)
@@ -599,12 +573,6 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}, &cobra.Command{Use: "move SESSION NEW_PARENT", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().SessionMove(cmd.Context(), contract.SessionMoveRequest{Session: contract.SessionID(args[0]), NewParent: contract.SessionID(args[1])})
 		return err
-	}}, &cobra.Command{Use: "profiles", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := getClient().ProfileList(cmd.Context(), contract.ProfileListRequest{})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result.Profiles)
 	}})
 	session.AddCommand(start, closeCmd, restart, setProfile)
 	root.AddCommand(session)

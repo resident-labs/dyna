@@ -77,7 +77,6 @@ func Entries() []Entry {
 	entries = append(entries, postEntries()...)
 	entries = append(entries, sessionEntries()...)
 	entries = append(entries, roomEntries()...)
-	entries = append(entries, rulesEntries()...)
 	entries = append(entries, opEntries()...)
 	entries = append(entries, hostexecEntries()...)
 	entries = append(entries, prEntries()...)

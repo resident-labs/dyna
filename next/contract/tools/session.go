@@ -11,6 +11,5 @@ func sessionEntries() []Entry {
 		entry("session", "restart", contract.MethodSessionRestart, typ[contract.SessionRestartRequest](), Tree, "Replace a failed box", "session restart"),
 		entry("session", "set_profile", contract.MethodSessionSetProfile, typ[contract.SessionSetProfileRequest](), Tree, "Set a session profile", "session set-profile"),
 		entry("session", "move", contract.MethodSessionMove, typ[contract.SessionMoveRequest](), Tree, "Move a session", "session move"),
-		entry("session", "profiles", contract.MethodProfileList, typ[contract.ProfileListRequest](), Tree, "List profiles", "session profiles"),
 	}
 }
