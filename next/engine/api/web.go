@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +72,18 @@ func (w *Web) SetRoutes(routes []string) error {
 		w.routes[host] = origin
 	}
 	return nil
+}
+
+// publicRoutes lists the origins set with SetRoutes, without the loopback one.
+func (w *Web) publicRoutes() []string {
+	out := []string{}
+	for host, origin := range w.routes {
+		if host != w.host {
+			out = append(out, origin)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func secret() (string, error) {
@@ -134,6 +147,10 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			defaults = store.FullDeviceScopes
 		}
 		value, _, err := w.devices.RedeemPairCode(r.Context(), req.Code, req.Name, defaults, w.now())
+		if errors.Is(err, store.ErrPairEnded) {
+			http.Error(out, "pairing code ended", http.StatusGone)
+			return
+		}
 		if errors.Is(err, store.ErrPair) {
 			http.Error(out, "invalid pairing code", http.StatusForbidden)
 			return
