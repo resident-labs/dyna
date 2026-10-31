@@ -237,3 +237,56 @@ func TestWakeStartsDormantBudgetParent(t *testing.T) {
 		t.Fatalf("parent and child did not start: %d parent=%s child=%s", host.starts, stateOf(t, s, ctx, parent), stateOf(t, s, ctx, child.Session))
 	}
 }
+
+func listedJobs(t *testing.T, s *Service, ctx context.Context, room contract.RoomID, sid contract.SessionID) int {
+	t.Helper()
+	list, problem := s.SessionList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionListRequest{Room: room})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, session := range list.Sessions {
+		if session.ID == sid {
+			return session.ShellJobs
+		}
+	}
+	t.Fatal("session not listed")
+	return 0
+}
+
+func TestSessionListKeepsJobCountWhileATurnRuns(t *testing.T) {
+	s, _, room, sid, ctx := quietSession(t, 1)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: sid}
+	wakeSession(t, s, ctx, room, sid)
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, _, _, err := s.store.Dispatch(ctx, sid, "turn_two", event, false)
+	if err != nil || turn != "turn_two" {
+		t.Fatalf("turn %q: %v", turn, err)
+	}
+	// A job that starts and ends inside this turn must not lower the count of the job that still runs.
+	if _, problem := s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_inside"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if got := listedJobs(t, s, ctx, room, sid); got != 1 {
+		t.Fatalf("jobs during the turn: %d", got)
+	}
+	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted, ShellJobs: 1}); problem != nil {
+		t.Fatal(problem)
+	}
+	if got := listedJobs(t, s, ctx, room, sid); got != 1 {
+		t.Fatalf("jobs after the turn: %d", got)
+	}
+}
+
+func TestSessionListLowersJobCountForAJobEndingInTheTurnEndMillisecond(t *testing.T) {
+	s, _, room, sid, ctx := quietSession(t, 1)
+	s.now = func() time.Time { return time.Unix(1000, 0) } // the same millisecond as the turn end
+	if _, problem := s.ShellJobEnded(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.ShellJobEndedRequest{Job: "job_1"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if got := listedJobs(t, s, ctx, room, sid); got != 0 {
+		t.Fatalf("jobs after the job ended: %d", got)
+	}
+}
