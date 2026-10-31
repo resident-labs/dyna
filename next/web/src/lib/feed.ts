@@ -23,6 +23,12 @@ export const boxReason = ({ box, cause }: BoxFailure): string => {
   return reason[0].toLowerCase() + reason.slice(1);
 };
 
+// Why a session's last turn failed, to follow "failed".
+export const turnReason = (cause?: FailureCause): string => {
+  const reason = cause ? causes[cause] : "the last turn failed";
+  return reason[0].toLowerCase() + reason.slice(1);
+};
+
 // A box's failed row, in the feed and at the end of a DM. A stopped box with a cause may still start, so it has not failed.
 export const boxRow = (box: BoxState, cause?: FailureCause) => ({
   label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" as const : box === "lost" ? "Stopped unexpectedly" as const : box === "failed" ? "Failed" as const : "Could not start" as const,
@@ -171,10 +177,10 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   return rows;
 }
 
-// The muted time on a row's name line: the clock today, else the date and the clock.
 // A full moment for a title, such as "Oct 31, 2026, 4:48 AM".
 export const fullTime = (value: string): string => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
+// The muted time on a row's name line: the clock today, else the date and the clock.
 export function formatTime(value: string): string {
   const at = new Date(value);
   const clock = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
