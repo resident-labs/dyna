@@ -12,6 +12,7 @@
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let busy = $state(false), keyFailed = $state(false), now = $state(Date.now());
+  let removing: string | undefined = $state(), removeFailed = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
 
@@ -58,6 +59,12 @@
     if (!attempt || busy) return;
     const url = redirect, ticket = generation; redirect = ""; busy = true;
     await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch(() => { if (ticket === generation) connectState = "failed"; });
+    busy = false;
+  }
+  async function remove(account: Account) {
+    if (busy) return;
+    busy = true; removeFailed = false;
+    await call("accounts.remove", { accountId: account.id }).then(() => { removing = undefined; reload(); }, () => { removeFailed = true; });
     busy = false;
   }
   const remaining = (at: string, time: number) => {
@@ -126,6 +133,11 @@
                 {#if account.state === "sign_in_expired"} <StatusPill tone="error" label="Sign-in expired" />
                 {:else if account.state === "quota_low"} <StatusPill tone="warning" label="Low usage" />{/if}
                 <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}</div></div>
+                {#if account.state === "sign_in_expired"}
+                  <div class="expired"><span>Its limits show once it is signed in.</span><span>Remove it, then use Connect another to sign in again.</span></div>
+                  {#if removing === account.id}<div class="remove-confirm"><span>Remove this account? Dyna deletes its sign-in. You can connect it again later.</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
+                  {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; }}>Remove</button>{/if}
+                {/if}
               </div>
             {/each}
             {#if inline && selected?.id === provider.id}{@render form()}{/if}
@@ -147,6 +159,8 @@
   .list, .add { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
   .row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
   .row + .row, .connect { border-top: 1px solid var(--line); }
+  .expired { display: grid; gap: 4px; margin-left: auto; color: var(--muted); font-size: 12.5px; }
+  .remove-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
   .row strong { font-size: 14px; } .row .muted { margin-top: 3px; }
   .add { padding: 16px; display: grid; gap: 12px; } .add .heading { margin: 0; }
   .providers { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -157,5 +171,5 @@
   .connect label { display: grid; grid-template-columns: 70px minmax(0, 450px); align-items: center; gap: 12px; width: 100%; color: var(--muted); }
   input { min-width: 0; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
   .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-size: 24px; font-variant-numeric: tabular-nums; }
-  @media (max-width: 640px) { .body { padding: 12px 16px; } .connect { padding: 16px; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
+  @media (max-width: 640px) { .row { flex-wrap: wrap; } .expired, .remove-confirm { flex-basis: 100%; margin: 0; } .body { padding: 12px 16px; } .connect { padding: 16px; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
 </style>
