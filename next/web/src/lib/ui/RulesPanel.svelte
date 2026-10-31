@@ -86,7 +86,7 @@
 <section class="panel" aria-label="Rules" tabindex="-1" bind:this={element}>
   <!-- One way back: the room name in the crumb when wide, a 40 px arrow on a phone. -->
   <div class="top"><button type="button" class="back" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}><Icon name="back" /></button>
-    <button type="button" class="room" onclick={onback}>{room}</button><span class="slash" aria-hidden="true">/</span><strong>Rules</strong>{#if rules.length}<span class="count">{rules.length}</span>{/if}
+    <button type="button" class="room" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}>{room}</button><span class="slash" aria-hidden="true">/</span><strong>Rules</strong>{#if rules.length}<span class="count">{rules.length}</span>{/if}
     <!-- Filters help only in a long list. -->
     {#if rules.length > 10}<div class="filters" role="group" aria-label="Show rules by">
       {#each [["all", "All", undefined], ["owner", "Yours", owner], ["agents", "Agents", rules.length - owner]] as const as [value, label, total] (value)}
