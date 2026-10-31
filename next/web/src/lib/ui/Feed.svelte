@@ -192,7 +192,7 @@
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>
         {#if canRestart(item)}<BoxRestart session={item.session} {onclosed} />{/if}</FailedTurnRow>
-      {:else if item.kind === "more-failures"}<div class="more-failures"><button type="button" aria-expanded={opened.has(item.key)} onclick={() => toggle(item.key)}>and {item.failures.length} more {item.failures.every(failure => failure.label === "Turn failed") ? `failed ${item.failures.length === 1 ? "turn" : "turns"}` : item.failures.length === 1 ? "failure" : "failures"} <time datetime={item.failures[0].at}>{item.failures.length > 1 ? timeSpan(item.failures[0].at, item.failures.at(-1)!.at) : formatTime(item.failures[0].at)}</time><Icon name="chevron" size={14} /></button></div>
+      {:else if item.kind === "more-failures"}<div class="more-failures"><button type="button" aria-expanded={opened.has(item.key)} onclick={() => toggle(item.key)}>and {item.failures.length} more {item.failures.every(failure => failure.label === "Turn failed") ? `failed ${item.failures.length === 1 ? "turn" : "turns"}` : item.failures.length === 1 ? "failure" : "failures"} <time datetime={item.failures[0].at}>{item.failures.length > 1 ? timeSpan(item.failures[0].at, item.failures.at(-1)!.at) : formatTime(item.failures[0].at)}</time><span class="failure-chevron" class:open={opened.has(item.key)}><Icon name="chevron" size={14} /></span></button></div>
         {#if opened.has(item.key)}{#each item.failures as failed (failed.key)}<FailedTurnRow row={failed} author={name(failed.session)} root={root(failed.session)} onseen={failed.label === "Turn failed" ? () => store.see(home, failed.seq) : undefined}>{#if canRestart(failed)}<BoxRestart session={failed.session} {onclosed} />{/if}</FailedTurnRow>{/each}{/if}
       <!-- The store knows every request that waited when the room opened and every later one. A request the window
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
@@ -230,6 +230,8 @@
   .more-failures { padding: 4px 16px 4px var(--gutter); color: var(--muted); font-size: 12.5px; }
   .more-failures button { all: unset; display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; }
   .more-failures time { opacity: .8; }
+  .failure-chevron { display: inline-flex; transform: rotate(-90deg); }
+  .failure-chevron.open { transform: none; }
   .restart-warning { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 6px 16px; color: var(--muted); font-size: 14px; }
   .restart-mark { display: flex; justify-content: center; padding-top: 2px; }
   .restart-warning p { margin: 0; overflow-wrap: anywhere; }
