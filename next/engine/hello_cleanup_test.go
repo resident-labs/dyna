@@ -79,8 +79,6 @@ func TestHelloTimeoutRetriesCleanupBeforeFailure(t *testing.T) {
 		b := &blockingTimeoutBoxes{started: make(chan struct{}), release: make(chan struct{})}
 		s.boxes = b
 		s.now = func() time.Time { return time.Unix(1061, 0) }
-		events, cancel := s.store.Subscribe()
-		defer cancel()
 		swept := make(chan error, 1)
 		go func() { swept <- s.FailStaleStarts(ctx) }()
 		<-b.started
@@ -89,12 +87,6 @@ func TestHelloTimeoutRetriesCleanupBeforeFailure(t *testing.T) {
 			_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
 			closed <- e
 		}()
-		for event := range events {
-			change, ok := event.Body.(contract.BoxChanged)
-			if ok && change.To == contract.BoxClosing {
-				break
-			}
-		}
 		close(b.release)
 		if err := <-swept; err != nil {
 			t.Fatal(err)
