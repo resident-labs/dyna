@@ -52,6 +52,7 @@ type Service interface {
 	DeliveryDone(context.Context, contract.Principal, contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error)
 	ArchiveDone(context.Context, contract.Principal, contract.ArchiveDoneRequest) (contract.ArchiveDoneResponse, *contract.Error)
 	TranscriptAppend(context.Context, contract.Principal, contract.TranscriptAppendRequest) (contract.TranscriptAppendResponse, *contract.Error)
+	TranscriptRead(context.Context, contract.Principal, contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error)
 	ShellJobEnded(context.Context, contract.Principal, contract.ShellJobEndedRequest) (contract.ShellJobEndedResponse, *contract.Error)
 	// Events atomically subscribes after seq, including committed events not yet
 	// delivered. The producer closes the channel when ctx ends.
