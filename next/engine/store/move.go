@@ -38,26 +38,9 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 		if _, err := tx.ExecContext(ctx, "UPDATE boxes SET parent=? WHERE session=?", nullableBox(budgetParent), target); err != nil {
 			return err
 		}
-		for i, b := range members {
-			state := b.State
-			if state == contract.BoxReady {
-				next, body, err := box.Transition(b, contract.BoxStopped, "", event.Time)
-				if err != nil {
-					return err
-				}
-				state = next.State
-				boxEvents[i].Body = body
-				if _, err := s.AppendEvent(tx, boxEvents[i]); err != nil {
-					return err
-				}
-			}
-			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET state=?,reason='',updated_at=? WHERE id=?", state, event.Time.UnixMilli(), b.ID); err != nil {
-				return err
-			}
-		}
 		if _, err := tx.ExecContext(ctx, `WITH RECURSIVE sub(id) AS (
 			SELECT ? UNION ALL SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL
-		) UPDATE sessions SET state='dormant' WHERE id IN (SELECT id FROM sub)`, target); err != nil {
+		) UPDATE boxes SET want='stop' WHERE session IN (SELECT id FROM sub) AND state='ready'`, target); err != nil {
 			return err
 		}
 		_, err = s.AppendEvent(tx, event)

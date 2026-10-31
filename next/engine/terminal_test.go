@@ -24,12 +24,12 @@ func TestTerminalKeepsBoxAwake(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	s.ReconcileDormancy(ctx, false, true)
+	passLifecycle(t, s, ctx)
 	if host.stops != 0 {
 		t.Fatal("terminal box stopped")
 	}
 	release()
-	s.ReconcileDormancy(ctx, false, true)
+	passLifecycle(t, s, ctx)
 	if host.stops != 1 {
 		t.Fatal("box did not stop after terminal closed")
 	}

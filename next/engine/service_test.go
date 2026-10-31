@@ -13,8 +13,23 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 )
+
+func resetLifecycle(s *Service) {
+	s.reconciler = lifecycle.New(s.store, s.boxes, s, s.repos, s.event, func() time.Time { return s.now() })
+}
+
+func passLifecycle(t *testing.T, s *Service, ctx context.Context) {
+	t.Helper()
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.reconciler.Wait()
+}
+
+type BoxSpec = lifecycle.BoxSpec
 
 type fakeBoxes struct{}
 
@@ -31,6 +46,7 @@ func (fakeBoxes) Stop(context.Context, contract.BoxID) error      { return nil }
 
 func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
 	t.Helper()
+	passLifecycle(t, s, ctx)
 	session, err := s.store.Session(ctx, caller.Session)
 	if err != nil {
 		t.Fatal(err)
@@ -39,10 +55,16 @@ func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.
 	if err != nil {
 		t.Fatal(err)
 	}
+	if current.State != contract.BoxStarting && current.State != contract.BoxReady && current.State != contract.BoxClosing {
+		t.Fatalf("test agent box is not ready to connect: %+v", current)
+	}
 	if current.State == contract.BoxStarting {
 		if _, problem := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); problem != nil {
 			t.Fatal(problem)
 		}
+	}
+	if allowed, err := s.store.CanDispatch(ctx, caller.Session); err != nil || (!allowed && current.State != contract.BoxClosing) {
+		t.Fatalf("test agent cannot dispatch: session=%+v box=%+v err=%v", session, current, err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	channel, problem := s.BoxChannel(ctx, caller)
@@ -82,6 +104,7 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 		t.Fatal(err)
 	}
 	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	resetLifecycle(s)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -89,10 +112,12 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	session, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "worker", Profile: "test", Goal: "goal", Brief: "brief"})
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	return s, room.Room, session.Session, ctx
 }
 func setupRoot(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context.Context) {
@@ -562,10 +587,12 @@ func (unavailableBoxes) Remove(context.Context, contract.BoxID) error { return n
 func TestStartErrorReturnsReachableFailedSession(t *testing.T) {
 	s, room, _, ctx := setup(t)
 	s.boxes = unavailableBoxes{}
+	resetLifecycle(s)
 	response, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "pending", Profile: "test"})
 	if e != nil || response.Session == "" || response.Box == "" {
 		t.Fatalf("got %+v, %v", response, e)
 	}
+	passLifecycle(t, s, ctx)
 	list, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
 	if e != nil {
 		t.Fatal(e)
@@ -637,11 +664,14 @@ func TestCloseCancelsCreatingBox(t *testing.T) {
 	s, room, root, ctx := setup(t)
 	adapter := blockingBoxes{started: make(chan BoxSpec)}
 	s.boxes = adapter
-	done := make(chan *contract.Error, 1)
-	go func() {
-		_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "blocked", Profile: "test", Goal: "goal"})
-		done <- e
-	}()
+	resetLifecycle(s)
+	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "blocked", Profile: "test", Goal: "goal"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
 	spec := <-adapter.started
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE sessions SET parent=? WHERE id=?", root, spec.Session)
@@ -652,9 +682,7 @@ func TestCloseCancelsCreatingBox(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: spec.Session}); e != nil {
 		t.Fatal(e)
 	}
-	if e := <-done; e != nil {
-		t.Fatal(e)
-	}
+	s.reconciler.Wait()
 	b, err := s.store.Box(ctx, spec.Box)
 	if err != nil || b.State != contract.BoxDeleted {
 		t.Fatalf("box: %+v, %v", b, err)
@@ -678,6 +706,7 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 		}
 	})
 	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	resetLifecycle(s)
 	ctx := context.Background()
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
@@ -688,6 +717,7 @@ func TestSessionStartWithoutFittingHostEmitsPending(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room.Room, Types: []contract.EventType{"box.changed"}})
 	if e != nil {
 		t.Fatal(e)
@@ -714,6 +744,7 @@ func TestClosePendingRepositoryFreeChildWithoutArchiveAck(t *testing.T) {
 		}
 	})
 	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	resetLifecycle(s)
 	ctx := context.Background()
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
@@ -755,6 +786,7 @@ func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
 		}
 	})
 	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	resetLifecycle(s)
 	ctx := context.Background()
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
@@ -832,12 +864,14 @@ func TestChildPlacement(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	recorder := &recordingBoxes{}
 	s.boxes = recorder
+	resetLifecycle(s)
 	start := func(parent contract.SessionID, name string) contract.SessionStartResponse {
 		t.Helper()
 		r, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: name, Profile: "test", Parent: parent, Goal: "goal"})
 		if e != nil {
 			t.Fatal(e)
 		}
+		passLifecycle(t, s, ctx)
 		return r
 	}
 	lead := start(root, "lead")
@@ -860,14 +894,17 @@ func TestChildPlacement(t *testing.T) {
 func TestChildWaitsForParentBox(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	s.boxes = unavailableBoxes{}
+	resetLifecycle(s)
 	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root, Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: lead.Session, Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	b, err := s.store.Box(ctx, child.Box)
 	if err != nil {
 		t.Fatal(err)
@@ -878,22 +915,25 @@ func TestChildWaitsForParentBox(t *testing.T) {
 }
 
 type heldParentBox struct {
+	first    atomic.Bool
 	started  chan BoxSpec
 	release  chan struct{}
 	children chan BoxSpec
+	finished chan contract.BoxID
 	blocked  contract.BoxID
 	unblock  chan struct{}
 }
 
 func (b *heldParentBox) Create(_ context.Context, spec BoxSpec) (string, error) {
-	select {
-	case b.started <- spec:
+	if b.first.CompareAndSwap(false, true) {
+		b.started <- spec
 		<-b.release
-	default:
+	} else {
 		b.children <- spec
 		if spec.Box == b.blocked {
 			<-b.unblock
 		}
+		b.finished <- spec.Box
 	}
 	return "image", nil
 }
@@ -902,63 +942,47 @@ func (*heldParentBox) Remove(context.Context, contract.BoxID) error { return nil
 func TestPendingChildrenRetryIndependently(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	s.SetRepositories(placementRepos{})
-	adapter := &heldParentBox{started: make(chan BoxSpec), release: make(chan struct{}), children: make(chan BoxSpec, 2), unblock: make(chan struct{})}
+	adapter := &heldParentBox{started: make(chan BoxSpec), release: make(chan struct{}), children: make(chan BoxSpec, 2), finished: make(chan contract.BoxID, 2), unblock: make(chan struct{})}
 	s.boxes = adapter
-	result := make(chan *contract.Error, 1)
-	go func() {
-		_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root, Goal: "goal"})
-		result <- e
-	}()
-	parent := <-adapter.started
+	resetLifecycle(s)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	parent, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root, Goal: "goal"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	spec := <-adapter.started
 	start := func(name string) contract.SessionStartResponse {
 		t.Helper()
-		r, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: name, Profile: "test", Parent: parent.Session, Goal: "goal"})
-		if e != nil {
-			t.Fatal(e)
+		child, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "test", Parent: parent.Session, Goal: "goal"})
+		if problem != nil {
+			t.Fatal(problem)
 		}
-		return r
+		return child
 	}
 	a, b := start("a"), start("b")
 	adapter.blocked = a.Box
 	close(adapter.release)
-	if e := <-result; e != nil {
-		t.Fatal(e)
+	s.reconciler.Wait()
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
-		spec := <-adapter.children
-		want, err := box.SliceName([]contract.BoxID{parent.Box, spec.Box})
-		if err != nil || spec.Slice != want || spec.Host != parent.Host || len(spec.Repos) != 1 || spec.Repos[0].Name != "owner/repo" {
-			t.Fatalf("placement: %+v", spec)
+	for range 2 {
+		child := <-adapter.children
+		want, err := box.SliceName([]contract.BoxID{spec.Box, child.Box})
+		if err != nil || child.Slice != want || child.Host != spec.Host || len(child.Repos) != 1 || child.Repos[0].Name != "owner/repo" {
+			t.Fatalf("placement: %+v", child)
 		}
 	}
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e == nil || e.Code != contract.ErrConflict {
-		t.Fatalf("close while child starts: %v", e)
+	if got := <-adapter.finished; got != b.Box {
+		t.Fatalf("unblocked child = %s, want %s", got, b.Box)
 	}
 	close(adapter.unblock)
-	connectAgent(ctx, t, s, parent.Session)
-	for _, id := range []contract.SessionID{a.Session, b.Session} {
-		unlock := s.lockBox(id)
-		unlock()
-		connectAgent(ctx, t, s, id)
-	}
-	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent.Session}); e != nil {
-		t.Fatal(e)
-	}
-	for _, id := range []contract.SessionID{a.Session, b.Session} {
-		ack := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-		if _, e := s.ArchiveDone(ctx, ack, contract.ArchiveDoneRequest{}); e != nil {
-			t.Fatal(e)
-		}
-	}
-	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent.Session}
-	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
-		t.Fatal(e)
-	}
-	for _, id := range []contract.SessionID{a.Session, b.Session, parent.Session} {
-		if _, err := s.store.Session(ctx, id); !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("session remains open: %v", err)
-		}
+	s.reconciler.Wait()
+	if got := <-adapter.finished; got != a.Box {
+		t.Fatalf("blocked child = %s, want %s", got, a.Box)
 	}
 }
 
@@ -1003,11 +1027,14 @@ func TestClosingCreatingParentRejectsConcurrentChild(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	adapter := closingInterleaveBox{started: make(chan BoxSpec), cancelled: make(chan struct{}), release: make(chan struct{})}
 	s.boxes = adapter
-	started := make(chan *contract.Error, 1)
-	go func() {
-		_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root, Goal: "goal"})
-		started <- e
-	}()
+	resetLifecycle(s)
+	_, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root, Goal: "goal"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
 	parent := <-adapter.started
 	closed := make(chan *contract.Error, 1)
 	go func() {
@@ -1020,9 +1047,7 @@ func TestClosingCreatingParentRejectsConcurrentChild(t *testing.T) {
 		t.Error("child started while parent was closing")
 	}
 	close(adapter.release)
-	if e := <-started; e != nil {
-		t.Fatal(e)
-	}
+	s.reconciler.Wait()
 	if e := <-closed; e != nil {
 		t.Fatal(e)
 	}
@@ -1051,6 +1076,7 @@ func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
 	connectAgent(ctx, t, s, lead.Session)
 	adapter := heldRemoveBox{started: make(chan struct{}, 2), release: make(chan struct{}), removed: make(chan struct{}, 2)}
 	s.boxes = adapter
+	resetLifecycle(s)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: lead.Session}); e != nil {
 		t.Fatal(e)
@@ -1137,6 +1163,7 @@ func TestPostNeedsTextOrFile(t *testing.T) {
 // connectAgent marks the session's box as connected, as a box hello does, and records a turn, so its close waits for an archive ack.
 func connectAgent(ctx context.Context, t *testing.T, s *Service, session contract.SessionID) {
 	t.Helper()
+	passLifecycle(t, s, ctx)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)

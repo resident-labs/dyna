@@ -56,15 +56,20 @@ func TestHelloTimeoutRetriesCleanupBeforeFailure(t *testing.T) {
 	}
 	b := &retryTimeoutBoxes{service: s}
 	s.boxes = b
+	resetLifecycle(s)
 	s.now = func() time.Time { return time.Unix(1061, 0) }
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []contract.BoxState{contract.BoxStarting, contract.BoxFailed} {
-		if err := s.FailStaleStarts(ctx); err != nil {
+		if i == 1 {
+			s.now = func() time.Time { return time.Unix(1092, 0) }
+		}
+		if err := s.reconciler.Pass(ctx); err != nil {
 			t.Fatal(err)
 		}
+		s.reconciler.Wait()
 		got, err := s.store.Box(ctx, record.Box)
 		if err != nil || got.State != want || b.calls != i+1 || b.states[i] != contract.BoxStarting {
 			t.Fatalf("attempt %d: box=%+v calls=%d states=%v err=%v", i, got, b.calls, b.states, err)
@@ -81,9 +86,10 @@ func TestHelloTimeoutRetriesCleanupBeforeFailure(t *testing.T) {
 		}
 		b := &blockingTimeoutBoxes{started: make(chan struct{}), release: make(chan struct{})}
 		s.boxes = b
+		resetLifecycle(s)
 		s.now = func() time.Time { return time.Unix(1061, 0) }
 		swept := make(chan error, 1)
-		go func() { swept <- s.FailStaleStarts(ctx) }()
+		go func() { err := s.reconciler.Pass(ctx); s.reconciler.Wait(); swept <- err }()
 		<-b.started
 		closed := make(chan *contract.Error, 1)
 		go func() {
