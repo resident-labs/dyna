@@ -116,6 +116,14 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	if err != nil || len(rows) != 1 || rows[0].ID != "pending" {
 		t.Fatalf("lifecycle boxes %+v: %v", rows, err)
 	}
+	completed, err := s.Box(ctx, "old")
+	if err != nil || completed.State != contract.BoxDeleted {
+		t.Fatalf("completed box %+v: %v", completed, err)
+	}
+	all, err := s.Boxes(ctx)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all boxes %+v: %v", all, err)
+	}
 }
 
 func TestCloseIntentAndArchiveCompletion(t *testing.T) {
