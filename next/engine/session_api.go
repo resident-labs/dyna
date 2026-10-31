@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"slices"
 	"time"
@@ -39,7 +38,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		if err == nil {
 			return response, nil
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		if !errors.Is(err, store.ErrNotFound) {
 			return contract.SessionStartResponse{}, failure(err)
 		}
 	}
