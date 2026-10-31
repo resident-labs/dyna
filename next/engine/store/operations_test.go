@@ -22,7 +22,7 @@ func TestOperationAtomicDedupAndTransition(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", now); err != nil {
 		t.Fatal(err)
 	}
-	record := StoredOperation{Operation: contract.Operation{ID: "op", Kind: "test.run", Room: "room", By: contract.Principal{Kind: contract.PrincipalOwner}, Class: contract.ClassAgent, State: contract.OpPending, Created: now, Expires: now.Add(time.Hour), Card: contract.Card{Title: "Run"}}, Args: json.RawMessage(`{"x":1}`)}
+	record := StoredOperation{Operation: contract.Operation{ID: "op", Kind: "test.run", Room: "room", By: contract.Principal{Kind: contract.PrincipalOwner}, Class: contract.ClassOwner, State: contract.OpPending, Created: now, Expires: now.Add(time.Hour), Card: contract.Card{Title: "Run"}}, Args: json.RawMessage(`{"x":1}`)}
 	event := contract.Event{ID: "event", Time: now, Room: "room", From: record.Operation.By, Body: contract.PostCreated{Text: "requested"}}
 	err = s.Write(ctx, func(tx *sql.Tx) error { return s.InsertOperation(tx, record, event, nil) })
 	if err != nil {

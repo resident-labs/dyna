@@ -89,7 +89,7 @@ test("the waiting count holds pending owner-class operations from op.list and op
   const card = { title: "asks to open a pull request", target: { kind: "repo", name: "web" } } as const;
   const listed = { id: "a", kind: "pr.open", room: "r", by: { kind: "session", session: "s" }, class: "owner", card, args: { title: "", body: "", base: "main", draft: false },
     state: "pending", created: "", expires: "" } as const;
-  const requested = (seq: number, id: string, level: "agent" | "owner") => event(seq, { type: "op.requested", body: { id, kind: "pr.open", by: listed.by, class: level, card, expires: "" } });
+  const requested = (seq: number, id: string, level: "auto" | "owner") => event(seq, { type: "op.requested", body: { id, kind: "pr.open", by: listed.by, class: level, card, expires: "" } });
   const original = globalThis.fetch;
   globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("op.list") ? { operations: [listed] } : { sessions: [], seq: 10 }));
   try {
@@ -98,7 +98,7 @@ test("the waiting count holds pending owner-class operations from op.list and op
     assert.equal(room.waiting, 1);
     const decided = (seq: number, id: string) => event(seq, { type: "op.decided", body: { id, state: "approved", decision: { by: { kind: "owner" }, approved: true, at: "" } } });
     room.apply(decided(10, "a"));
-    room.apply(requested(11, "b", "agent"));
+    room.apply(requested(11, "b", "auto"));
     room.apply(requested(12, "c", "owner"));
     assert.deepEqual([room.waiting, room.requests.get("b")?.state], [2, "pending"]);
     room.apply(decided(13, "a"));
