@@ -1,5 +1,7 @@
 export type DiffLine = { kind: "same" | "add" | "remove"; text: string; line: number };
 
+export type DiffHunk = { line: number; lines: DiffLine[] };
+
 // Keep unchanged lines between changes so the review gives each change context.
 export function instructionDiff(before: string, after: string): DiffLine[] {
   const a = before ? before.split("\n") : [], b = after ? after.split("\n") : [];
@@ -19,4 +21,22 @@ export function instructionDiff(before: string, after: string): DiffLine[] {
     }
   }
   return out;
+}
+
+export function instructionHunks(lines: DiffLine[]): DiffHunk[] {
+  const ranges: { start: number; end: number; line: number }[] = [];
+  for (let i = 0; i < lines.length;) {
+    if (lines[i].kind === "same") { i++; continue; }
+    const first = i;
+    while (i < lines.length && lines[i].kind !== "same") i++;
+    let start = first - 1, end = i;
+    while (start >= 0 && lines[start].kind === "same" && !lines[start].text.trim()) start--;
+    while (end < lines.length && lines[end].kind === "same" && !lines[end].text.trim()) end++;
+    if (start < 0 || lines[start].kind !== "same") start = first;
+    if (end >= lines.length || lines[end].kind !== "same") end = i - 1;
+    const previous = ranges.at(-1);
+    if (previous && start <= previous.end) previous.end = end;
+    else ranges.push({ start, end, line: lines[first].line });
+  }
+  return ranges.map(({ start, end, line }) => ({ line, lines: lines.slice(start, end + 1).filter(item => item.kind !== "same" || item.text.trim()) }));
 }
