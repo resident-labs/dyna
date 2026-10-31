@@ -6,10 +6,14 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 23
+const schemaVersion = 24
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	23: {
+		`ALTER TABLE sessions ADD COLUMN shell_jobs INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE sessions SET shell_jobs=MAX(0,COALESCE((SELECT shell_jobs FROM turns WHERE session=sessions.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1),0))`,
+	},
 	22: {`ALTER TABLE hosts ADD COLUMN maintained_at INTEGER NOT NULL DEFAULT 0`},
 	19: {`CREATE TABLE rules (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, text TEXT NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, removed_at INTEGER, PRIMARY KEY(room, number))`},
 	20: {"CREATE TABLE uploads (sha256 TEXT NOT NULL, room TEXT NOT NULL, PRIMARY KEY(sha256, room))"},
