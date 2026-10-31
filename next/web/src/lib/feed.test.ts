@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { feedRows, workSummary } from "./feed.ts";
+import { commandLine, feedRows, workSummary } from "./feed.ts";
 import type { Event, EventBody, Principal } from "./contract.gen.ts";
+
+test("a command line shows each argument exactly: spaces, quotes and empty arguments are quoted", () => {
+  assert.equal(commandLine(["tool", "a b"]), "tool 'a b'");
+  assert.equal(commandLine(["tool", "a", "b"]), "tool a b");
+  assert.equal(commandLine(["echo", "it's", "", "--x=1"]), `echo 'it'\\''s' '' --x=1`);
+});
 
 const lead: Principal = { kind: "session", session: "l" };
 function event(seq: number, body: EventBody, from: Principal = { kind: "engine" }): Event {
