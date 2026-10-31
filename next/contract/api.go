@@ -16,6 +16,7 @@ const (
 	MethodDeliveryDone      Method = "delivery.done"
 	MethodHostAdd           Method = "host.add"
 	MethodHostList          Method = "host.list"
+	MethodProfileList       Method = "profile.list"
 	MethodAccountsQuota     Method = "accounts.quota"
 	MethodRoomCreate        Method = "room.create"
 	MethodRoomRepoAdd       Method = "room.repo.add"
@@ -90,6 +91,17 @@ type ConversationReadRequest struct {
 	Seq          int64        `json:"seq"`
 }
 type ConversationReadResponse struct{}
+
+type ProfileListRequest struct{}
+type ProfileSummary struct {
+	Name     ProfileName   `json:"name"`
+	Provider ModelProvider `json:"provider"`
+	Model    string        `json:"model"`
+	Thinking ThinkingLevel `json:"thinking"`
+}
+type ProfileListResponse struct {
+	Profiles []ProfileSummary `json:"profiles"`
+}
 
 type RoomListRequest struct{}
 type RoomSummary struct {

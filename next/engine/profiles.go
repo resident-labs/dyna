@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -50,6 +52,22 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 		}
 	}
 	return profiles, nil
+}
+
+func (p ProfileConfig) List() []contract.ProfileSummary {
+	result := make([]contract.ProfileSummary, 0, len(p))
+	for name, profile := range p {
+		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking})
+	}
+	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
+	return result
+}
+
+func (s *Service) ProfileList(_ context.Context, who contract.Principal, _ contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error) {
+	if who.Kind != contract.PrincipalOwner {
+		return contract.ProfileListResponse{}, forbidden()
+	}
+	return contract.ProfileListResponse{Profiles: s.profiles.List()}, nil
 }
 
 func (p ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, []string, error) {
