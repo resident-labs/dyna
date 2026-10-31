@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // receiver is the forced command on the second machine, the same file the owner installs.
@@ -83,15 +84,18 @@ func copies(t *testing.T, dir string) []string {
 }
 
 func TestBackupReceiver(t *testing.T) {
-	const name = "dyna-20261031T060000Z.tar.gz.age"
 	body := []byte("encrypted copy bytes")
 
 	t.Run("a full copy is kept", func(t *testing.T) {
 		script := install(t, roomyKiB)
-		if code := receive(t, script, name+" "+strconv.Itoa(len(body)), body); code != 0 {
+		if code := receive(t, script, strconv.Itoa(len(body)), body); code != 0 {
 			t.Fatalf("exit status %d; want 0", code)
 		}
-		got, err := os.ReadFile(filepath.Join(filepath.Dir(script), name))
+		names := copies(t, filepath.Dir(script))
+		if len(names) != 1 {
+			t.Fatalf("copies: %v", names)
+		}
+		got, err := os.ReadFile(names[0])
 		if err != nil || !bytes.Equal(got, body) {
 			t.Fatalf("kept copy = %q, %v; want the bytes sent", got, err)
 		}
@@ -99,7 +103,7 @@ func TestBackupReceiver(t *testing.T) {
 
 	t.Run("a short copy is refused and leaves nothing", func(t *testing.T) {
 		script := install(t, roomyKiB)
-		if code := receive(t, script, name+" "+strconv.Itoa(len(body)+1), body); code != 65 {
+		if code := receive(t, script, strconv.Itoa(len(body)+1), body); code != 65 {
 			t.Fatalf("exit status %d; want 65", code)
 		}
 		if left := copies(t, filepath.Dir(script)); len(left) != 0 {
@@ -107,23 +111,16 @@ func TestBackupReceiver(t *testing.T) {
 		}
 	})
 
-	t.Run("a bad name is refused and leaves nothing", func(t *testing.T) {
-		for _, bad := range []string{"other.tar.gz.age", "dyna-20261031T060000Z.db.age", "dyna-x.tar.gz", "dyna-a/b.tar.gz.age", "../dyna-1.tar.gz.age"} {
-			t.Run(bad, func(t *testing.T) {
-				script := install(t, roomyKiB)
-				if code := receive(t, script, bad+" "+strconv.Itoa(len(body)), body); code != 64 {
-					t.Fatalf("exit status %d; want 64", code)
-				}
-				if left := copies(t, filepath.Dir(script)); len(left) != 0 {
-					t.Fatalf("files after a bad name = %v; want none", left)
-				}
-			})
+	t.Run("a name supplied by the sender is refused", func(t *testing.T) {
+		script := install(t, roomyKiB)
+		if code := receive(t, script, "dyna-future.tar.gz.age 1", body); code != 64 {
+			t.Fatalf("exit status %d", code)
 		}
 	})
 
 	t.Run("a copy over 16 GiB is refused before any bytes are read", func(t *testing.T) {
 		script := install(t, roomyKiB)
-		if code := receive(t, script, name+" "+strconv.Itoa(copyLimit+1), body); code != 64 {
+		if code := receive(t, script, strconv.Itoa(copyLimit+1), body); code != 64 {
 			t.Fatalf("exit status %d; want 64", code)
 		}
 		if left := copies(t, filepath.Dir(script)); len(left) != 0 {
@@ -133,7 +130,7 @@ func TestBackupReceiver(t *testing.T) {
 
 	t.Run("a copy with less than 50 GiB left is refused with 66", func(t *testing.T) {
 		script := install(t, floorKiB-1)
-		if code := receive(t, script, name+" "+strconv.Itoa(len(body)), body); code != 66 {
+		if code := receive(t, script, strconv.Itoa(len(body)), body); code != 66 {
 			t.Fatalf("exit status %d; want 66", code)
 		}
 		if left := copies(t, filepath.Dir(script)); len(left) != 0 {
@@ -149,8 +146,14 @@ func TestBackupReceiver(t *testing.T) {
 			if err := os.WriteFile(old, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
+			if day == 1 {
+				at := time.Now().Add(-16 * 24 * time.Hour)
+				if err := os.Chtimes(old, at, at); err != nil {
+					t.Fatal(err)
+				}
+			}
 		}
-		if code := receive(t, script, name+" "+strconv.Itoa(len(body)), body); code != 0 {
+		if code := receive(t, script, strconv.Itoa(len(body)), body); code != 0 {
 			t.Fatalf("exit status %d; want 0", code)
 		}
 		kept := copies(t, dir)

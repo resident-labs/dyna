@@ -1,6 +1,6 @@
 # Backups
 
-The engine keeps the newest 3 daily copies of `store.db` in `<data>/backups`. When the owner sets the two backup flags, it also sends each day's archive, encrypted, to a second machine. That machine keeps the newest 14 archives. This guide shows how to set that up and how to restore an archive.
+The engine keeps the newest 3 daily copies of `store.db` in `<data>/backups`. When the owner sets the two backup flags, it also sends each day's archive, encrypted, to a second machine. That machine keeps at least the newest 14 archives. It removes older copies only after 14 days. This guide shows how to set that up and how to restore an archive.
 
 ## What the second machine can do
 
@@ -8,9 +8,9 @@ The backup key can add archives. It cannot do anything else:
 
 - `restrict` turns off a shell, terminal, port forwarding and agent forwarding.
 - `command=` runs only `backup-recv.sh`, whatever the engine asks for.
-- The receiver takes one file, named `dyna-<stamp>.tar.gz.age`, with its byte count.
+- The receiver takes one file and its byte count. It names the file using its own clock.
 - It refuses a file over 16 GiB, and a copy that would leave less than 50 GiB free.
-- A short copy or a bad name is refused, and the partial file is removed.
+- A short copy or invalid byte count is refused, and the partial file is removed.
 - The receiver never sends a file back. Only the owner reads the archives, on that machine.
 
 Each archive is an encrypted `tar.gz`. It holds `store.db`, `files/`, `transcripts/`, `archive/`, `connect/` and `cliproxy/auth/`, when those folders exist.

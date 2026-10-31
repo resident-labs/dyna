@@ -80,13 +80,13 @@ func TestBackupCopyFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	b := backupLoop{store: st, dir: dir, dest: "backup-host", recipient: identity.Recipient(), now: func() time.Time { return now }, run: func(_ context.Context, dest, name string, size int64, input *os.File) error {
+	b := backupLoop{store: st, dir: dir, dest: "backup-host", recipient: identity.Recipient(), now: func() time.Time { return now }, run: func(_ context.Context, dest string, size int64, input *os.File) error {
 		data, err := io.ReadAll(input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if dest != "backup-host" || name != "dyna-20260102T030405000000000Z.tar.gz.age" || size != int64(len(data)) || strings.Contains(string(data), "private database") {
-			t.Fatalf("bad copy command: %s %s %d", dest, name, size)
+		if dest != "backup-host" || size != int64(len(data)) || strings.Contains(string(data), "private database") {
+			t.Fatalf("bad copy command: %s %d", dest, size)
 		}
 		plain, err := age.Decrypt(bytes.NewReader(data), identity)
 		if err != nil {
