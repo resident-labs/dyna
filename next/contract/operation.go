@@ -9,7 +9,6 @@ type Class string
 
 const (
 	ClassAuto  Class = "auto"  // runs at once
-	ClassAgent Class = "agent" // a session above the caller, or the owner, approves
 	ClassOwner Class = "owner" // only the owner approves
 )
 
