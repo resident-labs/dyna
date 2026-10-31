@@ -308,6 +308,13 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 	}
 	return body, nil
 }
+
+// Maintain removes dangling images and compacts caches without deleting borrowed objects.
+func (h *Host) Maintain(ctx context.Context, hostData string) error {
+	_, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f || exit; for repo in "$1"/git/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done`, "dyna-maintain", hostData)
+	return err
+}
+
 func (h *Host) EnsureSlice(ctx context.Context, s box.Slice) error {
 	if _, err := h.run(ctx, "systemctl", "--user", "start", s.Name); err != nil {
 		var exit remoteExit
