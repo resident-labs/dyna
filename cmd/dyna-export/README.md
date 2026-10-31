@@ -6,14 +6,18 @@ Build from the reviewed v1 commit on the capacity host:
 (cd cmd/dyna-export && go build -o "$PWD/dyna-export" .)
 ```
 
-After the owner pauses v1, the cutover operator captures a standalone SQLite
-backup and consistent private copies of the required files. Never point the
-exporter at a live database or live configuration.
+The owner must pause v1 before cutover. The cutover operator captures a standalone
+SQLite backup and private copies of configuration and skill files. Never point
+the exporter at a live database or live configuration. The operator reads the
+append-only room feeds in place, without copying them.
 
 - `--backup` names the standalone SQLite backup. It must have no WAL or
   shared-memory sidecar.
-- `--data` names a private capture of the v1 data tree. It must contain each
-  room's `rooms/<room-id>/messages.jsonl` and any captured skill bodies.
+- `--data` names a private directory containing captured skill bodies.
+- `--feeds` names the v1 data root containing `rooms/<room-id>/messages.jsonl`.
+  The exporter reads these append-only files in place and never writes them.
+  It skips an unterminated final line and names the room in the private report.
+  The owner must review that gap; the file read is not an atomic snapshot.
 - `--config` names a private captured config directory with `settings.json`
   and `profiles.json`.
 - `--manifest` names a private JSON capture manifest. The operator makes it
@@ -49,9 +53,9 @@ enabled skills. Its count check does not prove that the capture includes every
 live skill.
 
 ```sh
-dyna-export --backup /capture/backup.db --data /capture/data --config /capture/config \
+dyna-export --backup /capture/backup.db --data /capture/data --feeds /v1/data --config /capture/config \
   --manifest /capture/manifest.json --commit <full-commit-sha> --out /capture/bundle
-dyna-export verify --backup /capture/backup.db --data /capture/data --config /capture/config \
+dyna-export verify --backup /capture/backup.db --data /capture/data --feeds /v1/data --config /capture/config \
   --manifest /capture/manifest.json --out /capture/bundle
 ```
 
