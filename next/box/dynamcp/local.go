@@ -45,6 +45,9 @@ func BoxTools(socket string) Local {
 			if len(data) > 25<<20 {
 				return fail(fmt.Errorf("visual exceeds 25 MiB"))
 			}
+			if _, _, err := visual.Meta(req.File, data); err != nil {
+				return fail(err)
+			}
 			const csp = "default-src 'none'; script-src 'unsafe-inline'; connect-src data: blob:; img-src data: blob:; font-src data: blob:; media-src data: blob:; style-src 'unsafe-inline' data: blob:; frame-src 'none'; child-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 			checked, err := visual.Inspect(ctx, data, csp, false)
 			if err != nil {

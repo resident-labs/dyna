@@ -569,7 +569,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if err != nil {
 				return err
 			}
-			title, height, err := visualMeta(htmlPath, data)
+			title, height, err := visual.Meta(htmlPath, data)
 			if err != nil {
 				return err
 			}
