@@ -321,8 +321,8 @@ func (b *boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	return host, b.Start(ctx, spec.Box)
 }
-func (b *boxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return host, nil
+func (b *boxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: host}, nil
 }
 func (b *boxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
 	b.mu.Lock()
