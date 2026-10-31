@@ -1,12 +1,56 @@
 package engine
 
 import (
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/resident-labs/dyna/engine/store"
 )
+
+func TestExpireReplayKeys(t *testing.T) {
+	s, _, _, ctx := setup(t)
+	now := time.Unix(1000000, 0)
+	s.now = func() time.Time { return now }
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		for id, at := range map[string]time.Time{
+			"old":      now.Add(-24*time.Hour - time.Millisecond),
+			"boundary": now.Add(-24 * time.Hour),
+			"recent":   now.Add(-time.Hour),
+		} {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES('start','session','s',?,'ref',?)", id, at.UnixMilli()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ExpireArchives(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.store.Read().QueryContext(ctx, "SELECT client_id FROM client_replays ORDER BY client_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != "boundary" || ids[1] != "recent" {
+		t.Fatalf("remaining replay keys = %v", ids)
+	}
+}
 
 func TestExpireArchives(t *testing.T) {
 	s, room, session, ctx := setup(t)
