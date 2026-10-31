@@ -244,7 +244,7 @@ const fixtures: Record<string, EventPayload> = {
     ]),
   ),
   ...Object.fromEntries(
-    (['queued', 'trial', 'checks', 'landed', 'failed', 'returned', 'conflict', 'rolled-back'] as const).map((type) => [
+    (['queued', 'trial', 'checks', 'landed', 'cancelled', 'failed', 'returned', 'conflict', 'rolled-back'] as const).map((type) => [
       `merge/${type}`,
       {
         type,
@@ -254,7 +254,7 @@ const fixtures: Record<string, EventPayload> = {
         prs: [{ number: 242, title: 'Tidy the composer', url: 'https://github.com/acme/app/pull/242' }],
         checks: { done: 4, total: 9, failed: type === 'failed' ? ['unit'] : undefined },
         commit: type === 'landed' ? 'b'.repeat(40) : undefined,
-        reason: type === 'failed' || type === 'returned' || type === 'conflict' ? 'trial CI failed' : undefined,
+        reason: type === 'cancelled' ? 'main moved' : type === 'failed' || type === 'returned' || type === 'conflict' ? 'trial CI failed' : undefined,
         label: 'PR #242',
       },
     ]),
