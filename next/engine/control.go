@@ -8,19 +8,9 @@ import (
 )
 
 func (s *Service) SessionStop(ctx context.Context, caller contract.Principal, req contract.SessionStopRequest) (contract.SessionStopResponse, *contract.Error) {
-	target, err := s.store.Session(ctx, req.Session)
-	if err != nil {
-		return contract.SessionStopResponse{}, failure(err)
-	}
-	if e := s.roomAccess(ctx, caller, target.Room); e != nil {
-		return contract.SessionStopResponse{}, e
-	}
-	tree, err := s.store.RoomTree(ctx, target.Room)
-	if err != nil {
-		return contract.SessionStopResponse{}, failure(err)
-	}
-	if !tree.CanManage(caller, target.ID) {
-		return contract.SessionStopResponse{}, forbidden()
+	target, problem := s.managedSession(ctx, caller, req.Session)
+	if problem != nil {
+		return contract.SessionStopResponse{}, problem
 	}
 	stopping, err := s.store.RequestTurnStop(ctx, target.ID, s.now())
 	if err != nil {
