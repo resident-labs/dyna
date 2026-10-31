@@ -92,7 +92,7 @@ func TestUpgradeBackup(t *testing.T) {
 	if err := upgrade(db, 1, "", stepsForTest, before); err != nil {
 		t.Fatal(err)
 	}
-	names, err := filepath.Glob(filepath.Join(backupDir, "pre-upgrade-v41-*.db"))
+	names, err := filepath.Glob(filepath.Join(backupDir, "pre-upgrade-v"+strconv.Itoa(schemaVersion-1)+"-*.db"))
 	if err != nil || len(names) != 1 {
 		t.Fatalf("backups: %v, %v", names, err)
 	}
