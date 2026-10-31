@@ -14,9 +14,9 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
 	}
-	result := contract.HostListResponse{Hosts: []contract.HostName{contract.ControlPlane}}
+	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, host.Name)
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, CPUs: host.CPUs, MemBytes: host.MemBytes})
 	}
 	return result, nil
 }
