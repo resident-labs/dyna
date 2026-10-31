@@ -82,7 +82,7 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 				continue
 			}
 			found = true
-			want := contract.BoxCreating
+			want := contract.BoxPending
 			if i == 2 {
 				want = contract.BoxFailed
 			}
@@ -338,84 +338,92 @@ func TestReconcilerArchiveStartFailureAndRetry(t *testing.T) {
 	}
 }
 
-type retryHelloHost struct {
+type pendingRetryHost struct {
 	fakeBoxes
-	service            *Service
-	session            contract.SessionID
-	oldHello, newHello *contract.Error
+	service          *Service
+	session          contract.SessionID
+	creates, removes int
+	hello            *contract.Error
 }
 
-func (h *retryHelloHost) Remove(ctx context.Context, _ contract.BoxID) error {
-	_, h.oldHello = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: h.session}, contract.BoxHelloRequest{})
+func (h *pendingRetryHost) Remove(context.Context, contract.BoxID) error {
+	h.removes++
 	return nil
 }
 
-func (h *retryHelloHost) Create(ctx context.Context, _ lifecycle.BoxSpec) (string, error) {
-	_, h.newHello = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: h.session}, contract.BoxHelloRequest{})
+func (h *pendingRetryHost) Create(ctx context.Context, _ lifecycle.BoxSpec) (string, error) {
+	h.creates++
+	if h.creates == 1 {
+		return "", errors.New("create failed")
+	}
+	_, h.hello = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: h.session}, contract.BoxHelloRequest{})
 	return "image", nil
 }
 
-func TestCreateRetryAcceptsNewHelloAfterCleanup(t *testing.T) {
-	s, _, sid, ctx := setup(t)
-	session, err := s.store.Session(ctx, sid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=?, failures=1 WHERE id=?", s.now().UnixMilli()-1, session.Box)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	host := &retryHelloHost{service: s, session: sid}
-	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, s.now)
-	if err := r.Pass(ctx); err != nil {
-		t.Fatal(err)
-	}
-	r.Wait()
-	b, err := s.store.Box(ctx, session.Box)
-	if err != nil || host.oldHello == nil || host.newHello != nil || b.State != contract.BoxReady {
-		t.Fatalf("old hello=%v new hello=%v box=%+v err=%v", host.oldHello, host.newHello, b, err)
-	}
-}
-
-type closeDuringRetryCleanup struct {
-	fakeBoxes
-	service      *Service
-	session      contract.SessionID
-	closeProblem *contract.Error
-	created      bool
-}
-
-func (h *closeDuringRetryCleanup) Remove(ctx context.Context, _ contract.BoxID) error {
-	_, h.closeProblem = h.service.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: h.session, Discard: true})
-	return nil
-}
-
-func (h *closeDuringRetryCleanup) Create(context.Context, lifecycle.BoxSpec) (string, error) {
-	h.created = true
-	return "image", nil
-}
-
-func TestCreateRetryDoesNotStartAfterClose(t *testing.T) {
-	s, _, sid, ctx := setup(t)
-	session, err := s.store.Session(ctx, sid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=?, failures=1 WHERE id=?", s.now().UnixMilli()-1, session.Box)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	host := &closeDuringRetryCleanup{service: s, session: sid}
-	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, s.now)
-	if err := r.Pass(ctx); err != nil {
-		t.Fatal(err)
-	}
-	r.Wait()
-	if host.closeProblem != nil || host.created {
-		t.Fatalf("close=%v created=%v", host.closeProblem, host.created)
+func TestPendingCreateRetry(t *testing.T) {
+	for _, closeDuringBackoff := range []bool{false, true} {
+		name := "retry reaches ready"
+		if closeDuringBackoff {
+			name = "close during backoff"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, _, sid, ctx := setup(t)
+			session, err := s.store.Session(ctx, sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=0, failures=0 WHERE id=?", session.Box)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Unix(1000, 0)
+			s.now = func() time.Time { return now }
+			host := &pendingRetryHost{service: s, session: sid}
+			r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
+			if err := r.Pass(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.Wait()
+			rows, err := s.store.LifecycleBoxes(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pending bool
+			for _, row := range rows {
+				if row.ID == session.Box {
+					pending = row.State == contract.BoxPending && row.Host == "host" && row.Failures == 1 && row.DueAt.Equal(now.Add(30*time.Second))
+				}
+			}
+			if !pending {
+				t.Fatalf("failed create did not retain its host in pending backoff: %+v", rows)
+			}
+			if _, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.BoxHelloRequest{}); problem == nil {
+				t.Fatal("old box hello succeeded during pending backoff")
+			}
+			if closeDuringBackoff {
+				if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid, Discard: true}); problem != nil {
+					t.Fatal(problem)
+				}
+			} else {
+				now = now.Add(30 * time.Second)
+			}
+			if err := r.Pass(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.Wait()
+			b, err := s.store.Box(ctx, session.Box)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if closeDuringBackoff {
+				if host.creates != 1 || b.State != contract.BoxDeleted {
+					t.Fatalf("closed pending box: creates=%d box=%+v", host.creates, b)
+				}
+			} else if host.creates != 2 || host.removes != 2 || host.hello != nil || b.State != contract.BoxReady {
+				t.Fatalf("retry: creates=%d removes=%d hello=%v box=%+v", host.creates, host.removes, host.hello, b)
+			}
+		})
 	}
 }
