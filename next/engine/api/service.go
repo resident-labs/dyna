@@ -77,6 +77,7 @@ type Service interface {
 	TranscriptFetch(context.Context, contract.Principal, contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, *contract.Error)
 	TranscriptAppend(context.Context, contract.Principal, contract.TranscriptAppendRequest) (contract.TranscriptAppendResponse, *contract.Error)
 	TranscriptRead(context.Context, contract.Principal, contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error)
+	SessionWork(context.Context, contract.Principal, contract.SessionWorkRequest) (contract.SessionWorkResponse, *contract.Error)
 	ShellJobEnded(context.Context, contract.Principal, contract.ShellJobEndedRequest) (contract.ShellJobEndedResponse, *contract.Error)
 	// Events atomically subscribes after seq, including committed events not yet
 	// delivered. The producer closes the channel when ctx ends.

@@ -14,6 +14,7 @@ CREATE VIRTUAL TABLE post_search USING fts5(text, author);
 CREATE TRIGGER post_search_insert AFTER INSERT ON events WHEN new.type='post.created' BEGIN INSERT INTO post_search(rowid,text,author) VALUES(new.seq,coalesce(json_extract(CAST(new.body AS TEXT),'$.text'),''),CASE new.from_kind WHEN 'session' THEN coalesce((SELECT name FROM sessions WHERE id=new.from_id),'') ELSE new.from_kind END); END;
 CREATE TRIGGER post_search_delete AFTER DELETE ON events WHEN old.type='post.created' BEGIN DELETE FROM post_search WHERE rowid=old.seq; END;
 CREATE INDEX events_room_seq ON events(room, seq);
+CREATE INDEX events_sender_type ON events(room, from_kind, from_id, type, seq);
 CREATE UNIQUE INDEX events_client_id ON events(room, from_kind, from_id, client_id) WHERE client_id IS NOT NULL;
 CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL;
 CREATE INDEX events_type_seq ON events(type, seq);
@@ -36,6 +37,7 @@ CREATE TABLE uploads (sha256 TEXT NOT NULL, room TEXT NOT NULL, PRIMARY KEY(sha2
 CREATE TABLE pr_owners (repo TEXT NOT NULL REFERENCES repos(repo), number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), goal TEXT NOT NULL, approved_head TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', PRIMARY KEY(repo, number));
 
 CREATE INDEX turns_session_ended ON turns(session, ended_at);
+CREATE INDEX turns_session_started ON turns(session, started_seq);
 CREATE INDEX sessions_room_closed ON sessions(room, closed_at);
 CREATE INDEX sessions_parent ON sessions(parent);
 CREATE INDEX operations_state_expires ON operations(state, expires_at);
