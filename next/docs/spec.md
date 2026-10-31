@@ -102,7 +102,7 @@ The old module (`dyna-agent`) adds only `cmd/dyna-export`. It imports `next/cont
 | `dyna box-agent` | in each box | turn runner, shell server, transcript stream, model and git routes into the box |
 | `dyna <noun> <verb>` | anywhere | the CLI. In a box it uses the box socket. On the control plane it uses the owner socket. On the owner's desktop it uses the owner socket through an SSH forward (`--socket`, decision 14). |
 
-**Dependency direction.** `contract` imports nothing from the module. `room` imports only `contract`, and it does no I/O: it decides, and the engine acts. `harness` imports only `contract`. `box` imports `contract` and `harness`, because the box agent runs the adapters. `engine` imports `room`, `box`, `harness` and `contract`. `cmd/dyna` wires them. `migrate` imports `contract` and `engine/store`. A unit test enforces this with `go list -deps`.
+**Dependency direction.** `contract` imports nothing from the module. `room` imports only `contract`, and it does no I/O: it decides, and the engine acts. `harness` imports only `contract`. `box` imports `contract` and `harness`, because the box agent runs the adapters. `engine` imports `room`, `box`, `harness` and `contract`. `engine/runtime` also imports `web`, which only embeds the built assets. `cmd/dyna` wires them. `migrate` imports `contract` and `engine/store`. A unit test enforces this with `go list -deps`.
 
 Sub-packages are the area lead's choice. The expected ones are `engine/store`, `engine/api`, `engine/approve`, `engine/model`, `engine/git`, `engine/sched`, `engine/lifecycle`, `box/podman`, `box/fakehost`, `harness/pi` and `harness/fakeharness`.
 
@@ -896,7 +896,7 @@ Owner, 2026-10-30: v2 ports v1's workspace tools. The engine side has two parts,
   - the control-plane host: the owner's login shell, in its own `systemd-run --user --scope` unit, so that it does not count against the engine's limits.
 - When the socket closes, the engine hangs up the PTY and stops the command's process group. When the shell exits, the engine closes the socket. In M2 there is no reattach after a page reload. M3 may keep a closed tab's shell and its last output for a few minutes.
 - An open terminal keeps its box from going dormant. A terminal to a box that is not ready is refused with `conflict` before the upgrade.
-- The engine keeps no transcript of a terminal and emits no event. A shell on the control plane acts as the owner, as a local terminal does. It does not run in a host-exec scope, so the `hostexec-scope` refusal (6.4) does not apply to it.
+- The engine keeps no transcript of a terminal and emits no event. A shell on the control plane acts as the owner, as a local terminal does. It does not run in a host-exec scope, so the `hostexec_scope` refusal (6.4) does not apply to it.
 
 **Web renderer.** The web app reuses v1's terminal renderer, libghostty-vt in WASM from T3 Code, vendored into `next/web` with its license and README (root, 2026-10-30). v1's transport (terminal IDs, base64 writes, byte offsets and a kept buffer) exists for reattach, which waits for M3. v1's terminal pane needs only send, resize, write and exit, so a small WebSocket adapter replaces that transport.
 
@@ -908,7 +908,7 @@ Drafted by dyna:node-shell. Host exec runs one command outside every box: on a c
 
 ### 6.1 Grants
 
-A host-exec grant names the hosts, the reason and the expiry. It permits any command on those hosts until expiry or revocation. There are no command rules or per-run approvals. If no active grant matches the host, the call fails with `no-grant`.
+A host-exec grant names the hosts, the reason and the expiry. It permits any command on those hosts until expiry or revocation. There are no command rules or per-run approvals. If no active grant matches the host, the call fails with `no_grant`.
 
 `hostexec.run` is class `auto`. Every run emits `op.ran` and records a `hostexec_runs` row. The `grants` table stores hosts as JSON.
 
@@ -935,7 +935,7 @@ Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeou
 
 ### 6.4 Control-plane safety and accepted risks
 
-Host exec on the control plane runs as the owner's user. To stop such a command from acting as the owner through the engine, each control-plane run gets its own scope, `dyna-hostexec-<op>.scope`. The owner socket reads each caller's cgroup. If the path contains `dyna-hostexec-`, the engine refuses every call with `hostexec-scope` and does not map the caller to the grant holder.
+Host exec on the control plane runs as the owner's user. To stop such a command from acting as the owner through the engine, each control-plane run gets its own scope, `dyna-hostexec-<op>.scope`. The owner socket reads each caller's cgroup. If the path contains `dyna-hostexec-`, the engine refuses every call with `hostexec_scope` and does not map the caller to the grant holder.
 
 Accepted risks (owner, 2026-10-30):
 
@@ -990,7 +990,7 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
 - **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. It can be restarted in a new box with the same session ID, grants and history.
-- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle, a move to another room, and a move to a parent on another host. The engine moves only an idle subtree: no turn runs in it, and each session's last turn ended with no running shell job. Otherwise it refuses with `move-busy` and names the session; the mover waits and tries again.
+- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle, a move to another room, and a move to a parent on another host. The engine moves only an idle subtree: no turn runs in it, and each session's last turn ended with no running shell job. Otherwise it refuses with `move_busy` and names the session; the mover waits and tries again.
   - In one transaction, under the subtree's box locks so that no turn starts, the engine checks that the subtree is idle, sets the new parent, marks each box in the subtree to be created again, and records `session.moved`.
   - It then stops and removes the subtree's containers deepest first, and keeps their volumes. Each box starts again on its next wake, as after dormancy (5.3), from the same volume under its new slice. A moved session that becomes a lead gets a top-level slice (5.5).
 
@@ -1378,7 +1378,7 @@ Acceptance:
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
 5. unit: a budget slice whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
-6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no-grant`, revoke, expiry, and the `hostexec-scope` refusal.
+6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no_grant`, revoke, expiry, and the `hostexec_scope` refusal.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
 9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves a waiting operation in the approvals panel. (No M2 operation kind is agent-class, so the tree approval of 3.5 is checked by the engine/approve unit tests.)
