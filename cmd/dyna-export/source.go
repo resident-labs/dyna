@@ -61,6 +61,9 @@ func openBackup(path string) (*sql.DB, error) {
 		{"hooks.documents", 5},
 		{"pr.state", 2},
 		{"pr.record_parts", 1},
+		{"localci.schema", 6},
+		{"sessions.service", 1},
+		{"sessions.history", 1},
 	} {
 		var got int
 		if err := db.QueryRow("SELECT value FROM meta WHERE key=?", version.key).Scan(&got); err != nil {
