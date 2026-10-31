@@ -162,9 +162,10 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		if c := s.computers[caller.Session]; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
 			for ch := range c.watchers {
 				select {
-				case ch <- frame:
+				case <-ch:
 				default:
 				}
+				ch <- frame
 			}
 		}
 		s.mu.Unlock()
