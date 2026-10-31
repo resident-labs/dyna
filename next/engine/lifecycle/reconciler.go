@@ -221,7 +221,20 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if row.Paused || row.Want != store.WantRun || (b.State != contract.BoxPending && b.State != contract.BoxStopped) || (!row.DueAt.IsZero() && row.DueAt.After(r.now())) {
 			continue
 		}
-		placement := box.Admit(hosts, all, b, 20*box.GiB)
+		placement := box.Placement{}
+		cpus, memory := b.Size.CPUs, b.Size.MemBytes
+		for _, placed := range all {
+			if placed.ID == b.ID || placed.Room != b.Room || placed.State == contract.BoxPending || placed.State == contract.BoxStopped || placed.State == contract.BoxFailed || placed.State == contract.BoxDeleted {
+				continue
+			}
+			cpus += placed.Size.CPUs
+			memory += placed.Size.MemBytes
+		}
+		if row.Limits.CPUs > 0 && cpus > 4*row.Limits.CPUs || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
+			placement.Reason = box.PendingRoomLimit
+		} else {
+			placement = box.Admit(hosts, all, b, 20*box.GiB)
+		}
 		next := b
 		if placement.Reason != "" {
 			next.State, next.Reason = contract.BoxPending, string(placement.Reason)
