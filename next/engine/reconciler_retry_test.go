@@ -1,12 +1,16 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 )
@@ -53,6 +57,10 @@ func (h *failingCreateHost) Remove(_ context.Context, id contract.BoxID) error {
 }
 
 func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
+	var logs bytes.Buffer
+	previousLog := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousLog) })
 	s, room, sid, ctx := setup(t)
 	session, err := s.store.Session(ctx, sid)
 	if err != nil {
@@ -87,6 +95,9 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 			if i == 2 {
 				want = contract.BoxFailed
 			}
+			if i < 2 && row.Reason != string(box.PendingCreateRetry) {
+				t.Fatalf("attempt %d: persisted reason=%q, want %q", i+1, row.Reason, box.PendingCreateRetry)
+			}
 			if row.State != want || row.Failures != i+1 || (delay != 0 && !row.DueAt.Equal(now.Add(delay))) {
 				t.Fatalf("attempt %d: state=%s failures=%d due=%s", i+1, row.State, row.Failures, row.DueAt)
 			}
@@ -105,17 +116,34 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 			now = now.Add(delay)
 		}
 	}
-	events, err := s.store.Events(ctx, room, 0, 1000, []contract.EventType{"box.changed"})
-	if err != nil {
-		t.Fatal(err)
+	log.SetOutput(previousLog)
+	if !strings.Contains(logs.String(), "create unavailable") {
+		t.Fatalf("create error missing from log: %q", logs.String())
 	}
-	for _, event := range events {
+	page, problem := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Limit: 1000, Types: []contract.EventType{"box.changed"}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var retries int
+	var failed bool
+	for _, event := range page.Events {
 		change := event.Body.(contract.BoxChanged)
-		if change.Box == session.Box && change.To == contract.BoxFailed && change.Cause == contract.CauseCreateFailed {
-			return
+		if change.Box != session.Box {
+			continue
+		}
+		if change.From == contract.BoxCreating && change.To == contract.BoxPending {
+			if change.Reason != string(box.PendingCreateRetry) {
+				t.Fatalf("owner event reason=%q, want %q", change.Reason, box.PendingCreateRetry)
+			}
+			retries++
+		}
+		if change.To == contract.BoxFailed && change.Cause == contract.CauseCreateFailed {
+			failed = true
 		}
 	}
-	t.Fatal("third failure did not publish create_failed")
+	if retries != 2 || !failed {
+		t.Fatalf("owner events: retries=%d terminal failure=%v", retries, failed)
+	}
 }
 
 func TestReconcilerCleansPinnedPendingCreate(t *testing.T) {
