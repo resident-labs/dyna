@@ -357,7 +357,7 @@
     else if (refocus) menuButton?.focus({ focusVisible: !tapped });
   }
   $effect(() => { if (!phone.current) drawer = false; });
-  // On a phone the sessions panel is a bottom sheet at about two thirds of the height (fix 1). Its handle drags it to
+  // On a phone the sessions panel is a bottom sheet that fits its content, up to about two thirds of the height (fix 1). Its handle drags it to
   // full height, or down to its first height and then closed; a tap toggles the height. The tree already puts what
   // needs the owner first and folds idle sessions.
   let sheetFull = $state(false), dragged = false;
@@ -608,6 +608,7 @@
   }
   .handle { display: none; }
   @media (max-width: 640px) {
+    aside.members:not(.full) .tree { flex: 0 1 auto; display: flex; flex-direction: column; }
     .handle { all: unset; position: relative; display: block; width: 100%; height: 22px; flex: none; cursor: grab; touch-action: none; }
     .handle::before { content: ""; position: absolute; left: calc(50% - 18px); top: 9px; width: 36px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
     .handle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

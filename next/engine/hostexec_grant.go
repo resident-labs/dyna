@@ -78,7 +78,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 				body += "\nThis host also runs the engine and holds the model sign-ins."
 			}
 			if unknown {
-				body += "\nThe engine cannot confirm whether a host holds the model sign-ins."
+				body += "\nA host here may hold the model sign-ins. Approve only if you trust this session with them."
 			}
 			return contract.Card{Title: "asks for host access", Target: target, Body: body}
 		},

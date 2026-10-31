@@ -43,7 +43,6 @@
   // The rule being edited keeps its number and its place. A rule that goes away closes its edit.
   let editing: { number: number; text: string } | undefined = $state();
   let list: HTMLElement | undefined = $state();
-  let addHeight = $state(0);
   let find: HTMLInputElement | undefined = $state();
   let now = $state(Date.now());
   onMount(() => {
@@ -106,7 +105,7 @@
     clearTimeout(flashing);
     flashing = setTimeout(() => { flash = undefined; }, 2000);
   }
-  // A tall box must not leave Save behind the add box.
+  // A tall box keeps Save in view.
   const showEdit = (form: HTMLElement) => form.scrollIntoView({ block: "nearest" });
   function startEdit(rule: RoomRule) {
     menuFor = undefined;
@@ -170,7 +169,7 @@
     <label class="find"><Icon name="search" size={14} /><input type="search" bind:this={find} bind:value={query} placeholder="Find a rule" aria-label="Find a rule"
       onkeydown={event => { if (event.key === "Escape" && query) { event.stopPropagation(); query = ""; } }} />
       {#if wanted}<span class="total" role="status">{matched.length} of {rules.length}</span>{:else}<kbd aria-hidden="true">/</kbd>{/if}</label>{/if}</div>
-  <div class="list" bind:this={list} style:scroll-padding-bottom="{addHeight}px">
+  <div class="list" bind:this={list}>
     <div class="page">
       <div class="doc">
         {#if rules.length}<p class="lead">Every session in {room} reads these on its next turn.</p>
@@ -203,7 +202,7 @@
                   <button type="button" onclick={() => copy(rule)} aria-label={`Copy rule r${rule.number}`}>{copied?.number === rule.number ? copied.word : "Copy"}</button>
                   <button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button></span>
                 <span class="more"><button type="button" aria-label={`Rule r${rule.number} actions`} aria-haspopup="menu" aria-expanded={menuFor === rule.number}
-                  onclick={async () => { menuFor = menuFor === rule.number ? undefined : rule.number; await tick(); list?.querySelector<HTMLElement>(".menu [role=menuitem]")?.focus(); }}><Icon name="more" /></button>
+                  onclick={async () => { menuFor = menuFor === rule.number ? undefined : rule.number; await tick(); list?.querySelector(".menu")?.scrollIntoView({ block: "nearest" }); list?.querySelector<HTMLElement>(".menu [role=menuitem]")?.focus(); }}><Icon name="more" /></button>
                   {#if menuFor === rule.number}
                   <span class="menu" role="menu" tabindex="-1" onkeydown={event => { if (event.key === "Escape") { event.stopPropagation(); menuFor = undefined; } }}>
                     <button type="button" role="menuitem" onclick={() => startEdit(rule)}>Edit</button>
@@ -214,11 +213,6 @@
           {/each}
         </ol>
         {#if store.ready && !rules.length && !rows.length}<p class="none empty">No rules yet. A rule you add here reaches every session in {room}.</p>{/if}
-        <!-- Where the composer is, so adding a rule feels like posting one. -->
-        <form class="add" bind:clientHeight={addHeight} onsubmit={event => { event.preventDefault(); void submit(); }}>
-          {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
-          <RuleBox bind:value={draft} label="New rule" placeholder={`Add a rule for every session in ${room}`} {busy} onsave={() => void submit()} />
-        </form>
       </div>
       {#if rules.length}<div class="side" role="complementary" aria-label="About these rules">
         <div class="tile" title="Estimated at 4 characters to a token"><p class="figure"><span>About</span> <strong>{tokens}</strong> <span>tokens</span></p><p>read on every turn</p></div>
@@ -233,11 +227,18 @@
       </div>{/if}
     </div>
   </div>
+  <!-- Where the composer is, so adding a rule feels like posting one. It sits under the scroller, in the rules' column, so no rule runs under it. -->
+  <div class="page foot" class:paired={rules.length > 0}>
+    <form class="add" onsubmit={event => { event.preventDefault(); void submit(); }}>
+      {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
+      <RuleBox bind:value={draft} label="New rule" placeholder={`Add a rule for every session in ${room}`} {busy} onsave={() => void submit()} />
+    </form>
+  </div>
 </section>
 
 <style>
   .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
-  .top { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .top { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); overflow: hidden; scrollbar-gutter: stable; }
   .total { flex: none; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .find { display: flex; align-items: center; gap: 8px; margin-left: auto; width: 228px; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); }
   .find:has(input:focus-visible) { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
@@ -246,16 +247,17 @@
   .find input::-webkit-search-cancel-button { display: none; }
   .find input::placeholder { color: var(--muted); }
   kbd { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; font: 11px var(--mono); }
-  /* The scroller holds both columns, so the side column sticks and the add box stays at the foot. */
-  .list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+  /* The scroller holds both columns, so the side column sticks. The same gutter on the bar and the foot keeps all three in line. */
+  .list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; }
   .page { flex: 1 0 auto; display: grid; grid-template-columns: minmax(0, 880px) 264px; justify-content: center; gap: 16px; padding: 0 16px; }
   .page:not(:has(.side)) { grid-template-columns: minmax(0, 880px); }
+  .foot { flex: none; overflow: hidden; scrollbar-gutter: stable; padding-top: 8px; }
+  .foot.paired { grid-template-columns: minmax(0, 880px) 264px; }
   .doc { min-width: 0; display: flex; flex-direction: column; padding-top: 16px; }
   .lead { margin: 0 0 12px 12px; color: var(--muted); font-size: 14px; }
   .fold { display: none; flex-wrap: wrap; align-items: center; gap: 0 12px; margin: 0 0 12px 12px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .none { margin: 0 0 12px 12px; color: var(--muted); font-size: 14px; }
   .empty { margin-top: auto; }
-  .empty + .add { margin-top: 0; }
   ol { margin: 0 0 12px; padding: 0; list-style: none; display: grid; gap: 3px; }
   li { position: relative; display: grid; grid-template-columns: 44px 1fr auto; align-items: start; padding: 13px 12px; border-radius: 6px; transition: background 200ms ease-out; }
   li:hover, li:focus-within { background: var(--hover); }
@@ -306,7 +308,7 @@
   .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; min-width: 180px; padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
   .menu button { min-height: 44px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; }
-  .add { position: sticky; bottom: 0; z-index: 2; margin-top: auto; padding: 0 0 16px; background: var(--bg); }
+  .add { min-width: 0; padding: 0 0 16px; }
   .failure { margin: 0 0 8px; color: var(--danger); font-size: 13px; }
   .side { position: sticky; top: 16px; align-self: start; display: grid; gap: 20px; margin-top: 16px; padding-bottom: 16px; min-width: 0; }
   .side section { display: grid; }
@@ -326,7 +328,7 @@
   .ref:focus-visible, .author:focus-visible, .recent:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   /* The side column folds by the page's own width, so the open Sessions panel folds it too. */
   @container (max-width: 899px) {
-    .page { grid-template-columns: minmax(0, 880px); }
+    .page, .foot.paired { grid-template-columns: minmax(0, 880px); }
     .side { display: none; }
     .fold { display: flex; }
   }
