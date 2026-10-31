@@ -24,7 +24,17 @@ type API struct {
 	git     func(Caller) http.Handler
 	web     *Web
 	files   func(Caller) http.Handler
+	connect ConnectOperations
 }
+
+type ConnectOperations interface {
+	Start(context.Context, contract.ConnectStartRequest) error
+	Status(context.Context) (contract.ConnectStatusResponse, error)
+	Cancel(context.Context) error
+	Unlink(context.Context) error
+}
+
+func (a *API) SetConnectOperations(ops ConnectOperations) { a.connect = ops }
 
 func New(service Service, model func(Caller) http.Handler) *API {
 	return &API{service: service, model: model}
@@ -37,6 +47,37 @@ func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
+	call(mux, contract.MethodConnectStart, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, req contract.ConnectStartRequest) (contract.ConnectStartResponse, *contract.Error) {
+		if a.connect == nil {
+			return contract.ConnectStartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unavailable"}
+		}
+		if err := a.connect.Start(ctx, req); err != nil {
+			return contract.ConnectStartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect start failed"}
+		}
+		return contract.ConnectStartResponse{}, nil
+	})
+	call(mux, contract.MethodConnectStatus, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, _ contract.ConnectStatusRequest) (contract.ConnectStatusResponse, *contract.Error) {
+		if a.connect == nil {
+			return contract.ConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unavailable"}
+		}
+		out, err := a.connect.Status(ctx)
+		if err != nil {
+			return contract.ConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect status unavailable"}
+		}
+		return out, nil
+	})
+	call(mux, contract.MethodConnectCancel, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, _ contract.ConnectCancelRequest) (contract.ConnectCancelResponse, *contract.Error) {
+		if a.connect == nil || a.connect.Cancel(ctx) != nil {
+			return contract.ConnectCancelResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect cancel failed"}
+		}
+		return contract.ConnectCancelResponse{}, nil
+	})
+	call(mux, contract.MethodConnectUnlink, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, _ contract.ConnectUnlinkRequest) (contract.ConnectUnlinkResponse, *contract.Error) {
+		if a.connect == nil || a.connect.Unlink(ctx) != nil {
+			return contract.ConnectUnlinkResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unlink failed"}
+		}
+		return contract.ConnectUnlinkResponse{}, nil
+	})
 	call(mux, contract.MethodWebLogin, c, contract.ScopeAdmin, func(c Caller) bool { return owner(c) && !c.Web }, func(ctx context.Context, p contract.Principal, req contract.WebLoginRequest) (contract.WebLoginResponse, *contract.Error) {
 		if a.web == nil {
 			return contract.WebLoginResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the engine was started without --web.listen"}
@@ -457,6 +498,9 @@ func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, s
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if method == contract.MethodConnectStatus {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		_ = json.NewEncoder(w).Encode(result)
 	})
 }

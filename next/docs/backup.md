@@ -15,7 +15,7 @@ The backup key can add archives. It cannot do anything else:
 
 A compromised engine host can replace every copy over 14 days, so the owner has 14 days to notice it; a copy under 14 days old cannot be removed by an upload.
 
-Each archive is an encrypted `tar.gz`. It holds `store.db`, `files/`, `transcripts/`, `archive/`, `connect/` and `cliproxy/auth/`, when those folders exist.
+Each archive is an encrypted `tar.gz`. It holds `store.db`, `files/`, `transcripts/`, `archive/`, `connect/` and `cliproxy/auth/`, when those folders exist. `connect/pending.json` contains pending link approval secrets and is included when present. Keep restored archives private.
 
 ## Set up the age key pair
 
