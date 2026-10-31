@@ -11,6 +11,8 @@ import (
 type Harness interface {
 	Start(context.Context, contract.TurnID, []contract.TurnInput, func()) (contract.TurnEnded, error)
 	Continue(context.Context, contract.TurnID, func()) (contract.TurnEnded, error)
+	// SetModel switches the model for later turns. It is never called during a turn.
+	SetModel(context.Context, contract.ModelChoice) error
 	Recover(contract.TurnID, []contract.TurnInput) (contract.TurnEnded, bool, error)
 	Steer(context.Context, contract.TurnInput) error
 	FollowUp(context.Context, contract.TurnInput) error
