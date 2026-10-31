@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ContextFileCache } from "../src/core/context-file-cache.ts";
 import { createContextUpdate, deliveredSections } from "../src/core/context-updates.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
@@ -11,6 +12,29 @@ describe("context updates", () => {
 		expect(update?.content).toContain("Removed section obsolete.");
 		expect(update?.details).toEqual({ sections: current });
 		expect(createContextUpdate(current, current)).toBeUndefined();
+	});
+
+	it("does no reads, hashes or diffs when file metadata is unchanged", () => {
+		let reads = 0;
+		let hashes = 0;
+		const stamp = { ino: 1, size: 4, mtimeMs: 1, isFile: true };
+		const cache = new ContextFileCache(
+			() => stamp,
+			() => {
+				reads++;
+				return "same";
+			},
+			(value) => {
+				hashes++;
+				return value;
+			},
+		);
+		expect(cache.changed(["file"])).toBe(true);
+		const first = cache.readFile("file");
+		expect(cache.changed(["file"])).toBe(false);
+		const second = cache.readFile("file");
+		expect([reads, hashes]).toEqual([1, 1]);
+		expect(createContextUpdate({ file: first ?? "" }, { file: second ?? "" })).toBeUndefined();
 	});
 
 	it("derives only the active branch and replaces it at compaction", () => {
