@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 30
+const schemaVersion = 31
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	30: {`CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room))`},
 	28: {`ALTER TABLE pr_owners ADD COLUMN branch TEXT NOT NULL DEFAULT ''`, `UPDATE pr_owners SET branch=COALESCE((SELECT 'v2/'||json_extract(CAST(body AS TEXT),'$.session') FROM events WHERE type='pr.opened' AND json_extract(CAST(body AS TEXT),'$.repo')=pr_owners.repo AND json_extract(CAST(body AS TEXT),'$.number')=pr_owners.number ORDER BY seq DESC LIMIT 1),'')`},
 	29: {`CREATE TABLE devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_sha256 BLOB NOT NULL UNIQUE, paired_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER)`, `CREATE TABLE device_scopes (device TEXT NOT NULL REFERENCES devices(id), scope TEXT NOT NULL, PRIMARY KEY(device, scope))`, `CREATE TABLE pairing_codes (id INTEGER PRIMARY KEY CHECK(id=1), code_hash BLOB NOT NULL, scopes BLOB NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL)`},
 	27: {`CREATE TABLE backup_copy_status (id INTEGER PRIMARY KEY CHECK(id=1), last_success INTEGER, failure TEXT NOT NULL)`},

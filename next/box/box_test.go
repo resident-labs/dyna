@@ -130,3 +130,21 @@ func TestFakeHost(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
+
+func TestAdmissionRespectsHostRooms(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeAgent)
+	h := box.Host{Name: "host", State: box.HostReady, CPUs: 2, MemBytes: 4 * box.GiB, DiskBytes: 30 * box.GiB, Rooms: []contract.RoomID{"allowed"}}
+	req := box.Box{ID: "box", Room: "other", Size: size}
+	if got := box.Admit([]box.Host{h}, nil, req, 0); got.Reason != box.PendingRoomHost {
+		t.Fatalf("restricted host: %+v", got)
+	}
+	req.Room = "allowed"
+	if got := box.Admit([]box.Host{h}, nil, req, 0); got.Host != "host" {
+		t.Fatalf("allowed room: %+v", got)
+	}
+	h.Rooms = nil
+	req.Room = "other"
+	if got := box.Admit([]box.Host{h}, nil, req, 0); got.Host != "host" {
+		t.Fatalf("unrestricted host: %+v", got)
+	}
+}
