@@ -116,8 +116,10 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 			query.Del(name)
 		}
 		r.URL.RawQuery = query.Encode()
+		// Drop Connection before adding the policy: ReverseProxy removes headers
+		// named by Connection, which otherwise lets a box strip the policy.
 		// Do not forward box-controlled credentials or affinity headers.
-		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth"} {
+		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "Connection"} {
 			r.Header.Del(name)
 		}
 		encodedIDs := make([]string, len(eligibleIDs))
