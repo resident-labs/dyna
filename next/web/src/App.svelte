@@ -39,7 +39,8 @@
   let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
   let store: RoomStore | undefined = $state();
   $effect(() => {
-    if (!room) return;
+    // Home has no room, so no room controls or panels may show one.
+    if (!room) { store = undefined; return; }
     const current = new RoomStore(room);
     store = current;
     void current.open();
