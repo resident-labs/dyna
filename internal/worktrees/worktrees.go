@@ -592,6 +592,13 @@ func ApplyRunDispositionWithWarnings(runID string, disposition Disposition) ([]A
 			actions = append(actions, action)
 			continue
 		}
+		protected, err := SessionProtected(context.Background(), rec)
+		if err != nil {
+			return actions, warnings, fmt.Errorf("check worktree session ownership: %w", err)
+		}
+		if protected {
+			return actions, warnings, fmt.Errorf("worktree %s is used by an open session or goal", rec.Path)
+		}
 		if err := Remove(rec, d == DispositionRemoveAll); err != nil {
 			return actions, warnings, err
 		}
