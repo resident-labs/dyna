@@ -717,6 +717,10 @@ func writeOAuthCallbackFile(authDir, canonicalProvider, state, code, errorMessag
 		return "", err
 	}
 
+	if DynaMemoryOAuthCallbacks && (canonicalProvider == "anthropic" || canonicalProvider == "codex") {
+		return "memory", dynaWriteCallback(state, code, errorMessage)
+	}
+
 	fileName := fmt.Sprintf(".oauth-%s-%s.oauth", canonicalProvider, state)
 	filePath := filepath.Join(authDir, fileName)
 	if err := os.MkdirAll(authDir, 0o700); err != nil {
