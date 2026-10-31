@@ -27,7 +27,7 @@ and its files 0600. The archive is outside this counts-only rehearsal.
 
 | Bundle part | v1 source | Selection / conversion |
 |---|---|---|
-| Standing instructions | `goal_rooms.body`, `internal/goals/sqlite.go` | Render global room `*` and each room's rules as separate documents; verify IDs and exact text against SQL. |
+| Standing instructions | `goal_rooms.body`, `internal/goals/sqlite.go` | Render global room `*` and each room's rules as separate documents; verify each text and its order against SQL. |
 | Settings | `settings.json`, `internal/settings/settings.go` | only contract fields; minutes to milliseconds |
 | Profiles | `profiles.json`, `internal/profile/profile.go` | proxy-supported models; mapping needs review below |
 | Hosts | `machines`, `internal/machines/store.go` | enabled remote hosts only; room IDs resolved to names |
