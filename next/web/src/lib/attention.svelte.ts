@@ -26,12 +26,22 @@ export class Attention {
   async open(): Promise<void> {
     const list = await call("room.list", {});
     this.head = list.seq;
-    for (const room of list.rooms ?? []) {
-      this.rooms.set(room.id, room);
-      this.waiting.set(room.id, new SvelteSet(room.waiting));
-      this.working.set(room.id, new SvelteSet(room.working));
-    }
+    for (const room of list.rooms ?? []) this.add(room);
     this.stop = this.connect(undefined, () => this.head, event => this.apply(event));
+  }
+
+  private add(room: RoomSummary): void {
+    this.rooms.set(room.id, room);
+    this.waiting.set(room.id, new SvelteSet(room.waiting));
+    this.working.set(room.id, new SvelteSet(room.working));
+  }
+
+  // A room created after the page loaded first shows as an event from a room the page does not know, such as its
+  // root's session.started; room.list then names it. One read runs at a time.
+  private refreshing: Promise<void> | undefined;
+  private refresh(): void {
+    this.refreshing ??= call("room.list", {}).then(list => { for (const room of list.rooms ?? []) if (!this.rooms.has(room.id)) this.add(room); }, () => {})
+      .finally(() => { this.refreshing = undefined; });
   }
 
   close(): void { this.stop(); }
@@ -69,7 +79,7 @@ export class Attention {
     if (event.seq <= this.head) return;
     this.head = event.seq;
     const waiting = this.waiting.get(event.room ?? ""), working = this.working.get(event.room ?? "");
-    if (!waiting || !working) return;
+    if (!waiting || !working) { if (event.room) this.refresh(); return; }
     const buffer = this.pending.get(event.room ?? "");
     if (buffer) buffer.push(event); else this.track(event);
     switch (event.type) {
