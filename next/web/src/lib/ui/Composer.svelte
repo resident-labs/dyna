@@ -131,7 +131,7 @@
     <input bind:this={picker} type="file" multiple hidden onchange={event => { note = files.add(event.currentTarget.files ?? [], forwarded); event.currentTarget.value = ""; element?.focus(); }} />
     <span class="keys">Enter to send · Shift+Enter for a new line</span>
     {#if stop && empty}<button type="button" class="send stop" aria-label={stop.stopping ? "Stopping" : "Stop"} title={stop.stopping ? "Stopping" : "Stop"} disabled={stop.stopping}
-      onclick={stop.run}><Icon name="stop" /></button>
+      onclick={event => { stop.run(); if (!event.detail) element?.focus(); }}><Icon name="stop" /></button>
     {:else}<button type="button" class="send" aria-label="Send" title="Send" disabled={!canSend} onclick={() => { note = ""; onsend(); element?.focus(); }}><Icon name="send" /></button>{/if}
   </div>
 </div>
