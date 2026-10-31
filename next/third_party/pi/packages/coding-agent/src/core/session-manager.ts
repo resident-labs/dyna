@@ -1269,9 +1269,11 @@ export class SessionManager {
 		details?: T,
 		fromHook?: boolean,
 		usage?: Usage,
+		sections?: Record<string, string>,
 	): string {
 		const timestamp = new Date().toISOString();
-		const systemMessage = getCurrentSystemMessage(this.buildSessionProjection().messages);
+		const current = getCurrentSystemMessage(this.buildSessionProjection().messages);
+		const systemMessage = current && (sections ? { ...current, sections: { ...sections } } : current);
 		const id = generateId(this.byId);
 		const entry: CompactionEntry<T> = {
 			type: "compaction",
