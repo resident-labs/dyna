@@ -152,6 +152,6 @@
   .virtual { height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
   .space { position: relative; flex: none; margin-top: auto; }
   .space.top { margin-top: 0; }
-  .item { position: absolute; top: 0; left: 0; width: 100%; }
   .end { position: absolute; bottom: 0; height: 0; }
+  .item { position: absolute; top: 0; left: 0; right: 0; width: 100%; max-width: var(--feed-reading-width, none); margin: 0 auto; }
 </style>
