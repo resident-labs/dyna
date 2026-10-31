@@ -3,14 +3,27 @@
   import StatusPill from "./StatusPill.svelte";
   import { formatTime, type Row } from "../feed.ts";
   import { hue } from "../identity.ts";
-  let { row, author, root }: { row: Extract<Row, { kind: "failed" }>; author: string; root: boolean } = $props();
+  let { row, author, root, onseen }: { row: Extract<Row, { kind: "failed" }>; author: string; root: boolean; onseen?: () => void } = $props();
+  // The owner has seen a failed turn once its row stays on screen for a second, which clears the session's mark.
+  // The wait skips rows that only pass by, such as while the feed jumps to its end on open.
+  function seen(node: HTMLElement) {
+    if (!onseen) return;
+    const done = onseen;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new IntersectionObserver(([entry]) => {
+      clearTimeout(timer);
+      if (entry.isIntersecting) timer = setTimeout(() => { done(); observer.disconnect(); }, 1000);
+    });
+    observer.observe(node);
+    return () => { clearTimeout(timer); observer.disconnect(); };
+  }
 </script>
 
 <!-- As v1's turn result, a failed turn uses the post layout: the session's avatar, then its name line and the cause. -->
-<article class="failed">
+<article class="failed" {@attach seen}>
   <Avatar kind="session" name={author} {root} />
   <p class="name"><strong style:--hue={hue(author)}>{author}</strong> <time datetime={row.at}>{formatTime(row.at)}</time>
-    <StatusPill tone="failed">{row.label}</StatusPill></p>
+    <StatusPill tone="failed" label={row.label} /></p>
   {#if row.cause}<p class="cause">{row.cause}</p>{/if}
 </article>
 
@@ -21,5 +34,5 @@
   .name { display: flex; align-items: baseline; gap: 8px; }
   strong { color: oklch(var(--id-name) var(--hue)); }
   .cause { color: var(--muted); }
-  time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  time { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 </style>

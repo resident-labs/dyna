@@ -2,7 +2,7 @@ import type { Attachment, Conversation, Event, FailureCause, Principal } from ".
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
-  | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
+  | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[] }
   | { kind: "day"; key: string; at: string };
 
@@ -83,7 +83,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       if (to === "failed" || to === "lost" || cause) {
         flush();
         dated(event.at);
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, cause: cause ? causes[cause] : "",
+        rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, cause: cause ? causes[cause] : "",
           label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" : to === "lost" ? "Stopped unexpectedly" : "Could not start" });
       }
       continue;
@@ -101,7 +101,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
         flush();
         dated(event.at);
         const cause = event.body.cause;
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
+        rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
       if (answer || event.body.outcome === "failed") continue;
     }
