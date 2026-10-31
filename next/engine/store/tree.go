@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/room"
@@ -60,4 +61,36 @@ func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID, disc
 		) UPDATE boxes SET want=?,due_at=0 WHERE session IN (SELECT id FROM sub) AND want!='discard'`, target, want)
 		return err
 	})
+}
+
+// TreeError reports a tree rule refusal from the write transaction.
+type TreeError struct{ Message string }
+
+func (e *TreeError) Error() string { return e.Message }
+
+func transactionTree(ctx context.Context, tx *sql.Tx, id contract.RoomID) (room.Tree, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT s.id,coalesce(s.parent,''),coalesce(b.host,'') FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id", id)
+	if err != nil {
+		return room.Tree{}, err
+	}
+	defer rows.Close()
+	var nodes []room.Node
+	for rows.Next() {
+		var node room.Node
+		if err := rows.Scan(&node.ID, &node.Parent, &node.Host); err != nil {
+			return room.Tree{}, err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return room.Tree{}, err
+	}
+	return room.NewTree(nodes), nil
+}
+
+func checkDepth(depth, limit int) error {
+	if limit > 0 && depth > limit {
+		return &TreeError{Message: fmt.Sprintf("session depth %d exceeds limit %d", depth, limit)}
+	}
+	return nil
 }

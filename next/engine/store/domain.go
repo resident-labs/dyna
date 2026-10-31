@@ -59,8 +59,39 @@ func (s *Store) SessionReplay(ctx context.Context, caller contract.Principal, cl
 	return response, err
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string) error {
+// SessionReplayError carries the original result of a concurrent retry.
+type SessionReplayError struct{ Response contract.SessionStartResponse }
+
+func (e *SessionReplayError) Error() string { return "session start already committed" }
+
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string, maxDepth int) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if clientID != "" {
+			var response contract.SessionStartResponse
+			err := tx.QueryRowContext(ctx, "SELECT s.id,b.id FROM client_replays r JOIN sessions s ON s.id=r.ref JOIN boxes b ON b.session=s.id WHERE r.method=? AND r.caller_kind=? AND r.caller_id=? AND r.client_id=?", contract.MethodSessionStart, event.From.Kind, event.From.Session, clientID).Scan(&response.Session, &response.Box)
+			if err == nil {
+				return &SessionReplayError{Response: response}
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
+		if parent != "" {
+			tree, err := transactionTree(ctx, tx, session.Room)
+			if err != nil {
+				return err
+			}
+			actual, err := tree.ParentFor(event.From, parent)
+			if err != nil {
+				return &TreeError{Message: err.Error()}
+			}
+			if actual != parent {
+				return &TreeError{Message: "parent changed"}
+			}
+			if err := checkDepth(tree.Depth(parent)+1, maxDepth); err != nil {
+				return err
+			}
+		}
 		if clientID != "" {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES(?,?,?,?,?,?)", contract.MethodSessionStart, event.From.Kind, event.From.Session, clientID, session.ID, event.Time.UnixMilli()); err != nil {
 				return err
