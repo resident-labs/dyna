@@ -73,3 +73,47 @@ func TestFileRoomAccess(t *testing.T) {
 		t.Fatal(rec.Header())
 	}
 }
+
+func TestPostAttachesOnlyRoomFiles(t *testing.T) {
+	s, roomA, sessionA, ctx := setup(t)
+	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	roomB, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	started, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: roomB.Room, Name: "worker", Profile: "test", Goal: "goal"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	a := contract.Principal{Kind: contract.PrincipalSession, Session: sessionA}
+	b := contract.Principal{Kind: contract.PrincipalSession, Session: started.Session}
+	upload := func(caller contract.Principal, room contract.RoomID, body string) contract.Attachment {
+		req := httptest.NewRequest("POST", "/v1/files?name=note.txt", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "text/plain")
+		rec := httptest.NewRecorder()
+		s.Files(caller, room).ServeHTTP(rec, req)
+		var file contract.Attachment
+		if rec.Code != 200 || json.NewDecoder(rec.Body).Decode(&file) != nil {
+			t.Fatalf("upload: %d", rec.Code)
+		}
+		return file
+	}
+	post := func(caller contract.Principal, room contract.RoomID, file contract.Attachment) *contract.Error {
+		_, e := s.Post(ctx, caller, contract.PostRequest{Room: room, Text: "file", Attachments: []contract.Attachment{file}})
+		return e
+	}
+	fromA := upload(a, roomA, "a")
+	if e := post(b, roomB.Room, fromA); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("other room's upload: %v", e)
+	}
+	if e := post(b, roomB.Room, upload(b, roomB.Room, "b")); e != nil {
+		t.Fatalf("own upload: %v", e)
+	}
+	if e := post(owner, roomB.Room, fromA); e != nil {
+		t.Fatalf("owner: %v", e)
+	}
+	if e := post(b, roomB.Room, fromA); e != nil {
+		t.Fatalf("file posted in the room: %v", e)
+	}
+}
