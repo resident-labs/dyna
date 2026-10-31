@@ -75,7 +75,7 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 	return out, nil
 }
 
-var quotedDynaMarker = regexp.MustCompile(`(?i)\[[ \t]*dyna[ \t]*\]`)
+var quotedDynaMarker = regexp.MustCompile(`(?im)^([ \t]*)\[[ \t]*dyna[ \t]*\]`)
 
 type boxChannel struct {
 	stop          context.CancelFunc
@@ -269,7 +269,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				if err != nil {
 					return
 				}
-				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(text, "[quoted]")}
+				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(text, "${1}[quoted]")}
 				if delivery.Queue == nil {
 					start = append(start, input)
 				} else {
