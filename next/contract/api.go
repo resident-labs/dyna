@@ -30,6 +30,7 @@ const (
 	MethodTurnOutput       Method = "turn.output"
 	MethodTurnActivity     Method = "turn.activity"
 	MethodTranscriptAppend Method = "transcript.append"
+	MethodTranscriptRead   Method = "transcript.read"
 	MethodShellJobEnded    Method = "shell.job.ended"
 	MethodShellOutput      Method = "shell.output"
 )
@@ -327,6 +328,23 @@ type TurnActivityRequest struct {
 	Label string `json:"label"`
 }
 type TurnActivityResponse struct{}
+type TranscriptReadRequest struct {
+	Session SessionID `json:"session"`
+	Turn    TurnID    `json:"turn,omitempty"`
+}
+type TranscriptStep struct {
+	Turn    TurnID     `json:"turn"`
+	Tool    string     `json:"tool"`
+	Label   string     `json:"label"`
+	Started time.Time  `json:"started"`
+	Ended   *time.Time `json:"ended,omitempty"`
+	Failed  bool       `json:"failed"`
+	Preview string     `json:"preview"`
+}
+type TranscriptReadResponse struct {
+	Steps     []TranscriptStep `json:"steps"`
+	Truncated bool             `json:"truncated"`
+}
 type TranscriptAppendRequest struct {
 	Path   string `json:"path"`
 	Offset int64  `json:"offset"`
