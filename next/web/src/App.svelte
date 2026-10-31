@@ -128,13 +128,16 @@
   let docked = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
   // The view closes when its computer stops or the room changes, before the DOM updates, so it never
-  // streams again unasked. Focus that was in the view returns to the row's button, or to the panel.
+  // streams again unasked. Focus that was in the view returns to the row's button, or to the panel;
+  // below 900 px with the panel closed, it returns to the panel's toggle button.
   async function stopWatching() {
     const id = watching ?? "";
     const held = members?.contains(document.activeElement) || computer?.contains(document.activeElement);
     watching = undefined;
     await tick();
-    if (held) (members?.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? members)?.focus();
+    if (!held) return;
+    if (!members?.getClientRects().length) toggle?.focus();
+    else (members.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? members).focus();
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   const wide = new MediaQuery("min-width: 901px");
@@ -162,8 +165,9 @@
 {/snippet}
 
 {#snippet computerView(id: string)}
-  <ComputerView session={id} name={store?.names.get(id) ?? "Session"} {docked} bind:rect bind:element={computer}
-    onclose={() => void stopWatching()} ondock={() => { docked = !docked; if (docked && !wide.current) void showPanel(true); }} />
+  <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
+  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} {docked} bind:rect bind:element={computer}
+    onclose={() => void stopWatching()} ondock={() => { docked = !docked; if (docked && !wide.current) void showPanel(true); }} />{/key}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
