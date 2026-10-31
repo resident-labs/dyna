@@ -325,6 +325,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private readonly contextFileCache = new ContextFileCache();
 	private readonly skillFileCache = new ContextFileCache();
 	private skillDirectories = new Set<string>();
+	private skillCandidates = new Set<string>();
 	private skillDiscoveryDirectories = new Set<string>();
 	private settingsManager: SettingsManager;
 	private eventBus: EventBus;
@@ -460,7 +461,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private skillWatchPaths(): string[] {
 		return [
 			...this.lastSkillPaths,
-			...this.skills.map((skill) => skill.filePath),
+			...this.skillCandidates,
 			...this.skillDirectories,
 			...this.skillDiscoveryDirectories,
 			...[...this.skillDirectories, ...this.skillDiscoveryDirectories].flatMap((dir) =>
@@ -937,6 +938,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private updateSkillsFromPaths(skillPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {
 		let skillsResult: { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
 		const directories = new Set<string>();
+		const candidates = new Set<string>();
 		if (this.noSkills && skillPaths.length === 0) {
 			skillsResult = { skills: [], diagnostics: [] };
 		} else {
@@ -945,7 +947,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				agentDir: this.agentDir,
 				skillPaths,
 				includeDefaults: false,
-				cache: { files: this.skillFileCache, directories },
+				cache: { files: this.skillFileCache, directories, candidates },
 			});
 		}
 		const resolvedSkills = this.skillsOverride ? this.skillsOverride(skillsResult) : skillsResult;
@@ -958,6 +960,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		}));
 		this.skillDiagnostics = resolvedSkills.diagnostics;
 		this.skillDirectories = directories;
+		this.skillCandidates = candidates;
 		this.skillFileCache.changed(this.skillWatchPaths());
 	}
 
