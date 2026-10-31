@@ -20,7 +20,6 @@ const BundleV1 BundleVersion = 1
 
 // V1 labels, as the owner knows them.
 type (
-	RuleLabel     string // "r17"
 	QuestionLabel string // "q33"
 	RoomName      string // "dyna"
 	V1Address     string // "dyna:code-architectural", or "owner"
@@ -41,7 +40,6 @@ type BundleSource struct {
 }
 
 type BundleCounts struct {
-	Rules         int `json:"rules"`
 	Goals         int `json:"goals"`
 	GoalItems     int `json:"goalItems"`
 	Issues        int `json:"issues"`
@@ -60,7 +58,7 @@ type GlobalBundle struct {
 	Rooms         []RoomName      `json:"rooms"`
 	Exported      time.Time       `json:"exported"`
 	Source        BundleSource    `json:"source"`
-	Rules         []Rule          `json:"rules"`
+	Instructions  Instructions    `json:"instructions"`
 	Settings      SettingsBundle  `json:"settings"`
 	Profiles      []ProfileBundle `json:"profiles"`
 	Hosts         []HostBundle    `json:"hosts"`
@@ -82,7 +80,6 @@ type RoomBundle struct {
 	Paused        bool             `json:"paused"`
 	RootProfile   ProfileName      `json:"rootProfile,omitempty"`
 	Upstreams     []RoomUpstream   `json:"upstreams,omitempty"`
-	Rules         []Rule           `json:"rules"`
 	Goals         []GoalBundle     `json:"goals"`
 	Issues        []IssueBundle    `json:"issues"`
 	NextIssue     int              `json:"nextIssue"`
@@ -96,12 +93,15 @@ type RoomBundle struct {
 	Counts        BundleCounts     `json:"counts"`
 }
 
-type Rule struct {
-	Label   RuleLabel      `json:"label"`
-	Text    string         `json:"text"`
-	By      ImportedAuthor `json:"by"`
-	Created time.Time      `json:"created"`
-	Updated time.Time      `json:"updated"`
+// Instructions contains the rendered standing-instruction files.
+type Instructions struct {
+	Global string             `json:"global"`
+	Rooms  []RoomInstructions `json:"rooms"`
+}
+
+type RoomInstructions struct {
+	Room RoomID `json:"room"`
+	Text string `json:"text"`
 }
 
 // SettingsBundle keeps only the v1 settings that v2 uses.
