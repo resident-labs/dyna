@@ -83,6 +83,7 @@ const (
 	ErrNotFound             ErrorCode = "not_found"
 	ErrForbidden            ErrorCode = "forbidden"
 	ErrConflict             ErrorCode = "conflict"
+	ErrProfileExists        ErrorCode = "profile_exists"
 	ErrMoveBusy             ErrorCode = "move_busy"
 	ErrHasChildren          ErrorCode = "has_children"
 	ErrParentClosing        ErrorCode = "parent_closing"

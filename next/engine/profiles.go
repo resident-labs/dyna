@@ -136,9 +136,12 @@ func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, 
 	return contract.ModelChoice{Provider: profile.Provider, ID: profile.Model, Thinking: profile.Thinking}, slices.Clone(profile.AllowedModels), nil
 }
 
-func (p *ProfileConfig) update(name contract.ProfileName, value *profile) *contract.Error {
+func (p *ProfileConfig) update(name contract.ProfileName, value *profile, create bool) *contract.Error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if _, exists := p.entries[name]; create && exists {
+		return &contract.Error{Code: contract.ErrProfileExists, Message: "profile already exists"}
+	}
 	next := make(map[contract.ProfileName]profile, len(p.entries)+1)
 	for k, v := range p.entries {
 		next[k] = v
@@ -195,7 +198,7 @@ func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req cont
 		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
 	v := req.Profile
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, MaxCallsPerRun: v.MaxCallsPerRun})
+	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, MaxCallsPerRun: v.MaxCallsPerRun}, req.Create)
 	return contract.ProfileSetResponse{}, err
 }
 
@@ -216,5 +219,5 @@ func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req
 	if inUse {
 		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "profile is used by an open session"}
 	}
-	return contract.ProfileRemoveResponse{}, p.update(req.Name, nil)
+	return contract.ProfileRemoveResponse{}, p.update(req.Name, nil, false)
 }

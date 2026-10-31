@@ -152,6 +152,7 @@ type Profile struct {
 	MaxCallsPerRun int           `json:"maxCallsPerRun"`
 }
 type ProfileSetRequest struct {
+	Create  bool    `json:"create"`
 	Profile Profile `json:"profile"`
 }
 type ProfileSetResponse struct{}
