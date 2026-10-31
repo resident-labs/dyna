@@ -1,11 +1,46 @@
 import { createSubscriber } from "svelte/reactivity";
-import type { PostSearchRequest, PostSearchResponse, SearchPost } from "./contract.gen.ts";
+import type { PostSearchRequest, PostSearchResponse, SearchPost, SearchSession, SessionSearchRequest, SessionSearchResponse } from "./contract.gen.ts";
 
-// The names field anticipates the search contract for closed-session authors.
 export type PostHit = SearchPost;
 export type SearchRequest = PostSearchRequest;
-export type SearchResponse = PostSearchResponse & { names: Record<string, string> | null };
+export type SearchResponse = PostSearchResponse;
 export type SearchCall = (request: SearchRequest) => Promise<SearchResponse>;
+
+export class SessionSearch {
+  private state: "idle" | "searching" | "failed" | "done" = "idle";
+  private sessions: SearchSession[] = [];
+  private total = 0;
+  private generation = 0;
+  private changed = () => {};
+  private subscribe = createSubscriber(update => { this.changed = update; });
+  private readonly search: (request: SessionSearchRequest) => Promise<SessionSearchResponse>;
+  constructor(search: (request: SessionSearchRequest) => Promise<SessionSearchResponse>) { this.search = search; }
+  get snapshot() { this.subscribe(); return { state: this.state, sessions: this.sessions, total: this.total }; }
+  prepare(query: string): void {
+    ++this.generation;
+    this.sessions = [];
+    this.total = 0;
+    this.state = query ? "searching" : "idle";
+    this.changed();
+  }
+  async start(query: string): Promise<void> {
+    const generation = ++this.generation;
+    if (!query) { this.state = "idle"; this.changed(); return; }
+    this.state = "searching";
+    this.changed();
+    try {
+      const result = await this.search({ query, limit: 50 });
+      if (generation !== this.generation) return;
+      this.sessions = result.sessions ?? [];
+      this.total = result.total;
+      this.state = "done";
+    } catch {
+      if (generation !== this.generation) return;
+      this.state = "failed";
+    }
+    this.changed();
+  }
+}
 
 export class MessageSearch {
   state: "idle" | "searching" | "failed" | "done" = "idle";
