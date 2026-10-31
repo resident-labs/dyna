@@ -440,7 +440,7 @@ func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session})
 	if e != nil {
 		t.Fatal(e)
 	}
