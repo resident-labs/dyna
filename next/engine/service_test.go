@@ -213,17 +213,25 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: child.Session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	childAck := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
 	if _, e := s.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
 	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, err := s.store.Session(ctx, child.Session); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("child remains open: %v", err)
 	}
@@ -624,9 +632,13 @@ func TestBoxLifecycleEmitsTransitions(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	list, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
 	if e != nil {
 		t.Fatal(e)
@@ -789,6 +801,8 @@ func TestClosePendingRepositoryFreeChildWithoutArchiveAck(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker.Session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	current, err := st.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxDeleted {
 		t.Fatalf("box %+v, error %v, want deleted without an archive ack", current, err)
@@ -858,9 +872,13 @@ func TestCloseRetriesAfterBoxDeletion(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room, Types: []contract.EventType{"box.changed"}})
 	if e != nil {
 		t.Fatal(e)
@@ -1060,11 +1078,12 @@ func TestClosingCreatingParentRejectsConcurrentChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent := <-adapter.started
-	closed := make(chan *contract.Error, 1)
-	go func() {
-		_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: parent.Session})
-		closed <- e
-	}()
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: parent.Session}); e != nil {
+		t.Fatal(e)
+	}
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
 	<-adapter.cancelled
 	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent.Session, Goal: "goal"})
 	if e == nil {
@@ -1072,9 +1091,6 @@ func TestClosingCreatingParentRejectsConcurrentChild(t *testing.T) {
 	}
 	close(adapter.release)
 	s.reconciler.Wait()
-	if e := <-closed; e != nil {
-		t.Fatal(e)
-	}
 }
 
 type heldRemoveBox struct {
@@ -1105,18 +1121,20 @@ func TestConcurrentCloseRemovesBoxOnce(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: lead.Session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	ack := contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}
-	result := make(chan *contract.Error, 2)
-	ackLead := func() {
-		_, e := s.ArchiveDone(ctx, ack, contract.ArchiveDoneRequest{})
-		result <- e
+	if _, e := s.ArchiveDone(ctx, ack, contract.ArchiveDoneRequest{}); e != nil {
+		t.Fatal(e)
 	}
-	go ackLead()
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
 	<-adapter.started
-	go ackLead()
+	if err := s.reconciler.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
 	close(adapter.release)
-	<-result
-	<-result
+	s.reconciler.Wait()
 	if n := len(adapter.removed); n != 1 {
 		t.Fatalf("removed %d times", n)
 	}
@@ -1261,6 +1279,8 @@ func TestClosedSessionNamesRemainInEvents(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session, Discard: true}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	list, e := s.SessionList(ctx, owner, contract.SessionListRequest{Room: room})
 	if e != nil {
 		t.Fatal(e)
@@ -1401,6 +1421,8 @@ func TestOwnerAttention(t *testing.T) {
 	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker, Discard: true}); problem != nil {
 		t.Fatal(problem)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	closed := <-stream
 	if body, ok := closed.Body.(contract.SessionClosed); !ok || body.Session != worker {
 		t.Fatalf("expected session.closed for %s, got %+v", worker, closed)
