@@ -565,6 +565,28 @@ func TestCompleteLocalPassIgnoresACancelledWorkflow(t *testing.T) {
 	}
 }
 
+func TestTrialSchedulerSkipsChecksWithoutMatchingRun(t *testing.T) {
+	var endpoints []string
+	s := &Service{}
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		for _, arg := range cmd.Args {
+			if strings.HasPrefix(arg, "repos/") {
+				endpoints = append(endpoints, arg)
+			}
+		}
+		return writeFakeJSON(cmd.Stdout, workflowRunsResponse{})
+	}
+	r := Record{Host: "github.com", Repo: "owner/repo"}
+	job := registeredCIJob{record: r, head: strings.Repeat("a", 40), branch: "trial", trial: true}
+	conclusive, err := s.scheduledCIConclusive(t.Context(), job, "repo", nil, nil)
+	if err != nil || conclusive {
+		t.Fatalf("conclusive=%v, err=%v", conclusive, err)
+	}
+	if len(endpoints) != 1 || !strings.Contains(endpoints[0], "/actions/runs?") {
+		t.Fatalf("expected only workflow runs request, got %v", endpoints)
+	}
+}
+
 // The scheduler must still run local CI when the only hosted evidence is a
 // cancelled workflow: treating it as settled would skip local execution and
 // leave the trial waiting for CI that never comes.
