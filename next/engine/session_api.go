@@ -38,14 +38,14 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if _, ok := box.Size(req.Size); req.Size != "" && !ok {
 		return contract.SessionStartResponse{}, invalid("unknown size")
 	}
+	s.treeMu.Lock()
+	defer s.treeMu.Unlock()
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		if roomName != "" {
 			return contract.SessionStartResponse{}, invalid("unknown profile")
 		}
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	s.treeMu.Lock()
-	defer s.treeMu.Unlock()
 	tree, err := s.store.RoomTree(ctx, req.Room)
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -227,6 +227,8 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 // SessionSetProfile moves a session to another profile. A failed session wakes to carry its failed input with it.
 func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Principal, req contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, *contract.Error) {
 	var response contract.SessionSetProfileResponse
+	s.treeMu.Lock()
+	defer s.treeMu.Unlock()
 	target, problem := s.managedSession(ctx, caller, req.Session)
 	if problem != nil {
 		return response, problem

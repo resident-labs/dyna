@@ -47,6 +47,8 @@ type Service interface {
 	OpList(context.Context, contract.Principal, contract.OpListRequest) (contract.OpListResponse, *contract.Error)
 	HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error)
 	ProfileList(context.Context, contract.Principal, contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error)
+	ProfileSet(context.Context, contract.Principal, contract.ProfileSetRequest) (contract.ProfileSetResponse, *contract.Error)
+	ProfileRemove(context.Context, contract.Principal, contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error)
 	HostList(context.Context, contract.Principal, contract.HostListRequest) (contract.HostListResponse, *contract.Error)
 	AccountsRemove(context.Context, contract.Principal, contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error)
 	AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error)
