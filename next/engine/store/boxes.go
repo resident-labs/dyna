@@ -28,7 +28,7 @@ type LifecycleBox struct {
 }
 
 func (s *Store) Boxes(ctx context.Context) ([]box.Box, error) {
-	rows, err := s.LifecycleBoxes(ctx)
+	rows, err := s.lifecycleBoxes(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,11 @@ func (s *Store) Boxes(ctx context.Context) ([]box.Box, error) {
 }
 
 func (s *Store) LifecycleBoxes(ctx context.Context) ([]LifecycleBox, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,parent,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures FROM boxes WHERE NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY created_at,id")
+	return s.lifecycleBoxes(ctx, true)
+}
+
+func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]LifecycleBox, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,parent,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY created_at,id", activeOnly)
 	if err != nil {
 		return nil, err
 	}
