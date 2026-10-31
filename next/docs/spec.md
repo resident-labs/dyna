@@ -1328,7 +1328,7 @@ Acceptance:
 6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no-grant`, revoke, expiry, and the `hostexec-scope` refusal.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
-9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves an agent-class operation in the approvals panel.
+9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves a waiting operation in the approvals panel. (No M2 operation kind is agent-class, so the tree approval of 3.5 is checked by the engine/approve unit tests.)
 10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it for one hour, it runs, and after a revoke it is refused again.
 11. manual: a lead and its child run on hermeslab; the child's cgroup is under the lead's slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
