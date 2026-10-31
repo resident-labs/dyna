@@ -106,7 +106,7 @@ export class Attention {
       }
       this.seed(list.sessions ?? [], { id: room, seq: list.seq });
       const broken = this.broken.get(room);
-      if (broken?.size) void boxFailures(room, list.seq + 1).then(found => {
+      if (broken?.size) void boxFailures(room, list.seq + 1, broken.keys()).then(found => {
         for (const [id, failure] of found) if (broken.has(id)) broken.set(id, failure);
       });
       return list;

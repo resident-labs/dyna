@@ -328,6 +328,24 @@ test("a pending box's reason comes from history, follows a pending to pending ch
   } finally { globalThis.fetch = original; }
 });
 
+test("a pending box's reason behind a full page of other box changes still loads", async () => {
+  const original = globalThis.fetch;
+  const session = { id: "s", lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "pending", computer: "stopped", goal: "", startedAt: "", hadJobs: false };
+  const changed = (seq: number, id: string, reason: string) => event(seq, { type: "box.changed", body: { box: id, session: id, from: "pending", to: "pending", reason } });
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 300 }));
+    if (!String(input).endsWith("events.list")) return new Response("{}");
+    const { beforeSeq }: EventsListRequest = JSON.parse(String(init?.body));
+    const events = beforeSeq === 301 ? Array.from({ length: 200 }, (_, i) => changed(101 + i, "x", "cpu")) : [changed(50, "s", "room-limit")];
+    return new Response(JSON.stringify({ events }));
+  };
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.equal(room.pendingReasons.get("s"), "room-limit");
+  } finally { globalThis.fetch = original; }
+});
+
 test("a failed job counts after a fresh load until the owner reads past its end, and the page does not wait for it", async () => {
   const original = globalThis.fetch;
   let answer = (_: Response) => {};
