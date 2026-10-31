@@ -85,6 +85,30 @@ func (o *Operations) Resume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if a.State == contract.ConnectAttemptUnlinking {
+		o.mu.Lock()
+		ctx, cancel := context.WithCancel(o.ctx)
+		o.cancel, o.done = cancel, make(chan struct{})
+		done := o.done
+		go func() {
+			defer close(done)
+			defer o.signal()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for {
+				if o.unlink(ctx) == nil || ctx.Err() != nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+		o.mu.Unlock()
+		return nil
+	}
 	if linked || a.State == contract.ConnectAttemptStarting || a.State == contract.ConnectAttemptPending {
 		o.mu.Lock()
 		defer o.mu.Unlock()
@@ -117,7 +141,7 @@ func (o *Operations) Start(ctx context.Context, req contract.ConnectStartRequest
 	if err != nil {
 		return err
 	}
-	if linked || a.State == contract.ConnectAttemptStarting || a.State == contract.ConnectAttemptPending {
+	if linked || a.State == contract.ConnectAttemptStarting || a.State == contract.ConnectAttemptPending || a.State == contract.ConnectAttemptUnlinking {
 		return errors.New("link already active")
 	}
 	ready := o.launch(req)
@@ -186,6 +210,13 @@ func (o *Operations) Close() { o.mu.Lock(); defer o.mu.Unlock(); o.stop() }
 func (o *Operations) Cancel(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	a, err := o.state.ConnectAttempt(ctx)
+	if err != nil {
+		return err
+	}
+	if a.State == contract.ConnectAttemptUnlinking {
+		return errors.New("unlink is in progress")
+	}
 	o.stop()
 	linked, err := o.state.ConnectLinked(ctx)
 	if err != nil {
@@ -208,6 +239,14 @@ func (o *Operations) Unlink(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.stop()
+	return o.unlink(ctx)
+}
+
+func (o *Operations) unlink(ctx context.Context) error {
+	if err := o.state.SetConnectAttempt(ctx, contract.ConnectAttempt{State: contract.ConnectAttemptUnlinking}); err != nil {
+		return err
+	}
+	o.signal()
 	linked, err := o.state.ConnectLinked(ctx)
 	if err != nil {
 		return err
@@ -215,6 +254,9 @@ func (o *Operations) Unlink(ctx context.Context) error {
 	if linked {
 		link, err := o.files.Link()
 		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(filepath.Join(o.files.dir, "machine.key")); err != nil {
 			return err
 		}
 		key, err := o.files.Key()
@@ -231,13 +273,10 @@ func (o *Operations) Unlink(ctx context.Context) error {
 	if err := o.state.UnlinkConnect(ctx); err != nil {
 		return err
 	}
-	if err := o.state.SetConnectAttempt(ctx, contract.ConnectAttempt{State: contract.ConnectAttemptCanceled}); err != nil {
-		return err
-	}
 	for _, name := range []string{"pending.json", "link.json", "machine.key", "tunnel-token", "jwks.json"} {
 		if err := os.Remove(filepath.Join(o.files.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
-	return nil
+	return o.state.SetConnectAttempt(ctx, contract.ConnectAttempt{State: contract.ConnectAttemptCanceled})
 }
