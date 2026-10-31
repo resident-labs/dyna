@@ -445,10 +445,26 @@ type TranscriptAppendRequest struct {
 type TranscriptAppendResponse struct {
 	AckedOffset int64 `json:"ackedOffset"`
 }
+type ShellJobEndKind string
+
+const (
+	ShellJobExited   ShellJobEndKind = "exit"
+	ShellJobSignaled ShellJobEndKind = "signal"
+	ShellJobStopped  ShellJobEndKind = "stopped"
+)
+
+type ShellJobEnd struct {
+	Kind   ShellJobEndKind `json:"kind"`
+	Code   int             `json:"code,omitempty"`
+	Signal string          `json:"signal,omitempty"`
+}
+
 type ShellJobEndedRequest struct {
-	Job      ShellJobID `json:"job"`
-	ExitCode int        `json:"exitCode"`
-	Tail     string     `json:"tail"` // the last output, masked
+	Description string       `json:"description,omitempty"`
+	End         *ShellJobEnd `json:"end,omitempty"`
+	Job         ShellJobID   `json:"job"`
+	ExitCode    int          `json:"exitCode"`
+	Tail        string       `json:"tail"` // the last output, masked
 }
 type ShellJobEndedResponse struct{}
 type TurnInput struct {
@@ -500,14 +516,16 @@ type ShellOutputResponse struct{}
 // ShellJobOutput is one job's output since the last post, masked, in whole lines. With Reset, Text is
 // the job's last 64 KiB and replaces what the viewer shows. GET /v1/shell/watch streams these values.
 type ShellJobOutput struct {
-	Job      ShellJobID `json:"job"`
-	Command  string     `json:"command"`
-	Running  bool       `json:"running"`
-	ExitCode int        `json:"exitCode"` // when Running is false
-	Text     string     `json:"text"`
-	Reset    bool       `json:"reset,omitempty"`
-	Started  time.Time  `json:"started"`        // by the box's clock
-	Ended    time.Time  `json:"ended,omitzero"` // by the box's clock, once the job has ended
+	Description string       `json:"description,omitempty"`
+	End         *ShellJobEnd `json:"end,omitempty"`
+	Job         ShellJobID   `json:"job"`
+	Command     string       `json:"command"`
+	Running     bool         `json:"running"`
+	ExitCode    int          `json:"exitCode"` // when Running is false
+	Text        string       `json:"text"`
+	Reset       bool         `json:"reset,omitempty"`
+	Started     time.Time    `json:"started"`        // by the box's clock
+	Ended       time.Time    `json:"ended,omitzero"` // by the box's clock, once the job has ended
 }
 
 // TerminalResize is the JSON text frame a client sends on GET /v1/terminal to set the terminal's size.
