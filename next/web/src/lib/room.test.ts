@@ -223,7 +223,7 @@ test("a DM window reads and keeps only the events whose home is that DM", async 
 });
 
 test("session.list gives running turns and failures, and a live DM answer lands in the DM, not the feed", async () => {
-  const listed = { name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "" } as const;
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "" } as const;
   const server = engine(3, [{ id: "s", ...listed, turn: "t" }, { id: "x", ...listed, name: "Other", lastOutcome: "failed" }]);
   try {
     const room = new RoomStore("r", () => () => {});
@@ -244,7 +244,7 @@ test("session.list gives running turns and failures, and a live DM answer lands 
 });
 
 test("session.list and later events set and clear the running computers", async () => {
-  const listed = { name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", goal: "" } as const;
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", goal: "" } as const;
   const server = engine(3, [{ id: "s", ...listed, computer: "running" }, { id: "x", ...listed, computer: "stopped" }]);
   try {
     const room = new RoomStore("r", () => () => {});
@@ -262,7 +262,7 @@ test("session.list and later events set and clear the running computers", async 
 });
 
 test("activity labels follow the running turn and never reach a window", async () => {
-  const listed = { name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "" } as const;
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "" } as const;
   const server = engine(1, [{ id: "s", ...listed, turn: "t", activity: "read spec.md" }]);
   try {
     const room = new RoomStore("r", () => () => {});

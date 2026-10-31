@@ -35,7 +35,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": return undefined;
+    case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
