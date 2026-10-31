@@ -107,7 +107,7 @@ type boxChannel struct {
 	watching      uint64
 	shellWatching uint64
 	archiveRetry  bool
-	input         *computerInputHandle // owner input stays separate from the turn loop
+	input         computerInputHandle // owner input stays separate from the turn loop
 }
 
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
@@ -128,18 +128,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	state.computerLock.Lock()
 	s.mu.Lock()
 	previous := state.channel
-	s.mu.Unlock()
-	if previous != nil {
-		previous.input.close()
-	}
-	s.mu.Lock()
 	var roomID contract.RoomID
 	var stopped bool
 	if previous != nil {
 		roomID, stopped = s.clearComputerLocked(session.ID)
 		s.clearShellLocked(session.ID)
 	}
-	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1), input: &computerInputHandle{queue: make(chan contract.ComputerInputBatch, 64), done: make(chan struct{})}}
+	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1), input: computerInputHandle{queue: make(chan contract.ComputerInputBatch, 64), done: ctx.Done()}}
 	state.channel = channel
 	s.mu.Unlock()
 	if previous != nil {
@@ -154,7 +149,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	go func() {
 		defer func() {
 			state.computerLock.Lock()
-			channel.input.close()
 			stop()
 			s.mu.Lock()
 			var roomID contract.RoomID
@@ -187,7 +181,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 		}()
 		defer func() {
-			channel.input.close()
 			stop()
 			<-pumpDone
 			close(out)
