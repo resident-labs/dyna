@@ -15,9 +15,7 @@ func (s *Service) framePrincipal(ctx context.Context, viewer contract.SessionID,
 	case contract.PrincipalEngine:
 		return "the Dyna engine", nil
 	case contract.PrincipalSession:
-		var name string
-		var parent, viewerParent contract.SessionID
-		err := s.store.Read().QueryRowContext(ctx, "SELECT name,COALESCE(parent,''),(SELECT COALESCE(parent,'') FROM sessions WHERE id=?) FROM sessions WHERE id=?", viewer, principal.Session).Scan(&name, &parent, &viewerParent)
+		name, parent, viewerParent, err := s.store.FrameSession(ctx, viewer, principal.Session)
 		if err != nil {
 			return "", err
 		}
