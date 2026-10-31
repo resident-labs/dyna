@@ -2,7 +2,7 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
-import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
+import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
 
@@ -136,6 +136,7 @@ export class RoomStore {
       if (session.hadJobs) this.hadJobs.add(session.id);
     }
     if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
+    if (this.hadJobs.size) for (const key of await failedJobs(this.room, list.seq + 1)) this.failedJobs.add(key);
     // A failure turnFailures cannot place keeps list.seq and shows.
     for (const [session, { seq, body }] of await turnFailures(this.room, list.seq + 1, this.failed.keys())) {
       this.failed.set(session, seq);
