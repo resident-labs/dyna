@@ -19,7 +19,6 @@ type Load struct {
 // Each good probe also reads the dyna budget slices and calls onPressure once per episode. The caller owns the ticks.
 func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data string, report func(reachable bool, load Load), onPressure func(slice string, kind contract.PressureKind)) {
 	misses := 0
-	reachable := true
 	seen := make(map[string]*slicePressure)
 	var prevTime time.Time
 	var prevCPU int64
@@ -34,14 +33,13 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data strin
 			cancel()
 			if err != nil {
 				misses++
-				if misses >= 3 && reachable {
-					reachable = false
+				if misses >= 3 {
 					report(false, load)
 				}
 				continue
 			}
 			misses = 0
-			reachable = true
+			load.DiskBytes, load.DiskUsed = 0, 0
 			for _, line := range strings.Split(string(out), "\n") {
 				if strings.HasPrefix(line, "dyna-load ") {
 					var used, current int64
