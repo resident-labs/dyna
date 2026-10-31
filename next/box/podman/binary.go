@@ -7,12 +7,30 @@ import (
 	"strings"
 )
 
-// InstallBinary installs one version and atomically switches the current link.
-func (h *Host) InstallBinary(ctx context.Context, hostData, version string, binary []byte) error {
+// InstallBinary sends the engine bytes only when the host lacks the sum. It always switches the current link.
+func (h *Host) InstallBinary(ctx context.Context, hostData, version, sum string, read func() ([]byte, error)) error {
 	if !filepath.IsAbs(hostData) || version == "." || version == ".." || version == "" || filepath.Base(version) != version || strings.ContainsRune(version, '\x00') {
 		return errors.New("invalid binary path or version")
 	}
-	_, err := h.runInput(ctx, binary, "bash", "-c", `set -eu
+	probe, err := h.run(ctx, "bash", "-c", `set -eu
+if test -f "$1/bin/$2/dyna"; then sha256sum < "$1/bin/$2/dyna" | cut -d ' ' -f 1; fi`, "dyna-probe", hostData, version)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(probe)) == sum {
+		_, err = h.run(ctx, "bash", "-c", `set -eu
+cd -- "$1/bin"
+linkdir=$(mktemp -d .current.XXXXXX)
+trap 'rm -rf -- "$linkdir"' EXIT
+ln -s -- "$2" "$linkdir/current"
+mv -Tf -- "$linkdir/current" current`, "dyna-link", hostData, version)
+		return err
+	}
+	binary, err := read()
+	if err != nil {
+		return err
+	}
+	_, err = h.runInput(ctx, binary, "bash", "-c", `set -eu
 dir="$1/bin/$2"
 mkdir -p -- "$dir"
 tmp=$(mktemp "$dir/.dyna.XXXXXX")
