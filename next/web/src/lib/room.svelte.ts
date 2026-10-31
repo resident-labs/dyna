@@ -21,6 +21,9 @@ export class RoomStore {
   readonly turns = new SvelteMap<string, string>();
   // The running turn's latest activity label per session, such as "read spec.md".
   readonly activity = new SvelteMap<string, string>();
+  // The running turn's labels so far, newest last, kept while the page is open: the engine keeps only the latest one,
+  // so a page opened mid-turn starts from that. A DM shows them as the turn's steps.
+  readonly steps = new SvelteMap<string, string[]>();
   // Sessions whose last turn failed, with that turn.ended's seq.
   readonly failed = new SvelteMap<string, number>();
   // Why each failed turn failed, when the engine said; a session row shows it after "Failed".
@@ -120,7 +123,7 @@ export class RoomStore {
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
       this.boxes.set(session.id, session.boxState);
       if (session.turn) this.turns.set(session.id, session.turn);
-      if (session.turn && session.activity) this.activity.set(session.id, session.activity);
+      if (session.turn && session.activity) { this.activity.set(session.id, session.activity); this.steps.set(session.id, [session.activity]); }
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
       if (session.computer === "running") this.computers.add(session.id);
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
@@ -170,7 +173,11 @@ export class RoomStore {
     if (event.type === "conversation.read") { this.noteRead(event.body.conversation, event.body.seq); return; }
     // A live activity label has seq 0 and never reaches a window; a label of another turn is stale.
     if (event.type === "turn.activity") {
-      if (this.turns.get(event.body.session) === event.body.turn) this.activity.set(event.body.session, event.body.label);
+      if (this.turns.get(event.body.session) === event.body.turn) {
+        this.activity.set(event.body.session, event.body.label);
+        const steps = this.steps.get(event.body.session) ?? [];
+        if (steps.at(-1) !== event.body.label) this.steps.set(event.body.session, [...steps, event.body.label].slice(-50));
+      }
       return;
     }
     if (event.seq <= this.head) return;
@@ -188,6 +195,7 @@ export class RoomStore {
       case "session.closed":
         this.sessions.delete(event.body.session);
         this.activity.delete(event.body.session);
+        this.steps.delete(event.body.session);
         break;
       case "session.moved": {
         const moved = this.sessions.get(event.body.session);
@@ -206,11 +214,13 @@ export class RoomStore {
       case "turn.started":
         this.turns.set(event.body.session, event.body.turn);
         this.activity.delete(event.body.session);
+        this.steps.delete(event.body.session);
         break;
       case "turn.ended":
         if (this.turns.get(event.body.session) === event.body.turn) {
           this.turns.delete(event.body.session);
           this.activity.delete(event.body.session);
+          this.steps.delete(event.body.session);
         }
         // Only a completed turn clears the failure; a stopped turn did not succeed.
         if (event.body.outcome === "failed") {
