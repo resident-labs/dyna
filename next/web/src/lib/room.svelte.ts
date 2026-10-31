@@ -37,6 +37,7 @@ export class RoomStore {
   readonly shellJobs = new SvelteMap<string, number>();
   // Jobs that failed, as "session/job", so the dock can mark one while its Jobs tab is closed.
   readonly failedJobs = new SvelteSet<string>();
+  readonly endedJobs = new SvelteSet<string>();
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
   // The room's rules by number. rule.list reads after session.list, and rule.added and rule.removed repeat safely.
@@ -237,6 +238,7 @@ export class RoomStore {
       case "shell.job.ended":
         // A running turn's end replaces the count, as in the engine.
         if (!this.turns.has(event.body.session)) this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
+        this.endedJobs.add(`${event.body.session}/${event.body.job}`);
         if (event.body.exitCode !== 0) this.failedJobs.add(`${event.body.session}/${event.body.job}`);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
