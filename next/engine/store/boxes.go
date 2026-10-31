@@ -139,8 +139,6 @@ func (s *Store) BoxAncestry(ctx context.Context, id contract.BoxID) ([]box.Box, 
 	return result, rows.Err()
 }
 
-// SetBoxLifecycle commits an observed transition and retry data together.
-// A stale observed state returns false without publishing an event.
 // WakeLostInventory makes a new box channel eligible for one immediate inventory.
 func (s *Store) WakeLostInventory(ctx context.Context, id contract.BoxID) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
@@ -149,6 +147,8 @@ func (s *Store) WakeLostInventory(ctx context.Context, id contract.BoxID) error 
 	})
 }
 
+// SetBoxLifecycle commits an observed transition and retry data together.
+// A stale observed state returns false without publishing an event.
 func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time.Time, failures int, event contract.Event) (bool, error) {
 	changed := old.State != next.State || old.Reason != next.Reason
 	if old.State != next.State {
