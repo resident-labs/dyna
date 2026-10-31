@@ -443,7 +443,7 @@
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
-        {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title="Open a terminal in this session's box" onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
+        {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
         <span class="room-menu"><RoomMenu bind:this={roomMenu} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
@@ -526,6 +526,7 @@
   .tabs button[aria-pressed="true"] { background: var(--selected); color: var(--text); }
   .tool { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   .tool:hover { background: var(--hover); }
+  .tool[aria-pressed="true"] { background: var(--selected); }
   /* The session's name gets the crumb's width: the rail or a phone's back arrow leads to the room. */
   @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
   @media (max-width: 760px) { .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } .tool span { display: none; } }
