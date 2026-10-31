@@ -324,7 +324,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, record := range ops {
-		if err := s.finish(record.Operation, contract.OpResult{Error: "interrupted: outcome unknown"}); err != nil {
+		if err := s.finish(record.Operation, contract.OpResult{Error: "interrupted: outcome unknown", Cause: contract.CauseInterrupted}); err != nil {
 			return err
 		}
 	}

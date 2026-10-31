@@ -322,7 +322,7 @@ func TestInterruptedExecutionIsNotRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	record, err = f.s.Store.Operation(context.Background(), op.ID)
-	if err != nil || record.Operation.State != contract.OpFailed || f.runs.Load() != 0 {
+	if err != nil || record.Operation.State != contract.OpFailed || record.Operation.Result == nil || record.Operation.Result.Cause != contract.CauseInterrupted || f.runs.Load() != 0 {
 		t.Fatalf("record %+v err %v", record, err)
 	}
 }

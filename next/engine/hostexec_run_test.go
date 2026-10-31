@@ -320,7 +320,13 @@ func TestHostexecCardEmptyCwdAndStoreError(t *testing.T) {
 	if body := entry.Card(ctx, args, who).Body; strings.Contains(body, "Working directory") {
 		t.Fatalf("body %q", body)
 	}
-	result := entry.Execute(ctx, "missing-operation", args, who)
+	inactive := args
+	inactive.Grant = "missing-grant"
+	result := entry.Execute(ctx, "missing-operation", inactive, who)
+	if result.Cause != contract.CauseGrantInactive {
+		t.Fatalf("inactive result %+v", result)
+	}
+	result = entry.Execute(ctx, "missing-operation", args, who)
 	if result.Error == "" || result.Error == "grant no longer active" {
 		t.Fatalf("result %+v", result)
 	}
