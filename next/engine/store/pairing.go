@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,6 +19,9 @@ import (
 )
 
 var ErrPair = errors.New("invalid pairing code")
+
+// ErrPairEnded says that no live code exists: it was used, expired, or took 5 wrong tries.
+var ErrPairEnded = fmt.Errorf("%w: it ended", ErrPair)
 var pairEncoding = base32.NewEncoding("ABCDEFGHJKLMNPQRSTUVWXYZ23456789").WithPadding(base32.NoPadding)
 
 func (s *Store) NewPairCode(ctx context.Context, scopes []contract.Scope, now time.Time) (string, error) {
@@ -50,26 +54,26 @@ func (s *Store) RedeemPairCode(ctx context.Context, code, name string, defaults 
 	hash := sha256.Sum256([]byte(strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(code))))
 	tokenHash := sha256.Sum256([]byte(token))
 	d := Device{ID: id, Name: name, TokenHash: tokenHash, PairedAt: now, LastSeenAt: now, ExpiresAt: now.Add(DeviceLife)}
-	failed := false
+	var failed error
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		var stored, scopes []byte
 		var expires int64
 		var tries int
 		err := tx.QueryRowContext(ctx, "SELECT code_hash,scopes,expires_at,tries FROM pairing_codes WHERE id=1").Scan(&stored, &scopes, &expires, &tries)
 		if err == sql.ErrNoRows {
-			failed = true
+			failed = ErrPairEnded
 			return nil
 		}
 		if err != nil {
 			return err
 		}
 		if expires <= now.UnixMilli() || tries >= 5 {
-			failed = true
+			failed = ErrPairEnded
 			_, err = tx.ExecContext(ctx, "DELETE FROM pairing_codes WHERE id=1")
 			return err
 		}
 		if subtle.ConstantTimeCompare(hash[:], stored) != 1 {
-			failed = true
+			failed = ErrPair
 			if tries+1 >= 5 {
 				_, err = tx.ExecContext(ctx, "DELETE FROM pairing_codes WHERE id=1")
 			} else {
@@ -99,8 +103,8 @@ func (s *Store) RedeemPairCode(ctx context.Context, code, name string, defaults 
 	if err != nil {
 		return "", Device{}, err
 	}
-	if failed {
-		return "", Device{}, ErrPair
+	if failed != nil {
+		return "", Device{}, failed
 	}
 	return token, d, nil
 }
