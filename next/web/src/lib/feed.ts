@@ -129,6 +129,7 @@ export function describe(event: Event, name: Name): string {
     case "session.started": return `${name(event.body.session)} started`;
     case "session.closed": return `${name(event.body.session)} closed`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
+    case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return `${name(event.body.session)}'s box is ${event.body.to}`;
     case "turn.started": return `${name(event.body.session)} started a turn`;
     case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;

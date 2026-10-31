@@ -54,6 +54,10 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		}
 		s.mu.Lock()
 		activity := s.activity[session.ID]
+		session.Computer = contract.ComputerStopped
+		if c := s.computers[session.ID]; c != nil {
+			session.Computer = c.state
+		}
 		s.mu.Unlock()
 		if session.Turn != "" && activity.Turn == session.Turn {
 			session.Activity = activity.Label

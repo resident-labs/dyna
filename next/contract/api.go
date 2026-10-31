@@ -18,6 +18,7 @@ const (
 	MethodPost             Method = "post"
 	MethodEventsList       Method = "events.list"
 	MethodBoxHello         Method = "box.hello"
+	MethodComputerChanged  Method = "computer.changed"
 	MethodTurnOutput       Method = "turn.output"
 	MethodTurnActivity     Method = "turn.activity"
 	MethodTranscriptAppend Method = "transcript.append"
@@ -57,16 +58,17 @@ type SessionListRequest struct {
 	Room RoomID `json:"room"`
 }
 type SessionSummary struct {
-	ID          SessionID   `json:"id"`
-	Name        string      `json:"name"`
-	Parent      SessionID   `json:"parent"`
-	Profile     ProfileName `json:"profile"`
-	Box         BoxID       `json:"box"`
-	BoxState    BoxState    `json:"boxState"`
-	Goal        string      `json:"goal"`
-	Turn        TurnID      `json:"turn,omitempty"`        // the running turn
-	Activity    string      `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
-	LastOutcome TurnOutcome `json:"lastOutcome,omitempty"` // of the last ended turn
+	ID          SessionID     `json:"id"`
+	Name        string        `json:"name"`
+	Parent      SessionID     `json:"parent"`
+	Profile     ProfileName   `json:"profile"`
+	Box         BoxID         `json:"box"`
+	BoxState    BoxState      `json:"boxState"`
+	Computer    ComputerState `json:"computer"`
+	Goal        string        `json:"goal"`
+	Turn        TurnID        `json:"turn,omitempty"`        // the running turn
+	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
+	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
@@ -257,6 +259,16 @@ type Upgrade struct {
 	Version string `json:"version"`
 }
 
+type ComputerWatchStart struct {
+	Generation uint64 `json:"generation"`
+}
+type ComputerWatchStop struct{}
+
+type ComputerChangedRequest struct {
+	To ComputerState `json:"to"`
+}
+type ComputerChangedResponse struct{}
+
 type Archive struct{}
 
 type ArchiveDoneRequest struct {
@@ -281,6 +293,11 @@ type BoxMessageBody interface {
 type BoxMessage struct {
 	Body BoxMessageBody `json:"body"`
 }
+
+func (ComputerWatchStart) BoxMessageType() BoxMessageType { return "computer.watch.start" }
+func (ComputerWatchStart) isBoxMessageBody()              {}
+func (ComputerWatchStop) BoxMessageType() BoxMessageType  { return "computer.watch.stop" }
+func (ComputerWatchStop) isBoxMessageBody()               {}
 
 func (Archive) BoxMessageType() BoxMessageType { return "archive" }
 func (Archive) isBoxMessageBody()              {}
