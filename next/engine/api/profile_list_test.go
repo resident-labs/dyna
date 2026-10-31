@@ -52,7 +52,7 @@ func TestProfileListOwnerOnly(t *testing.T) {
 	if err := json.Unmarshal(got.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	want := []contract.ProfileSummary{{Name: "a", Provider: contract.ModelProviderAnthropic, Model: "a-model", Thinking: contract.ThinkingLow}, {Name: "z", Provider: contract.ModelProviderOpenAI, Model: "z-model", Thinking: contract.ThinkingHigh}}
+	want := []contract.ProfileSummary{{Name: "a", Provider: contract.ModelProviderAnthropic, Model: "a-model", AllowedModels: []string{"a-model"}, Thinking: contract.ThinkingLow}, {Name: "z", Provider: contract.ModelProviderOpenAI, Model: "z-model", AllowedModels: []string{"z-model"}, Thinking: contract.ThinkingHigh}}
 	if !reflect.DeepEqual(result.Profiles, want) {
 		t.Fatalf("profiles: %+v", result.Profiles)
 	}
