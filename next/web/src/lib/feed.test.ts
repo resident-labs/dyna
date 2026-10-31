@@ -31,10 +31,11 @@ test("folds the work between two posts into one row", () => {
   assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web ran 2 turns");
 });
 
-test("counts sessions once more than two ran turns", () => {
+test("names two sessions that ran turns and counts more", () => {
   const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
   const begun = (seq: number, session: string) => event(seq, { type: "session.started", body: { session, name: session, profile: "p", goal: "" } });
   const name = (session: string) => session;
+  assert.equal(workSummary([started(1, "designer"), started(2, "lead-web")], name), "designer and lead-web ran turns");
   assert.equal(workSummary([begun(1, "a"), started(2, "a"), started(3, "b"), started(4, "c")], name), "a started, 3 sessions ran turns");
 });
 
