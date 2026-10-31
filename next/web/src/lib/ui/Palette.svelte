@@ -4,7 +4,7 @@
   import { call } from "../client.ts";
   import type { RoomSummary } from "../contract.gen.ts";
   import { build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, visits, type Item, type Person, type Place, type Scope, type Visit } from "../palette.ts";
-  import { MessageSearch, type SearchCall } from "../search.svelte.ts";
+  import { MessageSearch, SessionSearch, type SearchCall } from "../search.svelte.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import { hue } from "../identity.ts";
@@ -22,6 +22,7 @@
   let recent: Visit[] = $state.raw([]);
   let retry = $state(0);
   const messages = new MessageSearch(untrack(() => search));
+  const sessionSearch = new SessionSearch(request => call("session.search", request));
   let current = $derived(rooms.find(found => found.id === room));
   let actions: Action[] = $derived([
     ...current ? [
@@ -43,7 +44,17 @@
     const place = places.find(found => found.id === visit.room);
     return place ? [{ kind: "room", room: place }] : [];
   }));
-  let sections = $derived(build(text, scope, { rooms: places, sessions: people, actions, recent: recentItems, messages: messages.snapshot }));
+  let sessionMatches = $derived(sessionSearch.snapshot);
+  let searchingSessions = $derived(!!mode.query && (!mode.scope || mode.scope === "sessions"));
+  let foundPeople: Person[] = $derived(sessionMatches.sessions.map(found => {
+    const open = people.find(person => person.id === found.id);
+    return { id: found.id, name: found.name, room: found.room, roomName: rooms.find(room => room.id === found.room)?.name ?? "Room",
+      root: open?.root ?? false, working: open?.working ?? false, closed: found.closed };
+  }));
+  let sections = $derived(build(text, scope, { rooms: places, sessions: searchingSessions ? foundPeople : people,
+    sessionsTotal: searchingSessions ? sessionMatches.total : undefined,
+    sessionsState: searchingSessions && (sessionMatches.state === "searching" || sessionMatches.state === "failed") ? sessionMatches.state : undefined,
+    actions, recent: recentItems, messages: messages.snapshot }));
   let items = $derived(rows(sections));
 
   onMount(() => {
@@ -63,6 +74,13 @@
     const term = selected && selected !== "messages" ? "" : query;
     messages.prepare(term);
     const timer = setTimeout(() => void messages.start(term, target), 150);
+    return () => clearTimeout(timer);
+  });
+  $effect(() => {
+    const term = searchingSessions ? mode.query : "";
+    void retry;
+    sessionSearch.prepare(term);
+    const timer = setTimeout(() => void sessionSearch.start(term), 150);
     return () => clearTimeout(timer);
   });
   $effect(() => { void text; void scope; pick = 0; });
@@ -137,8 +155,8 @@
           </button>
         {/each}
         {#if scope === "sessions" && section.group === "sessions" && section.shown < section.total}<p class="note">Showing {section.shown.toLocaleString()} of {section.total.toLocaleString()} sessions. Narrow the search to see the rest.</p>{/if}
-        {#if section.state === "searching"}<div class="note">Searching messages…<div class="skeleton"></div><div class="skeleton short"></div></div>
-        {:else if section.state === "failed"}<div class="note">Could not search messages. <button class="retry" onclick={() => retry++}>Retry</button></div>{/if}
+        {#if section.state === "searching"}<div class="note">Searching {section.group}…<div class="skeleton"></div><div class="skeleton short"></div></div>
+        {:else if section.state === "failed"}<div class="note">Could not search {section.group}. <button class="retry" onclick={() => retry++}>Retry</button></div>{/if}
       {/each}
       {#if mode.query && !sections.length}<p class="note">No room, session, message or action matches “{mode.query}”.</p>{/if}
     </div>

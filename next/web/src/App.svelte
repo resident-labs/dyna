@@ -260,8 +260,7 @@
   let palette = $state(false);
   let paletteOpener: HTMLElement | undefined;
   let jumpSeq: number | undefined = $state();
-  // Author names for closed sessions will come from the search response when that contract lands.
-  const searchPosts: SearchCall = async request => ({ ...await call("post.search", request), names: null });
+  const searchPosts: SearchCall = request => call("post.search", request);
   function closePalette() {
     palette = false;
     void tick().then(() => (paletteOpener?.isConnected ? paletteOpener : composer)?.focus());
