@@ -418,4 +418,17 @@ func TestRoomListCountsAFailedBoxOnceWithoutAFailedTurn(t *testing.T) {
 	if rooms, problem = s.RoomList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomListRequest{}); problem != nil || rooms.Rooms[0].Failed != 1 {
 		t.Fatalf("a failed box and a failed turn count twice: %+v: %v", rooms, problem)
 	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM turns WHERE session=?", worker); err != nil {
+			return err
+		}
+		_, err := tx.Exec("UPDATE boxes SET state='lost' WHERE session=?", worker)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rooms, problem = s.RoomList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomListRequest{}); problem != nil || rooms.Rooms[0].Failed != 1 {
+		t.Fatalf("a lost box with no failed turn counts once: %+v: %v", rooms, problem)
+	}
 }
