@@ -50,6 +50,7 @@ type Service interface {
 	AccountsRemove(context.Context, contract.Principal, contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error)
 	AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error)
 	AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error)
+	AccountsReconnect(context.Context, contract.Principal, contract.AccountsReconnectRequest) (contract.AccountsConnectResponse, *contract.Error)
 	AccountsConnectCallback(context.Context, contract.Principal, contract.AccountsConnectCallbackRequest) (contract.AccountsConnectCallbackResponse, *contract.Error)
 	AccountsConnectStatus(context.Context, contract.Principal, contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error)
 	AccountsSetKey(context.Context, contract.Principal, contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, *contract.Error)

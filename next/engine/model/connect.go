@@ -31,6 +31,7 @@ type connectAttempt struct {
 	account       contract.AccountID
 	proxyID       string
 	callbackSent  bool
+	saved         bool
 }
 
 type Connections struct {
@@ -38,8 +39,10 @@ type Connections struct {
 	management managementClient
 	store      AccountStore
 	now        func() time.Time
-	mu         sync.Mutex
-	attempts   map[string]*connectAttempt
+	// Lock order: removeMu -> proxy credential gate -> manager.mu -> mu -> store.
+	// Never call the proxy while holding mu.
+	mu       sync.Mutex
+	attempts map[string]*connectAttempt
 }
 
 func (p *Proxy) Connections(key string, st AccountStore, now func() time.Time) *Connections {
@@ -66,16 +69,25 @@ func (c *Connections) request(ctx context.Context, method, path string, body []b
 }
 
 func (c *Connections) Start(ctx context.Context, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, error) {
+	return c.start(ctx, req, "", "")
+}
+
+func (c *Connections) Reconnect(ctx context.Context, account contract.AccountID, proxyID string, provider contract.AccountProvider) (contract.AccountsConnectResponse, error) {
+	return c.start(ctx, contract.AccountsConnectRequest{Provider: provider}, account, proxyID)
+}
+
+func (c *Connections) start(ctx context.Context, req contract.AccountsConnectRequest, account contract.AccountID, proxyID string) (contract.AccountsConnectResponse, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	for id, entry := range c.attempts {
-		if !c.now().Before(entry.expires.Add(time.Hour)) {
+		if !(entry.saved && entry.status == contract.ConnectPending) && !c.now().Before(entry.expires.Add(time.Hour)) {
 			delete(c.attempts, id)
 		}
 	}
 	if len(c.attempts) >= 128 {
+		c.mu.Unlock()
 		return contract.AccountsConnectResponse{}, errConnect
 	}
+	c.mu.Unlock()
 	var provider string
 	var flow contract.ConnectFlow
 	for _, option := range oauthProviders {
@@ -87,17 +99,19 @@ func (c *Connections) Start(ctx context.Context, req contract.AccountsConnectReq
 	if provider == "" {
 		return contract.AccountsConnectResponse{}, errConnect
 	}
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return contract.AccountsConnectResponse{}, errConnect
+	}
+	attempt := hex.EncodeToString(id[:])
 	var result oauthResponse
 	generation := c.proxy.generation.Load()
-	if err := c.request(ctx, http.MethodGet, "oauth/auth-url?provider="+provider, nil, &result); err != nil {
-		return contract.AccountsConnectResponse{}, err
+	data, err := c.management.requestAttempt(ctx, http.MethodGet, "/v8/management/oauth/auth-url?provider="+provider, nil, attempt)
+	if err != nil || json.Unmarshal(data, &result) != nil {
+		return contract.AccountsConnectResponse{}, errConnect
 	}
 	link, err := url.Parse(result.URL)
 	if err != nil || link.Scheme != "https" || link.Host == "" || result.State == "" || generation != c.proxy.generation.Load() {
-		return contract.AccountsConnectResponse{}, errConnect
-	}
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
 		return contract.AccountsConnectResponse{}, errConnect
 	}
 	seconds := result.ExpiresIn
@@ -105,20 +119,36 @@ func (c *Connections) Start(ctx context.Context, req contract.AccountsConnectReq
 		seconds = 300
 	}
 	expires := c.now().Add(time.Duration(seconds) * time.Second)
-	attempt := hex.EncodeToString(id[:])
-	c.attempts[attempt] = &connectAttempt{provider: req.Provider, proxyProvider: provider, flow: flow, label: req.Label, state: result.State, expires: expires, generation: generation, status: contract.ConnectPending}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.attempts) >= 128 || generation != c.proxy.generation.Load() {
+		return contract.AccountsConnectResponse{}, errConnect
+	}
+	c.attempts[attempt] = &connectAttempt{provider: req.Provider, proxyProvider: provider, flow: flow, label: req.Label, state: result.State, expires: expires, generation: generation, status: contract.ConnectPending, account: account, proxyID: proxyID}
 	return contract.AccountsConnectResponse{Attempt: attempt, Flow: flow, Link: result.URL, Code: result.UserCode, ExpiresAt: expires}, nil
+}
+
+// CancelReconnect prevents unsaved attempts from replacing a removed account.
+func (c *Connections) CancelReconnect(id contract.AccountID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, a := range c.attempts {
+		if a.account == id && !a.saved && a.status == contract.ConnectPending {
+			a.status = contract.ConnectFailed
+		}
+	}
 }
 
 func (c *Connections) Callback(ctx context.Context, req contract.AccountsConnectCallbackRequest) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	a := c.attempts[req.Attempt]
 	if a == nil || a.status != contract.ConnectPending || a.callbackSent || !c.now().Before(a.expires) || a.generation != c.proxy.generation.Load() || a.flow != contract.ConnectFlowCallback {
+		c.mu.Unlock()
 		return errConnect
 	}
 	u, err := url.Parse(req.RedirectURL)
 	if err != nil || len(u.Query()["state"]) != 1 || u.Query().Get("state") != a.state {
+		c.mu.Unlock()
 		return errConnect
 	}
 	payload, err := json.Marshal(struct {
@@ -126,9 +156,11 @@ func (c *Connections) Callback(ctx context.Context, req contract.AccountsConnect
 		RedirectURL string `json:"redirect_url"`
 	}{a.proxyProvider, req.RedirectURL})
 	if err != nil {
+		c.mu.Unlock()
 		return errConnect
 	}
 	a.callbackSent = true
+	c.mu.Unlock()
 	var result oauthResponse
 	return c.request(ctx, http.MethodPost, "oauth/callback", payload, &result)
 }
@@ -147,6 +179,10 @@ func (c *Connections) Complete(ctx context.Context, completed OAuthCompletion, c
 			break
 		}
 	}
+	var saved bool
+	if attempt != "" {
+		saved = c.attempts[attempt].saved
+	}
 	c.mu.Unlock()
 	if attempt == "" {
 		return ErrCompletionRejected
@@ -156,6 +192,9 @@ func (c *Connections) Complete(ctx context.Context, completed OAuthCompletion, c
 		return err
 	}
 	if status.Status != contract.ConnectConnected {
+		if saved {
+			return errConnect
+		}
 		return ErrCompletionRejected
 	}
 	return nil
@@ -168,13 +207,13 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 	if a == nil {
 		return contract.AccountsConnectStatusResponse{Status: contract.ConnectFailed}, nil
 	}
+	if expected != "" && a.proxyID != "" && a.proxyID != expected {
+		return contract.AccountsConnectStatusResponse{}, ErrCompletionRejected
+	}
 	if a.status == contract.ConnectConnected || a.status == contract.ConnectFailed {
-		if expected != "" && a.proxyID != expected {
-			return contract.AccountsConnectStatusResponse{}, ErrCompletionRejected
-		}
 		return contract.AccountsConnectStatusResponse{Status: a.status, AccountID: a.account}, nil
 	}
-	if !c.now().Before(a.expires) {
+	if !a.saved && !c.now().Before(a.expires) {
 		if expected != "" {
 			a.status = contract.ConnectFailed
 		}
@@ -184,8 +223,21 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 		a.status = contract.ConnectFailed
 		return contract.AccountsConnectStatusResponse{Status: a.status}, nil
 	}
+	state := a.state
+	c.mu.Unlock()
 	var result oauthResponse
-	if err := c.request(ctx, http.MethodGet, "oauth/status?state="+url.QueryEscape(a.state), nil, &result); err != nil {
+	requestErr := c.request(ctx, http.MethodGet, "oauth/status?state="+url.QueryEscape(state), nil, &result)
+	c.mu.Lock()
+	if c.attempts[req.Attempt] != a || a.status != contract.ConnectPending {
+		return contract.AccountsConnectStatusResponse{Status: a.status, AccountID: a.account}, nil
+	}
+	if !a.saved && !c.now().Before(a.expires) {
+		return contract.AccountsConnectStatusResponse{Status: contract.ConnectExpired}, nil
+	}
+	if requestErr != nil {
+		if a.saved {
+			return contract.AccountsConnectStatusResponse{}, errConnect
+		}
 		a.status = contract.ConnectFailed
 		return contract.AccountsConnectStatusResponse{Status: a.status}, nil
 	}
@@ -200,15 +252,41 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 		}
 		return contract.AccountsConnectStatusResponse{Status: contract.ConnectPending}, nil
 	case "ok":
-		if result.AuthID == "" || !result.Saved || (expected != "" && result.AuthID != expected) {
+		if result.AuthID == "" || !result.Saved || (expected != "" && result.AuthID != expected) || (a.account != "" && result.AuthID != a.proxyID) {
 			a.status = contract.ConnectFailed
 			break
 		}
 		if !result.Adopted {
+			if a.saved {
+				a.status = contract.ConnectFailed
+				return contract.AccountsConnectStatusResponse{}, errConnect
+			}
 			if expected != "" {
 				a.status = contract.ConnectFailed
 			}
 			return contract.AccountsConnectStatusResponse{Status: contract.ConnectPending}, nil
+		}
+		if a.account != "" {
+			bindings, err := c.store.Accounts(ctx)
+			if err != nil {
+				return contract.AccountsConnectStatusResponse{}, errConnect
+			}
+			found := false
+			for _, binding := range bindings {
+				if binding.Account.ID == a.account && binding.ProxyID == a.proxyID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return contract.AccountsConnectStatusResponse{}, errConnect
+			}
+			if !a.saved {
+				a.status = contract.ConnectFailed
+				break
+			}
+			a.status = contract.ConnectConnected
+			break
 		}
 		var raw [16]byte
 		if _, err := rand.Read(raw[:]); err != nil {
