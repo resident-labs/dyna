@@ -9,7 +9,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-var ErrMoveCycle = errors.New("cannot move a session into its subtree")
+var ErrMoveCycle = errors.New("move would make a cycle")
 
 // MoveSession checks idleness and commits the new tree and recreate markers together.
 func (s *Store) MoveSession(ctx context.Context, target, parent contract.SessionID, budgetParent contract.BoxID, event contract.Event, members []box.Box, boxEvents []contract.Event) (contract.SessionID, bool, error) {
