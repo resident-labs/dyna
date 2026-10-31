@@ -15,7 +15,7 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
-  import { fileSize, formatTime, isThumb, type Row } from "../feed.ts";
+  import { fileSize, formatTime, isImage, isThumb, type Row } from "../feed.ts";
   import type { Attachment } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   let { row, author, to, root, onretry, ondiscard, onforward }: {
@@ -36,6 +36,9 @@
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
   // Images the engine refused. Each shows as a file card without a link, as its link would open only the refusal.
   let failed: string[] = $state([]);
+  // Images already retried once; a second failure leaves the card without Retry.
+  let retried: string[] = $state([]);
+  const retry = (file: Attachment) => { retried = [...retried, file.sha256]; failed = failed.filter(sha => sha !== file.sha256); };
   let images = $derived(row.attachments.filter(file => isThumb(file, failed)));
   let others = $derived(row.attachments.filter(file => !isThumb(file, failed)));
 </script>
@@ -60,7 +63,8 @@
       title={dead ? `${file.name} did not load` : `Open ${file.name}`}>
       <span class="ext" aria-hidden="true">{extension(file.name)}</span>
       <span class="meta"><span class="file-name">{file.name}</span><span class="size">{dead ? "Did not load" : fileSize(file.bytes)}</span></span>
-      {#if !dead}<span class="open" aria-hidden="true">↗</span>{/if}</svelte:element>{/each}
+      {#if !dead}<span class="open" aria-hidden="true">↗</span>
+      {:else if isImage(file) && !retried.includes(file.sha256)}<button type="button" class="reload" onclick={() => retry(file)}>Retry</button>{/if}</svelte:element>{/each}
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>
@@ -109,6 +113,8 @@
   .file.dead { cursor: default; }
   .file.dead:hover { background: none; }
   .file.dead .file-name { color: var(--text); }
+  .reload { margin-left: auto; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+  .reload:hover { color: var(--text); text-decoration: underline; }
   .ext { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 6px; background: var(--raised);
     color: var(--muted); font: 600 10.5px var(--mono); }
   .meta { display: flex; flex-direction: column; min-width: 0; }
