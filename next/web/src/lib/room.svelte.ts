@@ -2,7 +2,8 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
-import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
+import { pendingReason, type PendingReason } from "./event.ts";
+import { lastBoxChanges, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
 
@@ -32,6 +33,8 @@ export class RoomStore {
   readonly causes = new SvelteMap<string, FailureCause>();
   // Sessions whose box failed or was lost, with why.
   readonly boxFailures = new SvelteMap<string, BoxFailure>();
+  // Why each pending box waits, when admission said.
+  readonly pendingReasons = new SvelteMap<string, PendingReason>();
   // The owner's read position per conversation, by readKey; the newest seq wins.
   private readonly read = new SvelteMap<string, number>();
   // Sessions whose box runs a computer the owner can watch.
@@ -149,7 +152,14 @@ export class RoomStore {
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
       if (session.hadJobs || session.shellJobs) this.hadJobs.add(session.id);
     }
-    if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
+    if ([...this.boxes.values()].some(box => box === "pending" || box === "failed" || box === "lost")) {
+      for (const [id, { at, body }] of await lastBoxChanges(this.room, list.seq + 1)) {
+        if (body.to !== this.boxes.get(id)) continue;
+        if (body.to === "failed" || body.to === "lost") this.boxFailures.set(id, { box: body.to, cause: body.cause, at });
+        const reason = pendingReason(body);
+        if (reason) this.pendingReasons.set(id, reason);
+      }
+    }
     // A failure turnFailures cannot place keeps list.seq and shows.
     for (const [session, { seq, body }] of await turnFailures(this.room, list.seq + 1, this.failed.keys())) {
       this.failed.set(session, seq);
@@ -215,15 +225,18 @@ export class RoomStore {
         if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
         break;
       }
-      case "box.changed":
-        this.boxes.set(event.body.session, event.body.to);
-        if (event.body.to === "failed" || event.body.to === "lost") {
-          const { session, to, cause } = event.body;
-          this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });
-        } else this.boxFailures.delete(event.body.session);
+      case "box.changed": {
+        const { session, to, cause } = event.body, reason = pendingReason(event.body);
+        this.boxes.set(session, to);
+        if (to === "failed" || to === "lost") this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });
+        else this.boxFailures.delete(session);
+        // A pending to pending change can name a new reason.
+        if (reason) this.pendingReasons.set(session, reason);
+        else this.pendingReasons.delete(session);
         // A computer runs only inside a ready box.
-        if (event.body.to !== "ready") this.computers.delete(event.body.session);
+        if (to !== "ready") this.computers.delete(session);
         break;
+      }
       case "computer.changed":
         if (event.body.to === "running") this.computers.add(event.body.session);
         else this.computers.delete(event.body.session);
