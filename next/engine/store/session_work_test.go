@@ -66,7 +66,7 @@ func TestSessionWorkPagesTurns(t *testing.T) {
 	if err != nil || total != 3 || more || len(page) != 1 || page[0].Started.ID != "start1" || page[0].Ended != nil || len(page[0].Posts) != 1 {
 		t.Fatalf("older=%+v more=%v err=%v", page, more, err)
 	}
-	if _, _, _, err := s.SessionWork(ctx, "s", "missing", 2); err != sql.ErrNoRows {
+	if _, _, _, err := s.SessionWork(ctx, "s", "missing", 2); err != ErrInvalidWorkCursor {
 		t.Fatalf("missing cursor error = %v", err)
 	}
 }
