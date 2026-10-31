@@ -9,14 +9,24 @@ export type ContextSections = Record<string, string>;
 export function deliveredSections(branch: SessionEntry[]): ContextSections | undefined {
 	for (let i = branch.length - 1; i >= 0; i--) {
 		const entry = branch[i];
-		if (entry.type === "message" && entry.message.role === "custom" && entry.message.customType === "context_update") {
+		if (
+			entry.type === "message" &&
+			entry.message.role === "custom" &&
+			entry.message.customType === "context_update"
+		) {
 			const details = entry.message.details;
 			if (isContextDetails(details)) return details.sections;
 		}
-		const head = entry.type === "compaction" ? entry.systemMessage
-			: entry.type === "message" && entry.message.role === "system" && entry.message.sections ? entry.message : undefined;
+		const head =
+			entry.type === "compaction"
+				? entry.systemMessage
+				: entry.type === "message" && entry.message.role === "system" && entry.message.sections
+					? entry.message
+					: undefined;
 		if (head) {
-			return Object.fromEntries(Object.entries(head.sections ?? {}).filter((item): item is [string, string] => item[1] !== null));
+			return Object.fromEntries(
+				Object.entries(head.sections ?? {}).filter((item): item is [string, string] => item[1] !== null),
+			);
 		}
 	}
 	return undefined;
@@ -26,8 +36,12 @@ export function deliveredSections(branch: SessionEntry[]): ContextSections | und
 function isContextDetails(details: unknown): details is { sections: ContextSections } {
 	if (typeof details !== "object" || details === null || !("sections" in details)) return false;
 	const sections = details.sections;
-	return typeof sections === "object" && sections !== null && !Array.isArray(sections)
-		&& Object.values(sections).every((value) => typeof value === "string");
+	return (
+		typeof sections === "object" &&
+		sections !== null &&
+		!Array.isArray(sections) &&
+		Object.values(sections).every((value) => typeof value === "string")
+	);
 }
 
 /**
@@ -46,8 +60,11 @@ export function createContextUpdate(previous: ContextSections, current: ContextS
 		const diff = diffLines(old, text)
 			.map((part) => {
 				const prefix = part.added ? "+" : part.removed ? "-" : " ";
-				return part.value.split("\n").filter((line, i, lines) => i < lines.length - 1 || line !== "")
-					.map((line) => prefix + line).join("\n");
+				return part.value
+					.split("\n")
+					.filter((line, i, lines) => i < lines.length - 1 || line !== "")
+					.map((line) => prefix + line)
+					.join("\n");
 			})
 			.join("\n");
 		changes.push(`Changed section ${key}:\n${diff}`);

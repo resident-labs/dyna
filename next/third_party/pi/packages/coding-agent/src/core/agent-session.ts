@@ -486,6 +486,7 @@ export class AgentSession {
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
 
 	private _baseSystemPromptOptions!: NormalizedBuildSystemPromptOptions;
+	private _hostSections: Record<string, string> = {};
 	/** Prompt options after before_agent_start mutations for the active run. */
 	private _runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
 
@@ -776,7 +777,10 @@ export class AgentSession {
 
 	/** Compaction settings for model with the --compaction-trigger-tokens override applied. */
 	private _compactionSettings(model: Pick<Model<any>, "provider" | "id"> | undefined) {
-		return withCompactionTriggerOverride(this.settingsManager.getCompactionSettings(model), this._compactionTriggerTokens);
+		return withCompactionTriggerOverride(
+			this.settingsManager.getCompactionSettings(model),
+			this._compactionTriggerTokens,
+		);
 	}
 
 	/** Whether `projection`, the current session projection, exceeds the compaction threshold of `model`. */
@@ -1734,6 +1738,12 @@ export class AgentSession {
 		return Array.from(unique);
 	}
 
+	/** Replace host-supplied sections for the next request. */
+	setPromptSections(sections: Array<{ key: string; text: string }>): void {
+		this._hostSections = Object.fromEntries(sections.map(({ key, text }) => [key, text]));
+		this._baseSystemPromptOptions.sections = { ...this._hostSections };
+	}
+
 	private _rebuildSystemPrompt(toolNames: string[]): void {
 		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
 		const toolSnippets: Record<string, string> = {};
@@ -1751,6 +1761,7 @@ export class AgentSession {
 
 		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
 			cwd: this._cwd,
+			sections: this._hostSections,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
@@ -1887,7 +1898,12 @@ export class AgentSession {
 	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
 	 * @param onStarted Called once the run's messages are prepared, before the first request.
 	 */
-	private async _startRun(trigger: BeforeAgentStartTrigger | undefined, onStarted?: () => void, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<void> {
+	private async _startRun(
+		trigger: BeforeAgentStartTrigger | undefined,
+		onStarted?: () => void,
+		deliveryId?: string,
+		additionalInputs: AgentMessage[] = [],
+	): Promise<void> {
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
@@ -1945,7 +1961,11 @@ export class AgentSession {
 	 * message followed by pending nextTurn messages (consumed here) and handler messages, with a
 	 * system patch first when the prompt changed.
 	 */
-	private async _prepareRun(trigger: BeforeAgentStartTrigger, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<AgentMessage[]> {
+	private async _prepareRun(
+		trigger: BeforeAgentStartTrigger,
+		deliveryId?: string,
+		additionalInputs: AgentMessage[] = [],
+	): Promise<AgentMessage[]> {
 		// Check if we need to compact before sending (catches aborted responses).
 		// The starting message is sent below, so do not call agent.continue() here.
 		const lastAssistant = this._findLastAssistantMessage();
@@ -2213,8 +2233,9 @@ export class AgentSession {
 				timestamp: Date.now(),
 			});
 		}
-		await this._startRun({ messageType: "user", prompt: expandedText, images: currentImages }, () =>
-			preflightResult?.("started"),
+		await this._startRun(
+			{ messageType: "user", prompt: expandedText, images: currentImages },
+			() => preflightResult?.("started"),
 			options?.deliveryId,
 			additionalInputs,
 		);
@@ -2228,19 +2249,27 @@ export class AgentSession {
 		const messages = this.agent.state.messages;
 		let assistantIndex = -1;
 		for (let i = messages.length - 1; i >= 0; i--) {
-			if (messages[i].role === "assistant") { assistantIndex = i; break; }
+			if (messages[i].role === "assistant") {
+				assistantIndex = i;
+				break;
+			}
 		}
 		if (assistantIndex >= 0) {
 			const assistant = messages[assistantIndex] as AssistantMessage;
-			const results = new Set(messages.slice(assistantIndex + 1).flatMap((message) =>
-				message.role === "toolResult" ? [message.toolCallId] : [],
-			));
+			const results = new Set(
+				messages
+					.slice(assistantIndex + 1)
+					.flatMap((message) => (message.role === "toolResult" ? [message.toolCallId] : [])),
+			);
 			for (const block of assistant.content) {
 				if (block.type !== "toolCall" || results.has(block.id)) continue;
 				const result: ToolResultMessage = {
-					role: "toolResult", toolCallId: block.id, toolName: block.name,
+					role: "toolResult",
+					toolCallId: block.id,
+					toolName: block.name,
 					content: [{ type: "text", text: "interrupted; state unknown" }],
-					isError: true, timestamp: Date.now(),
+					isError: true,
+					timestamp: Date.now(),
 				};
 				this.sessionManager.appendMessage(result);
 				this.agent.state.messages = [...this.agent.state.messages, result];
@@ -2990,7 +3019,15 @@ export class AgentSession {
 				throw new Error("Compaction cancelled");
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage, buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions));
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				usage,
+				buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+			);
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);
@@ -3316,7 +3353,15 @@ export class AgentSession {
 			}
 			abortController.signal.throwIfAborted();
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage, buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions));
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				usage,
+				buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+			);
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);

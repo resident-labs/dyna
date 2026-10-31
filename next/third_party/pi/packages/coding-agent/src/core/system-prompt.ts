@@ -142,7 +142,7 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	} = options;
 
 	for (const name of Object.keys(customSections)) {
-		if (!SYSTEM_PROMPT_SECTION_NAME.test(name) || name === "preamble") {
+		if (!name || name === "preamble") {
 			throw new Error(`Invalid system prompt section name: ${name}`);
 		}
 	}
@@ -170,7 +170,9 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	}
 
 	if (appendSystemPrompt) promptSections.addendum = appendSystemPrompt;
-	if (contextFiles.length > 0) promptSections.project_context = renderProjectContext(contextFiles);
+	for (const file of contextFiles) {
+		promptSections[`file:${file.path}`] = renderProjectContext([file]);
+	}
 	// A hidden reader is still reachable through another tool, so skills stay but the hint names no tool.
 	const readers = ["read", "bash"] as const;
 	const skillFileReadTool =
@@ -187,7 +189,10 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 
 	const sections: SystemPromptSections = { preamble: promptSections.preamble };
 	for (const [name, content] of Object.entries(promptSections)) {
-		if (name !== "preamble") sections[name] = `<${name}>\n${content}\n</${name}>`;
+		if (name !== "preamble") {
+			const tag = SYSTEM_PROMPT_SECTION_NAME.test(name) ? name : "context_section";
+			sections[name] = `<${tag}>\n${content}\n</${tag}>`;
+		}
 	}
 	return sections;
 }
