@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { call } from "../client.ts";
   import type { RoomSummary } from "../contract.gen.ts";
   import { build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, visits, type Item, type Person, type Place, type Scope, type Visit } from "../palette.ts";
@@ -18,7 +18,7 @@
   let people: Person[] = $state.raw([]);
   let recent: Visit[] = $state.raw([]);
   let retry = $state(0);
-  const messages = new MessageSearch(search);
+  const messages = new MessageSearch(untrack(() => search));
   const actions: Action[] = [
     { id: "requests", label: "Requests", hint: "", keys: ["G", "R"], icon: "inbox" },
     { id: "pause", label: "Pause the room", hint: "No session starts a new turn", keys: [], icon: "pause" },
@@ -85,12 +85,12 @@
   function scrolled() {
     if (scope === "messages" && list.scrollTop + list.clientHeight >= list.scrollHeight - 80) void messages.more();
   }
-  const name = (id?: string) => people.find(person => person.id === id)?.name ?? "Session";
+  const name = (id?: string) => (id && messages.names[id]) || people.find(person => person.id === id)?.name || "Session";
   const roomName = (id: string) => rooms.find(found => found.id === id)?.name ?? "Room";
 </script>
 
 <div class="shade" role="presentation" onclick={event => { if (event.target === event.currentTarget) onclose(); }}>
-  <section class="palette" role="dialog" aria-modal="true" aria-label="Search and actions" bind:this={dialog} onkeydown={keys}>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Search and actions" tabindex="-1" bind:this={dialog} onkeydown={keys}>
     <div class="input"><Icon name="search" size={20} />
       {#if scope}<button class="chip" onclick={() => { scope = undefined; input.focus(); }}>{scope} <Icon name="close" size={12} /></button>{/if}
       <input bind:this={input} bind:value={text} placeholder="Search rooms, sessions, messages and actions" aria-label="Search rooms, sessions, messages and actions"
@@ -104,7 +104,7 @@
         {#each section.items as item}
           {@const index = items.indexOf(item)}
           <button type="button" id="palette-{index}" role="option" aria-selected={pick === index} class="row" class:chosen={pick === index}
-            class:message={item.kind === "message"} onmousemove={() => pick = index} onclick={() => choose(item)}>
+            class:message={item.kind === "message"} class:more={item.kind === "more"} onmousemove={() => pick = index} onclick={() => choose(item)}>
             {#if item.kind === "room"}
               <Avatar kind="room" name={item.room.name} size={22} />
               <span class="name">{#each marks(item.room.name, mode.query, Infinity) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
@@ -132,7 +132,7 @@
       {#if mode.query && !sections.length}<p class="note">No room, session, message or action matches “{mode.query}”.</p>{/if}
     </div>
     <footer><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>&gt;</kbd> actions only</span><span class="fact">Matches every word by its start</span></footer>
-  </section>
+  </div>
 </div>
 
 <style>
@@ -140,11 +140,12 @@
   .palette { width: min(680px, 100%); max-height: min(720px, calc(100dvh - 112px)); display: flex; flex-direction: column; background: var(--raised); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 24px 64px var(--shadow-lg); overflow: hidden; }
   .input { min-height: 56px; display: flex; gap: 10px; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--muted); }
   input { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 16px; outline: none; }
+  .input:focus-within { box-shadow: inset 0 0 0 2px var(--focus); }
   input::placeholder { color: var(--muted); }
   button { font: inherit; cursor: pointer; }
   .scope, .chip, .cancel { border: 0; background: none; color: var(--muted); white-space: nowrap; }
   .chip { text-transform: capitalize; background: var(--selected); border-radius: 6px; padding: 4px 8px; display: flex; gap: 4px; align-items: center; }
-  .scope { display: flex; align-items: center; gap: 4px; }
+  .scope { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 20px; padding: 4px 8px; }
   .cancel { display: none; }
   kbd { font: inherit; font-size: 11px; color: var(--muted); background: var(--selected); border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; }
   .list { overflow: auto; padding: 8px; min-height: 0; }
@@ -157,11 +158,12 @@
   .icon { width: 22px; flex: none; display: grid; place-items: center; color: var(--muted); }
   .keys { margin-left: auto; display: flex; gap: 4px; }
   .message { align-items: flex-start; }
+  .more { color: var(--focus); }
   .body { min-width: 0; display: grid; gap: 4px; }
-  .excerpt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+  .excerpt { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
   .meta { display: flex; gap: 7px; color: var(--muted); font-size: 11px; }
   .meta strong { color: oklch(var(--id-initials) var(--hue)); }
-  mark { color: var(--text); background: var(--selected); font-weight: 700; }
+  mark { color: var(--text); background: var(--attention-fill); border-radius: 3px; }
   .note { margin: 0; padding: 10px; color: var(--muted); font-size: 13px; }
   .retry { color: var(--focus); background: none; border: 0; }
   .skeleton { height: 8px; width: 70%; margin-top: 10px; border-radius: 4px; background: var(--selected); }

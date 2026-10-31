@@ -98,7 +98,7 @@
     if (seq === undefined || !view.ready) return;
     let cancelled = false;
     void (async () => {
-      while (!cancelled && view.hasOlder && view.oldest > seq && !view.error) await view.loadOlder();
+      await view.seek(seq);
       if (cancelled) return;
       await tick();
       const index = items.findIndex(item => item.key === `p${seq}`);

@@ -87,6 +87,16 @@ export class EventWindow {
     });
   }
 
+  // Reach a searched post without competing with an automatic page load.
+  async seek(seq: number): Promise<void> {
+    while (this.busy) await this.busy;
+    while (this.older && this.oldest > seq && !this.failure) {
+      const before = this.oldest;
+      await this.loadOlder();
+      if (this.oldest >= before) break;
+    }
+  }
+
   // Loads the page after the window, fetched again by its boundary seq, until it reaches the newest event.
   async loadNewer(): Promise<void> {
     if (this.busy || this.present) return;
