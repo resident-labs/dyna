@@ -256,13 +256,12 @@ func (s *Store) Files(roomID string, conversation Conversation, recipient, autho
 		args []any
 	}
 	sources := []source{
-		{`WHERE h.room_id=? AND h.conversation=?`, []any{roomID, home}},
-		{`JOIN post_deliveries d ON d.room_id=h.room_id AND d.post_id=h.post_id
- WHERE d.room_id=? AND d.session_id=? AND h.conversation<>? AND d.state NOT IN ('cancelled','failed')`,
+		{`post_homes h WHERE h.room_id=? AND h.conversation=?`, []any{roomID, home}},
+		{fileDeliverySource,
 			[]any{roomID, recipient, home}},
 	}
 	if author != "" {
-		sources = append(sources, source{`WHERE h.room_id=? AND h.author_session_id=? AND h.conversation<>?`, []any{roomID, author, home}})
+		sources = append(sources, source{`post_homes h WHERE h.room_id=? AND h.author_session_id=? AND h.conversation<>?`, []any{roomID, author, home}})
 	}
 	seen := map[string]bool{}
 	var out []Message
@@ -286,6 +285,11 @@ func (s *Store) Files(roomID string, conversation Conversation, recipient, autho
 	return out, nil
 }
 
+// fileDeliverySource starts with this session’s deliveries. An ordinary join
+// can instead scan every home in the room before checking the session.
+const fileDeliverySource = `post_deliveries d CROSS JOIN post_homes h ON d.room_id=h.room_id AND d.post_id=h.post_id
+ WHERE d.room_id=? AND d.session_id=? AND h.conversation<>? AND d.state NOT IN ('cancelled','failed')`
+
 // homeFiles is Files for one source: it walks that source's rows newest first
 // in batches until it has limit posts with files.
 func (s *Store) homeFiles(roomID, from string, args []any, limit int) ([]Message, error) {
@@ -295,7 +299,7 @@ func (s *Store) homeFiles(roomID, from string, args []any, limit int) ([]Message
 	}
 	// The cursor is the (ts, rowid) of the last row read, which is the order the
 	// rows are listed in.
-	query := "SELECT h.post_id, h.ts, h.rowid FROM post_homes h " + from +
+	query := "SELECT h.post_id, h.ts, h.rowid FROM " + from +
 		" AND (h.ts<? OR (h.ts=? AND h.rowid<?)) ORDER BY h.ts DESC, h.rowid DESC LIMIT ?"
 	ts, row := int64(math.MaxInt64), int64(math.MaxInt64)
 	var out []Message
