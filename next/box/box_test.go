@@ -47,31 +47,44 @@ func TestTransitions(t *testing.T) {
 }
 func TestAdmission(t *testing.T) {
 	size, _ := box.Size(contract.BoxSizeSmall)
-	h := box.Host{Name: "host", State: box.HostReady, CPUs: 2, MemBytes: 4 * box.GiB, DiskBytes: 40 * box.GiB}
+	h := box.Host{Name: "host", State: box.HostReady, CPUs: 1, MemBytes: 4 * box.GiB, DiskBytes: 40 * box.GiB}
 	req := box.Box{ID: "box_a", Size: size}
 	if p := box.Admit([]box.Host{h}, nil, req, 20*box.GiB); p.Host != "host" {
 		t.Fatal(p)
 	}
-	occupied := box.Box{ID: "box_b", Host: "host", Size: size, State: contract.BoxReady}
+	occupiedSize, _ := box.Size(contract.BoxSizeMedium)
+	occupied := box.Box{ID: "box_b", Host: "host", Size: occupiedSize, State: contract.BoxReady}
 	if p := box.Admit([]box.Host{h}, []box.Box{occupied}, req, 20*box.GiB); p.Reason != box.PendingCPU {
 		t.Fatal(p)
 	}
 }
-func TestAdmissionChargesPlacementRoots(t *testing.T) {
+func TestAdmissionCountsEveryPlacedBoxAtQuarterSize(t *testing.T) {
 	size, _ := box.Size(contract.BoxSizeMedium)
-	h := box.Host{Name: "host", State: box.HostReady, CPUs: 4, MemBytes: 8 * box.GiB, DiskBytes: 100 * box.GiB}
-	lead := box.Box{ID: "lead", Host: h.Name, Size: size, State: contract.BoxReady}
-	child := box.Box{ID: "child", BudgetParent: lead.ID, Size: size}
-	if p := box.Admit([]box.Host{h}, []box.Box{lead}, child, 0); p.Host != h.Name {
-		t.Fatalf("child: %+v", p)
+	h := box.Host{Name: "host", State: box.HostReady, CPUs: 2, MemBytes: 16 * box.GiB, DiskBytes: 100 * box.GiB}
+	for _, state := range []contract.BoxState{contract.BoxCreating, contract.BoxStarting, contract.BoxReady, contract.BoxClosing, contract.BoxLost} {
+		placed := []box.Box{{ID: "a", Host: h.Name, Size: size, State: state}}
+		request := box.Box{ID: "b", Size: size}
+		if p := box.Admit([]box.Host{h}, placed, request, 0); p.Host != h.Name {
+			t.Fatalf("%s: %+v", state, p)
+		}
+		placed = append(placed, box.Box{ID: "b", Host: h.Name, Size: size, State: contract.BoxCreating})
+		request.ID = "c"
+		if p := box.Admit([]box.Host{h}, placed, request, 0); p.Reason != box.PendingCPU {
+			t.Fatalf("%s: %+v", state, p)
+		}
 	}
-	if p := box.Admit([]box.Host{h}, []box.Box{lead}, box.Box{ID: "new-lead", Size: size}, 0); p.Reason != box.PendingCPU {
-		t.Fatalf("full host: %+v", p)
+}
+func TestAdmissionStopsAtRealMemoryThreshold(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeAgent)
+	host := box.Host{Name: "host", State: box.HostReady, CPUs: 4, MemBytes: 10 * box.GiB, DiskBytes: 100 * box.GiB}
+	request := box.Box{ID: "box_a", Size: size}
+	host.MemUsed = 8*box.GiB - 1
+	if p := box.Admit([]box.Host{host}, nil, request, 0); p.Host != host.Name {
+		t.Fatal(p)
 	}
-	h.CPUs, h.MemBytes = 8, 16*box.GiB
-	child.Host, child.State = h.Name, contract.BoxReady
-	if p := box.Admit([]box.Host{h}, []box.Box{lead, child}, box.Box{ID: "new-lead", Size: size}, 0); p.Host != h.Name {
-		t.Fatalf("child charged host: %+v", p)
+	host.MemUsed++
+	if p := box.Admit([]box.Host{host}, nil, request, 0); p.Reason != box.PendingMemory {
+		t.Fatal(p)
 	}
 }
 func TestStoppedCountsDiskNotCPUOrMemory(t *testing.T) {
@@ -108,8 +121,8 @@ func TestWakeStaysOnHostAndAccountsDisk(t *testing.T) {
 	}
 }
 func TestSliceAndCgroup(t *testing.T) {
-	name, err := box.SliceName([]contract.BoxID{"box_a", "box_b", "box_c"})
-	if err != nil || name != "dyna-fefe13ab0a05-01052e8504ae-1636b387f6bc.slice" {
+	name, err := box.SliceName("box_a")
+	if err != nil || name != "dyna-box_a.slice" {
 		t.Fatalf("%q %v", name, err)
 	}
 	if got := box.CgroupArgs(name); len(got) != 1 || got[0] != "--cgroup-parent="+name {

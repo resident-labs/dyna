@@ -213,7 +213,9 @@ type HostAddRequest struct {
 	SSH            string   `json:"ssh"`
 	OwnerOnlyAdmin bool     `json:"ownerOnlyAdmin"`
 }
-type HostAddResponse struct{}
+type HostAddResponse struct {
+	NoSwap bool `json:"noSwap"`
+}
 
 // HostListRequest asks for the hosts an owner terminal can open (5.15). Only the owner calls it.
 type HostListRequest struct{}

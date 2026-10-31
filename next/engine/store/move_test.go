@@ -23,7 +23,7 @@ func TestMoveRejectsDescendant(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := contract.Event{ID: "move", Room: "r", Time: time.Unix(1, 0), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.SessionMoved{Session: "p", NewParent: "c"}}
-	_, _, err = s.MoveSession(ctx, "p", "c", "bc", event, nil, nil)
+	err = s.MoveSession(ctx, "p", "c", event)
 	if err == nil {
 		t.Fatal("move into descendant succeeded")
 	}

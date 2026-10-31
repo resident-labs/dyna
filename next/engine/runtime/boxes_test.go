@@ -134,21 +134,21 @@ type childSliceRunner struct{ childRunning bool }
 
 func (r *childSliceRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
 	command := args[len(args)-1]
-	if strings.Contains(command, "systemctl --user stop") && strings.Contains(command, "dyna-parent.slice") {
+	if strings.Contains(command, "'systemctl' '--user' 'stop'") && strings.Contains(command, "dyna-parent.slice") {
 		r.childRunning = false
 	}
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
 
-func TestImageRecreateKeepsRunningChild(t *testing.T) {
+func TestLegacyParentWakeKeepsRunningChild(t *testing.T) {
 	runner := &childSliceRunner{childRunning: true}
 	host, err := podman.New("user@host", t.TempDir(), "host", runner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
-	spec := lifecycle.BoxSpec{Box: "parent", Host: "host", Slice: "dyna-parent.slice"}
-	if err := b.Recreate(context.Background(), spec, "new-image", spec.Slice); err != nil {
+	spec := lifecycle.BoxSpec{Box: "parent", Host: "host", Slice: "dyna-box_parent.slice"}
+	if err := b.Recreate(context.Background(), spec, "new-image", "dyna-parent.slice"); err != nil {
 		t.Fatal(err)
 	}
 	if !runner.childRunning {

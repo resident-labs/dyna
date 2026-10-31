@@ -35,9 +35,9 @@ func TestPiPackageInstalledBesideBinary(t *testing.T) {
 
 type fakeRegistrar struct{ called bool }
 
-func (f *fakeRegistrar) AddHost(context.Context, contract.HostAddRequest) error {
+func (f *fakeRegistrar) AddHost(context.Context, contract.HostAddRequest) (bool, error) {
 	f.called = true
-	return nil
+	return false, nil
 }
 
 func (*fakeRegistrar) HostLoad(context.Context, []contract.HostSummary) error { return nil }
@@ -77,8 +77,8 @@ func TestHostListIncludesLoadAndRunningBoxes(t *testing.T) {
 
 type missingPodmanRegistrar struct{ fakeRegistrar }
 
-func (*missingPodmanRegistrar) AddHost(context.Context, contract.HostAddRequest) error {
-	return podman.RequiredError{}
+func (*missingPodmanRegistrar) AddHost(context.Context, contract.HostAddRequest) (bool, error) {
+	return false, podman.RequiredError{}
 }
 func TestHostAddRefusesMissingPodman(t *testing.T) {
 	s := serviceWithHosts{boxes: &missingPodmanRegistrar{}}

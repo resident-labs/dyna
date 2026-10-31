@@ -13,7 +13,7 @@ import (
 func TestReconcilerRetriesLeadWhenAnotherBoxIsDeleted(t *testing.T) {
 	s, room, first, ctx := setup(t)
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE hosts SET cpus=5")
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET cpus=2")
 		return err
 	}); err != nil {
 		t.Fatal(err)

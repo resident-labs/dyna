@@ -83,16 +83,12 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	sizeName := contract.BoxSizeAgent
-	var budgetParent contract.BoxID
-	if parent != "" {
+	if parent != "" && parent == tree.Root() {
 		sizeName = contract.BoxSizeMedium
 	}
 	if req.Size != "" {
-		if parent != "" && parent != tree.Root() {
-			return contract.SessionStartResponse{}, invalid("a child keeps its parent's size")
-		}
 		sizeName = req.Size
-	} else if repo != "" && s.repos != nil && (parent == "" || parent == tree.Root()) {
+	} else if repo != "" && s.repos != nil {
 		size, err := s.repos.Size(ctx, repo)
 		if err != nil {
 			return contract.SessionStartResponse{}, failure(err)
@@ -104,26 +100,11 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			sizeName = size
 		}
 	}
-	if parent != "" && parent != tree.Root() {
-		p, err := s.store.Session(ctx, parent)
-		if err != nil {
-			return contract.SessionStartResponse{}, failure(err)
-		}
-		parentBox, err := s.store.Box(ctx, p.Box)
-		if err != nil {
-			return contract.SessionStartResponse{}, failure(err)
-		}
-		if parentBox.State == contract.BoxClosing || parentBox.State == contract.BoxDeleted {
-			return contract.SessionStartResponse{}, invalid("parent box is closing")
-		}
-		budgetParent = p.Box
-		sizeName = parentBox.Size.Name
-	}
 	initial, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err := s.store.StartSession(ctx, session, parent, budgetParent, sizeName, req.Goal, event, initial, ""); err != nil {
+	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, ""); err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	return contract.SessionStartResponse{Session: session.ID, Box: session.Box}, nil

@@ -45,7 +45,7 @@ func (s *Store) LifecycleBoxes(ctx context.Context) ([]LifecycleBox, error) {
 }
 
 func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]LifecycleBox, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,parent,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,(SELECT room FROM sessions WHERE id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY created_at,id", activeOnly)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,(SELECT room FROM sessions WHERE id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY created_at,id", activeOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -53,13 +53,12 @@ func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]Lifecycl
 	var boxes []LifecycleBox
 	for rows.Next() {
 		var b LifecycleBox
-		var parent, host sql.NullString
+		var host sql.NullString
 		var size contract.BoxSizeName
 		var created, updated, due int64
-		if err := rows.Scan(&b.ID, &b.Session, &parent, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures, &b.Room, &b.Paused); err != nil {
+		if err := rows.Scan(&b.ID, &b.Session, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures, &b.Room, &b.Paused); err != nil {
 			return nil, err
 		}
-		b.BudgetParent = contract.BoxID(parent.String)
 		b.Host = contract.HostName(host.String)
 		var ok bool
 		b.Size, ok = box.Size(size)
@@ -117,27 +116,6 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 		return err
 	})
 	return next, err
-}
-
-// BoxAncestry returns budget ancestors and the box, parent first.
-func (s *Store) BoxAncestry(ctx context.Context, id contract.BoxID) ([]box.Box, error) {
-	rows, err := s.Read().QueryContext(ctx, `WITH RECURSIVE path(id,session,parent,state,depth) AS (
-  SELECT id,session,parent,state,0 FROM boxes WHERE id=?
-  UNION ALL SELECT b.id,b.session,b.parent,b.state,p.depth+1 FROM boxes b JOIN path p ON b.id=p.parent
- ) SELECT id,session,state FROM path ORDER BY depth DESC`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []box.Box
-	for rows.Next() {
-		var b box.Box
-		if err := rows.Scan(&b.ID, &b.Session, &b.State); err != nil {
-			return nil, err
-		}
-		result = append(result, b)
-	}
-	return result, rows.Err()
 }
 
 // WakeLostInventory schedules inventory; an in-flight check may defer it by up to 60 seconds.

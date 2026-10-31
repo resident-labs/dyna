@@ -127,21 +127,18 @@ func (t Tree) Leaves(order []contract.SessionID) []contract.SessionID {
 	return leaves
 }
 
-// CheckMove rejects moving root, cycles, another room, and another host.
+// CheckMove rejects moving root, cycles and another room.
 func (t Tree) CheckMove(s, parent contract.SessionID) error {
-	n, ok := t.nodes[s]
+	_, ok := t.nodes[s]
 	if !ok || s == t.root {
 		return errors.New("root or unknown session cannot move")
 	}
-	p, ok := t.nodes[parent]
+	_, ok = t.nodes[parent]
 	if !ok {
 		return errors.New("parent is not in the room tree")
 	}
 	if parent == s || t.Above(s, parent) {
 		return errors.New("move would make a cycle")
-	}
-	if n.Host != p.Host {
-		return errors.New("parent is on another host")
 	}
 	return nil
 }
