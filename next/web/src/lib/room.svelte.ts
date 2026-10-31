@@ -233,6 +233,7 @@ export class RoomStore {
         if (this.turns.get(event.body.session) === event.body.turn) {
           this.turns.delete(event.body.session);
           this.stopping.delete(event.body.session);
+          this.stopFailed.delete(event.body.session);
           this.activity.delete(event.body.session);
           this.steps.delete(event.body.session);
         }
