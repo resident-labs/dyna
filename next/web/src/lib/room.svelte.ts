@@ -1,4 +1,4 @@
-import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { decodeEvent } from "./event.ts";
@@ -8,10 +8,15 @@ export type PendingPost = { text: string; home: Conversation; seq?: number };
 export type PendingOperation = OpRequested | Operation;
 export type PostEvent = Extract<Event, { type: "post.created" }>;
 type Folded = {
-  sessions: Map<string, SessionStarted>; boxes: Map<string, BoxState>;
-  turns: Map<string, string>; operations: Map<string, PendingOperation>;
+  sessions: Map<string, SessionStarted>; boxes: Map<string, BoxState>; turns: Map<string, string>;
+  failed: Set<string>; operations: Map<string, PendingOperation>;
 };
 
+export const PAGE = 200;
+export const WINDOW = 1000;
+
+// The store holds a window of at most WINDOW events. Sessions, boxes, turns and
+// operations come from session.list and op.list plus live events, never from history.
 export class RoomStore {
   readonly events = new SvelteMap<number, Event>();
   readonly seqs: number[] = [];
@@ -19,53 +24,147 @@ export class RoomStore {
   readonly sessions = new SvelteMap<string, SessionStarted>();
   readonly boxes = new SvelteMap<string, BoxState>();
   readonly turns = new SvelteMap<string, string>();
+  readonly failed = new SvelteSet<string>();
   readonly operations = new SvelteMap<string, PendingOperation>();
+  // Names outlive closed sessions, so old posts still show who wrote them.
+  readonly names = new SvelteMap<string, string>();
   private initialOperations = new Map<string, PendingOperation>();
   private operationBaseline = 0;
   private sessionBaseline = 0;
   private initialSessions = new Map<string, SessionStarted>();
   private initialBoxes = new Map<string, BoxState>();
+  private present = true;
+  private older = false;
+  private loaded = false;
+  // The page request in flight; a jump to the present waits for it instead of being dropped.
+  private busy: Promise<void> | undefined;
+  // The last load error, kept until a load succeeds, so the owner sees it instead of a silent gap.
+  private failure: unknown;
+  private latest = 0;
   private stopStream = () => {};
   private closed = false;
+  private changed = () => {};
+  private subscribe = createSubscriber(update => { this.changed = update; });
 
   readonly room: string;
-  constructor(room: string) { this.room = room; }
+  private readonly connect: typeof stream;
+  constructor(room: string, connect: typeof stream = stream) {
+    this.room = room;
+    this.connect = connect;
+  }
 
   get newest(): number { return this.seqs.at(-1) ?? 0; }
+  get oldest(): number { return this.seqs[0] ?? 0; }
   // seqs is a plain array; reading events.size makes Svelte readers see new seqs.
   get ordered(): Event[] { return this.events.size ? this.seqs.map(seq => this.events.get(seq)!) : []; }
+  // True while the window ends at the newest event, so live events append to it.
+  get atPresent(): boolean { this.subscribe(); return this.present; }
+  // True once the first page has loaded, so an empty feed is really empty.
+  get ready(): boolean { this.subscribe(); return this.loaded; }
+  get error(): unknown { this.subscribe(); return this.failure; }
 
   async open(): Promise<void> {
-    const page = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: Number.MAX_SAFE_INTEGER, limit: 200 });
-    for (const value of page.events ?? []) {
-      const event = decodeEvent(value);
-      if (event) this.insert(event);
-    }
+    await this.run(() => this.opening());
+    if (this.closed || !this.loaded) return;
+    this.stopStream = this.connect(this.room, () => this.latest, event => this.apply(event));
+  }
+
+  private async opening(): Promise<void> {
+    await this.loadLatest();
     const sessionList = await call("session.list", { room: this.room });
-    this.sessionBaseline = this.newest;
+    this.sessionBaseline = this.latest;
     this.initialSessions = new Map((sessionList.sessions ?? []).map(session => [session.id, {
       session: session.id, name: session.name, parent: session.parent || undefined,
       profile: session.profile, goal: session.goal || undefined,
     }]));
+    for (const session of this.initialSessions.values()) this.names.set(session.session, session.name);
     this.initialBoxes = new Map((sessionList.sessions ?? []).map(session => [session.id, session.boxState]));
     const listed = await call("op.list", { room: this.room });
-    this.operationBaseline = this.newest;
+    this.operationBaseline = this.latest;
     this.initialOperations = new Map((listed.operations ?? [])
       .filter(op => op.state === "pending").map(op => [op.id, op]));
     this.fold();
-    if (this.closed) return;
-    this.stopStream = stream(this.room, () => this.newest, event => this.apply(event));
+    this.loaded = true;
   }
 
   close(): void { this.closed = true; this.stopStream(); }
 
   apply(event: Event): void {
-    if (!this.insert(event)) return;
-    for (const post of this.pendingPosts) {
-      if (post.seq === event.seq) this.pendingPosts.delete(post);
-    }
-    // Live events update the session.list and op.list snapshots one by one; open() folds the first page once.
+    if (this.present) {
+      if (!this.insert(event)) return;
+      this.release("oldest");
+    } else if (event.seq <= this.latest) return;
+    this.latest = Math.max(this.latest, event.seq);
     this.step(event, this);
+  }
+
+  // Loads the page before the window and releases the newest end beyond WINDOW.
+  async loadOlder(): Promise<void> {
+    if (this.busy || !this.older) return;
+    await this.run(async () => {
+      const page = await this.page({ beforeSeq: this.oldest });
+      for (const event of page.events) this.insert(event);
+      this.older = page.full;
+      this.release("newest");
+    });
+  }
+
+  // Loads the page after the window, fetched again by its boundary seq, until it reaches the newest event.
+  async loadNewer(): Promise<void> {
+    if (this.busy || this.present) return;
+    await this.run(async () => {
+      const page = await this.page({ afterSeq: this.newest });
+      for (const event of page.events) this.insert(event);
+      this.release("oldest");
+      if (!page.full && this.newest >= this.latest) this.present = true;
+    });
+  }
+
+  async jumpToPresent(): Promise<void> {
+    while (this.busy) await this.busy;
+    if (!this.present) await this.run(() => this.loadLatest());
+  }
+
+  // Runs one load at a time. It never rejects: an error is kept in error for the view.
+  private run(task: () => Promise<void>): Promise<void> {
+    const busy = task().then(() => { this.failure = undefined; }, (error: unknown) => { this.failure = error; }).finally(() => {
+      if (this.busy === busy) this.busy = undefined;
+      this.changed();
+    });
+    this.busy = busy;
+    return busy;
+  }
+
+  private async loadLatest(): Promise<void> {
+    const page = await this.page({ beforeSeq: Number.MAX_SAFE_INTEGER });
+    this.events.clear();
+    this.seqs.length = 0;
+    for (const event of page.events) this.insert(event);
+    this.older = page.full;
+    this.latest = Math.max(this.latest, this.newest);
+    // Live events that arrived during the request are fetched before the window follows them again.
+    while (this.newest < this.latest) {
+      const more = await this.page({ afterSeq: this.newest });
+      if (!more.events.length) break;
+      for (const event of more.events) this.insert(event);
+    }
+    this.release("oldest");
+    this.present = true;
+  }
+
+  private async page(range: { beforeSeq: number } | { afterSeq: number }): Promise<{ events: Event[]; full: boolean }> {
+    const page = await call("events.list", { room: this.room, afterSeq: 0, ...range, limit: PAGE });
+    const values = page.events ?? [];
+    return { events: values.map(decodeEvent).filter(event => event !== undefined), full: values.length === PAGE };
+  }
+
+  private release(end: "oldest" | "newest"): void {
+    while (this.seqs.length > WINDOW) {
+      const seq = end === "oldest" ? this.seqs.shift() : this.seqs.pop();
+      if (seq !== undefined) this.events.delete(seq);
+      if (end === "oldest") this.older = true;
+      else this.present = false;
+    }
   }
 
   private insert(event: Event): boolean {
@@ -74,6 +173,11 @@ export class RoomStore {
     const index = this.seqs.findIndex(seq => seq > event.seq);
     if (index < 0) this.seqs.push(event.seq);
     else this.seqs.splice(index, 0, event.seq);
+    if (event.type === "session.started") this.names.set(event.body.session, event.body.name);
+    // A sent post stays pending until its event is in the window, so it never disappears.
+    for (const post of this.pendingPosts) {
+      if (post.seq === event.seq) this.pendingPosts.delete(post);
+    }
     return true;
   }
 
@@ -91,6 +195,8 @@ export class RoomStore {
       case "turn.started": state.turns.set(event.body.session, event.body.turn); break;
       case "turn.ended":
         if (state.turns.get(event.body.session) === event.body.turn) state.turns.delete(event.body.session);
+        if (event.body.outcome === "failed") state.failed.add(event.body.session);
+        else state.failed.delete(event.body.session);
         break;
       case "op.requested":
         if (event.seq > this.operationBaseline) state.operations.set(event.body.id, event.body);
@@ -101,15 +207,17 @@ export class RoomStore {
     }
   }
 
+  // Folds the first page once on open; turns and failures exist only as events.
   private fold(): void {
     const state: Folded = {
       sessions: new Map(this.initialSessions), boxes: new Map(this.initialBoxes),
-      turns: new Map(), operations: new Map(this.initialOperations),
+      turns: new Map(), failed: new Set(), operations: new Map(this.initialOperations),
     };
     for (const event of this.ordered) this.step(event, state);
     this.sessions.clear(); for (const entry of state.sessions) this.sessions.set(...entry);
     this.boxes.clear(); for (const entry of state.boxes) this.boxes.set(...entry);
     this.turns.clear(); for (const entry of state.turns) this.turns.set(...entry);
+    this.failed.clear(); for (const session of state.failed) this.failed.add(session);
     this.operations.clear(); for (const entry of state.operations) this.operations.set(...entry);
   }
 
@@ -121,9 +229,12 @@ export class RoomStore {
   async post(request: PostRequest): Promise<void> {
     const pending: PendingPost = { text: request.text, home: request.home ?? { kind: "feed" } };
     this.pendingPosts.add(pending);
+    // The owner's post shows at the present, so the window moves there while it sends.
+    const jumped = this.jumpToPresent();
     const response = await call("post", request)
       .catch((error: unknown) => { this.pendingPosts.delete(pending); throw error; });
     pending.seq = response.seq;
     if (this.events.has(response.seq)) this.pendingPosts.delete(pending);
+    await jumped;
   }
 }

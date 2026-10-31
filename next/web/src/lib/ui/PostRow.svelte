@@ -1,0 +1,41 @@
+<script lang="ts" module>
+  import DOMPurify from "dompurify";
+  // Links in posts open in a new tab without access to this page.
+  DOMPurify.addHook("afterSanitizeAttributes", node => {
+    if (node instanceof HTMLAnchorElement) {
+      node.target = "_blank";
+      node.rel = "noopener noreferrer";
+    }
+  });
+</script>
+
+<script lang="ts">
+  import { marked } from "marked";
+  import { formatTime, type Row } from "../feed.ts";
+  let { row, author }: { row: Extract<Row, { kind: "post" }>; author: string } = $props();
+  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view.
+  let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] }));
+</script>
+
+<article class="post" class:first={row.first}>
+  {#if row.first}<p class="name"><strong>{author}</strong> <time datetime={row.at}>{formatTime(row.at)}</time></p>{/if}
+  <div class="text">{@html html}</div>
+  {#if row.attachments.length}
+    <p class="files">{row.attachments.length === 1 ? "1 file" : `${row.attachments.length} files`}: {row.attachments.map(file => file.name).join(", ")}</p>
+  {/if}
+</article>
+
+<style>
+  .post { padding: 1px 16px; }
+  .first { padding-top: 12px; }
+  .name { margin: 0 0 2px; }
+  time, .files { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .files { margin: 2px 0 0; }
+  .text { overflow-wrap: anywhere; }
+  .text :global(:is(p, ul, ol, pre, blockquote)) { margin: 0 0 4px; }
+  .text :global(:is(p, ul, ol, pre, blockquote):last-child) { margin-bottom: 0; }
+  .text :global(pre) { padding: 8px 10px; border-radius: 8px; background: var(--sidebar); overflow-x: auto; }
+  .text :global(code) { font: 13px ui-monospace, monospace; }
+  .text :global(blockquote) { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
+  .text :global(a) { color: var(--focus); }
+</style>

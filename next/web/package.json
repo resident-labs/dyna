@@ -7,7 +7,12 @@
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit",
     "test": "node --test 'src/**/*.test.ts'"
   },
-  "dependencies": { "svelte": "^5.0.0" },
+  "dependencies": {
+    "@tanstack/virtual-core": "^3.19.9",
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.2",
+    "svelte": "^5.0.0"
+  },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@types/node": "^24.0.0",
