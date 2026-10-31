@@ -39,7 +39,7 @@
   }
   onMount(() => { reload(); window.addEventListener("focus", reload); return () => window.removeEventListener("focus", reload); });
   const unrated = (p: ProfileSummary) => !p.taste && !p.diagnostics && !p.intelligence && !p.cost;
-  const rating = (n: number) => n || "–";
+  const rating = (n: number) => n || "Not rated";
 </script>
 
 {#snippet action()}<button type="button" class="new" onclick={() => { close(); creating = true; }}>{phone ? "New" : "New profile"}</button>{/snippet}
@@ -67,10 +67,14 @@
       <div class="head"><span></span><span>Taste</span><span>Diagnostics</span><span>Intelligence</span><span>Thrift</span><span>Limits</span><span></span></div>
       {#each profiles as profile (profile.name)}
         <div class="row">
-          <div class="identity"><strong title={profile.name}>{profile.name}</strong><span>{slugName(profile.model)} · {thinking[profile.thinking]}</span>
-            <span class="mobile-ratings">{#if unrated(profile)}Not rated{:else}Taste {rating(profile.taste)} · Diagnostics {rating(profile.diagnostics)} · Intelligence {rating(profile.intelligence)} · Thrift {rating(profile.cost)}{/if}</span>
-            {#if profile.maxConcurrent}<span class="mobile-ratings">At most {profile.maxConcurrent} at once</span>{/if}</div>
-          <span class="number">{rating(profile.taste)}</span><span class="number">{rating(profile.diagnostics)}</span><span class="number">{rating(profile.intelligence)}</span><span class="number">{rating(profile.cost)}</span>
+          <div class="identity"><strong title={profile.name}>{profile.name}</strong><span>{slugName(profile.model)} · {thinking[profile.thinking]}</span></div>
+          {#if unrated(profile)}
+            <span class="unrated">Not rated · <button type="button" onclick={() => { close(); editing = profile.name; }}>Rate</button></span>
+          {:else}
+            {#each [["Taste", profile.taste], ["Diagnostics", profile.diagnostics], ["Intelligence", profile.intelligence], ["Thrift", profile.cost]] as [label, value]}
+              <span class="number"><span class="rating-label">{label} </span>{rating(value)}</span>
+            {/each}
+          {/if}
           <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{#if profile.maxCallsPerRun} · {/if}{/if}{#if profile.maxCallsPerRun}{profile.maxCallsPerRun} calls per run{:else if !profile.maxConcurrent}No limits{/if}</span>
           <button type="button" class="edit" onclick={() => { const name = editing === profile.name ? undefined : profile.name; close(); editing = name; }} aria-label={`Edit ${profile.name}`}>{#if phone}<Icon name="forwardChevron" />{:else}Edit{/if}</button>
         </div>
@@ -86,7 +90,7 @@
   .new { border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); font: inherit; padding: 8px 12px; cursor: pointer; }
   .phone-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
   .phone-bar button { width: 32px; height: 40px; display: grid; place-items: center; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
-  .content { overflow: auto; padding: 20px 16px 32px; }
+  .content { container-type: inline-size; overflow: auto; padding: 20px 16px 32px; }
   .summary, .muted { color: var(--muted); margin: 0 8px 16px; }
   .summary { font-size: 12.5px; }
   .table { max-width: 1048px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); overflow: hidden; }
@@ -97,14 +101,17 @@
   .identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .identity span, .number, .limits { color: var(--muted); font-size: 12.5px; }
   .number { font-variant-numeric: tabular-nums; }
-  .mobile-ratings { display: none; }
+  .rating-label { display: none; }
+  .unrated { grid-column: span 4; color: var(--muted); font-size: 12.5px; }
+  .unrated button { border: 0; background: none; color: var(--text); font: inherit; padding: 0; cursor: pointer; text-decoration: underline; }
   .edit { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; padding: 8px; }
-  @media (max-width: 640px) {
-    .content { padding: 14px 4px 32px; }
-    .summary { margin: 0 8px 16px; }
-    .head, .number, .limits { display: none; }
-    .row { grid-template-columns: minmax(0, 1fr) 32px; min-height: 0; gap: 0; padding: 6px 14px; }
-    .row:first-of-type { border-top: 0; }
-    .mobile-ratings { display: block; }
+  @container (max-width: 800px) {
+    .head { display: none; }
+    .row { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: 8px 12px; padding: 14px; }
+    .identity { grid-column: 1 / 3; }
+    .edit { grid-column: 3; grid-row: 1; }
+    .number { grid-column: span 1; }
+    .rating-label { display: inline; }
+    .unrated, .limits { grid-column: 1 / -1; }
   }
 </style>
