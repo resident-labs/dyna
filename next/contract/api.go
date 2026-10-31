@@ -539,23 +539,32 @@ const (
 )
 
 type TranscriptItem struct {
-	ID          string             `json:"id"`
-	Turn        TurnID             `json:"turn"`
-	Kind        TranscriptItemKind `json:"kind"`
-	At          time.Time          `json:"at"`
-	Ended       *time.Time         `json:"ended,omitempty"`
-	Text        string             `json:"text,omitempty"`
-	Tool        string             `json:"tool,omitempty"`
-	Arguments   string             `json:"arguments,omitempty"`
-	Output      string             `json:"output,omitempty"`
-	Failed      bool               `json:"failed,omitempty"`
-	More        bool               `json:"more,omitempty"`
-	Event       EventID            `json:"event,omitempty"`
-	Room        RoomID             `json:"room,omitempty"`
-	Seq         int64              `json:"seq,omitempty"`
-	Home        *Conversation      `json:"home,omitempty"`
-	Bytes       int64              `json:"bytes,omitempty"`
-	Attachments []Attachment       `json:"attachments,omitempty"`
+	ID           string                  `json:"id"`
+	Turn         TurnID                  `json:"turn"`
+	Kind         TranscriptItemKind      `json:"kind"`
+	At           time.Time               `json:"at"`
+	Ended        *time.Time              `json:"ended,omitempty"`
+	Text         string                  `json:"text,omitempty"`
+	Tool         string                  `json:"tool,omitempty"`
+	Arguments    string                  `json:"arguments,omitempty"`
+	Output       string                  `json:"output,omitempty"`
+	Failed       bool                    `json:"failed,omitempty"`
+	More         bool                    `json:"more,omitempty"`
+	Event        EventID                 `json:"event,omitempty"`
+	Room         RoomID                  `json:"room,omitempty"`
+	Seq          int64                   `json:"seq,omitempty"`
+	Home         *Conversation           `json:"home,omitempty"`
+	Bytes        int64                   `json:"bytes,omitempty"`
+	Attachments  []Attachment            `json:"attachments,omitempty"`
+	Posts        []TranscriptItem        `json:"posts,omitempty"`
+	PostsOmitted int                     `json:"postsOmitted,omitempty"`
+	PostsNext    *TranscriptPostLocation `json:"postsNext,omitempty"`
+}
+
+// Session-origin posts can only use a room feed; post_api rejects DM homes.
+type TranscriptPostLocation struct {
+	Room RoomID `json:"room"`
+	Seq  int64  `json:"seq"`
 }
 type TranscriptInput struct {
 	Home *Conversation `json:"home,omitempty"`
