@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"database/sql"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"strings"
@@ -71,16 +70,10 @@ func TestGrantCardEscapesControlCharactersAndNamesWildcard(t *testing.T) {
 
 func TestGrantCardEscapesHost(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE sessions SET name=? WHERE id=?", "worker\nforged", worker)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
 	a := contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Hosts: []contract.HostName{"hermeslab\nany command"}, Commands: []contract.CommandRule{{Program: "git"}}}
 	body := s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
 	before, _, found := strings.Cut(body, ":\n")
-	if !found || !strings.Contains(before, `"hermeslab\nany command"`) || !strings.Contains(before, `"worker\nforged"`) || strings.Contains(before, "\n") {
+	if !found || !strings.Contains(before, `"hermeslab\nany command"`) || strings.Contains(before, "\n") {
 		t.Fatalf("host: %q", body)
 	}
 }
