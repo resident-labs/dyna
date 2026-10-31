@@ -102,7 +102,7 @@
   .meta { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .sep { opacity: 0.6; }
   .bad { color: var(--danger); }
-  .command { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; padding: 6px 10px; border-radius: 6px;
+  .command { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; padding: 0 10px; border-radius: 6px;
     background: var(--hover); color: var(--muted); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
   .command.whole { display: block; }
   .more { all: unset; justify-self: start; color: var(--focus); font-size: 12.5px; font-weight: 500; cursor: pointer; }
