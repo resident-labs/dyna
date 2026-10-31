@@ -11,7 +11,8 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// SetInstructionsPublisher configures host replication before serving requests.
+// SetInstructionsPublisher configures a nonblocking callback before serving requests.
+// The callback marks the save synchronously and starts any remote work itself.
 func (s *Service) SetInstructionsPublisher(publish func(context.Context)) {
 	s.publishInstructions = publish
 }
@@ -103,7 +104,7 @@ func (s *Service) InstructionsSet(ctx context.Context, caller contract.Principal
 	sum := sha256.Sum256([]byte(req.Text))
 	out.Hash = hex.EncodeToString(sum[:])
 	if s.publishInstructions != nil {
-		s.publishInstructions(ctx)
+		s.publishInstructions(context.WithoutCancel(ctx))
 	}
 	return out, nil
 }
