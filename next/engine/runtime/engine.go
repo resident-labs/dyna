@@ -216,7 +216,12 @@ func Run(ctx context.Context, cfg Config) error {
 				http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			proxy.Handler(string(session.ID), allowed).ServeHTTP(w, r)
+			eligible, err := st.EligibleAccountProxyIDs(r.Context(), session.Room)
+			if err != nil {
+				http.Error(w, "account policy unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			proxy.Handler(string(session.ID), allowed, eligible).ServeHTTP(w, r)
 		}))
 	})
 	apiServer.Build = cfg.Version

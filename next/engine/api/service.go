@@ -50,6 +50,7 @@ type Service interface {
 	ProfileSet(context.Context, contract.Principal, contract.ProfileSetRequest) (contract.ProfileSetResponse, *contract.Error)
 	ProfileRemove(context.Context, contract.Principal, contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error)
 	HostList(context.Context, contract.Principal, contract.HostListRequest) (contract.HostListResponse, *contract.Error)
+	AccountsSetLimits(context.Context, contract.Principal, contract.AccountsSetLimitsRequest) (contract.AccountsSetLimitsResponse, *contract.Error)
 	AccountsRemove(context.Context, contract.Principal, contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error)
 	AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error)
 	AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error)
