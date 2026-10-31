@@ -14,11 +14,12 @@ type ConnectStartRequest struct {
 type ConnectStartResponse struct{}
 type ConnectStatusRequest struct{}
 type ConnectStatusResponse struct {
-	Attempt     ConnectAttempt `json:"attempt"`
-	URL         string         `json:"url,omitempty"`
-	Code        string         `json:"code,omitempty"`
-	Fingerprint string         `json:"fingerprint,omitempty"`
-	Linked      bool           `json:"linked"`
+	Attempt          ConnectAttempt `json:"attempt"`
+	URL              string         `json:"url,omitempty"`
+	Code             string         `json:"code,omitempty"`
+	Fingerprint      string         `json:"fingerprint,omitempty"`
+	Linked           bool           `json:"linked"`
+	ConnectorMissing bool           `json:"connectorMissing"`
 }
 type ConnectCancelRequest struct{}
 type ConnectCancelResponse struct{}
