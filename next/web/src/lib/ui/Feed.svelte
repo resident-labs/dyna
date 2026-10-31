@@ -90,7 +90,8 @@
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
-      {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)} />
+      {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
+        onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>
