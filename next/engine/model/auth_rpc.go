@@ -27,9 +27,18 @@ type OAuthCompletion struct {
 }
 type AuthDelete struct{ ID string }
 type AuthSave struct {
-	Record  private.ProxyAuth
-	Create  bool
-	Attempt string
+	Record   private.ProxyAuth
+	Create   bool
+	Attempt  string
+	Identity OAuthIdentity
+}
+
+// OAuthIdentity carries only raw provider account identifiers on the private RPC.
+type OAuthIdentity struct {
+	AccountID   string `json:"account_id"`
+	AccountUUID string `json:"account_uuid"`
+	Subject     string `json:"sub"`
+	Email       string `json:"email"`
 }
 
 func (r *AuthRPC) List(_ struct{}, out *[]private.ProxyAuth) error {
@@ -44,21 +53,20 @@ func (r *AuthRPC) List(_ struct{}, out *[]private.ProxyAuth) error {
 // rawCredentialIdentity reads only provider identity fields from an opaque proxy record.
 func rawCredentialIdentity(raw []byte) (string, string) {
 	var record struct {
-		Metadata struct {
-			AccountID   string `json:"account_id"`
-			AccountUUID string `json:"account_uuid"`
-			Subject     string `json:"sub"`
-			Email       string `json:"email"`
-		} `json:"metadata"`
+		Metadata OAuthIdentity `json:"metadata"`
 	}
 	if json.Unmarshal(raw, &record) != nil {
 		return "", ""
 	}
+	return record.Metadata.identity()
+}
+
+func (identity OAuthIdentity) identity() (string, string) {
 	for _, field := range []struct{ name, value string }{
-		{"account_id", record.Metadata.AccountID},
-		{"account_uuid", record.Metadata.AccountUUID},
-		{"sub", record.Metadata.Subject},
-		{"email", record.Metadata.Email},
+		{"account_id", identity.AccountID},
+		{"account_uuid", identity.AccountUUID},
+		{"sub", identity.Subject},
+		{"email", identity.Email},
 	} {
 		if strings.TrimSpace(field.value) != "" {
 			return field.name, field.value
@@ -96,7 +104,7 @@ func (r *AuthRPC) Save(req AuthSave, _ *struct{}) error {
 				}
 			}
 			kind, identity := rawCredentialIdentity(saved.Record)
-			newKind, newIdentity := rawCredentialIdentity(req.Record.Record)
+			newKind, newIdentity := req.Identity.identity()
 			if saved.ID == "" || saved.Provider != req.Record.Provider || req.Record.ID != a.proxyID || identity == "" || kind != newKind || identity != newIdentity {
 				a.status, a.reason = contract.ConnectFailed, contract.ConnectWrongAccount
 				return errors.New("account completion rejected")
