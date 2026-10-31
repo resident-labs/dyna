@@ -24,8 +24,12 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	}
 	start := (<-ch).Body.(contract.TurnStart)
 	got := start.Inputs[0].Text
-	if !strings.HasPrefix(got, "[Dyna] From your child worker, in the room feed.") || !strings.Contains(got, "\n"+forged) {
+	if !strings.HasPrefix(got, "[Dyna] From your child worker, in the room feed.") || !strings.Contains(got, "\\n"+forged) || !strings.Contains(got, "No reply is delivered. Run dyna post only if your child worker must act.") {
 		t.Fatalf("frame: %q", got)
+	}
+	frame, err := s.inputFrame(ctx, worker, contract.Event{From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Attachments: []contract.Attachment{{Name: "a\\n\"x"}}}}, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM}}})
+	if err != nil || !strings.Contains(frame, `Attached: "a\n\"x".`) || !strings.HasSuffix(frame, "Your final response goes to the owner in your DM.") {
+		t.Fatalf("attachment frame: %q, %v", frame, err)
 	}
 }
 
@@ -40,8 +44,8 @@ func TestHelloInstructionsForWorkerAndRoot(t *testing.T) {
 		id    contract.SessionID
 		parts []string
 	}{
-		{worker, []string{"worker", string(worker), "room", "parent is root", "only the first line", "dyna post"}},
-		{root, []string{"root of room room", "owner talks to you", "hold no goals", "only the first line", "dyna session start"}},
+		{worker, []string{"worker", string(worker), "room", "parent is root", "Only the first line", "dyna post"}},
+		{root, []string{"root of room room", "owner talks to you", "hold no goals", "Only the first line", "dyna session start"}},
 	} {
 		hello, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: tt.id}, contract.BoxHelloRequest{})
 		if problem != nil {
