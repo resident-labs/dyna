@@ -194,7 +194,7 @@ func (s *Service) quietBudgetRecovery(ctx context.Context, r Record, policy Chan
 	}
 	// Reuse the live poll's parser and run selection. Missing or invalid saved
 	// evidence needs a full poll, never a passing result from a partial cache.
-	gh := GitHub{requests: &requestCache{entries: entries, cacheOnly: true}}
+	gh := GitHub{requests: &requestCache{entries: entries, cacheOnly: true, countSavedCI: true}}
 	runs, err := gh.readCommitRuns(ctx, refRecord(r), r.Head)
 	if err != nil {
 		return true

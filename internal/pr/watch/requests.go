@@ -42,6 +42,7 @@ type requestCache struct {
 	forceBudgets  bool // Existing full polls also refresh completed timing evidence.
 	forceSnapshot bool // Reconcile a committed budget through the normal full poll.
 	cacheOnly     bool // Read saved evidence without transport or entry mutation.
+	countSavedCI  bool // Keep the CI decode test hook specific to CI evidence.
 	savedComments *[]Comment
 	entries       map[string]cachedResponse
 	used          map[string]cachedResponse

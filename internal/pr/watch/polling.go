@@ -169,7 +169,7 @@ func (g GitHub) settledPollCI(ctx context.Context, r Record, pull Pull, ciProbe 
 		return nil
 	}
 	saved := g
-	saved.requests = &requestCache{cacheOnly: true, entries: g.requests.entries}
+	saved.requests = &requestCache{cacheOnly: true, countSavedCI: true, entries: g.requests.entries}
 	var ci Snapshot
 	if err := saved.readCommitCI(ctx, refRecord(r), r.Head, &ci); err != nil {
 		return nil
