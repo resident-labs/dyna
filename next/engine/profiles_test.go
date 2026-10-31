@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -45,5 +46,30 @@ func TestProfilesRejectNegativeLimits(t *testing.T) {
 				t.Fatal("negative limit accepted")
 			}
 		})
+	}
+}
+
+func TestProfileRatings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	config := `{"writer":{"provider":"anthropic","model":"m","allowedModels":["m"],"thinking":"low","description":"Clear writing","taste":10,"diagnostics":8,"intelligence":7,"cost":6}}`
+	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := profiles.List()[0]
+	if got.Description != "Clear writing" || got.Taste != 10 || got.Diagnostics != 8 || got.Intelligence != 7 || got.Cost != 6 {
+		t.Fatalf("ratings lost: %+v", got)
+	}
+	for _, invalid := range []string{"-1", "11"} {
+		bad := strings.Replace(config, `"taste":10`, `"taste":`+invalid, 1)
+		if err := os.WriteFile(path, []byte(bad), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadProfiles(path); err == nil {
+			t.Fatalf("accepted rating %s", invalid)
+		}
 	}
 }
