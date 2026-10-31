@@ -19,12 +19,13 @@
   let recent: Visit[] = $state.raw([]);
   let retry = $state(0);
   const messages = new MessageSearch(untrack(() => search));
-  const actions: Action[] = [
-    { id: "requests", label: "Requests", hint: "", keys: ["G", "R"], icon: "inbox" },
-    { id: "pause", label: "Pause the room", hint: "No session starts a new turn", keys: [], icon: "pause" },
+  let current = $derived(rooms.find(found => found.id === room));
+  let actions: Action[] = $derived([
+    { id: "requests", label: "Requests", hint: current?.waiting?.length ? `${current.waiting.length} wait for you` : "", keys: ["G", "R"], icon: "inbox" },
+    { id: "pause", label: current?.paused ? "Resume the room" : "Pause the room", hint: current?.paused ? "Sessions can start turns again" : "No session starts a new turn", keys: [], icon: "pause" },
     { id: "theme", label: "Theme", hint: "Change the app's appearance", keys: [], icon: "palette" },
     { id: "settings", label: "Settings", hint: "", keys: ["Ctrl", ","], icon: "gear" },
-  ];
+  ]);
   let places: Place[] = $derived(rooms.map(found => ({ id: found.id, name: found.name, paused: found.paused,
     sessions: people.filter(person => person.room === found.id).length, working: found.working?.length ?? 0 })));
   let mode = $derived(parse(text, scope));
