@@ -297,7 +297,7 @@ func (r *Reconciler) launch(ctx context.Context, row store.LifecycleBox) {
 	go func() {
 		defer r.wg.Done()
 		if err := r.step(stepCtx, row); err != nil && stepCtx.Err() == nil {
-			log.Printf("lifecycle step: %v", err)
+			log.Printf("lifecycle step %s: %v", row.ID, err)
 		}
 		cancel()
 		r.mu.Lock()
