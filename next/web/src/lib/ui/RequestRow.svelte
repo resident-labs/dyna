@@ -27,7 +27,7 @@
 <article class:current>
   {#if !grouped}<div class="head"><Avatar kind={request.by.kind} {name} size={24} /><strong style:--hue={hue(name)}>{name}</strong>
     <span class="time">{#if soon}<StatusPill tone="warning" word label={"Expires " + fromNow(request.expires, now)} />{:else}Expires {fromNow(request.expires, now)}{/if}</span></div>{/if}
-  <p><span class="muted">{request.card.title}</span>{#if request.card.target.kind !== "room" && !request.card.body?.includes(request.card.target.name)} on <code>{request.card.target.name}</code>{/if}{#if request.card.body}{" "}{request.card.body}{/if}</p>
+  <p><span class="muted">{request.card.title}</span>{#if request.card.target.kind !== "room" && !request.card.body?.includes(request.card.target.name)}{" on "}<code>{request.card.target.name}</code>{/if}{#if request.card.body}{" · "}{request.card.body}{/if}</p>
   {#each request.card.changes ?? [] as change (change.field)}<p><span class="muted">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
   {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
   {#if admin && note}<input aria-label="Note to the session" placeholder="Add a note" bind:value={reason} disabled={busy} />{/if}
