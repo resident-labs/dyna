@@ -54,25 +54,3 @@ func TestMoveRejectsDeepSubtree(t *testing.T) {
 		t.Fatalf("unexpected error: %v", e)
 	}
 }
-
-func TestProfileListRequiresRoomForChildren(t *testing.T) {
-	s, room, root, ctx := setupRoot(t)
-	s.SetMaxDepth(2)
-	who := func(id contract.SessionID) contract.Principal {
-		return contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	}
-	if _, e := s.ProfileList(ctx, who(root), contract.ProfileListRequest{}); e != nil {
-		t.Fatal(e)
-	}
-	child, e := s.SessionStart(ctx, who(root), contract.SessionStartRequest{Room: room, Name: "child", Profile: "test"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e := s.ProfileList(ctx, who(child.Session), contract.ProfileListRequest{}); e == nil || e.Code != contract.ErrForbidden {
-		t.Fatalf("depth limit: %v", e)
-	}
-	s.SetMaxDepth(0)
-	if _, e := s.ProfileList(ctx, who(child.Session), contract.ProfileListRequest{}); e != nil {
-		t.Fatal(e)
-	}
-}

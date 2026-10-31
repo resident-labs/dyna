@@ -72,20 +72,8 @@ func (p ProfileConfig) List() []contract.ProfileSummary {
 	return result
 }
 
-func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error) {
-	if who.Kind == contract.PrincipalSession {
-		session, err := s.store.Session(ctx, who.Session)
-		if err != nil {
-			return contract.ProfileListResponse{}, forbidden()
-		}
-		tree, err := s.store.RoomTree(ctx, session.Room)
-		if err != nil {
-			return contract.ProfileListResponse{}, failure(err)
-		}
-		if tree.Depth(who.Session) == 0 || s.checkDepth(tree.Depth(who.Session)+1) != nil {
-			return contract.ProfileListResponse{}, forbidden()
-		}
-	} else if who.Kind != contract.PrincipalOwner {
+func (s *Service) ProfileList(_ context.Context, who contract.Principal, _ contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error) {
+	if who.Kind != contract.PrincipalOwner {
 		return contract.ProfileListResponse{}, forbidden()
 	}
 	return contract.ProfileListResponse{Profiles: s.profiles.List()}, nil
