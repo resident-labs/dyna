@@ -13,7 +13,7 @@ import (
 
 func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli())
+		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, engine_host) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost)
 		return err
 	})
 }
@@ -69,7 +69,7 @@ func (s *Store) FinishHostMaintenance(ctx context.Context, name contract.HostNam
 }
 
 func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, maintained_at FROM hosts ORDER BY name")
+	rows, err := s.Read().QueryContext(ctx, "SELECT name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, maintained_at, engine_host FROM hosts ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 	for rows.Next() {
 		var h box.Host
 		var checked, maintained int64
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &checked, &maintained); err != nil {
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &checked, &maintained, &h.EngineHost); err != nil {
 			return nil, err
 		}
 		h.CheckedAt = time.UnixMilli(checked)
@@ -88,4 +88,11 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 		hosts = append(hosts, h)
 	}
 	return hosts, rows.Err()
+}
+
+func (s *Store) SetEngineHost(ctx context.Context, name contract.HostName, value bool) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET engine_host=? WHERE name=?", value, name)
+		return err
+	})
 }

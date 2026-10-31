@@ -18,6 +18,7 @@ const (
 )
 
 type Host struct {
+	EngineHost          *bool
 	Name                contract.HostName
 	SSH                 string
 	State               HostState
