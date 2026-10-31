@@ -88,7 +88,9 @@ func TestRecordedTurnAndSteer(t *testing.T) {
 	}
 }
 
-func TestErrorStopReasonCarriesModelFailure(t *testing.T) {
+// replayTurn runs one turn against a scripted RPC stream and returns the settled result.
+func replayTurn(t *testing.T, stream string) contract.TurnEnded {
+	t.Helper()
 	inputReader, inputWriter := io.Pipe()
 	outputReader, outputWriter := io.Pipe()
 	h := &Harness{
@@ -119,8 +121,6 @@ func TestErrorStopReasonCarriesModelFailure(t *testing.T) {
 	if err := json.NewEncoder(outputWriter).Encode(event{ID: c.ID, Type: "response", Success: true}); err != nil {
 		t.Fatal(err)
 	}
-	stream := `{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"provider refused"}}` + "\n" +
-		`{"type":"agent_settled","aborted":false}` + "\n"
 	if _, err := outputWriter.Write([]byte(stream)); err != nil {
 		t.Fatal(err)
 	}
@@ -128,8 +128,23 @@ func TestErrorStopReasonCarriesModelFailure(t *testing.T) {
 	case err := <-errs:
 		t.Fatal(err)
 	case got := <-result:
-		if got.Outcome != contract.TurnOutcome("failed") || got.Cause != contract.CauseModelFailed || got.Error != "provider refused" {
-			t.Fatalf("unexpected result: %+v", got)
-		}
+		return got
+	}
+	return contract.TurnEnded{}
+}
+
+func TestErrorStopReasonCarriesModelFailure(t *testing.T) {
+	got := replayTurn(t, `{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"provider refused"}}`+"\n"+
+		`{"type":"agent_settled","aborted":false}`+"\n")
+	if got.Outcome != contract.TurnOutcome("failed") || got.Cause != contract.CauseModelFailed || got.Error != "provider refused" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestAbortAfterErrorClearsFailure(t *testing.T) {
+	got := replayTurn(t, `{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"provider refused"}}`+"\n"+
+		`{"type":"agent_settled","aborted":true}`+"\n")
+	if got.Outcome != contract.TurnOutcome("stopped") || got.Cause != "" || got.Error != "" {
+		t.Fatalf("stopped turn kept its failure: %+v", got)
 	}
 }
