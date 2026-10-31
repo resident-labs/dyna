@@ -201,6 +201,11 @@ export class RoomStore {
         this.activity.delete(event.body.session);
         this.steps.delete(event.body.session);
         break;
+      case "session.profile_changed": {
+        const changed = this.sessions.get(event.body.session);
+        if (changed) this.sessions.set(event.body.session, { ...changed, profile: event.body.profile });
+        break;
+      }
       case "session.moved": {
         const moved = this.sessions.get(event.body.session);
         if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
