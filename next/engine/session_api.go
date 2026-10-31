@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"slices"
 	"time"
 
@@ -35,8 +34,6 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, e
 		}
 	}
-	s.treeMu.Lock()
-	defer s.treeMu.Unlock()
 	if req.ClientID != "" {
 		response, err := s.store.SessionReplay(ctx, caller, req.ClientID)
 		if err == nil {
@@ -68,11 +65,6 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		parent, err = tree.ParentFor(caller, req.Parent)
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())
-		}
-	}
-	if parent != "" {
-		if e := s.checkDepth(tree.Depth(parent) + 1); e != nil {
-			return contract.SessionStartResponse{}, e
 		}
 	}
 	var repo contract.RepoName
@@ -126,13 +118,26 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.ClientID); err != nil {
-		if errors.Is(err, store.ErrParentHostAbsent) {
-			return contract.SessionStartResponse{}, invalid(err.Error())
+	var response contract.SessionStartResponse
+	problem := s.withProfile(req.Profile, func() *contract.Error {
+		var err error
+		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.ClientID, s.maxDepth)
+		if err != nil {
+			var treeErr *store.TreeError
+			if errors.As(err, &treeErr) {
+				return invalid(treeErr.Error())
+			}
+			if errors.Is(err, store.ErrParentHostAbsent) {
+				return invalid(err.Error())
+			}
+			return failure(err)
 		}
-		return contract.SessionStartResponse{}, failure(err)
+		return nil
+	})
+	if problem != nil {
+		return contract.SessionStartResponse{}, problem
 	}
-	return contract.SessionStartResponse{Session: session.ID, Box: session.Box}, nil
+	return response, nil
 }
 
 func (s *Service) Connected(id contract.SessionID) bool {
@@ -240,8 +245,6 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 // SessionSetProfile moves a session to another profile. A failed session wakes to carry its failed input with it.
 func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Principal, req contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, *contract.Error) {
 	var response contract.SessionSetProfileResponse
-	s.treeMu.Lock()
-	defer s.treeMu.Unlock()
 	target, problem := s.managedSession(ctx, caller, req.Session)
 	if problem != nil {
 		return response, problem
@@ -253,30 +256,14 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	if err != nil {
 		return response, failure(err)
 	}
-	err = s.store.Write(ctx, func(tx *sql.Tx) error {
-		var outcome contract.TurnOutcome
-		err := tx.QueryRowContext(ctx, "SELECT outcome FROM turns WHERE session=? AND ended_at IS NOT NULL ORDER BY ended_at DESC, started_seq DESC LIMIT 1", target.ID).Scan(&outcome)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
+	problem = s.withProfile(req.Profile, func() *contract.Error {
+		if err := s.store.SetSessionProfile(ctx, target.ID, req.Profile, event); err != nil {
+			if errors.Is(err, store.ErrTreeForbidden) {
+				return forbidden()
+			}
+			return failure(err)
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET profile=? WHERE id=?", req.Profile, target.ID); err != nil {
-			return err
-		}
-		seq, err := s.store.AppendEvent(tx, event)
-		if err != nil {
-			return err
-		}
-		return s.store.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: target.ID}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: outcome == contract.TurnFailed})
+		return nil
 	})
-	if err != nil {
-		return response, failure(err)
-	}
-	return response, nil
-}
-
-func (s *Service) checkDepth(depth int) *contract.Error {
-	if s.maxDepth > 0 && depth > s.maxDepth {
-		return invalid(fmt.Sprintf("session depth %d exceeds limit %d", depth, s.maxDepth))
-	}
-	return nil
+	return response, problem
 }

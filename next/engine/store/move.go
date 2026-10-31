@@ -8,17 +8,28 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-var ErrMoveCycle = errors.New("move would make a cycle")
+var ErrTreeForbidden = errors.New("tree access forbidden")
 
 // MoveSession commits the tree change and event in one transaction.
-func (s *Store) MoveSession(ctx context.Context, target, parent contract.SessionID, event contract.Event) error {
+func (s *Store) MoveSession(ctx context.Context, target, parent contract.SessionID, event contract.Event, maxDepth int) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		var cycle bool
-		if err := tx.QueryRowContext(ctx, `WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL) SELECT EXISTS(SELECT 1 FROM sub WHERE id=?)`, target, parent).Scan(&cycle); err != nil {
+		tree, err := loadTree(ctx, tx, event.Room)
+		if err != nil {
 			return err
 		}
-		if cycle {
-			return ErrMoveCycle
+		caller := event.From
+		if !tree.CanManage(caller, target) || !(tree.CanManage(caller, parent) || caller.Kind == contract.PrincipalSession && caller.Session == parent) {
+			return ErrTreeForbidden
+		}
+		if err := tree.CheckMove(target, parent); err != nil {
+			return &TreeError{Message: err.Error()}
+		}
+		order, err := tree.CloseOrder(target)
+		if err != nil {
+			return &TreeError{Message: err.Error()}
+		}
+		if err := checkDepth(tree.Depth(parent)+1+tree.Depth(order[0])-tree.Depth(target), maxDepth); err != nil {
+			return err
 		}
 		var state string
 		if err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND closed_at IS NULL", parent).Scan(&state); err != nil {
@@ -30,7 +41,7 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET parent=? WHERE id=?", parent, target); err != nil {
 			return err
 		}
-		_, err := s.AppendEvent(tx, event)
+		_, err = s.AppendEvent(tx, event)
 		return err
 	})
 }
