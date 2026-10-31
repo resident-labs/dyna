@@ -282,6 +282,7 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if e != nil {
 		return retry(e)
 	}
+	s.postQuotaWarnings(fresh, s.now())
 	// The pass is due again while a PR is watched or a notice was pending: a
 	// delivery can fail, and flush sends only a few notices per pass.
 	var next time.Time
