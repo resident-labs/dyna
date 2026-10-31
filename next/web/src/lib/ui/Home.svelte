@@ -6,7 +6,7 @@
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { clause, fromNow, requestLine } from "../feed.ts";
-  import { hostLabel, hostMeters, watchHosts } from "../hosts.ts";
+  import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { distinctInitials, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
@@ -129,14 +129,19 @@
     void call("accounts.quota", {}).then(list => { accounts = list.accounts ?? []; loadedAt = Date.now(); }, () => { accountsFailed = true; });
   });
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
-  // machines and the busiest usage window; a part with nothing to say is left out.
+  // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
   let asks = $derived(total(attention.waiting));
   let needs = $derived(asks + failures.length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
+  // A large shared folder never changes the sentence; the muted line names the largest, its room and its host.
+  const roomName = (room: string) => attention.rooms.get(room)?.name ?? "a closed room";
+  let shared = $derived((hosts ?? []).flatMap(h => largeShared(h).map(folder => ({ ...folder, host: h.name }))).sort((a, b) => b.bytes - a.bytes));
   let summary = $derived([
     low.length && lowDisk,
+    shared.length && `Shared folder of ${roomName(shared[0].room)} holds ${sharedSize(shared[0].bytes)} on ${shared[0].host === "control-plane" ? "this computer" : shared[0].host}`
+      + (shared.length > 1 ? `, and ${shared.length - 1} more ${shared.length === 2 ? "is" : "are"} large` : ""),
     !active.length && "No room is working",
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
     accounts && busiestWindow(accounts),
@@ -173,7 +178,7 @@
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
   {#if hosts?.length || hostsFailed}<h2 id="machines" bind:this={machines}>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
   {#if !hosts && hostsFailed}<p class="failed">Machines could not load.</p>{/if}
-  {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} />{/each}</div>{/if}
+  {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} {roomName} />{/each}</div>{/if}
   {#if accounts?.length || accountsFailed}<h2>Usage{#if accounts?.length}<span>{accounts.length}</span>{/if}</h2>{/if}
   {#if accountsFailed}<p class="failed">Model usage could not load.</p>{/if}
   {#if accounts?.length}<div class="cards">{#each accounts as account, i (i)}<UsageCard {account} now={loadedAt} />{/each}</div>{/if}
