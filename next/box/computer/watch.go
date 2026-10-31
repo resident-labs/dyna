@@ -37,14 +37,32 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":1}`)); err != nil {
 		return err
 	}
+	result, err := d.Call(ctx, "Page.captureScreenshot", json.RawMessage(`{"format":"jpeg","quality":70}`))
+	if err != nil {
+		return err
+	}
+	var shot struct {
+		Data string `json:"data"`
+	}
+	if err = json.Unmarshal(result, &shot); err != nil {
+		return err
+	}
+	if err = writeFrame(out, shot.Data); err != nil {
+		return err
+	}
 	for {
-		_, data, err := d.conn.Read(ctx)
-		if err != nil {
-			return err
-		}
 		var m message
-		if err := json.Unmarshal(data, &m); err != nil {
-			return err
+		if len(d.pending) > 0 {
+			m = d.pending[0]
+			d.pending = d.pending[1:]
+		} else {
+			_, data, err := d.conn.Read(ctx)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(data, &m); err != nil {
+				return err
+			}
 		}
 		if m.Method != "Page.screencastFrame" {
 			continue
@@ -56,14 +74,7 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 		if err := json.Unmarshal(m.Params, &frame); err != nil {
 			return err
 		}
-		jpeg, err := base64.StdEncoding.DecodeString(frame.Data)
-		if err != nil {
-			return err
-		}
-		if err = binary.Write(out, binary.BigEndian, uint32(len(jpeg))); err != nil {
-			return err
-		}
-		if _, err = out.Write(jpeg); err != nil {
+		if err = writeFrame(out, frame.Data); err != nil {
 			return err
 		}
 		// Pace acknowledgements so busy pages do not stream at display refresh rate.
@@ -79,4 +90,16 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 			return err
 		}
 	}
+}
+
+func writeFrame(out io.Writer, data string) error {
+	jpeg, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return err
+	}
+	if err = binary.Write(out, binary.BigEndian, uint32(len(jpeg))); err != nil {
+		return err
+	}
+	_, err = out.Write(jpeg)
+	return err
 }
