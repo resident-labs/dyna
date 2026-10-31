@@ -47,8 +47,18 @@ func TestProxyStoreReloadsCredentialAndRejectsDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded := mgr.List()
-	if len(loaded) != 1 || loaded[0].Metadata["access_token"] != "invented-token" {
+	if len(loaded) != 1 || !loaded[0].Disabled || loaded[0].Metadata["access_token"] != "invented-token" {
 		t.Fatal("restart lost credential")
+	}
+	if err := db.BindAccount(context.Background(), "account", auth.ID, "anthropic", "Invented"); err != nil {
+		t.Fatal(err)
+	}
+	mgr = proxyauth.NewManager(p, nil, nil)
+	if err := mgr.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if loaded = mgr.List(); len(loaded) != 1 || loaded[0].Disabled {
+		t.Fatal("bound credential was not enabled after restart")
 	}
 	if err := p.Delete(context.Background(), auth.ID); err != nil {
 		t.Fatal(err)

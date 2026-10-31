@@ -156,6 +156,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer proxy.Listener.Close()
 	proxyCtx, stopProxy := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopProxy()
 	done := make(chan struct{})
 	drain := model.NewDrain()
 	boxCtx, stopBoxes := context.WithCancel(ctx)

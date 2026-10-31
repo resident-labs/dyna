@@ -27,7 +27,7 @@ func validProxyKeyID(id string) bool {
 	return err == nil
 }
 
-func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, managementHash string) {
+func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials *proxyStore, managementHash string) {
 	dyna := router.Group("/dyna", func(c *gin.Context) {
 		password := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 		if bcrypt.CompareHashAndPassword([]byte(managementHash), []byte(password)) != nil {
@@ -54,7 +54,7 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, managementHa
 				Attributes: map[string]string{"api_key": req.Key, "auth_kind": "apikey", "base_url": provider.URL, "compat_name": name, "provider_key": "openai-compatible-" + name},
 				Metadata:   map[string]any{"type": "openai-compatibility"},
 			}
-			if err := (*service).RegisterDynaCredential(c.Request.Context(), auth, provider.Models[0]); err != nil {
+			if err := (*service).RegisterDynaCredential(c.Request.Context(), auth); err != nil {
 				c.Status(http.StatusServiceUnavailable)
 				return
 			}
@@ -79,6 +79,21 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, managementHa
 		c.JSON(http.StatusOK, struct {
 			Credentials []cliproxy.DynaCredential `json:"credentials"`
 		}{(*service).DynaCredentials()})
+	})
+	dyna.POST("/credentials/activate", func(c *gin.Context) {
+		var req struct {
+			ID    string `json:"id"`
+			Model string `json:"model"`
+		}
+		if c.ShouldBindJSON(&req) != nil || req.ID == "" {
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		if !credentials.bound(req.ID) || (*service).ActivateDynaCredential(c.Request.Context(), req.ID, req.Model) != nil {
+			c.Status(http.StatusServiceUnavailable)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	dyna.POST("/credentials/remove", func(c *gin.Context) {
 		var req struct {

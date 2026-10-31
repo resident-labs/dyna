@@ -21,6 +21,19 @@ type proxyStore struct {
 
 func (*proxyStore) RequireDurableAuth() bool { return true }
 
+func (s *proxyStore) bound(id string) bool {
+	var records []store.ProxyAuth
+	if s.client.Call("Auth.List", struct{}{}, &records) != nil {
+		return false
+	}
+	for _, record := range records {
+		if record.ID == id {
+			return record.Bound
+		}
+	}
+	return false
+}
+
 func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 	var records []store.ProxyAuth
 	if err := s.client.Call("Auth.List", struct{}{}, &records); err != nil {
@@ -36,6 +49,11 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 		var auth proxyauth.Auth
 		if err := json.Unmarshal(record.Record, &auth); err != nil {
 			return nil, errors.New("proxy store record invalid")
+		}
+		// Only bound credentials may be enabled after proxy restart.
+		auth.Disabled = !record.Bound
+		if record.Bound && auth.Status == proxyauth.StatusDisabled {
+			auth.Status = proxyauth.StatusActive
 		}
 		auths = append(auths, &auth)
 	}
