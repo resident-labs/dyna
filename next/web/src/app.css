@@ -1,6 +1,8 @@
 :root {
   /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
   --gutter: 60px;
+  /* v1's --feed-reading-width: the feed and its composer stop here on a wide window and centre. */
+  --feed-reading-width: 920px;
   /* Avatar initials under 24 px: no step of the type scale fits two letters there. */
   --type-face: 9px;
   /* v1's stacks. main.ts bundles the first face of each; the rest cover scripts beyond Latin. */
