@@ -12,11 +12,13 @@ type Plan = store.Plan
 type Window = store.Window
 type Effort = adapters.Effort
 
-// hideUnusedModelWindows drops a model-specific window while it shows 0% used.
-// Once the model has any use, the window stays visible.
-func hideUnusedModelWindows(accounts []Account) {
-	for i := range accounts {
-		a := &accounts[i]
+// visibleSnapshot returns a copy of out without model-specific windows that
+// show 0% used. Once the model has any use, the window stays visible. The
+// cached snapshot keeps every window, so a hidden window can return after its
+// reset as a probable-reset window.
+func visibleSnapshot(out Snapshot) Snapshot {
+	accounts := make([]Account, len(out.Accounts))
+	for i, a := range out.Accounts {
 		kept := make([]Window, 0, len(a.Windows))
 		for _, w := range a.Windows {
 			if p, ok := WindowPercent(w); ok && p == 0 && strings.HasPrefix(w.ID, store.ModelWindowPrefix) {
@@ -25,7 +27,10 @@ func hideUnusedModelWindows(accounts []Account) {
 			kept = append(kept, w)
 		}
 		a.Windows = kept
+		accounts[i] = a
 	}
+	out.Accounts = accounts
+	return out
 }
 
 // ApplyBlockingQuota derives blocking metadata from exhausted future quota windows.
