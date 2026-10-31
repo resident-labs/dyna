@@ -98,7 +98,17 @@ type HostAddResponse struct{}
 // HostListRequest asks for the hosts an owner terminal can open (5.15). Only the owner calls it.
 type HostListRequest struct{}
 type HostListResponse struct {
-	Hosts []HostName `json:"hosts"` // ControlPlane first, then each added host by name
+	Hosts []HostSummary `json:"hosts"` // ControlPlane first, then each added host by name
+}
+
+type HostSummary struct {
+	Name      HostName `json:"name"`
+	Reachable bool     `json:"reachable"`
+	Boxes     int      `json:"boxes"`
+	CPUs      int      `json:"cpus"`
+	MemBytes  int64    `json:"memBytes"`
+	CPUUsed   float64  `json:"cpuUsed"`
+	MemUsed   int64    `json:"memUsed"`
 }
 
 type RoomCreateRequest struct {
