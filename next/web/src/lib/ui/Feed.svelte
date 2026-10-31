@@ -121,6 +121,12 @@
   });
   const toggle = (key: string) => { list?.hold(); if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
+  // Measured row heights keep the deferred correction small when new rows first enter the view.
+  const estimate = (item: Item): number => {
+    if (item.kind === "post") return 40 + 20 * Math.max(1, item.text.split("\n").length);
+    if (item.kind === "day" || item.kind === "new" || item.kind === "notice" || item.kind === "restarted") return 28;
+    return 59;
+  };
   // True once the conversation has loaded with no event at all; a session that never existed reads so.
   export const empty = () => view.ready && !view.ordered.length;
   let ring: number | undefined = $state();
@@ -182,8 +188,8 @@
   <button type="button" class="jump" onclick={older}>Show older posts</button>
 {/if}
 {#if items.length}
-  <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={view.atPresent} bind:element
-    onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
+  <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" {estimate} follow={view.atPresent} bind:element
+    onstart={() => void view.loadOlder(() => list?.scrollSettled() ?? Promise.resolve())} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow row={item} {newest} onvisual={openVisual} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
