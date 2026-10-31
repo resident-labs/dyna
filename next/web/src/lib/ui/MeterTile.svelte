@@ -14,7 +14,7 @@
 
 <style>
   .tile { display: grid; gap: 4px; min-width: 0; align-content: start; }
-  .name { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .name { color: var(--muted); font-size: 12.5px; }
   strong { font-size: 24px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .unit { margin-left: 4px; color: var(--muted); font-size: 12.5px; }
   .track { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 7%, transparent); overflow: hidden; }
