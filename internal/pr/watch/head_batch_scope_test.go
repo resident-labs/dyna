@@ -20,7 +20,7 @@ func TestUpdateRecordsOrAllRecoversUndeclaredRecordPolling(t *testing.T) {
 	scope := RateLimitScope{Host: "github.com", Account: "fixture", Resource: "core"}
 	if err := e.s.Store.update(func(st *State) error {
 		st.Records[r.Key], st.Records[other.Key] = &r, &other
-		st.RateLimits = map[string]RateLimit{scope.Key(): {PauseUntil: e.clock.Add(time.Hour), Reason: "rate limited", PauseScope: scope}}
+		st.RateLimits = map[string]RateLimit{scope.Key(): {PauseUntil: e.clock.Add(-time.Second), Reason: "rate limited", PauseScope: scope}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
