@@ -50,13 +50,13 @@ func (c *contentBlocks) UnmarshalJSON(data []byte) error {
 }
 
 type event struct {
-	ToolName string                     `json:"toolName"`
-	Args     map[string]json.RawMessage `json:"args"`
-	ID       string                     `json:"id"`
-	Type     string                     `json:"type"`
-	Success  bool                       `json:"success"`
-	Error    string                     `json:"error"`
-	Aborted  bool                       `json:"aborted"`
+	ToolName string          `json:"toolName"`
+	Args     json.RawMessage `json:"args"`
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Success  bool            `json:"success"`
+	Error    string          `json:"error"`
+	Aborted  bool            `json:"aborted"`
 	Data     struct {
 		SessionFile string `json:"sessionFile"`
 	} `json:"data"`
