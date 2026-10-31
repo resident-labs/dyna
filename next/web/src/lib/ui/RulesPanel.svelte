@@ -12,7 +12,7 @@
   import type { RoomRule } from "../contract.gen.ts";
   // The room's rules as a numbered charter with a side column: what the rules cost, who set them and what changed last.
   // Numbers are stable: removing a rule never renumbers the others, and Undo adds the same text again under the next number.
-  let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: (event: MouseEvent) => void; element?: HTMLElement } = $props();
+  let { store, room, edit, onback, element = $bindable() }: { store: RoomStore; room: string; edit: boolean; onback: (event: MouseEvent) => void; element?: HTMLElement } = $props();
   // A removed rule keeps its place for 10 seconds as "Rule r4 removed · Undo".
   const removed = new SvelteMap<number, RoomRule>();
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
@@ -198,16 +198,16 @@
                   style:--hue={hue(name(rule))}>{name(rule)}</span>, <time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{ruleAge(rule.at, now)}</time></span></p>
                 <!-- The bar sits on the row's top edge, in the padding and the gap above, so it never covers text. -->
                 <span class="bar">
-                  <button type="button" data-edit={rule.number} onclick={() => startEdit(rule)} aria-label={`Edit rule r${rule.number}`}>Edit</button>
+                  {#if edit}<button type="button" data-edit={rule.number} onclick={() => startEdit(rule)} aria-label={`Edit rule r${rule.number}`}>Edit</button>{/if}
                   <button type="button" onclick={() => copy(rule)} aria-label={`Copy rule r${rule.number}`}>{copied?.number === rule.number ? copied.word : "Copy"}</button>
-                  <button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button></span>
+                  {#if edit}<button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button>{/if}</span>
                 <span class="more"><button type="button" aria-label={`Rule r${rule.number} actions`} aria-haspopup="menu" aria-expanded={menuFor === rule.number}
                   onclick={async () => { menuFor = menuFor === rule.number ? undefined : rule.number; await tick(); list?.querySelector(".menu")?.scrollIntoView({ block: "nearest" }); list?.querySelector<HTMLElement>(".menu [role=menuitem]")?.focus(); }}><Icon name="more" /></button>
                   {#if menuFor === rule.number}
                   <span class="menu" role="menu" tabindex="-1" onkeydown={event => { if (event.key === "Escape") { event.stopPropagation(); menuFor = undefined; } }}>
-                    <button type="button" role="menuitem" onclick={() => startEdit(rule)}>Edit</button>
+                    {#if edit}<button type="button" role="menuitem" onclick={() => startEdit(rule)}>Edit</button>{/if}
                     <button type="button" role="menuitem" onclick={() => copy(rule)}>Copy</button>
-                    <button type="button" role="menuitem" onclick={() => void remove(rule)}>Remove</button></span>{/if}</span>
+                    {#if edit}<button type="button" role="menuitem" onclick={() => void remove(rule)}>Remove</button>{/if}</span>{/if}</span>
               </li>
             {/if}
           {/each}
@@ -228,12 +228,12 @@
     </div>
   </div>
   <!-- Where the composer is, so adding a rule feels like posting one. It sits under the scroller, in the rules' column, so no rule runs under it. -->
-  <div class="page foot" class:paired={rules.length > 0}>
+  {#if edit}<div class="page foot" class:paired={rules.length > 0}>
     <form class="add" onsubmit={event => { event.preventDefault(); void submit(); }}>
       {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
       <RuleBox bind:value={draft} label="New rule" placeholder={`Add a rule for every session in ${room}`} {busy} onsave={() => void submit()} />
     </form>
-  </div>
+  </div>{/if}
 </section>
 
 <style>

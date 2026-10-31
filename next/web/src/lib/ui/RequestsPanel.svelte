@@ -3,7 +3,7 @@
   import PageCrumb from "./PageCrumb.svelte";
   import RequestCard from "./RequestCard.svelte";
   import type { Request, RoomStore } from "../room.svelte.ts";
-  let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: (event: MouseEvent) => void; element?: HTMLElement } = $props();
+  let { store, room, admin, onback, element = $bindable() }: { store: RoomStore; room: string; admin: boolean; onback: (event: MouseEvent) => void; element?: HTMLElement } = $props();
   // Relative times refresh each half minute while the page is open; this reads nothing from the engine.
   let now = $state(Date.now());
   // Waiting requests in the order they expire: first the owner's own, which Home and the room header count, then the ones
@@ -31,7 +31,7 @@
     const at = pending.findIndex(request => request.id === current);
     const key = event.key.toLowerCase();
     if (key === "j" || key === "k") pointed = pending[Math.min(pending.length - 1, Math.max(0, at + (key === "j" ? 1 : -1)))].id;
-    else if (key === "a" || key === "d") { if (!event.repeat) void cards[current]?.decide(key === "a"); }
+    else if (key === "a" || key === "d") { if (admin && !event.repeat) void cards[current]?.decide(key === "a"); }
     else if (key === "enter" && !(event.target instanceof HTMLButtonElement)) chosen = current;
     else return;
     event.preventDefault();
@@ -55,7 +55,7 @@
 </script>
 
 {#snippet card(request: Request)}
-  <RequestCard bind:this={cards[request.id]} {request} {store} {now} folded={request.id !== open} current={request.id === current}
+  <RequestCard {admin} bind:this={cards[request.id]} {request} {store} {now} folded={request.id !== open} current={request.id === current}
     onopen={() => { chosen = request.id; pointed = request.id; }} />
 {/snippet}
 
@@ -74,7 +74,7 @@
     {/if}
     {#if decided.length}
       <h2>Decided today<span class="count">{decided.length}</span></h2>
-      {#each all ? decided : decided.slice(0, 10) as request (request.id)}<RequestCard {request} {store} {now} />{/each}
+      {#each all ? decided : decided.slice(0, 10) as request (request.id)}<RequestCard {admin} {request} {store} {now} />{/each}
       {#if decided.length > 10 && !all}<button type="button" class="more" onclick={() => { all = true; }}>Show {decided.length - 10} more</button>{/if}
     {/if}
   </div></div>

@@ -7,11 +7,11 @@
   // A session's profile, and the menu that changes it, with RoomMenu's keys. The row shows the store's profile, which
   // session.profile_changed updates, so the value moves only once the engine has changed it. Until the list loads, the
   // profile's name stands in for its label; opening the menu asks again after a failed load.
-  let { session, profile }: { session: string; profile: string } = $props();
+  let { session, profile, switchable }: { session: string; profile: string; switchable: boolean } = $props();
   let profiles: ProfileSummary[] | undefined = $state();
   let open = $state(false), busy = $state(false), failure = $state("");
   let root: HTMLDivElement;
-  let button: HTMLButtonElement;
+  let button: HTMLButtonElement | undefined = $state();
   let list: HTMLDivElement | undefined = $state();
   let current = $derived(profiles?.find(item => item.name === profile));
   let label = $derived(current && profiles ? profileLabel(current, profiles) : { model: slugName(profile), detail: "" });
@@ -25,7 +25,7 @@
     if (busy) return;
     if (next && !profiles) await load();
     open = next && Boolean(profiles);
-    if (open) { await tick(); (items().find(item => item.ariaChecked === "true") ?? items()[0])?.focus(); } else if (refocus) button.focus();
+    if (open) { await tick(); (items().find(item => item.ariaChecked === "true") ?? items()[0])?.focus(); } else if (refocus) button?.focus();
   }
   async function choose(name: string) {
     await show(false, true);
@@ -48,9 +48,10 @@
 
 <svelte:window onpointerdown={event => { if (open && event.target instanceof Node && !root.contains(event.target)) void show(false); }} />
 <div class="menu" bind:this={root}>
+  {#if !switchable}<span class="names">{label.model}{#if label.detail}<small>{label.detail}</small>{/if}</span>{:else}
   <button type="button" class="open" bind:this={button} aria-disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`Profile: ${label.model} ${label.detail}. Change profile`}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <span class="names">{label.model}{#if label.detail}<small>{label.detail}</small>{/if}</span><Icon name="chevron" /></button>
+    <span class="names">{label.model}{#if label.detail}<small>{label.detail}</small>{/if}</span><Icon name="chevron" /></button>{/if}
   {#if open && profiles}
     <div class="list" role="menu" aria-label="Profiles" tabindex="-1" bind:this={list} onkeydown={move}>
       {#each profiles as item (item.name)}{@const shown = profileLabel(item, profiles)}<button type="button" role="menuitemradio" aria-checked={item.name === profile} tabindex="-1" onclick={() => void choose(item.name)}>
