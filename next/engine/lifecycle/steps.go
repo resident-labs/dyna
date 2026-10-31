@@ -173,5 +173,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		ctx = context.WithoutCancel(ctx)
 	}
 	_, err = r.change(ctx, b, next, due, failures, cause)
+	if err == nil && b.State == contract.BoxLost {
+		return workErr
+	}
 	return err
 }
