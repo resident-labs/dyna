@@ -1,4 +1,4 @@
-package runtime
+package engine
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -20,12 +19,12 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	}
 	defer st.Close()
 	ctx := context.Background()
-	actions := &accountActions{pending: make(map[string]accountAction)}
-	core := engine.New(st, nil, nil, time.Now)
-	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.entry()}, time.Minute); err != nil {
+	core := New(st, nil, nil, time.Now)
+	actions := NewAccountActions(core, nil)
+	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	s := &serviceWithHosts{Service: core, accounts: actions}
+	s := actions
 	secret := "invented-callback-address-and-key"
 	result, problem := s.runAccountAction(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountActionCallback, func(context.Context) accountActionResult {
 		if secret == "" {
