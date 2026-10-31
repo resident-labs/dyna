@@ -22,7 +22,8 @@
   // Scopes live on the code, and a new code replaces the old one. So each change makes a code, and every exit (close,
   // or leaving the pane) makes one that nobody sees, which ends the shown one, even one still on its way. Calls run one
   // at a time, so the code shown is always the engine's live one.
-  let closing = false, gone = false, running = false, again = false;
+  let closing = $state(false);
+  let gone = false, running = false, again = false;
   async function make() {
     again = true;
     if (running) return;
@@ -38,7 +39,8 @@
         if (made) { if (!gone) onclose(false); }
         // After an exit nobody can press Try again, so a failed discard tries twice more.
         else if (gone) again = ++tries < 3;
-        else { failed = true; closing = false; }
+        // The close stays asked for, so Try again tries to end the code again.
+        else failed = true;
       }
       // A newer request follows, so this code is never shown: its scopes are not the boxes'.
       else if (again) continue;
@@ -91,10 +93,10 @@
   {:else if blank}<div class="tile blank" aria-hidden="true"></div>{/if}
   <div class="side">
     <h3>Pair a device<button type="button" class="close" aria-label="Close and end this code" title="Close" onclick={close}><Icon name="close" /></button></h3>
-    {#if failed}<p class="problem" role="alert">{live ? "The code did not change." : "The code was not made."} <button type="button" class="retry" onclick={() => void make()}>Try again</button></p>{/if}
+    {#if failed}<p class="problem" role="alert">{closing ? "The code was not ended." : live ? "The code did not change." : "The code was not made."} <button type="button" class="retry" onclick={() => void make()}>Try again</button></p>{/if}
     {#if live && !addresses.length}<p>No web address is set, so another device cannot reach this engine. Start the engine with <code>--web.route</code>, then pair again.</p>
     {:else if live}
-      <div><div class="code" class:dead={left === 0 || changing}>{changing ? "·····-·····" : showCode(live.code.code)}</div><div class="left" role="timer">{changing ? "Making a new code…" : left ? `Works once, for ${clock(left)}` : "Expired"}</div></div>
+      <div><div class="code" class:dead={left === 0 || changing}>{changing ? "·····-·····" : showCode(live.code.code)}</div><div class="left" role="timer">{changing ? (failed ? "" : "Making a new code…") : left ? `Works once, for ${clock(left)}` : "Expired"}</div></div>
       {#if addresses.length > 1}<span class="address"><select aria-label="Web address" bind:value={() => address, value => { route = value; }}>
         {#each addresses as item (item)}<option value={item}>{item}</option>{/each}</select><Icon name="chevron" size={14} /></span>{/if}
       <p>Scan it with the device's camera, or type the code there. A paired device acts as you.</p>
