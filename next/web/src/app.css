@@ -80,12 +80,14 @@ main > header strong { font-size: 16px; }
   .shell > aside.members { display: none; }
   .shell > aside.members.shown { display: flex; position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; padding-bottom: max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)); width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
 }
-/* A phone shows the rooms as one scrolling row above the feed. */
+/* A phone: the rail is a drawer from the left, as in Discord's phone app, with the open room's pages beside the rooms. */
 @media (max-width: 640px) {
-  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); --panel-top: 117px; }
-  .rail { border: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
-  .rail nav { flex-direction: row; align-self: stretch; padding: 12px 16px; }
-  .rail footer { display: none; }
-  .rail a[aria-current="page"]::before { left: calc(50% - 14px); top: auto; bottom: -12px; width: 28px; height: 4px; border-radius: 4px 4px 0 0; }
+  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: fixed; z-index: 3; top: 0; bottom: 0; left: 0; width: min(88vw, 340px); display: grid; grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); overflow: hidden;
+    transform: translateX(-100%); visibility: hidden; transition: transform 160ms ease-out, visibility 160ms; }
+  .shell.drawer .rail { transform: none; visibility: visible; box-shadow: 8px 0 24px rgb(0 0 0 / 30%); }
+  .rail > nav:first-child { grid-column: 1; align-items: center; overflow-y: auto; }
+  .rail footer { grid-column: 1; display: flex; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
