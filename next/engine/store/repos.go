@@ -9,10 +9,15 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
+var ErrRoomNotFound = errors.New("unknown room")
+
 // RoomRepos returns the repositories listed by a room.
 func (s *Store) RoomRepos(ctx context.Context, id contract.RoomID) ([]contract.RoomRepo, error) {
 	var exists int
 	if err := s.Read().QueryRowContext(ctx, "SELECT 1 FROM rooms WHERE id=?", id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRoomNotFound
+		}
 		return nil, err
 	}
 	rows, err := s.Read().QueryContext(ctx, "SELECT repo,is_default FROM room_repos WHERE room=? ORDER BY repo", id)
@@ -36,6 +41,9 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var exists int
 		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM rooms WHERE id=?", id).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrRoomNotFound
+			}
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, "SELECT repo,is_default FROM room_repos WHERE room=? ORDER BY repo", id)
