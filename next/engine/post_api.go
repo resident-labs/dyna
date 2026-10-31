@@ -109,6 +109,9 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		file.Bytes = info.Size()
 		file.Media = media
 	}
+	if req.VisualReply != "" && (req.VisualUpdate != "" || caller.Kind != contract.PrincipalOwner || len(req.Mentions) != 0 || req.ReplyTo != "") {
+		return contract.PostResponse{}, invalid("invalid visual reply")
+	}
 	if req.VisualUpdate != "" && visuals != 1 {
 		return contract.PostResponse{}, invalid("visual update requires one visual")
 	}
@@ -184,7 +187,14 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, failure(err)
 	}
 	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
-	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate)
+	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate, req.VisualReply)
+	var superseded *store.VisualSupersededError
+	if errors.As(err, &superseded) {
+		return contract.PostResponse{}, &contract.Error{Code: contract.ErrVisualSuperseded, Message: "visual has a newer version", Visual: &contract.VisualSuperseded{Event: superseded.Event, Version: superseded.Version, Seq: superseded.Seq}}
+	}
+	if errors.Is(err, store.ErrVisualNoAuthor) {
+		return contract.PostResponse{}, invalid("visual has no session author")
+	}
 	if errors.Is(err, store.ErrVisualForbidden) {
 		return contract.PostResponse{}, forbidden()
 	}
@@ -214,7 +224,22 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 		}
 		dm = req.Home.Session
 	}
-	events, err := s.store.EventsPage(ctx, req.Room, req.AfterSeq, req.BeforeSeq, req.Limit, req.Types, dm)
+	var events []contract.Event
+	var err error
+	if req.Event != "" {
+		if req.AfterSeq != 0 || req.BeforeSeq != 0 || req.Home != nil || len(req.Types) != 0 {
+			return contract.EventsListResponse{}, invalid("event lookup cannot have filters")
+		}
+		var event contract.Event
+		event, err = s.store.EventInRoom(ctx, req.Room, req.Event)
+		if err == nil {
+			events = append(events, event)
+		} else if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		}
+	} else {
+		events, err = s.store.EventsPage(ctx, req.Room, req.AfterSeq, req.BeforeSeq, req.Limit, req.Types, dm)
+	}
 	if err != nil {
 		return contract.EventsListResponse{}, failure(err)
 	}
