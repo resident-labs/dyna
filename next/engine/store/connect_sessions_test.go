@@ -39,6 +39,19 @@ func TestConnectDeviceMappingAndRevocation(t *testing.T) {
 	if err != nil || !ok || got.Device != "device1" || len(scopes) != 1 || scopes[0] != contract.ScopeRead {
 		t.Fatalf("mapping: %+v %v %v %v", got, scopes, ok, err)
 	}
+	rotated := sha256.Sum256([]byte("rotated"))
+	if err := s.RotateConnectSession(ctx, got, rotated, now, false); err != nil {
+		t.Fatal(err)
+	}
+	old, _, ok, err := s.AuthenticateConnect(ctx, x.Hash, x.Origin, now.Add(31*time.Second))
+	if err != nil || !ok || !old.CookieStale {
+		t.Fatalf("old cookie: %+v %v %v", old, ok, err)
+	}
+	streamScopes, alive, err := s.ConnectStreamScopes(ctx, got.ID, now.Add(31*time.Second))
+	if err != nil || !alive || len(streamScopes) != 1 || streamScopes[0] != contract.ScopeRead {
+		t.Fatalf("stream: %v %v %v", streamScopes, alive, err)
+	}
+	x.Hash = rotated
 	if err := s.Write(ctx, func(tx *sql.Tx) error {
 		_, e := tx.Exec("UPDATE devices SET revoked_at=? WHERE id=?", now.UnixMilli(), got.Device)
 		return e
@@ -47,6 +60,9 @@ func TestConnectDeviceMappingAndRevocation(t *testing.T) {
 	}
 	if _, _, ok, err := s.AuthenticateConnect(ctx, x.Hash, x.Origin, now); err != nil || ok {
 		t.Fatalf("revoked auth: %v %v", ok, err)
+	}
+	if _, alive, err := s.ConnectStreamScopes(ctx, got.ID, now); err != nil || alive {
+		t.Fatalf("revoked stream: %v %v", alive, err)
 	}
 	x.ID = "third"
 	if err := s.StartConnectSession(ctx, x); err == nil {

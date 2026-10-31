@@ -109,10 +109,13 @@ func (s *Store) unlinkConnect(ctx context.Context, generation int64) error {
 		if generation != 0 && n != 1 {
 			return ErrConnectEpoch
 		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM connect_revocations"); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM connect_nonces"); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "DELETE FROM connect_sessions")
+		_, err = tx.ExecContext(ctx, "DELETE FROM connect_sessions")
 		return err
 	})
 }
