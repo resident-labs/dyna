@@ -102,7 +102,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomCreate, c, owner, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, owner, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, owner, a.service.RoomRepos)
-	call(mux, contract.MethodSessionStart, c, owner, a.service.SessionStart)
+	call(mux, contract.MethodSessionStart, c, user, a.service.SessionStart)
 	call(mux, contract.MethodSessionMove, c, user, a.service.SessionMove)
 	call(mux, contract.MethodSessionClose, c, user, a.service.SessionClose)
 	call(mux, contract.MethodSessionSetProfile, c, user, a.service.SessionSetProfile)

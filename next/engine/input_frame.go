@@ -21,6 +21,7 @@ func (s *Service) framePrincipal(ctx context.Context, viewer contract.SessionID,
 		if err != nil {
 			return "", err
 		}
+		name = fmt.Sprintf("%q", name)
 		if principal.Session == viewerParent {
 			name = "your parent " + name
 		} else if parent == viewer {
