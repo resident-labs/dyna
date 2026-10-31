@@ -311,6 +311,21 @@ type scopeRunner interface {
 	StopHostexec(context.Context, string) error
 }
 
+func (b *Boxes) TerminalArgv(ctx context.Context, host contract.HostName, id contract.BoxID) ([]string, error) {
+	if host == contract.ControlPlane && id == "" {
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+		return []string{"systemd-run", "--user", "--scope", "--quiet", "--", shell, "-l"}, nil
+	}
+	h, err := b.host(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	return h.TerminalArgv(id), nil
+}
+
 func (b *Boxes) scopeRunner(ctx context.Context, host contract.HostName) (scopeRunner, error) {
 	if host == contract.ControlPlane {
 		return hostexec.Local{}, nil
