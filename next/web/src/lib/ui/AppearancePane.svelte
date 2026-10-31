@@ -6,7 +6,7 @@
   // Settings > Appearance. Each card draws a small Home from that theme's own tokens, scoped to the card, so a new
   // theme needs no picker work. The cards are one radio group: a click or an arrow key applies the theme at once.
   let { bar }: { bar: Snippet<[string, number | undefined, Snippet | undefined]> } = $props();
-  let cards: HTMLElement[] = $state([]);
+  const cards: HTMLElement[] = [];
   const scoped = (tokens: Readonly<Record<string, string>>) => Object.entries(tokens).map(([name, value]) => `${name}: ${value}`).join("; ");
   function key(event: KeyboardEvent, index: number) {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
@@ -43,13 +43,14 @@
   .body { flex: 1; min-height: 0; width: min(1040px, 100%); padding: 20px 24px; overflow-y: auto; }
   .lead { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
   .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 16px; }
-  .pick { display: grid; gap: 8px; min-width: 0; border-radius: 12px; cursor: pointer; }
+  /* The hover ring takes the page's --firm here, as the card below sets its own theme's tokens. */
+  .pick { --ring: var(--firm); display: grid; gap: 8px; min-width: 0; border-radius: 12px; cursor: pointer; }
   .pick:focus-visible { outline: none; }
   .pick:focus-visible .home { outline: 2px solid var(--focus); outline-offset: 2px; }
   /* The card is painted with its own theme's tokens, set on this element. */
   .home { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr); aspect-ratio: 5 / 2; overflow: hidden;
     border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
-  .pick:hover .home { box-shadow: 0 0 0 2px var(--selected); }
+  .pick:hover .home { box-shadow: 0 0 0 2px var(--ring); }
   /* A ring and a check: a ring alone reads as the focus ring. */
   .home.on { outline: 2px solid var(--focus); outline-offset: 3px; }
   i, b { display: block; font-style: normal; }
