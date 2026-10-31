@@ -88,3 +88,22 @@ func TestDeviceManagementRequiresAdminOwner(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceScopesReturnsTheCallersOwn(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	for _, tc := range []struct {
+		name   string
+		caller Caller
+		want   string
+	}{
+		{"read device", Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeRead}}, `{"scopes":["read"]}`},
+		{"owner socket", Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}, `{"scopes":["read","operate","files","terminal","computers","admin"]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := request(a.handler(tc.caller), "/v1/device.scopes", `{}`)
+			if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != tc.want {
+				t.Fatalf("got %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
