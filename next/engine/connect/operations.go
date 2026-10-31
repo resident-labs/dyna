@@ -34,17 +34,44 @@ func NewOperations(ctx context.Context, files *Files, state operationState, appP
 	return &Operations{ctx: ctx, files: files, state: state, appPort: appPort, cardPort: cardPort, wake: make(chan struct{}, 1)}
 }
 
-func (o *Operations) launch(req contract.ConnectStartRequest) {
+func (o *Operations) launch(req contract.ConnectStartRequest) <-chan error {
 	ctx, cancel := context.WithCancel(o.ctx)
 	o.cancel, o.done = cancel, make(chan struct{})
-	done := o.done
+	done, ready := o.done, make(chan error, 1)
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 		defer o.signal()
-		_, _ = LinkMachine(ctx, &Relay{Base: req.Relay}, o.files, o.state, LinkOptions{Name: req.Name, AppPort: o.appPort, CardPort: o.cardPort, Ticks: ticker.C})
+		notified := false
+		started := func(LinkStart, string) {
+			if !notified {
+				ready <- nil
+				notified = true
+			}
+		}
+		for {
+			_, err := LinkMachine(ctx, &Relay{Base: req.Relay}, o.files, o.state, LinkOptions{Name: req.Name, AppPort: o.appPort, CardPort: o.cardPort, Ticks: ticker.C, Started: started})
+			if !notified {
+				ready <- err
+				notified = true
+			}
+			if err == nil || ctx.Err() != nil {
+				return
+			}
+			a, e := o.state.ConnectAttempt(ctx)
+			linked, le := o.state.ConnectLinked(ctx)
+			if e != nil || le != nil || (!linked && a.State != contract.ConnectAttemptPending) {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
 	}()
+	return ready
 }
 
 // Resume restarts an interrupted attempt or completes an approved link.
@@ -92,8 +119,13 @@ func (o *Operations) Start(ctx context.Context, req contract.ConnectStartRequest
 	if linked || a.State == contract.ConnectAttemptStarting || a.State == contract.ConnectAttemptPending {
 		return errors.New("link already active")
 	}
-	o.launch(req)
-	return nil
+	ready := o.launch(req)
+	select {
+	case err := <-ready:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (o *Operations) Status(ctx context.Context) (contract.ConnectStatusResponse, error) {
@@ -116,6 +148,9 @@ func (o *Operations) Status(ctx context.Context) (contract.ConnectStatusResponse
 	var p pendingLink
 	if err := json.Unmarshal(b, &p); err != nil || p.Start.Expires != a.Expires {
 		return out, errors.New("invalid pending link")
+	}
+	if _, err := os.Stat(filepath.Join(o.files.dir, "machine.key")); err != nil {
+		return out, err
 	}
 	key, err := o.files.Key()
 	if err != nil {
