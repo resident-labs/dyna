@@ -79,7 +79,7 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 		}
 	}
 	if g.requests != nil && g.requests.cacheOnly {
-		if method != "GET" || len(cached.Body) == 0 {
+		if method != "GET" || len(cached.Body) == 0 || cached.Stale {
 			return nil, "", fmt.Errorf("saved GitHub response is unavailable")
 		}
 		g.requests.use(key, cached)
@@ -213,6 +213,7 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 		if !now.Before(rate.PauseUntil) {
 			rate.PauseUntil, rate.Reason, rate.PauseScope = time.Time{}, "", RateLimitScope{}
 		}
+		cached.Stale = false
 		if etag := headers.Get("ETag"); etag != "" {
 			cached.ETag = etag
 		}
@@ -451,4 +452,9 @@ func (c *requestCache) pauseUntil(scope RateLimitScope) time.Time {
 		until = c.legacyPause
 	}
 	return until
+}
+
+// discussionResponse identifies pages that only a complete poll may publish.
+func discussionResponse(path string) bool {
+	return strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?")
 }
