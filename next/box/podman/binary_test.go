@@ -25,23 +25,41 @@ func (r *binaryRunner) Run(_ context.Context, input []byte, args ...string) ([]b
 	return []byte(fmt.Sprintf("%sDYNA-END %020d 000\n", r.output, len(r.output))), nil
 }
 
-func TestInstallBinarySendsFramedBytes(t *testing.T) {
-	r := &binaryRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
+	read := func() ([]byte, error) { return []byte("binary"), nil }
+	for _, tc := range []struct {
+		name, hostSum string
+		sentBytes     bool
+	}{
+		{name: "same sum", hostSum: "abc\n"},
+		{name: "other sum", hostSum: "def\n", sentBytes: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &binaryRunner{output: tc.hostSum}
+			h, err := New("user@host", t.TempDir(), "host", r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := h.InstallBinary(context.Background(), "/data", "v1", "abc", read); err != nil {
+				t.Fatal(err)
+			}
+			command := r.args[len(r.args)-1]
+			if tc.sentBytes {
+				if !strings.Contains(command, "'dyna-install' '/data' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000006\nbinary" {
+					t.Fatalf("command %q input %q", command, r.input)
+				}
+				return
+			}
+			if !strings.Contains(command, "'dyna-link' '/data' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000000\n" {
+				t.Fatalf("command %q input %q", command, r.input)
+			}
+		})
+	}
+	h, err := New("user@host", t.TempDir(), "host", &binaryRunner{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.InstallBinary(context.Background(), "/data", "v1", []byte("binary")); err != nil {
-		t.Fatal(err)
-	}
-	command := r.args[len(r.args)-1]
-	if !strings.HasSuffix(command, "'dyna-install' '/data' 'v1'") || !strings.Contains(command, "sha256sum") || !strings.Contains(command, "mv -Tf") {
-		t.Fatalf("command %q", command)
-	}
-	if string(r.input) != "DYNA-IN 00000000000000000006\nbinary" {
-		t.Fatalf("input %q", r.input)
-	}
-	if err := h.InstallBinary(context.Background(), "/data", "../escape", nil); err == nil {
+	if err := h.InstallBinary(context.Background(), "/data", "../escape", "abc", read); err == nil {
 		t.Fatal("accepted invalid version")
 	}
 }
@@ -57,7 +75,11 @@ func (r *concurrentInstallRunner) Run(_ context.Context, _ []byte, args ...strin
 			return nil, nil
 		}
 	}
-	r.commands <- args[len(args)-1]
+	command := args[len(args)-1]
+	if !strings.Contains(command, "'dyna-install'") {
+		return []byte("DYNA-END 00000000000000000000 000\n"), nil
+	}
+	r.commands <- command
 	<-r.release
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
@@ -69,8 +91,9 @@ func TestConcurrentInstallsUsePrivateTemporaryLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 2)
+	read := func() ([]byte, error) { return []byte("binary"), nil }
 	for _, version := range []string{"v1", "v2"} {
-		go func() { done <- h.InstallBinary(context.Background(), "/data", version, []byte("binary")) }()
+		go func() { done <- h.InstallBinary(context.Background(), "/data", version, "abc", read) }()
 	}
 	for range 2 {
 		command := <-r.commands
