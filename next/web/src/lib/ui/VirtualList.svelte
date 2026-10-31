@@ -113,14 +113,28 @@
     if (page.end) onend?.();
   }
   const measure = (node: HTMLDivElement) => { virtualizer.measureElement(node); };
-  // The browser checks the end mark after its own layout of each frame; the last queued entry is the current state. A scroll handler that read scrollHeight after
-  // the rows changed forced an extra layout on each scroll event: 637 ms in a 20 second trace.
+  // The browser checks the end mark after its own layout of each frame; the last queued entry is the current state.
+  // A scroll handler that read scrollHeight after the rows changed forced an extra layout on each scroll event:
+  // 637 ms in a 20 second trace.
+  const watch = (shown: (entry: IntersectionObserverEntry) => void, node: HTMLDivElement) => {
+    const observer = new IntersectionObserver(entries => shown(entries.at(-1)!), { root: element, rootMargin: "0px 0px 24px 0px" });
+    observer.observe(node);
+    return observer;
+  };
+  let end: HTMLDivElement | undefined = $state();
   const bottom = (node: HTMLDivElement) => {
     if (!element || !onbottom) return;
-    const report = onbottom, observer = new IntersectionObserver(entries => report(entries.at(-1)!.isIntersecting), { root: element, rootMargin: "0px 0px 24px 0px" });
-    observer.observe(node);
+    const report = onbottom, observer = watch(entry => report(entry.isIntersecting), node);
     return () => observer.disconnect();
   };
+  // Whether the end is in view in the layout the next frame draws. A flag kept from an earlier callback can be stale
+  // after rows were added or grew, so a reader who must not be told "seen" too early asks here.
+  export function atBottom(): Promise<boolean> {
+    return new Promise(resolve => {
+      if (!end || !element) { resolve(false); return; }
+      const observer = watch(entry => { observer.disconnect(); resolve(entry.isIntersecting); }, end);
+    });
+  }
 </script>
 
 <div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}>
@@ -130,7 +144,7 @@
         {@render row(rows[item.index])}
       </div>
     {/each}
-    <div class="end" {@attach bottom}></div>
+    <div class="end" bind:this={end} {@attach bottom}></div>
   </div>
 </div>
 
