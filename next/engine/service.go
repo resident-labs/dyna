@@ -61,14 +61,15 @@ type Service struct {
 	filesDir      string
 }
 
-// sessionState is the engine's in-memory state for one session. s.mu guards every field except
-// Every field is guarded by s.mu.
+// sessionState is the engine's in-memory state for one session. s.mu guards its fields.
+// computerLock serializes computer transitions and channel replacement.
 type sessionState struct {
-	channel   *boxChannel
-	activity  contract.TurnActivity
-	computer  *computerState
-	terminals int
-	watch     *shellWatch
+	computerLock sync.Mutex
+	channel      *boxChannel
+	activity     contract.TurnActivity
+	computer     *computerState
+	terminals    int
+	watch        *shellWatch
 	// activityOrder is the s.activityCount value when activity was set, so a room's newest label wins.
 	activityOrder uint64
 }

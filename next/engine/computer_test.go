@@ -197,8 +197,18 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
-	s.clearComputerLocked(id)
+	state := s.sessionLocked(id)
 	s.mu.Unlock()
+	state.computerLock.Lock()
+	s.mu.Lock()
+	stopRoom, stopped := s.clearComputerLocked(id)
+	s.mu.Unlock()
+	if stopped {
+		if err := s.computerEvent(ctx, id, stopRoom, contract.ComputerStopped); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state.computerLock.Unlock()
 	if _, ok := <-watch; ok {
 		t.Fatal("watch stayed open")
 	}
