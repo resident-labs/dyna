@@ -347,11 +347,11 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err = s.transition(ctx, record.Room, current, contract.BoxClosing, "")
+	current, err = s.transition(ctx, record.Room, current, contract.BoxClosing, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.transition(ctx, record.Room, current, contract.BoxDeleted, ""); err != nil {
+	if _, err = s.transition(ctx, record.Room, current, contract.BoxDeleted, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ResumeClosures(ctx); err != nil {
@@ -378,7 +378,7 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.transition(ctx, room, current, contract.BoxClosing, ""); err != nil {
+	if _, err := s.transition(ctx, room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
@@ -422,7 +422,7 @@ func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, ""); err != nil {
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ResumeClosures(ctx); err != nil {
