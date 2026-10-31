@@ -89,6 +89,7 @@ type RoomBundle struct {
 	Handoff       []SessionHandoff `json:"handoff"`
 	HookHandoff   []HookHandoff    `json:"hookHandoff,omitempty"`
 	LimitHandoff  []RoomLimitGap   `json:"limitHandoff,omitempty"`
+	RepoHandoff   []RepoHandoff    `json:"repoHandoff,omitempty"`
 	Counts        BundleCounts     `json:"counts"`
 }
 
@@ -308,6 +309,16 @@ type QuestionBundle struct {
 	Reason    string         `json:"reason,omitempty"`
 	Asked     time.Time      `json:"asked"`
 }
+
+// RepoHandoff names a repository that v2 cannot import yet.
+type RepoHandoff struct {
+	Identity string            `json:"identity"`
+	Reason   RepoHandoffReason `json:"reason"`
+}
+
+type RepoHandoffReason string
+
+const RepoUnsupportedForge RepoHandoffReason = "unsupportedForge"
 
 // RoomLimitGap identifies a v1 limit that needs manual review.
 type RoomLimitGap string
