@@ -252,6 +252,30 @@ func (b *Boxes) Restore(ctx context.Context) error {
 	return nil
 }
 
+func (b *Boxes) containerHost(ctx context.Context, id contract.BoxID) (*podman.Host, error) {
+	record, err := b.Store.Box(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return b.host(ctx, record.Host)
+}
+
+func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
+	host, err := b.containerHost(ctx, id)
+	if err != nil {
+		return err
+	}
+	return host.StartContainer(ctx, id)
+}
+
+func (b *Boxes) Stop(ctx context.Context, id contract.BoxID) error {
+	host, err := b.containerHost(ctx, id)
+	if err != nil {
+		return err
+	}
+	return host.StopContainer(ctx, id)
+}
+
 func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	record, err := b.Store.Box(ctx, id)
 	if err != nil {
