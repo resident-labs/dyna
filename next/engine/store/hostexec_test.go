@@ -47,15 +47,42 @@ func TestRecoverHostexecMarksInterruptedRunsLost(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stopped string
-	var ended int64
-	if err = s.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op='running'").Scan(&stopped, &ended); err != nil || stopped != "lost" || ended != recovered.UnixMilli() {
-		t.Fatalf("running %q %d: %v", stopped, ended, err)
+	var ended sql.NullInt64
+	if err = s.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op='running'").Scan(&stopped, &ended); err != nil || stopped != "lost" || ended.Valid {
+		t.Fatalf("running %q %+v: %v", stopped, ended, err)
 	}
-	if err = s.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op='finished'").Scan(&stopped, &ended); err != nil || stopped != "revoked" || ended != now.UnixMilli() {
-		t.Fatalf("finished %q %d: %v", stopped, ended, err)
+	if err = s.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op='finished'").Scan(&stopped, &ended); err != nil || stopped != "revoked" || !ended.Valid || ended.Int64 != now.UnixMilli() {
+		t.Fatalf("finished %q %+v: %v", stopped, ended, err)
 	}
 	runs, err := s.HostexecStops(ctx, recovered)
 	if err != nil || len(runs) != 1 || runs[0].Op != "running" {
 		t.Fatalf("stop sweep %+v: %v", runs, err)
+	}
+	if err = s.CompleteHostexecStop(ctx, "running", recovered.Add(29*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	runs, err = s.HostexecStops(ctx, recovered.Add(29*time.Second))
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("early stop: %+v %v", runs, err)
+	}
+	if err = s.CompleteHostexecStop(ctx, "running", recovered.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	runs, err = s.HostexecStops(ctx, recovered.Add(30*time.Second))
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("completed stop: %+v %v", runs, err)
+	}
+	if err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=NULL WHERE op='running'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runs, err = s.HostexecStops(ctx, now.Add(610*time.Second))
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("expired stop: %+v %v", runs, err)
+	}
+	if err = s.Read().QueryRow("SELECT ended_at FROM hostexec_runs WHERE op='running'").Scan(&ended); err != nil || !ended.Valid {
+		t.Fatalf("deadline: %+v %v", ended, err)
 	}
 }
