@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
@@ -29,6 +30,9 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	}
 	if req.Name == "" || req.Profile == "" {
 		return contract.SessionStartResponse{}, invalid("name and profile are required")
+	}
+	if _, ok := box.Size(req.Size); req.Size != "" && !ok {
+		return contract.SessionStartResponse{}, invalid("unknown size")
 	}
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		if roomName != "" {
@@ -80,6 +84,12 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	var budgetParent contract.BoxID
 	if parent != "" {
 		sizeName = contract.BoxSizeMedium
+	}
+	if req.Size != "" {
+		if parent != "" && parent != tree.Root() {
+			return contract.SessionStartResponse{}, invalid("a child keeps its parent's size")
+		}
+		sizeName = req.Size
 	}
 	if parent != "" && parent != tree.Root() {
 		p, err := s.store.Session(ctx, parent)
