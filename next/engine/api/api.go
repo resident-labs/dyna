@@ -98,7 +98,7 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.service.OpSubmit(ctx, p, req)
 	})
-	call(mux, contract.MethodOpDecide, c, contract.ScopeOperate, user, a.service.OpDecide)
+	call(mux, contract.MethodOpDecide, c, contract.ScopeAdmin, user, a.service.OpDecide)
 	call(mux, contract.MethodOpWithdraw, c, contract.ScopeOperate, user, a.service.OpWithdraw)
 	call(mux, contract.MethodOpList, c, contract.ScopeRead, user, a.service.OpList)
 	call(mux, contract.MethodHostAdd, c, contract.ScopeAdmin, owner, a.service.HostAdd)
