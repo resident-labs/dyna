@@ -14,6 +14,91 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestFailedAndInterruptedStartCanRetry(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	files, err := OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer relay.Close()
+	opts := LinkOptions{Name: "test", AppPort: 1001, CardPort: 1002}
+	if _, err := LinkMachine(ctx, &Relay{Base: relay.URL}, files, st, opts); err == nil {
+		t.Fatal("start succeeded")
+	}
+	a, err := st.ConnectAttempt(ctx)
+	if err != nil || a.State != contract.ConnectAttemptFailed {
+		t.Fatalf("after failure: %+v %v", a, err)
+	}
+	if err := st.SetConnectAttempt(ctx, contract.ConnectAttempt{State: contract.ConnectAttemptStarting}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LinkMachine(ctx, &Relay{Base: relay.URL}, files, st, opts); err == nil {
+		t.Fatal("interrupted start succeeded")
+	}
+	a, err = st.ConnectAttempt(ctx)
+	if err != nil || a.State != contract.ConnectAttemptFailed {
+		t.Fatalf("after restart: %+v %v", a, err)
+	}
+}
+
+func TestCancelPreservesLinkedRecovery(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/machine/tunnel-token":
+			close(entered)
+			select {
+			case <-release:
+				w.Write([]byte(`{"token":"invented"}`))
+			case <-r.Context().Done():
+			}
+		case "/.well-known/jwks.json":
+			w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"test","x":"invented"}]}`))
+		}
+	}))
+	defer relay.Close()
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	files, err := OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.Key(); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.SaveLink(Link{Relay: relay.URL, Machine: "invented-machine"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InitializeConnectLink(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	ops := NewOperations(context.Background(), files, st, 1001, 1002)
+	defer ops.Close()
+	if err := ops.Resume(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	if err := ops.Cancel(context.Background()); err == nil {
+		t.Fatal("cancel accepted a linked machine")
+	}
+	close(release)
+	<-ops.done
+	if _, err := os.Stat(filepath.Join(dir, "connect", "jwks.json")); err != nil {
+		t.Fatal("linked recovery did not finish")
+	}
+}
+
 func TestUnlinkFinishesAfterRelayAlreadyRevoked(t *testing.T) {
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusGone) }))
 	defer relay.Close()
