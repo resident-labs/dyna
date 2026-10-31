@@ -226,6 +226,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodDeliveryDone, c, box, a.service.DeliveryDone)
 	call(mux, contract.MethodArchiveDone, c, box, a.service.ArchiveDone)
 	call(mux, contract.MethodTranscriptAppend, c, box, a.service.TranscriptAppend)
+	call(mux, contract.MethodTranscriptRead, c, owner, a.service.TranscriptRead)
 	call(mux, contract.MethodShellJobEnded, c, box, a.service.ShellJobEnded)
 	mux.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
 		if !user(c) {
