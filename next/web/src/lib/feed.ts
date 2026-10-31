@@ -219,6 +219,8 @@ export const shortPaths = (label: string) => label.replace(/\S+(?:\/\S+){4,}/g, 
 
 export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+// A session the room no longer lists.
+export const closedSession = "A closed session";
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
 // One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
@@ -251,7 +253,8 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
   }
   if (until) last = Math.max(last, Date.parse(until));
   if (from) first = Math.min(first, Date.parse(from));
-  const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions` : list(sessions);
+  const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions`
+    : sessions.length === 2 && sessions.every(session => session === closedSession) ? "Closed sessions" : list([...new Set(sessions)]);
   const minutes = Math.round((last - first) / 60_000);
   const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
   const ran = [...turns.values()].reduce((sum, set) => sum + set.size, 0);

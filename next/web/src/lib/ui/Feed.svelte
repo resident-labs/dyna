@@ -8,7 +8,7 @@
   import WorkRow from "./WorkRow.svelte";
   import RequestCard from "./RequestCard.svelte";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
-  import { shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
+  import { closedSession, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
@@ -71,7 +71,7 @@
   const opened = new SvelteSet<string>();
   // svelte-ignore state_referenced_locally
   const transcripts = home.kind === "dm" && home.session ? new TurnTranscripts(home.session) : undefined;
-  const name = (session: string) => store.names.get(session) ?? "A closed session";
+  const name = (session: string) => store.names.get(session) ?? closedSession;
   const author = (from: Principal) => from.kind === "owner" ? "You" : from.session ? name(from.session) : "Dyna";
   // The root session is the open session with no parent.
   const root = (session?: string) => { const open = session ? store.sessions.get(session) : undefined; return open !== undefined && !open.parent; };
