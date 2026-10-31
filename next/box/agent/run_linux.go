@@ -130,13 +130,14 @@ func Run(ctx context.Context) error {
 	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
+	text := hello.Instructions
 	if len(hello.Rules) > 0 {
-		text := "Room standing rules:"
+		text += "\n\nRoom standing rules:"
 		for _, rule := range hello.Rules {
 			text += fmt.Sprintf("\nr%d: %s", rule.Number, rule.Text)
 		}
-		args = append(args, "--append-system-prompt", text)
 	}
+	args = append(args, "--append-system-prompt", text)
 	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--exclude-tools", "bash", "--continue")
 	h, err := pi.Open(ctx, "pi", args, "")
 	if err != nil {
