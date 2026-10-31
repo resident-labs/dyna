@@ -31,6 +31,7 @@ func (s *Service) clearComputerLocked(id contract.SessionID) {
 	delete(s.computers, id)
 	for ch := range c.watchers {
 		close(ch)
+		delete(c.watchers, ch)
 	}
 	if c.state == contract.ComputerRunning {
 		_ = s.computerEvent(context.Background(), id, c.room, contract.ComputerStopped)
@@ -66,6 +67,7 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	}
 	c.state = req.To
 	if req.To == contract.ComputerStopped {
+		wakeComputer(s.channels[session.ID])
 		for ch := range c.watchers {
 			close(ch)
 			delete(c.watchers, ch)
@@ -74,19 +76,10 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	return contract.ComputerChangedResponse{}, nil
 }
 
-func sendComputer(channel *boxChannel, body contract.BoxMessageBody) {
-	m := contract.BoxMessage{Body: body}
+func wakeComputer(channel *boxChannel) {
 	select {
-	case channel.control <- m:
+	case channel.wake <- struct{}{}:
 	default:
-		select {
-		case <-channel.control:
-		default:
-		}
-		select {
-		case channel.control <- m:
-		default:
-		}
 	}
 }
 
@@ -111,7 +104,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	}
 	ch := make(chan []byte, 1)
 	if len(c.watchers) == 0 {
-		sendComputer(channel, contract.ComputerWatchStart{})
+		wakeComputer(channel)
 	}
 	c.watchers[ch] = struct{}{}
 	go func() {
@@ -124,7 +117,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 		delete(c.watchers, ch)
 		close(ch)
 		if len(c.watchers) == 0 && s.channels[id] == channel {
-			sendComputer(channel, contract.ComputerWatchStop{})
+			wakeComputer(channel)
 		}
 	}()
 	return ch, nil
