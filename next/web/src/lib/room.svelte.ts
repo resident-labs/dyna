@@ -2,9 +2,10 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
-import type { BoxState, Conversation, Event, OpRequested, Operation, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Conversation, Decision, Event, OpRequested, OpResult, OpState, SessionStarted } from "./contract.gen.ts";
 
-export type PendingOperation = OpRequested | Operation;
+// An operation of the room as the Requests panel shows it: its card, then its decision and run.
+export type Request = OpRequested & { state: OpState; decision?: Decision; result?: OpResult };
 
 // Sessions, boxes, turns and operations come from session.list and op.list once, then from
 // live events, never from history. Each open conversation reads its events in its own window.
@@ -17,7 +18,8 @@ export class RoomStore {
   readonly failed = new SvelteSet<string>();
   // Sessions whose box runs a computer the owner can watch.
   readonly computers = new SvelteSet<string>();
-  readonly operations = new SvelteMap<string, PendingOperation>();
+  // op.list gives the pending operations; decided ones stay for the time the room is open.
+  readonly requests = new SvelteMap<string, Request>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
   private readonly windows = new Set<EventWindow>();
@@ -42,6 +44,8 @@ export class RoomStore {
   // True once session.list and op.list have loaded.
   get ready(): boolean { this.subscribe(); return this.loaded; }
   get error(): unknown { this.subscribe(); return this.failure; }
+  // Every pending operation waits for the owner: agent-class ones also for an agent ancestor.
+  get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending").length; }
 
   async open(): Promise<void> {
     this.opening = this.load();
@@ -68,7 +72,9 @@ export class RoomStore {
       if (session.lastOutcome === "failed") this.failed.add(session.id);
       if (session.computer === "running") this.computers.add(session.id);
     }
-    for (const op of listed.operations ?? []) if (op.state === "pending") this.operations.set(op.id, op);
+    for (const { id, kind, by, class: level, card, expires, state } of listed.operations ?? []) {
+      this.requests.set(id, { id, kind, by, class: level, card, expires, state });
+    }
   }
 
   close(): void { this.closed = true; this.stopStream(); }
@@ -134,10 +140,12 @@ export class RoomStore {
         if (event.body.outcome === "failed") this.failed.add(event.body.session);
         else if (event.body.outcome === "completed") this.failed.delete(event.body.session);
         break;
-      case "op.requested": this.operations.set(event.body.id, event.body); break;
-      case "op.decided": case "op.ran":
-        if (event.body.state !== "pending") this.operations.delete(event.body.id);
+      case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
+      case "op.decided": case "op.ran": {
+        const known = this.requests.get(event.body.id);
+        if (known) this.requests.set(event.body.id, { ...known, ...event.body });
         break;
+      }
     }
   }
 }
