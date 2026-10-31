@@ -278,7 +278,7 @@
   .link { padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: var(--focus); font: inherit; font-weight: 500; cursor: pointer; }
   .link:hover { background: var(--hover); }
   /* 26 px high and 13 px above the row: the row's padding and the gap take all of it, so showing it hides no text. */
-  .bar { position: absolute; top: -13px; right: 8px; z-index: 1; display: flex; gap: 2px; height: 26px; padding: 1px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); box-shadow: 0 2px 8px rgb(0 0 0 / 12%); }
+  .bar { position: absolute; top: -13px; right: 8px; z-index: 1; display: flex; gap: 2px; height: 26px; padding: 1px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); box-shadow: 0 2px 8px var(--shadow-sm); }
   li:not(:hover, :focus-within) .bar { opacity: 0; pointer-events: none; }
   .bar button { padding: 0 8px; border: 0; border-radius: 4px; background: none; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
   .bar button:hover { background: var(--hover); color: var(--text); }
@@ -306,7 +306,7 @@
   }
   .more > button { display: grid; place-items: center; width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0; margin: -8px -8px -8px 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
   .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; min-width: 180px; padding: 4px; display: grid;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }
   .menu button { min-height: 44px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; }
   .add { min-width: 0; padding: 0 0 16px; }
   .failure { margin: 0 0 8px; color: var(--danger); font-size: 13px; }
