@@ -65,6 +65,8 @@
   .live { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   .connecting { color: var(--muted); font-weight: 400; }
   .first { margin-left: auto; }
+  /* Full screen, the band under the home bar stays near-black, as the screen is. */
+  :global(.computer.full)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: env(safe-area-inset-bottom); background: #0d0d0f; }
   /* The screen is near-black in both themes, as a display is. Docked, it takes the panel width at the screen's ratio;
      floating, it fills the window body edge to edge and the dark background fills the letterbox. */
   .screen { position: relative; display: grid; place-items: center; flex: 1; margin: 0; border-radius: 0 0 7px 7px; overflow: hidden; background: #0d0d0f; }
