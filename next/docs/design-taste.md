@@ -157,6 +157,15 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 ## Process
 
+### Design panel, before each page or component
+
+1. One opus designer proposes 2 or 3 designs as rendered mockups. Each design cites its reference: T3 Code, Discord, Linear or v1. [owner r23]
+2. Three opus judges pick one design each, with a short review. A judge may add its own mockup. Judges are fresh: none of them designed this page. [owner r23]
+3. The design with the majority of votes is built, with the judges' reviews applied. [owner r23]
+4. The judges review the built page. Repeat steps 1 to 3 until the judges agree that the page is solid. [owner r23]
+5. The PR attaches the mockups, the votes and the reviews. [root]
+6. Judges read `next/docs/spec.md` first and never reopen its settled owner decisions. [owner r25]
+
 ### Each UI PR
 
 1. Read v1's matching screen and its components first. Say in the PR which v1 parts it keeps and why. [owner r24]
