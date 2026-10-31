@@ -79,6 +79,9 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if input.Args == nil {
 		return contract.Operation{}, ErrInvalid
 	}
+	if scoped, ok := input.Args.(interface{ OperationRoom() contract.RoomID }); ok && scoped.OperationRoom() != input.Room {
+		return contract.Operation{}, ErrInvalid
+	}
 	kind := input.Args.OpKind()
 	entry, ok := s.Kinds[kind]
 	if !ok {
