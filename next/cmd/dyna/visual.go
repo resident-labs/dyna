@@ -186,8 +186,11 @@ func visualMeta(name string, data []byte) (string, int, error) {
 	if label == "" {
 		label = filepath.Base(name)
 	}
-	if len([]rune(label)) > 200 {
-		label = string([]rune(label)[:200])
+	if len(label) > 255 {
+		label = label[:255]
+		for !utf8.ValidString(label) {
+			label = label[:len(label)-1]
+		}
 	}
 	return label, height, nil
 }
