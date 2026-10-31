@@ -25,6 +25,7 @@
     root: "M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9ZM12 12l7.8-4.5M12 12v9M12 12 4.2 7.5",
     lock: "M6 11h12v9H6ZM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
     plug: "M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0ZM12 16v5",
+    inbox: "M3 13h5l1.5 2.5h5L16 13h5M5.5 5h13L21 13v6H3v-6Z",
   };
   export type IconName = keyof typeof paths;
 </script>
