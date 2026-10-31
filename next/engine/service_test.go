@@ -652,18 +652,26 @@ func TestSessionStartRejectsUnknownParent(t *testing.T) {
 	}
 }
 
-type blockingBoxes struct{ started chan BoxSpec }
+type blockingBoxes struct {
+	started   chan BoxSpec
+	cancelled chan struct{}
+	removed   chan contract.BoxID
+}
 
 func (b blockingBoxes) Create(ctx context.Context, spec BoxSpec) (string, error) {
 	b.started <- spec
 	<-ctx.Done()
+	close(b.cancelled)
 	return "", ctx.Err()
 }
-func (blockingBoxes) Remove(context.Context, contract.BoxID) error { return nil }
+func (b blockingBoxes) Remove(_ context.Context, id contract.BoxID) error {
+	b.removed <- id
+	return nil
+}
 
 func TestCloseCancelsCreatingBox(t *testing.T) {
 	s, room, root, ctx := setup(t)
-	adapter := blockingBoxes{started: make(chan BoxSpec)}
+	adapter := blockingBoxes{started: make(chan BoxSpec, 1), cancelled: make(chan struct{}), removed: make(chan contract.BoxID, 1)}
 	s.boxes = adapter
 	resetLifecycle(s)
 	_, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "blocked", Profile: "test", Goal: "goal"})
@@ -683,7 +691,22 @@ func TestCloseCancelsCreatingBox(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: spec.Session}); e != nil {
 		t.Fatal(e)
 	}
-	s.reconciler.Wait()
+	passLifecycle(t, s, ctx)
+	select {
+	case <-adapter.cancelled:
+	default:
+		t.Fatal("close did not cancel create")
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	select {
+	case id := <-adapter.removed:
+		if id != spec.Box {
+			t.Fatalf("removed box %s, want %s", id, spec.Box)
+		}
+	default:
+		t.Fatal("close did not remove the box")
+	}
 	b, err := s.store.Box(ctx, spec.Box)
 	if err != nil || b.State != contract.BoxDeleted {
 		t.Fatalf("box: %+v, %v", b, err)
