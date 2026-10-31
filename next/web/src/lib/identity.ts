@@ -15,13 +15,15 @@ export function initials(name: string): string {
 }
 
 // Initials that tell names apart, the rooms on the rail or the sessions in one room: each name, in name order, takes
-// the first free of its two words' first letters, its first two letters, then its first letter and a digit.
-// "design-system" and "docs-site" give "DS" and "DO"; the order makes every page agree.
+// the first free of its two words' first letters, its first two letters, its first letter and a digit of its own (the
+// last first), then its first letter and a counting digit. "design-system" and "docs-site" give "DS" and "DO", and
+// "reviewer-2", "reviewer-22" and "reviewer-27" give "R2", "RE" and "R7"; the order makes every page agree.
 export function distinctInitials(names: string[]): Map<string, string> {
   const taken = new Set<string>(), result = new Map<string, string>();
   for (const name of [...new Set(names)].sort((a, b) => a.localeCompare(b))) {
-    const first = (words(name)[0] ?? name).charAt(0);
-    const label = [initials(name), name.slice(0, 2).toUpperCase(), ...Array.from({ length: 9 }, (_, i) => `${first.toUpperCase()}${i + 1}`)]
+    const first = (words(name)[0] ?? name).charAt(0).toUpperCase();
+    const own = [...name.match(/\d/g) ?? []].reverse();
+    const label = [initials(name), name.slice(0, 2).toUpperCase(), ...[...own, ..."123456789"].map(digit => first + digit)]
       .find(candidate => !taken.has(candidate)) ?? initials(name);
     taken.add(label);
     result.set(name, label);
