@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 14
+const schemaVersion = 15
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -35,6 +35,7 @@ var steps = map[int][]string{
 		`CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY REFERENCES operations(id), grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, scope TEXT NOT NULL, started_at INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, ended_at INTEGER, output_bytes INTEGER NOT NULL DEFAULT 0, stopped TEXT NOT NULL DEFAULT '');`,
 		`CREATE INDEX hostexec_runs_grant ON hostexec_runs(grant_id, ended_at);`,
 	},
+	14: {`ALTER TABLE hostexec_runs ADD COLUMN lost_at INTEGER`, `CREATE INDEX hostexec_runs_pending ON hostexec_runs(ended_at) WHERE ended_at IS NULL`, `UPDATE hostexec_runs SET ended_at=NULL,lost_at=unixepoch()*1000 WHERE stopped='lost' AND started_at+timeout_ms+10000>unixepoch()*1000`},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.

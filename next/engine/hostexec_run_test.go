@@ -114,7 +114,7 @@ func TestHostexecLostFinishesOperationAndNotifies(t *testing.T) {
 	}
 	var stopped string
 	var ended sql.NullInt64
-	if err := s.store.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op=?", res.Operation.ID).Scan(&stopped, &ended); err != nil || stopped != "lost" || !ended.Valid {
+	if err := s.store.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op=?", res.Operation.ID).Scan(&stopped, &ended); err != nil || stopped != "lost" || ended.Valid {
 		t.Fatalf("stopped %s ended %+v: %v", stopped, ended, err)
 	}
 }
@@ -252,7 +252,7 @@ func TestHostexecStopsDoNotBlockEachOther(t *testing.T) {
 			if err := s.store.InsertOperation(tx, op, contract.Event{}, nil); err != nil {
 				return err
 			}
-			if _, err := tx.Exec("INSERT INTO hostexec_runs(op,grant_id,host,scope,started_at,timeout_ms,ended_at,stopped) VALUES(?,?,?,?,?,?,?,'lost')", id, grants[0].ID, "host", id, s.now().UnixMilli(), 600000, s.now().UnixMilli()); err != nil {
+			if _, err := tx.Exec("INSERT INTO hostexec_runs(op,grant_id,host,scope,started_at,timeout_ms,lost_at,stopped) VALUES(?,?,?,?,?,?,?,'lost')", id, grants[0].ID, "host", id, s.now().UnixMilli(), 600000, s.now().UnixMilli()); err != nil {
 				return err
 			}
 		}
@@ -305,5 +305,23 @@ func TestHostexecDeadlineRecordsLost(t *testing.T) {
 	var stopped string
 	if err := s.store.Read().QueryRow("SELECT stopped FROM hostexec_runs WHERE op=?", res.Operation.ID).Scan(&stopped); err != nil || stopped != "lost" {
 		t.Fatalf("stopped %q: %v", stopped, err)
+	}
+}
+
+func TestHostexecCardEmptyCwdAndStoreError(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	grants, err := s.store.ListActiveGrants(ctx, room, who, s.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := contract.HostexecRunArgs{Room: room, Host: "host", Argv: []string{"true"}, Grant: grants[0].ID}
+	entry := s.HostexecRunEntry()
+	if body := entry.Card(ctx, args, who).Body; strings.Contains(body, "Working directory") {
+		t.Fatalf("body %q", body)
+	}
+	result := entry.Execute(ctx, "missing-operation", args, who)
+	if result.Error == "" || result.Error == "grant no longer active" {
+		t.Fatalf("result %+v", result)
 	}
 }
