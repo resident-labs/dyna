@@ -20,28 +20,36 @@ type activeStep struct {
 }
 
 type Reconciler struct {
-	store  *store.Store
-	boxes  BoxAdapter
-	view   View
-	event  eventFunc
-	now    func() time.Time
-	kick   chan struct{}
-	mu     sync.Mutex
-	repos  Repositories
-	active map[contract.BoxID]*activeStep
-	hosts  map[contract.HostName]int
-	fresh  map[contract.BoxID]bool
-	wg     sync.WaitGroup
-	pass   sync.Mutex
+	store        *store.Store
+	boxes        BoxAdapter
+	view         View
+	event        eventFunc
+	now          func() time.Time
+	kick         chan struct{}
+	mu           sync.Mutex
+	repos        Repositories
+	active       map[contract.BoxID]*activeStep
+	hosts        map[contract.HostName]int
+	fresh        map[contract.BoxID]bool
+	disconnected map[contract.BoxID]time.Time
+	wg           sync.WaitGroup
+	pass         sync.Mutex
 }
 
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
-	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool)}
+	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time)}
 }
 func (r *Reconciler) SetRepositories(repos Repositories) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.repos = repos
+}
+
+func (r *Reconciler) Connected(id contract.BoxID) {
+	r.pass.Lock()
+	delete(r.disconnected, id)
+	r.pass.Unlock()
+	r.Kick()
 }
 func (r *Reconciler) Kick() {
 	select {
@@ -112,12 +120,42 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	hostState := make(map[contract.HostName]box.HostState, len(hosts))
+	for _, host := range hosts {
+		hostState[host.Name] = host.State
+	}
 	all := make([]box.Box, len(rows))
 	for i := range rows {
 		all[i] = rows[i].Box
 	}
 	for i, row := range rows {
 		b := row.Box
+		if b.State != contract.BoxReady {
+			delete(r.disconnected, b.ID)
+		} else {
+			lost := hostState[b.Host] == box.HostUnreachable
+			if r.view.Connected(b.Session) {
+				delete(r.disconnected, b.ID)
+			} else {
+				since, ok := r.disconnected[b.ID]
+				if !ok {
+					since = r.now()
+					r.disconnected[b.ID] = since
+				}
+				lost = lost || !r.now().Before(since.Add(60*time.Second))
+			}
+			if lost {
+				next := b
+				next.State, next.Reason = contract.BoxLost, "host or box disconnected"
+				changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, contract.CauseHostLost)
+				if err != nil {
+					return err
+				}
+				if changed {
+					b, row.Box, rows[i].Box, all[i] = next, next, next, next
+				}
+			}
+		}
 		if row.Want == store.WantClose || row.Want == store.WantDiscard {
 			r.mu.Lock()
 			step := r.active[b.ID]
@@ -196,6 +234,12 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			if !exists || busy || parent.Want != store.WantRun || !(parent.State == contract.BoxReady || parent.State == contract.BoxStarting && parent.DueAt.After(r.now())) {
 				continue
 			}
+		}
+		if row.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
+			if row.DueAt.IsZero() || !row.DueAt.After(r.now()) {
+				r.launch(ctx, row)
+			}
+			continue
 		}
 		if row.Want == store.WantRun && (row.Box.State == contract.BoxCreating || row.Box.State == contract.BoxStarting) || row.Want == store.WantStop && row.Box.State == contract.BoxReady {
 			if !row.DueAt.IsZero() && row.DueAt.After(r.now()) {

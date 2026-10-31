@@ -370,6 +370,10 @@ func TestHeartbeatThreeMisses(t *testing.T) {
 	if <-reports {
 		t.Fatal("expected unreachable")
 	}
+	ticks <- time.Time{}
+	if <-reports {
+		t.Fatal("expected another unreachable report")
+	}
 	cancel()
 	<-done
 }
