@@ -14,11 +14,12 @@
   let activity = $derived(working.length === 1 ? store.activity.get(working[0].session) : undefined);
 </script>
 
-<!-- The line keeps its 20 px when nobody works, so the composer never moves. -->
+<!-- The line keeps its 20 px when nobody works, so the composer never moves. Screen readers hear who starts or stops,
+     not each activity label. -->
 <p class="working" aria-live="polite">
   {#if working.length}<WorkingDot />
     <span class="text">{#each named as open, i (open.session)}{#if i}{i === named.length - 1 && !more ? " and " : ", "}{/if}<strong style:--hue={hue(open.name)}>{open.name}</strong>{/each}{#if more} and {more} more{/if}
-      {working.length > 1 ? "are" : "is"} working{#if activity}{` · ${shortPaths(activity)}`}{/if}</span>
+      {working.length > 1 ? "are" : "is"} working{#if activity}<span aria-hidden="true">{` · ${shortPaths(activity)}`}</span>{/if}</span>
   {/if}
 </p>
 
