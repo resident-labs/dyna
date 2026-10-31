@@ -170,16 +170,21 @@ export class EventWindow {
       event.body.home.kind === this.home.kind && event.body.home.session === this.home.session);
   }
 
-  // Sends a post; it shows as pending until its event is in the window, and a failed send stays for retry or discard.
-  post(request: PostRequest): Promise<void> {
+  // Shows a post that did not send; the app keeps such posts while the owner is in another conversation.
+  unsent(request: PostRequest): number {
     const id = ++this.sent;
-    this.pendingPosts.set(id, { id, request, at: new Date().toISOString(), failed: false });
-    return this.retry(id);
+    this.pendingPosts.set(id, { id, request, at: new Date().toISOString(), failed: true });
+    return id;
   }
 
-  async retry(id: number): Promise<void> {
+  // Sends a post; it shows as pending until its event is in the window. It resolves false when the send
+  // failed: the post then stays as a failed row for retry or discard.
+  post(request: PostRequest): Promise<boolean> { return this.retry(this.unsent(request)); }
+
+  // Only a failed post sends again, so a second click never sends it twice.
+  async retry(id: number): Promise<boolean> {
     const known = this.pendingPosts.get(id);
-    if (!known) return;
+    if (!known?.failed) return true;
     const pending = { ...known, failed: false };
     this.pendingPosts.set(id, pending);
     // The owner's post shows at the present, so the window moves there while it sends.
@@ -190,6 +195,7 @@ export class EventWindow {
     else if (this.events.has(response.seq)) this.pendingPosts.delete(id);
     else this.pendingPosts.set(id, { ...pending, seq: response.seq });
     await jumped;
+    return response !== undefined;
   }
 
   discard(id: number): void { this.pendingPosts.delete(id); }

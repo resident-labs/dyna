@@ -19,7 +19,7 @@
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
   import { parseMentions } from "./lib/mentions.ts";
-  import type { Conversation, SessionStarted } from "./lib/contract.gen.ts";
+  import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
@@ -86,8 +86,13 @@
     event.preventDefault();
     if (event.key === "ArrowLeft") folded.add(id); else folded.delete(id);
   }
-  // Drafts belong to one conversation, keyed by room and session. A failed send stays in the feed with Retry.
+  // Drafts and failed sends belong to one conversation, keyed by room and session. A failed send shows in its
+  // feed with Retry, also after the owner leaves and comes back; raw keeps each request's identity for onsettled.
   let drafts: Record<string, string> = $state({});
+  let unsent: Record<string, PostRequest[]> = $state.raw({});
+  const keyOf = (request: PostRequest) => `${request.room}/${request.home?.session ?? ""}`;
+  const keep = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: [...unsent[keyOf(request)] ?? [], request] }; };
+  const settle = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: (unsent[keyOf(request)] ?? []).filter(kept => kept !== request) }; };
   let key = $derived(`${room}/${session ?? ""}`);
   function send() {
     if (!store || !room) return;
@@ -232,7 +237,7 @@
     {:else}<div class="feed">
       {#if !room && !roomsError}<Home {attention} {navigate} onrequests={() => { section = "requests"; }} />
       {:else if store && !unavailable}
-        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} />{/key}
+        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} />{/key}
       {:else}<p class="empty">{unavailable || roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}
         {#if store && unavailable && !signedOut(store.error)}<button type="button" class="retry" onclick={() => void store?.open()}>Try again</button>{/if}</p>{/if}
     </div>
