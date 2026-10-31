@@ -9,6 +9,7 @@
   import WorkRow from "./WorkRow.svelte";
   import Icon from "./Icon.svelte";
   import RequestCard from "./RequestCard.svelte";
+  import StatusPill from "./StatusPill.svelte";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
   import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, timeSpan, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
@@ -187,7 +188,7 @@
       {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow row={item} {newest} onvisual={openVisual} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
       {:else if item.kind === "notice"}<p class="divider"><span>{describe(item.event, name)}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
-      {:else if item.kind === "restarted"}<p class="hint">{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone.</p>
+      {:else if item.kind === "restarted"}<div class="restart-warning"><span class="restart-mark"><StatusPill tone="warning" label="Box replaced" dot triangle /></span><p>{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone. <time datetime={item.at}>{formatTime(item.at)}</time></p></div>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>
         {#if canRestart(item)}<BoxRestart session={item.session} {onclosed} />{/if}</FailedTurnRow>
@@ -229,7 +230,10 @@
   .more-failures { padding: 4px 16px 4px var(--gutter); color: var(--muted); font-size: 12.5px; }
   .more-failures button { all: unset; display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; }
   .more-failures time { opacity: .8; }
-  .more-failures button :global(svg) { margin-left: auto; }
+  .restart-warning { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 6px 16px; color: var(--muted); font-size: 14px; }
+  .restart-mark { display: flex; justify-content: center; padding-top: 2px; }
+  .restart-warning p { margin: 0; overflow-wrap: anywhere; }
+  .restart-warning time { white-space: nowrap; font-size: 12.5px; }
   .more-failures button:focus-visible { outline: 2px solid var(--focus); }
   .divider { margin: 12px 16px; display: flex; align-items: center; gap: 8px; color: var(--muted); text-align: center; font-size: 12.5px; }
   .divider::before, .divider::after { content: ""; flex: 1; min-width: 12px; border-top: 1px solid var(--line); }
