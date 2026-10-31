@@ -92,12 +92,8 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if err != nil {
 		return contract.Operation{}, err
 	}
-	tree, err := s.Store.RoomTree(ctx, input.Room)
-	if err != nil {
-		return contract.Operation{}, err
-	}
 	class := entry.Class(input.Args, who)
-	immediate := who.Kind == contract.PrincipalOwner || class == contract.ClassAuto || class == contract.ClassAgent && who.Session == tree.Root()
+	immediate := who.Kind == contract.PrincipalOwner || class == contract.ClassAuto
 	now := s.Now()
 	id, err := s.ID("op_")
 	if err != nil {
@@ -108,18 +104,10 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 		op.State = contract.OpApproved
 	}
 	var request contract.Event
-	var deliveries []contract.Delivery
 	if !immediate {
 		request, err = s.event(op.Room, who, contract.OpRequested{ID: op.ID, Kind: op.Kind, By: who, Class: class, Card: op.Card, Expires: op.Expires})
 		if err != nil {
 			return contract.Operation{}, err
-		}
-		if class == contract.ClassAgent {
-			parent, err := tree.Handoff(who.Session)
-			if err != nil {
-				return contract.Operation{}, err
-			}
-			deliveries = delivery(parent.PRHolder)
 		}
 	}
 	var previous store.StoredOperation
@@ -139,7 +127,7 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 		if checkErr != nil {
 			return checkErr
 		}
-		return s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, deliveries)
+		return s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, nil)
 	})
 	if err != nil {
 		return contract.Operation{}, err
@@ -182,20 +170,9 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	if err := s.access(ctx, who, op.Room); err != nil {
 		return err
 	}
-	if who.Kind != contract.PrincipalOwner {
-		if state == contract.OpWithdrawn {
-			if who != op.By {
-				return ErrForbidden
-			}
-		} else {
-			tree, err := s.Store.RoomTree(ctx, op.Room)
-			if err != nil {
-				return err
-			}
-			if op.Class != contract.ClassAgent || !tree.Above(who.Session, op.By.Session) {
-				return ErrForbidden
-			}
-		}
+	// Only the owner decides; a session may only withdraw its own request.
+	if who.Kind != contract.PrincipalOwner && (state != contract.OpWithdrawn || who != op.By) {
+		return ErrForbidden
 	}
 	var entry Entry
 	if state == contract.OpApproved {

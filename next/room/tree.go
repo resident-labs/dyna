@@ -127,24 +127,6 @@ func (t Tree) Leaves(order []contract.SessionID) []contract.SessionID {
 	return leaves
 }
 
-type Handoff struct {
-	PRHolder   contract.SessionID
-	GoalHolder contract.SessionID
-}
-
-// Handoff returns the parent for PRs and the parent for goals, unless it is root.
-func (t Tree) Handoff(s contract.SessionID) (Handoff, error) {
-	n, ok := t.nodes[s]
-	if !ok || n.Parent == "" {
-		return Handoff{}, errors.New("root or unknown session cannot close")
-	}
-	h := Handoff{PRHolder: n.Parent}
-	if n.Parent != t.root {
-		h.GoalHolder = n.Parent
-	}
-	return h, nil
-}
-
 // CheckMove rejects moving root, cycles, another room, and another host.
 func (t Tree) CheckMove(s, parent contract.SessionID) error {
 	n, ok := t.nodes[s]
