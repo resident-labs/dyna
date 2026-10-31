@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { APIError } from "./lib/client.ts";
   import Feed from "./lib/ui/Feed.svelte";
@@ -212,7 +212,11 @@
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
   $effect(() => { const read = attention.rooms.get(room ?? "")?.lastRead; if (store && read) store.noteRead({ kind: "feed" }, read); });
-  $effect(() => { if (session && store?.unseen(session)) store.see({ kind: "dm", session }, store.failed.get(session) ?? 0); });
+  // Only opening counts: a failure that arrives while the DM is open clears once its row is on screen.
+  $effect(() => {
+    const open = session, current = store;
+    if (open && current?.ready) untrack(() => { if (current.unseen(open)) current.see({ kind: "dm", session: open }, current.failed.get(open) ?? 0); });
+  });
   const trouble = (id: string) => {
     const box = store?.boxes.get(id);
     // A failed turn shows until the owner sees it or the session's next turn succeeds.

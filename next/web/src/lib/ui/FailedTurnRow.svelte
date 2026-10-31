@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { formatTime, type Row } from "../feed.ts";
@@ -6,9 +7,11 @@
   let { row, author, root, onseen }: { row: Extract<Row, { kind: "failed" }>; author: string; root: boolean; onseen?: () => void } = $props();
   // The owner has seen a failed turn once its row stays on screen for a second while the page is visible, which
   // clears the session's mark. The wait skips rows that only pass by, such as while the feed jumps to its end on open.
+  // Feed passes a new callback with every event, so the attachment reads it once; reading it as a dependency
+  // would restart the wait on each event, and a busy room would never count the row as seen.
   function seen(node: HTMLElement) {
-    if (!onseen) return;
-    const done = onseen;
+    const done = untrack(() => onseen);
+    if (!done) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let shown = false;
     const start = () => {
