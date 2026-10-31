@@ -78,6 +78,7 @@ import {
 	shouldCompact,
 	withCompactionTriggerOverride,
 } from "./compaction/index.ts";
+import { createContextUpdate, deliveredSections } from "./context-updates.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -142,7 +143,6 @@ import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type S
 import {
 	buildSystemPrompt,
 	buildSystemPromptSections,
-	diffSystemPromptSections,
 	type NormalizedBuildSystemPromptOptions,
 	normalizeBuildSystemPromptOptions,
 } from "./system-prompt.ts";
@@ -990,6 +990,7 @@ export class AgentSession {
 						draft.details,
 						true,
 						draft.usage,
+						buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
 					);
 					break;
 				}
@@ -1774,15 +1775,15 @@ export class AgentSession {
 	private _preparePromptAndToolLoadout(
 		options: NormalizedBuildSystemPromptOptions,
 		messages: AgentMessage[] = this.agent.state.messages,
-	): SystemMessage | undefined {
+	): AgentMessage | undefined {
 		options.selectedTools = this._applyToolLoadout(options.selectedTools).map((tool) => tool.name);
-		// The tool list and rules must match the declarations the request carries.
 		options.hiddenTools = [...this._hiddenDeclarations];
-		const sections = diffSystemPromptSections(
-			getCurrentSystemMessage(messages)?.sections ?? {},
-			buildSystemPromptSections(options),
-		);
-		return sections ? { role: "system", content: "", sections, timestamp: Date.now() } : undefined;
+		const sections = buildSystemPromptSections(options);
+		const previous = deliveredSections(this.sessionManager.getBranch());
+		if (previous === undefined && !getCurrentSystemMessage(messages)) {
+			return { role: "system", content: "", sections, timestamp: Date.now() };
+		}
+		return createContextUpdate(previous ?? {}, sections);
 	}
 
 	/**
@@ -1913,7 +1914,11 @@ export class AgentSession {
 		this._pendingToolNames.clear();
 		try {
 			if (trigger) await this.agent.prompt(messages);
-			else await this.agent.continue();
+			else {
+				const update = this._preparePromptAndToolLoadout(this._baseSystemPromptOptions);
+				if (update) this.agent.steer(update);
+				await this.agent.continue();
+			}
 			while (!this._agentRunAbortRequested) {
 				if (await this._handlePostAgentRun()) {
 					if (this._agentRunAbortRequested) break;
@@ -1991,7 +1996,8 @@ export class AgentSession {
 		}
 		const updateMessage = this._preparePromptAndToolLoadout(result.systemPromptOptions);
 		this._runSystemPromptOptions = result.systemPromptOptions;
-		if (updateMessage) messages.unshift(updateMessage);
+		if (updateMessage?.role === "system") messages.unshift(updateMessage);
+		else if (updateMessage) messages.push(updateMessage);
 		return messages;
 	}
 
@@ -2984,7 +2990,7 @@ export class AgentSession {
 				throw new Error("Compaction cancelled");
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage, buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions));
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);
@@ -3310,7 +3316,7 @@ export class AgentSession {
 			}
 			abortController.signal.throwIfAborted();
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage, buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions));
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);
