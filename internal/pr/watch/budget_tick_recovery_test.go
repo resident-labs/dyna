@@ -88,8 +88,10 @@ func TestTickReconcilesCommittedBudgetBeforeQuietSafetyPoll(t *testing.T) {
 	}
 	next := e.clock.Add(time.Minute)
 	policy := EffectivePolicy(st, committed)
+	pull := e.f.Pull
+	pull.DiscussionVersion = "0/0/0"
 	if !pollDue(st, &committed, next) || fullPollDue(committed, next) ||
-		!quietPull(committed, policy, e.f.Pull, committed.Polling.CIVersion, false, next) {
+		!quietPull(committed, policy, pull, committed.Polling.CIVersion, false, next) {
 		t.Fatal("recovery fixture is not a due quiet poll before the safety slot")
 	}
 	release()
