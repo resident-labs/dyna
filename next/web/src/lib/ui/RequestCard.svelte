@@ -67,27 +67,27 @@
 
 <style>
   .request { display: grid; gap: 8px; max-width: 760px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
-  .card { margin: 8px 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+  .card { margin: 8px 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
   .yours { border-left: 3px solid var(--attention); padding-left: 14px; }
   .decided { gap: 4px; color: var(--muted); }
-  .title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; font-weight: 600; overflow-wrap: anywhere; }
+  .title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; font-size: 16px; line-height: 1.25; font-weight: 600; overflow-wrap: anywhere; }
   .who { color: oklch(var(--id-name) var(--hue)); }
   .who.owner { color: var(--focus); }
   .who.engine, .who.root { color: var(--text); }
   .asks { color: var(--muted); font-weight: 400; }
-  .decided .title { font-weight: 500; }
+  .decided .title { font-size: 14px; font-weight: 400; }
   .decided .who { color: inherit; }
   .exact { padding: 8px 12px; border-radius: 6px; background: var(--bg); font: 13px/1.5 var(--mono); font-variant-ligatures: none; max-height: 320px; overflow: auto; }
   .exact p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .decided .exact { display: none; }
-  .meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .cause { color: var(--text); }
   .field { color: var(--muted); }
   .actions { display: flex; gap: 8px; }
   input { max-width: 480px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
   button { padding: 6px 14px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   button:hover:not(:disabled) { background: var(--hover); }
-  .approve { background: var(--focus); color: var(--bg); border-color: var(--focus); font-weight: 600; }
+  .approve { background: var(--focus); color: var(--bg); border-color: var(--focus); }
   .approve:hover:not(:disabled) { background: var(--focus); filter: brightness(1.08); }
   :disabled { opacity: 0.6; cursor: default; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
