@@ -202,6 +202,37 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 	}
 }
 
+// After an engine restart or a dead master, the old box socket is still on the host, and sshd
+// refuses to forward over it. Each forward removes it first.
+func TestForwardRemovesStaleHostSocketFirst(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	ctx := context.Background()
+	f := box.Forward{Box: "a", HostPath: "/remote/sock/a/engine.sock", EnginePath: "/local/s"}
+	removedBeforeForward := func(stage, remove string) {
+		for i, args := range r.calls {
+			if len(args) > 4 && args[len(args)-4] == "forward" {
+				previous := r.calls[i-1]
+				if !strings.HasSuffix(previous[len(previous)-1], remove) {
+					t.Fatalf("%s: the forward did not remove the old socket first", stage)
+				}
+				return
+			}
+		}
+		t.Fatalf("%s: no forward in %v", stage, r.calls)
+	}
+	if err := h.AddForward(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	removedBeforeForward("add", `rm -f -- "$2"' 'dyna' '/remote/sock/a' '/remote/sock/a/engine.sock'`)
+	r.calls = nil
+	r.dead = true
+	if err := h.StartContainer(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	removedBeforeForward("restore", "'rm' '-f' '--' '/remote/sock/a/engine.sock'")
+}
+
 type resetRunner struct{ calls [][]string }
 
 func (r *resetRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
