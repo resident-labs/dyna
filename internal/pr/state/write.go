@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/hub"
 	appstate "dyna-agent/internal/state"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/updatedrain"
 )
 
 // Topic names the event that a committed PR state write publishes. The engine
@@ -123,6 +124,14 @@ func write(root string, st State) (err error) {
 	if err := refreshFrom(writer, root); err != nil {
 		return err
 	}
+	newTrial := false
+	for repo, trial := range st.MergeTrials {
+		old := snapshot.state.MergeTrials[repo]
+		if trial != nil && TrialActive(trial.Phase) && (old == nil || old.Branch != trial.Branch || !TrialActive(old.Phase)) {
+			newTrial = true
+			break
+		}
+	}
 	before := snapshot.revision
 	revision := before + 1
 	rows, err := prepareRows(snapshot.state, snapshot.index, st)
@@ -131,6 +140,15 @@ func write(root string, st State) (err error) {
 	}
 	st.unchanged = nil
 	err = writer.Write(context.Background(), hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
+		if newTrial {
+			active, err := updatedrain.Active(context.Background(), conn)
+			if err != nil {
+				return err
+			}
+			if active {
+				return updatedrain.ErrDraining
+			}
+		}
 		// Refuse a stale preparation rather than overwrite an intervening write.
 		var current int64
 		err := conn.QueryRowContext(context.Background(), "SELECT revision FROM pr_state WHERE id=1").Scan(&current)
