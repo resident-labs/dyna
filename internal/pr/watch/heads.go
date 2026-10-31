@@ -74,6 +74,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 	}
 	out := map[string]headProbe{}
 	var failures []error
+	var retries [][]*Record
 	for start := 0; start < len(records); start += headBatchSize {
 		chunk := records[start:min(start+headBatchSize, len(records))]
 		heads, _, err := g.readHeadChunk(ctx, chunk)
@@ -89,19 +90,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 				}
 			}
 			if len(failed) > 0 {
-				mid := (len(failed) + 1) / 2
-				for _, half := range [][]*Record{failed[:mid], failed[mid:]} {
-					if len(half) == 0 {
-						continue
-					}
-					retried, _, retryErr := g.readHeadChunk(ctx, half)
-					for k, p := range retried {
-						out[k] = p
-					}
-					if retryErr != nil {
-						failures = append(failures, retryErr)
-					}
-				}
+				retries = append(retries, failed)
 			}
 			continue
 		}
@@ -110,6 +99,22 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 		}
 		if err != nil {
 			failures = append(failures, err)
+		}
+	}
+	// Retry after every chunk ran once, so stalled retries cannot starve later chunks.
+	for _, failed := range retries {
+		mid := (len(failed) + 1) / 2
+		for _, half := range [][]*Record{failed[:mid], failed[mid:]} {
+			if len(half) == 0 {
+				continue
+			}
+			retried, _, retryErr := g.readHeadChunk(ctx, half)
+			for k, p := range retried {
+				out[k] = p
+			}
+			if retryErr != nil {
+				failures = append(failures, retryErr)
+			}
 		}
 	}
 	return out, g.requests.rates, errors.Join(failures...)

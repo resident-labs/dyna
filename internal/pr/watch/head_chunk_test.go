@@ -18,7 +18,7 @@ func TestHeadChunkDeadlineDoesNotBlockLaterChunk(t *testing.T) {
 	calls := 0
 	withHeadChunkTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
 		calls++
-		if calls <= 3 {
+		if calls != 2 {
 			return context.WithDeadline(ctx, time.Unix(0, 0))
 		}
 		return context.WithTimeout(ctx, d)
