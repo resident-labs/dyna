@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/runstore"
 	statewrite "dyna-agent/internal/state"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/updatedrain"
 )
 
 // updateBusy reads all rooms immediately before an automatic restart. A new
@@ -22,10 +23,7 @@ func updateBusy(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	for _, trial := range st.MergeTrials {
-		switch trial.Phase {
-		case prstate.MergeTrialPhaseQueued, prstate.MergeTrialPhaseBuilding,
-			prstate.MergeTrialPhaseRunning, prstate.MergeTrialPhaseReviewing,
-			prstate.MergeTrialPhaseStacking, prstate.MergeTrialPhasePublishing:
+		if prstate.TrialActive(trial.Phase) {
 			return true, nil
 		}
 	}
@@ -133,4 +131,43 @@ id INTEGER PRIMARY KEY CHECK(id=1), last_restart INTEGER NOT NULL, busy_since IN
 		_, err := conn.ExecContext(ctx, "INSERT INTO update_restart_guard VALUES(1,?,0,0) ON CONFLICT(id) DO UPDATE SET last_restart=excluded.last_restart,busy_since=0,noticed=0", now.Unix())
 		return err
 	})
+}
+
+// updateMayBuild allows a long-waiting update to prepare its binary while CI
+// continues. The restart cooldown still applies.
+func (s Service) updateMayBuild(ctx context.Context, now time.Time) (bool, error) {
+	db, err := s.Jobs.db()
+	if err != nil {
+		return false, err
+	}
+	var last, since int64
+	if err := db.QueryRowContext(ctx, `SELECT last_restart,busy_since FROM update_restart_guard WHERE id=1`).Scan(&last, &since); err != nil {
+		return false, err
+	}
+	return since != 0 && now.Sub(time.Unix(since, 0)) >= 30*time.Minute && (last == 0 || now.Sub(time.Unix(last, 0)) >= time.Hour), nil
+}
+
+// waitForDrain gives admitted work a bounded time to finish. A cancelled
+// installer releases its fence without restarting.
+func waitForDrain(ctx context.Context, db *sql.DB, budget time.Duration) (bool, error) {
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		busy, err := updateBusy(ctx)
+		if err != nil || !busy {
+			return !busy, err
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-timer.C:
+			return false, nil
+		case <-ticker.C:
+			if err := updatedrain.Refresh(ctx, db); err != nil {
+				return false, err
+			}
+		}
+	}
 }

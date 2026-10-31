@@ -559,3 +559,13 @@ type Decision struct {
 	Action string `json:"action"`
 	Reason string `json:"reason"`
 }
+
+// TrialActive reports phases that can launch work or publish a merge.
+func TrialActive(phase MergeTrialPhase) bool {
+	switch phase {
+	case MergeTrialPhaseQueued, MergeTrialPhaseBuilding, MergeTrialPhaseRunning, MergeTrialPhaseReviewing, MergeTrialPhaseStacking, MergeTrialPhasePublishing:
+		return true
+	default:
+		return false
+	}
+}

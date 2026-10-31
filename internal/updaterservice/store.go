@@ -9,6 +9,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	statewrite "dyna-agent/internal/state"
+	"dyna-agent/internal/updatedrain"
 )
 
 // RunName identifies installer receipts created by the Updates service.
@@ -110,6 +111,11 @@ func (s Store) Update(ctx context.Context, change func(*Config) error) error {
 		old := c
 		if err := change(&c); err != nil {
 			return err
+		}
+		if old.Enabled && !c.Enabled {
+			if err := updatedrain.ClearAbandoned(ctx, conn); err != nil {
+				return err
+			}
 		}
 		if c.Source != old.Source || c.EveryMinutes != old.EveryMinutes || c.Enabled != old.Enabled {
 			_, err := conn.ExecContext(ctx, `UPDATE updater_service SET source=?, enabled=?, every_minutes=?, multiple_hooks=?, tool_path=?, next_due='' WHERE id=1`, c.Source, c.Enabled, c.EveryMinutes, c.MultipleHooks, c.ToolPath)
