@@ -13,7 +13,7 @@ test("navigating away cancels the pending forward, while a retained row forwards
   forward.start(() => drafts.push("old conversation"), 150);
   forward.cancel(); // The old conversation's row is destroyed on navigation.
   for (const callback of timers.values()) callback();
-  assert.deepEqual(drafts, []);
+  assert.equal(drafts.length, 0);
   forward.start(() => drafts.push("current conversation"), 150);
   timers.get(2)!();
   assert.deepEqual(drafts, ["current conversation"]);
