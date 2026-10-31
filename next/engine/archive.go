@@ -13,7 +13,11 @@ import (
 )
 
 func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, current box.Box, reason string) error {
-	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: current.ID, Session: current.Session, Host: current.Host, From: contract.BoxClosing, To: contract.BoxClosing, Reason: reason})
+	var cause contract.FailureCause
+	if reason != "" {
+		cause = contract.CauseArchiveFailed
+	}
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: current.ID, Session: current.Session, Host: current.Host, From: contract.BoxClosing, To: contract.BoxClosing, Reason: reason, Cause: cause})
 	if err != nil {
 		return err
 	}

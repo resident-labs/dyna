@@ -95,9 +95,9 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			run := store.HostexecRun{Op: op, Grant: a.Grant, Host: a.Host, Scope: "dyna-hostexec-" + string(op) + ".scope", Timeout: a.Timeout}
 			if err := s.store.StartHostexec(ctx, run, who, a.Room, s.now()); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
-					return contract.OpResult{Error: "grant no longer active"}
+					return contract.OpResult{Cause: contract.CauseGrantInactive, Error: "grant no longer active"}
 				}
-				return contract.OpResult{Error: err.Error()}
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
 			started := s.now()
 			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
@@ -111,21 +111,22 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				stopped = store.HostexecTimeout
 			}
 			if e := s.store.FinishHostexec(ctx, op, s.now(), len(out), stopped); e != nil {
-				return contract.OpResult{Error: e.Error()}
+				return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
 			}
 			result := contract.OpResult{ExitCode: code, Truncated: truncated}
 			if err != nil {
 				result.Error = err.Error()
+				result.Cause = contract.CauseHostLost
 			}
 			if len(out) > 64<<10 {
 				rest := out[64<<10:]
 				sum := sha256.Sum256(rest)
 				name := hex.EncodeToString(sum[:])
 				if e := os.MkdirAll(s.filesDir, 0700); e != nil {
-					return contract.OpResult{Error: e.Error()}
+					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
 				}
 				if e := os.WriteFile(filepath.Join(s.filesDir, name), rest, 0600); e != nil {
-					return contract.OpResult{Error: e.Error()}
+					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
 				}
 				result.OutputFile = name
 				out = out[:64<<10]

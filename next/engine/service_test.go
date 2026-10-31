@@ -526,7 +526,7 @@ func TestStartErrorReturnsReachableFailedSession(t *testing.T) {
 		t.Fatal(e)
 	}
 	last := list.Events[len(list.Events)-1].Body.(contract.BoxChanged)
-	if last.Session != response.Session || last.To != contract.BoxFailed || last.Reason != "host unavailable" {
+	if last.Session != response.Session || last.To != contract.BoxFailed || last.Reason != "host unavailable" || last.Cause != contract.CauseCreateFailed {
 		t.Fatalf("unexpected placement: %+v", last)
 	}
 }

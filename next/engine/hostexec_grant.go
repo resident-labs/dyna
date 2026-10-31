@@ -79,7 +79,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			now := s.now()
 			value, err := id("grant_", now)
 			if err != nil {
-				return contract.OpResult{Error: err.Error()}
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
 			expiry := a.Expires
 			if !a.Never && expiry.IsZero() {
@@ -88,7 +88,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Commands: a.Commands, Mode: a.Mode, Expires: expiry, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
 			err = s.store.Write(ctx, func(tx *sql.Tx) error { return s.store.InsertGrant(tx, g) })
 			if err != nil {
-				return contract.OpResult{Error: err.Error()}
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
 			return contract.OpResult{Output: value}
 		},
