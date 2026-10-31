@@ -19,6 +19,13 @@ func TestProfileSurfaceValidation(t *testing.T) {
 	if err != nil || profiles.Surface("p") != contract.AgentSurfaceCaller {
 		t.Fatalf("surface: %v %v", profiles, err)
 	}
+	if err := os.WriteFile(path, []byte(strings.Replace(config, `,"agentSurface":"caller"`, "", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err = LoadProfiles(path)
+	if err != nil || profiles.Surface("p") != contract.AgentSurfaceOff {
+		t.Fatalf("default surface: %v %v", profiles, err)
+	}
 	if err := os.WriteFile(path, []byte(strings.Replace(config, "caller", "unknown", 1)), 0600); err != nil {
 		t.Fatal(err)
 	}
