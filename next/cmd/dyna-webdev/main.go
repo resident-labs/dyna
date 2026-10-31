@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	pngenc "image/png"
 	"io/fs"
 	"log"
@@ -90,6 +91,49 @@ func (devService) ShellWatch(ctx context.Context, _ contract.SessionID) (<-chan 
 		}
 	}()
 	return out, nil
+}
+
+// SessionList shows builder-feed's computer as running, so the computer view can be opened.
+func (d devService) SessionList(ctx context.Context, p contract.Principal, req contract.SessionListRequest) (contract.SessionListResponse, *contract.Error) {
+	list, problem := d.Service.SessionList(ctx, p, req)
+	for i := range list.Sessions {
+		if list.Sessions[i].Name == "builder-feed" {
+			list.Sessions[i].Computer = contract.ComputerRunning
+		}
+	}
+	return list, problem
+}
+
+// ComputerWatch streams a 16:10 desktop with a bar that moves each frame, twice a second.
+func (devService) ComputerWatch(ctx context.Context, _ contract.SessionID) (<-chan []byte, *contract.Error) {
+	frames := make(chan []byte)
+	go func() {
+		defer close(frames)
+		for i := 0; ; i++ {
+			shot := image.NewRGBA(image.Rect(0, 0, 1280, 800))
+			for y := range 800 {
+				for x := range 1280 {
+					c := color.RGBA{uint8(30 + y/10), uint8(50 + x/16), 110, 255}
+					if y > 120 && y < 640 && x > 200 && x < 1080 { // a window, with a bar that moves each frame
+						c = color.RGBA{236, 233, 228, 255}
+						if y < 160 || (y > 300 && y < 330 && x < 220+(i*40)%840) {
+							c = color.RGBA{70, 90, 160, 255}
+						}
+					}
+					shot.Set(x, y, c)
+				}
+			}
+			var frame bytes.Buffer
+			fatal(jpeg.Encode(&frame, shot, nil))
+			select {
+			case frames <- frame.Bytes():
+			case <-ctx.Done():
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}()
+	return frames, nil
 }
 
 type profiles struct{}
