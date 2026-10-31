@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
+  import { accountRows, accountState } from "../accounts.ts";
   import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
 
@@ -127,7 +128,7 @@
     {#if !phone || !adding}
       <p class="muted">{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers</p>
       {#each providers.filter(p => accounts.some(a => a.provider === p.id)) as provider (provider.id)}
-        {@const group = accounts.filter(a => a.provider === provider.id)}
+        {@const group = accountRows(accounts.filter(a => a.provider === provider.id))}
         <section>
           <div class="heading"><h2><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName}</h2>
             <span class="muted">{group.length} · {provider.connectMethod === "key" ? "API key" : "Sign-in"}</span>
@@ -135,10 +136,10 @@
           </div>
           <div class="list">
             {#each group as account, index (account.id)}
+              {@const status = accountState(account)}
               <div class="row"><div><strong>{account.label || `${provider.displayName} account ${index + 1}`}</strong>
-                {#if account.state === "sign_in_expired"} <StatusPill tone="error" label="Sign-in expired" />
-                {:else if account.state === "quota_low"} <StatusPill tone="warning" label="Low usage" />{/if}
-                <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}</div></div>
+                {#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}
+                <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}{#if status.line} · {status.line}{/if}</div></div>
                 {#if account.state === "sign_in_expired"}
                   <div class="expired"><span>Its limits show once it is signed in.</span><span>Remove it, then use Connect another to sign in again.</span></div>
                   {#if removing === account.id}<div class="remove-confirm"><span>Remove this account? Dyna deletes its sign-in. You can connect it again later.</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
