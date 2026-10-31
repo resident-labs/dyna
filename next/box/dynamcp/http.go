@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box/post"
+	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
 )
@@ -58,14 +59,15 @@ type Forward func(context.Context, contract.Method, []byte) ([]byte, *contract.E
 type Local func(context.Context, tools.BoxHandler, []byte) (result, *contract.Error)
 
 type Server struct {
-	list    []tool
-	names   string
-	actions map[string]map[string]action
-	forward Forward
-	local   Local
-	mu      sync.Mutex
-	pending map[string]context.CancelFunc
-	upload  post.Upload
+	list     []tool
+	names    string
+	actions  map[string]map[string]action
+	forward  Forward
+	local    Local
+	mu       sync.Mutex
+	pending  map[string]context.CancelFunc
+	upload   post.Upload
+	preparer post.Preparer
 }
 
 func New(forward Forward, local Local, upload post.Upload) (*Server, error) {
@@ -77,7 +79,7 @@ func New(forward Forward, local Local, upload post.Upload) (*Server, error) {
 	for _, tool := range list {
 		names = append(names, tool.Name)
 	}
-	return &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc), upload: upload}, nil
+	return &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc), upload: upload, preparer: post.Preparer{Render: visual.Preview}}, nil
 }
 
 // Description names the areas from the same registry as tools/list.
@@ -133,7 +135,7 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 			return failure(contract.ErrUnavailable, "Post preparation is unavailable.")
 		}
 		input := decoded.(*tools.PostInput)
-		req, _, err := post.Prepare(ctx, s.upload, *input)
+		req, _, err := s.preparer.Prepare(ctx, s.upload, *input)
 		if err != nil {
 			return failure(contract.ErrInvalid, err.Error())
 		}
