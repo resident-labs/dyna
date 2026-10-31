@@ -34,6 +34,24 @@ func TestQuotaSummaryNamesTheCallersThatSpendQuota(t *testing.T) {
 	}
 }
 
+func TestRunPhasesPreserveTotalsAndHideRequestValues(t *testing.T) {
+	now := time.Unix(1, 0)
+	var lines []string
+	q := &quotaLog{now: func() time.Time { return now }, logf: func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }}
+	caller := ghQuotaCaller("repos/private/repository/actions/runs?head_sha=secret")
+	q.recordPhase(caller, RunWatchSnapshot, false)
+	q.recordPhase(caller, RunCancellation, false)
+	q.recordPhase(caller, RunOther, true)
+	now = now.Add(window)
+	q.recordPhase("graphql", RunOther, false)
+	if len(lines) != 2 || !strings.Contains(lines[0], "runs-head-sha 2") ||
+		!strings.Contains(lines[1], "snapshot 1 counted 0 free; cancellation 1 counted 0 free") ||
+		!strings.Contains(lines[1], "other 0 counted 1 free") ||
+		strings.Contains(strings.Join(lines, " "), "secret") || strings.Contains(strings.Join(lines, " "), "private") {
+		t.Fatalf("unexpected quota summaries: %v", lines)
+	}
+}
+
 // A workflow run list is named by the filter it asks for, so a per-commit read
 // is told apart from a branch cleanup. Filter values never reach the label.
 func TestRunListCallerNamesTheFilterNotItsValue(t *testing.T) {
