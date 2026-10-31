@@ -15,6 +15,7 @@ type eventFunc func(contract.RoomID, contract.Principal, contract.EventBody) (co
 
 type activeStep struct {
 	cancel context.CancelFunc
+	want   store.BoxWant
 	done   chan struct{}
 }
 
@@ -118,7 +119,17 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	for i, row := range rows {
 		b := row.Box
 		if row.Want == store.WantClose || row.Want == store.WantDiscard {
-			r.cancel(b.ID)
+			r.mu.Lock()
+			step := r.active[b.ID]
+			if step != nil && step.want != row.Want {
+				step.cancel()
+			}
+			r.mu.Unlock()
+			if step == nil {
+				if err := r.closePass(ctx, row, all); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if row.Want == store.WantRun && b.State == contract.BoxReady && !r.view.OpenTerminal(b.Session) {
@@ -202,7 +213,7 @@ func (r *Reconciler) launch(ctx context.Context, row store.LifecycleBox) {
 		return
 	}
 	stepCtx, cancel := context.WithCancel(ctx)
-	step := &activeStep{cancel: cancel, done: make(chan struct{})}
+	step := &activeStep{cancel: cancel, want: row.Want, done: make(chan struct{})}
 	r.active[row.ID] = step
 	r.hosts[row.Host]++
 	r.wg.Add(1)

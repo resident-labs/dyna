@@ -36,6 +36,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	if !current {
 		return nil
 	}
+	if row.Want == store.WantClose || row.Want == store.WantDiscard {
+		return r.closeStep(ctx, row)
+	}
 	b := row.Box
 	next := b
 	var due time.Time
