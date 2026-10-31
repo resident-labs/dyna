@@ -15,6 +15,7 @@ import (
 var ErrParentClosing = errors.New("parent session is closing")
 var ErrSessionClosing = errors.New("session is closing")
 var ErrVisualForbidden = errors.New("visual belongs to another room or author")
+var ErrVisualNoAuthor = errors.New("visual has no session author")
 
 type VisualSupersededError struct {
 	Event   contract.EventID
@@ -348,13 +349,15 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 		if visualReply != "" {
 			var visualID contract.EventID
 			var version, current int
+			var authorKind contract.PrincipalKind
+			var author contract.SessionID
 			err := tx.QueryRowContext(ctx, `SELECT json_extract(a.value,'$.visual.id'), json_extract(a.value,'$.visual.version')
 				FROM events e, json_each(e.body,'$.attachments') a
 				WHERE e.id=? AND e.room=? AND e.type='post.created' AND json_type(a.value,'$.visual')='object'`, visualReply, event.Room).Scan(&visualID, &version)
 			if err != nil {
 				return err
 			}
-			if err := tx.QueryRowContext(ctx, "SELECT version FROM visuals WHERE id=? AND room=?", visualID, event.Room).Scan(&current); err != nil {
+			if err := tx.QueryRowContext(ctx, "SELECT version,author_kind,author_id FROM visuals WHERE id=? AND room=?", visualID, event.Room).Scan(&current, &authorKind, &author); err != nil {
 				return err
 			}
 			if version != current {
@@ -368,6 +371,16 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 				}
 				return &VisualSupersededError{Event: latest, Version: current, Seq: seq}
 			}
+			if authorKind != contract.PrincipalSession || author == "" {
+				return ErrVisualNoAuthor
+			}
+			post := event.Body.(contract.PostCreated)
+			target := contract.Principal{Kind: contract.PrincipalSession, Session: author}
+			post.Mentions = []contract.Principal{target}
+			post.ReplyTo = visualReply
+			event.Body = post
+			deliveries = []contract.Delivery{{To: target, Surface: contract.SurfaceCard, Wake: true,
+				Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: event.From, Home: post.Home, ReplyTo: visualReply}}}
 		}
 		post, isPost := event.Body.(contract.PostCreated)
 		if isPost {
