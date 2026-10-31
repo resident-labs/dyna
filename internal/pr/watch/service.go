@@ -712,6 +712,9 @@ func (s *Service) observePoll(st *State, r *Record, snap Snapshot, pollTime []ti
 	if !snap.ciReused {
 		r.Polling.FullChecked = s.now()
 	}
+	if !snap.discussionReused && snap.Pull.State != "closed" {
+		r.Polling.DiscussionChecked = s.now()
+	}
 	if r.Head != snap.Pull.Head.SHA || r.HeadSeen.IsZero() {
 		r.HeadSeen = s.now()
 	}

@@ -41,7 +41,8 @@ func (e *rateLimitError) Error() string {
 type requestCache struct {
 	forceBudgets  bool // Existing full polls also refresh completed timing evidence.
 	forceSnapshot bool // Reconcile a committed budget through the normal full poll.
-	cacheOnly     bool // Read saved CI evidence without transport or entry mutation.
+	cacheOnly     bool // Read saved evidence without transport or entry mutation.
+	savedComments *[]Comment
 	entries       map[string]cachedResponse
 	used          map[string]cachedResponse
 	notModified   map[string]bool
