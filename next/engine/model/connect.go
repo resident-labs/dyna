@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/store"
 )
 
 var errConnect = errors.New("account connection unavailable")
@@ -37,13 +36,13 @@ type connectAttempt struct {
 type Connections struct {
 	proxy      *Proxy
 	management managementClient
-	store      *store.Store
+	store      AccountStore
 	now        func() time.Time
 	mu         sync.Mutex
 	attempts   map[string]*connectAttempt
 }
 
-func (p *Proxy) Connections(key string, st *store.Store, now func() time.Time) *Connections {
+func (p *Proxy) Connections(key string, st AccountStore, now func() time.Time) *Connections {
 	return &Connections{proxy: p, management: managementClient{client: p.client, key: key}, store: st, now: now, attempts: make(map[string]*connectAttempt)}
 }
 
