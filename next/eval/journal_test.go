@@ -13,7 +13,7 @@ func TestJournalPreventsUnapprovedReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	cell := Cell{Task: 1, Provider: Opus, Arm: Off}
+	cell := Cell{Task: 1, Provider: Claude, Arm: Caller}
 	if err := j.Begin(ctx, cell, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestJournalPreventsUnapprovedReplay(t *testing.T) {
 	if err := j.Begin(ctx, cell, 2); err == nil {
 		t.Fatal("duplicate retry allowed")
 	}
-	other := Cell{Task: 2, Provider: Opus, Arm: Off}
+	other := Cell{Task: 2, Provider: Claude, Arm: Caller}
 	if err := j.Begin(ctx, other, 1); err != nil {
 		t.Fatal(err)
 	}
