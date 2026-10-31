@@ -537,7 +537,7 @@ func TestFailedTurnReturnsInputsWithoutWaking(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			turn, inputs, err := s.store.Dispatch(ctx, session, "retry", event, false)
+			turn, inputs, _, err := s.store.Dispatch(ctx, session, "retry", event, false)
 			if err != nil || turn != "" || len(inputs) != 0 {
 				t.Fatalf("started without wake: turn=%q inputs=%+v err=%v", turn, inputs, err)
 			}
@@ -563,7 +563,7 @@ func TestFailedTurnReturnsInputsWithoutWaking(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			turn, inputs, err = s.store.Dispatch(ctx, session, "retry", event, false)
+			turn, inputs, _, err = s.store.Dispatch(ctx, session, "retry", event, false)
 			if err != nil || turn != "retry" || len(inputs) != 2 || inputs[0].Seq != first.Delivery || int64(inputs[1].Seq) != post.Seq {
 				t.Fatalf("retry: turn=%q inputs=%+v err=%v", turn, inputs, err)
 			}
@@ -673,7 +673,7 @@ func TestPostToOwnerDM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, inputs, err := s.store.Dispatch(ctx, session, "turn", started, false)
+	_, inputs, _, err := s.store.Dispatch(ctx, session, "turn", started, false)
 	if err != nil || len(inputs) != 2 || inputs[1].Reply.Kind != contract.ReplyFinal || inputs[1].Reply.Home != home {
 		t.Fatalf("post %v inputs %+v: %v", post, inputs, err)
 	}
@@ -693,7 +693,7 @@ func TestOwnPostDoesNotWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, deliveries, err := s.store.Dispatch(ctx, session, turn, event, true)
+	_, deliveries, _, err := s.store.Dispatch(ctx, session, turn, event, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1706,5 +1706,33 @@ func TestSessionSetProfileEventAndWake(t *testing.T) {
 	}
 	if got, err := s.store.Session(ctx, worker); err != nil || got.Profile != "test" {
 		t.Fatalf("profile %q: %v", got.Profile, err)
+	}
+}
+
+func TestSetModelFailureKeepsInputForTheProfileWake(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channelCtx, cancel := context.WithCancel(ctx)
+	channel, problem := testChannel(t, s, channelCtx, caller)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	start := (<-channel).Body.(contract.TurnStart)
+	cancel()
+	for range channel {
+	}
+	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnFailed, Error: "no such model", Cause: contract.CauseSetModelFailed}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := s.SessionSetProfile(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionSetProfileRequest{Session: session, Profile: "other"}); problem != nil {
+		t.Fatal(problem)
+	}
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, inputs, profile, err := s.store.Dispatch(ctx, session, "retry", event, false)
+	if err != nil || turn != "retry" || profile != "other" || len(inputs) != 2 || inputs[0].Seq != start.Inputs[0].Delivery {
+		t.Fatalf("turn=%q profile=%q inputs=%+v err=%v", turn, profile, inputs, err)
 	}
 }

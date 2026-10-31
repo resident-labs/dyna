@@ -33,7 +33,7 @@ func quietSession(t *testing.T, jobs int) (*Service, *dormantHost, contract.Room
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, _, err := s.store.Dispatch(ctx, sid, "turn_quiet", event, false)
+	turn, _, _, err := s.store.Dispatch(ctx, sid, "turn_quiet", event, false)
 	if err != nil {
 		t.Fatal(err)
 	}
