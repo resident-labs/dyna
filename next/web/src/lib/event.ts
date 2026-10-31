@@ -38,7 +38,7 @@ const bodies: Record<string, Check> = {
   "connect.connector": object({ missing: boolean }),
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
   "account.quota_low": object({ accountId: string, window: string, remainingPercent: number, floor: number }),
-  "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
+  "post.created": object({ text: string, home: conversation, turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) })))) }),
   "session.restarted": object({ session: string }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), brief: optional(string) }),
@@ -51,6 +51,7 @@ const bodies: Record<string, Check> = {
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string), cause, shellJobs: optional(number) }),
   "conversation.read": object({ room: string, conversation, seq: number }),
   "turn.activity": object({ session: string, turn: string, label: string }),
+  "transcript.changed": object({ session: string, turn: string }),
   "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "owner"), card, expires: string }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
   "op.ran": object({ id: string, state, result: object({ exitCode: number, cause, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
@@ -75,7 +76,7 @@ export function decodeEvent(value: unknown): Event | undefined {
   const record = value as Record<string, unknown>;
   const body = typeof record.type === "string" && Object.hasOwn(bodies, record.type) ? bodies[record.type] : undefined;
   // Live-only events are never stored and have seq 0.
-  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < (record.type === "turn.activity" || record.type === "conversation.read" ? 0 : 1) || !string(record.id) ||
+  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < (record.type === "turn.activity" || record.type === "conversation.read" || record.type === "transcript.changed" ? 0 : 1) || !string(record.id) ||
       !string(record.at) || !optional(string)(record.room) || !principal(record.from) || !body?.(record.body)) {
     return skip(value);
   }
