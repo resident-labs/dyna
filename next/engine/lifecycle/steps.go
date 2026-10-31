@@ -151,14 +151,17 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		if err != nil {
 			return err
 		}
+		status, found, inspectErr := r.boxes.Inspect(ctx, b.ID)
 		image, imageErr := r.boxes.CurrentImage(ctx, b.Session, b.Host)
 		if imageErr != nil {
 			image.Tag = b.Image
 			next.Reason = imageErr.Error()
 		}
-		if imageErr != nil && slice != b.Slice {
+		if inspectErr != nil {
+			workErr = inspectErr
+		} else if imageErr != nil && (slice != b.Slice || !found || status.LegacySharedMount) {
 			workErr = imageErr
-		} else if slice != b.Slice || image.Tag != b.Image {
+		} else if slice != b.Slice || image.Tag != b.Image || !found || status.LegacySharedMount {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()

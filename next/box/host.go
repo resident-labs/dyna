@@ -26,8 +26,9 @@ type ContainerSpec struct {
 	Labels       []Label
 }
 type ContainerStatus struct {
-	Box     contract.BoxID
-	Running bool
+	Box               contract.BoxID
+	Running           bool
+	LegacySharedMount bool
 }
 type Forward struct {
 	Box                  contract.BoxID
