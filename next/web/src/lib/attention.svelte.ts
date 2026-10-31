@@ -26,12 +26,34 @@ export class Attention {
   async open(): Promise<void> {
     const list = await call("room.list", {});
     this.head = list.seq;
-    for (const room of list.rooms ?? []) {
-      this.rooms.set(room.id, room);
-      this.waiting.set(room.id, new SvelteSet(room.waiting));
-      this.working.set(room.id, new SvelteSet(room.working));
-    }
+    for (const room of list.rooms ?? []) this.add(room);
     this.stop = this.connect(undefined, () => this.head, event => this.apply(event));
+  }
+
+  private add(room: RoomSummary): void {
+    this.rooms.set(room.id, room);
+    this.waiting.set(room.id, new SvelteSet(room.waiting));
+    this.working.set(room.id, new SvelteSet(room.working));
+  }
+
+  // A room created after the page loaded first shows as an event from a room the page does not know, such as its
+  // root's session.started; room.list then names it. One read runs at a time. Events from unknown rooms wait in
+  // early while it runs; the answer covers those up to its seq, and the newer ones apply on top. Events from a room
+  // the answer does not name yet wait for one more read, as when the read started before the room existed.
+  private refreshing: Promise<void> | undefined;
+  private early: Event[] = [];
+  private again = false;
+  private refresh(): void {
+    this.refreshing ??= call("room.list", {}).then(list => {
+      for (const room of list.rooms ?? []) if (!this.rooms.has(room.id)) this.add(room);
+      const newer = this.early.filter(event => event.seq > list.seq);
+      this.early = newer.filter(event => !this.rooms.has(event.room ?? ""));
+      for (const event of newer) if (this.rooms.has(event.room ?? "")) this.applyRoom(event);
+    }, () => { this.early = []; }).finally(() => {
+      this.refreshing = undefined;
+      this.again = !this.again && this.early.length > 0;
+      if (this.again) this.refresh(); else this.early = [];
+    });
   }
 
   close(): void { this.stop(); }
@@ -74,6 +96,11 @@ export class Attention {
     }
     if (event.seq <= this.head) return;
     this.head = event.seq;
+    if (!event.room || this.rooms.has(event.room)) this.applyRoom(event);
+    else { this.early.push(event); this.refresh(); }
+  }
+
+  private applyRoom(event: Event): void {
     const waiting = this.waiting.get(event.room ?? ""), working = this.working.get(event.room ?? "");
     if (!waiting || !working) return;
     const buffer = this.pending.get(event.room ?? "");
