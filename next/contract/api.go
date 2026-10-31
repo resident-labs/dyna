@@ -267,9 +267,7 @@ type EventsListResponse struct {
 	Names  map[SessionID]string `json:"names"`
 	Next   int64                `json:"next"`
 }
-type BoxHelloRequest struct {
-	Version string `json:"version"`
-}
+type BoxHelloRequest struct{}
 type ModelProvider string
 
 const (
@@ -307,7 +305,6 @@ type BoxHelloResponse struct {
 	Model   ModelChoice `json:"model"`
 	Repos   []BoxRepo   `json:"repos,omitempty"`
 	Rules   []RoomRule  `json:"rules,omitempty"`
-	Upgrade string      `json:"upgrade,omitempty"`
 }
 type TurnOutputRequest struct {
 	ShellJobs int          `json:"shellJobs"`
@@ -384,10 +381,6 @@ type TurnStop struct {
 	Turn   TurnID `json:"turn"`
 	Reason string `json:"reason"`
 }
-type Upgrade struct {
-	Version string `json:"version"`
-}
-
 type ComputerWatchStart struct {
 	Generation uint64 `json:"generation"`
 }
@@ -481,5 +474,3 @@ func (TurnSteer) BoxMessageType() BoxMessageType { return "turn.steer" }
 func (TurnSteer) isBoxMessageBody()              {}
 func (TurnStop) BoxMessageType() BoxMessageType  { return "turn.stop" }
 func (TurnStop) isBoxMessageBody()               {}
-func (Upgrade) BoxMessageType() BoxMessageType   { return "upgrade" }
-func (Upgrade) isBoxMessageBody()                {}
