@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Attention } from "./attention.svelte.ts";
 import { boxReason } from "./feed.ts";
-import type { Event, EventBody } from "./contract.gen.ts";
+import type { Event, EventBody, Scope } from "./contract.gen.ts";
 
 const event = (seq: number, room: string, body: EventBody): Event => ({ seq, id: String(seq), at: "", room, from: { kind: "owner" }, ...body });
 const card = { title: "Push", target: { kind: "room", name: "a" } } as const;
@@ -173,5 +173,21 @@ test("the owner stream keeps a room's paused state current", async () => {
     assert.equal(attention.rooms.get("a")?.paused, true);
     attention.apply(event(3, "a", { type: "room.resumed", body: {} }));
     assert.equal(attention.rooms.get("a")?.paused, false);
+  } finally { globalThis.fetch = original; }
+});
+
+test("the page reads its device's scopes once at connect, and offers every control when the engine has no such method", async () => {
+  const original = globalThis.fetch;
+  const connect = async (scopes: Response) => {
+    globalThis.fetch = async input => String(input).endsWith("/device.scopes") ? scopes : new Response(JSON.stringify({ seq: 1, rooms: [] }));
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    return attention;
+  };
+  try {
+    const reader = await connect(new Response(JSON.stringify({ scopes: ["read"] })));
+    assert.deepEqual(["read", "operate", "terminal", "admin"].map(scope => reader.can(scope as Scope)), [true, false, false, false]);
+    const old = await connect(new Response(JSON.stringify({ code: "not_found", message: "not found" }), { status: 404 }));
+    assert.equal(old.can("operate"), true);
   } finally { globalThis.fetch = original; }
 });

@@ -31,7 +31,7 @@
   import type { Attachment } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   let { row, author, to, root, onretry, ondiscard, onforward }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward: () => void;
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void;
   } = $props();
   let html = $derived(render(row.text));
   // Copy text answers in the bar for 2 seconds, as in v1.
@@ -58,7 +58,7 @@
 <!-- A tap focuses the row on a touch screen, so focus shows its action bar as hover does. -->
 <article class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1">
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
-    <button type="button" aria-label="Forward" title="Forward" onclick={onforward}><Icon name="forward" /></button>
+    {#if onforward}<button type="button" aria-label="Forward" title="Forward" onclick={onforward}><Icon name="forward" /></button>{/if}
     <button type="button" aria-label="Copy text" title="Copy text" onclick={copy}><Icon name={copied === "Copied" ? "check" : "copy"} /></button></div>{/if}
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} />
