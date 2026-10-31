@@ -268,18 +268,20 @@ type FeedInput struct {
 
 // Dispatch atomically assigns pending inputs to the active turn, or starts one.
 // replay includes previously taken inputs for a new channel connection.
-func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn contract.TurnID, started contract.Event, replay bool) (contract.TurnID, []FeedInput, error) {
+// Dispatch also returns the session's profile, read in the same transaction as its inputs.
+func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn contract.TurnID, started contract.Event, replay bool) (contract.TurnID, []FeedInput, contract.ProfileName, error) {
 	var active contract.TurnID
 	var inputs []FeedInput
+	var profile contract.ProfileName
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		var eligible bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready')`, session).Scan(&eligible); err != nil {
-			return err
-		}
-		if !eligible {
+		err := tx.QueryRowContext(ctx, `SELECT s.profile FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&profile)
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		err := tx.QueryRowContext(ctx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL", session).Scan(&active)
+		if err != nil {
+			return err
+		}
+		err = tx.QueryRowContext(ctx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL", session).Scan(&active)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -363,7 +365,7 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 		}
 		return nil
 	})
-	return active, inputs, err
+	return active, inputs, profile, err
 }
 
 // SessionHasTurns reports whether a box ever ran a turn for the session. A session without turns has no work to archive.

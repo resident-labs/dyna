@@ -36,7 +36,7 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 		if _, err := s.writer.Exec(query); err != nil {
 			t.Fatal(err)
 		}
-		turn, inputs, err := s.Dispatch(ctx, "s", "turn", start, false)
+		turn, inputs, _, err := s.Dispatch(ctx, "s", "turn", start, false)
 		if err != nil || turn != "" || len(inputs) != 0 {
 			t.Fatalf("dispatch while ineligible: %q %v %v", turn, inputs, err)
 		}
@@ -44,7 +44,7 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	if _, err := s.writer.Exec("UPDATE sessions SET state='open'"); err != nil {
 		t.Fatal(err)
 	}
-	turn, inputs, err := s.Dispatch(ctx, "s", "turn", start, false)
+	turn, inputs, _, err := s.Dispatch(ctx, "s", "turn", start, false)
 	if err != nil || turn != "turn" || len(inputs) != 1 {
 		t.Fatalf("eligible dispatch: %q %v %v", turn, inputs, err)
 	}
