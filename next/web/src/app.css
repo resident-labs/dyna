@@ -7,10 +7,12 @@
   --id-name: 47% 0.13; --id-face: 89% 0.05; --id-initials: 38% 0.1;
   /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
   --gutter: 60px;
-  /* v1's stacks: installed faces first, no bundled font. */
+  /* v1's stacks. main.ts bundles the first face of each; the rest cover scripts beyond Latin. */
   --sans: 'IBM Plex Sans', 'Adwaita Sans', system-ui, sans-serif; --mono: 'JetBrains Mono', 'Adwaita Mono', ui-monospace, monospace;
-  font: 15px/1.5 var(--sans);
+  /* v1's scale: 15 px running text at 1.45; weights are 400, 500 and 600. */
+  font: 15px/1.45 var(--sans); -webkit-font-smoothing: antialiased;
 }
+strong, b, h1, h2, h3, h4 { font-weight: 600; }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #23201d; --sidebar: #1a1816; --raised: #2d2926; --line: rgb(255 235 210 / 8%); --selected: rgb(255 235 210 / 9%);
@@ -41,7 +43,7 @@ aside.members { border-right: 0; border-left: 1px solid var(--line); }
 /* A request waits for the owner: StatusPill's attention color, ringed so it reads on any room color. */
 .waiting { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--attention); box-shadow: 0 0 0 3px var(--sidebar); }
 .rail footer { margin-top: auto; padding: 12px 0; }
-.label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .member:hover { background: var(--hover); }
 header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
