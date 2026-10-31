@@ -191,7 +191,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if failure != "" {
 			image = b.Image
 			if state != contract.BoxCreating || failures >= 3 {
-				to, reason = contract.BoxFailed, failure
+				to, reason = contract.BoxFailed, string(contract.CauseCreateFailed)
 			} else {
 				to, reason = contract.BoxPending, string(box.PendingCreateRetry)
 			}
