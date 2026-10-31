@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,6 +34,10 @@ func observe(p *Polling, now time.Time, snap Snapshot, reserve bool) {
 // comments, dispatch reviewers, send notices, or run merged worktree cleanup.
 // force is used once when a watch stops; subsequent attempts run at most hourly.
 func (s *Service) refreshUnwatched(ctx context.Context, key string, force bool, pauses map[string]bool) error {
+	return s.refreshUnwatchedFromProbe(ctx, key, force, pauses, nil)
+}
+
+func (s *Service) refreshUnwatchedFromProbe(ctx context.Context, key string, force bool, pauses map[string]bool, probe *headProbe) error {
 	st, err := s.Store.Read()
 	if err != nil {
 		return err
@@ -48,7 +53,14 @@ func (s *Service) refreshUnwatched(ctx context.Context, key string, force bool, 
 	}
 	gh := s.github(r.RoomID)
 	gh.requests = &requestCache{entries: st.Responses[key], used: map[string]cachedResponse{}, rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
-	pull, requestErr := gh.Pull(ctx, refRecord(*r))
+	var pull Pull
+	var requestErr error
+	if probe != nil {
+		pull = probe.Pull
+		gh.requests.account = probe.Account
+	} else {
+		pull, requestErr = gh.Pull(ctx, refRecord(*r))
+	}
 	if requestErr == nil && pull.State != "open" && pull.State != "closed" {
 		requestErr = fmt.Errorf("GitHub returned an invalid pull request state")
 	}
@@ -62,9 +74,9 @@ func (s *Service) refreshUnwatched(ctx context.Context, key string, force bool, 
 		if current.Responses == nil {
 			current.Responses = map[string]map[string]cachedResponse{}
 		}
-		if requestErr == nil {
+		if requestErr == nil && probe == nil {
 			current.Responses[key] = gh.requests.used
-		} else {
+		} else if requestErr != nil {
 			if current.Responses[key] == nil {
 				current.Responses[key] = map[string]cachedResponse{}
 			}
@@ -103,6 +115,63 @@ func (s *Service) refreshUnwatched(ctx context.Context, key string, force bool, 
 func shouldRefreshUnwatched(st State, r *Record, now time.Time, force bool) bool {
 	return r != nil && !r.Watching && r.State == state.PROpen && changeKind(*r) != "local" &&
 		!now.Before(quotaFor(st, r, now).PauseUntil) && (force || !now.Before(r.Polling.Next))
+}
+
+// refreshUnwatchedBatch runs after watched PR work, so stopped watches cannot
+// delay head confirmation or review dispatch. Failed probes fall back to the
+// existing REST reader.
+func (s *Service) refreshUnwatchedBatch(ctx context.Context, keys []string, pauses map[string]bool) error {
+	st, err := s.Store.Read()
+	if err != nil {
+		return err
+	}
+	var records []*Record
+	var failures []error
+	for _, key := range keys {
+		r := st.Records[key]
+		if !shouldRefreshUnwatched(st, r, s.now(), false) {
+			continue
+		}
+		paused, err := s.roomPausedCached(r.RoomID, pauses)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if !paused {
+			records = append(records, r)
+		}
+	}
+	if len(records) == 0 {
+		return errors.Join(failures...)
+	}
+	gh := s.github("")
+	gh.unwatchedHeads = true
+	gh.requests = &requestCache{rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
+	batchCtx, stop := context.WithTimeout(ctx, s.recordBudget())
+	heads, rates, _ := gh.readHeads(batchCtx, records)
+	stop()
+	if err := s.Store.update(func(current *State) error {
+		applyRateLimits(current, rates, s.now())
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, r := range records {
+		if ctx.Err() != nil {
+			return errors.Join(append(failures, ctx.Err())...)
+		}
+		var probe *headProbe
+		if head, ok := heads[r.Key]; ok && head.Err == nil {
+			probe = &head
+		}
+		recordCtx, cancel := context.WithTimeout(ctx, s.recordBudget())
+		err := s.refreshUnwatchedFromProbe(recordCtx, r.Key, false, pauses, probe)
+		cancel()
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // pullVersion ignores fields that GitHub can recompute without updating the PR.

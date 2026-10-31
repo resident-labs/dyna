@@ -396,6 +396,7 @@ type GitHub struct {
 	Timeout        time.Duration
 	recoverPolling func(RateLimit, RateLimitScope) error
 	artifactErrors bool
+	unwatchedHeads bool // Read only the terminal state of stopped watches.
 	runPhase       ghquota.RunPhase
 	now            func() time.Time
 	requests       *requestCache
