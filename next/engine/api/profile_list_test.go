@@ -120,10 +120,18 @@ func TestProfileWrites(t *testing.T) {
 		if _, err := tx.Exec("INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,1,1)"); err != nil {
 			return err
 		}
-		_, err := tx.Exec("INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','new','open','',0)")
+		_, err := tx.Exec("INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','new','closing','',0)")
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+	listed := request(owner, "/v1/profile.list", "{}")
+	var listedProfiles contract.ProfileListResponse
+	if err := json.Unmarshal(listed.Body.Bytes(), &listedProfiles); err != nil {
+		t.Fatal(err)
+	}
+	if len(listedProfiles.Profiles) != 2 || listedProfiles.Profiles[0].InUse != 1 || listedProfiles.Profiles[1].InUse != 0 {
+		t.Fatalf("usage: %+v", listedProfiles.Profiles)
 	}
 	if got := request(owner, "/v1/profile.remove", `{"name":"new"}`); got.Code != http.StatusConflict {
 		t.Fatalf("in-use: %d %s", got.Code, got.Body)
