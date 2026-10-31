@@ -22,20 +22,34 @@ test("folds the work between two posts into one row", () => {
   ], { kind: "feed" });
   assert.deepEqual(rows.map(row => row.kind), ["post", "work", "failed", "post"]);
   const work = rows[1];
-  assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web finished 2 turns and started its box");
+  assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web ran 2 turns");
 });
 
-test("names up to three sessions in one work sentence", () => {
+test("counts sessions once more than two ran turns", () => {
   const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
+  const begun = (seq: number, session: string) => event(seq, { type: "session.started", body: { session, name: session, profile: "p", goal: "" } });
   const name = (session: string) => session;
-  assert.equal(workSummary([started(1, "a"), started(2, "b")], name), "a and b worked");
-  assert.equal(workSummary([started(1, "a"), started(2, "b"), started(3, "c"), started(4, "d")], name), "a, b and 2 more worked");
+  assert.equal(workSummary([begun(1, "a"), started(2, "a"), started(3, "b"), started(4, "c")], name), "a started, 3 sessions ran turns");
 });
 
-test("a failed image build reads as a failure in the work sentence", () => {
+test("names failed image builds and computers in the work line", () => {
   const image = { host: "h", repo: "r", name: "base", tag: "1" };
   const failed = event(1, { type: "image.failed", body: { ...image, reason: "no space", logTail: "" } });
-  assert.equal(workSummary([failed], session => session), "Dyna had 1 image build fail");
+  assert.equal(workSummary([failed], session => session), "1 image build failed");
+  const computer = event(2, { type: "computer.changed", body: { session: "l", to: "running" } });
+  assert.equal(workSummary([computer], session => names[session]), "lead-web opened a computer");
+});
+
+test("keeps box changes out of the feed except a failed or lost box", () => {
+  const box = (seq: number, to: "ready" | "lost") => event(seq, { type: "box.changed", body: { box: "b", session: "l", to, reason: "podman: exit 125" } });
+  const rows = feedRows([box(1, "ready"), box(2, "lost")], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind === "failed" && [row.label, row.error]), [["Stopped unexpectedly", ""]]);
+});
+
+test("a failed turn with a final reply keeps its failed row", () => {
+  const ended = event(1, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "failed", final: "Partial", usage, error: "Broke",
+    replies: [{ reply: { kind: "final", target: { kind: "owner" } } }] } });
+  assert.deepEqual(feedRows([ended], { kind: "feed" }).map(row => row.kind), ["post", "failed"]);
 });
 
 test("puts a turn's final reply in its home only", () => {

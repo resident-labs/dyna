@@ -4,7 +4,7 @@
   let { row, author }: { row: Extract<Row, { kind: "failed" }>; author: string } = $props();
 </script>
 
-<p class="failed"><strong>{author}</strong> <time datetime={row.at}>{formatTime(row.at)}</time> <StatusPill tone="failed">Turn failed</StatusPill>
+<p class="failed"><strong>{author}</strong> <time datetime={row.at}>{formatTime(row.at)}</time> <StatusPill tone="failed">{row.label}</StatusPill>
   {#if row.error}<span class="error">{row.error}</span>{/if}</p>
 
 <style>

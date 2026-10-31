@@ -1,8 +1,8 @@
-import type { Attachment, BoxState, Conversation, Event, Principal } from "./contract.gen.ts";
+import type { Attachment, Conversation, Event, Principal } from "./contract.gen.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[] }
-  | { kind: "failed"; key: string; session: string; at: string; error: string }
+  | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Stopped unexpectedly"; error: string }
   | { kind: "work"; key: string; events: Event[] };
 
 type Name = (session: string) => string;
@@ -44,19 +44,29 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
     }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
+    // Box lifecycle stays out of the feed; only a failed or lost box shows, as a failed row in the owner's
+    // terms. Its reason is raw engine error text, so it never shows.
+    if (event.type === "box.changed") {
+      if (event.body.to === "failed" || event.body.to === "lost") {
+        flush();
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at,
+          label: event.body.to === "failed" ? "Could not start" : "Stopped unexpectedly", error: "" });
+      }
+      continue;
+    }
     if (event.type === "turn.ended") {
       // A final reply that no post of the session already carried is the session's answer here.
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
       if (event.body.final && answer) {
         post(`a${event.seq}`, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
-        continue;
       }
+      // A failed turn always gets its own row, even after its answer; it never folds into a work row.
       if (event.body.outcome === "failed") {
         flush();
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, error: event.body.error ?? "" });
-        continue;
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", error: event.body.error ?? "" });
       }
+      if (answer || event.body.outcome === "failed") continue;
     }
     work.push(event);
   }
@@ -73,53 +83,42 @@ export function formatTime(value: string): string {
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// What a box change means in a work row's sentence.
-const boxPhrase: Record<BoxState, string> = {
-  pending: "is starting its box", creating: "is starting its box", starting: "is starting its box", ready: "started its box",
-  stopped: "stopped its box", closing: "closed its box", deleted: "closed its box", failed: "had its box fail", lost: "lost its box",
-};
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
-// One quiet sentence per work row, such as "lead-web finished 2 turns and started its box".
-// Several sessions read as "root, lead-web and builder-feed worked"; the opened row lists each event.
+// One short line per work row in the owner's terms, such as "lead-web ran 2 turns" or
+// "builder-feed started, 3 sessions ran turns, 1 job"; the opened row lists each event.
 export function workSummary(events: Event[], name: Name): string {
-  const groups = new Map<string, {
-    begun: number; turns: number; jobs: number; operations: Set<string>; images: number; failedImages: number; prs: number; pressure: number; grants: number;
-    box?: BoxState; started: boolean; closed: boolean;
-  }>();
+  const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
+  const turns = new Map<string, Set<string>>();
+  const requests = new Set<string>();
+  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0;
   for (const event of events) {
-    const session = subject(event);
-    const label = session ? name(session) : "Dyna";
-    const group = groups.get(label) ?? {
-      begun: 0, turns: 0, jobs: 0, operations: new Set<string>(), images: 0, failedImages: 0, prs: 0, pressure: 0, grants: 0, started: false, closed: false,
-    };
-    groups.set(label, group);
     switch (event.type) {
-      case "session.started": group.started = true; break;
-      case "session.closed": group.closed = true; break;
-      case "box.changed": group.box = event.body.to; break;
-      case "turn.started": group.begun++; break;
-      case "turn.ended": group.turns++; break;
-      case "shell.job.ended": group.jobs++; break;
-      case "op.requested": case "op.decided": case "op.ran": group.operations.add(event.body.id); break;
-      case "image.built": group.images++; break;
-      case "image.failed": group.failedImages++; break;
-      case "pr.opened": group.prs++; break;
-      case "box.pressure": group.pressure++; break;
-      case "grant.expired": group.grants++; break;
+      case "session.started": started.push(name(event.body.session)); break;
+      case "session.moved": moved.push(name(event.body.session)); break;
+      case "session.closed": closed.push(name(event.body.session)); break;
+      case "computer.changed": (event.body.to === "running" ? opened : shut).push(name(event.body.session)); break;
+      case "turn.started": case "turn.ended": turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn)); break;
+      case "shell.job.ended": jobs++; break;
+      case "op.requested": case "op.decided": case "op.ran": requests.add(event.body.id); break;
+      case "image.built": images++; break;
+      case "image.failed": failedImages++; break;
+      case "pr.opened": prs++; break;
+      case "box.pressure": memory++; break;
+      case "grant.expired": grants++; break;
     }
   }
-  const labels = [...groups.keys()];
-  if (labels.length > 1) return `${list(labels.length > 3 ? [...labels.slice(0, 2), `${labels.length - 2} more`] : labels)} worked`;
-  const [label, group] = [...groups][0];
+  const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions` : list(sessions);
+  const [ran] = turns;
   const parts = [
-    group.started && "started", !group.turns && group.begun && `started ${count(group.begun, "turn")}`, group.turns && `finished ${count(group.turns, "turn")}`, group.jobs && `ran ${count(group.jobs, "job")}`,
-    group.operations.size && `made ${count(group.operations.size, "request")}`, group.images && `built ${count(group.images, "image")}`,
-    group.failedImages && `had ${count(group.failedImages, "image build")} fail`,
-    group.prs && `opened ${count(group.prs, "pull request")}`, group.pressure && `had ${count(group.pressure, "memory warning")}`,
-    group.grants && `had ${count(group.grants, "host-exec grant")} expire`, group.box && boxPhrase[group.box], group.closed && "closed",
+    started.length && `${who(started)} started`,
+    turns.size > 1 ? `${turns.size} sessions ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
+    jobs && count(jobs, "job"), requests.size && count(requests.size, "request"), images && `${count(images, "image")} built`,
+    failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
+    memory && count(memory, "memory warning"), grants && `${count(grants, "host-exec grant")} expired`,
+    opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
   ].filter(part => typeof part === "string");
-  return `${label} ${parts.length ? list(parts) : "worked"}`;
+  return parts.length ? parts.join(", ") : count(events.length, "update");
 }
 
 // One plain line for an event inside an opened work row.
@@ -130,12 +129,12 @@ export function describe(event: Event, name: Name): string {
     case "session.closed": return `${name(event.body.session)} closed`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
-    case "box.changed": return `${name(event.body.session)}'s box is ${event.body.to}`;
+    case "box.changed": return ""; // feedRows keeps box changes out of work rows.
     case "turn.started": return `${name(event.body.session)} started a turn`;
     case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
     // Live only: the room store keeps it out of every feed window.
     case "turn.activity": return event.body.label;
-    case "shell.job.ended": return `${name(event.body.session)}'s job ended with exit code ${event.body.exitCode}`;
+    case "shell.job.ended": return event.body.exitCode === 0 ? `${name(event.body.session)}'s job finished` : `${name(event.body.session)}'s job failed with exit code ${event.body.exitCode}`;
     case "op.requested": return `${who(event.body.by)} asked to ${event.body.card.title}`;
     case "op.decided": return `A request was ${event.body.state}`;
     case "op.ran": return event.body.state === "done" ? "A request ran" : `A request ${event.body.state}`;
@@ -143,7 +142,7 @@ export function describe(event: Event, name: Name): string {
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed: ${event.body.reason}`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
     case "grant.expired": return "A host-exec grant expired";
-    case "box.pressure": return event.body.kind === "max" ? "A box reached its memory limit" : "A box is short of memory";
+    case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
   }
 }

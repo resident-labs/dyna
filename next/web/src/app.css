@@ -21,36 +21,34 @@
 :hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
 body { margin: 0; background: var(--bg); color: var(--text); }
 /* The app fills the viewport exactly; only the feed and the side panels scroll. */
-.shell { display: grid; grid-template-columns: 280px 1fr; grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden; }
-.shell.open { grid-template-columns: 280px 1fr 260px; }
+.shell { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden; }
+.shell.open { grid-template-columns: 64px 1fr 260px; }
 main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 aside { background: var(--sidebar); border-right: 1px solid var(--line); overflow-y: auto; }
 aside.members { border-right: 0; border-left: 1px solid var(--line); }
-/* The rooms column: a rail of room squares beside the selected room's feed, direct messages and the owner footer. */
-aside.rooms { display: grid; grid-template-columns: 56px minmax(0, 1fr); overflow: hidden; }
-.rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; border-right: 1px solid var(--line); overflow-y: auto; }
-.rail a { position: relative; padding: 2px; border-radius: 30%; }
-.rail a:hover { background: none; box-shadow: 0 0 0 2px var(--line); }
-/* The selected room gets a short pill on the rail's edge, as Discord does; the focus ring stays for focus only. */
-.rail a[aria-current="page"] { background: none; }
-.rail a[aria-current="page"]::before { content: ""; position: absolute; left: -8px; top: calc(50% - 12px); width: 4px; height: 24px; border-radius: 0 4px 4px 0; background: var(--text); }
-.column { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
-.column footer { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); }
+/* The rail, as Discord's server list: one square per room, its name on hover, and the owner at the bottom. */
+.rail { display: flex; flex-direction: column; align-items: center; }
+.rail nav { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
+.rail a { position: relative; display: flex; border-radius: 30%; text-decoration: none; }
+.rail a:hover { box-shadow: 0 0 0 2px var(--line); }
+/* The selected room gets a short pill on the rail's edge; the focus ring stays for focus only. */
+.rail a[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: calc(50% - 14px); width: 4px; height: 28px; border-radius: 0 4px 4px 0; background: var(--text); }
+/* A request waits for the owner: StatusPill's attention color, ringed so it reads on any room color. */
+.waiting { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--attention); box-shadow: 0 0 0 3px var(--sidebar); }
+.rail footer { margin-top: auto; padding: 12px 0; }
 .label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .member:hover { background: var(--hover); }
 header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 main > header strong { font-size: 16px; }
+/* In a direct message the header leads with its room, a link back to the room's feed. */
+.crumb { color: var(--muted); text-decoration: none; font-size: 16px; }
+.crumb:hover { color: var(--text); }
 .panel-toggle { display: none; position: relative; margin-left: auto; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
 .panel-toggle:hover, .panel-toggle[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 /* A failed turn, in StatusPill's failed tone, while the sessions panel is closed. */
 .attention { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
 .count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
-.section-title { padding: 16px 16px 0; font-size: 12px; font-weight: 600; color: var(--muted); }
-nav { display: grid; gap: 1px; padding: 6px 8px; }
-nav a { display: flex; align-items: center; gap: 8px; color: var(--muted); text-decoration: none; padding: 6px 8px; border-radius: 6px; }
-nav a:hover { background: var(--hover); color: var(--text); }
-nav a[aria-current="page"] { background: var(--selected); color: var(--text); font-weight: 600; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .hint { margin: 10px 16px; font-size: 12px; color: var(--muted); }
 .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 12px; }
@@ -59,17 +57,17 @@ nav a[aria-current="page"] { background: var(--selected); color: var(--text); fo
 .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
 /* Narrow windows hide the sessions column; the header button opens it over the feed. */
 @media (max-width: 900px) {
-  .shell.open { grid-template-columns: 280px minmax(0, 1fr); }
+  .shell.open { grid-template-columns: 64px minmax(0, 1fr); }
   main > header .panel-toggle { display: grid; }
   .shell > aside.members { display: none; }
   .shell > aside.members.shown { display: block; position: fixed; top: var(--panel-top, 52px); right: 0; bottom: 0; width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
 }
-/* A phone shows the room squares as one top row above the feed; the header names the room. */
+/* A phone shows the rooms as one scrolling row above the feed. */
 @media (max-width: 640px) {
-  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); --panel-top: 109px; }
-  aside.rooms { display: block; border: 0; border-bottom: 1px solid var(--line); }
-  .rail { flex-direction: row; padding: 8px 12px; border: 0; overflow-x: auto; }
-  .rail a[aria-current="page"]::before { left: calc(50% - 12px); top: auto; bottom: -8px; width: 24px; height: 4px; border-radius: 4px 4px 0 0; }
-  .column { display: none; }
+  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); --panel-top: 117px; }
+  .rail { border: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .rail nav { flex-direction: row; align-self: stretch; padding: 12px 16px; }
+  .rail footer { display: none; }
+  .rail a[aria-current="page"]::before { left: calc(50% - 14px); top: auto; bottom: -12px; width: 28px; height: 4px; border-radius: 4px 4px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

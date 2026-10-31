@@ -184,6 +184,8 @@ test("session.list gives running turns and failures, and a live DM answer lands 
     room.apply(event(4, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "completed", final: "Answer", usage,
       replies: [{ reply: { kind: "final", target: { kind: "owner" }, home: dm } }] } }));
     assert.equal(room.turns.has("s"), false);
+    room.apply(event(5, { type: "turn.ended", body: { session: "x", turn: "u", outcome: "stopped", usage } }));
+    assert.equal(room.failed.has("x"), true);
     assert.deepEqual(feedRows(dmWindow.ordered, dm).map(row => row.kind === "post" && row.text), ["Answer"]);
     assert.equal(feedRows(feedWindow.ordered, feed).some(row => row.kind === "post" && row.text === "Answer"), false);
   } finally { server.restore(); }
@@ -204,5 +206,24 @@ test("session.list and later events set and clear the running computers", async 
     assert.deepEqual([...room.computers], ["x"]);
     room.apply(event(6, { type: "box.changed", body: { box: "b", session: "x", from: "ready", to: "lost" } }));
     assert.equal(room.computers.size, 0);
+  } finally { server.restore(); }
+});
+
+test("activity labels follow the running turn and never reach a window", async () => {
+  const listed = { name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "" } as const;
+  const server = engine(1, [{ id: "s", ...listed, turn: "t", activity: "read spec.md" }]);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    const feedWindow = room.window(feed);
+    await feedWindow.jumpToPresent();
+    const label = (turn: string, text: string) => event(0, { type: "turn.activity", body: { session: "s", turn, label: text } });
+    assert.equal(room.activity.get("s"), "read spec.md");
+    room.apply(label("t", "ran go test"));
+    room.apply(label("old", "stale"));
+    assert.equal(room.activity.get("s"), "ran go test");
+    room.apply(event(2, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "completed", usage } }));
+    assert.equal(room.activity.has("s"), false);
+    assert.equal(feedWindow.ordered.some(item => item.type === "turn.activity"), false);
   } finally { server.restore(); }
 });
