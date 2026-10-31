@@ -57,3 +57,19 @@ func TestTranscriptPostClaimRequiresMatchingBash(t *testing.T) {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
 }
+
+func TestTranscriptBoundsToolIdentity(t *testing.T) {
+	id := strings.Repeat("x", 200000)
+	name := strings.Repeat("n", 200000)
+	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"` + id + `","name":"` + name + `"}]}}
+`
+	items, _, _, err := ReadTranscript(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "t"}, "x", "", 0, 1)
+	if err != nil || len(items) != 1 || len(items[0].ID) > 256 || len(items[0].Tool) > 256 {
+		t.Fatalf("item identity was not bounded: %v", err)
+	}
+	full, _, _, err := ReadTranscript(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "t"}, "x", items[0].ID, 0, 1)
+	if err != nil || len(full) != 1 || full[0].ID != items[0].ID {
+		t.Fatalf("stable item lookup failed: %v", err)
+	}
+}
