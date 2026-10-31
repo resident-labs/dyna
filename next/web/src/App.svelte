@@ -301,11 +301,31 @@
     else if (refocus) menuButton?.focus({ focusVisible: !tapped });
   }
   $effect(() => { if (!phone.current) drawer = false; });
+  // On a phone the sessions panel is a bottom sheet at about two thirds of the height (fix 1). Its handle drags it to
+  // full height, or down to its first height and then closed; a tap toggles the height. The tree already puts what
+  // needs the owner first and folds idle sessions.
+  let sheetFull = $state(false), dragged = false;
+  function drag(event: PointerEvent & { currentTarget: HTMLButtonElement }) {
+    const start = event.clientY, handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    handle.onpointerup = up => {
+      handle.onpointerup = null;
+      const dy = up.clientY - start;
+      dragged = Math.abs(dy) > 8;
+      if (dy < -40) sheetFull = true;
+      else if (dy > 60 && sheetFull) sheetFull = false;
+      else if (dy > 60) void showPanel(false, true);
+    };
+  }
   let toggle: HTMLButtonElement | undefined = $state();
-  async function showPanel(open: boolean) {
+  // As the drawer does: after a tap, focus moves with no ring. Focus waits for the update, which takes inert off main
+  // when a phone's sheet closes.
+  async function showPanel(open: boolean, tapped = false) {
     const held = members?.contains(document.activeElement);
     panel = open;
-    if (open) { await tick(); members?.focus(); } else if (held) toggle?.focus();
+    if (!open) sheetFull = false;
+    await tick();
+    if (open) members?.focus({ focusVisible: !tapped }); else if (held) toggle?.focus({ focusVisible: !tapped });
   }
   // The sessions the feed composer offers after @: the root first, then by name. A DM offers none.
   let mentions = $derived(session ? [] : [...store?.sessions.values() ?? []].filter(mentionable)
@@ -336,7 +356,7 @@
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
   {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} activity={store?.activity.get(id)} {docked} bind:rect bind:element={computer}
-    onclose={() => void stopWatching()} ondock={() => { docked = !docked; if (docked && !wide.current) void showPanel(true); }} />{/key}
+    onclose={() => void stopWatching()} ondock={event => { docked = !docked; if (docked && !wide.current) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
@@ -360,7 +380,7 @@
         {#if store && !unavailable}
           <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
-          <button type="button" onclick={() => void showPanel(true)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
+          <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
           <button type="button" onclick={() => void terminals?.pick()}><Icon name="terminal" />Terminal</button>
           <button type="button" aria-pressed={section === "rules"} onclick={() => { section = "rules"; }}><Icon name="rules" />Rules<span class="count">{store.rules.size}</span></button>
         {/if}
@@ -371,8 +391,9 @@
         {/each}
       {/if}</nav>{/if}
   </aside>
-  {#if drawer}<button type="button" class="scrim" tabindex="-1" aria-label="Close the menu" onclick={() => void showDrawer(false, true, true)}></button>{/if}
-  <main inert={drawer}>
+  {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : "Close the sessions"}
+    onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
+  <main inert={drawer || (panel && phone.current)}>
     <header><button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
         onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>
       {#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
@@ -385,7 +406,7 @@
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <span class="room-menu"><RoomMenu bind:this={roomMenu} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} /></span>{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.counts.failed ? "Sessions, a session failed" : "Sessions"}
-        title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}
+        title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={event => void showPanel(!panel, event.detail > 0)}><Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}
         {#if store?.counts.failed && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
     {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
@@ -407,12 +428,14 @@
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" bind:this={members} inert={drawer}>
+    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
       {#if jobsOf}
         {#if wide.current || panel}<ShellView session={jobsOf} name={store?.names.get(jobsOf) ?? "Session"} onback={() => void closeJobs()} />{/if}
       {:else}
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
+      {#if phone.current}<button type="button" class="handle" aria-label={sheetFull ? "Shrink the sessions sheet" : "Expand the sessions sheet"}
+        onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>{/if}
       <header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
       {#if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
@@ -426,7 +449,7 @@
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
         <a class="member" data-key={item.session} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
-          onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false); }}
+          onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false, event.detail > 0); }}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
@@ -477,6 +500,13 @@
     .phone { display: inline; }
     .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: rgb(0 0 0 / 50%); }
   }
+  .handle { display: none; }
+  @media (max-width: 640px) {
+    .handle { all: unset; position: relative; display: block; width: 100%; height: 22px; cursor: grab; touch-action: none; }
+    .handle::before { content: ""; position: absolute; left: calc(50% - 18px); top: 9px; width: 36px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
+    .handle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+    aside.members > header { border-bottom: 0; }
+  }
   .pages { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 12px 8px; border-left: 1px solid var(--line); overflow-y: auto; }
   .pages strong { padding: 6px 10px 10px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pages a, .pages button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 8px;
@@ -497,7 +527,7 @@
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .fold[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
   /* A thumb gets v1's taller target, so a near miss does not open the DM. */
-  @media (hover: none) { .fold { width: 24px; min-height: 44px; } }
+  @media (hover: none) { .fold { width: 24px; min-height: 44px; } .idle { height: 44px; } }
   .row a.member { flex: 1; min-width: 0; }
   /* "N idle sessions" stands for idle siblings until opened. Its chevron sits in the fold gutter and its words line
      up with the names. */
