@@ -34,8 +34,9 @@
   });
   const name = (rule: RoomRule) => rule.by.kind === "owner" ? "You" : rule.by.session ? store.names.get(rule.by.session) ?? "A closed session" : "Dyna";
   const root = (rule: RoomRule) => !!rule.by.session && store.sessions.has(rule.by.session) && !store.sessions.get(rule.by.session)?.parent;
-  // Within a day the time is relative, as in the feed; older rules show their date.
-  const when = (at: string) => now - Date.parse(at) < 86_400_000 ? fromNow(at, now)
+  // Within a day the time is relative, as in the feed; older rules show their date. A rule newer than the
+  // half-minute clock reads "just now", never as in the future.
+  const when = (at: string) => now - Date.parse(at) < 86_400_000 ? fromNow(at, Math.max(now, Date.parse(at)))
     : new Date(at).toLocaleDateString([], { month: "short", day: "numeric", year: new Date(at).getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" });
 
   async function add(text: string): Promise<boolean> {
@@ -98,14 +99,13 @@
       <ol>
         {#each rows as rule (rule.number)}
           {#if removed.has(rule.number)}
-            <li class="gone"><span class="number">r{rule.number}</span><p>Rule r{rule.number} removed · <button type="button" class="link" data-undo={rule.number}
+            <li class="gone"><p>Rule r{rule.number} removed · <button type="button" class="link" data-undo={rule.number}
               aria-label={`Undo: add rule r${rule.number}'s text again`} onclick={() => void undo(rule)} disabled={busy}>Undo</button></p></li>
           {:else}
             <li><span class="number">r{rule.number}</span>
               <div class="body"><p class="text">{rule.text}</p>
-                <p class="meta">{#if rule.by.kind === "owner"}You{:else}<Avatar kind={rule.by.kind} name={name(rule)} root={root(rule)} size={16} />
-                  <span class="who" class:root={root(rule)} style:--hue={hue(name(rule))}>{name(rule)}</span>{/if}
-                  · <time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{when(rule.at)}</time></p></div>
+                <p class="meta"><span class="by">{#if rule.by.kind === "owner"}You{:else}<Avatar kind={rule.by.kind} name={name(rule)} root={root(rule)} size={16} />
+                  <span class="who" class:root={root(rule)} style:--hue={hue(name(rule))}>{name(rule)}</span>{/if}</span><span aria-hidden="true">·</span><time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{when(rule.at)}</time></p></div>
               <button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button>
               <span class="more"><button type="button" aria-label={`Rule r${rule.number} actions`} aria-haspopup="menu" aria-expanded={menuFor === rule.number}
                 onclick={async () => { menuFor = menuFor === rule.number ? undefined : rule.number; await tick(); list?.querySelector<HTMLElement>(".menu [role=menuitem]")?.focus(); }}><Icon name="more" /></button>
@@ -127,7 +127,7 @@
 </section>
 
 <style>
-  .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
   .top { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
   .back { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
   .back:hover { background: var(--hover); color: var(--text); }
@@ -149,14 +149,16 @@
   .number { padding-top: 1px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
   .body { min-width: 0; }
   .text { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .meta { margin: 4px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+  .meta { margin: 4px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; }
+  .by { display: inline-flex; align-items: center; gap: 6px; }
   .who { color: oklch(var(--id-name) var(--hue)); font-weight: 500; }
   .who.root { color: var(--text); }
   .gone { align-items: center; color: var(--muted); font-size: 14px; }
   .gone p { margin: 0; grid-column: 2 / -1; }
   .link { padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: var(--focus); font: inherit; font-weight: 500; cursor: pointer; }
   .link:hover { background: var(--hover); }
-  .remove { padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+  /* Remove sits at the right end of the author line, so it takes no width from the rule's text. */
+  .remove { position: absolute; right: 8px; bottom: 6px; padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   .remove:hover { background: var(--selected); color: var(--danger); }
   /* A pointer shows Remove on the hovered or focused rule; a touch screen has an always-visible "…" menu instead. */
   li:not(:hover, :focus-within) .remove { opacity: 0; }
@@ -181,5 +183,6 @@
   .hint { flex: none; color: var(--muted); font-size: 12px; }
   kbd { padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; font: 11px var(--mono); }
   @media (hover: none) { .hint { display: none; } }
+  @container (max-width: 560px) { .hint { display: none; } }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
