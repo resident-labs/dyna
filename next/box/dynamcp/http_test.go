@@ -3,7 +3,6 @@ package dynamcp
 import (
 	"context"
 	"encoding/json"
-	"github.com/resident-labs/dyna/box/post"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resident-labs/dyna/box/post"
+	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -103,20 +104,30 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestPostPreparesLocalAttachments(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "report.txt")
+func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.txt")
+	html := filepath.Join(dir, "card.html")
+	doc := "<title>Report</title><p>Hello</p>"
 	if err := os.WriteFile(path, []byte("report"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(html, []byte(doc), 0600); err != nil {
+		t.Fatal(err)
+	}
+	uploads := map[string]string{}
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/files" || r.URL.Query().Get("name") != "report.txt" || string(data) != "report" {
-			t.Fatalf("upload: %s %s %q", r.Method, r.URL, data)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/files" {
+			t.Fatalf("upload: %s %s", r.Method, r.URL)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"name":"report.txt","sha256":"hash"}`)), Header: make(http.Header)}, nil
+		name := r.URL.Query().Get("name")
+		uploads[name] = string(data)
+		body, _ := json.Marshal(contract.Attachment{Name: name, SHA256: "hash-" + name})
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body))), Header: make(http.Header)}, nil
 	})}
 	var sent contract.PostRequest
 	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
@@ -133,16 +144,45 @@ func TestPostPreparesLocalAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	arguments, _ := json.Marshal(struct {
-		Action   string   `json:"action"`
-		Text     string   `json:"text"`
-		Paths    []string `json:"paths"`
-		ClientID string   `json:"clientId"`
-	}{"send", "hello", []string{path}, "retry"})
-	var args map[string]json.RawMessage
-	_ = json.Unmarshal(arguments, &args)
-	res := server.call(context.Background(), callParams{Name: "post", Arguments: args})
-	if res.IsError || sent.ClientID != "retry" || len(sent.Attachments) != 1 || sent.Attachments[0].SHA256 != "hash" {
-		t.Fatalf("result %+v post %+v", res, sent)
+	check := contract.VisualCheck{Name: contract.VisualCheckRenders, Status: contract.VisualCheckPass}
+	server.preparer.Render = func(_ context.Context, data []byte, csp string, allowNet bool) visual.Result {
+		if string(data) != doc || csp != visual.CSP(false) || allowNet {
+			t.Fatal("incorrect preview input")
+		}
+		return visual.Result{Banner: []byte("banner"), Thumb: []byte("thumb"), Widths: []visual.Shot{{Width: 320, Image: []byte("shot")}}, Checks: []contract.VisualCheck{check}}
+	}
+	type arguments struct {
+		Action       string           `json:"action"`
+		Text         string           `json:"text"`
+		Paths        []string         `json:"paths"`
+		HTML         string           `json:"html"`
+		ClientID     string           `json:"clientId"`
+		VisualUpdate contract.EventID `json:"visualUpdate"`
+	}
+	params, _ := json.Marshal(struct {
+		Name      string    `json:"name"`
+		Arguments arguments `json:"arguments"`
+	}{"post", arguments{"send", "hello", []string{path}, html, "retry", "original"}})
+	rpc, _ := json.Marshal(struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      int             `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}{"2.0", 1, "tools/call", params})
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(string(rpc))))
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"isError":true`) {
+		t.Fatalf("response: %s", w.Body.String())
+	}
+	if sent.ClientID != "retry" || sent.VisualUpdate != "original" || len(sent.Attachments) != 2 || sent.Attachments[0].SHA256 != "hash-report.txt" {
+		t.Fatalf("post: %+v", sent)
+	}
+	file := sent.Attachments[1]
+	card := file.Visual
+	if file.SHA256 != "hash-card.html" || card == nil || card.Title != "Report" || card.Height != 360 || card.Banner != "hash-banner.webp" || card.Thumbnail != "hash-thumbnail.webp" || len(card.Shots) != 1 || card.Shots[0].File != "hash-320.webp" || len(card.Checks) != 1 || card.Checks[0] != check {
+		t.Fatalf("visual: %+v", file)
+	}
+	if uploads["report.txt"] != "report" || uploads["card.html"] != doc || uploads["banner.webp"] != "banner" || uploads["thumbnail.webp"] != "thumb" || uploads["320.webp"] != "shot" {
+		t.Fatalf("uploads: %+v", uploads)
 	}
 }
