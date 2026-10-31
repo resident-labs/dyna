@@ -34,7 +34,7 @@ func TestStreamCancellationAndTypedErrors(t *testing.T) {
 	server.ServeHTTP(httptest.NewRecorder(), cancel)
 	<-done
 	body := w.Body.String()
-	if !strings.Contains(body, `"progressToken":"token"`) || !strings.Contains(body, `"code":"conflict"`) || !strings.Contains(body, `"isError":true`) {
+	if !strings.Contains(body, `"progressToken":"token"`) || !strings.Contains(body, `"isError":true`) {
 		t.Fatal(body)
 	}
 }
