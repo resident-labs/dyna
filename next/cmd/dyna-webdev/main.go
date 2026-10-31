@@ -333,6 +333,18 @@ func main() {
 	b.sockets = api.NewSockets(a, runtime, uint32(os.Getuid()), nil)
 	fatal(b.sockets.OpenOwner())
 	defer b.sockets.Close()
+	// The engine's reconciler starts and stops boxes; each session's box waits as pending until a pass takes it.
+	ticks := time.NewTicker(time.Second)
+	defer ticks.Stop()
+	reconciled := make(chan struct{})
+	go func() {
+		defer close(reconciled)
+		svc.Reconciler().Run(ctx, ticks.C)
+	}()
+	defer func() {
+		<-reconciled
+		svc.Reconciler().Wait()
+	}()
 	fatal(st.AddHost(ctx, box.Host{Name: host, State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
 	if *seed {
 		seedRoom(ctx, svc, *posts, *agents)
