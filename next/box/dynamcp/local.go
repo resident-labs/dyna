@@ -51,8 +51,13 @@ func BoxTools(socket string) Local {
 		case tools.ComputerClick, tools.ComputerText:
 			var req tools.SelectorRequest
 			_ = json.Unmarshal(raw, &req)
-			args = []string{req.Selector}
+			if req.Selector != "" {
+				args = []string{req.Selector}
+			}
 			if handler == tools.ComputerClick {
+				if req.Selector == "" {
+					return fail(fmt.Errorf("selector is required"))
+				}
 				action = computer.Click
 			} else {
 				action = computer.Text
@@ -60,6 +65,9 @@ func BoxTools(socket string) Local {
 		case tools.ComputerType:
 			var req tools.TypeRequest
 			_ = json.Unmarshal(raw, &req)
+			if req.Selector == "" {
+				return fail(fmt.Errorf("selector is required"))
+			}
 			action = computer.Type
 			args = []string{req.Selector, req.Text}
 		case tools.ComputerScreenshot:

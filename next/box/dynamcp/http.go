@@ -73,6 +73,15 @@ func New(forward Forward, local Local) (*Server, error) {
 	return &Server{list: list, actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc)}, nil
 }
 
+// Description names the areas from the same registry as tools/list.
+func (s *Server) Description() string {
+	names := make([]string, 0, len(s.list))
+	for _, tool := range s.list {
+		names = append(names, tool.Name)
+	}
+	return "Dyna tools cover " + strings.Join(names, ", ") + "."
+}
+
 func marshal[T any](v T) json.RawMessage { data, _ := json.Marshal(v); return data }
 
 func failure(code contract.ErrorCode, message string) result {
