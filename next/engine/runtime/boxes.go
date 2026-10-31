@@ -51,6 +51,7 @@ type Boxes struct {
 	HostData            string
 	InstructionsDir     string
 	instructionsMu      sync.Mutex
+	hostRunner          podman.Runner
 	instructionFailures map[contract.HostName]uint64
 	Version             string
 	PiTarball           []byte
@@ -316,7 +317,7 @@ func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegi
 }
 
 func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool, error) {
-	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), nil)
+	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), b.hostRunner)
 	if err != nil {
 		return false, err
 	}
