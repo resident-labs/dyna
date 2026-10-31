@@ -4,12 +4,29 @@ package service
 import (
 	"dyna-agent/internal/account/service/adapters"
 	"dyna-agent/internal/account/store"
+	"strings"
 	"time"
 )
 
 type Plan = store.Plan
 type Window = store.Window
 type Effort = adapters.Effort
+
+// hideUnusedModelWindows drops a model-specific window while it shows 0% used.
+// Once the model has any use, the window stays visible.
+func hideUnusedModelWindows(accounts []Account) {
+	for i := range accounts {
+		a := &accounts[i]
+		kept := make([]Window, 0, len(a.Windows))
+		for _, w := range a.Windows {
+			if p, ok := WindowPercent(w); ok && p == 0 && strings.HasPrefix(w.ID, store.ModelWindowPrefix) {
+				continue
+			}
+			kept = append(kept, w)
+		}
+		a.Windows = kept
+	}
+}
 
 // ApplyBlockingQuota derives blocking metadata from exhausted future quota windows.
 // The latest reset is when every blocking window has cleared.

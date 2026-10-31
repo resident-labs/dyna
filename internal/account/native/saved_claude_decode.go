@@ -91,9 +91,9 @@ func DecodeClaudeUsage(body []byte) ([]store.Window, error) {
 		seen[key] = true
 		label := name
 		if w := claudeScopedWindow(s.Kind); w != "" {
-			label += " " + w
+			label = w + " · " + name
 		}
-		windows = append(windows, store.Window{ID: "scoped:" + key, Label: label, UsedPercent: p, Unit: "percent", ResetsAt: claudeReset(s.ResetsAt)})
+		windows = append(windows, store.Window{ID: store.ModelWindowPrefix + key, Label: label, UsedPercent: p, Unit: "percent", ResetsAt: claudeReset(s.ResetsAt)})
 	}
 	if len(windows) == 0 {
 		return nil, errors.New("Claude usage response has no limits.")

@@ -188,6 +188,7 @@ func (s *Service) publish(accounts []Account, problems []runtime.AccountProblem,
 	})
 	now := s.o.Now()
 	applyStatedFailoverLimits(out.Accounts, s.o.Store, now)
+	hideUnusedModelWindows(out.Accounts)
 	ApplyBlockingQuota(out.Accounts, now)
 	s.last = out
 	return out

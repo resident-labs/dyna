@@ -86,6 +86,7 @@ func (s *Service) AccountUsageCached() Snapshot {
 			resetWindows(a, now)
 		}
 		applyStatedFailoverLimits(out.Accounts, s.o.Store, now)
+		hideUnusedModelWindows(out.Accounts)
 		ApplyBlockingQuota(out.Accounts, now)
 		return out
 	}
@@ -118,6 +119,7 @@ func CachedUsage(store *accountstore.Store, now time.Time) Snapshot {
 		out.Accounts = append(out.Accounts, a)
 	}
 	applyStatedFailoverLimits(out.Accounts, store, now)
+	hideUnusedModelWindows(out.Accounts)
 	ApplyBlockingQuota(out.Accounts, now)
 	return out
 }
