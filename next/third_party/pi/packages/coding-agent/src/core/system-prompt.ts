@@ -127,6 +127,7 @@ function buildRules(
 /** Build the ordered, independently replaceable sections of the structured system prompt. */
 export function buildSystemPromptSections(input: BuildSystemPromptOptions): SystemPromptSections {
 	const options = normalizeBuildSystemPromptOptions(input);
+	if (options.forceSystemPrompt !== undefined) return { preamble: options.forceSystemPrompt };
 	const {
 		customPrompt,
 		selectedTools,
@@ -210,26 +211,7 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
 	return { content: "", sections: buildSystemPromptSections(input) };
 }
 
-/** Build the system prompt text, rendered exactly as the transcript's system message replays it. */
+/** Build the complete system prompt text. */
 export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
 	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
-}
-
-/**
- * Diff the sections the model currently has (replayed from the transcript, so never null)
- * against the desired ones. Returns a `SystemMessage.sections` patch, or undefined when
- * nothing changed.
- */
-export function diffSystemPromptSections(
-	previous: Record<string, string | null>,
-	current: SystemPromptSections,
-): Record<string, string | null> | undefined {
-	const patch: Record<string, string | null> = {};
-	for (const [name, text] of Object.entries(current)) {
-		if (previous[name] !== text) patch[name] = text;
-	}
-	for (const name of Object.keys(previous)) {
-		if (current[name] === undefined) patch[name] = null;
-	}
-	return Object.keys(patch).length > 0 ? patch : undefined;
 }
