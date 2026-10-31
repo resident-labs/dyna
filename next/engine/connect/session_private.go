@@ -11,10 +11,10 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool, bool, error) {
-	l, err := s.link(ctx)
+func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool, error) {
+	l, _, err := s.link(ctx)
 	if err != nil {
-		return false, true, nil
+		return true, nil
 	}
 	s.mu.Lock()
 	cached, ok := s.grants[x.RelayDevice]
@@ -22,7 +22,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 	if !ok || cached.Generation != x.Generation || s.now().Sub(cached.At) > time.Minute {
 		relay, err := s.relay(l)
 		if err != nil {
-			return false, false, err
+			return false, err
 		}
 		grant, err := relay.CheckGrant(ctx, l.Machine, x.User, x.RelayDevice)
 		if err != nil {
@@ -30,25 +30,24 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 			if errors.As(err, &re) && (re.Status == http.StatusUnauthorized || re.Status == http.StatusForbidden || re.Status == http.StatusGone) {
 				if re.Status == http.StatusGone {
 					if e := s.store.UnlinkConnectGeneration(ctx, x.Generation); e != nil {
-						return false, false, e
+						return false, e
 					}
 				}
-				return false, true, nil
+				return true, nil
 			}
-			return false, false, err
+			return false, err
 		}
 		cached = grantCacheEntry{Grant: grant, At: s.now(), Generation: x.Generation}
 		if grant.Epoch > x.Epoch {
 			if err := s.store.AdvanceConnectEpoch(ctx, grant.Epoch, x.Generation); err != nil {
-				return false, false, err
+				return false, err
 			}
 		}
 		s.mu.Lock()
 		s.grants[x.RelayDevice] = cached
 		s.mu.Unlock()
 	}
-	allowed := cached.Grant.Active && x.Epoch >= cached.Grant.Epoch
-	return allowed, !allowed, nil
+	return !cached.Grant.Active || x.Epoch < cached.Grant.Epoch, nil
 }
 
 // ServePrivate handles proof-bound renewal.
@@ -74,7 +73,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 			fail(w, 429, "too many renewals")
 			return
 		}
-		ok, refused, err := s.checkGrant(r.Context(), x)
+		refused, err := s.checkGrant(r.Context(), x)
 		grace := false
 		if refused {
 			if err := s.store.RevokeConnectDevice(r.Context(), x.RelayDevice, x.Generation, s.now()); err != nil {
@@ -94,9 +93,6 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 				return
 			}
 			grace = true
-		} else if !ok {
-			fail(w, 403, "not allowed")
-			return
 		}
 		token, err := randomSecret()
 		if err != nil {
