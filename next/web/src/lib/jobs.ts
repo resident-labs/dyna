@@ -18,10 +18,6 @@ export function endCause(job: Ended, session: string): string {
   const code = end.code ?? job.exitCode;
   return code ? `Exit ${code}` : "Passed";
 }
-// The Jobs tool's mark. Running jobs are healthy and show none; only a failure the owner has not opened needs attention.
-export function jobsMark({ failures }: { running: number; failures: number }): "failed" | undefined {
-  return failures ? "failed" : undefined;
-}
 // A job's title: the description its session gave, or else its command's first line.
 export const jobTitle = (job: ShellJob) => job.description || job.command.split("\n", 1)[0];
 const rank = (job: ShellJob) => job.running ? 0 : failed(job) ? 1 : 2;
