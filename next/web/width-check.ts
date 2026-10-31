@@ -1,0 +1,63 @@
+// The browser and its Playwright client are the same system tools used by scripts/qa-branch.sh.
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+import { chromium } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.mjs";
+import { settingsPanes } from "./src/lib/routes.ts";
+
+const widths = [1280, 920, 768, 390];
+const fixtures = ["full", "empty"] as const;
+const binary = process.env.DYNA_WEBDEV_BIN;
+if (!binary) throw new Error("Set DYNA_WEBDEV_BIN to the built dyna-webdev binary");
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || "chromium", args: ["--no-sandbox"] });
+const servers = fixtures.map((fixture, index) => spawn(binary, ["-web.listen", `127.0.0.1:${20000 + process.pid % 20000 + index}`, "-fixture", fixture], { stdio: ["ignore", "pipe", "inherit"] }));
+try {
+  const logins = await Promise.all(servers.map(server => new Promise<string>((resolve, reject) => {
+    const lines = createInterface({ input: server.stdout });
+    lines.once("line", line => { lines.close(); resolve(line); });
+    server.once("exit", code => reject(new Error(`webdev exited before login: ${code}`)));
+    server.once("error", reject);
+  })));
+  const failures: string[] = [];
+  await Promise.all(fixtures.map(async (fixture, index) => {
+    const context = await browser.newContext();
+    const login = await context.newPage();
+    await login.goto(logins[index]);
+    await login.locator('[data-app-ready="true"]').waitFor();
+    const origin = new URL(login.url()).origin;
+    const rooms = await login.locator('nav[aria-label="Rooms"] a[href^="/r/"]').evaluateAll(links => links.map(link => link.getAttribute("href")!).filter(Boolean));
+    const routes = ["/", ...rooms, "/settings", ...settingsPanes.map(pane => `/settings/${pane.id}`)];
+    await login.close();
+    await Promise.all(routes.flatMap(route => widths.map(async width => {
+      const page = await context.newPage();
+      await page.setViewportSize({ width, height: 900 });
+      try {
+        await page.goto(origin + route);
+        await page.locator('[data-app-ready="true"]').waitFor();
+        if (route === "/settings/accounts" || route === "/settings/profiles")
+          await page.locator('[data-page-ready="true"]').waitFor();
+        await page.evaluate(() => document.fonts.ready);
+        const issues = await page.evaluate(() => {
+          const found: string[] = [];
+          if (document.documentElement.scrollWidth > document.documentElement.clientWidth) found.push("document");
+          for (const el of document.querySelectorAll<HTMLElement>("body *")) {
+            const style = getComputedStyle(el);
+            if (!el.getClientRects().length || !["hidden", "clip"].includes(style.overflowX) || el.scrollWidth <= el.clientWidth ||
+                !Array.from(el.childNodes).some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())) continue;
+            const text = el.textContent?.trim() ?? "";
+            const label = el.getAttribute("title") || el.getAttribute("aria-label") || "";
+            if (style.textOverflow === "ellipsis" && label.includes(text)) continue;
+            found.push(`${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\\s+/g, ".") : ""}: ${text.slice(0, 100)}`);
+          }
+          return found;
+        });
+        for (const issue of issues) failures.push(`${fixture} ${route} ${width}px: ${issue}`);
+      } finally { await page.close(); }
+    })));
+    await context.close();
+  }));
+  if (failures.length) { console.error(failures.sort().join("\n")); process.exitCode = 1; }
+  else console.log("All routes fit at all four widths in both fixtures.");
+} finally {
+  await browser.close();
+  for (const server of servers) server.kill("SIGTERM");
+}
