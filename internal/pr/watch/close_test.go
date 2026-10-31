@@ -19,7 +19,7 @@ func TestCloseCleansUpActiveCI(t *testing.T) {
 	r := e.track()
 	e.s.Notify = notify.New(room.DefaultStore(), subagent.NewManager())
 	e.f.Runs = []Run{{ID: 100, HeadBranch: "feature", Event: "pull_request", Status: "queued"}}
-	e.f.Raw["repos/owner/repo/actions/runs/100/cancel"] = "{}"
+	e.f.Raw["repos/owner/repo/actions/runs/100/cancel"] = "HTTP/2.0 202 Accepted\r\n\r\n"
 	e.write()
 
 	if err := e.s.Close(t.Context(), r.Key, ""); err != nil {
