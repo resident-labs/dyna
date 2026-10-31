@@ -135,26 +135,9 @@ func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 	defer rows.Close()
 	var events []contract.Event
 	for rows.Next() {
-		var event contract.Event
-		var at int64
-		var room sql.NullString
-		var kind contract.EventType
-		var fromID string
-		var body []byte
-		if err := rows.Scan(&event.Seq, &event.ID, &at, &room, &kind, &event.From.Kind, &fromID, &body); err != nil {
-			return nil, err
-		}
-		event.Time = time.UnixMilli(at).UTC()
-		event.Room = contract.RoomID(room.String)
-		switch event.From.Kind {
-		case contract.PrincipalSession:
-			event.From.Session = contract.SessionID(fromID)
-		case contract.PrincipalOwner:
-			event.From.Device = contract.DeviceID(fromID)
-		}
-		event.Body, err = contract.DecodeEventBody(kind, body)
+		event, err := scanEvent(rows)
 		if err != nil {
-			return nil, fmt.Errorf("event %d: %w", event.Seq, err)
+			return nil, err
 		}
 		events = append(events, event)
 	}
@@ -164,6 +147,34 @@ func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 		}
 	}
 	return events, rows.Err()
+}
+
+// scanEvent shares the event wire decoding. database/sql requires heterogeneous scan destinations.
+func scanEvent(rows *sql.Rows, extra ...interface{}) (contract.Event, error) {
+	var event contract.Event
+	var at int64
+	var room sql.NullString
+	var kind contract.EventType
+	var fromID string
+	var body []byte
+	dest := []interface{}{&event.Seq, &event.ID, &at, &room, &kind, &event.From.Kind, &fromID, &body}
+	if err := rows.Scan(append(dest, extra...)...); err != nil {
+		return event, err
+	}
+	event.Time = time.UnixMilli(at).UTC()
+	event.Room = contract.RoomID(room.String)
+	switch event.From.Kind {
+	case contract.PrincipalSession:
+		event.From.Session = contract.SessionID(fromID)
+	case contract.PrincipalOwner:
+		event.From.Device = contract.DeviceID(fromID)
+	}
+	var err error
+	event.Body, err = contract.DecodeEventBody(kind, body)
+	if err != nil {
+		return event, fmt.Errorf("event %d: %w", event.Seq, err)
+	}
+	return event, nil
 }
 
 // EventInRoom finds a room event by ID without exposing events from other rooms.

@@ -14,14 +14,20 @@ import (
 	"github.com/resident-labs/dyna/harness"
 )
 
+// TranscriptItem keeps the raw tool-call ID outside the wire contract.
+type TranscriptItem struct {
+	contract.TranscriptItem
+	CallID string
+}
+
 // ReadTranscript decodes complete Pi records and masks their content.
-func ReadTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int) ([]contract.TranscriptItem, int, bool, error) {
+func ReadTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int) ([]TranscriptItem, int, bool, error) {
 	return readTranscript(r, deliveries, source, fullItem, skip, limit, 16<<20)
 }
 
-func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int, maxRecord int64) ([]contract.TranscriptItem, int, bool, error) {
+func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int, maxRecord int64) ([]TranscriptItem, int, bool, error) {
 	reader := bufio.NewReaderSize(r, 64<<10)
-	var items []contract.TranscriptItem
+	var items []TranscriptItem
 	seen := 0
 	more := false
 	calls := map[string]int{}
@@ -56,13 +62,13 @@ func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 				id := fmt.Sprintf("large:%s:%d", source, lineNo)
 				if fullItem == "" {
 					if seen >= skip && len(items) < limit {
-						items = append(items, contract.TranscriptItem{ID: id, Turn: turn, Kind: contract.TranscriptTooLarge, At: lastAt, Bytes: size})
+						items = append(items, TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: id, Turn: turn, Kind: contract.TranscriptTooLarge, At: lastAt, Bytes: size}})
 					} else if seen >= skip {
 						more = true
 					}
 					seen++
 				} else if id == fullItem {
-					items = append(items, contract.TranscriptItem{ID: id, Turn: turn, Kind: contract.TranscriptTooLarge, At: lastAt, Bytes: size})
+					items = append(items, TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: id, Turn: turn, Kind: contract.TranscriptTooLarge, At: lastAt, Bytes: size}})
 				}
 			}
 			continue
@@ -95,14 +101,14 @@ func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 				continue
 			}
 			for n, b := range blocks {
-				item := contract.TranscriptItem{ID: transcriptItemID(entry.ID + ":" + strconv.Itoa(n)), Turn: turn, At: entry.Timestamp}
+				item := TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: transcriptItemID(entry.ID + ":" + strconv.Itoa(n)), Turn: turn, At: entry.Timestamp}}
 				switch b.Type {
 				case "text":
 					item.Kind, item.Text = contract.TranscriptText, harness.Mask(b.Text)
 				case "thinking":
 					item.Kind, item.Text = contract.TranscriptThinking, harness.Mask(b.Thinking)
 				case "toolCall":
-					item.Kind, item.ID, item.Tool, item.Arguments = contract.TranscriptTool, transcriptItemID(b.ID), clipToolName(harness.Mask(b.Name)), harness.Mask(string(b.Arguments))
+					item.Kind, item.ID, item.Tool, item.Arguments, item.CallID = contract.TranscriptTool, transcriptItemID(b.ID), clipToolName(harness.Mask(b.Name)), harness.Mask(string(b.Arguments)), b.ID
 				default:
 					continue
 				}
@@ -158,90 +164,53 @@ func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 	}
 }
 
-// TranscriptHasPost checks whether a bash result exactly identifies a post.
-func TranscriptHasPost(r *io.SectionReader, id contract.EventID) (bool, error) {
-	type message struct {
-		Type    string `json:"type"`
-		Message struct {
-			Role       string `json:"role"`
-			ToolCallID string `json:"toolCallId"`
-			Content    []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"content"`
-		} `json:"message"`
-	}
-	scan := func(visit func(message) bool) (bool, error) {
-		reader := bufio.NewReaderSize(io.NewSectionReader(r, 0, r.Size()), 64<<10)
+// TranscriptFindCalls marks candidate IDs found in an acknowledged range.
+func TranscriptFindCalls(r io.Reader, ids map[string]bool) error {
+	reader := bufio.NewReaderSize(r, 64<<10)
+	for {
+		var line []byte
+		oversized := false
 		for {
-			var line []byte
-			oversized := false
-			for {
-				part, err := reader.ReadSlice('\n')
-				if !oversized && len(line)+len(part) <= 16<<20 {
-					line = append(line, part...)
-				} else {
-					oversized = true
-					line = nil
-				}
-				if err == bufio.ErrBufferFull {
-					continue
-				}
-				if err == io.EOF {
-					return false, nil
-				}
-				if err != nil {
-					return false, err
-				}
-				break
+			part, err := reader.ReadSlice('\n')
+			if !oversized && len(line)+len(part) <= 16<<20 {
+				line = append(line, part...)
+			} else {
+				oversized = true
+				line = nil
 			}
-			if oversized {
+			if err == bufio.ErrBufferFull {
 				continue
 			}
-			var entry message
-			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && visit(entry) {
-				return true, nil
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			break
+		}
+		if oversized {
+			continue
+		}
+		var entry struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type string `json:"type"`
+					ID   string `json:"id"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" || entry.Message.Role != "assistant" {
+			continue
+		}
+		for _, block := range entry.Message.Content {
+			if _, wanted := ids[block.ID]; block.Type == "toolCall" && wanted {
+				ids[block.ID] = true
 			}
 		}
 	}
-	var scanErr error
-	found, err := scan(func(entry message) bool {
-		if entry.Message.Role != "toolResult" {
-			return false
-		}
-		var parts []string
-		for _, b := range entry.Message.Content {
-			if b.Type == "text" {
-				parts = append(parts, b.Text)
-			}
-		}
-		if strings.TrimSpace(strings.Join(parts, "\n")) != string(id) {
-			return false
-		}
-		call := entry.Message.ToolCallID
-		matched, e := scan(func(candidate message) bool {
-			if candidate.Message.Role != "assistant" {
-				return false
-			}
-			for _, b := range candidate.Message.Content {
-				if b.Type == "toolCall" && b.ID == call && b.Name == "bash" {
-					return true
-				}
-			}
-			return false
-		})
-		scanErr = e
-		return matched || e != nil
-	})
-	if err != nil {
-		return false, err
-	}
-	if scanErr != nil {
-		return false, scanErr
-	}
-	return found, nil
 }
 
 // TranscriptStep keeps the Work tab compatible until the thread replaces it.
