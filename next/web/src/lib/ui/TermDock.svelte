@@ -34,17 +34,24 @@
     // With no item yet (no ready session, hosts still loading), the menu itself takes the keys.
     (menu?.querySelector<HTMLElement>("[role=menuitem]") ?? menu)?.focus();
   }
+  // Showing a tab opens a collapsed dock and moves focus into its shell.
+  async function show(key: number) {
+    active = key;
+    collapsed = false;
+    await tick();
+    panes[key]?.focus();
+  }
   function open(target: TerminalTarget, label: string) {
     picking = false;
     const tab = { key: next++, target, label };
     tabs.push(tab);
-    active = tab.key;
+    void show(tab.key);
   }
   // A new shell for an exited tab reopens its target under a new key, so its pane starts over.
   function renew(tab: Tab) {
     const index = tabs.findIndex(item => item.key === tab.key);
     tabs[index] = { key: next++, target: tab.target, label: tab.label };
-    active = tabs[index].key;
+    void show(tabs[index].key);
   }
   // Focus moves to the tab that takes the closed one's place, or out of the dock when none is left.
   async function close(key: number) {
@@ -74,15 +81,20 @@
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
   }
+  // fit reads the column's height, which only a window resize changes, so the maximized height follows the window.
+  let viewport = $state(window.innerHeight);
+  let tallest = $derived(viewport && fit(Infinity));
   const hostLabel = (host: string) => host === "control-plane" ? "This computer" : host;
 </script>
+
+<svelte:window onresize={() => { viewport = window.innerHeight; }} />
 
 {#if tabs.length || picking}
 <FloatWindow label="Terminals" kind="terminals" docked={!floating} bind:rect bind:element>
   {#snippet header()}
     <div class="tabs" role="tablist" aria-label="Terminals">
       {#each tabs as tab (tab.key)}<span class="tab" class:active={tab.key === active}>
-        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => { active = tab.key; void tick().then(() => panes[tab.key]?.focus()); }}>{tab.label}
+        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{tab.label}
           {#if tab.exited}<span class="muted">exited</span>{/if}</button>
         <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => void close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
     </div>
@@ -108,7 +120,7 @@
       onkeydown={event => { const step = { ArrowUp: 24, ArrowDown: -24 }[event.key]; if (step) { event.preventDefault(); height = fit(height + step); } }}></div>{/if}
   <!-- Keys typed into a shell stay there, so Escape closes no panel and Alt with an arrow key moves no window; F6 still moves between areas. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" hidden={!floating && collapsed} style:height={floating ? null : `${maximized ? fit(Infinity) : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
+  <div class="body" hidden={!floating && collapsed} style:height={floating ? null : `${maximized ? tallest : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
     {#each tabs as tab (tab.key)}<div class="tabpanel" hidden={tab.key !== active}>
       {#if tab.exited}<p class="exited">{tab.exited.code ? `Exited with code ${tab.exited.code}` : "The shell exited."}
         <button type="button" class="retry" onclick={() => renew(tab)}>New shell</button></p>{/if}
