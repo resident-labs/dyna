@@ -49,6 +49,7 @@ The owner settled these. A review does not raise them as findings, and only the 
 3. **The library is cut** from v2 for now (decision 9; owner, 2026-10-30).
 4. **Integration tests only for important owner-facing features**: one or two each, and no end-to-end tests in the repository (10.1; owner, 2026-10-30).
 5. **No cutover rollback step** (goal 6; owner, 2026-10-31). The cutover has no step that restores v1 service. The frozen backup and the dry-run gate bound the data risk.
+6. **Readable room history is given up at the cutover** (9; owner, q57, 2026-10-31). `dyna room log` starts empty, and no archive reader is planned.
 
 ## 1. Goals and non-goals
 
@@ -1286,7 +1287,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 
 **What the owner gives up from the cutover until each port:** voice calls, web search through Dyna, issue watches, room MCP servers, and several settings panes. External members (7.3), the reviewer service (decision 13) and, for now, the library are dropped. Paired devices, the desktop window, issues, goals, PRs and rules keep working.
 
-**What the owner gives up at the cutover, with no port planned yet: readable room history.** `dyna room log` starts empty. Room feeds, files, finished goals and closed issues stay in `archive/` in the data folder (8.1), and they are never imported, but nothing reads them. The `dyna` room alone holds 65,088 posts and 1,965 attachments, and with the library cut, the feed is the main record of decisions. The owner chooses whether to accept this loss or to wait for `dyna room log --archive`, held until M3 (about 60 lines, no store change). Until then, keep `archive/`.
+**What the owner accepted giving up at the cutover (q57, 2026-10-31): readable room history.** `dyna room log` starts empty. Room feeds, files, finished goals and closed issues stay in `archive/` in the data folder (8.1), and they are never imported, but nothing reads them. The `dyna` room alone holds 65,088 posts and 1,965 attachments, and with the library cut, the feed is the main record of decisions. No `dyna room log --archive` is planned. `archive/` stays in the data folder and in the backups.
 
 ### 9.1 What we lose from Claude Code
 
