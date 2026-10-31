@@ -7,11 +7,12 @@ type AccountID string
 type AccountAction string
 
 const (
-	AccountActionConnect  AccountAction = "connect"
-	AccountActionCallback AccountAction = "callback"
-	AccountActionSetKey   AccountAction = "set_key"
-	AccountActionComplete AccountAction = "complete"
-	AccountActionRemove   AccountAction = "remove"
+	AccountActionConnect   AccountAction = "connect"
+	AccountActionReconnect AccountAction = "reconnect"
+	AccountActionCallback  AccountAction = "callback"
+	AccountActionSetKey    AccountAction = "set_key"
+	AccountActionComplete  AccountAction = "complete"
+	AccountActionRemove    AccountAction = "remove"
 )
 
 // AccountsActionArgs contains only the action kind, never account secrets.
@@ -80,6 +81,10 @@ type AccountsConnectRequest struct {
 	Provider AccountProvider `json:"provider"`
 	Label    string          `json:"label"`
 }
+type AccountsReconnectRequest struct {
+	AccountID AccountID `json:"accountId"`
+}
+
 type AccountsConnectResponse struct {
 	Attempt   string      `json:"attempt"`
 	Flow      ConnectFlow `json:"flow"`

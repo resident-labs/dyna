@@ -37,6 +37,7 @@ const (
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"
 	MethodAccountsConnect         Method = "accounts.connect"
+	MethodAccountsReconnect       Method = "accounts.reconnect"
 	MethodAccountsConnectCallback Method = "accounts.connect_callback"
 	MethodAccountsConnectStatus   Method = "accounts.connect_status"
 	MethodAccountsSetKey          Method = "accounts.set_key"
