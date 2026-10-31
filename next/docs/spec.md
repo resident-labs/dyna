@@ -1184,6 +1184,13 @@ A request with no change adds nothing. The update stays in the transcript, so la
 
 **What the box agent does.** It sends the turn's snapshot sections from `TurnStart` with `set_prompt_sections` before each `prompt` and `continue`, on the same stdin, so the pipe orders them; a failed command fails the turn. When the engine reports a skill change or a room MCP server change, the box agent writes the new skill files into Pi's skills folder or the new entry into `mcp.json`, then sends `reload_resources`. The new server connects without a restart, and its line reaches the model through the next update.
 
+**Performance** (owner, 2026-10-31: Pi and the engine stay fast).
+
+- **Pi, no change.** Before each run Pi checks every context file and the skills folder by `stat` (size and modification time) and reads a file only when that changed; it diffs a file's text only when its content hash changed. It compares each section by hash and diffs only sections whose hash changed. Budget: under 5 ms of Pi work per run when nothing changed.
+- **Pi, test.** A unit test runs the no-change path with an injected file system and counts reads, diffs and hashes: zero reads and zero diffs when nothing changed. It uses no clock and no sleeps (r2).
+- **Engine.** `context.snapshot` renders from indexed store queries for the session, its children, its requests and its PRs, with no per-turn full scans. A test counts the queries per render.
+- **Files.** The engine writes the `AGENTS.md` files only on save, never per turn.
+
 #### Tools
 
 The MCP server is named `dyna`, so Pi names each tool `mcp__dyna__<tool>`. Tool names carry no `dyna_` prefix, because Pi's namespace already says it. That is a deliberate difference from T3 Code, whose tools carry a `t3_` prefix.
