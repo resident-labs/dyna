@@ -79,16 +79,14 @@ func TestDormancyStopsAndWakes(t *testing.T) {
 
 func TestDormancyKeepsClosingAncestor(t *testing.T) {
 	s, h, _, sid, ctx := quietSession(t, 0)
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closing' WHERE id=?", sid)
-		return err
-	}); err != nil {
+	if err := s.store.MarkClosing(ctx, sid); err != nil {
 		t.Fatal(err)
 	}
 	s.ReconcileDormancy(ctx, false, true)
-	session, err := s.store.Session(ctx, sid)
-	if err != nil || string(session.State) != "closing" || h.stops != 0 {
-		t.Fatalf("closing ancestor changed: session=%+v stops=%d err=%v", session, h.stops, err)
+	var state string
+	err := s.store.Read().QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=?", sid).Scan(&state)
+	if err != nil || state != "closing" || h.stops != 0 {
+		t.Fatalf("closing ancestor changed: state=%s stops=%d err=%v", state, h.stops, err)
 	}
 }
 
