@@ -48,10 +48,11 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var delivery int64
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT seq FROM deliveries WHERE to_kind='session' AND to_id=? LIMIT 1", caller.Session).Scan(&delivery); err != nil {
-		t.Fatal(err)
+	wake, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: session.Room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: caller.Session}, Text: "wake"})
+	if problem != nil {
+		t.Fatal(problem)
 	}
+	delivery := wake.Seq
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		var input contract.EventID
 		if err := tx.QueryRowContext(ctx, "SELECT id FROM events WHERE seq=?", delivery).Scan(&input); err != nil {
@@ -150,7 +151,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if problem != nil || len(page.Turns) != 1 || len(page.Turns[0].Inputs) != 1 || !page.Turns[0].Inputs[0].At.Equal(inputEvent.Time) || page.Turns[0].Inputs[0].Seq != delivery || len(page.Turns[0].Items) != 3 || page.Turns[0].Items[1].Event != post.Event || page.Turns[0].Items[2].Event != unclaimed.Event || !page.Turns[0].Items[0].More || len(page.Turns[0].Items[0].Output) != 1024 {
+	if problem != nil || len(page.Turns) != 1 || len(page.Turns[0].Inputs) != 1 || !page.Turns[0].Inputs[0].At.Equal(inputEvent.Time) || page.Turns[0].Inputs[0].Home == nil || page.Turns[0].Inputs[0].Home.Kind != contract.ConversationDM || page.Turns[0].Inputs[0].Seq != delivery || len(page.Turns[0].Items) != 3 || page.Turns[0].Items[1].Event != post.Event || page.Turns[0].Items[2].Event != unclaimed.Event || !page.Turns[0].Items[0].More || len(page.Turns[0].Items[0].Output) != 1024 {
 		t.Fatalf("page=%+v error=%v", page, problem)
 	}
 	full, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Item: "call1"})
