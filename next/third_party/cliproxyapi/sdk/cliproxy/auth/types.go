@@ -32,6 +32,13 @@ type PostAuthHook func(context.Context, *Auth) error
 type RequestInfo struct {
 	Query   url.Values
 	Headers http.Header
+	// OAuthIdentity is the new grant identity before existing metadata is merged.
+	OAuthIdentity *OAuthIdentity
+}
+
+// OAuthIdentity holds only raw provider account identifiers.
+type OAuthIdentity struct {
+	AccountID, AccountUUID, Subject, Email string
 }
 
 type requestInfoKey struct{}
