@@ -37,6 +37,7 @@ export class RoomStore {
   readonly shellJobs = new SvelteMap<string, number>();
   // Jobs that failed, as "session/job", so the dock can mark one while its Jobs tab is closed.
   readonly failedJobs = new SvelteSet<string>();
+  // "session/job" keys that About subtracts from its running count, because the engine's list can lag.
   readonly endedJobs = new SvelteSet<string>();
   // Sessions with a job to reach: their box keeps a finished job's output.
   readonly hadJobs = new SvelteSet<string>();
