@@ -17,6 +17,14 @@ type Archive struct {
 	ExpiresAt time.Time
 }
 
+// ExpireReplayKeys removes keys older than the retry window.
+func (s *Store) ExpireReplayKeys(ctx context.Context, before time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "DELETE FROM client_replays WHERE created_at<?", before.UnixMilli())
+		return err
+	})
+}
+
 // ExpiredArchives bounds each maintenance pass and preserves the oldest first.
 func (s *Store) ExpiredArchives(ctx context.Context, now time.Time) ([]Archive, error) {
 	rows, err := s.Read().QueryContext(ctx, "SELECT session,repo,ref,commit_sha,expires_at FROM archives WHERE expires_at<=? AND retry_at<=? ORDER BY retry_at,expires_at,session,repo LIMIT 50", now.UnixMilli(), now.UnixMilli())
