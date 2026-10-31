@@ -433,8 +433,6 @@ jobs:
         with:
           name: next-webdev-width
           path: ${{ runner.temp }}
-      - name: Install system Chromium
-        run: sudo apt-get update -qq && sudo apt-get install -y chromium-browser
       - name: Check responsive widths
         env:
           DYNA_WEBDEV_BIN: ${{ runner.temp }}/dyna-webdev

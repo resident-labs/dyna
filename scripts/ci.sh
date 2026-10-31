@@ -166,8 +166,12 @@ case "$suite" in
     ;;
   next-web-width)
     : "${DYNA_WEBDEV_BIN:?Set DYNA_WEBDEV_BIN to the built binary}"
-    export CHROMIUM="${CHROMIUM:-$(command -v chromium || command -v chromium-browser)}"
+    export DYNA_CHROMIUM="${DYNA_CHROMIUM:-$(command -v google-chrome || command -v chromium || { test -x /snap/bin/chromium && echo /snap/bin/chromium; })}"
+    echo "Browser: $DYNA_CHROMIUM"
+    "$DYNA_CHROMIUM" --version
     npm ci --prefix internal/cli/computer/browserdeps --ignore-scripts --no-audit --no-fund
+    npm ci --prefix next/web --prefer-offline --no-audit
+    (cd next/web && ./node_modules/.bin/tsc --strict --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --allowImportingTsExtensions width-check.ts)
     node next/web/width-check.ts
     ;;
   cross-build)
