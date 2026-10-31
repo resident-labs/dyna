@@ -18,10 +18,11 @@ export class FileDraft {
   // Send waits while a file saves or has failed.
   get busy(): boolean { return this.items.some(item => item.state !== "ready"); }
 
-  // Adds the files that fit the limits; it returns one line that names what was left out and why, or "".
-  add(files: Iterable<File>): string {
+  // Adds the files that fit the limits, beside the reserved files a forwarded post carries; it returns one line
+  // that names what was left out and why, or "".
+  add(files: Iterable<File>, reserved = 0): string {
     const all = [...files], big = all.filter(file => file.size > maxBytes), small = all.filter(file => file.size <= maxBytes);
-    const fit = small.slice(0, Math.max(0, maxFiles - this.items.length)), over = small.length - fit.length;
+    const fit = small.slice(0, Math.max(0, maxFiles - reserved - this.items.length)), over = small.length - fit.length;
     for (const file of fit) {
       this.items.push({ id: this.next++, file, state: "saving", preview: /^image\/(png|jpeg|gif|webp)$/.test(file.type) ? URL.createObjectURL(file) : undefined });
       this.save(this.next - 1);
