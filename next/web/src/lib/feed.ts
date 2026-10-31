@@ -194,19 +194,24 @@ export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : 
 
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
-// One short line per work row in the owner's terms, such as "lead-web ran 2 turns" or
-// "builder-feed started, 3 sessions ran turns, 1 job"; the opened row lists each event.
+// One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
+// "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.
+// The time runs from the first turn's start to the last turn's end in the row, in whole minutes as T3 Code's
+// "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns".
 export function workSummary(events: Event[], name: Name): string {
   const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
   const turns = new Map<string, Set<string>>();
-  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0;
+  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0, first = Infinity, last = -Infinity;
   for (const event of events) {
     switch (event.type) {
       case "session.started": started.push(name(event.body.session)); break;
       case "session.moved": moved.push(name(event.body.session)); break;
       case "session.closed": closed.push(name(event.body.session)); break;
       case "computer.changed": (event.body.to === "running" ? opened : shut).push(name(event.body.session)); break;
-      case "turn.started": case "turn.ended": turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn)); break;
+      case "turn.started": case "turn.ended":
+        turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn));
+        if (event.type === "turn.started") first = Math.min(first, Date.parse(event.at)); else last = Math.max(last, Date.parse(event.at));
+        break;
       case "shell.job.ended": jobs++; break;
       case "image.built": images++; break;
       case "image.failed": failedImages++; break;
@@ -217,17 +222,19 @@ export function workSummary(events: Event[], name: Name): string {
     }
   }
   const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions` : list(sessions);
-  const [ran] = turns;
+  const minutes = Math.round((last - first) / 60_000);
+  const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
+  const ran = [...turns.values()].reduce((sum, set) => sum + set.size, 0);
   const parts = [
     started.length && `${who(started)} started`,
-    turns.size > 1 ? `${who([...turns.keys()].map(name))} ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
-    jobs && count(jobs, "job"), images && `${count(images, "image")} built`,
+    turns.size && `${who([...turns.keys()].map(name))} worked${last >= first ? ` for ${took}` : ""}`,
+    ran && count(ran, "turn"), jobs && count(jobs, "job"), images && `${count(images, "image")} built`,
     failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
     memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
     rules && count(rules, "rule change"),
     opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
   ].filter(part => typeof part === "string");
-  return parts.length ? parts.join(", ") : count(events.length, "update");
+  return parts.length ? parts.join(" · ") : count(events.length, "update");
 }
 
 // One plain line for an event inside an opened work row.
