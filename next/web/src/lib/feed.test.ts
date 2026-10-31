@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { decodeEvent } from "./event.ts";
 import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
-import { commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
+import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -16,6 +16,7 @@ test("a single-host grant for another session keeps who gets access and for how 
   assert.deepEqual(requestLine({ body: "Let builder-feed run any command on build-server for 24 hours.\nReason: tests", target }),
     { text: "Let builder-feed run any command on ", named: "build-server", after: " for 24 hours." });
   assert.equal(requestLine({ body: "timeout: 30s", target }).named, "");
+  assert.equal(clause(" for 24 hours."), " for 24 hours");
 });
 
 test("a command line shows each argument exactly: spaces, quotes and empty arguments are quoted", () => {
