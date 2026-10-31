@@ -66,7 +66,7 @@ export type Item =
 export type Section = { group: Group; title: string; shown: number; total: number; items: Item[]; state?: "searching" | "failed" };
 
 export type Messages = { state: "idle" | "searching" | "failed" | "done"; posts: PostHit[]; total: number };
-export type Sources = { rooms: Place[]; sessions: Person[]; actions: Action[]; recent: Item[]; messages: Messages };
+export type Sources = { rooms: Place[]; sessions: Person[]; sessionsTotal?: number; actions: Action[]; recent: Item[]; messages: Messages };
 
 // A leading ">" asks for actions only, as in VS Code; the rest of the text filters them.
 export function parse(text: string, scope?: Scope): { scope?: Scope; query: string } {
@@ -93,7 +93,8 @@ export function build(text: string, scope: Scope | undefined, sources: Sources):
       items: !alone && total > items.length && state !== "searching" ? [...items, { kind: "more", scope: group, total }] : items };
   };
   const rooms = section("rooms", ranked(sources.rooms, query, () => false).map((room): Item => ({ kind: "room", room })));
-  const sessions = section("sessions", ranked(sources.sessions, query, item => item.closed).map((session): Item => ({ kind: "session", session })));
+  const foundSessions = ranked(sources.sessions, query, item => item.closed).map((session): Item => ({ kind: "session", session }));
+  const sessions = section("sessions", foundSessions, sources.sessionsTotal ?? foundSessions.length);
   const messages = sources.messages;
   const post = section("messages", messages.posts.map((found): Item => ({ kind: "message", post: found })), Math.max(messages.total, messages.posts.length),
     messages.state === "searching" || messages.state === "failed" ? messages.state : undefined);
@@ -115,7 +116,8 @@ export const nothing = (sections: Section[], query: string): string | undefined 
 
 // The count beside a group's title: "3 of 61" when the group shows part of it.
 export const count = (found: Section): string | undefined => found.total > found.shown && found.group !== "recent" ? `${found.shown.toLocaleString()} of ${found.total.toLocaleString()}` : undefined;
-export const showAll = (scope: Scope, total: number) => `Show all ${total.toLocaleString()} ${nouns[scope]}`;
+export const showAll = (scope: Scope, total: number) => scope === "sessions" && total > 50
+  ? `Show first 50 of ${total.toLocaleString()} sessions` : `Show all ${total.toLocaleString()} ${nouns[scope]}`;
 
 export type Mode = { scope?: Scope; text: string };
 // Esc leaves a scope and keeps the query; with no scope it closes.
