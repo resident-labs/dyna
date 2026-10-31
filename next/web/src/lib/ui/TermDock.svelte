@@ -2,6 +2,7 @@
   import { tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { call } from "../client.ts";
+  import type { HostSummary } from "../contract.gen.ts";
   import { hostLabel } from "../hosts.ts";
   import type { TerminalTarget } from "../terminal.ts";
   import FloatWindow from "./FloatWindow.svelte";
@@ -26,7 +27,7 @@
   let active = $state(0);
   let next = 1;
   let picking = $state(false);
-  let hosts: string[] = $state([]);
+  let hosts: HostSummary[] = $state([]);
   let floating = $state(false);
   let rect = $state({ x: window.innerWidth - 744, y: window.innerHeight - 464, w: 720, h: 440 });
   // The docked height, kept for the page view. Maximized, the dock takes the most height fit allows; collapsed, only its tab bar shows.
@@ -55,7 +56,7 @@
   // Opens the new-tab menu; the room menu's "New terminal" comes here too.
   export async function pick() {
     picking = true;
-    void call("host.list", {}).then(list => { hosts = (list.hosts ?? []).map(h => h.name); }, () => { hosts = []; });
+    void call("host.list", {}).then(list => { hosts = list.hosts ?? []; }, () => { hosts = []; });
     await tick();
     // With no item yet (no ready session, hosts still loading), the menu itself takes the keys.
     (menu?.querySelector<HTMLElement>("[role=menuitem]") ?? menu)?.focus();
@@ -138,7 +139,7 @@
         {#if sessions.length}<p class="label">Sessions</p>{/if}
         {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => shell(session.id, session.name, session.root)}>{session.name}</button>{/each}
         {#if hosts.length}<p class="label">Hosts</p>{/if}
-        {#each hosts as host (host)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host }, hostLabel(host))}>{hostLabel(host)}</button>{/each}
+        {#each hosts as host (host.name)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host: host.name }, hostLabel(host.name))}>{hostLabel(host.name)}{#if host.diskLow}<StatusPill tone="warning" label="Disk low" />{/if}</button>{/each}
       </div>{/if}
     </span>
     {#if active}<button type="button" class="tool" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
@@ -187,7 +188,7 @@
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
   :global(.floating) .list { bottom: auto; top: calc(100% + 4px); }
   .list .label { margin: 6px 8px 2px; }
-  .list [role="menuitem"] { width: auto; height: auto; justify-content: start; display: flex; padding: 6px 8px; color: var(--text); font-size: 14px; }
+  .list [role="menuitem"] { width: auto; height: auto; justify-content: space-between; gap: 12px; display: flex; padding: 6px 8px; color: var(--text); font-size: 14px; }
   .list [role="menuitem"]:focus { background: var(--hover); outline: none; }
   .grip { position: absolute; top: -3px; left: 0; right: 0; height: 6px; z-index: 1; cursor: ns-resize; touch-action: none; }
   .grip:hover, .grip:focus-visible { background: var(--focus); opacity: 0.6; outline: none; }

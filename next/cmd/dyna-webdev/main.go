@@ -59,7 +59,7 @@ func (devService) AccountsQuota(context.Context, contract.Principal, contract.Ac
 	}}, nil
 }
 
-// HostList gives the dev host a busy beat (CPU and disk near their limits) and adds a host that has stopped
+// HostList gives the dev host a busy beat (CPU near its limit, disk low) and adds a host that has stopped
 // answering, so Home shows each look; engine/runtime fills the real load.
 func (d devService) HostList(ctx context.Context, p contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
 	list, problem := d.Service.HostList(ctx, p, req)
@@ -69,7 +69,7 @@ func (d devService) HostList(ctx context.Context, p contract.Principal, req cont
 			list.Hosts[i] = contract.HostSummary{Name: h.Name, Reachable: true, CPUs: 16, MemBytes: 31 * box.GiB, CPUUsed: 3.1, MemUsed: 10 * box.GiB, DiskBytes: 931 * box.GiB, DiskUsed: 519 * box.GiB}
 		case host:
 			list.Hosts[i].Reachable, list.Hosts[i].Boxes, list.Hosts[i].CPUUsed, list.Hosts[i].MemUsed = true, 2, 118.4, 96*box.GiB
-			list.Hosts[i].DiskBytes, list.Hosts[i].DiskUsed = 1024*box.GiB, 960*box.GiB
+			list.Hosts[i].DiskBytes, list.Hosts[i].DiskUsed, list.Hosts[i].DiskLow = 1024*box.GiB, 1020*box.GiB, true
 		}
 	}
 	// gpu-box stopped answering 4 min ago, so Home shows its last figures dimmed.
