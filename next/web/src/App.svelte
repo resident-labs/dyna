@@ -25,19 +25,25 @@
   let rooms = $derived([...attention.rooms.values()]);
   // While the engine is not reachable, open runs again by itself: after a growing wait while the page is visible, and at
   // once when a hidden page becomes visible again. Try again runs it at once.
+  // An open runs alone, so Try again or a wake during one adds no second stream; none starts after stop.
   function retrying(open: () => Promise<BlockedState | undefined>) {
     let tries = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let pending = false, stopped = false;
     const run = () => {
+      if (pending || stopped) return;
       clearTimeout(timer);
+      pending = true;
       void open().then(state => {
+        pending = false;
+        if (stopped) return;
         if (state !== "unreachable") { tries = 0; return; }
         if (document.visibilityState === "visible") timer = setTimeout(run, retryDelay(tries++));
       });
     };
     const wake = () => { if (document.visibilityState === "hidden") clearTimeout(timer); else if (tries) run(); };
     document.addEventListener("visibilitychange", wake);
-    return { run, stop: () => { clearTimeout(timer); document.removeEventListener("visibilitychange", wake); } };
+    return { run, stop: () => { stopped = true; clearTimeout(timer); document.removeEventListener("visibilitychange", wake); } };
   }
   // room.list failing blocks the whole page: the owner is signed out, or the engine is not reachable.
   let blocked: BlockedState | undefined = $state();
