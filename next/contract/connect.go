@@ -38,12 +38,13 @@ func (ConnectConnector) isEventBody()         {}
 type ConnectAttemptState string
 
 const (
-	ConnectAttemptIdle     ConnectAttemptState = "idle"
-	ConnectAttemptStarting ConnectAttemptState = "starting"
-	ConnectAttemptPending  ConnectAttemptState = "pending"
-	ConnectAttemptLinked   ConnectAttemptState = "linked"
-	ConnectAttemptCanceled ConnectAttemptState = "canceled"
-	ConnectAttemptFailed   ConnectAttemptState = "failed"
+	ConnectAttemptIdle      ConnectAttemptState = "idle"
+	ConnectAttemptStarting  ConnectAttemptState = "starting"
+	ConnectAttemptPending   ConnectAttemptState = "pending"
+	ConnectAttemptLinked    ConnectAttemptState = "linked"
+	ConnectAttemptUnlinking ConnectAttemptState = "unlinking"
+	ConnectAttemptCanceled  ConnectAttemptState = "canceled"
+	ConnectAttemptFailed    ConnectAttemptState = "failed"
 )
 
 type ConnectAttempt struct {
