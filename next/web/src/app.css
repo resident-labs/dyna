@@ -84,7 +84,7 @@ main > header strong { font-size: 16px; }
 @media (max-width: 640px) {
   .shell, .shell.open { grid-template-columns: minmax(0, 1fr); }
   .rail { position: fixed; z-index: 3; top: 0; bottom: 0; left: 0; width: min(88vw, 340px); display: grid; grid-template-columns: 72px minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); overflow: hidden;
+    grid-template-rows: minmax(0, 1fr) auto; align-items: stretch; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); overflow: hidden;
     transform: translateX(-100%); visibility: hidden; transition: transform 160ms ease-out, visibility 160ms; }
   .shell.drawer .rail { transform: none; visibility: visible; box-shadow: 8px 0 24px rgb(0 0 0 / 30%); }
   .rail > nav:first-child { grid-column: 1; align-items: center; overflow-y: auto; }

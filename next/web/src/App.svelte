@@ -271,7 +271,7 @@
   async function showDrawer(open: boolean, refocus = true) {
     drawer = open;
     await tick();
-    if (open) rail.querySelector<HTMLElement>(".pages [aria-current=page], .pages a, a")?.focus(); else if (refocus) menuButton?.focus();
+    if (open) (rail.querySelector<HTMLElement>(".pages [aria-current=page]") ?? rail.querySelector<HTMLElement>(".pages a"))?.focus(); else if (refocus) menuButton?.focus();
   }
   $effect(() => { if (!phone.current) drawer = false; });
   let toggle: HTMLButtonElement | undefined = $state();
