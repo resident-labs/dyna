@@ -38,6 +38,7 @@ type Service struct {
 	profiles  Profiles
 	repos     Repositories
 	approvals *approve.Service
+	hostexec  HostexecRunner
 	now       func() time.Time
 	mu        sync.Mutex
 	channels  map[contract.SessionID]*boxChannel

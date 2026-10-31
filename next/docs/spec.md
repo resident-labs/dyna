@@ -828,7 +828,7 @@ The `grants` table stores hosts and command rules as JSON columns.
 
 - **Root's default grant** is made with the room: every host including the control plane, any command, `preapproved`, no expiry (3.5). The owner can narrow it like any other grant.
 - **Owner grants.** Only the owner grants host exec: `dyna hostexec grant` or the web card, as the operation `hostexec.grant` with class `owner`. A session may ask for a grant; the request goes to the owner. The default expiry is 24 hours. `--expires never` must be explicit.
-- **Revoke.** `dyna hostexec revoke <grant>`, by the owner. It acts at once: pending runs under the grant are denied, and running commands get SIGTERM, then SIGKILL after 5 s.
+- **Revoke.** `dyna hostexec revoke <grant>`, by the owner. Pending runs fail their grant recheck. Running units are stopped with `systemctl --user stop`; `TimeoutStopSec=5` gives SIGTERM, then SIGKILL after 5 s. The engine retries stops on its 10 s tick to cover a launch racing revoke. A reachable unit receives the stop within 10 s, and systemd forces termination within another 5 s.
 - **Expiry** is checked at match time. A sweep marks expired grants and emits `grant.expired`. A running command is not stopped at expiry; only a revoke stops it.
 - The web app lists active grants with their expiry and a revoke button.
 
@@ -836,18 +836,18 @@ The `grants` table stores hosts and command rules as JSON columns.
 
 1. The agent runs `dyna hostexec run --host <h> [--timeout 10m] -- <argv>` in its box. The request comes over the box socket, so the engine knows the principal.
 2. The engine matches the grants and submits `hostexec.run{Host, Argv, Cwd, Timeout, Grant}`. It runs at once or waits for the owner.
-3. On a capacity host, the command runs over the master as `systemd-run --user --scope --unit=dyna-hostexec-<op> -p RuntimeMaxSec=<timeout> -- <argv>`, with framed replies. On the control plane, the same `systemd-run` runs locally.
+3. On a capacity host, the command runs over the master as `systemd-run --user --scope --unit=dyna-hostexec-<op> -p RuntimeMaxSec=<timeout> -p TimeoutStopSec=5 -- <argv>`, with framed replies. On the control plane, the same `systemd-run` runs locally.
 4. The command gets the host user's login environment. The engine adds no secrets. Stdin is empty.
-5. Output streams live to the caller and to watchers in the web app. Up to 64 KiB is kept inline in the result; the rest is a file named in the result. The default timeout is 10 minutes, and the maximum is 2 hours.
+5. There is no live output stream for now. The CLI waits for the result. Up to 64 KiB is kept inline in the result; the rest is a file named in the result, and output is capped at 8 MiB. The default timeout is 10 minutes, and the maximum is 2 hours.
 6. The caller gets the exit code and the output. A run longer than the shell's foreground window works like a long shell job: the caller wakes on `op.ran`.
 
 Every run emits `op.requested` (when it waits), `op.decided` (when someone decides), and `op.ran` with the exit code. No command runs without these events.
 
-Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout` or `revoked`. The exit code and output file stay on the operation.
+Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeout_ms`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout`, `revoked` or `lost`. A lost unit is stopped after its host reconnects. The exit code and output file stay on the operation.
 
 ### 6.4 Control-plane safety and accepted risks
 
-Host exec on the control plane runs as the owner's user. To stop such a command from acting as the owner through the engine, each control-plane run gets its own scope, `dyna-hostexec-<op>.scope`. The owner socket reads each caller's cgroup. If the path contains `dyna-hostexec-`, the engine treats the caller as the grant holder and refuses every owner-only call with `hostexec-scope`.
+Host exec on the control plane runs as the owner's user. To stop such a command from acting as the owner through the engine, each control-plane run gets its own scope, `dyna-hostexec-<op>.scope`. The owner socket reads each caller's cgroup. If the path contains `dyna-hostexec-`, the engine refuses every call with `hostexec-scope` and does not map the caller to the grant holder.
 
 Accepted risks (owner, 2026-10-30):
 

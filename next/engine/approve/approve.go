@@ -22,7 +22,7 @@ type Entry struct {
 	Class   func(contract.OpArgs, contract.Principal) contract.Class
 	Card    func(context.Context, contract.OpArgs, contract.Principal) contract.Card
 	Check   func(context.Context, contract.OpArgs, contract.Principal) error
-	Execute func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult
+	Execute func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
 	Decode  func(json.RawMessage) (contract.OpArgs, error)
 }
 
@@ -273,7 +273,7 @@ func (s *Service) run(op contract.Operation, entry Entry) {
 	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
 	} else {
-		result = entry.Execute(s.Context, op.Args, op.By)
+		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
 	}
 	_ = s.finish(op, result)
 }
