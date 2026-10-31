@@ -1006,6 +1006,16 @@ func TestUntrackedTrialMemberDoesNotHoldOtherReadyPRs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(st.MergeTrials) != 0 {
+		t.Fatal("untracked member retained its trial")
+	}
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	st, err = f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
 	b := st.MergeTrials["github.com/owner/repo"]
 	if b == nil || len(b.Changes) != 1 || b.Changes[0].Key != "github.com/owner/repo#2" {
 		t.Fatalf("ready PR did not advance: %+v", b)
