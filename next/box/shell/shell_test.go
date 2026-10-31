@@ -328,3 +328,74 @@ func TestSecretCrossingTheTrimPointWithoutNewlineIsDropped(t *testing.T) {
 		t.Fatalf("leaked or wrong text: %q", text[:min(len(text), 80)])
 	}
 }
+
+func TestOwnerViewKeepsAgentPosition(t *testing.T) {
+	token := "ghp_" + strings.Repeat("a1", 15)
+	j := &job{id: "j", command: "build " + token, done: make(chan struct{})}
+	s := New(Config{})
+	s.jobs = []*job{j}
+	j.Write([]byte("first\npartial"))
+	first := s.View(true)
+	if len(first) != 1 || !first[0].Reset || first[0].Text != "first\n" || strings.Contains(first[0].Command, token) {
+		t.Fatalf("reset: %+v", first)
+	}
+	if text, _ := j.unread(); text != "first\n" {
+		t.Fatalf("agent read moved: %q", text)
+	}
+	j.Write([]byte(" line\n"))
+	next := s.View(false)
+	if len(next) != 1 || next[0].Reset || next[0].Text != "partial line\n" {
+		t.Fatalf("delta: %+v", next)
+	}
+	j.Write([]byte(token + "\n"))
+	masked := s.View(false)
+	if len(masked) != 1 || strings.Contains(masked[0].Text, token) {
+		t.Fatalf("unmasked: %+v", masked)
+	}
+	j.mu.Lock()
+	j.finished = true
+	j.exit = 7
+	j.mu.Unlock()
+	next = s.View(false)
+	if len(next) != 1 || next[0].Running || next[0].ExitCode != 7 {
+		t.Fatalf("state: %+v", next)
+	}
+}
+
+func TestOwnerViewBudgetsAndResets(t *testing.T) {
+	s := New(Config{})
+	for i := 0; i < 8; i++ {
+		j := &job{id: contract.ShellJobID(fmt.Sprint(i)), done: make(chan struct{})}
+		j.Write([]byte(strings.Repeat("x", (64<<10)-1) + "\n"))
+		s.jobs = append(s.jobs, j)
+	}
+	first := s.View(true)
+	if len(first) != 4 {
+		t.Fatalf("first batch: %d", len(first))
+	}
+	second := s.View(false)
+	if len(second) != 4 {
+		t.Fatalf("second batch: %d", len(second))
+	}
+	for _, j := range append(first, second...) {
+		if !j.Reset || len(j.Text) > 64<<10 {
+			t.Fatalf("job: %+v", j)
+		}
+	}
+	s.jobs[0].Write([]byte(strings.Repeat("x\n", 1<<19)))
+	third := s.View(false)
+	if len(third) != 1 || !third[0].Reset || len(third[0].Text) > 64<<10 {
+		t.Fatalf("large output: %+v", third)
+	}
+	s.jobs = nil
+	for i := 0; i < 70; i++ {
+		s.jobs = append(s.jobs, &job{id: contract.ShellJobID(fmt.Sprint(i)), command: strings.Repeat("é", 3000), done: make(chan struct{})})
+	}
+	commands := s.View(true)
+	if len(commands) != 61 || len(commands[0].Command) != 4096 {
+		t.Fatalf("command batch: %d", len(commands))
+	}
+	if rest := s.View(false); len(rest) != 9 || !rest[0].Reset {
+		t.Fatalf("remaining commands: %d", len(rest))
+	}
+}

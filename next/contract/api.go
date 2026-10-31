@@ -23,6 +23,7 @@ const (
 	MethodTurnActivity     Method = "turn.activity"
 	MethodTranscriptAppend Method = "transcript.append"
 	MethodShellJobEnded    Method = "shell.job.ended"
+	MethodShellOutput      Method = "shell.output"
 )
 
 type ErrorCode string
@@ -73,6 +74,7 @@ type SessionSummary struct {
 	Turn        TurnID        `json:"turn,omitempty"`        // the running turn
 	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
 	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
+	ShellJobs   int           `json:"shellJobs,omitempty"`   // TurnEnded.ShellJobs of the last ended turn
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
@@ -268,6 +270,44 @@ type ComputerWatchStart struct {
 }
 type ComputerWatchStop struct{}
 
+// ShellWatchStart asks the box agent to post each shell job's output with shell.output while the
+// owner watches. Each start begins a new generation, and its first post resets every job's view.
+type ShellWatchStart struct {
+	Generation uint64 `json:"generation"`
+}
+type ShellWatchStop struct{}
+
+// ShellOutputRequest carries the new output of the box's shell jobs, about every 250 ms while watched.
+// The engine drops a post from an older generation.
+type ShellOutputRequest struct {
+	Generation uint64           `json:"generation"`
+	Jobs       []ShellJobOutput `json:"jobs"`
+}
+type ShellOutputResponse struct{}
+
+// ShellJobOutput is one job's output since the last post, masked, in whole lines. With Reset, Text is
+// the job's last 64 KiB and replaces what the viewer shows. GET /v1/shell/watch streams these values.
+type ShellJobOutput struct {
+	Job      ShellJobID `json:"job"`
+	Command  string     `json:"command"`
+	Running  bool       `json:"running"`
+	ExitCode int        `json:"exitCode"` // when Running is false
+	Text     string     `json:"text"`
+	Reset    bool       `json:"reset,omitempty"`
+}
+
+// TerminalResize is the JSON text frame a client sends on GET /v1/terminal to set the terminal's size.
+// Binary frames carry the terminal's bytes both ways.
+type TerminalResize struct {
+	Cols int `json:"cols"`
+	Rows int `json:"rows"`
+}
+
+// TerminalExit is the engine's last JSON text frame on GET /v1/terminal, sent when the shell exits.
+type TerminalExit struct {
+	ExitCode int `json:"exitCode"`
+}
+
 type ComputerChangedRequest struct {
 	To ComputerState `json:"to"`
 }
@@ -302,6 +342,10 @@ func (ComputerWatchStart) BoxMessageType() BoxMessageType { return "computer.wat
 func (ComputerWatchStart) isBoxMessageBody()              {}
 func (ComputerWatchStop) BoxMessageType() BoxMessageType  { return "computer.watch.stop" }
 func (ComputerWatchStop) isBoxMessageBody()               {}
+func (ShellWatchStart) BoxMessageType() BoxMessageType    { return "shell.watch.start" }
+func (ShellWatchStart) isBoxMessageBody()                 {}
+func (ShellWatchStop) BoxMessageType() BoxMessageType     { return "shell.watch.stop" }
+func (ShellWatchStop) isBoxMessageBody()                  {}
 
 func (Archive) BoxMessageType() BoxMessageType { return "archive" }
 func (Archive) isBoxMessageBody()              {}
