@@ -16,9 +16,10 @@ import (
 )
 
 type repoMapping struct {
-	Path        string `json:"path"`
-	Identity    string `json:"identity"`
-	DefaultRoom string `json:"defaultRoom"`
+	Path        string   `json:"path"`
+	Identity    string   `json:"identity"`
+	DefaultRoom string   `json:"defaultRoom"`
+	HookRooms   []string `json:"hookRooms,omitempty"`
 }
 type archiveMapping struct {
 	Session string `json:"session"`
@@ -35,10 +36,11 @@ type capturedManifest struct {
 	Skills       []skillMapping   `json:"skills"`
 }
 type capture struct {
-	Repos    map[string]contract.RepoName
-	Defaults map[contract.RepoName]contract.RoomName
-	Refs     map[string]string
-	Skills   []skillMapping
+	Repos     map[string]contract.RepoName
+	Defaults  map[contract.RepoName]contract.RoomName
+	HookRooms map[string][]contract.RoomName
+	Refs      map[string]string
+	Skills    []skillMapping
 }
 
 var errUnsupportedForge = errors.New("unsupported forge")
@@ -66,13 +68,21 @@ func readRepoManifest(file string) (capture, error) {
 	if manifest.Repositories == nil || manifest.ArchiveRefs == nil || manifest.Skills == nil {
 		return capture{}, fmt.Errorf("capture manifest needs repositories, archiveRefs and skills")
 	}
-	result := capture{Repos: make(map[string]contract.RepoName), Defaults: make(map[contract.RepoName]contract.RoomName), Refs: make(map[string]string)}
+	result := capture{Repos: make(map[string]contract.RepoName), Defaults: make(map[contract.RepoName]contract.RoomName), HookRooms: make(map[string][]contract.RoomName), Refs: make(map[string]string)}
 	for _, entry := range manifest.Repositories {
 		if !filepath.IsAbs(entry.Path) || filepath.Clean(entry.Path) != entry.Path || (entry.Identity != "" && (!repoIdentityPattern.MatchString(entry.Identity) || path.Clean(entry.Identity) != entry.Identity || room.ValidateName(entry.DefaultRoom) != nil)) || (entry.Identity == "" && entry.DefaultRoom != "") {
 			return capture{}, fmt.Errorf("invalid repository manifest entry")
 		}
 		if _, ok := result.Repos[entry.Path]; ok {
 			return capture{}, fmt.Errorf("duplicate repository path in manifest")
+		}
+		seenRooms := make(map[string]bool)
+		for _, name := range entry.HookRooms {
+			if room.ValidateName(name) != nil || seenRooms[name] {
+				return capture{}, fmt.Errorf("invalid or duplicate hook room")
+			}
+			seenRooms[name] = true
+			result.HookRooms[entry.Path] = append(result.HookRooms[entry.Path], contract.RoomName(name))
 		}
 		if entry.Identity == "" {
 			result.Repos[entry.Path] = ""

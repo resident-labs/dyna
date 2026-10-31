@@ -55,9 +55,31 @@ INSERT INTO hook_documents VALUES ('sha256-key','{"repo":"/capture/checkout","ho
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := readHooks(db, repos.RepoRooms, cap, nil)
+	got, _, err := readHooks(db, repos.RepoRooms, repos.PathRooms, cap, []contract.RoomName{"alpha"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	cap.Repos["/capture/checkout"] = ""
+	cap.HookRooms = map[string][]contract.RoomName{"/capture/checkout": {"alpha"}}
+	unverified, gaps, err := readHooks(db, repos.RepoRooms, repos.PathRooms, cap, []contract.RoomName{"alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unverified["alpha"]) != 1 || unverified["alpha"][0].Reason != contract.HookCheckoutUnverified || !gaps[0].UnverifiedCheckout {
+		t.Fatalf("unverified hook missing handoff: %+v %+v", unverified, gaps)
+	}
+	delete(cap.HookRooms, "/capture/checkout")
+	unverified, gaps, err = readHooks(db, repos.RepoRooms, repos.PathRooms, cap, []contract.RoomName{"alpha"})
+	if err != nil || len(unverified) != 0 || !gaps[0].WithoutRoom {
+		t.Fatalf("unmapped hook = %+v %+v %v", unverified, gaps, err)
+	}
+	if _, err := db.Exec(`INSERT INTO hook_documents VALUES ('global','{"hooks":[{"name":"global-hook","command":"check"}]}')`); err != nil {
+		t.Fatal(err)
+	}
+	onlyPath := map[string][]contract.RoomName{"/capture/checkout": {"alpha"}}
+	exact, gaps, err := readHooks(db, repos.RepoRooms, onlyPath, cap, []contract.RoomName{"alpha"})
+	if err != nil || len(exact["alpha"]) != 1 || len(gaps) != 2 || !gaps[0].WithoutRoom {
+		t.Fatalf("exact/global handoff = %+v %+v %v", exact, gaps, err)
 	}
 	for _, name := range []contract.RoomName{"alpha"} {
 		if len(got[name]) != 1 || got[name][0].Name != "verify" {

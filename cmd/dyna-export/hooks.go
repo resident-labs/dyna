@@ -10,12 +10,14 @@ import (
 )
 
 type hookGap struct {
-	Repo   string
-	Name   string
-	Fields []string
+	Repo               string
+	Name               string
+	Fields             []string
+	UnverifiedCheckout bool
+	WithoutRoom        bool
 }
 
-func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, cap capture, allRooms []contract.RoomName) (map[contract.RoomName][]contract.HookHandoff, []hookGap, error) {
+func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, pathRooms map[string][]contract.RoomName, cap capture, allRooms []contract.RoomName) (map[contract.RoomName][]contract.HookHandoff, []hookGap, error) {
 	rows, err := db.Query("SELECT repo,body FROM hook_documents ORDER BY repo")
 	if err != nil {
 		return nil, nil, err
@@ -36,24 +38,49 @@ func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, 
 		if err := json.Unmarshal(body, &doc); err != nil {
 			return nil, nil, fmt.Errorf("decode hook document: %w", err)
 		}
-		identity, mapped := cap.Repos[doc.Repo]
+		identity := cap.Repos[doc.Repo]
 		targets := repoRooms[identity]
+		unverified := repo != "global" && identity == ""
+		if unverified {
+			targets = append([]contract.RoomName{}, pathRooms[doc.Repo]...)
+			for _, name := range cap.HookRooms[doc.Repo] {
+				found := false
+				for _, r := range allRooms {
+					if r == name {
+						found = true
+					}
+				}
+				if !found {
+					return nil, nil, fmt.Errorf("hook manifest refers to unknown room")
+				}
+				duplicate := false
+				for _, r := range targets {
+					if r == name {
+						duplicate = true
+					}
+				}
+				if !duplicate {
+					targets = append(targets, name)
+				}
+			}
+		}
 		if repo == "global" {
-			targets = allRooms
+			targets = nil
 		}
 		for _, hook := range doc.Hooks {
 			if hook.Disabled || hook.Builtin != "" {
 				continue
 			}
-			if repo != "global" && !mapped {
-				return nil, nil, fmt.Errorf("active repository hook checkout is missing from the capture manifest")
-			}
 			// v1 hooks always execute a shell command; the typed Wake form
 			// cannot faithfully represent an arbitrary shell command.
 			fields := []string{"Event", "Command", "Cwd", "Timeout", "OnFail"}
-			gaps = append(gaps, hookGap{Repo: repo, Name: hook.Name, Fields: fields})
+			gaps = append(gaps, hookGap{Repo: repo, Name: hook.Name, Fields: fields, UnverifiedCheckout: unverified, WithoutRoom: len(targets) == 0})
 			for _, target := range targets {
-				handoffs[target] = append(handoffs[target], contract.HookHandoff{Name: hook.Name, Fields: fields})
+				handoff := contract.HookHandoff{Name: hook.Name, Fields: fields}
+				if unverified {
+					handoff.Reason = contract.HookCheckoutUnverified
+				}
+				handoffs[target] = append(handoffs[target], handoff)
 			}
 		}
 	}
