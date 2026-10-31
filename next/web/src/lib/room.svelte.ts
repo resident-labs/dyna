@@ -244,6 +244,11 @@ export class RoomStore {
         break;
       case "rule.added": this.rules.set(event.body.number, { number: event.body.number, text: event.body.text, by: event.from, at: event.at }); break;
       case "rule.removed": this.rules.delete(event.body.number); break;
+      case "rule.edited": {
+        const known = this.rules.get(event.body.number);
+        if (known) this.rules.set(event.body.number, { ...known, text: event.body.text });
+        break;
+      }
       case "shell.job.ended":
         // A running turn's end replaces the count, as in the engine.
         if (!this.turns.has(event.body.session)) this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
