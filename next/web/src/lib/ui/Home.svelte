@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { APIError, call } from "../client.ts";
   import type { Attention } from "../attention.svelte.ts";
@@ -84,13 +85,24 @@
   const decided = new SvelteMap<string, string>();
   const deciding = new SvelteSet<string>();
   const failures = new SvelteMap<string, string>();
-  async function decide(id: string, title: string, approve: boolean) {
+  // Focus that was on the decided row moves to the next request's Approve, or to the Requests heading when none is
+  // left, so a keyboard owner keeps their place. It is read before the buttons disable, which drops focus.
+  let requestsHeading: HTMLElement | undefined = $state();
+  async function decide(id: string, title: string, approve: boolean, row: HTMLElement) {
+    const held = row.contains(document.activeElement);
+    const sibling = (next: Element | null) => next?.classList.contains("request") ? next : undefined;
+    const neighbor = sibling(row.nextElementSibling) ?? sibling(row.previousElementSibling);
     deciding.add(id);
     failures.delete(id);
-    await call("op.decide", { id, approve }).then(() => { decided.set(id, `${approve ? "Approved" : "Denied"} · ${title}`); }, (error: unknown) => {
+    const saved = await call("op.decide", { id, approve }).then(() => { decided.set(id, `${approve ? "Approved" : "Denied"} · ${title}`); return true; }, (error: unknown) => {
       failures.set(id, error instanceof APIError && error.detail.code === "conflict" ? "This request is no longer waiting." : "Your decision was not saved. Try again.");
+      return false;
     });
     deciding.delete(id);
+    if (!held) return;
+    await tick();
+    if (!saved) { row.querySelector<HTMLElement>(".approve")?.focus(); return; }
+    (neighbor?.isConnected ? neighbor.querySelector<HTMLElement>(".approve") : requestsHeading)?.focus();
   }
   // A list shows while the store has items, as in v1's Home a failed load is never "all clear";
   // its count is the rows shown.
@@ -147,7 +159,7 @@
   {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
-    {#if asks || decided.size}<section class="card requests"><h2>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
+    {#if asks || decided.size}<section class="card requests"><h2 tabindex="-1" bind:this={requestsHeading}>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
       <div class="list">{#each groups as { room, count } (room.id)}<a class="item fold" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Icon name="chevron" /><Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
@@ -157,8 +169,8 @@
           <span class="line"><b class="who {value.by.kind}" class:root style:--hue={hue(who)}>{who}</b> · {#if value.target.kind === "host"}on <code>{value.target.name}</code> · {:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name} · {/if}{room.name} ·
             {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
           {#if failures.has(id)}<span class="line" role="alert">{failures.get(id)}</span>{/if}</span>
-        <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={() => void decide(id, value.title, true)}>Approve</button>
-          <button type="button" disabled={deciding.has(id)} onclick={() => void decide(id, value.title, false)}>Deny</button>
+        <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, value.title, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
+          <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, value.title, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>
           <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}{/each}
         {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
       </section>{/if}
@@ -166,8 +178,8 @@
       {#snippet row({ room, working, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span>
-        <!-- Who works: three small avatars at most, then the rest as a count. -->
-        {#if working.length}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} root={sessions.get(id)?.root ?? false} size={20} />{/each}
+        <!-- Who works, from two sessions on (one is named in the line): three small avatars at most, then a count. -->
+        {#if working.length > 1}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} root={sessions.get(id)?.root ?? false} size={20} />{/each}
           {#if working.length > 3}<span class="more-count">+{working.length - 3}</span>{/if}</span>{/if}</a>{/snippet}
       <div class="list">{#each active as item (item.room.id)}{@render row(item)}{/each}
         {#if quiet.length}<button type="button" class="item fold quiet" aria-expanded={showQuiet} onclick={() => { showQuiet = !showQuiet; }}>
