@@ -87,7 +87,7 @@ func (*streamConnect) ManagedOrigin(context.Context) string { return "" }
 func (*streamConnect) ServePublic(http.ResponseWriter, *http.Request, string, []string) bool {
 	return false
 }
-func (*streamConnect) ServePrivate(http.ResponseWriter, *http.Request, string, store.ConnectSession) {
+func (*streamConnect) ServePrivate(http.ResponseWriter, *http.Request, string, store.ConnectSession, []string) {
 }
 func (*streamConnect) Authenticate(context.Context, *http.Request, string) (store.ConnectSession, []contract.Scope, bool, error) {
 	return store.ConnectSession{ID: "session", Device: "device"}, []contract.Scope{contract.ScopeRead}, true, nil

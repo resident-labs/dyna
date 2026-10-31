@@ -51,19 +51,24 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 }
 
 // ServePrivate handles proof-bound renewal.
-func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin string, x store.ConnectSession) {
+func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin string, x store.ConnectSession, routes []string) {
 	if !browserRequest(r, origin) {
 		fail(w, 403, "forbidden")
 		return
 	}
 	var req struct {
-		Proof string `json:"proof"`
+		Proof  string `json:"proof"`
+		Target string `json:"target"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil && r.URL.Path != "/api/connect/logout" && r.URL.Path != "/api/logout" {
 		fail(w, 400, "bad request")
 		return
 	}
 	switch r.URL.Path {
+	case "/api/connect/routes":
+		s.routeList(w, r, origin, routes)
+	case "/api/connect/handoff":
+		s.issueHandoff(w, r, origin, req.Target, req.Proof, x, routes)
 	case "/api/connect/renew":
 		if err := s.proof(r.Context(), req.Proof, origin, r.URL.Path, x.JKT, x.Epoch, x.Generation); err != nil {
 			fail(w, 403, "invalid proof")

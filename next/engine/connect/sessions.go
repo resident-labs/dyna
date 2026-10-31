@@ -27,6 +27,11 @@ type mintCode struct {
 	Epoch, Generation         int64
 	End, Minted               time.Time
 }
+type handoffCode struct {
+	Session store.ConnectSession
+	Target  string
+	End     time.Time
+}
 type grantCacheEntry struct {
 	Grant      Grant
 	At         time.Time
@@ -45,13 +50,14 @@ type Sessions struct {
 	client    *http.Client
 	mu        sync.Mutex
 	codes     map[string]mintCode
+	handoffs  map[string]handoffCode
 	grants    map[string]grantCacheEntry
 	rates     map[string]rateEntry
 	keysTried time.Time
 }
 
 func NewSessions(files *Files, state *store.Store, now func() time.Time, client *http.Client) *Sessions {
-	return &Sessions{files: files, store: state, now: now, client: client, codes: make(map[string]mintCode), grants: make(map[string]grantCacheEntry), rates: make(map[string]rateEntry)}
+	return &Sessions{files: files, store: state, now: now, client: client, codes: make(map[string]mintCode), handoffs: make(map[string]handoffCode), grants: make(map[string]grantCacheEntry), rates: make(map[string]rateEntry)}
 }
 
 func randomSecret() (string, error) {
@@ -239,7 +245,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			fail(w, 403, "invalid relay request")
 			return true
 		}
-		if c.Sub != l.Owner.ID || !browserKeyPattern.MatchString(c.JKT) || !strings.HasPrefix(c.Dev, "dev_") || !slices.Contains(routes, c.Origin) {
+		if c.Sub != l.Owner.ID || !browserKeyPattern.MatchString(c.JKT) || !strings.HasPrefix(c.Dev, "dev_") || (!slices.Contains(routes, c.Origin) || routeRank(c.Origin, l.App) < 0) {
 			fail(w, 403, "invalid mint")
 			return true
 		}
@@ -298,7 +304,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			OK bool `json:"ok"`
 		}{true})
 	case "/api/connect/session":
-		s.exchange(w, r, origin)
+		s.exchange(w, r, origin, routes)
 	default:
 		return false
 	}
@@ -310,7 +316,7 @@ func browserRequest(r *http.Request, origin string) bool {
 	return r.Method == http.MethodPost && r.Header.Get("Origin") == origin && r.Header.Get("X-Dyna") == "1" && media == "application/json"
 }
 
-func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin string) {
+func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin string, routes []string) {
 	if !browserRequest(r, origin) {
 		fail(w, 403, "forbidden")
 		return
@@ -320,8 +326,9 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 		return
 	}
 	var req struct {
-		Code  string `json:"code"`
-		Proof string `json:"proof"`
+		Code    string `json:"code"`
+		Handoff string `json:"handoff"`
+		Proof   string `json:"proof"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req) != nil {
 		fail(w, 400, "bad request")
@@ -330,19 +337,35 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	if req.Code == "" {
-		fail(w, 400, "send a code")
-		return
-	}
-	c, ok := s.codes[hashToken(req.Code)]
-	delete(s.codes, hashToken(req.Code))
-	if !ok || !now.Before(c.End) || c.Origin != origin {
-		fail(w, 403, "invalid code")
-		return
-	}
-	if err := s.proof(r.Context(), req.Proof, origin, "/api/connect/session", c.JKT, c.Epoch, c.Generation); err != nil {
-		fail(w, 403, "invalid proof")
-		return
+	var x store.ConnectSession
+	var source string
+	if req.Handoff != "" {
+		h, ok := s.handoffs[hashToken(req.Handoff)]
+		delete(s.handoffs, hashToken(req.Handoff))
+		if !ok || !now.Before(h.End) || h.Target != origin || !slices.Contains(routes, origin) || routeRank(origin, "") < 0 {
+			fail(w, 403, "invalid handoff")
+			return
+		}
+		p, err := verifyProof(req.Proof, origin+"/api/connect/session", now)
+		if err != nil || p.JKT == h.Session.JKT || s.store.ConsumeConnectNonceForLink(r.Context(), h.Session.Epoch, h.Session.Generation, "proof:"+p.JTI, now, now.Add(2*time.Minute)) != nil {
+			fail(w, 403, "invalid proof")
+			return
+		}
+		x, source = h.Session, h.Session.ID
+		x.Origin, x.JKT = origin, p.JKT
+	} else {
+		c, ok := s.codes[hashToken(req.Code)]
+		delete(s.codes, hashToken(req.Code))
+		if !ok || !now.Before(c.End) || c.Origin != origin {
+			fail(w, 403, "invalid code")
+			return
+		}
+		if err := s.proof(r.Context(), req.Proof, origin, "/api/connect/session", c.JKT, c.Epoch, c.Generation); err != nil {
+			fail(w, 403, "invalid proof")
+			return
+		}
+		x = store.ConnectSession{RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation,
+			Created: now, Minted: c.Minted, End: now.Add(30 * 24 * time.Hour), Grant: now, Access: now.Add(15 * time.Minute)}
 	}
 	var secrets [96]byte
 	if _, err := rand.Read(secrets[:]); err != nil {
@@ -350,13 +373,15 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 		return
 	}
 	token := b64.EncodeToString(secrets[:32])
-	x := store.ConnectSession{
-		ID: "cs_" + b64.EncodeToString(secrets[32:64]), Device: "cd_" + b64.EncodeToString(secrets[64:]),
-		RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation,
-		Created: now, Minted: c.Minted, End: now.Add(30 * 24 * time.Hour), Grant: now, Access: now.Add(15 * time.Minute),
-		Hash: sha256.Sum256([]byte(token)),
+	x.ID, x.Hash = "cs_"+b64.EncodeToString(secrets[32:64]), sha256.Sum256([]byte(token))
+	var err error
+	if source != "" {
+		err = s.store.HandoffConnectSession(r.Context(), source, x, now)
+	} else {
+		x.Device = "cd_" + b64.EncodeToString(secrets[64:])
+		err = s.store.StartConnectSession(r.Context(), x)
 	}
-	if err := s.store.StartConnectSession(r.Context(), x); err != nil {
+	if err != nil {
 		fail(w, 403, "session could not start")
 		return
 	}
