@@ -54,30 +54,30 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 
 // SessionReplay returns the response saved for a caller's session start key.
 func (s *Store) SessionReplay(ctx context.Context, caller contract.Principal, clientID string) (contract.SessionStartResponse, error) {
+	return sessionReplay(ctx, s.read, caller, clientID)
+}
+
+func sessionReplay(ctx context.Context, q sqlQuery, caller contract.Principal, clientID string) (contract.SessionStartResponse, error) {
 	var response contract.SessionStartResponse
-	err := s.read.QueryRowContext(ctx, "SELECT s.id,b.id FROM client_replays r JOIN sessions s ON s.id=r.ref JOIN boxes b ON b.session=s.id WHERE r.method=? AND r.caller_kind=? AND r.caller_id=? AND r.client_id=?", contract.MethodSessionStart, caller.Kind, caller.Session, clientID).Scan(&response.Session, &response.Box)
+	err := q.QueryRowContext(ctx, "SELECT s.id,b.id FROM client_replays r JOIN sessions s ON s.id=r.ref JOIN boxes b ON b.session=s.id WHERE r.method=? AND r.caller_kind=? AND r.caller_id=? AND r.client_id=?", contract.MethodSessionStart, caller.Kind, caller.Session, clientID).Scan(&response.Session, &response.Box)
 	return response, err
 }
 
-// SessionReplayError carries the original result of a concurrent retry.
-type SessionReplayError struct{ Response contract.SessionStartResponse }
-
-func (e *SessionReplayError) Error() string { return "session start already committed" }
-
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string, maxDepth int) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string, maxDepth int) (contract.SessionStartResponse, error) {
+	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		if clientID != "" {
-			var response contract.SessionStartResponse
-			err := tx.QueryRowContext(ctx, "SELECT s.id,b.id FROM client_replays r JOIN sessions s ON s.id=r.ref JOIN boxes b ON b.session=s.id WHERE r.method=? AND r.caller_kind=? AND r.caller_id=? AND r.client_id=?", contract.MethodSessionStart, event.From.Kind, event.From.Session, clientID).Scan(&response.Session, &response.Box)
+			previous, err := sessionReplay(ctx, tx, event.From, clientID)
 			if err == nil {
-				return &SessionReplayError{Response: response}
+				response = previous
+				return nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
 		}
 		if parent != "" {
-			tree, err := transactionTree(ctx, tx, session.Room)
+			tree, err := loadTree(ctx, tx, session.Room)
 			if err != nil {
 				return err
 			}
@@ -166,6 +166,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		_, err = s.AppendEvent(tx, boxEvent)
 		return err
 	})
+	return response, err
 }
 
 func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {

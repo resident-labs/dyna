@@ -130,7 +130,7 @@ func TestProfileRemovalWaitsForAssignment(t *testing.T) {
 		started <- p.WithProfile("p", func() *contract.Error {
 			close(entered)
 			<-release
-			if err := s.store.StartSession(ctx, session, root, contract.BoxSizeAgent, "", event, boxEvent, "", false, "", 0); err != nil {
+			if _, err := s.store.StartSession(ctx, session, root, contract.BoxSizeAgent, "", event, boxEvent, "", false, "", 0); err != nil {
 				return failure(err)
 			}
 			return nil

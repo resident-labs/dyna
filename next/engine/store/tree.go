@@ -9,25 +9,15 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
+// sqlQuery matches database/sql's variadic query API, which requires any for SQL arguments.
+type sqlQuery interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // RoomTree loads open sessions in a room for the pure tree rules.
 func (s *Store) RoomTree(ctx context.Context, id contract.RoomID) (room.Tree, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT s.id,coalesce(s.parent,''),coalesce(b.host,'') FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id", id)
-	if err != nil {
-		return room.Tree{}, err
-	}
-	defer rows.Close()
-	var nodes []room.Node
-	for rows.Next() {
-		var node room.Node
-		if err := rows.Scan(&node.ID, &node.Parent, &node.Host); err != nil {
-			return room.Tree{}, err
-		}
-		nodes = append(nodes, node)
-	}
-	if err := rows.Err(); err != nil {
-		return room.Tree{}, err
-	}
-	return room.NewTree(nodes), nil
+	return loadTree(ctx, s.Read(), id)
 }
 
 // ClosingParent finds a marked parent after its last open child closes.
@@ -68,8 +58,8 @@ type TreeError struct{ Message string }
 
 func (e *TreeError) Error() string { return e.Message }
 
-func transactionTree(ctx context.Context, tx *sql.Tx, id contract.RoomID) (room.Tree, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT s.id,coalesce(s.parent,''),coalesce(b.host,'') FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id", id)
+func loadTree(ctx context.Context, q sqlQuery, id contract.RoomID) (room.Tree, error) {
+	rows, err := q.QueryContext(ctx, "SELECT s.id,coalesce(s.parent,''),coalesce(b.host,'') FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id", id)
 	if err != nil {
 		return room.Tree{}, err
 	}

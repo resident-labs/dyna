@@ -118,12 +118,11 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	var replay *store.SessionReplayError
+	var response contract.SessionStartResponse
 	problem := s.withProfile(req.Profile, func() *contract.Error {
-		if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.ClientID, s.maxDepth); err != nil {
-			if errors.As(err, &replay) {
-				return nil
-			}
+		var err error
+		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.ClientID, s.maxDepth)
+		if err != nil {
 			var treeErr *store.TreeError
 			if errors.As(err, &treeErr) {
 				return invalid(treeErr.Error())
@@ -138,10 +137,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if problem != nil {
 		return contract.SessionStartResponse{}, problem
 	}
-	if replay != nil {
-		return replay.Response, nil
-	}
-	return contract.SessionStartResponse{Session: session.ID, Box: session.Box}, nil
+	return response, nil
 }
 
 func (s *Service) Connected(id contract.SessionID) bool {
