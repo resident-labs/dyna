@@ -40,11 +40,13 @@
   .markdown :global(h1) { font-size: 18px; }
   .markdown :global(h2) { font-size: 16px; }
   .markdown :global(:is(h1, h2, h3, h4, h5, h6):first-child) { margin-top: 0; }
-  /* A code block sits on the raised surface and scrolls sideways; it never wraps. */
-  .markdown :global(pre) { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); overflow-x: auto; white-space: pre; overflow-wrap: normal; }
-  /* A wide table scrolls sideways inside its own block, as a code block does. Cells never wrap mid-word. */
+  /* A code block uses the thread's pre look and wraps, so it never scrolls sideways. */
+  .markdown :global(pre) { padding: 8px 12px; border-radius: 6px; background: var(--sidebar); white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.45 var(--mono); }
+  /* A table is capped at the text width. Its cells wrap, and only a table that still cannot fit scrolls in its own block. */
   .markdown :global(table) { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-  .markdown :global(:is(th, td)) { padding: 4px 8px; border: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  .markdown :global(:is(th, td)) { padding: 6px 12px; text-align: left; overflow-wrap: anywhere; }
+  .markdown :global(th) { font-weight: 600; border-bottom: 1px solid var(--line); }
+  .markdown :global(tr + tr > :is(th, td)) { border-top: 1px solid var(--line); }
   .markdown :global(code) { font: 13px var(--mono); font-variant-ligatures: none; }
   .markdown :global(blockquote) { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
   .markdown :global(a) { color: var(--focus); }
