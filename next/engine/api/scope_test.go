@@ -24,7 +24,7 @@ func TestWebScopeRefusals(t *testing.T) {
 		{"/v1/computers/watch", "GET", ""},
 		{"/v1/events", "GET", ""},
 		{"/v1/shell/watch", "GET", ""},
-		{"/v1/op.submit", "POST", `{"operation":{"kind":"hostexec.grant","args":{"room":"r"}}}`},
+		{"/v1/op.submit", "POST", `{"operation":{"kind":"pr.open","args":{"title":"t","body":"b","base":"main","draft":false}}}`},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -34,4 +34,11 @@ func TestWebScopeRefusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (f *fakeService) OperationScope(kind contract.OpKind) contract.Scope {
+	if kind == "pr.open" {
+		return contract.ScopeOperate
+	}
+	return ""
 }

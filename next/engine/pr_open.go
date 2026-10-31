@@ -27,6 +27,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 		return session, enginegit.SessionBranchPrefix + string(who.Session), err
 	}
 	return approve.Entry{
+		Scope: contract.ScopeOperate,
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			return contract.Card{Title: "asks to open a pull request", Body: args.(contract.PrOpenArgs).Title}
