@@ -64,6 +64,27 @@ func TestTerminalPRCleansUpRunsOnce(t *testing.T) {
 	}
 }
 
+func TestTerminalCleanupSurvivesInterruptedCommit(t *testing.T) {
+	e := newEnv(t)
+	e.f.Pull.Head.Ref = "feature"
+	e.write()
+	r := e.track()
+	e.f.Pull.State = "closed"
+	e.f.Runs = []Run{{ID: 100, HeadBranch: "feature", Event: "pull_request", Status: "queued"}}
+	if err := e.s.Store.update(func(st *State) error {
+		var out processEffects
+		e.s.closeRecord(st.Records[r.Key], Snapshot{Pull: e.f.Pull}, newPollNotices(st.Records[r.Key]), &out)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.tick()
+	calls, _ := os.ReadFile(e.calls)
+	if !strings.Contains(string(calls), "/runs/100/cancel") {
+		t.Fatal("interrupted terminal cleanup was not retried")
+	}
+}
+
 func TestTerminalEffectsRetryAfterFailure(t *testing.T) {
 	e := newEnv(t)
 	e.f.Pull.Head.Ref = "feature"
@@ -130,11 +151,14 @@ func TestCICleanupFailureDoesNotBlock(t *testing.T) {
 	old := log.Writer()
 	log.SetOutput(&logs)
 	defer log.SetOutput(old)
-	e.tick()
-	if !cleaned || e.record().Watching || !e.record().CICleanupDone {
-		t.Fatal("cancel failure blocked the merge path")
+	e.clock = e.clock.Add(time.Minute)
+	e.write()
+	if _, err := e.s.Tick(context.Background()); err == nil {
+		t.Fatal("expected CI cleanup failure")
 	}
-	e.tick()
+	if !cleaned || !e.record().Watching || e.record().CICleanupDone {
+		t.Fatal("cancel failure blocked merge cleanup or lost the retry")
+	}
 	if strings.Count(logs.String(), "PR CI cleanup") != 1 {
 		t.Fatalf("expected one failure log: %s", logs.String())
 	}
