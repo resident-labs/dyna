@@ -19,6 +19,7 @@ import (
 
 type API struct {
 	service Service
+	Build   string
 	model   func(Caller) http.Handler
 	git     func(Caller) http.Handler
 	web     *Web
@@ -322,6 +323,13 @@ func (a *API) handler(c Caller) http.Handler {
 		w.WriteHeader(http.StatusOK)
 		f, ok := w.(http.Flusher)
 		if !ok {
+			return
+		}
+		data, marshalErr := json.Marshal(contract.StreamHello{Build: a.Build})
+		if marshalErr != nil {
+			return
+		}
+		if _, writeErr := fmt.Fprintf(w, "event: hello\ndata: %s\n\n", data); writeErr != nil {
 			return
 		}
 		f.Flush()
