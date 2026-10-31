@@ -42,7 +42,7 @@ func (a *activity) run(ctx context.Context, ticks <-chan time.Time, send func(co
 	}
 }
 
-func (c *Client) turnActivity(ctx context.Context, req contract.TurnActivityRequest) error {
+func (c *Client) TurnActivity(ctx context.Context, req contract.TurnActivityRequest) error {
 	body, _ := json.Marshal(req)
 	_, err := c.post(ctx, contract.MethodTurnActivity, body)
 	return err
