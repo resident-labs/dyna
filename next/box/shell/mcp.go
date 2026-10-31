@@ -39,6 +39,7 @@ type toolResult struct {
 
 type toolCall struct {
 	Name      string `json:"name"`
+	CallID    string `json:"-"`
 	Arguments struct {
 		Command     string              `json:"command"`
 		Description string              `json:"description"`
@@ -87,6 +88,19 @@ func (s *Server) Handler() http.Handler {
 				resp.Error = &rpcError{-32602, err.Error()}
 				break
 			}
+			var args struct {
+				Arguments map[string]json.RawMessage `json:"arguments"`
+			}
+			if err := json.Unmarshal(req.Params, &args); err != nil {
+				resp.Error = &rpcError{-32602, err.Error()}
+				break
+			}
+			if raw := args.Arguments[contract.ToolCallIDArgument]; len(raw) > 0 {
+				if err := json.Unmarshal(raw, &call.CallID); err != nil || len(call.CallID) > 4096 {
+					resp.Error = &rpcError{-32602, "invalid tool call ID"}
+					break
+				}
+			}
 			text, err := s.call(r.Context().Done(), call)
 			if err != nil {
 				text = err.Error()
@@ -110,7 +124,7 @@ func (s *Server) call(cancel <-chan struct{}, call toolCall) (string, error) {
 		if strings.TrimSpace(args.Command) == "" {
 			return "", fmt.Errorf("command is required")
 		}
-		j, err := s.run(cancel, args.Command, args.Cwd, args.Description)
+		j, err := s.run(cancel, args.Command, args.Cwd, args.Description, call.CallID)
 		if err != nil {
 			return "", err
 		}
