@@ -80,7 +80,7 @@ func filledRoomBundle() RoomBundle {
 		LimitHandoff: []RoomLimitGap{RoomLimitMemoryMaxWithoutHigh},
 		RepoHandoff:  []RepoHandoff{{Identity: "example.org/team/repo", Reason: RepoUnsupportedForge}},
 		Handoff: []SessionHandoff{{
-			Name: "dyna:builder", Profile: "terra", Parent: "dyna:lead", Goals: []GoalID{"g1084"},
+			Name: "dyna:builder", Profile: "terra", ProfileWarning: ProfileUnsupportedMuse, Parent: "dyna:lead", Goals: []GoalID{"g1084"},
 			ArchiveRef: "refs/dyna/archive/builder", LastPost: "done",
 		}},
 		Counts: BundleCounts{Rules: 1, Goals: 1, GoalItems: 1, Issues: 1, PRs: 1, Questions: 1, Sessions: 1},
