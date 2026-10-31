@@ -87,6 +87,8 @@
   });
   const toggle = (key: string) => { list?.hold(); if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
+  // True once the conversation has loaded with no event at all; a session that never existed reads so.
+  export const empty = () => view.ready && !view.ordered.length;
   // The owner's own post and a jump always land on the newest row, even from inside the present window.
   // It never rejects: a failed send stays in the feed as a row with Retry.
   export async function send(request: PostRequest): Promise<void> {
