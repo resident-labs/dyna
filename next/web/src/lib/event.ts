@@ -31,6 +31,8 @@ const cause = optional(oneOf("create_failed", "start_failed", "no_hello", "engin
 const jobEnd = optional(nullable(object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) })));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
 const bodies: Record<string, Check> = {
+  "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
+  "account.quota_low": object({ accountId: string, window: string, remainingPercent: number, floor: number }),
   "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string })))) }),
   "session.restarted": object({ session: string }),

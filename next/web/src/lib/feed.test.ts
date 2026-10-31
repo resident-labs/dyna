@@ -208,3 +208,16 @@ test("an image that failed to load becomes a file card, and the others stay thum
   const files = [image("a"), image("b"), { name: "notes.txt", media: "text/plain", bytes: 10, sha256: "c" }];
   assert.deepEqual(files.filter(file => isThumb(file, ["b"])).map(file => file.sha256), ["a"]);
 });
+
+
+test("account alerts decode but never enter a room feed", () => {
+  const base = { seq: 1, id: "e", at: "2026-10-31T12:00:00Z", from: { kind: "engine" } };
+  for (const alert of [
+    { type: "account.failed", body: { accountId: "a", reason: "refresh_failed" } },
+    { type: "account.quota_low", body: { accountId: "a", window: "week", remainingPercent: 5, floor: 10 } },
+  ]) {
+    const decoded = decodeEvent({ ...base, ...alert });
+    assert.ok(decoded);
+    assert.deepEqual(dayRows([decoded], { kind: "feed" }), []);
+  }
+});
