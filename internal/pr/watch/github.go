@@ -473,7 +473,7 @@ func (g GitHub) commandWithAccount(ctx context.Context, dir string, tail bool, l
 var unmarshalSavedCI = json.Unmarshal
 
 func (g GitHub) decodeResponse(body []byte, out any) error {
-	if g.requests != nil && g.requests.cacheOnly {
+	if g.requests != nil && g.requests.countSavedCI {
 		return unmarshalSavedCI(body, out)
 	}
 	return json.Unmarshal(body, out)
