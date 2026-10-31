@@ -65,6 +65,17 @@ func newTestHost(t *testing.T, r *runner) *Host {
 	}
 	return h
 }
+func TestListContainersMarksOldLayouts(t *testing.T) {
+	r := &runner{body: `[{"Labels":{"dyna.box":"current","dyna.layout":"` + box.ContainerLayout + `"},"State":"running"},{"Labels":{"dyna.box":"old","dyna.shared":"2"},"State":"exited"},{"Labels":{"dyna.box":"missing"},"State":"exited"}]`}
+	got, err := newTestHost(t, r).ListContainers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].StaleLayout || !got[1].StaleLayout || !got[2].StaleLayout {
+		t.Fatalf("layout status: %+v", got)
+	}
+}
+
 func TestCapacityReservesFloorWithoutCountingBoxesTwice(t *testing.T) {
 	cpus, memory, disk, err := parseCapacity([]byte("8 16000 5000 90000"), 4000, 20000)
 	if err != nil || cpus != 7 || memory != 12000 || disk != 90000 {
