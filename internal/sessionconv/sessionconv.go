@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -51,11 +52,13 @@ var (
 	ErrTooLarge           = errors.New("session is too large to convert")
 )
 
-// Supported reports whether version is the pinned version for harness.
+var piForkVersion = regexp.MustCompile(`^` + regexp.QuoteMeta(PiSupportedVersion) + `-dyna\.[1-9][0-9]*(\.[0-9a-f]{12})?$`)
+
+// Supported reports whether version is compatible with the converter for harness.
 func Supported(harness Harness, version string) bool {
 	switch harness {
 	case HarnessPi:
-		return version == PiSupportedVersion
+		return version == PiSupportedVersion || piForkVersion.MatchString(version)
 	case HarnessClaude:
 		return version == ClaudeSupportedVersion
 	}
