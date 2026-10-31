@@ -29,7 +29,7 @@ func TestSetupRepos(t *testing.T) {
 				}
 				return "", nil
 			}
-			if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, git); err != nil {
+			if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(root, "owner/repo")
@@ -47,7 +47,7 @@ func TestSetupRepos(t *testing.T) {
 				t.Fatal(err)
 			}
 			calls = nil
-			if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, git); err != nil || len(calls) != 0 {
+			if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil || len(calls) != 0 {
 				t.Fatalf("skip: %v %v", calls, err)
 			}
 		})
@@ -67,14 +67,14 @@ func TestSetupRetryAfterCheckoutFailure(t *testing.T) {
 		}
 		return "", nil
 	}
-	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, git); err == nil {
+	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err == nil {
 		t.Fatal("expected failure")
 	}
 	if _, err := os.Stat(filepath.Join(root, "owner/repo")); !os.IsNotExist(err) {
 		t.Fatalf("partial repository visible: %v", err)
 	}
 	fail = false
-	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, git); err != nil {
+	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "owner/repo")); err != nil {
@@ -221,5 +221,27 @@ func TestArchiveRetriesBeforeReporting(t *testing.T) {
 	}
 	if !reflect.DeepEqual(waits, []time.Duration{transcriptRetryMin, 2 * transcriptRetryMin}) {
 		t.Fatalf("waits=%v", waits)
+	}
+}
+
+func TestSetupGitIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, email string
+		want        [][]string
+	}{
+		{name: "Example User", email: "user@example.invalid", want: [][]string{{"config", "--global", "user.name", "Example User"}, {"config", "--global", "user.email", "user@example.invalid"}}},
+		{},
+	} {
+		var calls [][]string
+		git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+			calls = append(calls, args)
+			return "", nil
+		}
+		if err := setupRepos(context.Background(), t.TempDir(), nil, tc.name, tc.email, git); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(calls, tc.want) {
+			t.Fatalf("calls = %v, want %v", calls, tc.want)
+		}
 	}
 }
