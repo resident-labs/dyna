@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -44,6 +43,7 @@ type Boxes struct {
 	Pressure  *engine.Service
 	mu        sync.Mutex
 	hosts     map[contract.HostName]*podman.Host
+	loads     map[contract.HostName]contract.HostSummary
 }
 
 // cache stores a host driver and starts its heartbeat until the engine stops. A cached name keeps its first driver and heartbeat. The caller holds b.mu.
@@ -58,8 +58,36 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
-		h.Heartbeat(b.Context, ticker.C, func(ok bool) { log.Printf("host %s reachable: %t", name, ok) }, b.pressure(name))
+		h.Heartbeat(b.Context, ticker.C, func(ok bool, cpu float64, mem int64) {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.loads == nil {
+				b.loads = make(map[contract.HostName]contract.HostSummary)
+			}
+			b.loads[name] = contract.HostSummary{Reachable: ok, CPUUsed: cpu, MemUsed: mem}
+		}, b.pressure(name))
 	}()
+}
+
+func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) error {
+	records, err := b.Store.Boxes(ctx)
+	if err != nil {
+		return err
+	}
+	counts := make(map[contract.HostName]int)
+	for _, record := range records {
+		if record.State == contract.BoxStarting || record.State == contract.BoxReady {
+			counts[record.Host]++
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := 1; i < len(hosts); i++ {
+		h := &hosts[i]
+		load := b.loads[h.Name]
+		h.Reachable, h.CPUUsed, h.MemUsed, h.Boxes = load.Reachable, load.CPUUsed, load.MemUsed, counts[h.Name]
+	}
+	return nil
 }
 
 func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host, error) {
