@@ -27,7 +27,13 @@ type ExecRunner struct{}
 func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
 	c := exec.CommandContext(ctx, args[0], args[1:]...)
 	c.Stdin = strings.NewReader(string(in))
-	return c.Output()
+	out, err := c.Output()
+	// ssh says why it failed only on stderr; without it an error reads "exit status 255".
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exit.Stderr)))
+	}
+	return out, err
 }
 
 type Host struct {
@@ -113,7 +119,12 @@ func (h *Host) ensure(ctx context.Context) error {
 	}
 	sort.Slice(fs, func(i, j int) bool { return fs[i].HostPath < fs[j].HostPath })
 	for i, f := range fs {
-		if err := h.control(ctx, "forward", "-R", f.HostPath+":"+f.EnginePath); err != nil {
+		// The dead master's socket is still on the host (see AddForward).
+		_, err := h.execute(ctx, "rm", "-f", "--", f.HostPath)
+		if err == nil {
+			err = h.control(ctx, "forward", "-R", f.HostPath+":"+f.EnginePath)
+		}
+		if err != nil {
 			for _, done := range fs[:i] {
 				_ = h.control(ctx, "cancel", "-R", done.HostPath+":"+done.EnginePath)
 			}
@@ -147,7 +158,9 @@ func (h *Host) AddForward(ctx context.Context, f box.Forward) error {
 		return nil
 	}
 	if f.Box != "" {
-		if _, err := h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1"`, "dyna", filepath.Dir(f.HostPath)); err != nil {
+		// A socket left by an earlier master, as after an engine restart, makes the forward fail:
+		// sshd keeps it, because its StreamLocalBindUnlink defaults to no.
+		if _, err := h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath); err != nil {
 			return err
 		}
 	}
