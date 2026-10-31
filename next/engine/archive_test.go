@@ -59,10 +59,11 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 	if _, e := s.ArchiveDone(ctx, childCaller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
 		t.Fatal(e)
 	}
-	passLifecycle(t, s, ctx)
-	passLifecycle(t, s, ctx)
-	if _, ok := (<-parentChannel).Body.(contract.Archive); !ok {
-		t.Fatal("parent archive not sent")
+	passLifecycle(t, s, ctx) // Remove the child's box.
+	passLifecycle(t, s, ctx) // Close the child session.
+	passLifecycle(t, s, ctx) // Start the parent's archive.
+	if state := stateOf(t, s, ctx, parent); state != contract.BoxClosing {
+		t.Fatalf("parent box state = %s, want closing", state)
 	}
 	if _, e := s.ArchiveDone(ctx, parentCaller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
 		t.Fatal(e)
