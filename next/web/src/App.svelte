@@ -3,6 +3,9 @@
   import { APIError, call } from "./lib/client.ts";
   import Feed from "./lib/ui/Feed.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
+  import Composer from "./lib/ui/Composer.svelte";
+  import SessionRow from "./lib/ui/SessionRow.svelte";
+  import Icon from "./lib/ui/Icon.svelte";
   import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   let rooms: RoomSummary[] = $state([]);
@@ -52,9 +55,8 @@
   let drafts: Record<string, string> = $state({});
   let failed: string | undefined = $state();
   let key = $derived(`${room}/${session ?? ""}`);
-  function send(event: KeyboardEvent) {
-    if (event.key !== "Enter" || event.shiftKey || event.isComposing || !store || !room) return;
-    event.preventDefault();
+  function send() {
+    if (!store || !room) return;
     const sent = key;
     const text = drafts[sent] ?? "";
     if (!text.trim()) return;
@@ -65,7 +67,7 @@
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
   let feed: HTMLDivElement | undefined = $state();
-  let composer: HTMLElement | undefined = $state();
+  let composer: HTMLTextAreaElement | undefined = $state();
   let members: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
@@ -76,30 +78,37 @@
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
   }
   let roomName = $derived(rooms.find(item => item.id === room)?.name ?? "Room");
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  let counts = $derived(store?.ready ? `${plural(store.sessions.size, "session")} · ${store.turns.size} working` : "");
+  // A session's muted status line: what it does now, then its profile.
+  const status = (id: string, profile: string) => {
+    const box = store?.boxes.get(id);
+    return `${store?.turns.has(id) ? "working" : box && box !== "ready" ? `box ${box}` : "idle"} · ${profile}`;
+  };
   let title = $derived(!room ? "Welcome" : session ? store?.sessions.get(session)?.name ?? "Session" : roomName);
 </script>
 
 <svelte:window onkeydown={cycle} />
 <div class="shell" class:open={room}>
   <aside aria-label="Rooms" tabindex="-1" bind:this={rail}>
-    <header><strong>Dyna</strong></header>
+    <header><Icon name="root" /><strong>Dyna</strong></header>
     <div class="section-title">Rooms</div>
     {#if rooms.length}
       <nav>{#each rooms as item (item.id)}
-        <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}>{item.name}</a>
+        <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}><Icon name="room" />{item.name}</a>
       {/each}</nav>
     {:else}<p class="hint">{roomsError || "Your rooms will appear here."}</p>{/if}
   </aside>
   <main>
-    <header><span>{title}</span></header>
+    <header>{#if room && !session}<Icon name="room" />{/if}<strong>{title}</strong>
+      {#if !session && counts}<span class="count">{counts}</span>{/if}</header>
     <div class="feed">
       {#if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
       {:else}<p class="empty">{unavailable || "Select a room."}</p>{/if}
     </div>
     {#if room && !unavailable}
-      <textarea class="composer" rows="1" aria-label="Message" bind:this={composer} bind:value={drafts[key]} onkeydown={send}
-        placeholder={"Message " + title}></textarea>
+      <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title} />
       {#if failed === key}<p class="hint" role="alert">Your message was not sent. Press Enter to try again.</p>{/if}
     {/if}
   </main>
@@ -107,7 +116,7 @@
     <aside class="members" aria-label="Sessions" tabindex="-1" bind:this={members}>
       <header class="label">Sessions</header>
       {#each tree as { session: item, depth } (item.session)}
-        <div class="member" style:padding-left="{16 + depth * 14}px">{item.name}
+        <div class="member" style:padding-left="{16 + depth * 14}px"><SessionRow name={item.name} status={status(item.session, item.profile)} />
           {#if store?.failed.has(item.session)}<StatusPill tone="failed">Failed</StatusPill>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
     </aside>
