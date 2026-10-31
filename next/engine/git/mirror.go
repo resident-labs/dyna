@@ -136,6 +136,43 @@ func (m *Mirror) Size(ctx context.Context, repo contract.RepoName) (contract.Box
 	return contract.BoxSizeName(size), err
 }
 
+// DeleteArchiveRef deletes only the recorded archive commit, never a changed ref.
+func (m *Mirror) DeleteArchiveRef(ctx context.Context, repo contract.RepoName, ref, commit string) error {
+	if m.Token == "" {
+		return MissingTokenError{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	path, err := m.path(repo)
+	if err != nil {
+		return err
+	}
+	remote := "https://github.com/" + string(repo) + ".git"
+	out, err := m.Runner.Run(ctx, m.authEnv(), "ls-remote", remote, ref)
+	if err != nil {
+		return err
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return nil
+	}
+	if len(fields) != 2 || fields[0] != commit || fields[1] != ref {
+		return errors.New("archive ref changed")
+	}
+	if _, err = os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return err
+		}
+		if _, err := m.Runner.Run(ctx, nil, "init", "--bare", path); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	_, err = m.Runner.Run(ctx, m.authEnv(), "--git-dir", path, "push", "--force-with-lease="+ref+":"+commit, remote, ":"+ref)
+	return err
+}
+
 // Ref reads one remote reference without fetching its objects.
 func (m *Mirror) Ref(ctx context.Context, repo contract.RepoName, ref string) (string, error) {
 	out, err := m.Runner.Run(ctx, m.authEnv(), "ls-remote", "https://github.com/"+string(repo)+".git", ref)
