@@ -95,6 +95,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Show a status only for state that needs attention (warning, error, failed, blocked) or that the owner cannot see otherwise. [owner r16]
 - Never add a status that repeats a control, such as "On" beside a switch. [owner r16]
 - Show plain facts (next run time, profile name, Idle) as muted text. [owner r16]
+- Show nothing for a healthy state: no green online dot and no OK chip. [owner, #1461]
 - Use a neutral outline badge for labels such as Default. [owner r16]
 - Give a session one status at most: Working, Pending approval or Failed. [spec 5.13]
 - In a dense list, show a 9 px dot alone; its label goes in the tooltip and the aria-label. [v1 StatusPill `mark`] [T3 `ThreadStatusLabel` compact, `ConnectionStatusDot.tsx`]
@@ -126,6 +127,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Show a row name in full. Truncate the muted second line first. [root, #1448]
 - Give a session row an avatar, its name, and one muted line that says what it is doing. [lead, polish pass] [v1]
 - Make the session tree collapsible with a chevron. [owner]
+- Home lists aggregate per room; never one row per agent. [root, #1461]
 
 ### Feed and messages
 
@@ -181,6 +183,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 4. Show v2's screen beside them in the PR, in dark and light when the view has both. [owner r23] [spec 5.13]
 5. Check the screenshot against this file before you ask for review. List any rule that you broke on purpose, and give the reason.
 6. The reviewer and the lead reject the PR unless v2 is clearly better than v1. [owner r23]
+7. Every UI PR includes a 390 px screenshot, and every screen works at that width. [owner, #1461]
 
 ### Adding or changing a rule
 

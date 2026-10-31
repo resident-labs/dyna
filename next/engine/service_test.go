@@ -1317,6 +1317,7 @@ func TestOwnerAttention(t *testing.T) {
 			{ID: "attention-post", Room: a, Body: contract.PostCreated{Text: "skip"}},
 			{ID: "attention-op", Room: a, Body: contract.OpRequested{}},
 			{ID: "attention-turn", Room: b.Room, Body: contract.TurnStarted{}},
+			{ID: "attention-session", Room: b.Room, Body: contract.SessionStarted{Session: "new-session"}},
 		} {
 			event.Time = time.Unix(1000, 0)
 			event.From = contract.Principal{Kind: contract.PrincipalEngine}
@@ -1329,7 +1330,8 @@ func TestOwnerAttention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []contract.EventID{"attention-op", "attention-turn"} {
+	// Home counts a room's sessions from session.started and session.closed.
+	for _, id := range []contract.EventID{"attention-op", "attention-turn", "attention-session"} {
 		event := <-stream
 		if event.ID != id {
 			t.Fatalf("got %s, want %s", event.ID, id)
