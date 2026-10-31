@@ -90,13 +90,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	}
 	ctx, stop := context.WithCancel(ctx)
 	s.mu.Lock()
-	if previous := s.channels[session.ID]; previous != nil {
+	state := s.sessionLocked(session.ID)
+	if previous := state.channel; previous != nil {
 		s.clearComputerLocked(session.ID)
 		s.clearShellLocked(session.ID)
 		previous.stop()
 	}
 	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1)}
-	s.channels[session.ID] = channel
+	state.channel = channel
 	s.mu.Unlock()
 	sub, cancel := s.store.Subscribe()
 	out := make(chan contract.BoxMessage)
@@ -104,8 +105,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		defer func() {
 			stop()
 			s.mu.Lock()
-			if s.channels[session.ID] == channel {
-				delete(s.channels, session.ID)
+			if state.channel == channel {
+				state.channel = nil
 				s.clearComputerLocked(session.ID)
 				s.clearShellLocked(session.ID)
 			}
@@ -117,13 +118,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		archiveSent := false
 		for {
 			s.mu.Lock()
-			c := s.computers[session.ID]
+			c := state.computer
 			var desired uint64
 			if c != nil && len(c.watchers) != 0 {
 				desired = c.generation
 			}
 			var shellDesired uint64
-			if w := s.shellWatches[session.ID]; w != nil && len(w.watchers) > 0 {
+			if w := state.watch; w != nil && len(w.watchers) > 0 {
 				shellDesired = w.generation
 			}
 			s.mu.Unlock()
