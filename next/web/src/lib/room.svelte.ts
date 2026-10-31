@@ -155,6 +155,8 @@ export class RoomStore {
   private async page(range: { beforeSeq: number } | { afterSeq: number }): Promise<{ events: Event[]; full: boolean }> {
     const page = await call("events.list", { room: this.room, afterSeq: 0, ...range, limit: PAGE });
     const values = page.events ?? [];
+    // Names of the page's sessions, closed ones too, because session.list returns open sessions only.
+    for (const [session, name] of Object.entries(page.names ?? {})) this.names.set(session, name);
     return { events: values.map(decodeEvent).filter(event => event !== undefined), full: values.length === PAGE };
   }
 

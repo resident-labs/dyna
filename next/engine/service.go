@@ -757,41 +757,52 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	if len(events) > 0 {
 		next = events[len(events)-1].Seq
 	}
-	ids := map[contract.SessionID]bool{}
+	// Names of the sessions this page names, so that posts and events of closed sessions keep their authors.
+	named := map[contract.SessionID]bool{}
 	for _, event := range events {
-		if event.From.Kind == contract.PrincipalSession {
-			ids[event.From.Session] = true
-		}
+		named[event.From.Session] = true
 		switch body := event.Body.(type) {
 		case contract.SessionStarted:
-			ids[body.Session] = true
+			named[body.Session] = true
 		case contract.SessionClosed:
-			ids[body.Session] = true
+			named[body.Session] = true
 		case contract.TurnStarted:
-			ids[body.Session] = true
+			named[body.Session] = true
 		case contract.TurnEnded:
-			ids[body.Session] = true
+			named[body.Session] = true
 		case contract.ShellJobEnded:
-			ids[body.Session] = true
+			named[body.Session] = true
 		case contract.BoxChanged:
-			ids[body.Session] = true
+			named[body.Session] = true
+		case contract.PrOpened:
+			named[body.Session] = true
 		case contract.OpRequested:
-			if body.By.Kind == contract.PrincipalSession {
-				ids[body.By.Session] = true
-			}
+			named[body.By.Session] = true
 		}
 	}
+	delete(named, "")
+	var ids []any
+	for id := range named {
+		ids = append(ids, id)
+	}
 	names := map[contract.SessionID]string{}
-	for id := range ids {
-		if id == "" {
-			continue
-		}
-		var name string
-		err := s.store.Read().QueryRowContext(ctx, "SELECT name FROM sessions WHERE id=?", id).Scan(&name)
+	if len(ids) > 0 {
+		rows, err := s.store.Read().QueryContext(ctx, "SELECT id,name FROM sessions WHERE id IN (?"+strings.Repeat(",?", len(ids)-1)+")", ids...)
 		if err != nil {
 			return contract.EventsListResponse{}, failure(err)
 		}
-		names[id] = name
+		defer rows.Close()
+		for rows.Next() {
+			var id contract.SessionID
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				return contract.EventsListResponse{}, failure(err)
+			}
+			names[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			return contract.EventsListResponse{}, failure(err)
+		}
 	}
 	return contract.EventsListResponse{Events: events, Next: next, Names: names}, nil
 }
