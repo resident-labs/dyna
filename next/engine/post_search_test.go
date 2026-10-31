@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"github.com/resident-labs/dyna/contract"
 	"strings"
 	"testing"
@@ -62,6 +63,16 @@ func TestPostSearch(t *testing.T) {
 	result, e := s.PostSearch(ctx, owner, contract.PostSearchRequest{Query: "work blue", Limit: 1})
 	if e != nil || result.Total != 1 || len(result.Posts) != 1 || result.Posts[0].Author.Session != worker {
 		t.Fatalf("author search: %+v, %v", result, e)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE sessions SET closed_at=1 WHERE id=?", worker)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, e = s.PostSearch(ctx, owner, contract.PostSearchRequest{Query: "work blue"})
+	if e != nil || result.Names[worker] != "worker" {
+		t.Fatalf("closed author: %+v %v", result, e)
 	}
 	if _, e := s.PostSearch(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostSearchRequest{Query: "deploy"}); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("session: %v", e)

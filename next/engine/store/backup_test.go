@@ -59,7 +59,7 @@ func TestUpgradeBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.writer.Exec("DROP TRIGGER post_search_insert; DROP TRIGGER post_search_delete; DROP TABLE post_search; ALTER TABLE deliveries DROP COLUMN handoff_from; ALTER TABLE archives DROP COLUMN retry_at; DROP INDEX events_client_id; ALTER TABLE events DROP COLUMN client_id; ALTER TABLE sessions DROP COLUMN close_reason; ALTER TABLE boxes ADD COLUMN parent TEXT REFERENCES boxes(id); DROP TABLE room_shared; DROP TABLE host_rooms; DROP TABLE device_scopes; DROP TABLE devices; DROP TABLE pairing_codes; DROP TABLE backup_copy_status; ALTER TABLE pr_owners DROP COLUMN branch; UPDATE meta SET value='27' WHERE key='schema_version'"); err != nil {
+	if _, err := s.writer.Exec("DROP TRIGGER session_search_insert; DROP TRIGGER session_search_update; DROP TRIGGER session_search_delete; DROP TABLE session_search; DROP TRIGGER post_search_insert; DROP TRIGGER post_search_delete; DROP TABLE post_search; ALTER TABLE deliveries DROP COLUMN handoff_from; ALTER TABLE archives DROP COLUMN retry_at; DROP INDEX events_client_id; ALTER TABLE events DROP COLUMN client_id; ALTER TABLE sessions DROP COLUMN close_reason; ALTER TABLE boxes ADD COLUMN parent TEXT REFERENCES boxes(id); DROP TABLE room_shared; DROP TABLE host_rooms; DROP TABLE device_scopes; DROP TABLE devices; DROP TABLE pairing_codes; DROP TABLE backup_copy_status; ALTER TABLE pr_owners DROP COLUMN branch; UPDATE meta SET value='27' WHERE key='schema_version'"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
