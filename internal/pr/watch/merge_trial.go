@@ -666,6 +666,12 @@ func (s *Service) publishTrialBatch(ctx context.Context, st State, repo string, 
 		b.Reason = err.Error()
 		return false, errors.Join(err, s.saveMergeTrial(repo, *b))
 	}
+	// Save the publication while the hold fence is still held. GitHub can
+	// report the PR open briefly after the main branch push.
+	b.PushPublished = true
+	if err := s.saveMergeTrial(repo, *b); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
