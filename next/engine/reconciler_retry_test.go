@@ -378,3 +378,44 @@ func TestCreateRetryAcceptsNewHelloAfterCleanup(t *testing.T) {
 		t.Fatalf("old hello=%v new hello=%v box=%+v err=%v", host.oldHello, host.newHello, b, err)
 	}
 }
+
+type closeDuringRetryCleanup struct {
+	fakeBoxes
+	service      *Service
+	session      contract.SessionID
+	closeProblem *contract.Error
+	created      bool
+}
+
+func (h *closeDuringRetryCleanup) Remove(ctx context.Context, _ contract.BoxID) error {
+	_, h.closeProblem = h.service.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: h.session, Discard: true})
+	return nil
+}
+
+func (h *closeDuringRetryCleanup) Create(context.Context, lifecycle.BoxSpec) (string, error) {
+	h.created = true
+	return "image", nil
+}
+
+func TestCreateRetryDoesNotStartAfterClose(t *testing.T) {
+	s, _, sid, ctx := setup(t)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=?, failures=1 WHERE id=?", s.now().UnixMilli()-1, session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host := &closeDuringRetryCleanup{service: s, session: sid}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, s.now)
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	if host.closeProblem != nil || host.created {
+		t.Fatalf("close=%v created=%v", host.closeProblem, host.created)
+	}
+}
