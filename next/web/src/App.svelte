@@ -1,7 +1,8 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
-  import { APIError } from "./lib/client.ts";
+  import { blockedBy, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
+  import Blocked from "./lib/ui/Blocked.svelte";
   import Feed from "./lib/ui/Feed.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
@@ -20,13 +21,30 @@
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
-  const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
-  let roomsError = $state("");
-  void attention.open().catch((error: unknown) => {
-    roomsError = signedOut(error) ? "Your sign-in ended. Run dyna web to sign in again." : "Rooms are not available.";
-  });
+  // While the engine is not reachable, open runs again by itself: after a growing wait while the page is visible, and at
+  // once when a hidden page becomes visible again. Try again runs it at once.
+  function retrying(open: () => Promise<BlockedState | undefined>) {
+    let tries = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = () => {
+      clearTimeout(timer);
+      void open().then(state => {
+        if (state !== "unreachable") { tries = 0; return; }
+        if (document.visibilityState === "visible") timer = setTimeout(run, retryDelay(tries++));
+      });
+    };
+    const wake = () => { if (document.visibilityState === "hidden") clearTimeout(timer); else if (tries) run(); };
+    document.addEventListener("visibilitychange", wake);
+    return { run, stop: () => { clearTimeout(timer); document.removeEventListener("visibilitychange", wake); } };
+  }
+  // room.list failing blocks the whole page: the owner is signed out, or the engine is not reachable.
+  let blocked: BlockedState | undefined = $state();
+  let roomsLoaded = $state(false);
+  const connect = retrying(() => attention.open().then(() => { blocked = undefined; roomsLoaded = true; return undefined; },
+    (error: unknown) => (blocked = blockedBy(error) ?? "unreachable"))).run;
+  connect();
   let path = $state(window.location.pathname);
   window.addEventListener("popstate", () => { path = window.location.pathname; section = undefined; });
   // A room view from the header menu shows in place of the conversation until Back or Escape.
@@ -46,12 +64,15 @@
     if (!room) { store = undefined; return; }
     const current = new RoomStore(room);
     store = current;
-    void current.open();
-    return () => current.close();
+    const opening = retrying(() => current.open().then(() => current.ready ? undefined : blockedBy(current.error)));
+    reopen = opening.run;
+    opening.run();
+    return () => { opening.stop(); current.close(); };
   });
-  // A room that failed to open is unavailable; later load errors show inside the feed.
-  let unavailable = $derived(!store || store.ready || store.error === undefined ? ""
-    : signedOut(store.error) ? "Your sign-in ended. Run dyna web to sign in again." : "This room is not available.");
+  // A room that failed to open is unavailable, for the same reasons as the page or its own; later load errors show inside the feed.
+  // Opens the shown room again; the effect above sets it for each room.
+  let reopen = $state(() => {});
+  let unavailable: BlockedState | "room" | undefined = $derived(!store || store.ready || store.error === undefined ? undefined : blockedBy(store.error) ?? "room");
   function navigate(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey) return;
     event.preventDefault();
@@ -247,12 +268,14 @@
         {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={requests} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
-      {#if !room && !roomsError}<Home {attention} {navigate} onrequests={() => { section = "requests"; }} />
+      {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
+      {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
+      {:else if !room}<Home {attention} {navigate} onrequests={() => { section = "requests"; }} />
+      {:else if unavailable && unavailable !== "room"}<Blocked kind={unavailable} onretry={unavailable === "unreachable" ? reopen : undefined} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={quote => { quotes[key] = quote; composer?.focus(); }} />{/key}
-      {:else}<p class="empty">{unavailable || roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}
-        {#if store && unavailable && !signedOut(store.error)}<button type="button" class="retry" onclick={() => void store?.open()}>Try again</button>{/if}</p>{/if}
+      {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
     {#if room && !unavailable}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
