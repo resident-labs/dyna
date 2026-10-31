@@ -194,6 +194,26 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 	return updated, err
 }
 
+// BeginCreate clears the retry deadline after cleanup, only while the same create
+// is still wanted. This lets the new container send hello before Create returns.
+func (s *Store) BeginCreate(ctx context.Context, id contract.BoxID, due time.Time) (bool, error) {
+	var dueMS int64
+	if !due.IsZero() {
+		dueMS = due.UnixMilli()
+	}
+	var begun bool
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET due_at=0 WHERE id=? AND state='creating' AND want='run' AND due_at=?`, id, dueMS)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		begun = n != 0
+		return err
+	})
+	return begun, err
+}
+
 // FinishCreate records the host result without overwriting a concurrent hello.
 func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
