@@ -70,7 +70,7 @@ func newRig(output string, killOn syscall.Signal) *rig {
 			}
 			return nil
 		},
-		start: func(_, _ string, out io.Writer) (process, error) {
+		start: func(_, _, _ string, out io.Writer) (process, error) {
 			_, err := io.WriteString(out, output)
 			return r.proc, err
 		},
@@ -82,7 +82,7 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	r := newRig("building\n", syscall.SIGKILL)
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "make", "", "")
+		j, _ := r.server.run(nil, "make", "", "", "")
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -107,7 +107,7 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 func TestFastCommandReturnsItsExitWithoutReport(t *testing.T) {
 	r := newRig("ok\n", syscall.SIGKILL)
 	r.proc.exit <- 0
-	j, err := r.server.run(nil, "true", "", "")
+	j, err := r.server.run(nil, "true", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestStopKillsTheGroupAfterTheGracePeriod(t *testing.T) {
 	r := newRig("", syscall.SIGKILL) // the process ignores SIGTERM
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "sleep 99", "", "")
+		j, _ := r.server.run(nil, "sleep 99", "", "", "")
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -151,7 +151,7 @@ func TestCloseKillsEveryJobGroup(t *testing.T) {
 	r := newRig("", syscall.SIGKILL)
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "sleep 99", "", "")
+		j, _ := r.server.run(nil, "sleep 99", "", "", "")
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -212,12 +212,28 @@ func TestHandlerRunsAShellCall(t *testing.T) {
 	}
 }
 
+func TestMCPPassesCallIDToShell(t *testing.T) {
+	r := newRig("", syscall.SIGKILL)
+	var got string
+	r.server.cfg.start = func(_, _, id string, _ io.Writer) (process, error) {
+		got = id
+		return r.proc, nil
+	}
+	r.proc.exit <- 0
+	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shell","arguments":{"command":"true","_dynaCallId":"call-1"}}}`))
+	response := httptest.NewRecorder()
+	r.server.Handler().ServeHTTP(response, request)
+	if got != "call-1" {
+		t.Fatalf("call ID = %q", got)
+	}
+}
+
 func TestReportRetriesUntilTheEngineAccepts(t *testing.T) {
 	r := newRig("", syscall.SIGKILL)
 	r.failing = 1
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "make", "", "")
+		j, _ := r.server.run(nil, "make", "", "", "")
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -235,14 +251,14 @@ func TestOnlyTheLastFinishedJobsAreKept(t *testing.T) {
 	server := New(Config{
 		After: func(time.Duration) <-chan time.Time { return nil },
 		newID: func() contract.ShellJobID { n++; return contract.ShellJobID(fmt.Sprintf("job_%d", n)) },
-		start: func(string, string, io.Writer) (process, error) {
+		start: func(string, string, string, io.Writer) (process, error) {
 			p := &fakeProc{exit: make(chan int, 1)}
 			p.exit <- 0
 			return p, nil
 		},
 	})
 	for range keepFinished + 2 {
-		if _, err := server.run(nil, "true", "", ""); err != nil {
+		if _, err := server.run(nil, "true", "", "", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -274,7 +290,7 @@ func TestStopKillsAChildThatOutlivesTheLeader(t *testing.T) {
 	r.proc.orphan = true
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "sleep 99 &", "", "")
+		j, _ := r.server.run(nil, "sleep 99 &", "", "", "")
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -293,7 +309,7 @@ func TestReportTailMasksATokenAcrossTheCut(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a1", 15)
 	r := newRig(strings.Repeat("x", tailLimit-10)+" "+token+"\n", syscall.SIGKILL)
 	r.proc.exit <- 0
-	if _, err := r.server.run(nil, "env", "", ""); err != nil {
+	if _, err := r.server.run(nil, "env", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	j, _ := r.server.find("job_1")
@@ -370,7 +386,7 @@ func TestOwnerViewCarriesJobTimes(t *testing.T) {
 	times := []time.Time{started, ended}
 	r.server.cfg.now = func() time.Time { now := times[0]; times = times[1:]; return now }
 	r.proc.exit <- 0
-	j, err := r.server.run(nil, "make", "", "")
+	j, err := r.server.run(nil, "make", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +451,7 @@ func TestJobEndAndDescription(t *testing.T) {
 			r.proc.signal = tc.signal
 			r.proc.stopCode = tc.code
 			done := make(chan *job, 1)
-			go func() { j, _ := r.server.run(nil, "build", "", "Build the bundle"); done <- j }()
+			go func() { j, _ := r.server.run(nil, "build", "", "Build the bundle", ""); done <- j }()
 			(<-r.timers).fire <- time.Time{}
 			j := <-done
 			if tc.stopped {

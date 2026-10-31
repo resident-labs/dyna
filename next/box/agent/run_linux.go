@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +31,9 @@ const (
 	engineSocket = "/run/dyna/engine/engine.sock"
 	piDir        = "/box/pi"
 )
+
+//go:embed call_id.ts
+var callIDExtension string
 
 func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
 	switch model.Provider {
@@ -168,6 +173,12 @@ func Run(ctx context.Context) error {
 	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
+	extensionPath := filepath.Join(piDir, "dyna-call-id.ts")
+	extension := strings.ReplaceAll(callIDExtension, "__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument)
+	if err = os.WriteFile(extensionPath, []byte(extension), 0600); err != nil {
+		return err
+	}
+	args = append(args, "--extension", extensionPath)
 	args = append(args, "--append-system-prompt", hello.Instructions)
 	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--exclude-tools", "bash", "--continue")
 	h, err := pi.Open(ctx, "pi", args, "", workdir)
