@@ -67,7 +67,7 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
 // The muted time on a row's name line: the clock today, else the date and the clock.
 export function formatTime(value: string): string {
   const at = new Date(value);
-  const clock = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const clock = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return at.toDateString() === new Date().toDateString() ? clock : `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
 }
 
