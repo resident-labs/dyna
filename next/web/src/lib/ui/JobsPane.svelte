@@ -117,7 +117,7 @@
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (the keyboard scrolls the output) -->
       <pre bind:this={output} tabindex="0" aria-label={`Output of ${shown.job.command}`}
         onscroll={() => { if (output) following = output.scrollHeight - output.scrollTop - output.clientHeight < 40; }}
-        >{#if fail}{shown.job.text.slice(0, fail.start)}<mark bind:this={failing}>{shown.job.text.slice(fail.start, fail.end)}</mark>{shown.job.text.slice(fail.end)}{:else}{shown.job.text || "No output yet."}{/if}</pre>
+        >{#if fail}{shown.job.text.slice(0, fail.start)}<mark bind:this={failing}>{shown.job.text.slice(fail.start, fail.end)}</mark>{shown.job.text.slice(fail.end)}{:else}{shown.job.text || (shown.job.running ? "No output yet." : "No output.")}{/if}</pre>
       {#if !following && shown.job.running}<button type="button" class="retry resume" onclick={() => { following = true; }}>Resume following</button>{/if}
     {/if}
   </section>
