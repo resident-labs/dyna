@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -88,4 +90,56 @@ func (closingInterleaveBox) TerminalArgv(context.Context, contract.HostName, con
 
 func (heldRemoveBox) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
 	return nil, nil
+}
+
+func (checkingBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (*recoveryBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (*retryTimeoutBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (*blockingTimeoutBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (unavailableBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (blockingBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (cancelOnRemove) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (*recordingBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (*heldParentBox) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (closingInterleaveBox) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (heldRemoveBox) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (fakeBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
+}
+
+func (*retryHost) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: true}, true, nil
 }

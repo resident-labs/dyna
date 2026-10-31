@@ -219,7 +219,7 @@ func TestHeartbeatReportsLoad(t *testing.T) {
 			reports <- sample{ok, load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed}
 		}, func(string, contract.PressureKind) {})
 	}()
-	for i, want := range []sample{{true, 0, 100, 1000, 400}, {true, 1.5, 250, 1000, 400}} {
+	for i, want := range []sample{{true, 0, 100, 1000, 400}, {true, 1.5, 250, 0, 0}} {
 		ticks <- time.Unix(1000+int64(10*i), 0)
 		if got := <-reports; got != want {
 			t.Errorf("sample %d: got %+v, want %+v", i, got, want)

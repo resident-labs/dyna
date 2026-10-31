@@ -89,6 +89,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	if err != nil {
 		return nil, failure(err)
 	}
+	if err := s.store.WakeLostInventory(ctx, session.Box); err != nil {
+		return nil, failure(err)
+	}
 	ctx, stop := context.WithCancel(ctx)
 	s.mu.Lock()
 	state := s.sessionLocked(session.ID)
@@ -109,6 +112,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		_ = s.computerEvent(context.Background(), session.ID, room, contract.ComputerStopped)
 	}
 	state.computerLock.Unlock()
+	s.reconciler.Connected(session.Box)
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {

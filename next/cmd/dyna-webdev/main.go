@@ -253,6 +253,12 @@ func (b *boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	return host, b.Start(ctx, spec.Box)
 }
+func (b *boxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cancel, present := b.cancel[id]
+	return box.ContainerStatus{Box: id, Running: cancel != nil}, present, nil
+}
 func (b *boxes) Start(_ context.Context, id contract.BoxID) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -268,7 +274,7 @@ func (b *boxes) Stop(_ context.Context, id contract.BoxID) error {
 	b.mu.Lock()
 	if cancel := b.cancel[id]; cancel != nil {
 		cancel()
-		delete(b.cancel, id)
+		b.cancel[id] = nil
 	}
 	b.mu.Unlock()
 	return nil
@@ -278,6 +284,9 @@ func (b *boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, _, _ strin
 }
 func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	_ = b.Stop(ctx, id) // Stop never fails.
+	b.mu.Lock()
+	delete(b.cancel, id)
+	b.mu.Unlock()
 	return b.sockets.RemoveBox(id)
 }
 func (b *boxes) run(ctx context.Context, id contract.BoxID) {
