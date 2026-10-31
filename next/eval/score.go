@@ -2,17 +2,23 @@ package eval
 
 import "slices"
 
+// FieldName identifies a canonical field supplied by the trusted observer.
+type FieldName string
+
+// Operation identifies a normalized engine or box operation.
+type Operation string
+
 // Field holds one canonical, non-secret fixture value from a trusted observer.
 // The observer must resolve identifiers and normalize transport-specific calls.
 type Field struct {
-	Name  string
+	Name  FieldName
 	Value string
 }
 
 // Call is one model-initiated operation, observed at an engine or box boundary.
 // Discovery calls have Discovery set and are reported separately as extra calls.
 type Call struct {
-	Operation string
+	Operation Operation
 	Arguments []Field
 	Failed    bool
 	Discovery bool

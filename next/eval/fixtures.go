@@ -10,13 +10,13 @@ type Fixture struct {
 	BranchHead, BranchBase                     string
 }
 
-func field(name, value string) Field { return Field{Name: name, Value: value} }
+func field(name FieldName, value string) Field { return Field{Name: name, Value: value} }
 
 // Expected returns the required calls and observed facts for one frozen task.
 // The fixture observer must obtain response facts and final state from the
 // engine or box, rather than deriving them from the model's final message.
 func Expected(id int, f Fixture) (Expectation, error) {
-	call := func(op string, args ...Field) Call { return Call{Operation: op, Arguments: args} }
+	call := func(op Operation, args ...Field) Call { return Call{Operation: op, Arguments: args} }
 	switch id {
 	case 1:
 		return Expectation{Calls: []Call{call("session.list", field("room", f.Room))}, State: []Field{field("session.A", f.A), field("session.B", f.B)}}, nil

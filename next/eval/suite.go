@@ -8,7 +8,7 @@ import "strings"
 type Task struct {
 	ID        int
 	Prompt    string
-	Operation string
+	Operation Operation
 }
 
 var tasks = [...]Task{
