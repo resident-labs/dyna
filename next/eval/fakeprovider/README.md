@@ -18,9 +18,9 @@ The first line of `listen.txt` is the chosen loopback address. Configure a
 separate CLIProxyAPI instance with an OpenAI-compatible provider whose base URL
 is `http://<address>/v1`, a dummy upstream key, and model name and alias equal
 to the fixture model. Use a separate proxy client key and empty auth directory.
-Run Pi against that proxy using the fixture model and a dummy key. A full-engine
-run additionally needs a sandbox-only way to configure its supervised proxy;
-this tool does not provide one.
+For a full-engine run, use a sandbox engine directory and an evaluation
+\`pi.tgz\` whose catalog adds the loopback fixture provider. Add the dummy key
+through the normal accounts API. This path depends on catalog PR 2.
 
 Example fixture:
 
