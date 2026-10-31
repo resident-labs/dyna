@@ -20,6 +20,18 @@ func (*blockedBackend) Execute(context.Context, Cell, Fixture) (Attempt, error) 
 }
 func (*blockedBackend) Cleanup(context.Context, Cell, Fixture) error { return nil }
 
+type incompleteFixtureBackend struct{ blockedBackend }
+
+func (*incompleteFixtureBackend) Preflight(context.Context) error { return nil }
+
+func TestIncompleteFixtureStartsNoModel(t *testing.T) {
+	backend := &incompleteFixtureBackend{}
+	err := RunSuite(context.Background(), backend, func(CellResult) error { t.Fatal("unexpected result"); return nil })
+	if err == nil || backend.calls != 1 {
+		t.Fatalf("err=%v prepares=%d", err, backend.calls)
+	}
+}
+
 func TestMissingPrerequisiteStartsNoTasks(t *testing.T) {
 	backend := &blockedBackend{}
 	err := RunSuite(context.Background(), backend, func(CellResult) error { t.Fatal("unexpected result"); return nil })

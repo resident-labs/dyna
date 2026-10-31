@@ -10,6 +10,21 @@ type Fixture struct {
 	BranchHead, BranchBase                     string
 }
 
+// Validate rejects incomplete fixtures before a model can act.
+func (f Fixture) Validate() error {
+	for name, value := range map[string]string{
+		"room": f.Room, "lead": f.Lead, "A": f.A, "B": f.B, "C": f.C,
+		"AName": f.AName, "BName": f.BName, "profile": f.Profile,
+		"operation": f.Operation, "host": f.Host, "file": f.File, "visual": f.Visual,
+		"page": f.Page, "branchHead": f.BranchHead, "branchBase": f.BranchBase,
+	} {
+		if value == "" {
+			return fmt.Errorf("fixture %s is empty", name)
+		}
+	}
+	return nil
+}
+
 func field(name FieldName, value string) Field { return Field{Name: name, Value: value} }
 
 // Expected returns the required calls and observed facts for one frozen task.
