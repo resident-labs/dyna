@@ -62,10 +62,18 @@
   }
 
   // Reads the element itself: the scroll handler runs before the virtualizer sees the new offset.
-  let last = 0;
+  let last = 0, atEnd = true;
+  // A view that shrinks, as when a phone's keyboard opens, keeps its scrollTop; a reader at the newest row stays there.
+  $effect(() => {
+    if (!element || !follow) return;
+    const view = element, observer = new ResizeObserver(() => { if (atEnd) view.scrollTop = view.scrollHeight; });
+    observer.observe(view);
+    return () => observer.disconnect();
+  });
   function scrolled(event?: Event) {
     if (!element) return;
     const top = element.scrollTop;
+    atEnd = top + element.clientHeight >= element.scrollHeight - 2;
     const page = shouldPage(top, element.scrollHeight, element.clientHeight, edge, event ? top - last : undefined);
     last = top;
     if (page.start) onstart?.();
