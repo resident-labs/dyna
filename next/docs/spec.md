@@ -354,7 +354,7 @@ const (
 	ClassOwner Class = "owner" // only the owner approves
 )
 
-type OpState string // "pending" | "approved" | "denied" | "expired" | "withdrawn" | "done" | "failed"
+type OpState string // "pending" | "approved" | "running" | "denied" | "expired" | "withdrawn" | "done" | "failed"
 
 type Operation struct {
 	ID       OpID      `json:"id"`
@@ -547,7 +547,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `transcripts` | (`session`, `path`) PK, `acked_offset`, `file` |
 | M2 | `images` | section 5.2 |
 | M3 | `room_shared` | (`room`, `host`) PK, `bytes`, `measured_at` (5.6) |
-| M2 | `operations` | `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
+| M2 | `operations` | schema step 38 treats legacy approved operations as running, because their outcome is unknown; `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
 | M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `hosts` JSON, `commands` JSON, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at`, `expired_at` |
 | M2 | `hostexec_runs` | section 6.3 |
 | M2 | `archives` | section 5.9 |

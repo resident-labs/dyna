@@ -15,7 +15,7 @@
   } = $props();
   const name = (who: Principal) => who.kind === "owner" ? "You" : who.session ? store.names.get(who.session) ?? "A closed session" : "Dyna";
   const outcome: Record<OpState, string> = {
-    pending: "", approved: "approved", denied: "denied", expired: "expired", withdrawn: "withdrawn", done: "approved", failed: "approved",
+    pending: "", approved: "approved", running: "approved", denied: "denied", expired: "expired", withdrawn: "withdrawn", done: "approved", failed: "approved",
   };
   // The root session is the open session with no parent.
   let open = $derived(request.by.session ? store.sessions.get(request.by.session) : undefined);
