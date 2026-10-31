@@ -16,6 +16,14 @@
   // An agent-class request may also be decided by the requester's parent session.
   let parent = $derived(open?.parent && store.names.get(open.parent));
   let target = $derived(request.card.target.kind === "room" ? "this room" : `${request.card.target.kind} ${request.card.target.name}`);
+  // One muted line for a decided request, such as "Denied by You · 2 minutes ago · “Use CI”". The engine decides expiry.
+  let decided = $derived.by(() => {
+    const decision = request.decision;
+    return [
+      outcome[request.state] + (decision && decision.by.kind !== "engine" ? ` by ${name(decision.by)}` : ""),
+      decision && fromNow(decision.at, now), decision?.reason && request.state !== "expired" && `“${decision.reason}”`, request.result?.error,
+    ].filter(part => typeof part === "string" && part !== "").join(" · ");
+  });
   let reason = $state("");
   let busy = $state(false);
   let failure = $state("");
@@ -47,10 +55,7 @@
     </div>
     {#if failure}<p class="meta" role="alert">{failure}</p>{/if}
   {:else}
-    <p class="meta">{#if request.state === "failed"}<StatusPill tone="failed">Run failed</StatusPill>{/if}
-      {outcome[request.state]}{#if request.decision && request.decision.by.kind !== "engine"} by {name(request.decision.by)}{/if}
-      {#if request.decision}· {fromNow(request.decision.at, now)}{/if}{#if request.decision?.reason && request.state !== "expired"} · “{request.decision.reason}”{/if}
-      {#if request.result?.error}· {request.result.error}{/if}</p>
+    <p class="meta">{#if request.state === "failed"}<StatusPill tone="failed">Run failed</StatusPill>{/if}<span>{decided}</span></p>
   {/if}
 </article>
 
