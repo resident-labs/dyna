@@ -30,7 +30,7 @@
     return () => { generation++; loadGeneration++; clearTimeout(timer); window.removeEventListener("focus", reload); };
   });
   function close() {
-    generation++; clearTimeout(timer); adding = false; selected = undefined; attempt = undefined;
+    generation++; clearTimeout(timer); adding = false; inline = false; selected = undefined; attempt = undefined;
     label = ""; secret = ""; redirect = ""; connectState = "idle"; keyFailed = false;
   }
   function choose(provider: AccountProviderInfo, inPlace: boolean) {
@@ -80,7 +80,7 @@
   };
 </script>
 
-{#snippet action()}<button class="btn" type="button" onclick={() => { close(); adding = true; }}>+ Add an account</button>{/snippet}
+{#snippet action()}<button class="btn add-button" type="button" onclick={() => { close(); adding = true; }}>+ Add an account</button>{/snippet}
 {#snippet form()}
   {#if selected}
     <div class="connect">
@@ -156,6 +156,7 @@
 </div>
 
 <style>
+  .add-button { margin-left: auto; }
   .phone-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
   .body { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; display: grid; align-content: start; gap: 18px; }
   p { margin: 0; } .muted { color: var(--muted); font-size: 12.5px; }
