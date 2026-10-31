@@ -1,3 +1,5 @@
+import type { ComputerInput, MouseButton } from "./contract.gen.ts";
+
 // The owner's input to a computer, as POST /v1/computer.input takes it: DOM key names, DevTools modifier bits, and
 // positions in the pixels of the picture the owner sees. v1 sent X11 keysyms over VNC, with a key down and up for each
 // modifier; here a press carries its modifiers as a bit mask, and the box turns a key into a DevTools key event.
@@ -11,13 +13,7 @@ export const Shift = 8;
 
 export type Modifiers = { ctrl: boolean; alt: boolean };
 
-export type Button = "left" | "middle" | "right";
-// One event of a batch. x and y are 0 for a key event.
-export type ComputerInput = {
-  kind: "key.down" | "key.up" | "char" | "mouse.move" | "mouse.down" | "mouse.up" | "wheel";
-  key?: string; code?: string; text?: string; modifiers?: number; button?: Button;
-  x: number; y: number; deltaX?: number; deltaY?: number;
-};
+export type { ComputerInput };
 
 // A key press is a down and an up, in that order.
 const press = (key: string, code: string, modifiers: number): ComputerInput[] => [
@@ -138,7 +134,7 @@ export function screenPoint(box: Box, picture: Size, clientX: number, clientY: n
 }
 
 // The button a pointer event names. Touch and pen contact are the left button.
-export const buttonOf = (button: number): Button => (button === 1 ? "middle" : button === 2 ? "right" : "left");
+export const buttonOf = (button: number): MouseButton => (button === 1 ? "middle" : button === 2 ? "right" : "left");
 
 // A finger on the screen: a short touch is a click where it lands, and a drag past the slop scrolls, as v1's
 // two-finger scroll did (one finger here, because the view is not zoomed while in control).
