@@ -117,8 +117,9 @@ type boxes struct {
 	cancel  map[contract.BoxID]context.CancelFunc
 }
 
+// Every webdev terminal is a plain local shell, so the web app's terminal can be tried and checked.
 func (b *boxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
-	return nil, fmt.Errorf("terminals are unavailable in webdev")
+	return []string{"bash", "--norc", "--noprofile"}, nil
 }
 
 func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error) {
