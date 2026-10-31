@@ -71,6 +71,7 @@
   let members: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
+    if (event.key === "Escape") panel = false;
     if (event.key !== "F6") return;
     event.preventDefault();
     const areas = [rail, feed, composer, members].filter(area => area !== undefined);
@@ -85,6 +86,8 @@
     const box = store?.boxes.get(id);
     return `${store?.turns.has(id) ? "working" : box && box !== "ready" ? `box ${box}` : "idle"} · ${profile}`;
   };
+  // Below 900 px the sessions panel is hidden; a header button opens it over the feed.
+  let panel = $state(false);
   let title = $derived(!room ? "Welcome" : session ? store?.sessions.get(session)?.name ?? "Session" : roomName);
 </script>
 
@@ -101,7 +104,9 @@
   </aside>
   <main>
     <header>{#if room && !session}<Icon name="room" />{/if}<strong>{title}</strong>
-      {#if !session && counts}<span class="count">{counts}</span>{/if}</header>
+      {#if !session && counts}<span class="count">{counts}</span>{/if}
+      {#if room}<button type="button" class="panel-toggle" aria-label="Sessions" title="Sessions" aria-controls="sessions"
+        aria-expanded={panel} onclick={() => { panel = !panel; }}><Icon name="people" /></button>{/if}</header>
     <div class="feed">
       {#if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
@@ -113,7 +118,7 @@
     {/if}
   </main>
   {#if room}
-    <aside class="members" aria-label="Sessions" tabindex="-1" bind:this={members}>
+    <aside class="members" id="sessions" class:shown={panel} aria-label="Sessions" tabindex="-1" bind:this={members}>
       <header class="label">Sessions</header>
       {#each tree as { session: item, depth } (item.session)}
         <div class="member" style:padding-left="{16 + depth * 14}px"><SessionRow name={item.name} status={status(item.session, item.profile)} />
