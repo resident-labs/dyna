@@ -38,6 +38,7 @@ const bodies: Record<string, Check> = {
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),
   "turn.ended": object({ session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string),
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string) }),
+  "turn.activity": object({ session: string, turn: string, label: string }),
   "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "agent", "owner"), card, expires: string }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
   "op.ran": object({ id: string, state, result: object({ exitCode: number, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
@@ -56,7 +57,8 @@ export function decodeEvent(value: unknown): Event | undefined {
   // JSON objects have string keys; the checks below validate the generated event shape.
   const record = value as Record<string, unknown>;
   const body = typeof record.type === "string" && Object.hasOwn(bodies, record.type) ? bodies[record.type] : undefined;
-  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < 1 || !string(record.id) ||
+  // turn.activity is live only, so it is never stored and has seq 0.
+  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < (record.type === "turn.activity" ? 0 : 1) || !string(record.id) ||
       !string(record.at) || !optional(string)(record.room) || !principal(record.from) || !body?.(record.body)) {
     return skip(value);
   }

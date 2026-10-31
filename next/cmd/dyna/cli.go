@@ -253,6 +253,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		room := contract.RoomID(args[0])
 		var after int64
 		printEvent := func(e contract.Event) error {
+			if e.Seq == 0 {
+				return nil
+			}
 			data, err := json.Marshal(e)
 			if err != nil {
 				return err
