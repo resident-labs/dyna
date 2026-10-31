@@ -91,15 +91,15 @@ func TestDormancyKeepsClosingAncestor(t *testing.T) {
 	}
 }
 
-func TestDormancyKeepsParentWithLiveChild(t *testing.T) {
+func TestDormancyStopsParentWithLiveChild(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
 	_, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: sid, Name: "child", Profile: "test", Goal: "goal"})
 	if problem != nil {
 		t.Fatal(problem)
 	}
 	passLifecycle(t, s, ctx)
-	if h.stops != 0 || stateOf(t, s, ctx, sid) != contract.BoxReady {
-		t.Fatal("parent with a live child stopped")
+	if h.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatal("parent with a live child did not stop")
 	}
 }
 
@@ -227,7 +227,7 @@ func TestDormancySkipsUncreatedPendingBox(t *testing.T) {
 	}
 }
 
-func TestWakeStartsDormantBudgetParent(t *testing.T) {
+func TestWakeDoesNotStartDormantParent(t *testing.T) {
 	s, room, parent, ctx := setup(t)
 	host := &dormantHost{}
 	s.boxes = host
@@ -253,8 +253,8 @@ func TestWakeStartsDormantBudgetParent(t *testing.T) {
 	wakeSession(t, s, ctx, room, child.Session)
 	passLifecycle(t, s, ctx)
 	passLifecycle(t, s, ctx)
-	if host.starts != 2 || stateOf(t, s, ctx, parent) != contract.BoxStarting || stateOf(t, s, ctx, child.Session) != contract.BoxStarting {
-		t.Fatalf("parent and child did not start: %d parent=%s child=%s", host.starts, stateOf(t, s, ctx, parent), stateOf(t, s, ctx, child.Session))
+	if host.starts != 1 || stateOf(t, s, ctx, parent) != contract.BoxStopped || stateOf(t, s, ctx, child.Session) != contract.BoxStarting {
+		t.Fatalf("unexpected wake: %d parent=%s child=%s", host.starts, stateOf(t, s, ctx, parent), stateOf(t, s, ctx, child.Session))
 	}
 }
 

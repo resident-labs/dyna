@@ -24,6 +24,7 @@ func (f *fakeClient) SessionStop(context.Context, contract.SessionStopRequest) (
 
 type fakeClient struct {
 	host         contract.HostAddRequest
+	hostNoSwap   bool
 	room         contract.RoomCreateRequest
 	repoAdd      contract.RoomRepoAddRequest
 	repoList     contract.RoomReposRequest
@@ -85,7 +86,7 @@ func (f *fakeClient) Upload(_ context.Context, path string) (contract.Attachment
 }
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
-	return contract.HostAddResponse{}, nil
+	return contract.HostAddResponse{NoSwap: f.hostNoSwap}, nil
 }
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q
@@ -162,6 +163,12 @@ func TestHostAddMapsFlags(t *testing.T) {
 	runCLI(t, f, "host", "add", "h", "--ssh", "u@h", "--owner-only-admin")
 	if f.host.Name != "h" || f.host.SSH != "u@h" || !f.host.OwnerOnlyAdmin {
 		t.Fatalf("%+v", f.host)
+	}
+}
+func TestHostAddWarnsWithoutSwap(t *testing.T) {
+	out := runCLI(t, &fakeClient{hostNoSwap: true}, "host", "add", "h", "--ssh", "u@h", "--owner-only-admin")
+	if !strings.Contains(out, "host has no swap") {
+		t.Fatalf("warning: %q", out)
 	}
 }
 func TestRoomCreateMapsName(t *testing.T) {
