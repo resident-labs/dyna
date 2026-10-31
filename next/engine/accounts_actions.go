@@ -128,15 +128,7 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 			}
 		}
 	}
-	return contract.AccountsListResponse{Accounts: accounts, Providers: []contract.AccountProviderInfo{
-		{ID: contract.ProviderAnthropic, DisplayName: "Claude", ConnectMethod: contract.ConnectOAuth},
-		{ID: contract.ProviderOpenAI, DisplayName: "ChatGPT", ConnectMethod: contract.ConnectOAuth},
-		{ID: contract.ProviderKimi, DisplayName: "Kimi Code", ConnectMethod: contract.ConnectOAuth},
-		{ID: contract.ProviderXAI, DisplayName: "xAI", ConnectMethod: contract.ConnectOAuth},
-		{ID: contract.ProviderZAI, DisplayName: "z.ai", ConnectMethod: contract.ConnectKey},
-		{ID: contract.ProviderOpencodeGo, DisplayName: "OpenCode Go", ConnectMethod: contract.ConnectKey},
-		{ID: contract.ProviderDeepSeek, DisplayName: "DeepSeek", ConnectMethod: contract.ConnectKey},
-	}}, nil
+	return contract.AccountsListResponse{Accounts: accounts, Providers: model.AccountProviders()}, nil
 }
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {

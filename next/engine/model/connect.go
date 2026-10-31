@@ -20,6 +20,7 @@ var errConnect = errors.New("account connection unavailable")
 type connectAttempt struct {
 	provider      contract.AccountProvider
 	proxyProvider string
+	flow          contract.ConnectFlow
 	label         string
 	state         string
 	expires       time.Time
@@ -74,17 +75,14 @@ func (c *Connections) Start(ctx context.Context, req contract.AccountsConnectReq
 		return contract.AccountsConnectResponse{}, errConnect
 	}
 	var provider string
-	flow := contract.ConnectFlowCallback
-	switch req.Provider {
-	case contract.ProviderAnthropic:
-		provider = "claude"
-	case contract.ProviderOpenAI:
-		provider = "codex"
-	case contract.ProviderKimi:
-		provider, flow = "kimi", contract.ConnectFlowDevice
-	case contract.ProviderXAI:
-		provider, flow = "xai", contract.ConnectFlowDevice
-	default:
+	var flow contract.ConnectFlow
+	for _, option := range oauthProviders {
+		if option.info.ID == req.Provider {
+			provider, flow = option.proxy, option.info.ConnectFlow
+			break
+		}
+	}
+	if provider == "" {
 		return contract.AccountsConnectResponse{}, errConnect
 	}
 	var result oauthResponse
@@ -106,7 +104,7 @@ func (c *Connections) Start(ctx context.Context, req contract.AccountsConnectReq
 	}
 	expires := c.now().Add(time.Duration(seconds) * time.Second)
 	attempt := hex.EncodeToString(id[:])
-	c.attempts[attempt] = &connectAttempt{provider: req.Provider, proxyProvider: provider, label: req.Label, state: result.State, expires: expires, generation: generation, status: contract.ConnectPending}
+	c.attempts[attempt] = &connectAttempt{provider: req.Provider, proxyProvider: provider, flow: flow, label: req.Label, state: result.State, expires: expires, generation: generation, status: contract.ConnectPending}
 	return contract.AccountsConnectResponse{Attempt: attempt, Flow: flow, Link: result.URL, Code: result.UserCode, ExpiresAt: expires}, nil
 }
 
@@ -114,7 +112,7 @@ func (c *Connections) Callback(ctx context.Context, req contract.AccountsConnect
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	a := c.attempts[req.Attempt]
-	if a == nil || a.status != contract.ConnectPending || a.callbackSent || !c.now().Before(a.expires) || a.generation != c.proxy.generation.Load() || (a.provider != contract.ProviderAnthropic && a.provider != contract.ProviderOpenAI) {
+	if a == nil || a.status != contract.ConnectPending || a.callbackSent || !c.now().Before(a.expires) || a.generation != c.proxy.generation.Load() || a.flow != contract.ConnectFlowCallback {
 		return errConnect
 	}
 	u, err := url.Parse(req.RedirectURL)
