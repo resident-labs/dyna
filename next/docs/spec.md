@@ -1186,7 +1186,7 @@ The engine renders the snapshot from current state when it dispatches a turn, an
 
 | Section | Contents | Cap (tokens) |
 |---|---|---|
-| `dyna_rules` | active global and room rules, full text, with who set each | 1,300 |
+| `dyna_rules` | every active global and room rule, full text, with who set each; never cut | none |
 | `dyna_goal` | own goal, its done condition and open items | 200 |
 | `dyna_children` | open children, stalest first: profile, state, current item, PR state; at most 8 rows | 250 |
 | `dyna_requests` | operations and questions waiting on this session, and its own that wait on others | 150 |
@@ -1194,7 +1194,8 @@ The engine renders the snapshot from current state when it dispatches a turn, an
 | `dyna_profiles` | ratings and limits; only for a session that may start children | 300 |
 | `dyna_usage` | each account window in 10% steps, with pace: ahead, on or under | 80 |
 
-- **Budget.** About 1,500 tokens typical and 2,500 at most. A section over its cap ends with "N more: context show".
+- **Budget.** The sections other than `dyna_rules` hold about 400 tokens typically and 1,130 at most. A section over its cap ends with "N more: context show".
+- **Rules are never cut.** Every active rule reaches every session in full at its next run, because rules bind every session and a session may never call `context show`. Rule text is already capped at 2,000 characters per rule (3.7), so the owner and root bound the section's size by the rules they keep. When `dyna_rules` passes 2,000 tokens, `rule.list` and the web app's rules view show its size, so the owner can consolidate rules; nothing is dropped.
 - **Pace.** It compares the share used with the share of the window that has passed. "Ahead" means more than 10 points above, "under" means more than 10 points below, and anything else is "on". Agents use it to choose a cheaper profile.
 - **No churn.** Sections hold no timestamps or durations, so a run where nothing changed appends nothing.
 - **Removed rules.** A removed rule is absent from the next `dyna_rules` section (section 7, Rules).
