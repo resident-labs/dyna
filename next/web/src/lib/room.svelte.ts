@@ -3,7 +3,9 @@ import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
 import { countOf, statusOf, type Counts, type Status } from "./status.ts";
-import type { BoxState, Conversation, Decision, Event, OpRequested, OpResult, OpState, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, SessionStarted } from "./contract.gen.ts";
+
+type TurnEndedEvent = Extract<Event, { type: "turn.ended" }>;
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
 export type Request = OpRequested & { state: OpState; decision?: Decision; result?: OpResult };
@@ -21,6 +23,8 @@ export class RoomStore {
   readonly activity = new SvelteMap<string, string>();
   // Sessions whose last turn failed, with that turn.ended's seq.
   readonly failed = new SvelteMap<string, number>();
+  // Why each failed turn failed, when the engine said; a session row shows it after "Failed".
+  readonly causes = new SvelteMap<string, FailureCause>();
   // The owner's read position per conversation, by readKey; the newest seq wins.
   private readonly read = new SvelteMap<string, number>();
   // Sessions whose box runs a computer the owner can watch.
@@ -80,7 +84,7 @@ export class RoomStore {
   get counts(): Counts { const asking = this.asking(); return countOf([...this.sessions.keys()].map(id => this.statusWith(id, asking))); }
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);
-    return statusOf({ waiting: asking.has(id), failed: this.unseen(id) || box === "failed" || box === "lost", working: this.turns.has(id) });
+    return statusOf({ broken: box === "failed" || box === "lost", waiting: asking.has(id), working: this.turns.has(id), failed: this.unseen(id) });
   }
   // The sessions whose requests wait for the owner.
   private asking(): Set<string> {
@@ -123,12 +127,16 @@ export class RoomStore {
       const page = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: before, limit: 200, types: ["turn.ended"] })
         .catch(() => undefined);
       const events = page?.events ?? [];
-      const found = new Map<string, number>();
+      const found = new Map<string, TurnEndedEvent>();
       for (const event of events) {
-        if (event.type === "turn.ended" && unplaced.has(event.body.session)) found.set(event.body.session, Math.max(found.get(event.body.session) ?? 0, event.seq));
+        if (event.type === "turn.ended" && unplaced.has(event.body.session) && event.seq > (found.get(event.body.session)?.seq ?? 0)) found.set(event.body.session, event);
       }
       // A session's newest turn.ended is its failure, since its last outcome failed.
-      for (const [session, seq] of found) { this.failed.set(session, seq); unplaced.delete(session); }
+      for (const [session, { seq, body }] of found) {
+        this.failed.set(session, seq);
+        if (body.cause) this.causes.set(session, body.cause);
+        unplaced.delete(session);
+      }
       if (events.length < 200) break;
       before = Math.min(...events.map(event => event.seq));
     }
@@ -199,8 +207,10 @@ export class RoomStore {
           this.activity.delete(event.body.session);
         }
         // Only a completed turn clears the failure; a stopped turn did not succeed.
-        if (event.body.outcome === "failed") this.failed.set(event.body.session, event.seq);
-        else if (event.body.outcome === "completed") this.failed.delete(event.body.session);
+        if (event.body.outcome === "failed") {
+          this.failed.set(event.body.session, event.seq);
+          if (event.body.cause) this.causes.set(event.body.session, event.body.cause); else this.causes.delete(event.body.session);
+        } else if (event.body.outcome === "completed") { this.failed.delete(event.body.session); this.causes.delete(event.body.session); }
         this.shellJobs.set(event.body.session, event.body.shellJobs ?? 0);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
