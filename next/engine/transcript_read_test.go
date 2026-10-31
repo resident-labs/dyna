@@ -98,11 +98,10 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 {"type":"message","id":"result","message":{"role":"toolResult","toolCallId":"call1","content":[{"type":"text","text":%q}]}}
 {"type":"message","id":"post-result","message":{"role":"toolResult","toolCallId":"post-call","content":[{"type":"text","text":%q}]}}
 `, delivery, output, post.Event)
-	ownerLive, roomLive := make(chan contract.Event, 1), make(chan contract.Event, 1)
-	s.mu.Lock()
-	s.live[ownerLive] = ""
-	s.live[roomLive] = session.Room
-	s.mu.Unlock()
+	ownerSub, ownerLive := s.live.Subscribe("", 1)
+	roomSub, roomLive := s.live.Subscribe(session.Room, 1)
+	defer s.live.Unsubscribe(ownerSub)
+	defer s.live.Unsubscribe(roomSub)
 	split := strings.Index(data, "\n") - 2
 	if _, problem := appendTranscript(s, ctx, caller, "a.jsonl", 0, data[:split]); problem != nil {
 		t.Fatal(problem)
