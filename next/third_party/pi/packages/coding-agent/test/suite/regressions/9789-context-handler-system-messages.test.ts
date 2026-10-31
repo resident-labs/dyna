@@ -84,7 +84,7 @@ describe("context handlers and system messages", () => {
 		expect(request.messages.filter((message) => message.role === "system")).toHaveLength(1);
 	});
 
-	it("keeps mid-conversation system messages in place when a handler leaves the conversation unchanged", async () => {
+	it("keeps context updates when a handler leaves the conversation unchanged", async () => {
 		let turn = 0;
 		const harness = await createHarness({
 			extensionFactories: [
@@ -104,8 +104,11 @@ describe("context handlers and system messages", () => {
 		await harness.session.prompt("second");
 
 		const systemMessages = getRequest().messages.filter((message) => message.role === "system");
-		expect(systemMessages).toHaveLength(2);
-		expect(systemMessages[1]?.sections).toEqual({ plan_mode: "<plan_mode>\nPlan only.\n</plan_mode>" });
+		expect(systemMessages).toHaveLength(1);
+		const update = harness.session.messages.find(
+			(message) => message.role === "custom" && message.customType === "context_update",
+		);
+		expect(update?.role === "custom" && update.content).toContain("Plan only.");
 	});
 
 	it("applies in-place edits to event.messages without a return value", async () => {
@@ -132,7 +135,7 @@ describe("context handlers and system messages", () => {
 		expect(toolNames(request)).toEqual(harness.session.getActiveToolNames());
 	});
 
-	it("keeps system messages a handler adds after the replayed head", async () => {
+	it("does not fold a handler-added system message into the head", async () => {
 		const harness = await createHarness({
 			extensionFactories: [
 				(pi) => {
@@ -151,7 +154,7 @@ describe("context handlers and system messages", () => {
 		expect(request.messages.map((message) => message.role)).toEqual(["system", "system", "user"]);
 		expect(toolNames(request)).toEqual(harness.session.getActiveToolNames());
 		expect(getCurrentSystemPrompt(request.messages)).toContain(harness.session.systemPrompt);
-		expect(getCurrentSystemPrompt(request.messages)).toContain("ephemeral reminder");
+		expect(getCurrentSystemPrompt(request.messages)).not.toContain("ephemeral reminder");
 	});
 });
 
