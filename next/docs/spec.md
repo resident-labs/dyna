@@ -497,7 +497,7 @@ M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`,
 - **The upgrade guard.** Before it opens anything, the engine checks the data folder. If `dyna.db` exists and `store.db` does not, it stops with `store_from_v1` and the text in section 8.4, which names the export step. The engine never opens or changes a v1 file. A `store.db` without `meta.format = 'dyna-v2'` is refused too.
 - **One writer.** One connection writes, in one goroutine. Every write is one transaction. A state change and its events are written in the same transaction. After `COMMIT`, the writer publishes the committed events to subscribers in `seq` order. Reads use a pool of read-only connections.
 - **Checkpoints off the writer path (D-582).** The writer connection sets `wal_autocheckpoint=0`. A checkpointer goroutine with its own connection runs `PRAGMA wal_checkpoint(PASSIVE)` when the WAL passes 64 MiB or 30 seconds pass, and `TRUNCATE` when the writer is idle. A `COMMIT` never waits for a checkpoint.
-- **No JSON state.** JSON appears only as the typed body columns (`events.body`, `operations.args`, `operations.card`), which only `contract` decodes. Settings, profiles and harness config stay JSON config files (r1).
+- **No JSON state.** JSON appears only as typed body columns (`events.body`, `operations.args`, `operations.card`, `grants.hosts`, `grants.commands`), which decode only into contract types and no query reads by field. One exception: a one-time upgrade step may read body fields to fill a new column, as step 15 fills `events.home`. Settings, profiles and harness config stay JSON config files (r1).
 - **Files.** Transcripts are append-only JSONL files per session. Attachments and large outputs are files stored by SHA-256. Rows hold the hash and the size.
 - **Backups.** Each day the engine runs `VACUUM INTO` from a read connection to `backups/`, and keeps 3. Daily backups are for disasters only. Relocation never uses them; it takes a fresh snapshot after writes stop (section 5.10).
 - **Budget.** `store.db` stays under 1 GiB. An archiver moves events older than 180 days for closed sessions to monthly JSONL files under `archive/`. It lands after the cutover, when the growth rate is measured.
@@ -511,7 +511,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M1 | `meta` | `key` PK, `value` (`format`, `schema_version`, `store_id`, `created_commit`) |
 | M1 | `rooms` | `id` PK, `name` UNIQUE, `created_at`, `cpus`, `mem_bytes` (room limit), `paused_at` |
 | M1 | `sessions` | `id` PK, `room`, `name`, `parent` NULL, `profile`, `state` (open, dormant, closed), `goal`, `created_at`, `closed_at`; UNIQUE (`room`, `name`) WHERE `closed_at` IS NULL |
-| M1 | `events` | `seq` INTEGER PK, `id` UNIQUE, `at`, `room`, `type`, `from_kind`, `from_id`, `body` BLOB; indexes (`room`, `seq`) and (`type`, `seq`) |
+| M1 | `events` | `seq` INTEGER PK, `id` UNIQUE, `at`, `room`, `type`, `from_kind`, `from_id`, `body` BLOB, `home` NULL (the session whose DM holds the event); indexes (`room`, `seq`), (`type`, `seq`) and (`room`, `home`, `seq`) WHERE `home` IS NOT NULL |
 | M1 | `deliveries` | (`to_kind`, `to_id`, `seq`) PK, `surface`, `reply_kind`, `reply_target_kind`, `reply_target_id`, `reply_home`, `reply_to`, `wake`, `state` (pending, taken, read), `turn`, `queue` (NULL for turn start, otherwise steer or follow_up) |
 | M1 | `turns` | `id` PK, `session`, `started_at`, `ended_at`, `outcome`, `model`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` |
 | M1 | `hosts`, `host_labels` | section 5.1 |
@@ -519,13 +519,12 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `transcripts` | (`session`, `path`) PK, `acked_offset`, `file` |
 | M2 | `images` | section 5.2 |
 | M2 | `operations` | `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
-| M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at` |
-| M2 | `grant_hosts`, `grant_commands`, `grant_command_args` | section 6.1; no JSON columns |
+| M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `hosts` JSON, `commands` JSON, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at`, `expired_at` |
 | M2 | `hostexec_runs` | section 6.3 |
-| M2 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; the default notice subscription needs them |
 | M2 | `archives` | section 5.9 |
 | M2 | `room_repos`, `repos` | section 7.6 |
 | M2 | `pr_owners` | (`repo`, `number`) PK, `session`, `goal`, `approved_head`. M2 opens PRs; M3 approves and merges them (decision 13). |
+| M3 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; hooks and the default notice subscription need them |
 | M3 | `repo_attribution`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
 | M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `library_entries`, `accounts` (labels and limits only), `counters`. The import also fills `pr_owners`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
@@ -791,8 +790,8 @@ Builders and reviewers design for the user first (owner rule). T3 Code guides th
 - **Color only for attention.** A session shows at most one status: Working (the only animation), Pending approval, or Failed. Other facts are muted text.
 - **Decisions in place.** An approval shows in the feed and in the approvals panel, with one shared component. The app has no modal dialogs, and the card send confirm is its only confirm step.
 - **Keyboard first.** Enter sends, and Shift+Enter makes a new line. F6 and mod+F6 move focus between the tree, the feed and the composer. Every control that can take focus shows a visible focus ring in light and dark. The Working pulse stops when the browser asks for reduced motion.
-- **Long lists are virtual** (owner rule). One shared virtual list renders only the visible rows of every long list: the feed, a long session tree, approvals, file lists and transcripts. It measures each row, keeps the reader's place when older rows load above, and stays at the bottom only while the reader is there. The feed keeps at most 1,000 events in memory and pages with `beforeSeq`. While the reader is away from the newest page, new events update the session tree and the approvals, and one line offers to jump to the present. The session tree and the approvals come from `session.list` and `op.list`, never from the feed history.
-- **Small and fast.** The app has no avatars, reactions, toasts for events that the feed shows, count badges, onboarding screens or empty-state pictures.
+- **Long lists are virtual** (owner rule). One shared virtual list renders only the visible rows of every long list: the feed, a long session tree, approvals, file lists and transcripts. It measures each row, keeps the reader's place when older rows load above, and stays at the bottom only while the reader is there. The feed keeps at most 1,000 events in memory and pages with `beforeSeq`. While the reader is away from the newest page, new events update the session tree and the approvals, and one line offers to jump to the present. The session tree and the approvals come from `session.list` and `op.list`, never from the feed history: `session.list` names each session's running turn, its last turn outcome and the room's newest seq, and the stream resumes after that seq. Each open conversation has its own window. A DM window asks `events.list` with `home`, so it reads only that DM's posts and the turns that answered in it.
+- **Small and fast.** The app has no reactions, toasts for events that the feed shows, unread-count badges, onboarding screens or empty-state pictures. A session's avatar is its initials on its name's identity color, never an uploaded image; counts are muted text (owner, 2026-10-30: v1's look is the bar).
 - **No raw text.** The app shows no IDs, raw logs or markdown labels.
 
 dyna:lead-rewrite is the design and taste reviewer for all v2 frontend work (owner rule):
@@ -825,13 +824,13 @@ A host-exec grant is a `contract.Grant` with `Kind: hostexec` (3.5).
 - When several grants match, `preapproved` wins over `approve`. When none matches, the call fails with `no-grant`, and nothing runs.
 - The class of `hostexec.run` comes from the grant that matched: `auto` when a `preapproved` grant matches, and `owner` when only an `approve` grant matches.
 
-Tables: `grant_hosts` (`grant`, `host`), `grant_commands` (`grant`, `idx`, `program`, `prefix`) and `grant_command_args` (`grant`, `idx`, `pos`, `arg`).
+The `grants` table stores hosts and command rules as JSON columns.
 
 ### 6.2 Default grant, owner grants, revoke and expiry
 
 - **Root's default grant** is made with the room: every host including the control plane, any command, `preapproved`, no expiry (3.5). The owner can narrow it like any other grant.
 - **Owner grants.** Only the owner grants host exec: `dyna hostexec grant` or the web card, as the operation `hostexec.grant` with class `owner`. A session may ask for a grant; the request goes to the owner. The default expiry is 24 hours. `--expires never` must be explicit.
-- **Revoke.** `dyna hostexec revoke <grant>`, by the owner. It acts at once: pending runs under the grant are denied, and running commands get SIGTERM, then SIGKILL after 5 s.
+- **Revoke.** `dyna hostexec revoke <grant>`, by the owner. Pending runs fail their grant recheck. Running units are stopped with `systemctl --user stop`; `TimeoutStopSec=5` gives SIGTERM, then SIGKILL after 5 s. The engine retries stops on its 10 s tick to cover a launch racing revoke. A reachable unit receives the stop within 10 s, and systemd forces termination within another 5 s.
 - **Expiry** is checked at match time. A sweep marks expired grants and emits `grant.expired`. A running command is not stopped at expiry; only a revoke stops it.
 - The web app lists active grants with their expiry and a revoke button.
 
@@ -839,18 +838,18 @@ Tables: `grant_hosts` (`grant`, `host`), `grant_commands` (`grant`, `idx`, `prog
 
 1. The agent runs `dyna hostexec run --host <h> [--timeout 10m] -- <argv>` in its box. The request comes over the box socket, so the engine knows the principal.
 2. The engine matches the grants and submits `hostexec.run{Host, Argv, Cwd, Timeout, Grant}`. It runs at once or waits for the owner.
-3. On a capacity host, the command runs over the master as `systemd-run --user --scope --unit=dyna-hostexec-<op> -p RuntimeMaxSec=<timeout> -- <argv>`, with framed replies. On the control plane, the same `systemd-run` runs locally.
+3. On a capacity host, the command runs over the master as `systemd-run --user --scope --unit=dyna-hostexec-<op> -p RuntimeMaxSec=<timeout> -p TimeoutStopSec=5 -- <argv>`, with framed replies. On the control plane, the same `systemd-run` runs locally.
 4. The command gets the host user's login environment. The engine adds no secrets. Stdin is empty.
-5. Output streams live to the caller and to watchers in the web app. Up to 64 KiB is kept inline in the result; the rest is a file named in the result. The default timeout is 10 minutes, and the maximum is 2 hours.
+5. There is no live output stream for now. The CLI waits for the result. Up to 64 KiB is kept inline in the result; the rest is a file named in the result, and output is capped at 8 MiB. The default timeout is 10 minutes, and the maximum is 2 hours.
 6. The caller gets the exit code and the output. A run longer than the shell's foreground window works like a long shell job: the caller wakes on `op.ran`.
 
 Every run emits `op.requested` (when it waits), `op.decided` (when someone decides), and `op.ran` with the exit code. No command runs without these events.
 
-Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout` or `revoked`. The exit code and output file stay on the operation.
+Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeout_ms`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout`, `revoked` or `lost`. A lost unit is stopped after its host reconnects. The exit code and output file stay on the operation.
 
 ### 6.4 Control-plane safety and accepted risks
 
-Host exec on the control plane runs as the owner's user. To stop such a command from acting as the owner through the engine, each control-plane run gets its own scope, `dyna-hostexec-<op>.scope`. The owner socket reads each caller's cgroup. If the path contains `dyna-hostexec-`, the engine treats the caller as the grant holder and refuses every owner-only call with `hostexec-scope`.
+Host exec on the control plane runs as the owner's user. To stop such a command from acting as the owner through the engine, each control-plane run gets its own scope, `dyna-hostexec-<op>.scope`. The owner socket reads each caller's cgroup. If the path contains `dyna-hostexec-`, the engine refuses every call with `hostexec-scope` and does not map the caller to the grant holder.
 
 Accepted risks (owner, 2026-10-30):
 
@@ -901,10 +900,9 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
 - **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. It can be restarted in a new box with the same session ID, grants and history.
-- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle, a move to another room, and a move to a parent on another host. A box's volume holds its repository and its harness state, and the engine never copies volumes between hosts; to change hosts, close the session and start a new one. A child's box sits in its parent's budget slice, so a move re-creates every box in the moved subtree:
-  - First the engine holds new wakes for the subtree and tells each box agent in it to refuse new shell jobs. Each agent applies the block and lists its running jobs in the same reply, so no job can start between the check and the block. If any job runs, or an agent does not reply, the engine cancels the move, lifts the hold and the block, and names the job or the box; the mover stops the job or waits. Otherwise the engine waits until every running turn in the subtree ends. Those turns cannot start a job, so the subtree is idle.
-  - When the subtree is idle, the engine stops its containers deepest first. It then creates each again from the same volume, the moved session first and its children after it, because a child's slice lives in its parent's. A moved session that becomes a lead gets a top-level slice (5.5).
-  - The new box agents start without the block, and the held wakes then run as usual. Each session resumes from the harness conversation in its volume, as after dormancy (5.3), and `session.moved` records the new parent.
+- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle, a move to another room, and a move to a parent on another host. The engine moves only an idle subtree: no turn runs in it, and each session's last turn ended with no running shell job. Otherwise it refuses with `move-busy` and names the session; the mover waits and tries again.
+  - In one transaction, under the subtree's box locks so that no turn starts, the engine checks that the subtree is idle, sets the new parent, marks each box in the subtree to be created again, and records `session.moved`.
+  - It then stops and removes the subtree's containers deepest first, and keeps their volumes. Each box starts again on its next wake, as after dormancy (5.3), from the same volume under its new slice. A moved session that becomes a lead gets a top-level slice (5.5).
 
 ### 7.5 Reply channels (D-579)
 
@@ -1275,7 +1273,7 @@ Acceptance:
 
 ### M2: web room view, approvals, host exec
 
-Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, the default notice subscription, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), and opening a PR through an operation (decision 13).
+Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), and opening a PR through an operation (decision 13).
 
 The order inside M2:
 
@@ -1286,7 +1284,7 @@ The order inside M2:
 Acceptance:
 
 1. unit: each decision rule in 3.5, including expiry on the injected clock and the stale check. A session above the caller can approve, a session beside it cannot, and no test uses a root flag.
-2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move to another host, or of a subtree with a running shell job, is refused. During a move, a turn in the subtree that starts a shell job gets a refusal (fake box agent). A move holds the subtree's wakes until its turns end, then re-creates the boxes under the new slices, parent before child, and delivers the held wakes. Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. When that parent is root, the goals have no holder, and `session.closed` lists them. Close of root fails.
+2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move to another host, or of a subtree with a running turn or shell job, is refused and names the session. A move re-creates the subtree's containers from the same volumes under the new slices, and each box starts again on its next wake (fake host). Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. When that parent is root, the goals have no holder, and `session.closed` lists them. Close of root fails.
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
 5. unit: a budget slice whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
@@ -1302,7 +1300,7 @@ Acceptance:
 
 ### M3: bundle import and self-hosting
 
-Scope: the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
+Scope: the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`) with the default notice subscription, which wakes root on `notice.posted` (an M3 event), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
 
 The order inside M3:
 

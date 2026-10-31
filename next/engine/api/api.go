@@ -41,7 +41,12 @@ func (a *API) handler(c Caller) http.Handler {
 	})
 	call(mux, contract.MethodRoomList, c, owner, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, user, a.service.SessionList)
+	call(mux, contract.MethodHostexecRun, c, box, a.service.HostexecRun)
+	call(mux, contract.MethodHostexecRevoke, c, owner, a.service.HostexecRevoke)
 	call(mux, contract.MethodOpSubmit, c, user, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+		if req.Operation.Kind == "hostexec.run" {
+			return contract.OpSubmitResponse{}, forbidden()
+		}
 		if box(c) {
 			if req.Operation.Room == "" {
 				req.Operation.Room = c.Room
@@ -59,6 +64,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomRepoAdd, c, owner, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, owner, a.service.RoomRepos)
 	call(mux, contract.MethodSessionStart, c, owner, a.service.SessionStart)
+	call(mux, contract.MethodSessionMove, c, user, a.service.SessionMove)
 	call(mux, contract.MethodSessionClose, c, user, a.service.SessionClose)
 	call(mux, contract.MethodPost, c, user, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 		if box(c) {
@@ -241,7 +247,7 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 	switch err.Code {
 	case contract.ErrInvalid:
 		status = http.StatusBadRequest
-	case contract.ErrForbidden:
+	case contract.ErrForbidden, contract.ErrHostexecScope:
 		status = http.StatusForbidden
 	case contract.ErrNotFound:
 		status = http.StatusNotFound

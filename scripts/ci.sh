@@ -121,6 +121,15 @@ case "$suite" in
     go vet ./...
     go test -count=1 ./...
     ;;
+  next-web)
+    # next/web is the v2 web app, a Svelte project with its own package.json.
+    # Its check runs on Node 24, the image set for next-web in local CI.
+    cd next/web
+    npm ci --prefer-offline --no-audit
+    npm run check
+    npm test
+    npm run build
+    ;;
   cross-build)
     started=$SECONDS
     # An optional target (goos/goarch) builds only that one.

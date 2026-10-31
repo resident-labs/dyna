@@ -49,6 +49,10 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure"}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
+	// A [wait] turn runs until it is stopped, so the working state can be seen.
+	if strings.Contains(inputs[0].Text, "[wait]") {
+		h.Turns[0].Release = make(chan struct{})
+	}
 	return h.Harness.Start(ctx, id, inputs, started)
 }
 
@@ -93,6 +97,9 @@ func (b *boxes) Stop(_ context.Context, id contract.BoxID) error {
 	}
 	b.mu.Unlock()
 	return nil
+}
+func (b *boxes) Recreate(ctx context.Context, spec engine.BoxSpec, _, _ string) error {
+	return b.Start(ctx, spec.Box)
 }
 func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	if err := b.Stop(ctx, id); err != nil {
