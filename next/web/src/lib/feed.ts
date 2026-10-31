@@ -84,20 +84,21 @@ const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.s
 // Several sessions read as "root, lead-web and builder-feed worked"; the opened row lists each event.
 export function workSummary(events: Event[], name: Name): string {
   const groups = new Map<string, {
-    turns: number; jobs: number; operations: Set<string>; images: number; prs: number; pressure: number; grants: number;
+    begun: number; turns: number; jobs: number; operations: Set<string>; images: number; prs: number; pressure: number; grants: number;
     box?: BoxState; started: boolean; closed: boolean;
   }>();
   for (const event of events) {
     const session = subject(event);
     const label = session ? name(session) : "Dyna";
     const group = groups.get(label) ?? {
-      turns: 0, jobs: 0, operations: new Set<string>(), images: 0, prs: 0, pressure: 0, grants: 0, started: false, closed: false,
+      begun: 0, turns: 0, jobs: 0, operations: new Set<string>(), images: 0, prs: 0, pressure: 0, grants: 0, started: false, closed: false,
     };
     groups.set(label, group);
     switch (event.type) {
       case "session.started": group.started = true; break;
       case "session.closed": group.closed = true; break;
       case "box.changed": group.box = event.body.to; break;
+      case "turn.started": group.begun++; break;
       case "turn.ended": group.turns++; break;
       case "shell.job.ended": group.jobs++; break;
       case "op.requested": case "op.decided": case "op.ran": group.operations.add(event.body.id); break;
@@ -111,12 +112,12 @@ export function workSummary(events: Event[], name: Name): string {
   if (labels.length > 1) return `${list(labels.length > 3 ? [...labels.slice(0, 2), `${labels.length - 2} more`] : labels)} worked`;
   const [label, group] = [...groups][0];
   const parts = [
-    group.started && "started", group.turns && `finished ${count(group.turns, "turn")}`, group.jobs && `ran ${count(group.jobs, "job")}`,
+    group.started && "started", !group.turns && group.begun && `started ${count(group.begun, "turn")}`, group.turns && `finished ${count(group.turns, "turn")}`, group.jobs && `ran ${count(group.jobs, "job")}`,
     group.operations.size && `made ${count(group.operations.size, "request")}`, group.images && `built ${count(group.images, "image")}`,
     group.prs && `opened ${count(group.prs, "pull request")}`, group.pressure && `had ${count(group.pressure, "memory warning")}`,
     group.grants && `had ${count(group.grants, "host-exec grant")} expire`, group.box && boxPhrase[group.box], group.closed && "closed",
   ].filter(part => typeof part === "string");
-  return `${label} ${parts.length ? list(parts) : "is working"}`;
+  return `${label} ${parts.length ? list(parts) : "worked"}`;
 }
 
 // One plain line for an event inside an opened work row.
