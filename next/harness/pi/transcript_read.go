@@ -84,6 +84,10 @@ func ReadSteps(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID,
 				if b.Type != "toolCall" {
 					continue
 				}
+				if len(b.ID) > 256 || len(b.Name) > 256 {
+					truncated = true
+					continue
+				}
 				label := activityLabel(event{ToolName: b.Name, Args: b.Arguments})
 				if runes := []rune(label); len(runes) > 80 {
 					label = string(runes[:79]) + "…"
@@ -120,6 +124,7 @@ func ReadSteps(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID,
 					preview := out.String()
 					if len(preview) > 1024 {
 						preview = string(bytes.ToValidUTF8([]byte(preview[:1024]), nil))
+						truncated = true
 					}
 					steps[i].Preview = preview
 				}
