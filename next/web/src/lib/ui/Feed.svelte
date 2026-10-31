@@ -7,9 +7,10 @@
   import BoxRestart from "./BoxRestart.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
+  import Icon from "./Icon.svelte";
   import RequestCard from "./RequestCard.svelte";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
-  import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
+  import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, timeSpan, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal, VisualCard } from "../contract.gen.ts";
   import type { VisualVersion } from "../visual.ts";
@@ -66,7 +67,21 @@
   // A DM ends with the running turn's finished steps; the live line has the current one, and they fold into its work row
   // when the turn ends. A failed box keeps its turn open but runs nothing, so no live line follows: every step is
   // finished, and the failure ends the DM, as a DM's read leaves box events out.
-  let rows = $derived(feedRows(view.ordered, home, pending, since));
+  const retainedRequests = new SvelteSet<string>();
+  $effect(() => { for (const request of store.requests.values()) retainedRequests.add(request.id); });
+  let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests));
+  let newestBoxRows = $derived.by(() => {
+    const latest = new Map<string, string>();
+    for (const row of rows) {
+      const failures = row.kind === "failed" ? [row] : row.kind === "more-failures" ? row.failures : [];
+      for (const failed of failures) if (failed.label !== "Turn failed") latest.set(failed.session, failed.key);
+    }
+    return latest;
+  });
+  function canRestart(row: Extract<Row, { kind: "failed" }>): boolean {
+    const current = store.boxFailures.get(row.session);
+    return !!current && (row.label === "Failed" || row.label === "Could not start") &&
+      (row.key === "box-failed" || (newestBoxRows.get(row.session) === row.key && row.at === current.at));
   let visualPosts = $derived(view.posts().flatMap(event => (event.body.attachments ?? []).flatMap(file => file.visual ? [{ event, visual: file.visual }] : [])));
   let newest = $derived(new Map(visualPosts.map(({ visual }) => [visual.id, visual])));
   function openVisual(visual: VisualCard) {
@@ -170,11 +185,13 @@
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow row={item} {newest} onvisual={openVisual} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
-      {:else if item.kind === "notice"}<p class="hint">{describe(item.event, name)} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></p>
+      {:else if item.kind === "notice"}<p class="divider"><span>{describe(item.event, name)}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
       {:else if item.kind === "restarted"}<p class="hint">{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone.</p>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>
-        {#if item.key === "box-failed" && failure?.box === "failed"}<BoxRestart session={item.session} {onclosed} />{/if}</FailedTurnRow>
+        {#if canRestart(item)}<BoxRestart session={item.session} {onclosed} />{/if}</FailedTurnRow>
+      {:else if item.kind === "more-failures"}<div class="more-failures"><button type="button" aria-expanded={opened.has(item.key)} onclick={() => toggle(item.key)}>and {item.failures.length} more {item.failures.every(failure => failure.label === "Turn failed") ? `failed ${item.failures.length === 1 ? "turn" : "turns"}` : item.failures.length === 1 ? "failure" : "failures"} <time datetime={item.failures[0].at}>{item.failures.length > 1 ? timeSpan(item.failures[0].at, item.failures.at(-1)!.at) : formatTime(item.failures[0].at)}</time><Icon name="chevron" size={14} /></button></div>
+        {#if opened.has(item.key)}{#each item.failures as failed (failed.key)}<FailedTurnRow row={failed} author={name(failed.session)} root={root(failed.session)} onseen={failed.label === "Turn failed" ? () => store.see(home, failed.seq) : undefined}>{#if canRestart(failed)}<BoxRestart session={failed.session} {onclosed} />{/if}</FailedTurnRow>{/each}{/if}
       <!-- The store knows every request that waited when the room opened and every later one. A request the window
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
@@ -208,6 +225,13 @@
   /* A centred muted date on a hairline, as in Discord. */
   .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  .more-failures { padding: 4px 16px 4px var(--gutter); color: var(--muted); font-size: 12.5px; }
+  .more-failures button { all: unset; display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; }
+  .more-failures time { opacity: .8; }
+  .more-failures button :global(svg) { margin-left: auto; }
+  .more-failures button:focus-visible { outline: 2px solid var(--focus); }
+  .divider { margin: 12px 16px; display: flex; align-items: center; gap: 8px; color: var(--muted); text-align: center; font-size: 12.5px; }
+  .divider::before, .divider::after { content: ""; flex: 1; min-width: 12px; border-top: 1px solid var(--line); }
   /* The first unread row, as in Discord and v1: a danger hairline with a small label at its right end. */
   .new { margin: 8px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--danger); font-size: 11px; font-weight: 600; line-height: 1.25; }
   .new::before { content: ""; flex: 1; border-top: 1px solid var(--danger); }
