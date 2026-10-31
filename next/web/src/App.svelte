@@ -576,6 +576,7 @@
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
+        <!-- Reserve about 7 px per hidden-count digit beside the chevron. -->
         <a class="member" data-key={item.session} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
           onclick={openSession}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
