@@ -31,9 +31,11 @@ func visibleSnapshot(out Snapshot) Snapshot {
 			}
 		}
 	}
-	accounts := make([]Account, len(out.Accounts))
-	for i, a := range out.Accounts {
-		kept := make([]Window, 0, len(a.Windows))
+	// The zero-capacity slices keep nil and empty values as they were, and
+	// appending to them never writes into the source arrays.
+	accounts := out.Accounts[:0:0]
+	for _, a := range out.Accounts {
+		kept := a.Windows[:0:0]
 		for _, w := range a.Windows {
 			if p, ok := WindowPercent(w); ok && p == 0 && strings.HasPrefix(w.ID, store.ModelWindowPrefix) && !inUse[pool{a.Provider, w.ID}] {
 				continue
@@ -41,7 +43,7 @@ func visibleSnapshot(out Snapshot) Snapshot {
 			kept = append(kept, w)
 		}
 		a.Windows = kept
-		accounts[i] = a
+		accounts = append(accounts, a)
 	}
 	out.Accounts = accounts
 	return out
