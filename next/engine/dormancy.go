@@ -18,6 +18,7 @@ type dormancy struct {
 
 // ReconcileDormancy is level-triggered. The runtime serializes its calls.
 func (s *Service) ReconcileDormancy(ctx context.Context, startup, retry bool) {
+	s.drainMoveStops()
 	if startup || retry {
 		clear(s.dormancy.failedStarts)
 		boxes, err := s.store.Boxes(ctx)
@@ -60,15 +61,20 @@ func (s *Service) ReconcileDormancy(ctx context.Context, startup, retry bool) {
 		return
 	}
 	for _, id := range ids {
-		if err := s.reconcileBox(ctx, id); err != nil {
+		if err := s.wakeAncestors(ctx, id); err != nil {
+			log.Printf("dormancy ancestors: %v", err)
+			continue
+		}
+		if err := s.reconcileBox(ctx, id, false); err != nil {
 			log.Printf("dormancy: %v", err)
 		}
 	}
 }
 
-func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID) error {
+func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID, force bool) error {
 	unlock := s.lockBox(id)
 	defer unlock()
+	s.drainMoveStops()
 	session, err := s.store.Session(ctx, id)
 	if err != nil {
 		return err
@@ -78,6 +84,9 @@ func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID) error
 		return err
 	}
 	if s.dormancy.unconfirmed[current.ID] || s.dormancy.failedStarts[current.ID] {
+		return nil
+	}
+	if current.State == contract.BoxReady && force {
 		return nil
 	}
 	if current.State == contract.BoxReady {
@@ -110,7 +119,16 @@ func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID) error
 		}
 		return err
 	}
-	changed, err := s.dormancyTransition(ctx, session.Room, current, contract.BoxStarting, "")
+	var changed bool
+	if force {
+		event, e := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})
+		if e != nil {
+			return e
+		}
+		changed, err = s.store.WakeAncestor(ctx, current, event)
+	} else {
+		changed, err = s.dormancyTransition(ctx, session.Room, current, contract.BoxStarting, "")
+	}
 	if err != nil || !changed {
 		return err
 	}
@@ -127,7 +145,36 @@ func (s *Service) stopBox(ctx context.Context, id contract.BoxID) error {
 }
 
 func (s *Service) startBox(ctx context.Context, current box.Box) error {
-	if err := s.boxes.Start(ctx, current.ID); err != nil {
+	var startErr error
+	path, err := s.store.BoxAncestry(ctx, current.ID)
+	if err != nil {
+		return err
+	}
+	var ancestry []contract.BoxID
+	for _, b := range path {
+		ancestry = append(ancestry, b.ID)
+	}
+	slice, err := box.SliceName(ancestry)
+	if err != nil {
+		return err
+	}
+	if current.Slice != slice {
+		var repos []contract.BoxRepo
+		if s.repos != nil {
+			repos, err = s.repos.Get(ctx, current.Session, current.Host, false)
+			if err != nil {
+				return err
+			}
+		}
+		// Keep the old slice until recreation or close removes it.
+		startErr = s.boxes.Recreate(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: slice, Size: current.Size, Repos: repos}, current.Image, current.Slice)
+		if startErr == nil {
+			startErr = s.store.SetRecreated(ctx, current.ID, slice)
+		}
+	} else {
+		startErr = s.boxes.Start(ctx, current.ID)
+	}
+	if err := startErr; err != nil {
 		s.dormancy.failedStarts[current.ID] = true
 		session, e := s.store.Session(ctx, current.Session)
 		if e != nil {
@@ -150,4 +197,35 @@ func (s *Service) dormancyTransition(ctx context.Context, room contract.RoomID, 
 		return s.store.StopIdle(ctx, current, event, s.now().Add(-quietPeriod))
 	}
 	return s.store.Wake(ctx, current, state, reason, event)
+}
+
+// wakeAncestors starts stopped budget parents before a child is admitted.
+func (s *Service) wakeAncestors(ctx context.Context, id contract.SessionID) error {
+	session, err := s.store.Session(ctx, id)
+	if err != nil {
+		return err
+	}
+	path, err := s.store.BoxAncestry(ctx, session.Box)
+	if err != nil || len(path) == 0 {
+		return err
+	}
+	current := path[len(path)-1]
+	if current.State != contract.BoxStopped && current.State != contract.BoxPending {
+		return nil
+	}
+	for _, parent := range path[:len(path)-1] {
+		if err := s.reconcileBox(ctx, parent.Session, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) drainMoveStops() {
+	s.moveMu.Lock()
+	for _, id := range s.moveStops {
+		s.dormancy.unconfirmed[id] = true
+	}
+	s.moveStops = nil
+	s.moveMu.Unlock()
 }

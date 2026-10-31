@@ -12,6 +12,60 @@ import (
 	"time"
 )
 
+func TestStaleHeadQueuesVerdictUntilConfirmed(t *testing.T) {
+	for _, outcome := range []string{"same", "changed", "closed"} {
+		t.Run(outcome, func(t *testing.T) {
+			e := newEnv(t)
+			e.setCI("success", 1)
+			e.track()
+			e.tick()
+			r := e.record()
+			if err := e.s.Store.update(func(st *State) error {
+				st.Records[r.Key].HeadStale = true
+				st.Records[r.Key].Error = "gateway timeout"
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			for _, invalid := range []struct{ actor, head string }{
+				{r.Author, r.Head}, {"another-reviewer", r.Head}, {r.Reviewer, ""}, {r.Reviewer, strings.Repeat("b", 40)},
+			} {
+				if err := e.s.Verdict(context.Background(), r.Key, invalid.actor, invalid.head, "approve", "Reviewed", 0); err == nil || e.record().PendingVerdict != nil {
+					t.Fatalf("invalid verdict was saved: %v", err)
+				}
+			}
+			err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "approve", "Reviewed", 0)
+			var pending *ErrPendingVerdict
+			if !errors.As(err, &pending) || e.record().PendingVerdict == nil || e.record().Verdict != "" {
+				t.Fatalf("stale verdict was not queued: %v", err)
+			}
+			switch outcome {
+			case "changed":
+				e.f.Pull.Head.SHA = strings.Repeat("b", 40)
+			case "closed":
+				e.f.Pull.State = "closed"
+			}
+			e.write()
+			e.tick()
+			got := e.record()
+			if got.PendingVerdict != nil {
+				t.Fatal("pending verdict was not consumed")
+			}
+			if outcome == "same" {
+				if got.Verdict != "approve" || len(got.ReviewRounds) != 1 {
+					t.Fatalf("confirmed verdict not applied once: %+v", got)
+				}
+				e.tick()
+				if len(e.record().ReviewRounds) != 1 {
+					t.Fatal("verdict applied twice")
+				}
+			} else if got.Verdict != "" {
+				t.Fatalf("old verdict applied to %s PR", outcome)
+			}
+		})
+	}
+}
+
 func TestPausedWatcherSavesVerdictUntilConfirmedRefresh(t *testing.T) {
 	for _, moved := range []bool{false, true} {
 		name := "same head"

@@ -28,7 +28,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 	}
 	return approve.Entry{
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
-		Card: func(args contract.OpArgs, _ contract.Principal) contract.Card {
+		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			return contract.Card{Title: args.(contract.PrOpenArgs).Title}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
@@ -50,7 +50,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			err := json.Unmarshal(data, &input)
 			return input, err
 		},
-		Execute: func(ctx context.Context, args contract.OpArgs, who contract.Principal) contract.OpResult {
+		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, who contract.Principal) contract.OpResult {
 			// The lock may be held for the GitHub client timeout of one minute.
 			unlock := s.lockBox(who.Session)
 			defer unlock()

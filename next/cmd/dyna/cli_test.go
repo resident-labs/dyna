@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,13 @@ type fakeClient struct {
 	submitResp contract.OpSubmitResponse
 }
 
+func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
+	return contract.HostexecRunResponse{}, nil
+}
+func (f *fakeClient) HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error) {
+	return contract.HostexecRevokeResponse{}, nil
+}
+func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil }
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
 	return contract.HostAddResponse{}, nil

@@ -56,6 +56,12 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
+		if session.NewRoomName != "" {
+			g := contract.Grant{ID: contract.GrantID("grant_" + string(session.ID)), Kind: contract.GrantHostExec, Room: session.Room, To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Hosts: []contract.HostName{contract.AllHosts}, Commands: []contract.CommandRule{{Program: "*", Prefix: true}}, Mode: contract.GrantModePreapproved, By: contract.Principal{Kind: contract.PrincipalEngine}, Created: event.Time}
+			if err := s.InsertGrant(tx, g); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,parent,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, nullableBox(budgetParent), "", contract.BoxSizeSmall, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
@@ -68,9 +74,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if parent != "" {
 			reply = contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Home: contract.Conversation{Kind: contract.ConversationFeed}}
 		}
-		err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
-		if err != nil {
-			return err
+		if started, _ := event.Body.(contract.SessionStarted); goal != "" || started.Brief != "" {
+			err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
+			if err != nil {
+				return err
+			}
 		}
 		_, err = s.AppendEvent(tx, boxEvent)
 		return err

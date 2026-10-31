@@ -1,10 +1,13 @@
 package store
 
 import (
+	"context"
 	"database/sql"
+	"github.com/resident-labs/dyna/contract"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestUpgradeRunsOneStep(t *testing.T) {
@@ -33,5 +36,31 @@ func TestUpgradeRunsOneStep(t *testing.T) {
 	var count int
 	if err := db.QueryRow("SELECT count(*) FROM probe").Scan(&count); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpgradeGrantsExistingRoot(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+ INSERT INTO meta VALUES ('schema_version','12');
+ CREATE TABLE rooms (id TEXT PRIMARY KEY);
+ CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL, parent TEXT, created_at INTEGER NOT NULL, closed_at INTEGER);
+ CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, type TEXT NOT NULL, body BLOB NOT NULL);
+ INSERT INTO rooms VALUES ('room');
+ INSERT INTO sessions VALUES ('root','room',NULL,1000,NULL),('child','room','root',1000,NULL);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, 1, "", steps); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{read: db}
+	grants, err := s.ListActiveGrants(context.Background(), "room", contract.Principal{Kind: contract.PrincipalSession, Session: "root"}, time.UnixMilli(1000))
+	if err != nil || len(grants) != 1 || grants[0].Mode != contract.GrantModePreapproved || grants[0].Hosts[0] != contract.AllHosts || grants[0].Commands[0].Program != "*" || !grants[0].Commands[0].Prefix {
+		t.Fatalf("root grants: %+v %v", grants, err)
 	}
 }

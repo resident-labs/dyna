@@ -33,7 +33,15 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.SessionListResponse{}, e
 	}
-	rows, err := s.store.Read().QueryContext(ctx, "SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),s.goal FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id", req.Room)
+	// The seq is read first, so events after it may repeat what the list shows but never miss a change.
+	var seq int64
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events WHERE room=?", req.Room).Scan(&seq); err != nil {
+		return contract.SessionListResponse{}, failure(err)
+	}
+	rows, err := s.store.Read().QueryContext(ctx, `SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),s.goal,
+		COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1),''),
+		COALESCE((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1),'')
+		FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, req.Room)
 	if err != nil {
 		return contract.SessionListResponse{}, failure(err)
 	}
@@ -41,7 +49,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	sessions := []contract.SessionSummary{}
 	for rows.Next() {
 		var session contract.SessionSummary
-		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal); err != nil {
+		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome); err != nil {
 			return contract.SessionListResponse{}, failure(err)
 		}
 		sessions = append(sessions, session)
@@ -49,5 +57,5 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	if err := rows.Err(); err != nil {
 		return contract.SessionListResponse{}, failure(err)
 	}
-	return contract.SessionListResponse{Sessions: sessions}, nil
+	return contract.SessionListResponse{Sessions: sessions, Seq: seq}, nil
 }

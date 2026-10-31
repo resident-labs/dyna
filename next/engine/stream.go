@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -160,7 +161,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case contract.PostCreated:
 					text = body.Text
 				case contract.SessionStarted:
-					text = fmt.Sprintf("Goal: %s\n\n%s", body.Goal, body.Brief)
+					var parts []string
+					if body.Goal != "" {
+						parts = append(parts, "Goal: "+body.Goal)
+					}
+					if body.Brief != "" {
+						parts = append(parts, body.Brief)
+					}
+					text = strings.Join(parts, "\n\n")
 				case contract.OpRequested:
 					card, err := json.Marshal(body.Card)
 					if err != nil {

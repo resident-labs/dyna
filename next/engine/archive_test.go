@@ -16,7 +16,7 @@ func setupArchive(t *testing.T) (*Service, contract.RoomID, contract.SessionID, 
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
-	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test"})
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test", Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -26,7 +26,7 @@ func setupArchive(t *testing.T) (*Service, contract.RoomID, contract.SessionID, 
 func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 	s, room, parent, ctx := setupArchive(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "grandchild", Profile: "test", Parent: parent})
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "grandchild", Profile: "test", Parent: parent, Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -364,7 +364,7 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 
 func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	s, room, parent, ctx := setup(t)
-	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test"})
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test", Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -436,7 +436,7 @@ func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 
 func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	s, room, root, ctx := setup(t)
-	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test"})
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "child", Profile: "test", Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -20,9 +20,9 @@ var ErrConflict = errors.New("operation is no longer pending")
 
 type Entry struct {
 	Class   func(contract.OpArgs, contract.Principal) contract.Class
-	Card    func(contract.OpArgs, contract.Principal) contract.Card
+	Card    func(context.Context, contract.OpArgs, contract.Principal) contract.Card
 	Check   func(context.Context, contract.OpArgs, contract.Principal) error
-	Execute func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult
+	Execute func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
 	Decode  func(json.RawMessage) (contract.OpArgs, error)
 }
 
@@ -79,6 +79,9 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if input.Args == nil {
 		return contract.Operation{}, ErrInvalid
 	}
+	if scoped, ok := input.Args.(interface{ OperationRoom() contract.RoomID }); ok && scoped.OperationRoom() != input.Room {
+		return contract.Operation{}, ErrInvalid
+	}
 	kind := input.Args.OpKind()
 	entry, ok := s.Kinds[kind]
 	if !ok {
@@ -100,7 +103,7 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if err != nil {
 		return contract.Operation{}, err
 	}
-	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: entry.Card(input.Args, who), State: contract.OpPending, Created: now, Expires: now.Add(s.Expiry)}
+	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: entry.Card(ctx, input.Args, who), State: contract.OpPending, Created: now, Expires: now.Add(s.Expiry)}
 	if immediate {
 		op.State = contract.OpApproved
 	}
@@ -270,7 +273,7 @@ func (s *Service) run(op contract.Operation, entry Entry) {
 	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
 	} else {
-		result = entry.Execute(s.Context, op.Args, op.By)
+		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
 	}
 	_ = s.finish(op, result)
 }

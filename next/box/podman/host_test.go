@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -38,8 +40,13 @@ func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error
 			return nil, nil
 		}
 		if a == "-M" {
+			// Like ssh, a new master keeps an existing control socket and then serves none.
+			socket := args[slices.Index(args, "-S")+1]
+			if _, err := os.Lstat(socket); err == nil {
+				return nil, nil
+			}
 			r.dead = false
-			return nil, nil
+			return nil, os.WriteFile(socket, nil, 0600)
 		}
 	}
 	if r.fail {
@@ -199,6 +206,53 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 				t.Fatalf("forward argv %v, want %v", args, want)
 			}
 		}
+	}
+}
+
+// After an engine restart or a dead master, the old box socket is still on the host, and sshd
+// refuses to forward over it. Each forward removes it first.
+func TestForwardRemovesStaleHostSocketFirst(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	ctx := context.Background()
+	f := box.Forward{Box: "a", HostPath: "/remote/sock/a/engine.sock", EnginePath: "/local/s"}
+	removedBeforeForward := func(stage, remove string) {
+		for i, args := range r.calls {
+			if len(args) > 4 && args[len(args)-4] == "forward" {
+				previous := r.calls[i-1]
+				if !strings.HasSuffix(previous[len(previous)-1], remove) {
+					t.Fatalf("%s: the forward did not remove the old socket first", stage)
+				}
+				return
+			}
+		}
+		t.Fatalf("%s: no forward in %v", stage, r.calls)
+	}
+	if err := h.AddForward(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	removedBeforeForward("add", `rm -f -- "$2"' 'dyna' '/remote/sock/a' '/remote/sock/a/engine.sock'`)
+	r.calls = nil
+	r.dead = true
+	if err := h.StartContainer(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	removedBeforeForward("restore", "'rm' '-f' '--' '/remote/sock/a/engine.sock'")
+}
+
+// A master killed with SIGKILL leaves its control socket. Each heartbeat then started one more
+// master that served no socket, and every host command failed.
+func TestRestartRemovesDeadMasterSocket(t *testing.T) {
+	r := &runner{dead: true}
+	h := newTestHost(t, r)
+	if err := os.WriteFile(h.socket, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.StartContainer(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if r.dead {
+		t.Fatal("the new master did not serve the control socket")
 	}
 }
 
