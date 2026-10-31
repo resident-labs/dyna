@@ -37,6 +37,26 @@ func gitConfigValue(env map[string]string, key string) string {
 	return ""
 }
 
+func TestSessionRejectsInvalidToolPaths(t *testing.T) {
+	records := setupRooms(t, "resident-labs/personal")
+	t.Setenv(BinaryEnv, filepath.Join(t.TempDir(), "missing-gh"))
+	for _, tc := range []struct {
+		name, scratch, binary, want string
+	}{
+		{"empty scratch", "", "/dyna", "GitHub session scratch path is empty"},
+		{"relative scratch", "private/scratch", "/dyna", "GitHub session scratch path is relative"},
+		{"empty binary", "/scratch", "", "GitHub session binary path is empty"},
+		{"relative binary", "/scratch", "private/dyna", "GitHub session binary path is relative"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := SessionEnvironment(context.Background(), records[0].ID, tc.scratch, tc.binary, nil)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestSessionUsesTheRoomAccount(t *testing.T) {
 	records := setupRooms(t, "resident-labs/personal", "work/private")
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
