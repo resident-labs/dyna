@@ -61,6 +61,42 @@ func TestDynaCompletionRejectsDifferentRuntimeGrant(t *testing.T) {
 	}
 }
 
+func TestDynaCompletionRejectsEnabledRuntimeGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousEnabled, previousHook := DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook
+	defer func() { DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook = previousEnabled, previousHook }()
+	DynaMemoryOAuthCallbacks = true
+	manager := coreauth.NewManager(nil, nil, nil)
+	if _, err := manager.Register(coreauth.WithSkipPersist(context.Background()), &coreauth.Auth{ID: "invented", Provider: "kimi", Metadata: map[string]any{"access_token": "invented-token"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{}, manager)
+	const state = "invented-enabled-state"
+	RegisterOAuthSession(state, "kimi")
+	t.Cleanup(func() { oauthSessions.mu.Lock(); delete(oauthSessions.sessions, state); oauthSessions.mu.Unlock() })
+	called := false
+	DynaOAuthCompletionHook = func(state, _ string) {
+		called = true
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/status?state="+state, nil)
+		h.GetAuthStatus(c)
+		var result struct {
+			Adopted bool `json:"adopted"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Error(err)
+		}
+		if result.Adopted {
+			t.Error("status promoted an enabled unbound credential")
+		}
+	}
+	h.dynaCompleteOAuth(state, &coreauth.Auth{ID: "invented", Metadata: map[string]any{"access_token": "invented-token"}})
+	if !called {
+		t.Fatal("failed adoption was not reported")
+	}
+}
+
 func TestDynaKimiOAuthCompletesAfterAdoption(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	previousEnabled, previousHook := DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook
