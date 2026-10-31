@@ -44,6 +44,7 @@ CREATE TABLE pr_owners (repo TEXT NOT NULL REFERENCES repos(repo), number INTEGE
 
 CREATE INDEX turns_session_ended ON turns(session, ended_at);
 CREATE INDEX turns_session_started ON turns(session, started_seq);
+CREATE INDEX turns_session_started_at ON turns(session, started_at DESC);
 CREATE INDEX sessions_room_closed ON sessions(room, closed_at);
 CREATE INDEX sessions_parent ON sessions(parent);
 CREATE INDEX pr_owners_session ON pr_owners(session);
