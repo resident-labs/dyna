@@ -36,17 +36,19 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 		return contract.RoomListResponse{}, failure(err)
 	}
 	rows.Close()
+	// newest holds each room's activityOrder of its Latest label.
+	newest := make([]uint64, len(rooms))
 	for kind, query := range []string{
-		"SELECT room,id FROM operations WHERE state='pending' AND class='owner' ORDER BY created_at",
-		"SELECT s.room,s.id FROM sessions s WHERE s.closed_at IS NULL AND EXISTS (SELECT 1 FROM turns t WHERE t.session=s.id AND t.ended_at IS NULL) ORDER BY s.created_at,s.id",
+		"SELECT room,id,'','' FROM operations WHERE state='pending' AND class='owner' ORDER BY created_at",
+		"SELECT s.room,s.id,s.name,t.id FROM sessions s JOIN turns t ON t.id=(SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1) WHERE s.closed_at IS NULL ORDER BY s.created_at,s.id",
 	} {
 		items, err := s.store.Read().QueryContext(ctx, query)
 		if err != nil {
 			return contract.RoomListResponse{}, failure(err)
 		}
 		for items.Next() {
-			var room, id string
-			if err := items.Scan(&room, &id); err != nil {
+			var room, id, name, turn string
+			if err := items.Scan(&room, &id, &name, &turn); err != nil {
 				items.Close()
 				return contract.RoomListResponse{}, failure(err)
 			}
@@ -56,6 +58,14 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 						rooms[i].Waiting = append(rooms[i].Waiting, contract.OpID(id))
 					} else {
 						rooms[i].Working = append(rooms[i].Working, contract.SessionID(id))
+						s.mu.Lock()
+						state := s.sessionLocked(contract.SessionID(id))
+						activity, order := state.activity, state.activityOrder
+						s.mu.Unlock()
+						if activity.Turn == contract.TurnID(turn) && activity.Label != "" && order > newest[i] {
+							newest[i] = order
+							rooms[i].Latest = &contract.RoomActivity{Session: activity.Session, Name: name, Label: activity.Label}
+						}
 					}
 				}
 			}
