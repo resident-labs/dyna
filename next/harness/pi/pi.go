@@ -340,7 +340,7 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 	}
 	limit := h.deliveryLineLimit
 	if limit == 0 {
-		limit = 16 << 20
+		limit = 64 << 20
 	}
 	reader := bufio.NewReader(file)
 	var line []byte
