@@ -1194,3 +1194,91 @@ func TestSessionListTurnState(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnerAttention(t *testing.T) {
+	s, a, worker, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	b, problem := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		for _, row := range []struct{ id, class string }{{"owner-op", "owner"}, {"agent-op", "agent"}} {
+			if _, err := tx.Exec(`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES(?, ?, ?, 'owner', '', ?, 'pending', '{}', '{}', x'00', 1, 2)`, row.id, row.id, a, row.class); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('running',?,1,NULL,'','',0,0,0,0),('ended',(SELECT id FROM sessions WHERE room=? AND parent IS NULL),1,2,'','',0,0,0,0)`, worker, b.Room); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, problem := s.RoomList(ctx, owner, contract.RoomListRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var newest int64
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT MAX(seq) FROM events").Scan(&newest); err != nil {
+		t.Fatal(err)
+	}
+	if list.Seq < newest || len(list.Rooms) != 2 {
+		t.Fatalf("list: %+v", list)
+	}
+	for _, room := range list.Rooms {
+		if room.Waiting == nil || room.Working == nil {
+			t.Fatalf("nil lists: %+v", room)
+		}
+		if room.ID == a && (!reflect.DeepEqual(room.Waiting, []contract.OpID{"owner-op"}) || !reflect.DeepEqual(room.Working, []contract.SessionID{worker})) {
+			t.Fatalf("room A: %+v", room)
+		}
+		if room.ID == b.Room && (len(room.Waiting) != 0 || len(room.Working) != 0) {
+			t.Fatalf("room B: %+v", room)
+		}
+	}
+	stream, problem := s.Events(ctx, owner, "", list.Seq)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		for _, event := range []contract.Event{
+			{ID: "attention-post", Room: a, Body: contract.PostCreated{Text: "skip"}},
+			{ID: "attention-op", Room: a, Body: contract.OpRequested{}},
+			{ID: "attention-turn", Room: b.Room, Body: contract.TurnStarted{}},
+		} {
+			event.Time = time.Unix(1000, 0)
+			event.From = contract.Principal{Kind: contract.PrincipalEngine}
+			if _, err := s.store.AppendEvent(tx, event); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []contract.EventID{"attention-op", "attention-turn"} {
+		event := <-stream
+		if event.ID != id {
+			t.Fatalf("got %s, want %s", event.ID, id)
+		}
+	}
+	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker, Discard: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	closed := <-stream
+	if body, ok := closed.Body.(contract.SessionClosed); !ok || body.Session != worker {
+		t.Fatalf("expected session.closed for %s, got %+v", worker, closed)
+	}
+	list, problem = s.RoomList(ctx, owner, contract.RoomListRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, room := range list.Rooms {
+		if room.ID == a && len(room.Working) != 0 {
+			t.Fatalf("closed session still working: %+v", room)
+		}
+	}
+}
