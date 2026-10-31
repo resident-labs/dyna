@@ -10,6 +10,6 @@ type ContextSnapshotResponse struct {
 	Sections []ContextSection `json:"sections"`
 }
 type ContextSection struct {
-	Name string `json:"name"`
+	Key  string `json:"key"`
 	Text string `json:"text"`
 }
