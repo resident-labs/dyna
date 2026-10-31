@@ -74,14 +74,17 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecRunArgs)
-			grant, err := s.matchHostexec(ctx, a.Room, who, a.Host)
+			grants, err := s.store.ListActiveGrants(ctx, a.Room, who, s.now())
 			if err != nil {
 				return err
 			}
-			if grant.ID != a.Grant {
-				return hostexec.ErrNoGrant
+			for _, grant := range grants {
+				if grant.ID == a.Grant {
+					_, err = hostexec.Match([]contract.Grant{grant}, a.Host, s.now())
+					return err
+				}
 			}
-			return nil
+			return hostexec.ErrNoGrant
 		},
 		Decode: func(data json.RawMessage) (contract.OpArgs, error) {
 			var a contract.HostexecRunArgs
