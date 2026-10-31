@@ -104,6 +104,7 @@
   button, a { min-height: 32px; padding: 4px 10px; border: 1px solid var(--firm); border-radius: 6px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   a { display: inline-flex; align-items: center; text-decoration: none; }
   .actions { display: flex; gap: 8px; }
+  @media (max-width: 480px) { .key-values { grid-template-columns: minmax(0, 1fr); gap: 4px; } .key-values dd + dt { margin-top: 4px; } }
   @media (hover: none) { button, a { min-height: 44px; } }
   @media (max-width: 640px) { .ways-body { padding: 12px 16px; } .section-head { flex-wrap: wrap; padding: 12px 16px; } .section-head span:not(:first-child) { flex-basis: auto; } }
 </style>
