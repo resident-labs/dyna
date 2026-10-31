@@ -4,7 +4,7 @@
   // word shows the label alone, for a status word inside a muted line whose dot shows elsewhere.
   // A count is the one filled form: a number on an icon's corner, as v1 and Discord count what waits. Its parent
   // names the count, places it and sets --ring to the color behind it.
-  // Working is the only tone that moves: its dot pulses softly, and stops when the browser asks for reduced motion.
+  // Working's dot has a still, soft halo, as in the chosen room mockup (note 6); nothing moves.
   let { tone, label, title = label, dot = false, word = false, count }: {
     tone: "warning" | "error" | "blocked" | "failed" | "working"; label: string; title?: string; dot?: boolean; word?: boolean; count?: number;
   } = $props();
@@ -25,7 +25,5 @@
   i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .dot { width: 14px; height: 14px; justify-content: center; }
   .dot i { width: 9px; height: 9px; }
-  .working i { animation: pulse 2s ease-in-out infinite; }
-  @keyframes pulse { 50% { box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 25%, transparent); } }
-  @media (prefers-reduced-motion: reduce) { .working i { animation: none; } }
+  .working i { box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 22%, transparent); }
 </style>
