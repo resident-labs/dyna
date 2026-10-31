@@ -439,6 +439,20 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 		if current.Responses == nil {
 			current.Responses = map[string]map[string]cachedResponse{}
 		}
+		// A newer head refresh or failed poll may have invalidated these
+		// pages while this worker was reading them.
+		live := current.Records[key]
+		if live != nil && (err != nil || live.Polling.DiscussionGeneration != r.Polling.DiscussionGeneration) {
+			for path, response := range entries {
+				if discussionResponse(path) {
+					response.Stale = true
+					entries[path] = response
+				}
+			}
+		}
+		if live != nil && err != nil {
+			live.Polling.DiscussionGeneration++
+		}
 		// Bodies are immutable; detach the worker's mutable response entry map.
 		current.Responses[key] = maps.Clone(entries)
 		if live := current.Records[key]; live != nil && gh.requests.account != "" {

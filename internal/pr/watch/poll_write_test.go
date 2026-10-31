@@ -145,3 +145,94 @@ func TestPollWriteKeepsCrossRecordQuotaScheduling(t *testing.T) {
 		})
 	}
 }
+
+func TestPollCannotUndoConcurrentDiscussionInvalidation(t *testing.T) {
+	e := newEnv(t)
+	r := e.track()
+	path := "github.com/repos/owner/repo/pulls/17/reviews?per_page=100"
+	if err := e.s.Store.update(func(st *State) error {
+		st.Responses = map[string]map[string]cachedResponse{}
+		st.Responses[r.Key] = map[string]cachedResponse{path: {ETag: `"v1"`, Body: []byte(`[]`)}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := e.s.github(r.RoomID)
+	gh.requests = &requestCache{entries: st.Responses[r.Key], used: map[string]cachedResponse{}, rates: cloneRates(st.RateLimits), now: e.s.now}
+	result := pollResult{key: r.Key, gh: gh, unchanged: true, polledAt: e.clock}
+	// A head refresh invalidates while this old poll remains in flight.
+	if err := e.s.Store.update(func(current *State) error {
+		current.Records[r.Key].Polling.DiscussionGeneration++
+		response := current.Responses[r.Key][path]
+		response.Stale = true
+		current.Responses[r.Key][path] = response
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.finishPoll(context.Background(), st, result); err != nil {
+		t.Fatal(err)
+	}
+	after, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Responses[r.Key][path].Stale {
+		t.Fatal("old poll cleared concurrent invalidation")
+	}
+}
+
+func TestOtherPollWritersKeepDiscussionInvalidation(t *testing.T) {
+	for _, writer := range []string{"merge", "budget"} {
+		t.Run(writer, func(t *testing.T) {
+			e := newEnv(t)
+			r := e.track()
+			path := "github.com/repos/owner/repo/pulls/17/reviews?per_page=100"
+			old := cachedResponse{ETag: `"v1"`, Body: []byte(`[]`)}
+			if err := e.s.Store.update(func(st *State) error {
+				st.Responses = map[string]map[string]cachedResponse{r.Key: {path: old}}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			observed, err := state.ReadSnapshot(e.s.Store.Root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, _ = observed.Record(r.Key)
+			gh := e.s.github(r.RoomID)
+			gh.requests = &requestCache{used: map[string]cachedResponse{path: old, "github.com/budget": {Body: []byte(`[]`)}}, rates: cloneRates(observed.Metadata().RateLimits), now: e.s.now}
+			if err := e.s.Store.update(func(st *State) error {
+				st.Records[r.Key].Polling.DiscussionGeneration++
+				v := st.Responses[r.Key][path]
+				v.Stale = true
+				st.Responses[r.Key][path] = v
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if writer == "merge" {
+				err = e.s.savePollResponses(r.Key, gh)
+			} else {
+				err = e.s.saveBudgetRequests(pollResult{key: r.Key, gh: gh}, r, EffectivePolicy(observed.Metadata(), r), observed)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := e.s.Store.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !after.Responses[r.Key][path].Stale {
+				t.Fatal("writer cleared concurrent invalidation")
+			}
+			if len(after.Responses[r.Key]["github.com/budget"].Body) == 0 {
+				t.Fatal("writer lost unrelated response")
+			}
+		})
+	}
+}
