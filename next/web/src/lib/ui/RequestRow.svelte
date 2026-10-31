@@ -27,7 +27,8 @@
 <article class:current>
   {#if !grouped}<div class="head"><Avatar kind={request.by.kind} {name} size={24} /><strong style:--hue={hue(name)}>{name}</strong>
     <span class="time">{#if soon}<StatusPill tone="warning" word label={"Expires " + fromNow(request.expires, now)} />{:else}Expires {fromNow(request.expires, now)}{/if}</span></div>{/if}
-  <p><span class="muted">{request.card.title}</span>{#if request.card.body}{" "}{request.card.body}{/if}</p>
+  <p><span class="muted">{request.card.title}</span>{#if request.card.target.kind !== "room" && !request.card.body?.includes(request.card.target.name)} on <code>{request.card.target.name}</code>{/if}{#if request.card.body}{" "}{request.card.body}{/if}</p>
+  {#each request.card.changes ?? [] as change (change.field)}<p><span class="muted">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
   {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
   {#if admin && note}<input aria-label="Note to the session" placeholder="Add a note" bind:value={reason} disabled={busy} />{/if}
   <div class="actions">{#if admin}<button class="approve" type="button" disabled={busy} onclick={() => void decide(true)}>Approve</button>
@@ -45,6 +46,7 @@
   .time { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
   p { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .muted { color: var(--muted); }
+  code { font: 13px var(--mono); overflow-wrap: anywhere; }
   pre { margin: 8px 0; padding: 10px; border-radius: 6px; background: var(--bg); font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
   .actions { flex-wrap: wrap; margin-top: 10px; }
   button { min-height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
