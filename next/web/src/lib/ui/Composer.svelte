@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import { render } from "./PostRow.svelte";
-  import type { Quote } from "../feed.ts";
+  import { count, type Quote } from "../feed.ts";
   // Enter sends and Shift+Enter starts a new line. The action row keeps room for the attach and mention buttons.
   // A forwarded post waits above the text as in v1; the × or Escape removes it.
   let { value = $bindable(""), placeholder, onsend, quote, onunquote, element = $bindable() }: {
@@ -18,7 +18,8 @@
 <div class="composer">
   {#if quote}<div class="quote"><p class="label"><Icon name="forward" size={14} /><span>Forwarding a post from <strong>{quote.author}</strong></span>
     <button type="button" aria-label="Remove forwarded post" title="Remove forwarded post" onclick={() => { onunquote(); element?.focus(); }}><Icon name="close" size={14} /></button></p>
-    <div class="quoted">{@html render(quote.text)}</div></div>{/if}
+    <div class="quoted">{@html render(quote.text)}</div>
+    {#if quote.attachments.length}<p class="files">{count(quote.attachments.length, "file")}: {quote.attachments.map(file => file.name).join(", ")}</p>{/if}</div>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} {placeholder}></textarea>
   <div class="actions">
     <span class="keys">Enter to send · Shift+Enter for a new line</span>
@@ -41,6 +42,7 @@
   @media (hover: none) { .quote button { width: 40px; height: 40px; } }
   .quoted { max-height: 4.5em; overflow: hidden; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   .quoted :global(:is(p, ul, ol, pre, blockquote)) { margin: 0; }
+  .files { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; }
   textarea:focus-visible { outline: none; }
   textarea::placeholder { color: var(--muted); }

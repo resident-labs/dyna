@@ -105,7 +105,9 @@
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
     // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
     const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
-    void view?.send({ room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined, home: session ? home : undefined });
+    // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
+    void view?.send({ room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
+      home: session ? home : undefined, attachments: quote?.attachments.length ? quote.attachments : undefined });
   }
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
