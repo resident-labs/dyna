@@ -442,7 +442,7 @@ suites:
     checks: [next, next-ssh]
 
   - id: next-pi
-    files: ['^next/third_party/pi/|^scripts/ci-changes\.sh$|^\.github/']
+    files: ['^next/third_party/pi/|^scripts/ci-changes\.sh$|^scripts/ci\.sh$|^\.github/']
     checks: [next-pi]
 
   - id: next-web
