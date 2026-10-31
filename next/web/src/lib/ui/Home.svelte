@@ -79,6 +79,11 @@
   }));
   const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
   let failures = $derived(failedRooms(attention, id => sessions.get(id)?.name));
+  // Only the owner can end a wait for a host that takes the room, so each such room has one row that opens it.
+  let hostless = $derived([...attention.rooms.values()].flatMap(room => {
+    const waits = attention.hostless.get(room.id)?.size ?? 0;
+    return waits ? [{ room, waits }] : [];
+  }));
   // Approve and Deny decide in place. The engine's op.decided event takes the row out of waiting; the owner's own
   // decision stays as one muted line until Home closes, so the row does not just vanish under the pointer.
   const decided = new SvelteMap<string, string>();
@@ -131,7 +136,7 @@
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
   let asks = $derived(total(attention.waiting));
-  let needs = $derived(asks + failures.length);
+  let needs = $derived(asks + failures.length + hostless.length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
@@ -169,6 +174,10 @@
         <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}{/each}
       {#each failures as { room, title, reason } (room.id)}<div class="item failure"><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title">{title}</span><span class="line"><StatusPill tone="failed" label={reason} /> · {room.name}</span></span>
+        <span class="acts"><a class="open" href={roomHref(room.id)} onclick={navigate}>Open</a></span></div>{/each}
+      {#each hostless as { room, waits } (room.id)}<div class="item hostless"><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
+        <span class="lines"><span class="title">{waits === 1 ? "1 session waits" : `${waits} sessions wait`} for a host that takes {room.name}</span>
+          <span class="line"><StatusPill tone="warning" label="No host takes this room" /></span></span>
         <span class="acts"><a class="open" href={roomHref(room.id)} onclick={navigate}>Open</a></span></div>{/each}
       {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
     </section></div>{/if}
@@ -211,10 +220,12 @@
   /* The owner approves from this line, so it wraps rather than cutting off who gets access or for how long. */
   .request .line { white-space: normal; }
   /* The owner acts on a failure's reason, so it wraps as well. */
-  .failure .line { white-space: normal; }
-  .failure .line :global(.status) { display: inline; white-space: normal; }
-  .failure .line :global(.status i) { display: inline-block; margin: 0 5px 1px 0; }
-  .failure .acts { width: auto; margin-left: auto; }
+  .failure .line, .hostless .line { white-space: normal; }
+  /* The sentence names the room, so it wraps on a phone instead of cutting the room's name. */
+  .hostless .title { white-space: normal; }
+  .failure .line :global(.status), .hostless .line :global(.status) { display: inline; white-space: normal; }
+  .failure .line :global(.status i), .hostless .line :global(.status i) { display: inline-block; margin: 0 5px 1px 0; }
+  .failure .acts, .hostless .acts { width: auto; margin-left: auto; }
   /* On Home every name is in the text color; the hue stays on the avatar. */
   .who { font-weight: 500; }
   /* Only the host is mono, as it is a name the owner may type. */
