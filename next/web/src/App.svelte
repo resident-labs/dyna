@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { watchHello } from "./lib/stream.ts";
+  import { FormDrafts } from "./lib/form-drafts.ts";
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
@@ -44,6 +46,24 @@
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const pairCode = linkCode(window.location.hash);
   if (window.location.hash.includes("pair=")) history.replaceState(null, "", window.location.pathname + window.location.search);
+  const formDrafts = new FormDrafts();
+  function formEvent(event: FocusEvent | Event) {
+    const control = event.target;
+    if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) {
+      if (event.type === "focusin") formDrafts.focus(control); else formDrafts.input(control);
+    }
+  }
+  let firstBuild: string | undefined;
+  let reloadPending = $state(false);
+  watchHello(({ build }) => {
+    if (firstBuild === undefined) { firstBuild = build; return; }
+    if (build === firstBuild || reloadPending) return;
+    const focused = document.activeElement;
+    const hasWork = Object.values(drafts).some(Boolean) || Object.values(quotes).some(Boolean) ||
+      Object.values(unsent).some(list => list.length) || [...fileDrafts.values()].some(draft => draft.items.length > 0) ||
+      formDrafts.pending || terminals?.hasInput() || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && focused.value);
+    if (hasWork) reloadPending = true; else location.reload();
+  });
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
   // Distinct initials for every room avatar, so two rooms never look alike on the rail.
@@ -536,7 +556,7 @@
     onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; dockChosen = true; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
-<svelte:window onkeydown={cycle} onclickcapture={dismissRequests} />
+<svelte:window onkeydown={cycle} onclickcapture={dismissRequests} onfocusin={formEvent} oninput={formEvent} />
 {#if palette}<Palette {rooms} {room} search={searchPosts} onclose={closePalette} onopen={paletteOpen} />{/if}
 {#snippet sheetHandle(of: string)}
   <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
@@ -605,6 +625,7 @@
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
+    {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
     {#if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} edit={attention.can("admin")} onback={event => void closeSection(event.detail > 0)} />
     {:else}<div class="feed">
@@ -688,6 +709,8 @@
   .visual-pane { min-width: 0; overflow: hidden; border-left: 1px solid var(--line); }
   @media (max-width: 760px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr); } .visual-pane { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(660px, 100vw); } }
   @media (max-width: 640px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: minmax(0, 1fr); } .visual-pane { width: 100%; height: var(--app-height, 100dvh); } }
+  .reload-notice { margin: 0; padding: 7px 16px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 13px; }
+  .reload-notice button { margin-left: 4px; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */

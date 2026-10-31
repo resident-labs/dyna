@@ -2,6 +2,11 @@ package contract
 
 import "time"
 
+// StreamHello is sent before events on each stream connection.
+type StreamHello struct {
+	Build string `json:"build"`
+}
+
 // EventType is "family.verb" in the past tense, such as "post.created".
 type EventType string
 
