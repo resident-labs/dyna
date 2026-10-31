@@ -5,8 +5,8 @@ import type { BoxState, Event, EventBody, FailureCause, Principal } from "./cont
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
   const at = "2026-10-30T12:00:00Z";
-  assert.equal(quoted({ author: "lead", at, text: "- one\n\n@root two" }, " see this \n"),
-    `> **Forwarded from lead** · ${formatTime(at)}\n>\n> - one\n>\n> @root two\n\nsee this`);
+  assert.equal(quoted({ author: "lead", at, text: "- one\n\n@root two\rthree", attachments: [] }, " see this \n"),
+    `> **Forwarded from lead** · ${formatTime(at)}\n>\n> - one\n>\n> @root two\n> three\n\nsee this`);
 });
 
 test("a command line shows each argument exactly: spaces, quotes and empty arguments are quoted", () => {

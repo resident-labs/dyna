@@ -71,8 +71,9 @@
   .post > :not(:global(.avatar)) { grid-column: 2; }
   /* v1's bar: it floats over the row's top right and is laid out while hidden, so showing it never moves the row. */
   .post > .bar { grid-column: auto; position: absolute; top: -14px; right: 16px; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 2px;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 18%); visibility: hidden; }
-  .post:hover > .bar, .post:focus-within > .bar { visibility: visible; }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 18%); opacity: 0; pointer-events: none; }
+  /* Hidden by opacity, not visibility, so Tab still reaches the buttons and shows the bar. */
+  .post:hover > .bar, .post:focus-within > .bar { opacity: 1; pointer-events: auto; }
   .bar button { all: unset; display: grid; place-items: center; width: 28px; height: 26px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   .bar button:hover { background: var(--selected); color: var(--text); }
   .bar button:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
