@@ -61,7 +61,7 @@ func TestUpgradeGrantsExistingRoot(t *testing.T) {
 	}
 	s := &Store{read: db}
 	grants, err := s.ListActiveGrants(context.Background(), "room", contract.Principal{Kind: contract.PrincipalSession, Session: "root"}, time.UnixMilli(1000))
-	if err != nil || len(grants) != 1 || grants[0].Mode != contract.GrantModePreapproved || grants[0].Hosts[0] != contract.AllHosts || grants[0].Commands[0].Program != "*" || !grants[0].Commands[0].Prefix {
+	if err != nil || len(grants) != 1 || grants[0].Hosts[0] != contract.AllHosts {
 		t.Fatalf("root grants: %+v %v", grants, err)
 	}
 }
@@ -82,11 +82,68 @@ func TestUpgradeSetsOpenTurnStartSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", steps); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}}); err != nil {
 		t.Fatal(err)
 	}
 	var seq sql.NullInt64
 	if err := db.QueryRow("SELECT started_seq FROM turns WHERE id='open'").Scan(&seq); err != nil || seq.Int64 != 9 {
 		t.Fatalf("open turn started_seq %v: %v", seq, err)
+	}
+}
+
+func TestUpgradeRevokesOldGrants(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+ INSERT INTO meta VALUES ('schema_version','17');
+ CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL, parent TEXT);
+ INSERT INTO sessions VALUES ('root','room',NULL),('child','room','root');
+ CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL, to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, hosts BLOB NOT NULL, commands BLOB NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, revoked_at INTEGER, expired_at INTEGER);
+ INSERT INTO grants VALUES
+ ('grant_root','hostexec','room','session','root','preapproved','["*"]','[]','engine','',NULL,NULL),
+ ('custom','hostexec','room','session','root','approve','[]','[]','owner','',NULL,NULL),
+ ('grant_child','hostexec','room','session','child','preapproved','[]','[]','engine','',NULL,NULL),
+ ('expired','hostexec','room','session','child','approve','[]','[]','owner','',NULL,5),
+ ('old','hostexec','room','session','child','approve','[]','[]','owner','',7,NULL);
+ CREATE TABLE hostexec_runs (grant_id TEXT, ended_at INTEGER, stopped TEXT);
+ INSERT INTO hostexec_runs VALUES ('custom',NULL,''),('grant_root',NULL,'');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, 1, "", steps); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT id,revoked_at,reason FROM grants ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]sql.NullInt64{}
+	for rows.Next() {
+		var id, reason string
+		var revoked sql.NullInt64
+		if err := rows.Scan(&id, &revoked, &reason); err != nil {
+			t.Fatal(err)
+		}
+		if reason != "" {
+			t.Fatalf("%s reason %q", id, reason)
+		}
+		got[id] = revoked
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got["grant_root"].Valid || !got["custom"].Valid || !got["grant_child"].Valid || got["expired"].Valid || got["old"].Int64 != 7 {
+		t.Fatalf("revocations: %+v", got)
+	}
+	var stopped string
+	if err := db.QueryRow(`SELECT stopped FROM hostexec_runs WHERE grant_id='custom'`).Scan(&stopped); err != nil || stopped != "revoked" {
+		t.Fatalf("run stopped=%q: %v", stopped, err)
+	}
+	if _, err := db.Exec(`SELECT mode,commands FROM grants`); err == nil {
+		t.Fatal("old columns remain")
 	}
 }
