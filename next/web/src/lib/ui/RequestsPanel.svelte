@@ -27,7 +27,7 @@
   <div class="list">
     <h2 class="label">Waiting for you</h2>
     {#each waiting as request (request.id)}<RequestCard {request} {store} {now} />
-    {:else}{#if store.ready}<p class="none">No requests are waiting.</p>{/if}{/each}
+    {:else}{#if store.ready}<p class="none">{shared.length ? "Nothing is waiting for you." : "No requests are waiting."}</p>{/if}{/each}
     {#if shared.length}
       <h2 class="label">Waiting for a session</h2>
       {#each shared as request (request.id)}<RequestCard {request} {store} {now} />{/each}
