@@ -10,8 +10,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
+
+func TestCancelRemovesPendingApproval(t *testing.T) {
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(LinkStart{ID: "invented-id", URL: "https://example.invalid", UserCode: "invented-code", Expires: time.Now().Add(time.Minute).UnixMilli()})
+	}))
+	defer relay.Close()
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	files, err := OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := NewOperations(context.Background(), files, st, 1001, 1002)
+	defer ops.Close()
+	if err := ops.Start(context.Background(), contract.ConnectStartRequest{Relay: relay.URL, Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := ops.Status(context.Background())
+	if err != nil || status.Code != "invented-code" {
+		t.Fatalf("status: %+v, %v", status, err)
+	}
+	if err := ops.Cancel(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err = ops.Status(context.Background())
+	if err != nil || status.Attempt.State != contract.ConnectAttemptCanceled || status.Code != "" {
+		t.Fatalf("canceled: %+v, %v", status, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "connect", "pending.json")); !os.IsNotExist(err) {
+		t.Fatal("pending secret remains")
+	}
+}
 
 func TestPendingLinkResumesAfterRestart(t *testing.T) {
 	now := time.Unix(1700000000, 0)
