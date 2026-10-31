@@ -16,7 +16,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"github.com/spf13/cobra"
 )
@@ -82,7 +81,7 @@ func proxyCommand() *cobra.Command {
 			}
 		}()
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
-		service, err = cliproxy.NewBuilder().WithPostAuthHook(func(_ context.Context, auth *coreauth.Auth) error { auth.Disabled = true; return nil }).WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
+		service, err = cliproxy.NewBuilder().WithPostAuthHook(cliproxy.StageDynaCredential).WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
 			proxyKeyRoutes(router, &service, credentials, cfg.RemoteManagement.SecretKey)
 		})).Build()
 		if err != nil {
