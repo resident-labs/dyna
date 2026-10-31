@@ -54,8 +54,9 @@ var transitions = map[contract.BoxState][]contract.BoxState{
 	contract.BoxReady:    {contract.BoxStopped, contract.BoxFailed, contract.BoxClosing, contract.BoxLost},
 	contract.BoxStopped:  {contract.BoxStarting, contract.BoxPending, contract.BoxClosing, contract.BoxLost},
 	contract.BoxClosing:  {contract.BoxDeleted, contract.BoxLost, contract.BoxFailed},
-	contract.BoxFailed:   {contract.BoxClosing},
-	contract.BoxLost:     {contract.BoxReady, contract.BoxStopped, contract.BoxFailed, contract.BoxClosing},
+	// Only session.restart moves a failed box back to pending.
+	contract.BoxFailed: {contract.BoxClosing, contract.BoxPending},
+	contract.BoxLost:   {contract.BoxReady, contract.BoxStopped, contract.BoxFailed, contract.BoxClosing},
 }
 
 func Transition(b Box, to contract.BoxState, reason string, now time.Time) (Box, contract.BoxChanged, error) {
