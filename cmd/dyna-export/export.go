@@ -18,6 +18,10 @@ type limitGap struct {
 	Room  string `json:"room"`
 	Field string `json:"field"`
 }
+type legacyIssueGap struct {
+	Room   contract.RoomName `json:"room"`
+	Events int               `json:"events"`
+}
 type exportReport struct {
 	Inventory             []fieldInventory    `json:"inventory"`
 	SkippedHosts          []string            `json:"skippedHosts"`
@@ -32,6 +36,7 @@ type exportReport struct {
 	SkippedServices       []string            `json:"skippedServices"`
 	SkippedWorkflowLeaves int                 `json:"skippedWorkflowLeaves"`
 	PartialFeeds          []contract.RoomName `json:"partialFeeds"`
+	LegacyIssueFeeds      []legacyIssueGap    `json:"legacyIssueFeeds"`
 	Profiles              int                 `json:"profiles"`
 	Repos                 int                 `json:"repos"`
 	Skills                int                 `json:"skills"`
@@ -122,6 +127,9 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 		feed, err := readFeed(feeds, rec.ID)
 		if err != nil {
 			return g, nil, report, err
+		}
+		if feed.legacyIssues > 0 {
+			report.LegacyIssueFeeds = append(report.LegacyIssueFeeds, legacyIssueGap{Room: name, Events: feed.legacyIssues})
 		}
 		if feed.partial {
 			report.PartialFeeds = append(report.PartialFeeds, name)
