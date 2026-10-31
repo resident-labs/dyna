@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import RequestCard from "./RequestCard.svelte";
   import type { RoomStore } from "../room.svelte.ts";
-  let { store, room, onback }: { store: RoomStore; room: string; onback: () => void } = $props();
+  let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: () => void; element?: HTMLElement } = $props();
   let back: HTMLButtonElement;
   // Waiting requests first, in the order they came; then the ones decided since the room opened, newest first.
   let requests = $derived([...store.requests.values()]);
@@ -19,7 +19,7 @@
   });
 </script>
 
-<section class="panel" aria-label="Requests">
+<section class="panel" aria-label="Requests" tabindex="-1" bind:this={element}>
   <div class="top"><button type="button" class="back" bind:this={back} onclick={onback}><Icon name="back" />Back</button>
     <span class="room">{room}</span><strong>Requests</strong></div>
   <div class="list">
