@@ -120,7 +120,17 @@ func shouldRefreshUnwatched(st State, r *Record, now time.Time, force bool) bool
 // refreshUnwatchedBatch runs after watched PR work, so stopped watches cannot
 // delay head confirmation or review dispatch. Failed probes fall back to the
 // existing REST reader.
-func (s *Service) refreshUnwatchedBatch(ctx context.Context, keys []string, pauses map[string]bool) error {
+func (s *Service) refreshUnwatchedBatch(ctx context.Context, initial State, keys []string, pauses map[string]bool) error {
+	due := false
+	for _, key := range keys {
+		if shouldRefreshUnwatched(initial, initial.Records[key], s.now(), false) {
+			due = true
+			break
+		}
+	}
+	if !due {
+		return nil
+	}
 	st, err := s.Store.Read()
 	if err != nil {
 		return err

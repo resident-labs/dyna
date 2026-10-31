@@ -307,7 +307,7 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if !next.IsZero() && fresh.LegacyPause.After(next) {
 		next = fresh.LegacyPause
 	}
-	remember(s.refreshUnwatchedBatch(ctx, keys, pauses))
+	remember(s.refreshUnwatchedBatch(ctx, st, keys, pauses))
 	issueCtx, stopIssues := context.WithTimeout(ctx, s.recordBudget())
 	issuesWatched, issueErr := s.pollIssueWatches(issueCtx)
 	remember(issueErr)
