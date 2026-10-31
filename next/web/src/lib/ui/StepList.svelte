@@ -48,18 +48,16 @@
     {/if}
   {/each}
 </ol>
-<!-- transcript.read's truncated flag covers dropped steps and capped output alike, so the line names both. -->
-{#if truncated}<p>Some steps or output are not shown.</p>{/if}
+{#if truncated}<p class="unavailable">Some step details are not available.</p>{/if}
 
 <style>
-  p { margin: 0; padding: 2px 0; }
-  ol { margin: 0; padding: 0; list-style: none; max-width: 720px; }
+  .unavailable { margin: 0; padding: 4px 0; }
+  ol { margin: 0; padding: 0; list-style: none; width: 100%; min-width: 0; }
   button { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 6px; }
   button:hover { background: var(--hover); color: var(--text); }
   button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   /* The wash reaches 4 px past the text, so the text keeps its edge. */
   .earlier, .step { display: flex; align-items: center; gap: 8px; min-width: 0; width: calc(100% + 8px); min-height: 28px; margin: 0 -4px; padding: 0 4px; }
-  .earlier { max-width: 728px; }
   .what { flex: 1; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .verb { flex: none; }
   code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
