@@ -829,13 +829,13 @@ func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A restart after the close marked the pending box and before it finished leaves this state behind.
-	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, "", ""); err != nil {
+	// A restart after the close intent is saved resumes the pending box close.
+	if err := st.MarkClosing(ctx, worker.Session, false); err != nil {
 		t.Fatal(err)
 	}
-	if e := s.ResumeClosures(ctx); e != nil {
-		t.Fatal(e)
-	}
+	restarted := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	passLifecycle(t, restarted, ctx)
+	passLifecycle(t, restarted, ctx)
 	current, err = st.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxDeleted {
 		t.Fatalf("box %+v, error %v, want deleted without an archive ack", current, err)

@@ -111,14 +111,12 @@ func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
 	h := heldArchiveStart{started: make(chan struct{}), release: make(chan struct{})}
 	s.boxes = h
 	resetLifecycle(s)
-	session, err := s.store.Session(ctx, sid)
-	if err != nil {
+	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.reconciler.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	closed := make(chan *contract.Error, 1)
-	go func() {
-		closed <- s.closeSession(ctx, contract.Principal{Kind: contract.PrincipalOwner}, session, false)
-	}()
 	<-h.started
 	channel, problem := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid})
 	if problem != nil {
@@ -128,9 +126,7 @@ func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
 		t.Fatal("closing box dispatched a turn")
 	}
 	close(h.release)
-	if problem := <-closed; problem != nil {
-		t.Fatal(problem)
-	}
+	s.reconciler.Wait()
 	var count int
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM turns WHERE session=?", sid).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("turns=%d err=%v", count, err)
@@ -383,9 +379,11 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 	if _, err = s.transition(ctx, record.Room, current, contract.BoxDeleted, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResumeClosures(ctx); err != nil {
+	if err := s.store.MarkClosing(ctx, session, false); err != nil {
 		t.Fatal(err)
 	}
+	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	passLifecycle(t, restarted, ctx)
 	if _, err := s.store.Session(ctx, session); err == nil {
 		t.Fatal("session remained open")
 	}
@@ -410,26 +408,23 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if _, err := s.transition(ctx, room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET id='000' WHERE session=?", child.Session)
-		return err
-	}); err != nil {
+	if err := s.store.MarkClosing(ctx, parent, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.MarkClosing(ctx, parent); err != nil {
-		t.Fatal(err)
-	}
-	if e := s.ResumeClosures(ctx); e != nil {
-		t.Fatal(e)
-	}
+	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	passLifecycle(t, restarted, ctx)
 	childAck := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
-	if _, e := s.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
+	if _, e := restarted.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, restarted, ctx)
+	passLifecycle(t, restarted, ctx)
 	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
-	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
+	if _, e := restarted.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, restarted, ctx)
+	passLifecycle(t, restarted, ctx)
 	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
 	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
 		t.Fatalf("close order: %+v, %v", events, err)
@@ -454,9 +449,11 @@ func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResumeClosures(ctx); err != nil {
+	if err := s.store.MarkClosing(ctx, session, false); err != nil {
 		t.Fatal(err)
 	}
+	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	passLifecycle(t, restarted, ctx)
 	current, err = s.store.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxClosing {
 		t.Fatalf("box %+v, error %v, want closing until the box acknowledges the archive", current, err)
