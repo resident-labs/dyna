@@ -27,6 +27,8 @@ const card = object({
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
 const cause = optional(oneOf("create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed", "nested_device_missing", "kvm_device_missing"));
+// How a shell job ended (the end field is new, so it may be missing).
+const jobEnd = optional(nullable(object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) })));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
 const bodies: Record<string, Check> = {
   "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
@@ -45,7 +47,7 @@ const bodies: Record<string, Check> = {
   "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "owner"), card, expires: string }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
   "op.ran": object({ id: string, state, result: object({ exitCode: number, cause, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
-  "shell.job.ended": object({ session: string, job: string, exitCode: number, tail: string }),
+  "shell.job.ended": object({ session: string, job: string, exitCode: number, tail: string, description: optional(string), end: jobEnd }),
   "box.pressure": object({ box: string, kind: oneOf("high", "max") }),
   "grant.expired": object({ grant: string }),
   "pr.opened": object({ repo: string, number: number, session: string, url: string }),
@@ -78,7 +80,7 @@ export function decodeEvent(value: unknown): Event | undefined {
 }
 
 const shellOutput = object({ job: string, command: string, running: boolean, exitCode: number, text: string, reset: optional(boolean),
-  started: string, ended: optional(string) });
+  started: string, ended: optional(string), description: optional(string), end: jobEnd });
 // Each message of /v1/shell/watch passes here once; one that does not match is skipped like an event.
 export function decodeShellOutput(value: unknown): ShellJobOutput | undefined {
   // The check covers every field of the generated type.
