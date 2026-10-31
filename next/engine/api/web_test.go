@@ -10,12 +10,19 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func TestWebGuardAndLogin(t *testing.T) {
 	now := time.Unix(1000, 0)
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { st.Close() }()
 	a := New(&fakeService{}, nil)
-	w, err := NewWeb(a, "127.0.0.1:7790", fstest.MapFS{"index.html": {Data: []byte("app")}}, func() time.Time { return now })
+	w, err := NewWeb(a, "127.0.0.1:7790", fstest.MapFS{"index.html": {Data: []byte("app")}}, func() time.Time { return now }, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +65,14 @@ func TestWebGuardAndLogin(t *testing.T) {
 		t.Fatalf("login: %d", rec.Code)
 	}
 	cookie := rec.Result().Cookies()[0]
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.devices = st
 	if !cookie.HttpOnly || cookie.Domain != "" || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatalf("cookie: %+v", cookie)
 	}
