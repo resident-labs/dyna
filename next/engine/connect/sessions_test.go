@@ -167,7 +167,7 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("authenticate: %v %v", ok, err)
 	}
 	out := httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, x)
+	service.ServePrivate(out, r, origin, x, []string{origin})
 	if out.Code != 200 {
 		t.Fatalf("renew: %d %s", out.Code, out.Body.String())
 	}
@@ -187,7 +187,7 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("grace auth: %v %v", ok, err)
 	}
 	out = httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, x)
+	service.ServePrivate(out, r, origin, x, []string{origin})
 	var renewal struct {
 		Grace bool `json:"grace"`
 	}
@@ -207,7 +207,7 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("503 auth: %v %v", ok, err)
 	}
 	out = httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, x)
+	service.ServePrivate(out, r, origin, x, []string{origin})
 	if err := json.Unmarshal(out.Body.Bytes(), &renewal); err != nil || out.Code != 200 || !renewal.Grace {
 		t.Fatalf("503 grace: %d %s %v", out.Code, out.Body.String(), err)
 	}
@@ -223,7 +223,7 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("expired grace auth: %v %v", ok, err)
 	}
 	out = httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, x)
+	service.ServePrivate(out, r, origin, x, []string{origin})
 	if out.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expired grace: %d", out.Code)
 	}
@@ -239,7 +239,7 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		t.Fatalf("rotated auth: %v %v", ok, err)
 	}
 	out = httptest.NewRecorder()
-	service.ServePrivate(out, r, origin, x)
+	service.ServePrivate(out, r, origin, x, []string{origin})
 	if out.Code != http.StatusUnauthorized {
 		t.Fatalf("relay refusal: %d %s", out.Code, out.Body.String())
 	}
