@@ -13,7 +13,7 @@
     state: "This sign-in started in another tab or browser. Start again here.",
     code: "This sign-in link no longer works. A link works once, within 5 minutes.",
     limit: "Too many sign-ins in the last minute. Wait a minute, then try again.",
-    unreachable: "This machine did not answer. Check this device’s connection, then try again.",
+    unreachable: "This machine did not answer. Check this device's connection, then try again.",
     relay: "Resident Labs did not finish the sign-in. Try again.",
   };
   async function show(value: Landing) {
@@ -68,7 +68,7 @@
       {#if result.field !== "proof"}<p><strong>If you set {result.pin.name ?? "this machine"} up again:</strong> open Settings › Sharing &amp; access on {result.pin.name ?? "the machine"} itself and compare its key. If it matches the offered key, remove this site’s data in your browser, then sign in again.</p>{/if}
       <p>{result.field === "proof" ? "Close this tab. You have not signed in." : result.returning ? "Otherwise, close this tab. Your sign-in code was not used." : "Otherwise, close this tab. You have not signed in."}</p>
     {:else if result?.kind === "failed"}
-      <h1>Sign-in did not finish</h1><p class="danger" role="alert">{result.problem === "unreachable" && pin?.name ? `${pin.name} did not answer. Check this device’s connection, then try again.` : errors[result.problem]}</p>
+      <h1>Sign-in did not finish</h1><p class="danger" role="alert">{result.problem === "unreachable" && pin?.name ? `${pin.name} did not answer. Check this device's connection, then try again.` : errors[result.problem]}</p>
       <button class="primary" onclick={() => { location.replace("/"); }}>Sign in again</button>
       <button class="link" onclick={() => { pairing = true; }}>Pair with a code instead</button>
     {:else if greeting}
