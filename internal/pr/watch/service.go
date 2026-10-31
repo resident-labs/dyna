@@ -1221,7 +1221,8 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 	}
 	named := s.namedReviewer(policyState, r, actor) || (confirmed != nil && deferredReplayReviewer(r, actor, head))
 	paused := confirmed == nil && changeKind(r) == "github" && s.now().Before(quotaFor(policyState, &r, s.now()).PauseUntil)
-	if !paused {
+	staleGitHub := changeKind(r) == "github" && !headVerified(r)
+	if !paused && !staleGitHub {
 		if err := staleVerdict(r, actor, head, Pull{}, reviewID, named); err != nil {
 			return err
 		}
@@ -1262,7 +1263,7 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		if !errors.As(pendingErr, &pending) {
 			return pendingErr
 		}
-		if paused {
+		if paused || staleGitHub {
 			return pendingErr
 		}
 	}
