@@ -107,7 +107,8 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 ### Cards and metric tiles
 
 - Use a card only for a thing with its own data, such as a machine or a model account. Never use a card as a frame around one line of text. [root]
-- Lead each metric tile with a large percent (the stat size, 24 px), then a thin bar, then muted "X of Y" below it. [root] [v1 `.stat-grid`, UsageMeter]
+- When the total is known, lead each metric tile with a large percent (the stat size, 24 px), then a thin bar, then muted "X of Y" below it. [root] [v1 `.stat-grid`, UsageMeter]
+- When the total is unknown (a provider reports no limit), lead with the counted figure at the stat size, show muted "Limit not reported" below it, and draw no bar. Never hide the counted usage. [spec, accounts check 10] [v1 UsageMeter "Not reported"]
 - Draw meters 6 px high on a track of about 7% alpha. Use 3 px bars in list rows. [v1 `--meter-h`, MachineRow]
 - Never show an empty or hollow card. When live data is missing, show the last known data dimmed (about 40% opacity) with its age. [root] [v1 `.dimmed`]
 - When a card has no data at all, leave it out. Do not show "No data". [root, #1461]
@@ -126,7 +127,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 ### Feed and messages
 
 - Lay out posts as Discord does: no bubbles and no borders, left-aligned, with one name line per run of posts from one sender. [spec 5.13] [Discord]
-- Show a hover bar on the selected post with Forward and Copy only. [owner]
+- Show a hover bar on the hovered or keyboard-focused post, with Forward and Copy only. [owner]
 - Float the hover bar over the top-right corner of the post. Showing it never moves the post. [v1 PostActions] [Discord]
 - Confirm Copy in place for 2 seconds ("Copied"). Never use a toast. [v1 PostActions]
 - Dim a pending post (about 50% opacity) until the engine confirms it. [owner, #1458]
@@ -159,10 +160,11 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 ### Each UI PR
 
 1. Read v1's matching screen and its components first. Say in the PR which v1 parts it keeps and why. [owner r24]
-2. Take screenshots of v1's matching screen and of one strong product (T3 Code, Discord or Linear) at the same window size and theme. [owner r23]
-3. Show v2's screen beside them in the PR, in dark and light when the view has both. [owner r23] [spec 5.13]
-4. Check the screenshot against this file before you ask for review. List any rule that you broke on purpose, and give the reason.
-5. The reviewer and the lead reject the PR unless v2 is clearly better than v1. [owner r23]
+2. Attach the required side-by-side image: v2's view on the left and the most similar T3 Code page on the right, at the same window size and theme. [spec 5.13]
+3. Also take a screenshot of v1's matching screen at the same size and theme. Discord or Linear images may be added, but they never replace the T3 Code image. [owner r23]
+4. Show v2's screen beside them in the PR, in dark and light when the view has both. [owner r23] [spec 5.13]
+5. Check the screenshot against this file before you ask for review. List any rule that you broke on purpose, and give the reason.
+6. The reviewer and the lead reject the PR unless v2 is clearly better than v1. [owner r23]
 
 ### Adding or changing a rule
 
