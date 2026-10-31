@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,35 @@ import (
 type dynaDurableProviderStore struct{ dynaFakeProviderStore }
 
 func (dynaDurableProviderStore) RequireDurableAuth() bool { return true }
+
+type dynaIdentityStore struct{ dynaDurableProviderStore }
+
+func (dynaIdentityStore) Save(ctx context.Context, auth *coreauth.Auth) (string, error) {
+	info := coreauth.GetRequestInfo(ctx)
+	if info.OAuthIdentity != nil {
+		if info.OAuthIdentity.Email == "" {
+			return "", errors.New("missing identity")
+		}
+	} else if auth.Metadata["email"] == nil {
+		return "", errors.New("missing identity")
+	}
+	return auth.ID, nil
+}
+
+func TestDynaReconnectRejectsInheritedIdentity(t *testing.T) {
+	ctx := coreauth.WithRequestInfo(context.Background(), &coreauth.RequestInfo{})
+	st := dynaIdentityStore{}
+	manager := coreauth.NewManager(st, nil, nil)
+	if _, err := manager.Register(coreauth.WithSkipPersist(ctx), &coreauth.Auth{ID: "same", Provider: "claude", Metadata: map[string]any{"email": "invented@example.test", "access_token": "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{}, manager)
+	h.tokenStore = st
+	newGrant := &coreauth.Auth{ID: "same", Provider: "claude", Metadata: map[string]any{"access_token": "new"}}
+	if _, err := h.saveTokenRecord(ctx, newGrant); err == nil {
+		t.Fatal("accepted identity inherited from old metadata")
+	}
+}
 
 func TestDynaReconnectAdoptsEnabledGrant(t *testing.T) {
 	previousEnabled, previousHook := DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook
