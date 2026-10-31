@@ -201,7 +201,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case contract.RuleAdded:
 					text = fmt.Sprintf("Rule r%d added: %s", body.Number, body.Text)
 				case contract.RuleRemoved:
-					text = fmt.Sprintf("Rule r%d removed.", body.Number)
+					var oldText string
+					if err := s.store.Read().QueryRowContext(ctx, "SELECT text FROM rules WHERE room=? AND number=?", event.Room, body.Number).Scan(&oldText); err != nil {
+						return
+					}
+					text = fmt.Sprintf("Rule r%d is removed and no longer applies: %s.", body.Number, oldText)
 				case contract.PostCreated:
 					text = body.Text
 				case contract.SessionStarted:
