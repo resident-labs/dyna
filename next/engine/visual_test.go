@@ -17,16 +17,17 @@ func TestVisualReplyRequiresCurrentVersion(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	author := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	req := httptest.NewRequest("POST", "/v1/files?name=card.html", bytes.NewBufferString("<title>Card</title>"))
 	req.Header.Set("Content-Type", "text/html")
 	rec := httptest.NewRecorder()
-	s.Files(owner, room).ServeHTTP(rec, req)
+	s.Files(author, room).ServeHTTP(rec, req)
 	var file contract.Attachment
 	if rec.Code != 200 || json.NewDecoder(rec.Body).Decode(&file) != nil {
 		t.Fatal(rec.Code)
 	}
 	file.Visual = &contract.VisualCard{Height: 120}
-	first, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "card", Attachments: []contract.Attachment{file}})
+	first, problem := s.Post(ctx, author, contract.PostRequest{Room: room, Text: "card", Attachments: []contract.Attachment{file}})
 	if problem != nil {
 		t.Fatal(problem)
 	}
@@ -100,6 +101,19 @@ func TestVisualReplyTargetsOriginalAuthor(t *testing.T) {
 	err := s.store.Read().QueryRowContext(ctx, "SELECT to_id FROM deliveries WHERE seq=?", reply.Seq).Scan(&recipient)
 	if err != nil || recipient != author {
 		t.Fatalf("recipient: %s, want %s: %v", recipient, author, err)
+	}
+}
+
+func TestVisualOriginalAuthorLookup(t *testing.T) {
+	s, roomID, author, card, ctx := visualReplyFixture(t)
+	event, err := s.store.Event(ctx, card.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := event.Body.(contract.PostCreated).Attachments[0].Visual.ID
+	page, problem := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: roomID, Event: id, Limit: 1})
+	if problem != nil || len(page.Events) != 1 || page.Events[0].ID != id || page.Events[0].From.Session != author || page.Names[author] != "author" {
+		t.Fatalf("original event: %+v %v", page, problem)
 	}
 }
 
