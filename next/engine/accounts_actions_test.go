@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -101,5 +102,50 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	}
 	if strings.Contains(args+card+opResult, secret) {
 		t.Fatal("operation contained secret")
+	}
+}
+
+func TestAccountLimitsOwnerAction(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: "proxy", Provider: "claude", Record: []byte(`{}`)}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindAccount(ctx, "account", "proxy", contract.ProviderAnthropic, "label"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','room',0,1,1)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	core := New(st, nil, nil, time.Now)
+	actions := NewAccountActions(core, nil, nil)
+	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	req := contract.AccountsSetLimitsRequest{AccountID: "account", Rooms: []contract.RoomID{"r"}}
+	if _, problem := actions.AccountsSetLimits(ctx, contract.Principal{Kind: contract.PrincipalSession}, req); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("session: %v", problem)
+	}
+	if _, problem := actions.AccountsSetLimits(ctx, contract.Principal{Kind: contract.PrincipalOwner}, req); problem != nil {
+		t.Fatal(problem)
+	}
+	ids, err := st.EligibleAccountProxyIDs(ctx, "other")
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("policy %v %v", ids, err)
+	}
+	req.Rooms = []contract.RoomID{"missing"}
+	if _, problem := actions.AccountsSetLimits(ctx, contract.Principal{Kind: contract.PrincipalOwner}, req); problem == nil {
+		t.Fatal("unknown room accepted")
+	}
+	ids, err = st.EligibleAccountProxyIDs(ctx, "r")
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("rollback %v %v", ids, err)
 	}
 }
