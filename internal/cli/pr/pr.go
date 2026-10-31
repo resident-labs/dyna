@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"dyna-agent/internal/authority"
@@ -635,6 +636,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 
 	comment := &cobra.Command{Use: "comment <number|url> [body]", Short: "Post a GitHub comment through gh and record its comment ID for routing", Args: cobra.RangeArgs(1, 2)}
 	commentBody := comment.Flags().String("body", "", "comment body text, as an alternative to the positional body")
+	commentEdit := comment.Flags().String("edit", "", "edit an account-owned issue comment by numeric ID")
 	commentAttachments := comment.Flags().StringArray("attach", nil, "attach a media file (repeatable)")
 	publishComment := comment.Flags().Bool("publish", false, "explicitly publish this comment to GitHub even when the room defaults to local")
 	comment.RunE = func(c *cobra.Command, a []string) error {
@@ -657,6 +659,22 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		roomID, err := publicationRoom(s, r)
 		if err != nil {
 			return err
+		}
+		if *commentEdit != "" {
+			id, err := strconv.ParseUint(*commentEdit, 10, 64)
+			if err != nil || id == 0 {
+				return fmt.Errorf("--edit requires a positive numeric comment ID")
+			}
+			if len(*commentAttachments) != 0 {
+				return fmt.Errorf("--attach is not supported with --edit")
+			}
+			if agentPublish {
+				if err := agentPublishing(s, r, roomID, *publishComment); err != nil {
+					return err
+				}
+			}
+			args := []string{"api", "--hostname", r.Host, fmt.Sprintf("repos/%s/issues/comments/%d", r.Repo, id), "--method", "PATCH", "--raw-field", "body=" + body}
+			return ghclient.Submit(c.Context(), roomID, "", args)
 		}
 		if agentPublish {
 			if err := agentPublishing(s, r, roomID, *publishComment); err != nil {

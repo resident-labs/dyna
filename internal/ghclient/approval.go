@@ -67,17 +67,29 @@ func decideCommand(ctx context.Context, cmd *exec.Cmd, r repository, login strin
 		return Write{}, Decision{}, err
 	}
 	w := ParseWrite(cmd.Args[1:], r.host, r.name, target)
-	if login == "" && w.ValidItem && slices.Contains([]Verb{"issue.close", "issue.reopen", "pr.close", "pr.reopen", "comment.edit", "comment.delete", "run.rerun", "run.rerun.failed", "run.cancel"}, w.Verb) {
+	commentWrite := w.Verb == "comment.edit" || w.Verb == "comment.delete"
+	var commentToken string
+	if (login == "" || commentWrite) && w.ValidItem && slices.Contains([]Verb{"issue.close", "issue.reopen", "pr.close", "pr.reopen", "comment.edit", "comment.delete", "run.rerun", "run.rerun.failed", "run.cancel"}, w.Verb) {
 		write := target == TargetRoom
 		if target == TargetUpstream {
 			_, comment := ownCommentCall(cmd.Args[1:])
 			write = isRepoFork(cmd.Args[1:]) || comment
 		}
-		login, _, _ = selectAccountForRoom(ctx, cmd, r, rec, write)
+		// Editing a comment requires authorship, not repository push access.
+		if commentWrite {
+			write = false
+		}
+		priorLogin := login
+		var accountErr error
+		login, commentToken, accountErr = selectAccountForRoom(ctx, cmd, r, rec, write)
+		if (accountErr != nil || login == "" || commentToken == "" || priorLogin != "" && !strings.EqualFold(priorLogin, login)) && commentWrite {
+			d := Decision{Rule: "comment-account", Refusal: ReasonCommentAccount}
+			return w, d, &RefusalError{Write: w, Decision: d}
+		}
 	}
 	lookups := WriteLookups{Login: login, OwnPR: owns,
 		AuthorOf: func(ctx context.Context, ref ItemRef) (string, error) {
-			return approvalAuthor(ctx, cmd.Path, cmd.Dir, ref)
+			return approvalAuthor(ctx, cmd, ref, commentToken)
 		},
 		ForkHead: func(ctx context.Context, w Write) bool {
 			args := commandArgs(w.Argv)
@@ -105,7 +117,7 @@ func decideCommand(ctx context.Context, cmd *exec.Cmd, r repository, login strin
 
 // approvalAuthor reads only the item needed for an authorship decision. A
 // failed read makes Classify choose owner; it never widens the agent class.
-func approvalAuthor(ctx context.Context, binary, dir string, ref ItemRef) (string, error) {
+func approvalAuthor(ctx context.Context, original *exec.Cmd, ref ItemRef, commentToken string) (string, error) {
 	var args []string
 	switch ref.Kind {
 	case ItemComment:
@@ -125,18 +137,28 @@ func approvalAuthor(ctx context.Context, binary, dir string, ref ItemRef) (strin
 	default:
 		return "", errors.New("unknown approval item kind")
 	}
-	cmd := Command(ctx, binary, dir, args...)
-	stdout, stderr := boundedio.New(64*1024), boundedio.New(8192)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err := RunWithAccount(ctx, cmd, nil); err != nil {
-		return "", err
+	var raw []byte
+	if ref.Kind == ItemComment {
+		var err error
+		raw, err = authOutput(ctx, original, commentToken, args...)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		cmd := Command(ctx, original.Path, original.Dir, args...)
+		stdout, stderr := boundedio.New(64*1024), boundedio.New(8192)
+		cmd.Stdout, cmd.Stderr = stdout, stderr
+		if err := RunWithAccount(ctx, cmd, nil); err != nil {
+			return "", err
+		}
+		raw = stdout.Bytes()
 	}
 	var payload struct {
 		Author struct{ Login string } `json:"author"`
 		Actor  struct{ Login string } `json:"actor"`
 		User   struct{ Login string } `json:"user"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return "", err
 	}
 	login := payload.Author.Login

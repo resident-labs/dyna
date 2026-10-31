@@ -86,6 +86,7 @@ func TestAgentWriteParity(t *testing.T) {
 		cli, raw []string
 	}{
 		{"comment", []string{"comment", url, "feedback"}, []string{"pr", "comment", url, "--body", "feedback"}},
+		{"comment edit", []string{"comment", url, "feedback", "--edit", "55"}, []string{"api", "--hostname", "github.com", "repos/owner/repo/issues/comments/55", "--method", "PATCH", "--raw-field", "body=feedback"}},
 		{"review", []string{"review", url, "--body-file", bodyFile}, ghclient.PinnedReviewArgs("github.com", "owner/repo", 17, head, "feedback")},
 		{"edit", []string{"edit", url, "--body-file", bodyFile}, []string{"pr", "edit", url, "--body", "feedback"}},
 	}
