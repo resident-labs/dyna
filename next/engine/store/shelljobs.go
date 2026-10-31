@@ -26,6 +26,6 @@ func (s *Store) ShellJobEnded(ctx context.Context, session contract.SessionID, j
 		if err != nil {
 			return err
 		}
-		return s.InsertDelivery(ctx, tx, seq, contract.Delivery{To: event.From, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
+		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: event.From, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 	})
 }
