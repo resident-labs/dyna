@@ -9,7 +9,7 @@ printf old > "$tmp/install/bin/dyna"
 printf oldpi > "$tmp/install/bin/pi.tgz"
 cat > "$tmp/tools/git" <<'SH'
 #!/usr/bin/env bash
-if [[ $* == *show-toplevel* ]]; then echo "$TEST_ROOT"; else echo abc123; fi
+if [[ $* == *show-toplevel* ]]; then echo "$TEST_ROOT"; elif [[ $* == *HEAD:next* ]]; then echo tree123; else echo abc123; fi
 SH
 cat > "$tmp/tools/npm" <<'SH'
 #!/usr/bin/env bash
@@ -37,16 +37,16 @@ cat >/dev/null; echo room-1
 SH
 chmod +x "$tmp/tools/"* "$TEST_ROOT/next/third_party/pi/scripts/pi-pack.sh"
 export PATH="$tmp/tools:$PATH"
-args=(--prefix "$tmp/install" --node-bin "$tmp/tools" --socket "$tmp/socket" --data "$tmp/data")
-FAKE_BINARY=empty "$script" "${args[@]}" --dry-run >"$tmp/out" 2>&1 && { echo 'Missing assets were accepted' >&2; exit 1; }
-"$script" "${args[@]}" --dry-run >"$tmp/out" 2>&1
-test "$(<"$tmp/install/bin/dyna")" = old && test ! -e "$TEST_LOG"
+args=(--prefix "$tmp/install" --node-bin "$tmp/tools" --socket "$tmp/socket")
+echo tree123 > "$tmp/install/deployed-next"
+"$script" "${args[@]}" >"$tmp/out" 2>&1
+grep -q 'No next/ change' "$tmp/out"
+test ! -e "$TEST_LOG"
+rm "$tmp/install/deployed-next"
 FAKE_STATUS=404 "$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Bad HTTP status was accepted' >&2; exit 1; }
-grep -q 'schema changed' "$tmp/out"
+grep -q 'fix forward on main' "$tmp/out"
+test "$(<"$tmp/install/failed-next")" = tree123
 test "$(grep -c restart "$TEST_LOG")" = 1
-test "$(<"$tmp/install/bin/dyna-prev")" = old
-# A retry must not replace the last known-good pair or restart again.
-"$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Unresolved deploy was accepted' >&2; exit 1; }
-grep -q 'previous deploy is unresolved' "$tmp/out"
-test "$(<"$tmp/install/bin/dyna-prev")" = old
+"$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Failed tree was accepted' >&2; exit 1; }
+grep -q 'already failed' "$tmp/out"
 test "$(grep -c restart "$TEST_LOG")" = 1
