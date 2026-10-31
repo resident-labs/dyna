@@ -2,13 +2,17 @@ package eval
 
 import (
 	"context"
-	"path/filepath"
+	"database/sql"
 	"testing"
 )
 
 func TestJournalPreventsUnapprovedReplay(t *testing.T) {
 	ctx := context.Background()
-	j, err := OpenJournal(filepath.Join(t.TempDir(), "attempts.db"))
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := initializeJournal(db)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,6 +31,10 @@ func OpenJournal(path string) (*Journal, error) {
 	if err != nil {
 		return nil, err
 	}
+	return initializeJournal(db)
+}
+
+func initializeJournal(db *sql.DB) (*Journal, error) {
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS attempts (
 		task INTEGER NOT NULL, provider TEXT NOT NULL, arm TEXT NOT NULL,
