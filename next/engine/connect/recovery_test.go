@@ -20,6 +20,50 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+type cancelRaceState struct {
+	*store.Store
+	checks int
+}
+
+func (s *cancelRaceState) ConnectLinked(ctx context.Context) (bool, error) {
+	s.checks++
+	if s.checks == 1 {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func TestCancelRaceRestartsLinkedRecovery(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	files, err := OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &cancelRaceState{Store: st}
+	engineCtx, stopEngine := context.WithCancel(context.Background())
+	defer stopEngine()
+	ops := NewOperations(engineCtx, files, state, 1001, 1002)
+	defer ops.Close()
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	ops.done = done
+	ops.cancel = func() { cancelRequest(); close(done) }
+	if err := ops.Cancel(requestCtx); err == nil {
+		t.Fatal("cancel accepted linked recovery")
+	}
+	if ops.done == nil || ops.done == done {
+		t.Fatal("linked recovery was not restarted")
+	}
+}
+
 func TestFailedAndInterruptedStartCanRetry(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
