@@ -27,7 +27,6 @@ CREATE INDEX sessions_room_closed ON sessions(room, closed_at);
 CREATE INDEX sessions_parent ON sessions(parent);
 CREATE INDEX operations_state_expires ON operations(state, expires_at);
 
-CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);
-CREATE TABLE grant_hosts (grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, PRIMARY KEY(grant_id, host));
-CREATE TABLE grant_commands (grant_id TEXT NOT NULL REFERENCES grants(id), idx INTEGER NOT NULL, program TEXT NOT NULL, prefix INTEGER NOT NULL, PRIMARY KEY(grant_id, idx));
-CREATE TABLE grant_command_args (grant_id TEXT NOT NULL, idx INTEGER NOT NULL, pos INTEGER NOT NULL, arg TEXT NOT NULL, PRIMARY KEY(grant_id, idx, pos), FOREIGN KEY(grant_id, idx) REFERENCES grant_commands(grant_id, idx));
+CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, hosts BLOB NOT NULL, commands BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);
+CREATE INDEX grants_expiry ON grants(expires_at) WHERE expired_at IS NULL AND revoked_at IS NULL;
+CREATE INDEX grants_room_principal ON grants(room, to_id);

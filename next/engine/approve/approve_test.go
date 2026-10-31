@@ -61,7 +61,9 @@ func setup(t *testing.T) *fixture {
 	f.s = New(st, ctx, nil, func() time.Time { return f.now }, 24*time.Hour, func(prefix string) (string, error) { return fmt.Sprintf("%s%d", prefix, ids.Add(1)), nil })
 	f.s.Kinds = map[contract.OpKind]Entry{"test.run": {
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return f.class },
-		Card:  func(contract.OpArgs, contract.Principal) contract.Card { return contract.Card{Title: "Run"} },
+		Card: func(context.Context, contract.OpArgs, contract.Principal) contract.Card {
+			return contract.Card{Title: "Run"}
+		},
 		Check: func(context.Context, contract.OpArgs, contract.Principal) error {
 			if f.stale {
 				return errors.New("changed")
