@@ -10,11 +10,12 @@
   import { tick, untrack, type Snippet } from "svelte";
   import { shouldPage } from "../paging.ts";
 
-  let { items, key, row, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, element = $bindable() }: {
+  let { items, key, row, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, onbottom, element = $bindable() }: {
     items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string; role?: "feed" | "group"; align?: "top" | "bottom";
     // Chat mode: open at the newest row and follow new rows while the reader is at the bottom.
     follow?: boolean; estimate?: number;
-    onstart?: () => void; onend?: () => void; element?: HTMLDivElement;
+    // onbottom tells whether the end of the rows is within 24 px of the view's bottom edge.
+    onstart?: () => void; onend?: () => void; onbottom?: (shown: boolean) => void; element?: HTMLDivElement;
   } = $props();
 
   const edge = 600;
@@ -117,6 +118,14 @@
     if (page.end) onend?.();
   }
   const measure = (node: HTMLDivElement) => { virtualizer.measureElement(node); };
+  // The browser checks the end mark after its own layout of each frame. A scroll handler that read scrollHeight after
+  // the rows changed forced an extra layout on each scroll event: 637 ms in a 20 second trace.
+  const bottom = (node: HTMLDivElement) => {
+    if (!element || !onbottom) return;
+    const report = onbottom, observer = new IntersectionObserver(([entry]) => report(entry.isIntersecting), { root: element, rootMargin: "0px 0px 24px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  };
 </script>
 
 <div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}>
@@ -128,6 +137,7 @@
       </div>
     {/each}
     <div style:height="{total - (visible.at(-1)?.end ?? 0)}px"></div>
+    <div {@attach bottom}></div>
   </div>
 </div>
 

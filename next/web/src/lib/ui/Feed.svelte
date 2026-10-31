@@ -45,17 +45,16 @@
   $effect(() => { if (since === undefined && store.ready && view.ready) since = untrack(() => store.readAt(home)); });
   // The owner has read the conversation up to its newest event once the bottom of the window is on screen while the
   // page is visible. see() sends only a newer position, so scrolling and new events make one call per change.
+  let bottom = $state(false);
   function markRead() {
-    if (since === undefined || !view.atPresent || !element || document.visibilityState !== "visible") return;
+    if (since === undefined || !view.atPresent || !bottom || document.visibilityState !== "visible") return;
     const newest = view.newest;
-    if (element.scrollTop + element.clientHeight >= element.scrollHeight - 24) untrack(() => store.see(home, newest));
+    untrack(() => store.see(home, newest));
   }
   $effect(markRead);
   $effect(() => {
-    const list = element;
-    list?.addEventListener("scroll", markRead, { passive: true });
     document.addEventListener("visibilitychange", markRead);
-    return () => { list?.removeEventListener("scroll", markRead); document.removeEventListener("visibilitychange", markRead); };
+    return () => document.removeEventListener("visibilitychange", markRead);
   });
   // The intro opens the conversation once the window reaches its first event; it also stands in for an empty feed.
   // Requests stay in the room feed and the Requests panel: a DM reads only its posts and the turns that answered in it (spec 5.13).
@@ -128,7 +127,7 @@
 {/if}
 {#if items.length}
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={view.atPresent} bind:element
-    onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()}>
+    onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()} onbottom={shown => { bottom = shown; }}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
