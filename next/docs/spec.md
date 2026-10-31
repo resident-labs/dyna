@@ -17,7 +17,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
    - **Accepted risk.** Anthropic's terms allow Claude Free, Pro and Max sign-ins only in Claude Code and Claude.ai, and Anthropic blocks clients that pose as Claude Code. Pi's traffic can therefore get an account flagged, or be billed as extra usage instead of plan limits. The owner accepts this. The self-hosting trial uses one Claude account only, to limit the damage.
 5. **A dormant session stops its box.** The container stops, and its volume stays. Its request no longer counts on the host. A wake starts it again (section 5.3).
 6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. The engine refuses owner-only calls from host-exec processes (section 6).
-7. **Root is a position in the tree.** Any session above another may approve its agent-class operations and start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
+7. **Root is a position in the tree.** Any session above another may start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The trial starts in M2, as soon as one box can build and test dyna (root, 2026-10-30). From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback until the cutover. The cutover follows only after the trial works and a dry-run import passes (section 11).
 9. **Some v1 features wait until after the cutover.** Voice and web search through Dyna come back after the cutover. The library (the feature map, the librarian and its page) is cut from v2 for now (owner, 2026-10-30); the frozen v1 backup keeps the map. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
@@ -349,7 +349,6 @@ type Class string
 
 const (
 	ClassAuto  Class = "auto"  // runs at once
-	ClassAgent Class = "agent" // a session above the caller, or the owner, approves
 	ClassOwner Class = "owner" // only the owner approves
 )
 
@@ -417,11 +416,10 @@ Decision rules (engine/approve):
 
 1. The owner's own operations run at once, at every class.
 2. `auto` runs at once.
-3. `agent` runs at once for a session with no parent (root). Otherwise it waits until any session above the caller in the tree, or the owner, approves.
-4. `owner` waits for the owner, also for root.
-5. The check runs again just before the executor. A card whose `Old` values no longer match fails with `stale`, and nothing runs.
-6. A pending operation expires after 24 hours (setting `approvals.expiry`). The same caller, kind and arguments while one is pending returns the pending one.
-7. Every operation emits `op.requested` when it waits, `op.decided` when someone decides, and `op.ran` with the result.
+3. `owner` waits for the owner, also for root.
+4. The check runs again just before the executor. A card whose `Old` values no longer match fails with `stale`, and nothing runs.
+5. A pending operation expires after 24 hours (setting `approvals.expiry`). The same caller, kind and arguments while one is pending returns the pending one.
+6. Every operation emits `op.requested` when it waits, `op.decided` when someone decides, and `op.ran` with the result.
 
 A grant gives a principal a power that the tree does not give.
 
@@ -981,7 +979,6 @@ Root is the session with no parent. Four things replace the 89 root checks in 12
 
 | What | Form |
 |---|---|
-| Approve agent-class operations | The tree: any session above the caller may approve (3.5). Root is above every session. |
 | Start, move, stop or close sessions | The tree: any session above another may do this. Root is above every session. |
 | Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). The owner can revoke them. |
 | Engine notices and unowned repository events | A default room subscription that wakes root (8.5). |
@@ -1385,7 +1382,7 @@ The order inside M2:
 
 Acceptance:
 
-1. unit: each decision rule in 3.5, including expiry on the injected clock and the stale check. A session above the caller can approve, a session beside it cannot, and no test uses a root flag.
+1. unit: each decision rule in 3.5, including expiry on the injected clock and the stale check. Only the owner decides, a session may withdraw only its own request, and no test uses a root flag.
 2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move to another host, or of a subtree with a running turn or shell job, is refused and names the session. A move re-creates the subtree's containers from the same volumes under the new slices, and each box starts again on its next wake (fake host). Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. When that parent is root, the goals have no holder, and `session.closed` lists them. Close of root fails.
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
@@ -1393,7 +1390,7 @@ Acceptance:
 6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no_grant`, revoke, expiry, and the `hostexec_scope` refusal.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
-9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves a waiting operation in the approvals panel. (No M2 operation kind is agent-class, so the tree approval of 3.5 is checked by the engine/approve unit tests.)
+9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves a waiting operation in the approvals panel.
 10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it for one hour, it runs, and after a revoke it is refused again.
 11. manual: a lead and its child run on hermeslab; the child's cgroup is under the lead's slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.

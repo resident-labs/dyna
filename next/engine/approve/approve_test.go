@@ -30,7 +30,7 @@ type fixture struct {
 
 func setup(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{now: time.Unix(1000, 0), class: contract.ClassAgent}
+	f := &fixture{now: time.Unix(1000, 0), class: contract.ClassOwner}
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func (f *fixture) submit(t *testing.T, who contract.Principal) contract.Operatio
 }
 func TestOwnerRunsEveryClass(t *testing.T) {
 	f := setup(t)
-	for _, class := range []contract.Class{contract.ClassOwner, contract.ClassAuto, contract.ClassAgent} {
+	for _, class := range []contract.Class{contract.ClassOwner, contract.ClassAuto} {
 		f.class = class
 		if op := f.submit(t, contract.Principal{Kind: contract.PrincipalOwner}); op.State != contract.OpDone {
 			t.Fatal(op.State)
@@ -105,19 +105,18 @@ func TestAutoRuns(t *testing.T) {
 		t.Fatal(op.State)
 	}
 }
-func TestAgentAncestry(t *testing.T) {
+func TestOnlyTheOwnerDecidesASessionRequest(t *testing.T) {
 	f := setup(t)
-	if op := f.submit(t, principal("root")); op.State != contract.OpDone {
-		t.Fatal(op.State)
-	}
 	op := f.submit(t, principal("worker"))
 	if op.State != contract.OpPending {
 		t.Fatal(op.State)
 	}
-	if err := f.s.Decide(context.Background(), principal("sibling"), op.ID, contract.OpApproved, ""); !errors.Is(err, ErrForbidden) {
-		t.Fatal(err)
+	for _, who := range []string{"root", "lead", "sibling"} {
+		if err := f.s.Decide(context.Background(), principal(who), op.ID, contract.OpApproved, ""); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("%s: %v", who, err)
+		}
 	}
-	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, contract.OpDenied, "no"); err != nil {
+	if err := f.s.Decide(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, op.ID, contract.OpDenied, "no"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -136,7 +135,7 @@ func TestStaleCheckPreventsExecution(t *testing.T) {
 	f := setup(t)
 	op := f.submit(t, principal("worker"))
 	f.stale = true
-	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, contract.OpApproved, ""); err != nil {
+	if err := f.s.Decide(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, op.ID, contract.OpApproved, ""); err != nil {
 		t.Fatal(err)
 	}
 	// A caller waits on the notification, not on a timer or polling.
@@ -179,21 +178,21 @@ func TestExpiryAndPendingDedup(t *testing.T) {
 func TestOperationEventsAndWakes(t *testing.T) {
 	f := setup(t)
 	op := f.submit(t, principal("worker"))
-	if err := f.s.Decide(context.Background(), principal("lead"), op.ID, contract.OpDenied, "declined"); err != nil {
+	if err := f.s.Decide(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, op.ID, contract.OpDenied, "declined"); err != nil {
 		t.Fatal(err)
 	}
 	events, err := f.s.Store.Events(context.Background(), "room", 0, 100, nil)
 	if err != nil || len(events) != 2 || events[0].Body.EventType() != "op.requested" || events[1].Body.EventType() != "op.decided" {
 		t.Fatalf("events %+v, err %v", events, err)
 	}
-	var parent, worker int
-	err = f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries WHERE to_id='lead' AND wake=1").Scan(&parent)
+	var worker, others int
+	err = f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries WHERE to_id='worker' AND wake=1").Scan(&worker)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries WHERE to_id='worker' AND wake=1").Scan(&worker)
-	if err != nil || parent != 1 || worker != 1 {
-		t.Fatalf("parent %d, worker %d, error %v", parent, worker, err)
+	err = f.s.Store.Read().QueryRow("SELECT count(*) FROM deliveries WHERE to_id!='worker'").Scan(&others)
+	if err != nil || worker != 1 || others != 0 {
+		t.Fatalf("worker %d, others %d, error %v", worker, others, err)
 	}
 }
 
@@ -284,7 +283,7 @@ func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
 	sub, cancel := f.s.Store.Subscribe()
 	defer cancel()
 	ctx, stop := context.WithCancel(context.Background())
-	if err := f.s.Decide(ctx, principal("lead"), op.ID, contract.OpApproved, ""); err != nil {
+	if err := f.s.Decide(ctx, contract.Principal{Kind: contract.PrincipalOwner}, op.ID, contract.OpApproved, ""); err != nil {
 		t.Fatal(err)
 	}
 	stop()

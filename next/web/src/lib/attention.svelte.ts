@@ -159,7 +159,7 @@ export class Attention {
     const buffer = this.pending.get(event.room ?? "");
     if (buffer) buffer.push(event); else this.track(event);
     switch (event.type) {
-      // Only the owner decides owner-class requests; an ancestor agent decides the rest.
+      // Only owner-class requests wait for the owner.
       case "op.requested": if (event.body.class === "owner") waiting.add(event.body.id); break;
       case "op.decided": case "op.ran": if (event.body.state !== "pending") waiting.delete(event.body.id); break;
       case "room.paused": case "room.resumed": {

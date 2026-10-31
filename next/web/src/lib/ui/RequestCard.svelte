@@ -20,8 +20,6 @@
   // The root session is the open session with no parent.
   let open = $derived(request.by.session ? store.sessions.get(request.by.session) : undefined);
   let root = $derived(open !== undefined && !open.parent);
-  // An agent-class request may also be decided by the requester's parent session.
-  let parent = $derived(open?.parent && store.names.get(open.parent));
   // The body's first line says what runs; the lines after it, such as the reason, are muted.
   let pending = $derived(request.state === "pending" && !gone);
   let [lead = "", ...rest] = $derived((request.card.body ?? "").split("\n"));
@@ -47,8 +45,6 @@
   let reason = $state("");
   let busy = $state(false);
   let failure = $state("");
-  // Who may decide, as one plain phrase: an agent-class request may also be decided by the asker's parent.
-  let deciders = $derived(request.class !== "owner" && parent ? `You or ${parent} can decide` : "You can decide");
   // A title is the phrase after the asker's name; a decided line keeps only what was asked for.
   let asked = $derived(request.card.title.replace(/^asks (for|to) /, ""));
   // The card becomes a muted line when the op.decided event arrives; the answer itself carries nothing.
@@ -73,12 +69,12 @@
 {#snippet expiry()}{#if soon}<StatusPill tone="warning" label="Expires {fromNow(request.expires, now)}" />{:else}Expires {fromNow(request.expires, now)}{/if}{/snippet}
 
 <!-- While it waits, a request reads as a sentence on a card, with the exact command that runs; an owner-class card has the attention edge.
-     Folded on the Requests page, it is one row: the sentence, what it allows, who decides if that is not only the owner, and its own Approve and Deny. -->
+     Folded on the Requests page, it is one row: the sentence, what it allows, and its own Approve and Deny. -->
 {#if pending && folded}
   <article class="row" class:current>
     <button type="button" class="head" aria-expanded="false" onclick={onopen}><span class="top">{@render who()}</span>
       {#if lead}<span class="sub">{@render ask()}{#if request.class === "owner"} · {@render expiry()}{/if}</span>{/if}
-      {#if request.class !== "owner" || !lead}<span class="sub">{deciders} · {@render expiry()}</span>{/if}</button>
+      {#if !lead}<span class="sub">You can decide · {@render expiry()}</span>{/if}</button>
     <div class="actions">
       <button type="button" class:approve={current} onclick={() => void decide(true)} disabled={busy}>Approve</button>
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
@@ -94,7 +90,7 @@
     {#if request.card.command?.length}<pre class="exact">{commandLine(request.card.command)}</pre>{/if}
     {#each request.card.changes ?? [] as change (change.field)}<p class="what"><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
     <!-- The page says who decides on every open card; the card body already says what the grant allows. -->
-    {#if !feed || (request.class !== "owner" && parent)}<p class="why">{deciders}.</p>{/if}
+    {#if !feed}<p class="why">You can decide.</p>{/if}
     {#if noting}<!-- svelte-ignore a11y_autofocus -->
       <input type="text" bind:value={reason} placeholder="Note to {name(request.by)}" aria-label="Note to the session" disabled={busy} autofocus />{/if}
     <div class="actions">

@@ -399,14 +399,7 @@ func main() {
 	runtime := filepath.Join(data, "runtime")
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{}, time.Now)
-	grant := svc.HostexecGrant() // a test grant is agent class here, so the Requests panel shows both classes
-	grant.Class = func(a contract.OpArgs, _ contract.Principal) contract.Class {
-		if a.(contract.HostexecGrantArgs).Reason == "Run Go tests on the host" {
-			return contract.ClassAgent
-		}
-		return contract.ClassOwner
-	}
-	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": grant}, time.Hour))
+	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": svc.HostexecGrant()}, time.Hour))
 	svc.SetFilesDir(filepath.Join(data, "files"))
 	svc.SetTranscriptDir(filepath.Join(data, "transcripts"))
 	a := api.New(devService{svc}, nil)

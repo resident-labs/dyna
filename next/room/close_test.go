@@ -30,23 +30,6 @@ func TestCloseAndMove(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		session contract.SessionID
-		want    Handoff
-		fail    bool
-	}{
-		{"to root", "a", Handoff{PRHolder: "root"}, false},
-		{"to parent", "b", Handoff{PRHolder: "a", GoalHolder: "a"}, false},
-		{"root", "root", Handoff{}, true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := tree.Handoff(tt.session)
-			if (err != nil) != tt.fail || got != tt.want {
-				t.Fatalf("got %+v %v", got, err)
-			}
-		})
-	}
-	for _, tt := range []struct {
-		name    string
-		session contract.SessionID
 		parent  contract.SessionID
 		fail    bool
 	}{
