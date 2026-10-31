@@ -61,6 +61,7 @@ func newRootCmd() *cobra.Command {
 		return err
 	}})
 	root.AddCommand(computerCommand("/run/dyna/agent.sock"))
+	root.AddCommand(proxyCommand())
 	addEngine(root)
 	return root
 }

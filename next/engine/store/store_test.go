@@ -210,3 +210,27 @@ func TestHistoryQueriesUseIndexes(t *testing.T) {
 		})
 	}
 }
+
+func TestExclusiveDataFolder(t *testing.T) {
+	dir := t.TempDir()
+	first, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second, err := Open(dir); err == nil {
+		_ = second.Close()
+		t.Fatal("second open succeeded")
+	} else if err.Error() != "data folder is in use by another engine" {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	next, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := next.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
