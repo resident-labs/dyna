@@ -55,7 +55,6 @@ export class RoomStore {
     const at = this.failed.get(id);
     return at !== undefined && Math.max(this.read.get("") ?? 0, this.read.get(id) ?? 0) < at;
   }
-  get unseenCount(): number { return [...this.failed.keys()].filter(id => this.unseen(id)).length; }
   // Keeps a read position: room.list gives the feed's, session.list each DM's, and conversation.read events move them.
   noteRead(conversation: Conversation, seq: number): void {
     if (seq > (this.read.get(readKey(conversation)) ?? 0)) this.read.set(readKey(conversation), seq);
