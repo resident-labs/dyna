@@ -1,6 +1,6 @@
 <script lang="ts">
   import { APIError, call } from "../client.ts";
-  import { fromNow } from "../feed.ts";
+  import { commandLine, fromNow } from "../feed.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import type { Request, RoomStore } from "../room.svelte.ts";
@@ -44,7 +44,7 @@
     <span>· {target}</span>{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>
       {#if request.class === "agent" && parent}<span>· {parent} can also decide</span>{/if}{/if}</p>
   {#if request.card.body}<p class="body">{request.card.body}</p>{/if}
-  {#if request.card.command?.length}<pre>{request.card.command.join(" ")}</pre>{/if}
+  {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
   {#if request.card.changes?.length}<ul class="changes">{#each request.card.changes as change (change.field)}
     <li><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</li>{/each}</ul>{/if}
   {#if request.state === "pending"}
