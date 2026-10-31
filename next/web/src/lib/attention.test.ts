@@ -54,3 +54,21 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     assert.deepEqual([...attention.sessions.get("b")!], ["s2", "s5"]);
   } finally { globalThis.fetch = original; }
 });
+
+test("a room created after the page loaded shows, with the events that came while room.list ran", async () => {
+  const original = globalThis.fetch;
+  let answer!: (response: Response) => void;
+  globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [] }));
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    globalThis.fetch = () => new Promise<Response>(done => { answer = done; });
+    attention.apply(event(6, "n", { type: "session.started", body: { session: "root", name: "root", profile: "p" } }));
+    attention.apply(event(8, "n", { type: "turn.started", body: { session: "root", turn: "t", inputs: [] } }));
+    answer(new Response(JSON.stringify({ seq: 7, rooms: [{ id: "n", name: "N", created: "", lastRead: 0, waiting: null, working: null }] })));
+    await new Promise(done => setTimeout(done));
+    assert.deepEqual([[...attention.rooms.keys()], [...attention.working.get("n") ?? []]], [["n"], ["root"]]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
