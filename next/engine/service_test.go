@@ -1235,4 +1235,20 @@ func TestOwnerAttention(t *testing.T) {
 			t.Fatalf("got %s, want %s", event.ID, id)
 		}
 	}
+	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker, Discard: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	closed := <-stream
+	if body, ok := closed.Body.(contract.SessionClosed); !ok || body.Session != worker {
+		t.Fatalf("expected session.closed for %s, got %+v", worker, closed)
+	}
+	list, problem = s.RoomList(ctx, owner, contract.RoomListRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, room := range list.Rooms {
+		if room.ID == a && len(room.Working) != 0 {
+			t.Fatalf("closed session still working: %+v", room)
+		}
+	}
 }
