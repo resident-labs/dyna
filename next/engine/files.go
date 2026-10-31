@@ -2,10 +2,8 @@ package engine
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -61,10 +59,7 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 				return
 			}
 			if caller.Kind == contract.PrincipalSession {
-				if err = s.store.Write(r.Context(), func(tx *sql.Tx) error {
-					_, err := tx.Exec("INSERT OR IGNORE INTO uploads(sha256,room) VALUES(?,?)", sum, room)
-					return err
-				}); err != nil {
+				if err = s.store.RecordUpload(r.Context(), sum, room); err != nil {
 					http.Error(w, "unavailable", 500)
 					return
 				}
@@ -80,8 +75,7 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 		hash := strings.TrimPrefix(r.URL.Path, "/v1/files/")
 		if strings.HasPrefix(hash, "visual/") {
 			id := strings.TrimPrefix(hash, "visual/")
-			var seq int64
-			err := s.store.Read().QueryRowContext(r.Context(), "SELECT seq FROM events WHERE id=? AND (? OR room=?) AND type='post.created'", id, caller.Kind == contract.PrincipalOwner, room).Scan(&seq)
+			seq, err := s.store.VisualPostSeq(r.Context(), contract.EventID(id), room, caller.Kind == contract.PrincipalOwner)
 			if err != nil {
 				http.NotFound(w, r)
 				return
@@ -126,9 +120,8 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 			http.NotFound(w, r)
 			return
 		}
-		var media string
-		err := s.store.Read().QueryRowContext(r.Context(), "SELECT f.media FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=? AND (? OR e.room=?) ORDER BY f.seq DESC LIMIT 1", hash, caller.Kind == contract.PrincipalOwner, room).Scan(&media)
-		if errors.Is(err, sql.ErrNoRows) {
+		media, found, err := s.store.FileMedia(r.Context(), hash, room, caller.Kind == contract.PrincipalOwner)
+		if !found && err == nil {
 			http.NotFound(w, r)
 			return
 		}
