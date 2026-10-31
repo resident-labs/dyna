@@ -459,7 +459,7 @@ suites:
     checks: [next-pi]
 
   - id: next-web
-    files: ['^next/web/', '^scripts/ci\.sh$']
+    files: ['^next/web/', '^next/cmd/dyna-webdev/', '^scripts/ci\.sh$']
     checks: [next-web, next-web-width]
 
   - id: cross

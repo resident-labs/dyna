@@ -75,6 +75,8 @@ try {
           if (knownWidthFailures[baselineRoute]?.includes(width)) console.warn(`Known: ${line}`);
           else failures.push(line);
         }
+      } catch (error: unknown) {
+        failures.push(`${fixture} ${route} ${width}px: page did not finish: ${error instanceof Error ? error.message : String(error)}`);
       } finally { await page.close(); }
       }
     }));
