@@ -216,8 +216,10 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			streamScope = contract.ScopeTerminal
 		case "/v1/computers/watch":
 			streamScope = contract.ScopeComputers
-		case "/v1/events", "/v1/shell/watch":
+		case "/v1/events":
 			streamScope = contract.ScopeRead
+		case "/v1/shell/watch":
+			streamScope = contract.ScopeTerminal
 		}
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
