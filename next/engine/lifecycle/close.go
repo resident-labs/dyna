@@ -59,27 +59,33 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 	if err != nil {
 		return err
 	}
-	next := row.Box
-	var cause contract.FailureCause
 	if row.Want == store.WantDiscard || !hadTurns {
-		if err = r.boxes.Remove(ctx, row.ID); err != nil {
-			next.State, next.Reason, cause = contract.BoxFailed, err.Error(), contract.CauseRemoveFailed
-		} else {
+		if err = r.boxes.Remove(ctx, row.ID); err == nil {
+			next := row.Box
 			next.State, next.Reason = contract.BoxDeleted, ""
+			_, err = r.change(ctx, row.Box, next, time.Time{}, row.Failures, "")
+			return err
 		}
 	} else {
 		err = r.boxes.Start(ctx, row.ID)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if retryErr := r.store.SetArchiveRetry(ctx, row.ID, r.now().Add(30*time.Second)); retryErr != nil {
-			return retryErr
-		}
-		return err
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	_, changeErr := r.change(ctx, row.Box, next, time.Time{}, row.Failures, cause)
-	return changeErr
+	reason := row.Reason
+	if row.Want == store.WantDiscard || !hadTurns {
+		reason = err.Error()
+	}
+	session, eventErr := r.store.Session(ctx, row.Session)
+	if eventErr != nil {
+		return eventErr
+	}
+	event, eventErr := r.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: row.ID, Session: row.Session, Host: row.Host, From: contract.BoxClosing, To: contract.BoxClosing, Reason: reason})
+	if eventErr != nil {
+		return eventErr
+	}
+	if retryErr := r.store.SetArchiveRetry(ctx, row.ID, row.Want, r.now().Add(30*time.Second), reason, event); retryErr != nil {
+		return retryErr
+	}
+	return err
 }
