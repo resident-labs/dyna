@@ -6,6 +6,6 @@
 <span class="dot" role={label ? "img" : "presentation"} aria-label={label}></span>
 
 <style>
-  .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--focus); animation: pulse 2s ease-in-out infinite; }
+  .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--success); animation: pulse 2s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: 0.35; } }
 </style>
