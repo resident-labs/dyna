@@ -32,6 +32,12 @@ test("names up to three sessions in one work sentence", () => {
   assert.equal(workSummary([started(1, "a"), started(2, "b"), started(3, "c"), started(4, "d")], name), "a, b and 2 more worked");
 });
 
+test("a failed image build reads as a failure in the work sentence", () => {
+  const image = { host: "h", repo: "r", name: "base", tag: "1" };
+  const failed = event(1, { type: "image.failed", body: { ...image, reason: "no space", logTail: "" } });
+  assert.equal(workSummary([failed], session => session), "Dyna had 1 image build fail");
+});
+
 test("puts a turn's final reply in its home only", () => {
   const ended = event(3, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "completed", final: "Answer", usage,
     replies: [{ reply: { kind: "final", target: { kind: "owner" }, home: { kind: "dm", session: "l" } } }] } });
