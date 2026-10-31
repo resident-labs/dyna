@@ -5,6 +5,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
@@ -12,7 +13,18 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
 	}
-	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane}}}
+	status, err := s.store.BackupCopyStatus(ctx)
+	if err != nil {
+		return contract.HostListResponse{}, failure(err)
+	}
+	var copyFailure contract.BackupCopyFailure
+	if status.Failure != "" {
+		copyFailure = contract.BackupCopyFailed
+		if status.Failure == store.BackupCopyNoSpace {
+			copyFailure = contract.BackupCopyNoSpace
+		}
+	}
+	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
 	for _, host := range hosts {
 		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < 20*box.GiB})
 	}
