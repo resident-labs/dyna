@@ -82,7 +82,12 @@ func (s *Service) access(ctx context.Context, who contract.Principal, room contr
 	return nil
 }
 func (s *Service) Submit(ctx context.Context, who contract.Principal, input contract.Operation) (contract.Operation, error) {
-	return s.submit(ctx, who, input, nil)
+	return s.submit(ctx, who, input, nil, "")
+}
+
+// SubmitWithClientID binds a retry key to the created or deduplicated operation.
+func (s *Service) SubmitWithClientID(ctx context.Context, who contract.Principal, input contract.Operation, clientID string) (contract.Operation, error) {
+	return s.submit(ctx, who, input, nil, clientID)
 }
 
 // SubmitEphemeral runs an owner action whose secrets must not enter its record.
@@ -90,12 +95,29 @@ func (s *Service) SubmitEphemeral(ctx context.Context, who contract.Principal, i
 	if execute == nil {
 		return contract.Operation{}, ErrInvalid
 	}
-	return s.submit(ctx, who, input, execute)
+	return s.submit(ctx, who, input, execute, "")
 }
 
-func (s *Service) submit(ctx context.Context, who contract.Principal, input contract.Operation, execute func(context.Context) contract.OpResult) (contract.Operation, error) {
+func (s *Service) submit(ctx context.Context, who contract.Principal, input contract.Operation, execute func(context.Context) contract.OpResult, clientID string) (contract.Operation, error) {
 	if err := s.access(ctx, who, input.Room); err != nil {
 		return contract.Operation{}, err
+	}
+	if clientID != "" {
+		var previous store.StoredOperation
+		err := s.Store.Write(ctx, func(tx *sql.Tx) error {
+			var err error
+			previous, err = s.Store.ReplayOperation(tx, who, clientID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		})
+		if err != nil {
+			return contract.Operation{}, err
+		}
+		if previous.Operation.ID != "" {
+			return s.decodeReplay(previous)
+		}
 	}
 	if input.Args == nil {
 		return contract.Operation{}, ErrInvalid
@@ -144,6 +166,16 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 	}
 	var previous store.StoredOperation
 	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
+		if clientID != "" {
+			found, err := s.Store.ReplayOperation(tx, who, clientID)
+			if err == nil {
+				previous = found
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
 		found, err := s.Store.PendingOperation(tx, op.Room, who, op.Kind, args)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -154,19 +186,29 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			}
 		} else if err == nil {
 			previous = found
+			if clientID != "" {
+				_, err := tx.Exec("INSERT INTO operation_replays(caller_kind,caller_id,client_id,operation) VALUES(?,?,?,?)", who.Kind, who.Session, clientID, found.Operation.ID)
+				return err
+			}
 			return nil
 		}
 		if checkErr != nil {
 			return checkErr
 		}
-		return s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, nil)
+		if err := s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, nil); err != nil {
+			return err
+		}
+		if clientID != "" {
+			_, err := tx.Exec("INSERT INTO operation_replays(caller_kind,caller_id,client_id,operation) VALUES(?,?,?,?)", who.Kind, who.Session, clientID, op.ID)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return contract.Operation{}, err
 	}
 	if previous.Operation.ID != "" {
-		previous.Operation.Args = input.Args
-		return previous.Operation, nil
+		return s.decodeReplay(previous)
 	}
 	if !immediate {
 		return op, nil
@@ -191,6 +233,16 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		s.mu.Unlock()
 		return op, nil
 	}
+}
+
+func (s *Service) decodeReplay(record store.StoredOperation) (contract.Operation, error) {
+	entry, ok := s.Kinds[record.Operation.Kind]
+	if !ok {
+		return contract.Operation{}, ErrInvalid
+	}
+	args, err := entry.Decode(record.Args)
+	record.Operation.Args = args
+	return record.Operation, err
 }
 
 func (s *Service) Decide(ctx context.Context, who contract.Principal, id contract.OpID, state contract.OpState, reason string) error {

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -15,13 +16,8 @@ import (
 )
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
-	if !mentionName.MatchString(req.Name) {
-		return contract.SessionStartResponse{}, invalid("session name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
-	}
-	switch req.Name {
-	case "root", "parent", "children", "siblings":
-		// room.ParseAddress reads these names as roles, so no one could mention the session by its name.
-		return contract.SessionStartResponse{}, invalid("session name " + req.Name + " is reserved for a mention role")
+	if len(req.ClientID) > 64 {
+		return contract.SessionStartResponse{}, invalid("clientId is longer than 64 characters")
 	}
 	return s.startSession(ctx, caller, req, "")
 }
@@ -30,6 +26,32 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if roomName == "" {
 		if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 			return contract.SessionStartResponse{}, e
+		}
+	}
+	s.treeMu.Lock()
+	defer s.treeMu.Unlock()
+	if req.ClientID != "" {
+		var data []byte
+		err := s.store.Read().QueryRowContext(ctx, "SELECT response FROM client_replays WHERE method=? AND caller_kind=? AND caller_id=? AND client_id=?", contract.MethodSessionStart, caller.Kind, caller.Session, req.ClientID).Scan(&data)
+		if err == nil {
+			var response contract.SessionStartResponse
+			if err := json.Unmarshal(data, &response); err != nil {
+				return response, failure(err)
+			}
+			return response, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+	}
+	if roomName == "" {
+		if !mentionName.MatchString(req.Name) {
+			return contract.SessionStartResponse{}, invalid("session name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
+		}
+		switch req.Name {
+		case "root", "parent", "children", "siblings":
+			// room.ParseAddress reads these names as roles, so no one could mention the session by its name.
+			return contract.SessionStartResponse{}, invalid("session name " + req.Name + " is reserved for a mention role")
 		}
 	}
 	if req.Name == "" || req.Profile == "" {
@@ -44,8 +66,6 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		}
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	s.treeMu.Lock()
-	defer s.treeMu.Unlock()
 	tree, err := s.store.RoomTree(ctx, req.Room)
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -113,7 +133,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost); err != nil {
+	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.ClientID); err != nil {
 		if errors.Is(err, store.ErrParentHostAbsent) {
 			return contract.SessionStartResponse{}, invalid(err.Error())
 		}
