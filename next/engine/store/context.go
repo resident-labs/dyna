@@ -9,7 +9,6 @@ import (
 )
 
 type ContextData struct {
-	Session  Session
 	Children []ContextChild
 	Requests []ContextRequest
 	PRs      []ContextPR
@@ -20,7 +19,7 @@ type ContextData struct {
 func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID) (ContextData, error) {
 	var data ContextData
 	var err error
-	if data.Session, err = s.Session(ctx, id); err != nil {
+	if _, err = s.Session(ctx, id); err != nil {
 		return data, err
 	}
 	if data.Children, err = s.ContextChildren(ctx, id); err != nil {
