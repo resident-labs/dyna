@@ -1652,3 +1652,59 @@ func TestSessionStartSize(t *testing.T) {
 		t.Fatalf("child size: %v", e)
 	}
 }
+
+func TestSessionSetProfileAuthority(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	sibling, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "sibling", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	req := contract.SessionSetProfileRequest{Session: worker, Profile: "other"}
+	if _, e = s.SessionSetProfile(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sibling.Session}, req); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("sibling: %v", e)
+	}
+	if _, e = s.SessionSetProfile(ctx, owner, req); e != nil {
+		t.Fatalf("owner: %v", e)
+	}
+}
+
+func TestSessionSetProfileEventAndWake(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	wakes := func() []bool {
+		rows, err := s.store.Read().QueryContext(ctx, "SELECT d.wake FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='session.profile_changed' AND d.to_id=? ORDER BY d.seq", worker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var got []bool
+		for rows.Next() {
+			var wake bool
+			if err := rows.Scan(&wake); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, wake)
+		}
+		return got
+	}
+	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: worker, Profile: "other"}); e != nil {
+		t.Fatal(e)
+	}
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('t',?,1,2,'failed','',0,0,0,0)", worker)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: worker, Profile: "test"}); e != nil {
+		t.Fatal(e)
+	}
+	if got := wakes(); len(got) != 2 || got[0] || !got[1] {
+		t.Fatalf("wake flags %v, want [false true]", got)
+	}
+	if got, err := s.store.Session(ctx, worker); err != nil || got.Profile != "test" {
+		t.Fatalf("profile %q: %v", got.Profile, err)
+	}
+}

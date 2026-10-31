@@ -139,7 +139,7 @@ func Run(ctx context.Context) error {
 	ticks := time.NewTicker(transcriptInterval)
 	defer ticks.Stop()
 	go transcript.Run(ctx, ticks.C, h.SessionFile)
-	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
+	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr, Model: hello.Model}
 	var closing atomic.Bool
 	var stopWatch context.CancelFunc
 	var stopShellWatch context.CancelFunc
