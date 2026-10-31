@@ -78,6 +78,12 @@ type TurnEnded struct {
 	ShellJobs int `json:"shellJobs,omitempty"`
 }
 
+type ConversationRead struct {
+	Room         RoomID       `json:"room"`
+	Conversation Conversation `json:"conversation"`
+	Seq          int64        `json:"seq"`
+}
+
 // TurnActivity is live only. The engine keeps each running turn's latest label in memory and
 // never stores this event, so it has seq 0, events.list never returns it, and it does not move a
 // stream's resume point. turn.ended clears it.
@@ -258,3 +264,6 @@ const (
 	TurnFailed    TurnOutcome = "failed"
 	TurnStopped   TurnOutcome = "stopped"
 )
+
+func (ConversationRead) EventType() EventType { return "conversation.read" }
+func (ConversationRead) isEventBody()         {}
