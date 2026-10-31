@@ -25,9 +25,8 @@
   /* A narrow card, such as on a phone, keeps three tiles in one row: smaller figures, and the text may take two lines
      instead of being cut. */
   @container (max-width: 320px) {
-    strong { font-size: 19px; }
-    .name { font-size: 10px; }
-    .unit, .text { font-size: 11.5px; }
+    strong { font-size: 20px; }
+    .name, .unit, .text { font-size: 11px; }
     .text { white-space: normal; }
   }
 </style>
