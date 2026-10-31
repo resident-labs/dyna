@@ -11,12 +11,13 @@ import (
 
 const quiet = `NOT EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NULL)
 AND NOT EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=s.id AND wake=1 AND state='pending')
+AND NOT EXISTS (SELECT 1 FROM boxes child JOIN boxes parent ON child.parent=parent.id WHERE parent.session=s.id AND child.state NOT IN ('deleted','failed'))
 AND EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND shell_jobs=0 AND ended_at<=? AND id=(SELECT id FROM turns WHERE session=s.id ORDER BY started_at DESC, rowid DESC LIMIT 1))`
 const waking = `EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=s.id AND wake=1 AND state='pending')`
 
 // DormancyCandidates finds quiet boxes and boxes with pending wakes.
 func (s *Store) DormancyCandidates(ctx context.Context, cutoff time.Time) ([]contract.SessionID, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.closed_at IS NULL AND ((b.state='ready' AND `+quiet+`) OR (b.state IN ('stopped','pending') AND b.host IS NOT NULL AND b.image != '' AND `+waking+`))`, cutoff.UnixMilli())
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.closed_at IS NULL AND s.state!='closing' AND ((b.state='ready' AND `+quiet+`) OR (b.state IN ('stopped','pending') AND b.host IS NOT NULL AND b.image != '' AND `+waking+`))`, cutoff.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +63,7 @@ func (s *Store) dormancyTransition(ctx context.Context, b box.Box, to contract.B
 	event.Body = body
 	var changed bool
 	err = s.Write(ctx, func(tx *sql.Tx) error {
-		query := `UPDATE sessions AS s SET state=? WHERE id=? AND closed_at IS NULL AND EXISTS (SELECT 1 FROM boxes WHERE session=s.id AND state=?) AND (` + condition + `)`
+		query := `UPDATE sessions AS s SET state=? WHERE id=? AND closed_at IS NULL AND state!='closing' AND EXISTS (SELECT 1 FROM boxes WHERE session=s.id AND state=?) AND (` + condition + `)`
 		var result sql.Result
 		var err error
 		if condition == quiet {
