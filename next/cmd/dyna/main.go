@@ -10,6 +10,8 @@ import (
 
 	"github.com/resident-labs/dyna/box/agent"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/tools"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -63,5 +65,13 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(computerCommand("/run/dyna/agent.sock"))
 	root.AddCommand(proxyCommand())
 	addEngine(root)
+	for _, entry := range tools.Entries() {
+		for _, binding := range entry.CLI {
+			cmd, rest, err := root.Find(strings.Fields(binding))
+			if err == nil && len(rest) == 0 {
+				cmd.Short = entry.Help
+			}
+		}
+	}
 	return root
 }
