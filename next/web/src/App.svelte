@@ -217,13 +217,14 @@
 <div class="shell" class:open={room}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
-      <!-- A room's dot shows while a request waits for the owner. -->
-      {#each rooms as item (item.id)}{@const waiting = !!attention.waiting.get(item.id)?.size}
+      <!-- A room's badge counts the requests that wait for the owner, as v1 and Discord count unread messages. -->
+      {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
-        aria-label={waiting ? `${item.name}, requests waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<span class="waiting"></span>{/if}</a>
+        aria-label={waiting ? `${item.name}, ${count(waiting, "request")} waiting` : item.name} title={item.name}>
+        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<span class="waiting">{waiting > 99 ? "99+" : waiting}</span>{/if}</a>
     {/each}</nav>
-    <footer><Avatar kind="owner" name="You" size={32} /></footer>
+    <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
+    <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
   </aside>
   <main>
     <header>{#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
