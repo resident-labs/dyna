@@ -106,6 +106,10 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			if err != nil {
 				return nil, err
 			}
+			if b.loads == nil {
+				b.loads = make(map[contract.HostName]contract.HostSummary)
+			}
+			b.loads[name] = contract.HostSummary{Reachable: record.State == box.HostReady}
 			b.cache(name, h)
 			return h, nil
 		}
@@ -148,6 +152,10 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 		return err
 	}
 	b.mu.Lock()
+	if b.loads == nil {
+		b.loads = make(map[contract.HostName]contract.HostSummary)
+	}
+	b.loads[req.Name] = contract.HostSummary{Reachable: true}
 	b.cache(req.Name, h)
 	b.mu.Unlock()
 	return nil
