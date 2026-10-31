@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hostLoads, hostMeters, lastSeen } from "./hosts.ts";
+import { backupProblem, hostLoads, hostMeters, lastSeen } from "./hosts.ts";
 
 test("words a host's load, marks meters at 90% of their limit as busy, and has none without capacity", () => {
   const gib = 2 ** 30;
@@ -22,4 +22,16 @@ test("the panel foot shows unreachable hosts first, then those low on disk, then
   assert.deepEqual(lines(hosts), [["down", "Unreachable"], ["cpu", "CPU 95% busy", "Memory 10%"], ["mem", "CPU 20%", "Memory 60%"]]);
   assert.deepEqual(hostLoads([...hosts, { ...host("full", 0.1, 1), diskLow: true }]).map(h => h.name), ["down", "full", "cpu"]);
   assert.deepEqual(lines(hosts.filter(h => h.reachable)), [["cpu", "CPU 95% busy", "Memory 10%"], ["mem", "CPU 20%", "Memory 60%"], ["calm", "CPU 10%", "Memory 10%"]]);
+});
+
+test("Home marks a stored backup failure or a copy over 48 hours old, and nothing else", () => {
+  const now = Date.parse("2026-10-31T12:00:00Z");
+  const h = { name: "control-plane", reachable: true, boxes: 0, cpus: 8, memBytes: 8, cpuUsed: 1, memUsed: 1, diskBytes: 0, diskUsed: 0, diskLow: false, history: null };
+  const on = { ...h, backupCopyEnabled: true };
+  assert.equal(backupProblem(h, now), undefined);
+  assert.equal(backupProblem(on, now), undefined);
+  assert.equal(backupProblem({ ...on, backupCopyAt: "2026-10-29T12:00:00Z" }, now), undefined);
+  assert.deepEqual(backupProblem({ ...on, backupCopyAt: "2026-10-28T11:00:00Z" }, now), { tone: "warning", label: "Backup 3 days old" });
+  assert.deepEqual(backupProblem({ ...on, backupCopyAt: "2026-10-31T00:00:00Z", backupCopyFailure: "no_space" }, now), { tone: "error", label: "No room for backup" });
+  assert.equal(backupProblem({ ...on, backupCopyFailure: "failed" }, now)?.label, "Backup failed");
 });
