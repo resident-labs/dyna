@@ -24,6 +24,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
+	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/harness/fakeharness"
 	"github.com/resident-labs/dyna/web"
@@ -147,7 +148,9 @@ func main() {
 	runtime := filepath.Join(data, "runtime")
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{}, time.Now)
-	fatal(svc.ConfigureOperations(ctx, nil, 0))
+	grant := svc.HostexecGrant() // agent class here, so the Requests panel has an agent-class operation
+	grant.Class = func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAgent }
+	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": grant}, time.Hour))
 	svc.SetFilesDir(filepath.Join(data, "files"))
 	svc.SetTranscriptDir(filepath.Join(data, "transcripts"))
 	a := api.New(devService{svc}, nil)
@@ -208,6 +211,13 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 		fatal(json.Unmarshal(rec.Body.Bytes(), &attachments[i]))
 	}
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: attachments})
+	by := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	for _, program := range []string{"go", "npm"} {
+		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{"fake"}, Commands: []contract.CommandRule{{Program: program, Args: []string{"test"}, Prefix: true}}, Mode: contract.GrantModeApprove}
+		if _, e := s.OpSubmit(ctx, by, contract.OpSubmitRequest{Operation: contract.Operation{Room: room.Room, Args: args}}); e != nil {
+			log.Fatal(e.Message)
+		}
+	}
 	for i := range posts {
 		text := fmt.Sprintf("Long-list post %d of %d.", i+1, posts)
 		if i%5 == 0 { // every fifth post is taller, so rows have different heights
