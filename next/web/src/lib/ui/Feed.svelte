@@ -7,13 +7,13 @@
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
   import RequestCard from "./RequestCard.svelte";
-  import { dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
+  import { shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
   let { store, home, intro, unsent, onunsent, onsettled, onforward, element = $bindable() }: {
-    store: RoomStore; home: Conversation; intro: Snippet; unsent: PostRequest[];
+    store: RoomStore; home: Conversation; intro: Snippet<[boolean]>; unsent: PostRequest[];
     onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; element?: HTMLDivElement;
   } = $props();
 
@@ -28,7 +28,7 @@
     for (const request of unsent) if (!shown.has(request)) view.unsent(request);
   });
   onDestroy(() => store.leave(view));
-  type Item = Row | { kind: "intro"; key: string };
+  type Item = Row | { kind: "intro"; key: string } | { kind: "steps"; key: string; labels: string[] };
   // A pending post's mentions are names; its row shows them as the sessions the engine will resolve.
   const mentioned = (names: string[]) => names.flatMap(name => {
     const session = [...store.sessions.values()].find(open => open.name === name)?.session;
@@ -57,9 +57,14 @@
   });
   // The intro opens the conversation once the window reaches its first event; it also stands in for an empty feed.
   // Requests stay in the room feed and the Requests panel: a DM reads only its posts and the turns that answered in it (spec 5.13).
+  // A DM ends with the running turn's finished steps; the live line has the current one, and they fold into its work row
+  // when the turn ends.
+  let rows = $derived(feedRows(view.ordered, home, pending, since));
+  let steps = $derived(home.kind === "dm" && home.session && view.atPresent ? (store.steps.get(home.session) ?? []).slice(0, -1) : []);
   let items: Item[] = $derived([
     ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
-    ...feedRows(view.ordered, home, pending, since),
+    ...rows,
+    ...steps.length ? [{ kind: "steps" as const, key: "steps", labels: steps }] : [],
   ]);
   // Opened work rows stay open while the list recycles their elements.
   const opened = new SvelteSet<string>();
@@ -122,7 +127,10 @@
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
-      {:else}{@render intro()}{/if}
+      {:else if item.kind === "steps"}<ul class="steps" aria-label="Finished steps">
+        {#if item.labels.length > 8}<li>{item.labels.length - 8} earlier</li>{/if}
+        {#each item.labels.slice(-8) as label, i (i)}<li>{shortPaths(label)}</li>{/each}</ul>
+      {:else}{@render intro(rows.some(row => row.kind === "post"))}{/if}
     {/snippet}
   </VirtualList>
 {/if}
@@ -136,6 +144,9 @@
 {/if}
 
 <style>
+  /* The running turn's steps sit where its work line will fold, in the work list's form. */
+  .steps { margin: 4px 16px 4px var(--gutter); padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; color: var(--muted); font-size: 12.5px; }
+  .steps li { padding: 1px 0; overflow-wrap: anywhere; }
   /* A centred muted date on a hairline, as in Discord. */
   .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--line); }

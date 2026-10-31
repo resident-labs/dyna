@@ -1,12 +1,12 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
-  // The top of a conversation, as in Discord: its avatar, its name large and one muted line.
-  let { kind, name, label, line, root = false }: { kind: "room" | "session"; name: string; label?: string; line: string; root?: boolean } = $props();
+  // The top of a conversation, as in Discord: its avatar, its name large and one muted line. compact keeps only the line.
+  let { kind, name, label, line, root = false, compact = false }: { kind: "room" | "session"; name: string; label?: string; line: string; root?: boolean; compact?: boolean } = $props();
 </script>
 
 <div class="intro">
-  <Avatar {kind} {name} {label} {root} size={64} />
-  <h1>{kind === "room" ? `#${name}` : name}</h1>
+  {#if !compact}<Avatar {kind} {name} {label} {root} size={64} />
+  <h1>{kind === "room" ? `#${name}` : name}</h1>{/if}
   <p>{line}</p>
 </div>
 
