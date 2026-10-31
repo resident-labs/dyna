@@ -16,7 +16,7 @@
   // A tab lives while the page is open (no reattach in M2); × closes its socket, and the engine ends
   // the shell. The new-tab menu lists the room's sessions whose box is ready, then the hosts.
   // After the shells, a Jobs tab shows the room's background jobs (JobsPane) while jobs has a session; it counts the
-  // running jobs only, and a red dot marks a failed job the owner has not opened (Jobs fix 4). With no shell open,
+  // running jobs, then the failed jobs the owner has not opened, in the failed tone (Jobs fix 4). With no shell open,
   // the dock shows only its tab bar until the owner opens Jobs.
   type JobSession = { id: string; name: string; root: boolean; running: number };
   let { sessions, jobs, failures, element = $bindable(), onempty }: {
@@ -41,7 +41,7 @@
   let only: string | undefined = $state();
   let jobsPane: JobsPane | undefined = $state();
   const opened = new SvelteSet<string>();
-  let unopened = $derived(failures.some(key => !opened.has(key)));
+  let unopened = $derived(failures.filter(key => !opened.has(key)).length);
   // The open list knows its own rows, so the tab counts those and the two cannot disagree.
   let listed: number | undefined = $state();
   let running = $derived(active === JOBS && (floating || !collapsed) && listed !== undefined ? listed : jobs.reduce((sum, session) => sum + session.running, 0));
@@ -68,8 +68,14 @@
     await tick();
     if (key === JOBS) jobsPane?.focus(); else panes[key]?.focus();
   }
-  // Opens a session's shell directly, for the DM header's Terminal button.
-  export function shell(id: string, name: string, root: boolean) { open({ box: id }, name, root); }
+  const liveShell = (id: string) => tabs.find(tab => "box" in tab.target && tab.target.box === id && !tab.exited);
+  // Whether the session has a shell open, for the DM header's pressed Terminal button.
+  export const hasShell = (id: string) => liveShell(id) !== undefined;
+  // The DM header's Terminal button: it shows the session's shell, or opens one. The "+" menu always opens a new one.
+  export function shell(id: string, name: string, root: boolean) {
+    const tab = liveShell(id);
+    if (tab) void show(tab.key); else open({ box: id }, name, root);
+  }
   function open(target: TerminalTarget, label: string, root = false) {
     picking = false;
     const tab = { key: next++, target, label, root };
@@ -115,6 +121,9 @@
   // fit reads the column's height, which only a window resize changes, so the maximized height follows the window.
   let viewport = $state(window.innerHeight);
   let tallest = $derived(viewport && fit(Infinity));
+  // Where the active shell runs. The engine gives no shell folder, so a box shows its session's name.
+  let shown = $derived(tabs.find(tab => tab.key === active));
+  let where = $derived(shown && ("box" in shown.target ? `${shown.label} box` : shown.label));
 </script>
 
 <svelte:window onresize={() => { viewport = window.innerHeight; }} />
@@ -130,18 +139,19 @@
       {#if jobs.length}<span class="tab" class:active={active === JOBS}>
         <button type="button" role="tab" class="jobs" aria-selected={active === JOBS} onclick={() => { only = undefined; void show(JOBS); }}>Jobs
           {#if running}<span class="muted">{running}</span>{/if}
-          {#if unopened}<StatusPill tone="failed" dot label="A failed job you have not opened" />{/if}</button></span>{/if}
+          {#if unopened}<span class="muted">·</span><StatusPill tone="failed" word label="{unopened} failed" />{/if}</button></span>{/if}
     </div>
     <span class="menu">
       <button type="button" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
         onclick={() => { if (picking) picking = false; else void pick(); }}><Icon name="plus" /></button>
       {#if picking}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
         {#if sessions.length}<p class="label">Sessions</p>{/if}
-        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => shell(session.id, session.name, session.root)}>{session.name}</button>{/each}
+        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ box: session.id }, session.name, session.root)}>{session.name}</button>{/each}
         {#if hosts.length}<p class="label">Hosts</p>{/if}
         {#each hosts as host (host.name)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host: host.name }, hostLabel(host.name))}>{hostLabel(host.name)}{#if host.diskLow}<StatusPill tone="warning" label="Disk low" />{/if}</button>{/each}
       </div>{/if}
     </span>
+    {#if shown}<span class="where" title={where}>{where}</span>{/if}
     {#if active}<button type="button" class="tool" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
       onclick={() => { floating = !floating; }}><Icon name={floating ? "dockBottom" : "undock"} /></button>
       {#if !floating}<button type="button" class="tool" aria-label={maximized ? "Restore the terminals" : "Maximize the terminals"} title={maximized ? "Restore" : "Maximize"}
@@ -179,6 +189,8 @@
   .muted { color: var(--muted); font-weight: 400; }
   .jobs { padding-right: 8px; }
   .x { width: 20px; height: 20px; margin-right: 3px; }
+  .where { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
+  @media (max-width: 640px) { .where { display: none; } }
   /* The dock's own controls sit at the right, 28 px like a floating window's. */
   .tool { width: 28px; height: 28px; }
   .fold :global(svg) { transition: transform 120ms; }

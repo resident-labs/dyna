@@ -29,6 +29,12 @@ export async function boxFailures(room: string, beforeSeq: number): Promise<Map<
   return found;
 }
 
+// session.list does not say which jobs failed, so this reads the newest job ends once, as "session/job" keys.
+export async function failedJobs(room: string, beforeSeq: number): Promise<string[]> {
+  const page = await call("events.list", { room, afterSeq: 0, beforeSeq, limit: 200, types: ["shell.job.ended"] }).catch(() => undefined);
+  return (page?.events ?? []).flatMap(event => event.type === "shell.job.ended" && event.body.exitCode !== 0 ? [`${event.body.session}/${event.body.job}`] : []);
+}
+
 // session.list says which last turns failed but not when, so this reads turn.ended pages back from the newest until it
 // has placed each failure, at most 5 pages, so a long room never waits on its whole history. A session's newest
 // turn.ended is its failure, since its last outcome failed. One it cannot place, as when a read fails, stays out.
