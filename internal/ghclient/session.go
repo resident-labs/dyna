@@ -92,8 +92,13 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 		}
 	}
 	out[tokenKey], out["GH_HOST"] = token, r.host
-	if !filepath.IsAbs(scratchDir) || !filepath.IsAbs(dynaBinary) {
-		return SessionEnv{}, fmt.Errorf("GitHub session tools require absolute scratch and binary paths")
+	for _, path := range []struct{ name, value string }{{"scratch", scratchDir}, {"binary", dynaBinary}} {
+		if path.value == "" {
+			return SessionEnv{}, fmt.Errorf("GitHub session %s path is empty", path.name)
+		}
+		if !filepath.IsAbs(path.value) {
+			return SessionEnv{}, fmt.Errorf("GitHub session %s path is relative", path.name)
+		}
 	}
 	values := map[string]string{}
 	for _, entry := range inherited {
