@@ -331,9 +331,14 @@ const RoomLimitMemoryMaxWithoutHigh RoomLimitGap = "memoryMaxWithoutHigh"
 
 // HookHandoff names an active v1 hook that needs manual recreation.
 type HookHandoff struct {
-	Name   string   `json:"name"`
-	Fields []string `json:"fields"`
+	Name   string            `json:"name"`
+	Fields []string          `json:"fields"`
+	Reason HookHandoffReason `json:"reason,omitempty"`
 }
+
+type HookHandoffReason string
+
+const HookCheckoutUnverified HookHandoffReason = "checkoutUnverified"
 
 // SessionHandoff tells root about one session that was open in v1.
 type SessionHandoff struct {
