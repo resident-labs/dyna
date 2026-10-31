@@ -9,8 +9,9 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
+  import { count } from "./lib/feed.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
-  import { MediaQuery } from "svelte/reactivity";
+  import { MediaQuery, SvelteSet } from "svelte/reactivity";
   import RoomMenu, { type Section } from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
@@ -52,21 +53,31 @@
     section = undefined;
   }
   let home: Conversation = $derived(session ? { kind: "dm", session } : { kind: "feed" });
-  // The sessions panel lists each child under its parent. Closed sessions leave it.
+  // The sessions panel lists each child under its parent. Closed sessions leave it. As in v1, a session with
+  // children folds its subtree, and its row counts the hidden sessions; folds last for this page view.
+  const folded = new SvelteSet<string>();
   let tree = $derived.by(() => {
     const sessions = [...(store?.sessions.values() ?? [])];
     const ids = new Set(sessions.map(item => item.session));
-    const rows: { session: SessionStarted; depth: number }[] = [];
+    const children = (parent: string | undefined) => sessions.filter(item => (item.parent && ids.has(item.parent) ? item.parent : undefined) === parent);
+    const size = (parent: string): number => children(parent).reduce((total, item) => total + 1 + size(item.session), 0);
+    const rows: { session: SessionStarted; depth: number; parent: boolean; hidden: number }[] = [];
     const walk = (parent: string | undefined, depth: number) => {
-      for (const item of sessions) {
-        if ((item.parent && ids.has(item.parent) ? item.parent : undefined) !== parent) continue;
-        rows.push({ session: item, depth });
-        walk(item.session, depth + 1);
+      for (const item of children(parent)) {
+        const hidden = folded.has(item.session) ? size(item.session) : 0;
+        rows.push({ session: item, depth, parent: children(item.session).length > 0, hidden });
+        if (!hidden) walk(item.session, depth + 1);
       }
     };
     walk(undefined, 0);
     return rows;
   });
+  // Left folds a parent's subtree and Right opens it, on its row or its chevron.
+  function fold(event: KeyboardEvent, id: string) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    if (event.key === "ArrowLeft") folded.add(id); else folded.delete(id);
+  }
   // Drafts and send errors belong to one conversation, keyed by room and session.
   let drafts: Record<string, string> = $state({});
   let failed: string | undefined = $state();
@@ -151,8 +162,8 @@
 </script>
 
 {#snippet intro()}
-  {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line="This is the start of your direct messages." />
-  {:else}<RoomIntro kind="room" name={roomName} line="This is the start of the room." />{/if}
+  {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`This is the start of your direct messages with ${title}.`} />
+  {:else}<RoomIntro kind="room" name={roomName} line={`This is the start of #${roomName}.`} />{/if}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
@@ -191,8 +202,13 @@
         {#if wide.current || panel}<ComputerView session={watching} name={store?.names.get(watching) ?? "Session"} onback={() => void stopWatching()} />{/if}
       {:else}
       <header class="label">Sessions</header>
-      {#each tree as { session: item, depth } (item.session)}
-        <div class="row"><a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate} onkeydown={walkTree}
+      {#each tree as { session: item, depth, parent, hidden } (item.session)}
+        <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
+          aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
+          title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
+          onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
+        <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate}
+          onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{16 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
           {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
@@ -207,7 +223,13 @@
 <style>
   a.member { color: var(--text); text-decoration: none; }
   a.member[aria-current="page"] { background: var(--selected); }
-  .row { display: flex; align-items: center; }
+  .row { position: relative; display: flex; align-items: center; }
+  /* The chevron sits in the gutter left of the avatar; a folded row stacks its hidden count under it, as in v1. */
+  .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); width: 16px; display: grid; justify-items: center;
+    padding: 2px 0; border-radius: 4px; color: var(--muted); font-size: 10px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
+  .fold:hover { background: var(--hover); color: var(--text); }
+  .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+  .fold[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
   .row a.member { flex: 1; min-width: 0; }
   .watch { all: unset; display: grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   .watch:hover { background: var(--hover); color: var(--text); }
