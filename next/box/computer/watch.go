@@ -41,12 +41,28 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 	if err != nil {
 		return err
 	}
+	// Ignore delayed frames captured before the screenshot completed.
+	lastFrameTime := float64(time.Now().UnixNano()) / 1e9
 	var shot struct {
 		Data string `json:"data"`
 	}
 	if err = json.Unmarshal(result, &shot); err != nil {
 		return err
 	}
+	// Frames received before the screenshot response predate the screenshot.
+	// Acknowledge them without showing them, so they cannot replace it.
+	for _, m := range d.pending {
+		var frame struct {
+			SessionID int `json:"sessionId"`
+		}
+		if err = json.Unmarshal(m.Params, &frame); err != nil {
+			return err
+		}
+		if err = ackFrame(ctx, d, frame.SessionID); err != nil {
+			return err
+		}
+	}
+	d.pending = nil
 	if err = writeFrame(out, shot.Data); err != nil {
 		return err
 	}
@@ -70,10 +86,20 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 		var frame struct {
 			Data      string `json:"data"`
 			SessionID int    `json:"sessionId"`
+			Metadata  struct {
+				Timestamp float64 `json:"timestamp"`
+			} `json:"metadata"`
 		}
 		if err := json.Unmarshal(m.Params, &frame); err != nil {
 			return err
 		}
+		if frame.Metadata.Timestamp < lastFrameTime {
+			if err = ackFrame(ctx, d, frame.SessionID); err != nil {
+				return err
+			}
+			continue
+		}
+		lastFrameTime = frame.Metadata.Timestamp
 		if err = writeFrame(out, frame.Data); err != nil {
 			return err
 		}
@@ -81,12 +107,7 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 		if err = pace(ctx); err != nil {
 			return err
 		}
-		d.id++
-		params, _ := json.Marshal(struct {
-			SessionID int `json:"sessionId"`
-		}{frame.SessionID})
-		ack, _ := json.Marshal(message{ID: d.id, Method: "Page.screencastFrameAck", Params: params})
-		if err = d.conn.Write(ctx, websocket.MessageText, ack); err != nil {
+		if err = ackFrame(ctx, d, frame.SessionID); err != nil {
 			return err
 		}
 	}
@@ -102,4 +123,13 @@ func writeFrame(out io.Writer, data string) error {
 	}
 	_, err = out.Write(jpeg)
 	return err
+}
+
+func ackFrame(ctx context.Context, d *DevTools, sessionID int) error {
+	d.id++
+	params, _ := json.Marshal(struct {
+		SessionID int `json:"sessionId"`
+	}{sessionID})
+	ack, _ := json.Marshal(message{ID: d.id, Method: "Page.screencastFrameAck", Params: params})
+	return d.conn.Write(ctx, websocket.MessageText, ack)
 }
