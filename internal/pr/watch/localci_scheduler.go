@@ -753,6 +753,11 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			}
 			return startCtx.Err()
 		}
+		// Competing runs can see the same free slot and move back and forth.
+		// Give a node time to settle after leaving it. The run's overall
+		// deadline above stays in force across every relocation.
+		const relocationCooldown = 30 * time.Second
+		left := map[string]time.Time{}
 		for {
 			req.OnQueue = func(waitCtx context.Context) *localci.Node {
 				nodes, listErr := s.registeredCINodes(waitCtx)
@@ -761,6 +766,10 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 				}
 				nodes = localci.NodesForLabels(localci.NodesForSuites(nodes, suites), plan.execution.LabelsForSuites(suites))
 				ready := s.readyCINodes(waitCtx, nodes, job, plan)
+				ready = slices.DeleteFunc(ready, func(candidate localci.Node) bool {
+					at, visited := left[candidate.Name]
+					return visited && s.now().Before(at.Add(relocationCooldown))
+				})
 				if retriedFrom != "" {
 					ready = slices.DeleteFunc(ready, func(candidate localci.Node) bool { return candidate.Name == retriedFrom })
 				}
@@ -777,6 +786,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			if !errors.As(err, &move) || ctx.Err() != nil {
 				break
 			}
+			left[node.Name] = s.now()
 			node = move.Node
 			runs := s.nodeRuns()
 			runs.Lock()

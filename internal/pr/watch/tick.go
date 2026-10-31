@@ -65,7 +65,7 @@ func tickKeys(st State) []string {
 func pollDue(st State, r *Record, now time.Time) bool {
 	return r != nil && r.Watching && changeKind(*r) != "local" &&
 		!now.Before(quotaFor(st, r, now).PauseUntil) && (!now.Before(r.Polling.Next) ||
-		(r.Polling.IntervalMinutes > 1 && !reserve(quotaFor(st, r, now), now) && !now.Before(r.Checked.Add(time.Minute)))) &&
+		(r.State == state.PROpen && r.Polling.IntervalMinutes > 1 && !reserve(quotaFor(st, r, now), now) && !now.Before(r.Checked.Add(time.Minute)))) &&
 		!(reserve(quotaFor(st, r, now), now) && !r.Checked.IsZero() && now.Before(r.Checked.Add(5*time.Minute)))
 }
 
@@ -169,10 +169,12 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 		}
 		// A quiet PR needs no job unless a committed budget still needs
 		// reconciliation. Its saved CI evidence selects the normal full poll.
-		if probe, ok := heads[key]; ok && probe.Err == nil && pollDue(st, st.Records[key], s.now()) {
-			r := *st.Records[key]
+		probe, ok := heads[key]
+		r := st.Records[key]
+		if r != nil && pollDue(st, r, s.now()) && ((ok && probe.Err == nil) || r.State != state.PROpen) {
+			r := *r
 			policy := EffectivePolicy(st, r)
-			if quietPull(r, policy, probe.Pull, probe.ciVersion(), false, s.now()) {
+			if ok && quietPull(r, policy, probe.Pull, probe.ciVersion(), false, s.now()) {
 				if !s.quietBudgetRecovery(ctx, r, policy, probe.Pull, st.Responses[key]) {
 					continue
 				}
@@ -210,9 +212,19 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 				started := time.Now()
 				recordCtx, stop := context.WithTimeout(pollCtx, s.recordBudget())
 				gh := s.github(r.RoomID)
-				gh.requests = &requestCache{forceBudgets: fullPollDue(*r, now), forceSnapshot: recoverBudgets[key], entries: st.Responses[key], used: map[string]cachedResponse{}, rates: rates, legacyPause: st.LegacyPause, rateMu: &rateMu, now: s.now}
-				snap, unchanged, e := gh.pollSnapshotFromPull(recordCtx, *r, EffectivePolicy(st, *r), heads[key].Pull, heads[key].ciVersion())
-				snap.headConfirmed = true
+				gh.requests = &requestCache{forceBudgets: fullPollDue(*r, now), forceSnapshot: recoverBudgets[key] || r.State != state.PROpen, entries: st.Responses[key], used: map[string]cachedResponse{}, rates: rates, legacyPause: st.LegacyPause, rateMu: &rateMu, now: s.now}
+				var snap Snapshot
+				var unchanged bool
+				var e error
+				if probe, ok := heads[key]; ok {
+					snap, unchanged, e = gh.pollSnapshotFromPull(recordCtx, *r, EffectivePolicy(st, *r), probe.Pull, probe.ciVersion())
+					snap.headConfirmed = true
+				} else {
+					// A prior head observation ended the PR, but finalization failed.
+					// Re-read metadata without putting terminal records in head batches.
+					snap, unchanged, e = gh.pollSnapshot(recordCtx, *r, EffectivePolicy(st, *r))
+					snap.recoverClosed, snap.recoverClosedAt, snap.recoverEpisode = r.State == state.PRClosed, r.ClosedAt, r.CloseEpisode
+				}
 				slog.Debug("PR watcher phase", "key", key, "phase", "snapshot", "duration", time.Since(started), "error", e)
 				results <- pollResult{key: key, gh: gh, snap: snap, err: e, started: started, ctx: recordCtx, cancel: stop, unchanged: unchanged, polledAt: polledAt}
 			}
@@ -480,6 +492,18 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 	}); saveErr != nil {
 		return saveErr
 	}
+	if err == nil && !result.unchanged {
+		err = s.processSnapshot(ctx, result, true)
+		if err != nil {
+			live, readErr := s.Store.Get(key)
+			if readErr != nil {
+				return errors.Join(err, readErr)
+			}
+			if !live.Watching || live.State == state.PROpen {
+				return err
+			}
+		}
+	}
 	if err != nil {
 		previousError := r.Error
 		if result.snap.headConfirmed {
@@ -501,8 +525,12 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 				}
 				r.Checked = s.now()
 				r.Polling.Next = nextPollTime(result.polledAt, 1)
+				if r.State != state.PROpen {
+					r.Polling.IntervalMinutes = min(60, max(1, r.Polling.IntervalMinutes*2))
+					r.Polling.Next = result.polledAt.Add(time.Duration(r.Polling.IntervalMinutes) * time.Minute)
+				}
 				var limited *rateLimitError
-				if errors.As(err, &limited) {
+				if errors.As(err, &limited) && limited.until.After(r.Polling.Next) {
 					r.Polling.Next = limited.until
 				}
 			}
@@ -516,10 +544,7 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 		}
 		return nil
 	}
-	if result.unchanged {
-		return nil
-	}
-	return s.processSnapshot(ctx, result, true)
+	return nil
 }
 
 // processSnapshot applies a full snapshot to the stored record.
