@@ -7,6 +7,19 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func TestPostStoresToolCallID(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	post, problem := s.Post(ctx, caller, contract.PostRequest{Room: room, Text: "hello", ToolCallID: "call-1"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	event, err := s.store.Event(ctx, post.Seq)
+	if err != nil || event.Body.(contract.PostCreated).ToolCallID != "call-1" {
+		t.Fatalf("post event = %+v, err = %v", event, err)
+	}
+}
+
 func TestPostClientIDRepeatReturnsTheFirstPost(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
