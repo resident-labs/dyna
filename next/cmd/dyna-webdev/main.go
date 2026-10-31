@@ -387,11 +387,22 @@ func fatal(err error) {
 		log.Fatal(err)
 	}
 }
+
+type routeList []string
+
+func (r *routeList) String() string { return strings.Join(*r, ",") }
+func (r *routeList) Set(route string) error {
+	*r = append(*r, route)
+	return nil
+}
+
 func main() {
 	listen := flag.String("web.listen", "127.0.0.1:7790", "web listen address")
 	seed := flag.Bool("seed", false, "create example room")
 	posts := flag.Int("posts", 0, "with -seed, add this many posts across the sessions for long-list checks")
 	agents := flag.Int("agents", 0, "with -seed, add this many sessions across six more rooms for crowded Home checks")
+	var routes routeList
+	flag.Var(&routes, "web.route", "public web origin to offer when pairing, repeatable")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -413,6 +424,7 @@ func main() {
 	fatal(err)
 	webServer, err := api.NewWeb(a, *listen, app, time.Now, st)
 	fatal(err)
+	fatal(webServer.SetRoutes(routes))
 	listener, err := webServer.Listen()
 	fatal(err)
 	defer listener.Close()
@@ -434,6 +446,7 @@ func main() {
 	fatal(st.AddHost(ctx, box.Host{Name: host, State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
 	if *seed {
 		seedRoom(ctx, svc, *posts, *agents)
+		seedDevices(ctx, st)
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(runtime, "owner.sock"))
@@ -445,6 +458,19 @@ func main() {
 	fatal(json.NewDecoder(resp.Body).Decode(&login))
 	fmt.Println(login.URL)
 	<-ctx.Done()
+}
+
+// seedDevices adds invented devices, so Settings shows a full list and an expiry warning.
+func seedDevices(ctx context.Context, st *store.Store) {
+	now := time.Now()
+	for _, d := range []store.Device{
+		{ID: "device_phone", Name: "iPhone", TokenHash: [32]byte{1}, PairedAt: now.Add(-9 * 24 * time.Hour), LastSeenAt: now.Add(-12 * time.Minute), ExpiresAt: now.Add(store.DeviceLife),
+			Scopes: []contract.Scope{contract.ScopeRead, contract.ScopeOperate, contract.ScopeFiles, contract.ScopeTerminal}},
+		{ID: "device_laptop", Name: "Work laptop", TokenHash: [32]byte{2}, PairedAt: now.Add(-40 * 24 * time.Hour), LastSeenAt: now.Add(-28 * 24 * time.Hour), ExpiresAt: now.Add(2 * 24 * time.Hour),
+			Scopes: []contract.Scope{contract.ScopeRead, contract.ScopeOperate}},
+	} {
+		fatal(st.CreateDevice(ctx, d))
+	}
 }
 
 // seedAgents spreads n sessions with invented names over six more rooms: every third one works until stopped,

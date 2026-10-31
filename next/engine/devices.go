@@ -57,7 +57,7 @@ func (s *Service) DeviceList(ctx context.Context, caller contract.Principal, _ c
 		return out, failure(err)
 	}
 	for _, d := range devices {
-		out.Devices = append(out.Devices, contract.Device{ID: d.ID, Name: d.Name, PairedAt: d.PairedAt, LastSeenAt: d.LastSeenAt, ExpiresAt: d.ExpiresAt, Scopes: d.Scopes})
+		out.Devices = append(out.Devices, contract.Device{ID: d.ID, Name: d.Name, PairedAt: d.PairedAt, LastSeenAt: d.LastSeenAt, ExpiresAt: d.ExpiresAt, Scopes: d.Scopes, Current: d.ID == string(caller.Device)})
 	}
 	return out, nil
 }

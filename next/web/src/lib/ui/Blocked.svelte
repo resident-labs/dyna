@@ -1,10 +1,8 @@
 <script lang="ts">
   import Icon, { type IconName } from "./Icon.svelte";
-  import type { Blocked } from "../client.ts";
   // Why the page shows no rooms, centred in the feed: an icon, what happened, and what the owner can do about it.
-  let { kind, onretry }: { kind: Blocked | "no-rooms"; onretry?: () => void } = $props();
-  const states: Record<Blocked | "no-rooms", { icon: IconName; title: string; line: string; command?: string }> = {
-    "signed-out": { icon: "lock", title: "You are signed out.", line: "Run this on the computer where Dyna runs to open a new sign-in link.", command: "dyna web" },
+  let { kind, onretry }: { kind: "unreachable" | "no-rooms"; onretry?: () => void } = $props();
+  const states: Record<"unreachable" | "no-rooms", { icon: IconName; title: string; line: string; command?: string }> = {
     unreachable: { icon: "plug", title: "Dyna is not reachable.", line: "This page tries again by itself. Check that the Dyna engine is running." },
     "no-rooms": { icon: "room", title: "Create your first room", line: "Run this on the computer where Dyna runs. The room shows here as soon as it exists.",
       command: "dyna room create <name> --root-profile <profile>" },
