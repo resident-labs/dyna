@@ -148,3 +148,38 @@ func TestStartSessionIsOpen(t *testing.T) {
 		t.Fatalf("session state = %q, want open", state)
 	}
 }
+
+func TestHelloRejectsCreateRetryButAcceptsActiveCreate(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
+ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,due_at,failures) VALUES('b','s','','agent','creating','create failed','',0,0,200,1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, _ := box.Size(contract.BoxSizeAgent)
+	b := box.Box{ID: "b", Session: "s", Size: size, State: contract.BoxCreating}
+	event := contract.Event{ID: "hello", Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+	if _, err := s.TransitionBox(ctx, b, contract.BoxReady, "", event); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("delayed hello during retry: %v", err)
+	}
+	var state string
+	var due, failures int
+	if err := s.Read().QueryRowContext(ctx, "SELECT state,due_at,failures FROM boxes WHERE id='b'").Scan(&state, &due, &failures); err != nil {
+		t.Fatal(err)
+	}
+	if state != "creating" || due != 200 || failures != 1 {
+		t.Fatalf("delayed hello changed box: %s %d %d", state, due, failures)
+	}
+	if _, err := s.writer.ExecContext(ctx, "UPDATE boxes SET due_at=0,failures=0 WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TransitionBox(ctx, b, contract.BoxReady, "", event); err != nil {
+		t.Fatalf("early hello during active first create: %v", err)
+	}
+}
