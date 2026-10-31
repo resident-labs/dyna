@@ -4,14 +4,14 @@
   // word shows the label alone, for a status word inside a muted line whose dot shows elsewhere.
   // A count is the number alone in the tone's color, with no circle (spec 5.13); its parent names it.
   // Working's dot has a still, soft halo, as in the chosen room mockup (note 6); nothing moves.
-  let { tone, label, title = label, dot = false, word = false, count }: {
-    tone: "warning" | "error" | "blocked" | "failed" | "working"; label: string; title?: string; dot?: boolean; word?: boolean; count?: number;
+  let { tone, label, title = label, dot = false, triangle = false, word = false, count }: {
+    tone: "warning" | "error" | "blocked" | "failed" | "working"; label: string; title?: string; dot?: boolean; triangle?: boolean; word?: boolean; count?: number;
   } = $props();
   let error = $derived(tone === "error" || tone === "blocked" || tone === "failed");
 </script>
 {#if count !== undefined}<span class="count" class:error aria-hidden="true">{count > 99 ? "99+" : count}</span>
 {:else}<span class="status" class:dot class:word class:error class:working={tone === "working"} {title} role={dot ? "img" : undefined}
-  aria-label={dot ? title : undefined}>{#if !word}<i></i>{/if}{#if !dot}{label}{/if}</span>{/if}
+  aria-label={dot ? title : undefined}>{#if triangle}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 2 20h20zM12 10v4M12 17h.01" /></svg>{:else if !word}<i></i>{/if}{#if !dot}{label}{/if}</span>{/if}
 <style>
   .status { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--attention); opacity: 0.9;
     font-size: 12.5px; font-weight: 500; line-height: 1.25; white-space: nowrap; }
