@@ -10,10 +10,12 @@ test("gives each name a stable hue that differs between similar names", () => {
 });
 
 test("gives names initials that tell them apart", () => {
-  const labels = distinctInitials(["root", "docs-site", "design-system", "dove", "d1", "reviewer-2", "reviewer-22", "reviewer-27", "reviewer-3", "reviewer-347", "rex-72"]);
-  assert.deepEqual(Object.fromEntries(labels), {
-    d1: "D1", "design-system": "DS", "docs-site": "DO", dove: "D2", root: "RO",
-    // Digits of the name's own come before a counting digit: the last one, then the others.
-    "reviewer-2": "R2", "reviewer-22": "RE", "reviewer-27": "R7", "reviewer-3": "R3", "reviewer-347": "R4", "rex-72": "R1",
+  const rooms = distinctInitials(["root", "docs-site", "design-system", "dove"]);
+  assert.deepEqual(Object.fromEntries(rooms), { "design-system": "DS", dove: "DO", root: "RO", "docs-site": "D1" });
+  // A name keeps its own initials before others fall back; digits of the name's own come before a counting digit.
+  const sessions = distinctInitials(["reviewer-2", "reviewer-7", "reviewer-22", "reviewer-27", "reviewer-3", "reviewer-347", "tester-2", "tester-28", "tester-29"]);
+  assert.deepEqual(Object.fromEntries(sessions), {
+    "reviewer-2": "R2", "reviewer-3": "R3", "reviewer-7": "R7", "tester-2": "T2",
+    "reviewer-22": "RE", "reviewer-27": "R1", "reviewer-347": "R4", "tester-28": "TE", "tester-29": "T9",
   });
 });
