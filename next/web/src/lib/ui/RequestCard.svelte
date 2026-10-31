@@ -1,6 +1,6 @@
 <script lang="ts">
   import { APIError, call } from "../client.ts";
-  import { causes, commandLine, fromNow } from "../feed.ts";
+  import { causes, commandLine, fromNow, requestLine } from "../feed.ts";
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -20,6 +20,9 @@
   let parent = $derived(open?.parent && store.names.get(open.parent));
   // The body's first line says what runs; the lines after it, such as the reason, are muted.
   let [lead = "", ...rest] = $derived((request.card.body ?? "").split("\n"));
+  // A host or repository target shows in mono: inside the first line when the line names it, else after the title.
+  let named = $derived(request.card.target.kind !== "room" ? request.card.target.name : "");
+  let line = $derived(requestLine(request.card));
   // The engine decides expiry; the owner sees it in the attention color for its last 5 minutes.
   let soon = $derived(Date.parse(request.expires) - now < 5 * 60_000);
   // One muted line for a decided request, such as "Denied by you · just now · “Use CI”".
@@ -52,14 +55,14 @@
 
 {#snippet who()}<Avatar kind={request.by.kind} name={name(request.by)} {root} size={request.state === "pending" && !gone ? 24 : 20} />
   <strong class={request.by.kind} class:root style:--hue={hue(name(request.by))}>{name(request.by)}</strong>
-  <span class="title">{request.card.title}{#if request.card.target.kind !== "room"} on <code>{request.card.target.name}</code>{/if}</span>{/snippet}
+  <span class="title">{request.card.title}{#if named && !line.named} on <code>{named}</code>{/if}</span>{/snippet}
 
 <!-- While it waits, a request reads as a sentence on a card, with the exact command that runs; an owner-class card has the attention edge. -->
 {#if request.state === "pending" && !gone}
   <article class="card" class:feed class:yours={request.class === "owner"}>
     <p class="top">{@render who()}
       <span class="expires">{#if soon}<StatusPill tone="warning" label="Expires {fromNow(request.expires, now)}" />{:else}Expires {fromNow(request.expires, now)}{/if}</span></p>
-    {#if lead}<p class="what">{lead}</p>{/if}
+    {#if lead}<p class="what">{line.text}{#if line.named}<code>{line.named}</code>{line.after}{/if}</p>{/if}
     {#if rest.length}<p class="why">{rest.join("\n")}</p>{/if}
     {#if request.card.command?.length}<pre class="exact">{commandLine(request.card.command)}</pre>{/if}
     {#each request.card.changes ?? [] as change (change.field)}<p class="what"><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}

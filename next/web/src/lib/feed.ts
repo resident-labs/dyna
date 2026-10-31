@@ -1,4 +1,4 @@
-import type { Attachment, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
+import type { Attachment, Card, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
 import type { Request } from "./room.svelte.ts";
 
 export type Row =
@@ -188,6 +188,13 @@ export function commandLine(argv: string[]): string {
 }
 
 // Files the browser shows inline as a thumbnail; other types get a file card.
+// A request's first line, split around the host or repository it names, so that name shows in mono. named is empty when
+// the line does not name it.
+export function requestLine(card: Pick<Card, "body" | "target">): { text: string; named: string; after: string } {
+  const text = card.body?.split("\n")[0] ?? "", name = card.target.kind === "room" ? "" : card.target.name;
+  const at = name ? text.indexOf(name) : -1;
+  return at < 0 ? { text, named: "", after: "" } : { text: text.slice(0, at), named: name, after: text.slice(at + name.length) };
+}
 export const isImage = (file: Attachment) => /^image\/(png|jpeg|gif|webp)$/.test(file.media);
 
 // A file size as v1 shows it, such as "512 B", "12.4 KB" or "3.1 MB".
