@@ -91,7 +91,7 @@ func TestUnwatchedBatchUsesOneHeadQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.s.refreshUnwatchedBatch(t.Context(), tickKeys(st), nil); err != nil {
+	if err := e.s.refreshUnwatchedBatch(t.Context(), st, tickKeys(st), nil); err != nil {
 		t.Fatal(err)
 	}
 	st, err = e.s.Store.Read()
@@ -128,7 +128,7 @@ func TestUnwatchedBatchUsesFreshQuota(t *testing.T) {
 		t.Error("batch ignored newly saved quota pause")
 		return nil
 	}
-	if err := e.s.refreshUnwatchedBatch(t.Context(), keys, nil); err != nil {
+	if err := e.s.refreshUnwatchedBatch(t.Context(), old, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !e.record().Polling.Next.Equal(e.clock) {
@@ -161,7 +161,7 @@ func TestUnwatchedBatchFallsBackWhenHeadMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.s.refreshUnwatchedBatch(t.Context(), tickKeys(st), nil); err != nil {
+	if err := e.s.refreshUnwatchedBatch(t.Context(), st, tickKeys(st), nil); err != nil {
 		t.Fatal(err)
 	}
 	if batches != 1 || rest != 1 || !e.record().Polling.Next.Equal(e.clock.Add(time.Hour)) {
