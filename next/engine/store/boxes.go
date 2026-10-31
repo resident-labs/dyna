@@ -214,7 +214,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			dueMS = due.UnixMilli()
 		}
 		// A completed turn after an early hello may have reset the current failure count.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, image, to, reason, dueMS, state, failures, b.ID, state)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
 		if err != nil {
 			return err
 		}
