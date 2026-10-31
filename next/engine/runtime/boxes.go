@@ -12,6 +12,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -48,11 +49,18 @@ type Boxes struct {
 	Proc      string // Proc is the folder with stat and meminfo; empty means /proc.
 	mu        sync.Mutex
 	hosts     map[contract.HostName]*podman.Host
-	loads     map[contract.HostName]contract.HostSummary
+	loads     map[contract.HostName]hostLoad
 	cpuPrev   *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
 	binOnce   sync.Once
 	binSum    string
 	binErr    error
+}
+
+type hostLoad struct {
+	summary contract.HostSummary
+	beats   int
+	cpuSum  float64
+	memSum  int64
 }
 
 // cpuTimes holds the cumulative jiffies of the aggregate cpu line in /proc/stat.
@@ -98,13 +106,8 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
-		h.Heartbeat(b.Context, ticker.C, func(ok bool, cpu float64, mem int64) {
-			b.mu.Lock()
-			defer b.mu.Unlock()
-			if b.loads == nil {
-				b.loads = make(map[contract.HostName]contract.HostSummary)
-			}
-			b.loads[name] = contract.HostSummary{Reachable: ok, CPUUsed: cpu, MemUsed: mem}
+		h.Heartbeat(b.Context, ticker.C, b.HostData, func(ok bool, load podman.Load) {
+			b.record(name, ok, load, time.Now())
 		}, b.pressure(name))
 	}()
 }
@@ -122,28 +125,80 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for i := 1; i < len(hosts); i++ {
+	for i := range hosts {
 		h := &hosts[i]
-		load := b.loads[h.Name]
+		load := b.loads[h.Name].summary
 		h.Reachable, h.CPUUsed, h.MemUsed, h.Boxes = load.Reachable, load.CPUUsed, load.MemUsed, counts[h.Name]
+		h.DiskBytes, h.DiskUsed, h.LastSeen = load.DiskBytes, load.DiskUsed, load.LastSeen
+		h.History = append([]contract.HostLoadPoint{}, load.History...)
+		cutoff := time.Now().Truncate(time.Minute).Add(-59 * time.Minute)
+		for len(h.History) > 0 && h.History[0].At.Before(cutoff) {
+			h.History = h.History[1:]
+		}
+		if h.Name == contract.ControlPlane {
+			h.Reachable, h.CPUs, h.MemBytes = true, goruntime.NumCPU(), load.MemBytes
+		}
 	}
-	b.controlPlane(&hosts[0])
 	return nil
 }
 
-// controlPlane fills the CPU and memory figures of this machine from the proc folder. A failed read leaves its figures at zero. The caller holds b.mu.
-func (b *Boxes) controlPlane(h *contract.HostSummary) {
+// record keeps the latest figures and minute means under the shared lock.
+func (b *Boxes) record(name contract.HostName, ok bool, sample podman.Load, now time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.loads == nil {
+		b.loads = make(map[contract.HostName]hostLoad)
+	}
+	state := b.loads[name]
+	load := &state.summary
+	load.Reachable = ok
+	if ok {
+		load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed, load.LastSeen = sample.CPUUsed, sample.MemUsed, sample.DiskBytes, sample.DiskUsed, now
+		load.MemBytes = sample.MemBytes
+		minute := now.Truncate(time.Minute)
+		for len(load.History) > 0 && load.History[0].At.Before(minute.Add(-59*time.Minute)) {
+			load.History = load.History[1:]
+		}
+		if len(load.History) == 0 || !load.History[len(load.History)-1].At.Equal(minute) {
+			load.History = append(load.History, contract.HostLoadPoint{At: minute})
+			state.beats, state.cpuSum, state.memSum = 0, 0, 0
+		}
+		state.beats++
+		state.cpuSum += sample.CPUUsed
+		state.memSum += sample.MemUsed
+		point := &load.History[len(load.History)-1]
+		point.CPUUsed, point.MemUsed = state.cpuSum/float64(state.beats), state.memSum/int64(state.beats)
+	}
+	b.loads[name] = state
+}
+
+// controlPlane samples the engine host on the same schedule as remote hosts.
+func (b *Boxes) controlPlane(data string) {
 	root := b.Proc
 	if root == "" {
 		root = "/proc"
 	}
-	h.Reachable = true
-	h.CPUs = goruntime.NumCPU()
-	if stat, err := os.ReadFile(filepath.Join(root, "stat")); err == nil {
-		h.CPUUsed = b.cpuCores(string(stat), h.CPUs)
-	}
-	if meminfo, err := os.ReadFile(filepath.Join(root, "meminfo")); err == nil {
-		h.MemBytes, h.MemUsed = memory(string(meminfo))
+	tick := time.NewTicker(10 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-b.Context.Done():
+			return
+		case now := <-tick.C:
+			var load podman.Load
+			if stat, err := os.ReadFile(filepath.Join(root, "stat")); err == nil {
+				load.CPUUsed = b.cpuCores(string(stat), goruntime.NumCPU())
+			}
+			if mem, err := os.ReadFile(filepath.Join(root, "meminfo")); err == nil {
+				load.MemBytes, load.MemUsed = memory(string(mem))
+			}
+			var fs syscall.Statfs_t
+			if syscall.Statfs(data, &fs) == nil {
+				load.DiskBytes = int64(fs.Blocks) * fs.Bsize
+				load.DiskUsed = int64(fs.Blocks-fs.Bfree) * fs.Bsize
+			}
+			b.record(contract.ControlPlane, true, load, now)
+		}
 	}
 }
 
@@ -191,9 +246,9 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 				return nil, err
 			}
 			if b.loads == nil {
-				b.loads = make(map[contract.HostName]contract.HostSummary)
+				b.loads = make(map[contract.HostName]hostLoad)
 			}
-			b.loads[name] = contract.HostSummary{Reachable: record.State == box.HostReady}
+			b.loads[name] = hostLoad{summary: contract.HostSummary{Reachable: record.State == box.HostReady}}
 			b.cache(name, h)
 			return h, nil
 		}
@@ -229,9 +284,9 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 	}
 	b.mu.Lock()
 	if b.loads == nil {
-		b.loads = make(map[contract.HostName]contract.HostSummary)
+		b.loads = make(map[contract.HostName]hostLoad)
 	}
-	b.loads[req.Name] = contract.HostSummary{Reachable: true}
+	b.loads[req.Name] = hostLoad{summary: contract.HostSummary{Reachable: true}}
 	b.cache(req.Name, h)
 	b.mu.Unlock()
 	return nil

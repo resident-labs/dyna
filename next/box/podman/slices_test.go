@@ -50,7 +50,7 @@ func driveHeartbeat(t *testing.T, bodies []string, at []time.Time) []pressureRep
 	var got []pressureReport
 	go func() {
 		defer close(done)
-		h.Heartbeat(ctx, ticks, func(bool, float64, int64) {}, func(slice string, kind contract.PressureKind) {
+		h.Heartbeat(ctx, ticks, "/data", func(bool, Load) {}, func(slice string, kind contract.PressureKind) {
 			got = append(got, pressureReport{slice, kind})
 		})
 	}()
@@ -195,7 +195,7 @@ func TestHeartbeatEpisodes(t *testing.T) {
 }
 
 func TestHeartbeatReportsLoad(t *testing.T) {
-	runner := &seqRunner{bodies: []string{"dyna-load 100 1000000\n", "dyna-load 250 16000000\n"}, drained: make(chan struct{})}
+	runner := &seqRunner{bodies: []string{"dyna-disk 1000 400\ndyna-load 100 1000000\n", "dyna-disk 1000 450\ndyna-load 250 16000000\n"}, drained: make(chan struct{})}
 	h, err := New("user@host", t.TempDir(), "host", runner)
 	if err != nil {
 		t.Fatal(err)
@@ -204,17 +204,20 @@ func TestHeartbeatReportsLoad(t *testing.T) {
 	defer cancel()
 	ticks := make(chan time.Time)
 	type sample struct {
-		reachable bool
-		cpu       float64
-		mem       int64
+		reachable           bool
+		cpu                 float64
+		mem                 int64
+		diskBytes, diskUsed int64
 	}
 	reports := make(chan sample)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.Heartbeat(ctx, ticks, func(ok bool, cpu float64, mem int64) { reports <- sample{ok, cpu, mem} }, func(string, contract.PressureKind) {})
+		h.Heartbeat(ctx, ticks, "/data", func(ok bool, load Load) {
+			reports <- sample{ok, load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed}
+		}, func(string, contract.PressureKind) {})
 	}()
-	for i, want := range []sample{{true, 0, 100}, {true, 1.5, 250}} {
+	for i, want := range []sample{{true, 0, 100, 1000, 400}, {true, 1.5, 250, 1000, 450}} {
 		ticks <- time.Unix(1000+int64(10*i), 0)
 		if got := <-reports; got != want {
 			t.Errorf("sample %d: got %+v, want %+v", i, got, want)

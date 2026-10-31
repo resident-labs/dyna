@@ -146,6 +146,7 @@ func Run(ctx context.Context, cfg Config) error {
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
 	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
+	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service

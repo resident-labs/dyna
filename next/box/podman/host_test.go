@@ -362,7 +362,7 @@ func TestHeartbeatThreeMisses(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.Heartbeat(ctx, ticks, func(ok bool, _ float64, _ int64) { reports <- ok }, func(string, contract.PressureKind) {})
+		h.Heartbeat(ctx, ticks, "/data", func(ok bool, _ Load) { reports <- ok }, func(string, contract.PressureKind) {})
 	}()
 	for i := 0; i < 3; i++ {
 		ticks <- time.Time{}
