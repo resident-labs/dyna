@@ -185,15 +185,7 @@ func Run(ctx context.Context, version string) error {
 			if _, ok := message.Body.(contract.Archive); ok {
 				closing.Store(true)
 				return closeBox(ctx, h, transcript, h.SessionFile(), time.After, func(ctx context.Context) error {
-					if len(hello.Repos) == 0 {
-						return client.ArchiveDone(ctx, contract.ArchiveDoneRequest{})
-					}
-					for _, repo := range hello.Repos {
-						if err := client.ArchiveDone(ctx, archiveRepo(ctx, "/box/work", hello.Session, repo, runGit)); err != nil {
-							return err
-						}
-					}
-					return nil
+					return archiveAndReport(ctx, "/box/work", hello.Session, hello.Repos, runGit, time.After, client.ArchiveDone)
 				})
 			}
 			return runner.Handle(ctx, message)
