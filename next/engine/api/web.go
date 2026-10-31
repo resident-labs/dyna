@@ -24,18 +24,23 @@ import (
 )
 
 type Web struct {
-	mu      sync.Mutex
-	host    string
-	routes  map[string]string
-	address string
-	handler http.Handler
-	now     func() time.Time
-	ticks   func() (<-chan time.Time, func())
-	tokens  map[[32]byte]time.Time
-	devices DeviceStore
-	connect ConnectSessions
-	app     fs.FS
-	api     *API
+	mu          sync.Mutex
+	host        string
+	routes      map[string]string
+	discovered  string
+	discovery   func(context.Context) string
+	routeWake   func()
+	discoveryAt time.Time
+	discoverMu  sync.Mutex
+	address     string
+	handler     http.Handler
+	now         func() time.Time
+	ticks       func() (<-chan time.Time, func())
+	tokens      map[[32]byte]time.Time
+	devices     DeviceStore
+	connect     ConnectSessions
+	app         fs.FS
+	api         *API
 }
 
 type DeviceStore interface {
@@ -75,18 +80,62 @@ func (w *Web) SetRoutes(routes []string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, route := range routes {
-		u, err := url.Parse(route)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (route != u.Scheme+"://"+u.Host && route != u.Scheme+"://"+u.Host+"/") || strings.ContainsAny(route, "*; \t\r\n") {
-			return fmt.Errorf("invalid web route %q: expected an http or https origin", route)
+		host, origin, err := webRoute(route)
+		if err != nil {
+			return err
 		}
-		host := strings.ToLower(u.Host)
-		origin := u.Scheme + "://" + host
 		if existing, ok := w.routes[host]; ok && existing != origin {
 			return fmt.Errorf("web route %q has a conflicting host", route)
 		}
 		w.routes[host] = origin
 	}
 	return nil
+}
+
+func webRoute(route string) (string, string, error) {
+	u, err := url.Parse(route)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (route != u.Scheme+"://"+u.Host && route != u.Scheme+"://"+u.Host+"/") || strings.ContainsAny(route, "*; \t\r\n") {
+		return "", "", fmt.Errorf("invalid web route %q: expected an http or https origin", route)
+	}
+	host := strings.ToLower(u.Host)
+	return host, u.Scheme + "://" + host, nil
+}
+
+// SetDiscovery installs route discovery before the tunnel supervisor starts.
+func (w *Web) SetDiscovery(discover func(context.Context) string, wake func()) {
+	w.mu.Lock()
+	w.discovery, w.routeWake = discover, wake
+	w.mu.Unlock()
+}
+
+// RefreshRoutes runs bounded discovery and returns the current public routes.
+func (w *Web) RefreshRoutes(ctx context.Context) []string {
+	w.discoverMu.Lock()
+	defer w.discoverMu.Unlock()
+	w.mu.Lock()
+	discover := w.discovery
+	w.mu.Unlock()
+	if discover != nil && (w.discoveryAt.IsZero() || !w.now().Before(w.discoveryAt.Add(30*time.Second))) {
+		w.discoveryAt = w.now()
+		route := discover(context.WithoutCancel(ctx))
+		if route != "" {
+			_, origin, err := webRoute(route)
+			if err != nil || !strings.HasPrefix(origin, "https://") {
+				route = ""
+			} else {
+				route = origin
+			}
+		}
+		w.mu.Lock()
+		changed := w.discovered != route
+		w.discovered = route
+		wake := w.routeWake
+		w.mu.Unlock()
+		if changed && wake != nil {
+			wake()
+		}
+	}
+	return w.PublicRoutes()
 }
 
 // PublicRoutes lists the origins set with SetRoutes, without the loopback one.
@@ -99,6 +148,9 @@ func (w *Web) PublicRoutes() []string {
 			out = append(out, origin)
 		}
 	}
+	if w.discovered != "" && !slices.Contains(out, w.discovered) {
+		out = append(out, w.discovered)
+	}
 	slices.Sort(out)
 	return out
 }
@@ -108,6 +160,9 @@ func (w *Web) routeOrigins(ctx context.Context) ([]string, string) {
 	var routes []string
 	for _, route := range w.routes {
 		routes = append(routes, route)
+	}
+	if w.discovered != "" && !slices.Contains(routes, w.discovered) {
+		routes = append(routes, w.discovered)
 	}
 	w.mu.Unlock()
 	var managed string
@@ -145,21 +200,34 @@ func (w *Web) login(_ context.Context, _ contract.Principal, _ contract.WebLogin
 }
 
 func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
-	routes, managed := w.routeOrigins(r.Context())
-	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; connect-src 'self' "+strings.Join(routes, " ")+"; frame-ancestors 'none'")
-	out.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Header.Get("Tailscale-Funnel-Request") != "" {
 		http.Error(out, "forbidden", http.StatusForbidden)
 		return
 	}
+	routes, managed := w.routeOrigins(r.Context())
+	host := strings.ToLower(r.Host)
 	w.mu.Lock()
-	origin, known := w.routes[strings.ToLower(r.Host)]
+	origin, known := w.routes[host]
+	if !known && w.discovered == "https://"+host {
+		origin, known = w.discovered, true
+	}
 	w.mu.Unlock()
 	if !known && w.connect != nil {
 		if u, err := url.Parse(managed); err == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "https" || u.Scheme == "http") {
 			origin, known = managed, true
 		}
 	}
+	if !known {
+		w.RefreshRoutes(r.Context())
+		routes, managed = w.routeOrigins(r.Context())
+		w.mu.Lock()
+		if w.discovered == "https://"+host {
+			origin, known = w.discovered, true
+		}
+		w.mu.Unlock()
+	}
+	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; connect-src 'self' "+strings.Join(routes, " ")+"; frame-ancestors 'none'")
+	out.Header().Set("X-Content-Type-Options", "nosniff")
 	if !known {
 		http.Error(out, "unknown host", http.StatusMisdirectedRequest)
 		return
@@ -353,13 +421,10 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	http.ServeContent(out, r, path, time.Time{}, bytes.NewReader(data))
 }
 
-func (w *Web) Listen(prepare func(int)) (net.Listener, error) {
+func (w *Web) Listen() (net.Listener, error) {
 	l, err := net.Listen("tcp", w.address)
 	if err != nil {
 		return nil, err
-	}
-	if prepare != nil {
-		prepare(l.Addr().(*net.TCPAddr).Port)
 	}
 	server := &http.Server{Handler: w, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(l)
