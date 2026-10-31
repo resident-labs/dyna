@@ -2,17 +2,51 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
+	"net/rpc"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/resident-labs/dyna/engine/model"
+	sdkapi "github.com/router-for-me/CLIProxyAPI/v8/sdk/api"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"github.com/spf13/cobra"
 )
+
+type oauthProxyService interface {
+	DeleteDynaCredential(context.Context, string) error
+	ActivateDynaCredential(context.Context, string, string) error
+}
+
+// proxyOAuthComplete keeps an ordinary rejected attempt local to its credential.
+func proxyOAuthComplete(client *rpc.Client, credentials *proxyStore, service oauthProxyService, state, id string) error {
+	var result model.OAuthCompletionResult
+	if client.Call("Auth.OAuthCompleted", model.OAuthCompletion{State: state, AuthID: id}, &result) != nil {
+		return errors.New("account completion unavailable")
+	}
+	bound, err := credentials.bound(id)
+	if err != nil {
+		return err
+	}
+	if !result.Accepted {
+		if bound {
+			return errors.New("account completion unavailable")
+		}
+		return service.DeleteDynaCredential(context.Background(), id)
+	}
+	if !bound {
+		return errors.New("account completion unavailable")
+	}
+	return service.ActivateDynaCredential(context.Background(), id, "")
+}
 
 func proxyCommand() *cobra.Command {
 	var path string
@@ -28,6 +62,19 @@ func proxyCommand() *cobra.Command {
 			return err
 		}
 		defer listener.Close()
+		storeConn := os.NewFile(4, "proxy-store.sock")
+		client := rpc.NewClient(storeConn)
+		defer client.Close()
+		credentials := &proxyStore{client: client}
+		sdkauth.RegisterTokenStore(credentials)
+		cliproxy.EnableDynaMemoryOAuthCallbacks()
+		var service *cliproxy.Service
+		cliproxy.SetDynaOAuthCompletionHook(func(state, id string) {
+			if proxyOAuthComplete(client, credentials, service, state, id) != nil {
+				// Restart removes unbound credentials before accepting requests.
+				os.Exit(1)
+			}
+		})
 		ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM)
 		defer cancel()
 		ready := make(chan struct{})
@@ -58,7 +105,9 @@ func proxyCommand() *cobra.Command {
 			}
 		}()
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
-		service, err := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(gated).Build()
+		service, err = cliproxy.NewBuilder().WithPostAuthHook(cliproxy.StageDynaCredential).WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
+			proxyKeyRoutes(router, &service, credentials, cfg.RemoteManagement.SecretKey)
+		})).Build()
 		if err != nil {
 			return err
 		}

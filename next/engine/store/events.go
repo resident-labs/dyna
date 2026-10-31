@@ -99,7 +99,7 @@ func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 	// database/sql requires a heterogeneous variadic slice for query arguments.
 	var args []interface{}
 	if allRooms {
-		query += "room IS NOT NULL AND seq>?"
+		query += "(room IS NOT NULL OR type IN ('op.requested','op.decided','op.ran')) AND seq>?"
 		args = append(args, afterSeq)
 	} else if room == "" {
 		query += "room IS NULL AND seq>?"

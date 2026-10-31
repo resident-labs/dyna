@@ -3,6 +3,26 @@ package contract
 import "time"
 
 type AccountID string
+
+type AccountAction string
+
+const (
+	AccountActionConnect  AccountAction = "connect"
+	AccountActionCallback AccountAction = "callback"
+	AccountActionSetKey   AccountAction = "set_key"
+	AccountActionComplete AccountAction = "complete"
+	AccountActionRemove   AccountAction = "remove"
+)
+
+// AccountsActionArgs contains only the action kind, never account secrets.
+type AccountsActionArgs struct {
+	Action  AccountAction `json:"action"`
+	Account AccountID     `json:"account,omitempty"`
+}
+
+func (AccountsActionArgs) OpKind() OpKind { return "accounts.action" }
+func (AccountsActionArgs) isOpArgs()      {}
+
 type ConnectMethod string
 
 const (
@@ -16,19 +36,23 @@ const (
 	AccountConnected     AccountState = "connected"
 	AccountSignInExpired AccountState = "sign_in_expired"
 	AccountQuotaLowState AccountState = "quota_low"
+	AccountUnknown       AccountState = "unknown"
+	AccountFailedState   AccountState = "failed"
 )
 
 type AccountProviderInfo struct {
 	ID            AccountProvider `json:"id"`
 	DisplayName   string          `json:"displayName"`
 	ConnectMethod ConnectMethod   `json:"connectMethod"`
+	ConnectFlow   ConnectFlow     `json:"connectFlow"`
 }
 type Account struct {
-	ID       AccountID       `json:"id"`
-	Provider AccountProvider `json:"provider"`
-	Label    string          `json:"label"`
-	Rooms    []RoomID        `json:"rooms"`
-	State    AccountState    `json:"state"`
+	ID       AccountID            `json:"id"`
+	Provider AccountProvider      `json:"provider"`
+	Label    string               `json:"label"`
+	Rooms    []RoomID             `json:"rooms"`
+	State    AccountState         `json:"state"`
+	Reason   AccountFailureReason `json:"reason,omitempty"`
 }
 type AccountsListRequest struct{}
 type AccountsListResponse struct {
@@ -40,6 +64,7 @@ type ConnectFlow string
 const (
 	ConnectFlowCallback ConnectFlow = "callback"
 	ConnectFlowDevice   ConnectFlow = "device"
+	ConnectFlowKey      ConnectFlow = "key"
 )
 
 type ConnectStatus string
@@ -112,8 +137,10 @@ type ProfileRemoveResponse struct{}
 type AccountFailureReason string
 
 const (
-	AccountSignInRejected AccountFailureReason = "sign_in_rejected"
-	AccountRefreshFailed  AccountFailureReason = "refresh_failed"
+	AccountSignInRejected    AccountFailureReason = "sign_in_rejected"
+	AccountRefreshFailed     AccountFailureReason = "refresh_failed"
+	AccountProxyFailed       AccountFailureReason = "proxy_failed"
+	AccountCredentialMissing AccountFailureReason = "credential_missing"
 )
 
 type AccountFailed struct {

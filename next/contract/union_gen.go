@@ -256,6 +256,12 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 }
 func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	switch k {
+	case "accounts.action":
+		var v AccountsActionArgs
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "hostexec.grant":
 		var v HostexecGrantArgs
 		if err := json.Unmarshal(data, &v); err != nil {
