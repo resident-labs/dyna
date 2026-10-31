@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1090,5 +1091,28 @@ func TestClosedSessionNamesRemainInEvents(t *testing.T) {
 	}
 	if len(events.Events) != 1 || events.Names[session] != "worker" {
 		t.Fatalf("events: %+v, names: %+v", events.Events, events.Names)
+	}
+}
+
+func TestRoomAndSessionNamesAreMentionSafe(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	for _, tc := range []struct {
+		name  string
+		valid bool
+	}{
+		{"Agent_1.test-2", true}, {"has space", false}, {"line\nbreak", false}, {"_leading", false}, {strings.Repeat("a", 65), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, roomErr := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: tc.name, RootProfile: "test"})
+			_, sessionErr := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: tc.name, Profile: "test"})
+			if tc.valid {
+				if roomErr != nil || sessionErr != nil {
+					t.Fatalf("valid name: room %v, session %v", roomErr, sessionErr)
+				}
+			} else if roomErr == nil || roomErr.Code != contract.ErrInvalid || sessionErr == nil || sessionErr.Code != contract.ErrInvalid {
+				t.Fatalf("invalid name: room %v, session %v", roomErr, sessionErr)
+			}
+		})
 	}
 }
