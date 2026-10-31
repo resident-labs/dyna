@@ -246,3 +246,24 @@ func TestStopAndPauseReachTheirViews(t *testing.T) {
 		t.Fatalf("the owner stream carries a room's pause: events %+v", all)
 	}
 }
+
+func TestPairedOwnerEventReplay(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	from := contract.Principal{Kind: contract.PrincipalOwner, Device: "dev_phone"}
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := s.AppendEvent(tx, contract.Event{ID: "ev_phone", Time: time.UnixMilli(10), From: from, Body: contract.PostCreated{Text: "hello"}})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.Events(ctx, "", 0, 10, nil)
+	if err != nil || len(events) != 1 || events[0].From != from {
+		t.Fatalf("events %+v, error %v", events, err)
+	}
+}

@@ -34,7 +34,7 @@ func TestComputerWatchResponseAndErrorsAreNotCached(t *testing.T) {
 		{&contract.Error{Code: contract.ErrHasChildren}, http.StatusConflict}, {&contract.Error{Code: contract.ErrParentClosing}, http.StatusConflict},
 	} {
 		s := computerService{fakeService: &fakeService{}, problem: tc.problem}
-		h := New(s, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
+		h := New(s, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeComputers}})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", "/v1/computers/watch?session=s", nil))
 		if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" {

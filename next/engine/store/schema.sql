@@ -40,3 +40,7 @@ CREATE TABLE rules (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT 
 CREATE TABLE conversation_reads (room TEXT NOT NULL, conversation TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(room, conversation));
 
 CREATE TABLE backup_copy_status (id INTEGER PRIMARY KEY CHECK(id=1), last_success INTEGER, failure TEXT NOT NULL);
+
+CREATE TABLE devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_sha256 BLOB NOT NULL UNIQUE, paired_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER);
+CREATE TABLE device_scopes (device TEXT NOT NULL REFERENCES devices(id), scope TEXT NOT NULL, PRIMARY KEY(device, scope));
+CREATE TABLE pairing_codes (id INTEGER PRIMARY KEY CHECK(id=1), code_hash BLOB NOT NULL, scopes BLOB NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL);

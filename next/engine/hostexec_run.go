@@ -64,6 +64,7 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 }
 func (s *Service) HostexecRunEntry() approve.Entry {
 	return approve.Entry{
+		Scope: contract.ScopeTerminal,
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			a := args.(contract.HostexecRunArgs)
