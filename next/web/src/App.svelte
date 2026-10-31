@@ -8,6 +8,7 @@
   import Composer from "./lib/ui/Composer.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
   import HostFoot from "./lib/ui/HostFoot.svelte";
+  import VirtualList from "./lib/ui/VirtualList.svelte";
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
@@ -345,10 +346,13 @@
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
       <header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>
-      {#each tree as row (row.kind === "idle" ? `idle ${row.key}` : row.session.session)}
-        {#if row.kind === "idle"}<button type="button" class="idle" aria-expanded={row.open} style:padding-left="{row.depth * 14}px" onkeydown={walkTree}
-          onclick={() => { if (!openIdle.delete(row.key)) openIdle.add(row.key); }}><Icon name="chevron" size={12} />{count(row.count, "idle session")}</button>
-        {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = row}
+      <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
+      {#if tree.length}<div class="tree"><VirtualList items={tree} key={entry => entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session}
+        label="Session list" role="group" align="top" estimate={48}>
+        {#snippet row(entry: TreeRow)}
+        {#if entry.kind === "idle"}<button type="button" class="idle" aria-expanded={entry.open} style:padding-left="{entry.depth * 14}px" onkeydown={walkTree}
+          onclick={() => { if (!openIdle.delete(entry.key)) openIdle.add(entry.key); }}><Icon name="chevron" size={12} />{count(entry.count, "idle session")}</button>
+        {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = entry}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
@@ -362,7 +366,8 @@
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
-      {:else}<p class="hint">No sessions yet.</p>{/each}
+        {/snippet}</VirtualList></div>
+      {:else}<p class="hint">No sessions yet.</p>{/if}
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
       {#if wide.current || panel}<HostFoot {navigate} />{/if}
       {/if}
@@ -386,6 +391,7 @@
   .narrow { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
   a.member[aria-current="page"] { background: var(--selected); }
+  .tree { flex: 1; min-height: 0; }
   .row { position: relative; display: flex; align-items: center; }
   /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same
      button, but it sits on the row line beside the chevron. */
