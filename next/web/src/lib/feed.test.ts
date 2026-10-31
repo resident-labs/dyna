@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandLine, dayLabel, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, workSummary } from "./feed.ts";
+import { commandLine, dayLabel, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -149,4 +149,9 @@ test("says how long the work in a row took, from the first turn's start to the l
   const rows = dayRows([events[0], answered], { kind: "feed" });
   const work = rows.find(row => row.kind === "work");
   assert.equal(work?.kind === "work" && workSummary(work.events, session => names[session], work.until), "lead-web worked for 4 min · 1 turn");
+});
+
+test("a long path in an activity label keeps its first folder and its file, and short paths stay whole", () => {
+  assert.equal(shortPaths("editing next/engine/approve/store/files.go"), "editing next/…/store/files.go");
+  assert.equal(shortPaths("editing next/engine/files.go and web/src/a.ts"), "editing next/engine/files.go and web/src/a.ts");
 });
