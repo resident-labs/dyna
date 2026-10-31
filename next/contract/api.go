@@ -208,7 +208,7 @@ type TurnOutputRequest struct {
 type TurnOutputResponse struct{}
 
 // TurnActivityRequest reports the running turn's latest tool call. The box agent sends at most
-// one a second; the engine drops a report for a turn that is not running.
+// one a second. Readers show a label only while its turn runs.
 type TurnActivityRequest struct {
 	Turn  TurnID `json:"turn"`
 	Label string `json:"label"`
